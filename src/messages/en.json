@@ -1,0 +1,52 @@
+{
+  "app": {
+    "name": "Family Superapp",
+    "tagline": "Your family's digital home"
+  },
+  "nav": {
+    "miniApps": "Apps",
+    "health": "Health",
+    "settings": "Settings",
+    "profile": "Profile",
+    "logout": "Log out",
+    "selectPerson": "Select person"
+  },
+  "settings": {
+    "title": "Settings",
+    "theme": "Theme",
+    "language": "Language",
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "languages": {
+    "en": "English",
+    "ru": "Русский"
+  },
+  "health": {
+    "title": "Health",
+    "description": "Manage medical records and chat with AI about your health data",
+    "records": "Medical Records",
+    "chat": "Health Chat"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete"
+  },
+  "auth": {
+    "welcome": "Welcome",
+    "subtitle": "Sign in to access your family superapp",
+    "signInWithGoogle": "Sign in with Google",
+    "signingIn": "Signing in...",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "accessDenied": {
+      "title": "Access Not Granted",
+      "message": "Your account is not authorized to access this application. Please contact an administrator if you believe this is an error.",
+      "loggedInAs": "Logged in as"
+    }
+  }
+}
