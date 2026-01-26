@@ -45,7 +45,7 @@ export interface MedicalRecordWithAttachments extends MedicalRecord {
 
 export interface MedicalRecordListItem extends MedicalRecord {
   attachment_count: number;
-  rank?: number;
+  search_rank?: number;
 }
 
 // Form types for creating/updating records
@@ -64,6 +64,7 @@ export interface UpdateMedicalRecordInput {
   title?: string;
   notes?: string | null;
   status?: RecordStatus;
+  ocr_text?: string | null;
 }
 
 // Search/filter types
@@ -94,3 +95,32 @@ export const RECORD_TYPES: RecordType[] = [
   "vet",
   "other",
 ];
+
+// ============================================================================
+// Stage 4: Extraction Types
+// ============================================================================
+
+export interface ExtractionResult {
+  ocr_text: string;
+  record_type: RecordType;
+  title: string;
+  record_date: string | null;
+  summary: string;
+  keywords: string[];
+}
+
+export interface IngestRecordResponse {
+  success: boolean;
+  extraction?: ExtractionResult;
+  chunks_created?: number;
+  error?: string;
+}
+
+export interface RecordChunk {
+  id: string;
+  record_id: string;
+  chunk_index: number;
+  content: string;
+  embedding?: number[] | null;
+  created_at: string;
+}

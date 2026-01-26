@@ -88,7 +88,9 @@
       "notesPlaceholder": "Add any additional notes...",
       "saveDraft": "Save as Draft",
       "saveAndActivate": "Save Record",
-      "filesSelected": "{count, plural, one {# file selected} other {# files selected}}"
+      "filesSelected": "{count, plural, one {# file selected} other {# files selected}}",
+      "maxFilesReached": "Maximum {max} files allowed",
+      "remainingSlots": "{count} of {max} slots remaining"
     },
     "detail": {
       "title": "Record Details",
@@ -99,7 +101,10 @@
       "noAttachments": "No attachments",
       "downloadAll": "Download all",
       "notes": "Notes",
-      "noNotes": "No notes added"
+      "noNotes": "No notes added",
+      "keywords": "Keywords",
+      "ocrText": "Extracted Text (OCR)",
+      "noOcrText": "No text extracted"
     },
     "confirm": {
       "removeTitle": "Remove Record",
@@ -108,6 +113,37 @@
       "deleteMessage": "This action cannot be undone. The record and all attachments will be permanently deleted.",
       "discardTitle": "Discard Draft",
       "discardMessage": "Are you sure you want to discard this draft? All uploaded files will be deleted."
+    },
+    "wizard": {
+      "step1": "Step 1 of 4",
+      "step2": "Step 2 of 4",
+      "step3": "Step 3 of 4",
+      "step4": "Step 4 of 4",
+      "upload": "Upload Files",
+      "processing": "Processing",
+      "review": "Review & Edit",
+      "complete": "Complete",
+      "continue": "Continue",
+      "preview": "Preview",
+      "editFields": "Edit Details",
+      "keywords": "Keywords",
+      "addKeyword": "Add keyword...",
+      "rawOcrText": "Raw OCR Text",
+      "chars": "chars",
+      "ocrTextPlaceholder": "Extracted text from document...",
+      "llmProcessing": "Analyzing document...",
+      "uploading": "Uploading files...",
+      "processingError": "Processing Failed",
+      "redoUpload": "Change Files",
+      "viewRecord": "View Record",
+      "viewAll": "Back to Records",
+      "addAnother": "Add Another",
+      "completeDescription": "Your medical record has been saved successfully."
+    },
+    "camera": {
+      "title": "Take Photo",
+      "takePhoto": "Take Photo",
+      "errorAccessing": "Could not access camera. Please check permissions."
     }
   },
   "common": {
@@ -129,7 +165,8 @@
     "search": "Search",
     "filter": "Filter",
     "clear": "Clear",
-    "noResults": "No results found"
+    "noResults": "No results found",
+    "add": "Add"
   },
   "auth": {
     "welcome": "Welcome",

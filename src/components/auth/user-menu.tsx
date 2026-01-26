@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { useUIStore } from "@/stores/ui-store";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export function UserMenu() {
@@ -40,9 +41,13 @@ export function UserMenu() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const setSelectedPersonId = useUIStore((state) => state.setSelectedPersonId);
+
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
+    // Clear selected person so the linked person is auto-selected on next login
+    setSelectedPersonId(null);
     router.push("/login");
     router.refresh();
   };

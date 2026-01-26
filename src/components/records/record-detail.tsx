@@ -11,11 +11,27 @@ import {
   Trash2,
   RotateCcw,
   FileCheck,
+  Pencil,
+  X,
+  Save,
+  Tag,
+  ChevronDown,
+  ChevronUp,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,6 +51,7 @@ import {
   useUpdateMedicalRecord,
 } from "@/hooks";
 import type { RecordType } from "@/types";
+import { RECORD_TYPES } from "@/types";
 import { cn } from "@/lib/utils";
 
 const RECORD_TYPE_COLORS: Record<RecordType, string> = {
@@ -59,11 +76,59 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [showOcrText, setShowOcrText] = useState(false);
+  
+  // Edit form state
+  const [editForm, setEditForm] = useState({
+    title: "",
+    record_type: "other" as RecordType,
+    record_date: "",
+    notes: "",
+    ocr_text: "",
+  });
 
   const softDeleteMutation = useSoftDeleteRecord();
   const restoreMutation = useRestoreRecord();
   const hardDeleteMutation = useHardDeleteRecord();
   const updateMutation = useUpdateMedicalRecord();
+
+  const startEditing = () => {
+    if (record) {
+      setEditForm({
+        title: record.title,
+        record_type: record.record_type,
+        record_date: record.record_date || "",
+        notes: record.notes || "",
+        ocr_text: record.ocr_text || "",
+      });
+      setIsEditing(true);
+    }
+  };
+
+  const cancelEditing = () => {
+    setIsEditing(false);
+  };
+
+  const saveChanges = () => {
+    updateMutation.mutate(
+      {
+        id: recordId,
+        updates: {
+          title: editForm.title,
+          record_type: editForm.record_type,
+          record_date: editForm.record_date || null,
+          notes: editForm.notes || null,
+          ocr_text: editForm.ocr_text || null,
+        },
+      },
+      {
+        onSuccess: () => {
+          setIsEditing(false);
+        },
+      }
+    );
+  };
 
   const handleRemove = () => {
     setShowRemoveDialog(true);
@@ -140,12 +205,32 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           </Button>
           <div>
             <div className="flex items-center gap-2 flex-wrap mb-1">
-              <Badge
-                variant="outline"
-                className={cn("font-medium", RECORD_TYPE_COLORS[record.record_type])}
-              >
-                {t(`records.types.${record.record_type}`)}
-              </Badge>
+              {isEditing ? (
+                <Select
+                  value={editForm.record_type}
+                  onValueChange={(value) =>
+                    setEditForm((prev) => ({ ...prev, record_type: value as RecordType }))
+                  }
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RECORD_TYPES.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {t(`records.types.${type}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className={cn("font-medium", RECORD_TYPE_COLORS[record.record_type])}
+                >
+                  {t(`records.types.${record.record_type}`)}
+                </Badge>
+              )}
               {isDraft && (
                 <Badge variant="secondary">{t("records.status.draft")}</Badge>
               )}
@@ -153,46 +238,76 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                 <Badge variant="destructive">{t("records.status.removed")}</Badge>
               )}
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">{record.title}</h1>
+            {isEditing ? (
+              <Input
+                value={editForm.title}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, title: e.target.value }))}
+                className="text-xl font-bold"
+                placeholder={t("records.add.recordTitlePlaceholder")}
+              />
+            ) : (
+              <h1 className="text-2xl font-bold tracking-tight">{record.title}</h1>
+            )}
           </div>
         </div>
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          {isDraft && (
-            <Button onClick={handleActivate} disabled={updateMutation.isPending}>
-              <FileCheck className="mr-2 h-4 w-4" />
-              {t("records.add.saveAndActivate")}
-            </Button>
-          )}
-          {!isRemoved && !isDraft && (
-            <Button
-              variant="destructive"
-              onClick={handleRemove}
-              disabled={softDeleteMutation.isPending}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t("records.actions.remove")}
-            </Button>
-          )}
-          {isRemoved && (
+          {isEditing ? (
             <>
-              <Button
-                variant="outline"
-                onClick={handleRestore}
-                disabled={restoreMutation.isPending}
-              >
-                <RotateCcw className="mr-2 h-4 w-4" />
-                {t("records.actions.restore")}
+              <Button variant="outline" onClick={cancelEditing}>
+                <X className="mr-2 h-4 w-4" />
+                {t("common.cancel")}
               </Button>
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={hardDeleteMutation.isPending}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                {t("records.actions.delete")}
+              <Button onClick={saveChanges} disabled={updateMutation.isPending}>
+                <Save className="mr-2 h-4 w-4" />
+                {t("common.save")}
               </Button>
+            </>
+          ) : (
+            <>
+              {!isRemoved && (
+                <Button variant="outline" onClick={startEditing}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  {t("common.edit")}
+                </Button>
+              )}
+              {isDraft && (
+                <Button onClick={handleActivate} disabled={updateMutation.isPending}>
+                  <FileCheck className="mr-2 h-4 w-4" />
+                  {t("records.add.saveAndActivate")}
+                </Button>
+              )}
+              {!isRemoved && !isDraft && (
+                <Button
+                  variant="destructive"
+                  onClick={handleRemove}
+                  disabled={softDeleteMutation.isPending}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {t("records.actions.remove")}
+                </Button>
+              )}
+              {isRemoved && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={handleRestore}
+                    disabled={restoreMutation.isPending}
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    {t("records.actions.restore")}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleDelete}
+                    disabled={hardDeleteMutation.isPending}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {t("records.actions.delete")}
+                  </Button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -202,11 +317,20 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
       <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
         <div className="flex items-center gap-1">
           <Calendar className="h-4 w-4" />
-          <span>
-            {record.record_date
-              ? format(new Date(record.record_date), "MMMM d, yyyy")
-              : t("records.noDate")}
-          </span>
+          {isEditing ? (
+            <Input
+              type="date"
+              value={editForm.record_date}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, record_date: e.target.value }))}
+              className="h-8 w-auto"
+            />
+          ) : (
+            <span>
+              {record.record_date
+                ? format(new Date(record.record_date), "MMMM d, yyyy")
+                : t("records.noDate")}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Clock className="h-4 w-4" />
@@ -228,12 +352,81 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 
       <Separator />
 
-      {/* Notes */}
-      {record.notes && (
+      {/* Keywords */}
+      {record.llm_keywords && record.llm_keywords.length > 0 && (
         <>
           <div>
-            <h2 className="text-lg font-semibold mb-2">{t("records.detail.notes")}</h2>
-            <p className="text-muted-foreground whitespace-pre-wrap">{record.notes}</p>
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <Tag className="h-4 w-4" />
+              {t("records.detail.keywords")}
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {record.llm_keywords.map((keyword, index) => (
+                <Badge key={index} variant="secondary">
+                  {keyword}
+                </Badge>
+              ))}
+            </div>
+          </div>
+          <Separator />
+        </>
+      )}
+
+      {/* Notes (used as summary) */}
+      <div>
+        <h2 className="text-lg font-semibold mb-2">{t("records.detail.notes")}</h2>
+        {isEditing ? (
+          <Textarea
+            value={editForm.notes}
+            onChange={(e) => setEditForm((prev) => ({ ...prev, notes: e.target.value }))}
+            placeholder={t("records.add.notesPlaceholder")}
+            rows={4}
+          />
+        ) : record.notes ? (
+          <p className="text-muted-foreground whitespace-pre-wrap">{record.notes}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground italic">{t("records.detail.noNotes")}</p>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* OCR Text (collapsible) */}
+      {(record.ocr_text || isEditing) && (
+        <>
+          <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 p-3">
+            <button
+              type="button"
+              onClick={() => setShowOcrText(!showOcrText)}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <FileText className="h-4 w-4" />
+                <span>
+                  {t("records.detail.ocrText")} 
+                  {record.ocr_text && ` (${record.ocr_text.length} ${t("records.wizard.chars")})`}
+                </span>
+              </div>
+              {showOcrText ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+            {showOcrText && (
+              isEditing ? (
+                <Textarea
+                  value={editForm.ocr_text}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, ocr_text: e.target.value }))}
+                  className="mt-3 min-h-[200px] font-mono text-xs"
+                  placeholder={t("records.wizard.ocrTextPlaceholder")}
+                />
+              ) : (
+                <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-black/5 p-3 text-xs text-muted-foreground dark:bg-white/5">
+                  {record.ocr_text || t("records.detail.noOcrText")}
+                </pre>
+              )
+            )}
           </div>
           <Separator />
         </>

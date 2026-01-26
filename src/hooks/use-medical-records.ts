@@ -14,61 +14,28 @@ import type {
 } from "@/types";
 
 // ============================================================================
-// FETCH RECORDS LIST
+// FETCH RECORDS LIST (using RPC for full-text search)
 // ============================================================================
 async function fetchMedicalRecords(
   filters: MedicalRecordFilters
 ): Promise<MedicalRecordListItem[]> {
   const supabase = createClient();
 
-  // Build the query
-  let query = supabase
-    .from("medical_records")
-    .select(
-      `
-      *,
-      attachment_count:record_attachments(count)
-    `
-    )
-    .order("record_date", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
-
-  // Apply filters
-  if (filters.person_id) {
-    query = query.eq("person_id", filters.person_id);
-  }
-
-  if (filters.record_type) {
-    query = query.eq("record_type", filters.record_type);
-  }
-
-  if (filters.status) {
-    query = query.eq("status", filters.status);
-  } else {
-    // Default: show only active records (not drafts or removed)
-    query = query.eq("status", "active");
-  }
-
-  // For search, use ilike for simple substring matching on title and notes
-  // This is more user-friendly than full-text search for partial matches
-  if (filters.search && filters.search.trim()) {
-    const searchTerm = `%${filters.search.trim()}%`;
-    query = query.or(`title.ilike.${searchTerm},notes.ilike.${searchTerm}`);
-  }
-
-  const { data, error } = await query;
+  // Use the search_medical_records RPC function for proper FTS with ranking
+  const { data, error } = await supabase.rpc("search_medical_records", {
+    search_query: filters.search?.trim() || null,
+    p_person_id: filters.person_id || null,
+    p_record_type: filters.record_type || null,
+    p_status: filters.status || "active",
+    p_limit: 50,
+    p_offset: 0,
+  });
 
   if (error) {
     throw new Error(error.message);
   }
 
-  // Transform the count from the nested structure
-  return (data || []).map((record) => ({
-    ...record,
-    attachment_count:
-      (record.attachment_count as unknown as { count: number }[])?.[0]?.count ||
-      0,
-  })) as MedicalRecordListItem[];
+  return (data || []) as MedicalRecordListItem[];
 }
 
 export function useMedicalRecords(filters: MedicalRecordFilters = {}) {
@@ -342,6 +309,102 @@ export function useHardDeleteRecord() {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["medical-records"],
+      });
+    },
+  });
+}
+
+// ============================================================================
+// INGEST RECORD (Vision OCR + LLM extraction via Edge Function)
+// ============================================================================
+interface IngestRecordInput {
+  recordId: string;
+}
+
+interface IngestRecordResponse {
+  success: boolean;
+  extraction?: {
+    ocr_text: string;
+    record_type: string;
+    title: string;
+    record_date: string | null;
+    summary: string;
+    keywords: string[];
+  };
+  chunks_created?: number;
+  error?: string;
+}
+
+async function ingestRecord({
+  recordId,
+}: IngestRecordInput): Promise<IngestRecordResponse> {
+  const supabase = createClient();
+
+  // Get current session for auth header
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    throw new Error("Not authenticated");
+  }
+
+  // Get the Supabase URL from environment
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL not configured");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${supabaseUrl}/functions/v1/ingest-record`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        record_id: recordId,
+      }),
+    });
+  } catch (networkError) {
+    // Network error - Edge Functions might not be running
+    throw new Error(
+      "Cannot connect to Edge Functions. Make sure 'supabase functions serve' is running."
+    );
+  }
+
+  // Check for HTTP errors
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Edge Function error (${response.status}): ${errorText || response.statusText}`
+    );
+  }
+
+  let data: IngestRecordResponse;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Invalid response from Edge Function");
+  }
+
+  if (!data.success) {
+    throw new Error(data.error || "Ingestion failed");
+  }
+
+  return data;
+}
+
+export function useIngestRecord() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ingestRecord,
+    onSuccess: (_, variables) => {
+      // Invalidate the record to refresh with extraction data
+      queryClient.invalidateQueries({
+        queryKey: ["medical-record", variables.recordId],
       });
     },
   });

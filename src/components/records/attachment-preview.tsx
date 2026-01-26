@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import Image from "next/image";
-import { FileText, Download, ExternalLink } from "lucide-react";
+import { FileText, Download, ExternalLink, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -27,6 +27,10 @@ export function AttachmentPreview({
 }: AttachmentPreviewProps) {
   const t = useTranslations();
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
   const { data: url, isLoading } = useAttachmentUrl(attachment.storage_path);
 
   const isImage = attachment.mime_type.startsWith("image/");
@@ -37,6 +41,53 @@ export function AttachmentPreview({
       window.open(url, "_blank");
     }
   };
+
+  const handleZoomIn = useCallback(() => {
+    setZoom((prev) => Math.min(prev + 0.5, 5));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoom((prev) => Math.max(prev - 0.5, 0.5));
+  }, []);
+
+  const handleResetZoom = useCallback(() => {
+    setZoom(1);
+    setPosition({ x: 0, y: 0 });
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom > 1) {
+      setIsDragging(true);
+      dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+    }
+  }, [zoom, position]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isDragging && zoom > 1) {
+      setPosition({
+        x: e.clientX - dragStart.current.x,
+        y: e.clientY - dragStart.current.y,
+      });
+    }
+  }, [isDragging, zoom]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.25 : 0.25;
+    setZoom((prev) => Math.min(Math.max(prev + delta, 0.5), 5));
+  }, []);
+
+  const handleLightboxClose = useCallback((open: boolean) => {
+    setIsLightboxOpen(open);
+    if (!open) {
+      setZoom(1);
+      setPosition({ x: 0, y: 0 });
+    }
+  }, []);
 
   if (isLoading) {
     return <Skeleton className="aspect-[4/3] w-full rounded-lg" />;
@@ -111,35 +162,80 @@ export function AttachmentPreview({
         </div>
       </div>
 
-      {/* Lightbox for images */}
+      {/* Lightbox for images with zoom */}
       {isImage && (
-        <Dialog open={isLightboxOpen} onOpenChange={setIsLightboxOpen}>
-          <DialogContent className="max-w-4xl p-0 overflow-hidden">
-            <DialogHeader className="absolute top-0 left-0 right-0 z-10 flex flex-row items-center justify-between p-4 bg-gradient-to-b from-black/60 to-transparent">
-              <DialogTitle className="text-white">
+        <Dialog open={isLightboxOpen} onOpenChange={handleLightboxClose}>
+          <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden">
+            <DialogHeader className="absolute top-0 left-0 right-0 z-10 flex flex-row items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent">
+              <DialogTitle className="text-white truncate max-w-[40%]">
                 {attachment.original_filename}
               </DialogTitle>
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
                   variant="secondary"
+                  onClick={handleZoomOut}
+                  disabled={zoom <= 0.5}
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </Button>
+                <span className="text-white text-sm min-w-[4rem] text-center">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleZoomIn}
+                  disabled={zoom >= 5}
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleResetZoom}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
                   onClick={handleDownload}
                 >
-                  <Download className="mr-1 h-4 w-4" />
-                  {t("common.download")}
+                  <Download className="h-4 w-4" />
                 </Button>
               </div>
             </DialogHeader>
             {url && (
-              <div className="relative min-h-[50vh] max-h-[80vh]">
-                <Image
-                  src={url}
-                  alt={attachment.original_filename}
-                  fill
-                  className="object-contain"
-                  sizes="100vw"
-                  priority
-                />
+              <div
+                className={cn(
+                  "relative min-h-[50vh] h-[85vh] overflow-hidden bg-black/90",
+                  zoom > 1 ? "cursor-grab" : "cursor-zoom-in",
+                  isDragging && "cursor-grabbing"
+                )}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                onWheel={handleWheel}
+                onClick={() => zoom === 1 && handleZoomIn()}
+              >
+                <div
+                  className="absolute inset-0 flex items-center justify-center transition-transform duration-100"
+                  style={{
+                    transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})`,
+                  }}
+                >
+                  <Image
+                    src={url}
+                    alt={attachment.original_filename}
+                    fill
+                    className="object-contain pointer-events-none"
+                    sizes="100vw"
+                    priority
+                    draggable={false}
+                  />
+                </div>
               </div>
             )}
           </DialogContent>

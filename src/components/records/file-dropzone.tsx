@@ -2,9 +2,10 @@
 
 import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Upload, X, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Upload, X, FileText, Image as ImageIcon, Loader2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { CameraCapture } from "./camera-capture";
 
 interface FileDropzoneProps {
   onFilesSelected: (files: File[]) => void;
@@ -13,6 +14,8 @@ interface FileDropzoneProps {
   isUploading?: boolean;
   accept?: string;
   maxSizeMB?: number;
+  maxFiles?: number;
+  showCamera?: boolean;
 }
 
 const ACCEPTED_TYPES = [
@@ -30,29 +33,49 @@ export function FileDropzone({
   isUploading = false,
   accept = "image/*,application/pdf",
   maxSizeMB = 20,
+  maxFiles = 10,
+  showCamera = true,
 }: FileDropzoneProps) {
   const t = useTranslations();
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
-  const validateFiles = useCallback((files: File[]): File[] => {
-    const validFiles: File[] = [];
-    const maxSize = maxSizeMB * 1024 * 1024;
+  const remainingSlots = maxFiles - selectedFiles.length;
+  const canAddMore = remainingSlots > 0;
 
-    for (const file of files) {
-      if (!ACCEPTED_TYPES.includes(file.type)) {
-        setError(`Invalid file type: ${file.name}`);
-        continue;
+  const validateFiles = useCallback(
+    (files: File[]): File[] => {
+      const validFiles: File[] = [];
+      const maxSize = maxSizeMB * 1024 * 1024;
+
+      // Check how many files we can still add
+      const slotsAvailable = maxFiles - selectedFiles.length;
+      if (slotsAvailable <= 0) {
+        setError(t("records.add.maxFilesReached", { max: maxFiles }));
+        return [];
       }
-      if (file.size > maxSize) {
-        setError(`File too large: ${file.name} (max ${maxSizeMB}MB)`);
-        continue;
-      }
-      validFiles.push(file);
-    }
 
-    return validFiles;
-  }, [maxSizeMB]);
+      for (const file of files) {
+        if (validFiles.length >= slotsAvailable) {
+          setError(t("records.add.maxFilesReached", { max: maxFiles }));
+          break;
+        }
+        if (!ACCEPTED_TYPES.includes(file.type)) {
+          setError(`Invalid file type: ${file.name}`);
+          continue;
+        }
+        if (file.size > maxSize) {
+          setError(`File too large: ${file.name} (max ${maxSizeMB}MB)`);
+          continue;
+        }
+        validFiles.push(file);
+      }
+
+      return validFiles;
+    },
+    [maxSizeMB, maxFiles, selectedFiles.length, t]
+  );
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -78,13 +101,18 @@ export function FileDropzone({
       setIsDragging(false);
       setError(null);
 
+      if (!canAddMore) {
+        setError(t("records.add.maxFilesReached", { max: maxFiles }));
+        return;
+      }
+
       const files = Array.from(e.dataTransfer.files);
       const validFiles = validateFiles(files);
       if (validFiles.length > 0) {
         onFilesSelected(validFiles);
       }
     },
-    [onFilesSelected, validateFiles]
+    [onFilesSelected, validateFiles, canAddMore, maxFiles, t]
   );
 
   const handleFileInput = useCallback(
@@ -99,6 +127,18 @@ export function FileDropzone({
       e.target.value = "";
     },
     [onFilesSelected, validateFiles]
+  );
+
+  const handleCameraCapture = useCallback(
+    (file: File) => {
+      setError(null);
+      if (!canAddMore) {
+        setError(t("records.add.maxFilesReached", { max: maxFiles }));
+        return;
+      }
+      onFilesSelected([file]);
+    },
+    [onFilesSelected, canAddMore, maxFiles, t]
   );
 
   const formatFileSize = (bytes: number): string => {
@@ -127,7 +167,7 @@ export function FileDropzone({
           isDragging
             ? "border-primary bg-primary/5"
             : "border-muted-foreground/25 hover:border-primary/50",
-          isUploading && "pointer-events-none opacity-50"
+          (isUploading || !canAddMore) && "pointer-events-none opacity-50"
         )}
       >
         <input
@@ -136,27 +176,44 @@ export function FileDropzone({
           multiple
           onChange={handleFileInput}
           className="absolute inset-0 cursor-pointer opacity-0"
-          disabled={isUploading}
+          disabled={isUploading || !canAddMore}
         />
-        
+
         {isUploading ? (
           <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
         ) : (
           <Upload className="h-10 w-10 text-muted-foreground" />
         )}
-        
+
         <p className="mt-4 text-sm font-medium">
           {isUploading ? t("records.add.uploading") : t("records.add.dropzone")}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           {t("records.add.dropzoneHint")}
         </p>
+        {maxFiles > 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t("records.add.remainingSlots", { count: remainingSlots, max: maxFiles })}
+          </p>
+        )}
       </div>
 
-      {/* Error message */}
-      {error && (
-        <p className="text-sm text-destructive">{error}</p>
+      {/* Camera button */}
+      {showCamera && canAddMore && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={() => setCameraOpen(true)}
+          disabled={isUploading}
+        >
+          <Camera className="mr-2 h-4 w-4" />
+          {t("records.camera.takePhoto")}
+        </Button>
       )}
+
+      {/* Error message */}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {/* Selected files preview */}
       {selectedFiles.length > 0 && (
@@ -171,8 +228,8 @@ export function FileDropzone({
                 className="flex items-center gap-3 rounded-lg border bg-muted/50 p-3"
               >
                 {getFileIcon(file.type)}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{file.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{file.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatFileSize(file.size)}
                   </p>
@@ -192,6 +249,13 @@ export function FileDropzone({
           </div>
         </div>
       )}
+
+      {/* Camera capture dialog */}
+      <CameraCapture
+        open={cameraOpen}
+        onOpenChange={setCameraOpen}
+        onCapture={handleCameraCapture}
+      />
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout";
-import { AddRecordForm } from "@/components/records";
+import { AddRecordWizard } from "@/components/records";
 import { useUIStore } from "@/stores/ui-store";
 import { usePersons } from "@/hooks";
 import { UserX } from "lucide-react";
@@ -50,7 +50,7 @@ export default function NewRecordPage() {
 
   return (
     <AppShell>
-      <AddRecordForm personId={selectedPerson.id} personName={selectedPerson.name} />
+      <AddRecordWizard personId={selectedPerson.id} personName={selectedPerson.name} />
     </AppShell>
   );
 }

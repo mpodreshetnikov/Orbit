@@ -33,12 +33,17 @@ export function PersonSelector() {
   // Find the user's own person (linked via auth_user_id)
   const myPerson = persons?.find((p) => p.auth_user_id === currentUser?.id);
 
-  // Auto-select user's own person if none selected
+  // Check if the currently selected person exists in the persons list
+  const selectedPersonExists = persons?.some((p) => p.id === selectedPersonId);
+
+  // Auto-select user's own person if:
+  // 1. No person is selected, OR
+  // 2. Selected person doesn't exist (e.g., from previous session/different user)
   useEffect(() => {
-    if (!selectedPersonId && myPerson) {
+    if (myPerson && (!selectedPersonId || !selectedPersonExists)) {
       setSelectedPersonId(myPerson.id);
     }
-  }, [selectedPersonId, myPerson, setSelectedPersonId]);
+  }, [selectedPersonId, selectedPersonExists, myPerson, setSelectedPersonId]);
 
   const selectedPerson = persons?.find((p) => p.id === selectedPersonId);
 
