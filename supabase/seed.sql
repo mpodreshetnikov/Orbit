@@ -64,6 +64,130 @@ INSERT INTO public.persons (name, kind, species, birthday) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
+-- MEDICAL RECORDS (Sample data)
+-- ============================================================================
+-- Get person IDs for sample records
+DO $$
+DECLARE
+  v_max_person_id uuid;
+  v_kate_person_id uuid;
+  v_demi_person_id uuid;
+  v_user_id uuid := '00000000-0000-4000-8000-000000000001';
+  v_record_id uuid;
+BEGIN
+  -- Get person IDs
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+  SELECT id INTO v_kate_person_id FROM public.persons WHERE name = 'Kate' LIMIT 1;
+  SELECT id INTO v_demi_person_id FROM public.persons WHERE name = 'Demi' LIMIT 1;
+
+  -- Sample records for Max
+  IF v_max_person_id IS NOT NULL THEN
+    -- Blood test record
+    INSERT INTO public.medical_records (
+      id, person_id, created_by_user_id, record_type, record_date, title, notes, status
+    ) VALUES (
+      'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      v_max_person_id,
+      v_user_id,
+      'lab',
+      '2025-12-15',
+      'Annual Blood Test Results',
+      'Complete blood count, metabolic panel, and lipid profile. All values within normal range.',
+      'active'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    -- Doctor visit record
+    INSERT INTO public.medical_records (
+      id, person_id, created_by_user_id, record_type, record_date, title, notes, status
+    ) VALUES (
+      'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+      v_max_person_id,
+      v_user_id,
+      'visit',
+      '2025-11-20',
+      'General Checkup',
+      'Annual physical examination. Blood pressure 120/80, weight stable. Recommended to continue current lifestyle.',
+      'active'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    -- Vaccination record
+    INSERT INTO public.medical_records (
+      id, person_id, created_by_user_id, record_type, record_date, title, notes, status
+    ) VALUES (
+      'c3d4e5f6-a7b8-9012-cdef-123456789012',
+      v_max_person_id,
+      v_user_id,
+      'vaccination',
+      '2025-10-01',
+      'Flu Vaccination 2025',
+      'Seasonal influenza vaccine administered. No adverse reactions.',
+      'active'
+    ) ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  -- Sample record for Kate
+  IF v_kate_person_id IS NOT NULL THEN
+    INSERT INTO public.medical_records (
+      id, person_id, created_by_user_id, record_type, record_date, title, notes, status
+    ) VALUES (
+      'd4e5f6a7-b8c9-0123-defa-234567890123',
+      v_kate_person_id,
+      v_user_id,
+      'imaging',
+      '2025-09-15',
+      'Dental X-Ray',
+      'Routine dental checkup x-rays. No cavities detected.',
+      'active'
+    ) ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  -- Sample records for Demi (pet)
+  IF v_demi_person_id IS NOT NULL THEN
+    -- Vet visit
+    INSERT INTO public.medical_records (
+      id, person_id, created_by_user_id, record_type, record_date, title, notes, status
+    ) VALUES (
+      'e5f6a7b8-c9d0-1234-efab-345678901234',
+      v_demi_person_id,
+      v_user_id,
+      'vet',
+      '2025-08-10',
+      'Annual Vet Checkup',
+      'Weight: 25kg. Healthy coat and teeth. Heart and lungs sound good. Recommended dental cleaning.',
+      'active'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    -- Pet vaccination
+    INSERT INTO public.medical_records (
+      id, person_id, created_by_user_id, record_type, record_date, title, notes, status
+    ) VALUES (
+      'f6a7b8c9-d0e1-2345-fabc-456789012345',
+      v_demi_person_id,
+      v_user_id,
+      'vaccination',
+      '2025-08-10',
+      'Rabies & DHPP Vaccines',
+      'Annual rabies and DHPP (Distemper, Hepatitis, Parvovirus, Parainfluenza) vaccinations. Next due: August 2026.',
+      'active'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    -- Draft record example
+    INSERT INTO public.medical_records (
+      id, person_id, created_by_user_id, record_type, record_date, title, notes, status
+    ) VALUES (
+      'a7b8c9d0-e1f2-3456-abcd-567890123456',
+      v_demi_person_id,
+      v_user_id,
+      'other',
+      NULL,
+      'Grooming Visit',
+      NULL,
+      'draft'
+    ) ON CONFLICT (id) DO NOTHING;
+  END IF;
+END $$;
+
+-- ============================================================================
 -- NOTES
 -- ============================================================================
 -- 1. Auth users are created directly in the seed file, allowing us to reference
@@ -83,3 +207,7 @@ ON CONFLICT DO NOTHING;
 --    - Email: dev@example.com
 --    - Auth User ID: 00000000-0000-4000-8000-000000000001
 --    - Name: Dev User
+--
+-- 6. Sample medical records are created for all persons to demonstrate the
+--    health records feature. Records include various types: lab, visit,
+--    vaccination, imaging, and vet visits.

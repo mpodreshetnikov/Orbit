@@ -1,20 +1,39 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout";
-import { UserX } from "lucide-react";
+import { AddRecordForm } from "@/components/records";
 import { useUIStore } from "@/stores/ui-store";
 import { usePersons } from "@/hooks";
-import { RecordsList } from "@/components/records";
+import { UserX } from "lucide-react";
+import { useEffect } from "react";
 
-export default function HealthPage() {
+export default function NewRecordPage() {
   const t = useTranslations();
+  const router = useRouter();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
-  const { data: persons } = usePersons();
+  const { data: persons, isLoading } = usePersons();
 
   const selectedPerson = persons?.find((p) => p.id === selectedPersonId);
 
-  // No person selected state
+  // Redirect if no person selected
+  useEffect(() => {
+    if (!isLoading && !selectedPerson) {
+      router.push("/health");
+    }
+  }, [isLoading, selectedPerson, router]);
+
+  if (isLoading) {
+    return (
+      <AppShell>
+        <div className="flex items-center justify-center p-12">
+          <p className="text-muted-foreground">{t("common.loading")}</p>
+        </div>
+      </AppShell>
+    );
+  }
+
   if (!selectedPerson) {
     return (
       <AppShell>
@@ -31,7 +50,7 @@ export default function HealthPage() {
 
   return (
     <AppShell>
-      <RecordsList personId={selectedPerson.id} personName={selectedPerson.name} />
+      <AddRecordForm personId={selectedPerson.id} personName={selectedPerson.name} />
     </AppShell>
   );
 }

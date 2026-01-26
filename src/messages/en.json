@@ -42,13 +42,94 @@
     "noRecords": "No medical records yet",
     "noRecordsDescription": "Upload your first medical record to get started."
   },
+  "records": {
+    "title": "Medical Records",
+    "search": "Search records...",
+    "filterByType": "Filter by type",
+    "allTypes": "All types",
+    "showRemoved": "Show removed",
+    "recordCount": "{count, plural, =0 {No records} one {# record} other {# records}}",
+    "attachments": "{count, plural, =0 {No attachments} one {# attachment} other {# attachments}}",
+    "noDate": "No date",
+    "addFirst": "Add your first record",
+    "types": {
+      "lab": "Lab Results",
+      "visit": "Doctor Visit",
+      "imaging": "Imaging",
+      "prescription": "Prescription",
+      "vaccination": "Vaccination",
+      "vet": "Vet Visit",
+      "other": "Other"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "removed": "Removed"
+    },
+    "actions": {
+      "view": "View",
+      "edit": "Edit",
+      "remove": "Remove",
+      "restore": "Restore",
+      "delete": "Delete permanently"
+    },
+    "add": {
+      "title": "Add Medical Record",
+      "subtitle": "Upload files and fill in record details",
+      "dropzone": "Drop files here or click to browse",
+      "dropzoneHint": "Supports images (PNG, JPG, WebP, HEIC) and PDFs up to 20MB",
+      "uploading": "Uploading...",
+      "processing": "Processing...",
+      "recordType": "Record type",
+      "recordDate": "Date",
+      "recordTitle": "Title",
+      "recordTitlePlaceholder": "e.g., Blood test results, Doctor visit notes",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Add any additional notes...",
+      "saveDraft": "Save as Draft",
+      "saveAndActivate": "Save Record",
+      "filesSelected": "{count, plural, one {# file selected} other {# files selected}}"
+    },
+    "detail": {
+      "title": "Record Details",
+      "createdAt": "Created",
+      "updatedAt": "Updated",
+      "createdBy": "Created by",
+      "attachments": "Attachments",
+      "noAttachments": "No attachments",
+      "downloadAll": "Download all",
+      "notes": "Notes",
+      "noNotes": "No notes added"
+    },
+    "confirm": {
+      "removeTitle": "Remove Record",
+      "removeMessage": "This record will be marked as removed and hidden from the list. You can restore it later.",
+      "deleteTitle": "Delete Permanently",
+      "deleteMessage": "This action cannot be undone. The record and all attachments will be permanently deleted.",
+      "discardTitle": "Discard Draft",
+      "discardMessage": "Are you sure you want to discard this draft? All uploaded files will be deleted."
+    }
+  },
   "common": {
     "loading": "Loading...",
     "error": "Something went wrong",
     "retry": "Retry",
     "cancel": "Cancel",
     "save": "Save",
-    "delete": "Delete"
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "back": "Back",
+    "close": "Close",
+    "upload": "Upload",
+    "download": "Download",
+    "remove": "Remove",
+    "restore": "Restore",
+    "edit": "Edit",
+    "view": "View",
+    "search": "Search",
+    "filter": "Filter",
+    "clear": "Clear",
+    "noResults": "No results found"
   },
   "auth": {
     "welcome": "Welcome",
