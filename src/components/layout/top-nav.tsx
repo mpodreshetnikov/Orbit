@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Heart, ChevronDown, Settings, Users } from "lucide-react";
+import { Heart, ChevronDown, Settings } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "./theme-toggle";
 import { LanguageToggle } from "./language-toggle";
+import { PersonSelector } from "./person-selector";
 import { UserMenu } from "@/components/auth/user-menu";
 
 export function TopNav() {
@@ -50,21 +51,8 @@ export function TopNav() {
 
         {/* Right: Person selector, Settings, Profile */}
         <div className="flex items-center gap-2">
-          {/* Person selector (placeholder) */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-1">
-                <Users className="h-4 w-4" />
-                <span className="hidden sm:inline">{t("nav.selectPerson")}</span>
-                <ChevronDown className="h-3 w-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled>
-                {t("nav.selectPerson")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Person selector */}
+          <PersonSelector />
 
           {/* Settings dropdown */}
           <DropdownMenu>

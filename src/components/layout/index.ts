@@ -5,3 +5,4 @@ export { MobileNav } from "./mobile-nav";
 export { ThemeToggle } from "./theme-toggle";
 export { LanguageToggle } from "./language-toggle";
 export { LanguageSync } from "./language-sync";
+export { PersonSelector } from "./person-selector";

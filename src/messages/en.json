@@ -22,11 +22,25 @@
     "en": "English",
     "ru": "Русский"
   },
+  "person": {
+    "select": "Select person",
+    "humans": "Family Members",
+    "pets": "Pets",
+    "noPerson": "No person selected",
+    "selectPrompt": "Please select a person to view their health records",
+    "noPersons": "No persons added yet",
+    "you": "you"
+  },
   "health": {
     "title": "Health",
     "description": "Manage medical records and chat with AI about your health data",
     "records": "Medical Records",
-    "chat": "Health Chat"
+    "chat": "Health Chat",
+    "chatDescription": "Chat with AI about health records",
+    "chatComingSoon": "Coming in Stage 5. Upload medical records first to enable AI chat.",
+    "addRecord": "Add Record",
+    "noRecords": "No medical records yet",
+    "noRecordsDescription": "Upload your first medical record to get started."
   },
   "common": {
     "loading": "Loading...",
