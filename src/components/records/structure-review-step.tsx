@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
@@ -12,12 +12,23 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  FlaskConical,
+  Pencil,
+  Trash2,
+  AlertTriangle,
+  ArrowUp,
+  ArrowDown,
+  Check,
+  ArrowLeft,
+  Search,
+  ChevronsUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -25,16 +36,569 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useUpdateMedicalRecord } from "@/hooks";
-import { RECORD_TYPES, type RecordType, type MedicalRecordWithAttachments } from "@/types";
-import { cn } from "@/lib/utils";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { 
+  useUpdateMedicalRecord, 
+  useRecordObservations,
+  useUpdateRecordObservation,
+  useDeleteRecordObservation,
+  useCreateRecordObservation,
+  useObservationCatalog,
+} from "@/hooks";
+import { 
+  RECORD_TYPES, 
+  type RecordType, 
+  type MedicalRecordWithAttachments,
+  type RecordObservationWithCatalog,
+  type ObservationStatus,
+} from "@/types";
 
 interface StructureReviewStepProps {
   record: MedicalRecordWithAttachments;
   onComplete: () => void;
+  onBack?: () => void;
 }
 
-export function StructureReviewStep({ record, onComplete }: StructureReviewStepProps) {
+// Status badge component
+function ObservationStatusBadge({ status }: { status: ObservationStatus | null }) {
+  const t = useTranslations();
+  
+  if (!status || status === "unknown") {
+    return null;
+  }
+
+  const config: Record<string, { variant: "default" | "destructive" | "secondary" | "outline"; icon: React.ReactNode }> = {
+    normal: { variant: "secondary", icon: <Check className="h-3 w-3" /> },
+    low: { variant: "outline", icon: <ArrowDown className="h-3 w-3 text-blue-500" /> },
+    high: { variant: "outline", icon: <ArrowUp className="h-3 w-3 text-orange-500" /> },
+    critical_low: { variant: "destructive", icon: <ArrowDown className="h-3 w-3" /> },
+    critical_high: { variant: "destructive", icon: <ArrowUp className="h-3 w-3" /> },
+  };
+
+  const { variant, icon } = config[status] || { variant: "secondary", icon: null };
+
+  return (
+    <Badge variant={variant} className="gap-1 text-xs">
+      {icon}
+      {t(`observations.status.${status}`)}
+    </Badge>
+  );
+}
+
+// Observation row component
+function ObservationRow({ 
+  observation, 
+  onEdit, 
+  onDelete,
+  isProcessing,
+}: { 
+  observation: RecordObservationWithCatalog;
+  onEdit: () => void;
+  onDelete: () => void;
+  isProcessing: boolean;
+}) {
+  const t = useTranslations();
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+      {/* Name and value */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium truncate">{observation.obs_name}</span>
+          {observation.obs_code && (
+            <code className="text-xs bg-muted px-1 py-0.5 rounded">
+              {observation.obs_code}
+            </code>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-1 text-sm">
+          {/* Reference range (numeric) */}
+          {(observation.ref_range_low !== null || observation.ref_range_high !== null) && (
+            <span className="text-muted-foreground/70 text-xs">
+              ({observation.ref_range_low ?? "—"}–{observation.ref_range_high ?? "—"})
+            </span>
+          )}
+          <span className="font-semibold">
+            {observation.value_text || observation.value_numeric}
+          </span>
+          {observation.unit && (
+            <span className="text-muted-foreground">{observation.unit}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Status */}
+      <ObservationStatusBadge status={observation.status as ObservationStatus} />
+
+      {/* Confidence indicator */}
+      {observation.confidence !== null && observation.confidence < 0.8 && (
+        <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" title={t("observations.lowConfidence")} />
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-1 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onEdit}
+          disabled={isProcessing}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-destructive hover:text-destructive"
+          onClick={onDelete}
+          disabled={isProcessing}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// Edit observation dialog
+function EditObservationDialog({
+  open,
+  onOpenChange,
+  observation,
+  onSave,
+  isNew,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  observation: Partial<RecordObservationWithCatalog> | null;
+  onSave: (data: {
+    obs_name: string;
+    value_text: string;
+    value_numeric: number | null;
+    value_canonical: number | null;
+    unit: string;
+    unit_canonical: string | null;
+    ref_range_text: string;
+    ref_range_low: number | null;
+    ref_range_high: number | null;
+    ref_range_low_canonical: number | null;
+    ref_range_high_canonical: number | null;
+    status: ObservationStatus | null;
+    obs_code: string | null;
+  }) => void;
+  isNew: boolean;
+}) {
+  const t = useTranslations();
+  const { data: catalog } = useObservationCatalog();
+
+  const [obsName, setObsName] = useState("");
+  const [valueText, setValueText] = useState("");
+  const [unit, setUnit] = useState("");
+  const [refRange, setRefRange] = useState("");
+  const [refRangeLow, setRefRangeLow] = useState("");
+  const [refRangeHigh, setRefRangeHigh] = useState("");
+  const [status, setStatus] = useState<ObservationStatus | null>(null);
+  const [obsCode, setObsCode] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [isComboboxOpen, setIsComboboxOpen] = useState(false);
+  const comboboxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  const currentCatalogEntry = obsCode ? catalog?.find(c => c.obs_code === obsCode) : null;
+
+  useEffect(() => {
+    if (open && observation) {
+      setObsName(observation.obs_name || "");
+      setValueText(observation.value_text || "");
+      setUnit(observation.unit || "");
+      setRefRange(observation.ref_range_text || "");
+      setRefRangeLow(observation.ref_range_low?.toString() || "");
+      setRefRangeHigh(observation.ref_range_high?.toString() || "");
+      setStatus(observation.status as ObservationStatus || null);
+      setObsCode(observation.obs_code || null);
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+    } else if (open && isNew) {
+      setObsName("");
+      setValueText("");
+      setUnit("");
+      setRefRange("");
+      setRefRangeLow("");
+      setRefRangeHigh("");
+      setStatus(null);
+      setObsCode(null);
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+    }
+  }, [open, observation, isNew]);
+
+  // Close combobox when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (comboboxRef.current && !comboboxRef.current.contains(event.target as Node)) {
+        setIsComboboxOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Convert value to canonical using catalog unit config
+  const convertToCanonical = (value: number | null, unitStr: string): number | null => {
+    if (value === null) return null;
+    if (!currentCatalogEntry?.accepted_units) return value;
+    
+    // Find unit config (case-insensitive)
+    const unitConfig = Object.entries(currentCatalogEntry.accepted_units).find(
+      ([u]) => u.toLowerCase() === unitStr.toLowerCase()
+    )?.[1] as { factor_to_canonical?: number; formula_to_canonical?: string } | undefined;
+    
+    if (!unitConfig) return value;
+    
+    // Apply formula if exists
+    if (unitConfig.formula_to_canonical) {
+      try {
+        const formula = unitConfig.formula_to_canonical.replace(/x/g, value.toString());
+        // eslint-disable-next-line no-eval
+        return eval(formula);
+      } catch {
+        return value;
+      }
+    }
+    
+    // Apply factor if exists
+    if (unitConfig.factor_to_canonical) {
+      return value * unitConfig.factor_to_canonical;
+    }
+    
+    return value;
+  };
+
+  const handleSave = () => {
+    const numericValue = parseFloat(valueText);
+    const refLow = parseFloat(refRangeLow);
+    const refHigh = parseFloat(refRangeHigh);
+    const valueNumeric = !isNaN(numericValue) ? numericValue : null;
+    const refLowVal = !isNaN(refLow) ? refLow : null;
+    const refHighVal = !isNaN(refHigh) ? refHigh : null;
+    const unitTrimmed = unit.trim();
+    
+    // Convert values to canonical
+    const valueCanonical = convertToCanonical(valueNumeric, unitTrimmed);
+    const refLowCanonical = convertToCanonical(refLowVal, unitTrimmed);
+    const refHighCanonical = convertToCanonical(refHighVal, unitTrimmed);
+    
+    // Get canonical unit from catalog
+    const unitCanonical = currentCatalogEntry?.canonical_unit || null;
+    
+    onSave({
+      obs_name: obsName.trim(),
+      value_text: valueText.trim(),
+      value_numeric: valueNumeric,
+      value_canonical: valueCanonical,
+      unit: unitTrimmed,
+      unit_canonical: unitCanonical,
+      ref_range_text: refRange.trim(),
+      ref_range_low: refLowVal,
+      ref_range_high: refHighVal,
+      ref_range_low_canonical: refLowCanonical,
+      ref_range_high_canonical: refHighCanonical,
+      status,
+      obs_code: obsCode,
+    });
+  };
+
+  const handleCatalogSelect = (code: string | null) => {
+    if (code === null) {
+      setObsCode(null);
+      setUnit("");
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+      return;
+    }
+    const entry = catalog?.find(c => c.obs_code === code);
+    if (entry) {
+      setObsCode(code);
+      setObsName(entry.name_ru);
+      setUnit(entry.canonical_unit);
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+    }
+  };
+
+  // Get accepted units from catalog entry
+  const acceptedUnits = currentCatalogEntry?.accepted_units 
+    ? Object.keys(currentCatalogEntry.accepted_units) 
+    : null;
+
+  // Filter catalog items based on search
+  const filteredCatalog = catalog?.filter(item => {
+    if (!catalogSearch.trim()) return true;
+    const search = catalogSearch.toLowerCase();
+    return (
+      item.obs_code.toLowerCase().includes(search) ||
+      item.name_ru.toLowerCase().includes(search) ||
+      item.name_en.toLowerCase().includes(search) ||
+      item.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
+      item.synonyms_en?.some(s => s.toLowerCase().includes(search))
+    );
+  }) || [];
+
+  // Display value for the combobox
+  const displayValue = currentCatalogEntry 
+    ? `${currentCatalogEntry.name_ru} (${currentCatalogEntry.obs_code})`
+    : "";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {isNew ? t("observations.addObservation") : t("observations.editObservation")}
+          </DialogTitle>
+          <DialogDescription>
+            {t("observations.editDescription")}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* Searchable catalog combobox */}
+          {catalog && catalog.length > 0 && (
+            <div className="space-y-2">
+              <Label>{t("observations.fromCatalog")}</Label>
+              <div className="relative" ref={comboboxRef}>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    ref={inputRef}
+                    value={isComboboxOpen ? catalogSearch : displayValue}
+                    onChange={(e) => {
+                      setCatalogSearch(e.target.value);
+                      if (!isComboboxOpen) setIsComboboxOpen(true);
+                    }}
+                    onFocus={() => {
+                      setIsComboboxOpen(true);
+                      setCatalogSearch("");
+                    }}
+                    placeholder={t("observations.searchOrSelect")}
+                    className="pl-9 pr-9"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
+                    onClick={() => {
+                      setIsComboboxOpen(!isComboboxOpen);
+                      if (!isComboboxOpen) {
+                        setCatalogSearch("");
+                        inputRef.current?.focus();
+                      }
+                    }}
+                  >
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
+                
+                {/* Dropdown */}
+                {isComboboxOpen && (
+                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
+                    <ScrollArea className="max-h-60">
+                      <div className="p-1">
+                        {/* Custom option */}
+                        <button
+                          type="button"
+                          onClick={() => handleCatalogSelect(null)}
+                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
+                            obsCode === null ? "bg-accent" : ""
+                          }`}
+                        >
+                          <Check className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`} />
+                          <span className="text-muted-foreground italic">
+                            {t("observations.customObservation")}
+                          </span>
+                        </button>
+                        
+                        {/* Catalog items */}
+                        {filteredCatalog.map((item) => (
+                          <button
+                            key={item.obs_code}
+                            type="button"
+                            onClick={() => handleCatalogSelect(item.obs_code)}
+                            className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
+                              obsCode === item.obs_code ? "bg-accent" : ""
+                            }`}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{item.name_ru}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {item.obs_code} · {item.canonical_unit}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                        
+                        {filteredCatalog.length === 0 && catalogSearch && (
+                          <div className="px-2 py-4 text-sm text-center text-muted-foreground">
+                            {t("catalogs.noSearchResults")}
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+              </div>
+              {currentCatalogEntry && (
+                <p className="text-xs text-muted-foreground">
+                  {t("observations.selectedFromCatalog")}: {currentCatalogEntry.obs_code}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Name */}
+          <div className="space-y-2">
+            <Label htmlFor="obs_name">{t("observations.name")}</Label>
+            <Input
+              id="obs_name"
+              value={obsName}
+              onChange={(e) => setObsName(e.target.value)}
+              placeholder={t("observations.namePlaceholder")}
+              disabled={!!currentCatalogEntry}
+            />
+            {currentCatalogEntry && (
+              <p className="text-xs text-muted-foreground">
+                {t("observations.nameFromCatalog")}
+              </p>
+            )}
+          </div>
+
+          {/* Value and Unit */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="value">{t("observations.value")}</Label>
+              <Input
+                id="value"
+                value={valueText}
+                onChange={(e) => setValueText(e.target.value)}
+                placeholder="14.2"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("observations.unit")}</Label>
+              {acceptedUnits && acceptedUnits.length > 0 ? (
+                <Select value={unit || "_none"} onValueChange={(v) => setUnit(v === "_none" ? "" : v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={t("observations.selectUnit")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">—</SelectItem>
+                    {acceptedUnits.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                  placeholder="g/L"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Reference range */}
+          <div className="space-y-2">
+            <Label>{t("observations.refRange")}</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="ref_low" className="text-xs text-muted-foreground">
+                  {t("observations.refLow")}
+                </Label>
+                <Input
+                  id="ref_low"
+                  type="number"
+                  step="any"
+                  value={refRangeLow}
+                  onChange={(e) => setRefRangeLow(e.target.value)}
+                  placeholder="12.0"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="ref_high" className="text-xs text-muted-foreground">
+                  {t("observations.refHigh")}
+                </Label>
+                <Input
+                  id="ref_high"
+                  type="number"
+                  step="any"
+                  value={refRangeHigh}
+                  onChange={(e) => setRefRangeHigh(e.target.value)}
+                  placeholder="16.0"
+                />
+              </div>
+            </div>
+            <Input
+              value={refRange}
+              onChange={(e) => setRefRange(e.target.value)}
+              placeholder={t("observations.refRangeText")}
+              className="text-xs"
+            />
+          </div>
+
+          {/* Status */}
+          <div className="space-y-2">
+            <Label>{t("observations.statusLabel")}</Label>
+            <Select 
+              value={status || "_unknown"} 
+              onValueChange={(v) => setStatus(v === "_unknown" ? null : v as ObservationStatus)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={t("observations.selectStatus")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_unknown">{t("observations.status.unknown")}</SelectItem>
+                <SelectItem value="normal">{t("observations.status.normal")}</SelectItem>
+                <SelectItem value="low">{t("observations.status.low")}</SelectItem>
+                <SelectItem value="high">{t("observations.status.high")}</SelectItem>
+                <SelectItem value="critical_low">{t("observations.status.critical_low")}</SelectItem>
+                <SelectItem value="critical_high">{t("observations.status.critical_high")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button onClick={handleSave} disabled={!obsName.trim()}>
+            {t("common.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function StructureReviewStep({ record, onComplete, onBack }: StructureReviewStepProps) {
   const t = useTranslations();
   const router = useRouter();
   
@@ -47,9 +611,19 @@ export function StructureReviewStep({ record, onComplete }: StructureReviewStepP
   const [newKeyword, setNewKeyword] = useState("");
   const [showOcrText, setShowOcrText] = useState(false);
 
-  const updateMutation = useUpdateMedicalRecord();
+  // Observations
+  const { data: observations, isLoading: observationsLoading } = useRecordObservations(record.id);
+  const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(null);
+  const [isAddingObservation, setIsAddingObservation] = useState(false);
+  const [showObservations, setShowObservations] = useState(true);
 
-  const isProcessing = updateMutation.isPending;
+  const updateMutation = useUpdateMedicalRecord();
+  const updateObsMutation = useUpdateRecordObservation();
+  const deleteObsMutation = useDeleteRecordObservation();
+  const createObsMutation = useCreateRecordObservation();
+
+  const isProcessing = updateMutation.isPending || updateObsMutation.isPending || 
+    deleteObsMutation.isPending || createObsMutation.isPending;
 
   const addKeyword = () => {
     const trimmed = newKeyword.trim();
@@ -85,11 +659,102 @@ export function StructureReviewStep({ record, onComplete }: StructureReviewStepP
       },
     });
 
+    // When activating, mark all observations as verified
     if (activate) {
+      await verifyAllObservations();
       router.push("/health");
     } else {
       onComplete();
     }
+  };
+
+  const handleEditObservation = (obs: RecordObservationWithCatalog) => {
+    setEditingObservation(obs);
+    setIsAddingObservation(false);
+  };
+
+  const handleAddObservation = () => {
+    setEditingObservation(null);
+    setIsAddingObservation(true);
+  };
+
+  const handleSaveObservation = async (data: {
+    obs_name: string;
+    value_text: string;
+    value_numeric: number | null;
+    value_canonical: number | null;
+    unit: string;
+    unit_canonical: string | null;
+    ref_range_text: string;
+    ref_range_low: number | null;
+    ref_range_high: number | null;
+    ref_range_low_canonical: number | null;
+    ref_range_high_canonical: number | null;
+    status: ObservationStatus | null;
+    obs_code: string | null;
+  }) => {
+    if (isAddingObservation) {
+      await createObsMutation.mutateAsync({
+        record_id: record.id,
+        obs_name: data.obs_name,
+        value_text: data.value_text,
+        value_numeric: data.value_numeric,
+        value_canonical: data.value_canonical,
+        unit: data.unit || null,
+        unit_canonical: data.unit_canonical,
+        ref_range_text: data.ref_range_text || null,
+        ref_range_low: data.ref_range_low,
+        ref_range_high: data.ref_range_high,
+        ref_range_low_canonical: data.ref_range_low_canonical,
+        ref_range_high_canonical: data.ref_range_high_canonical,
+        status: data.status,
+        obs_code: data.obs_code,
+        is_llm_extracted: false,
+        is_user_verified: true,
+      });
+    } else if (editingObservation) {
+      await updateObsMutation.mutateAsync({
+        id: editingObservation.id,
+        updates: {
+          obs_name: data.obs_name,
+          value_text: data.value_text,
+          value_numeric: data.value_numeric,
+          value_canonical: data.value_canonical,
+          unit: data.unit || null,
+          unit_canonical: data.unit_canonical,
+          ref_range_text: data.ref_range_text || null,
+          ref_range_low: data.ref_range_low,
+          ref_range_high: data.ref_range_high,
+          ref_range_low_canonical: data.ref_range_low_canonical,
+          ref_range_high_canonical: data.ref_range_high_canonical,
+          status: data.status,
+          obs_code: data.obs_code,
+          is_user_verified: true,
+        },
+      });
+    }
+
+    setEditingObservation(null);
+    setIsAddingObservation(false);
+  };
+
+  const handleDeleteObservation = async (obs: RecordObservationWithCatalog) => {
+    await deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id });
+  };
+
+  const verifyAllObservations = async () => {
+    if (!observations || observations.length === 0) return;
+    
+    // Verify all unverified observations
+    const unverified = observations.filter(obs => !obs.is_user_verified);
+    await Promise.all(
+      unverified.map(obs => 
+        updateObsMutation.mutateAsync({
+          id: obs.id,
+          updates: { is_user_verified: true },
+        })
+      )
+    );
   };
 
   return (
@@ -254,31 +919,123 @@ export function StructureReviewStep({ record, onComplete }: StructureReviewStepP
         </div>
       </div>
 
+      {/* Observations Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setShowObservations(!showObservations)}
+              className="flex items-center gap-2 text-left"
+            >
+              <FlaskConical className="h-5 w-5 text-primary" />
+              <CardTitle className="text-base">
+                {t("observations.title")}
+                {observations && observations.length > 0 && (
+                  <Badge variant="secondary" className="ml-2">
+                    {observations.length}
+                  </Badge>
+                )}
+              </CardTitle>
+              {showObservations ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddObservation}
+              disabled={isProcessing}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              {t("observations.add")}
+            </Button>
+          </div>
+        </CardHeader>
+        {showObservations && (
+          <CardContent className="pt-0">
+            {observationsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : observations && observations.length > 0 ? (
+              <div className="space-y-2">
+                {observations.map((obs) => (
+                  <ObservationRow
+                    key={obs.id}
+                    observation={obs}
+                    onEdit={() => handleEditObservation(obs)}
+                    onDelete={() => handleDeleteObservation(obs)}
+                    isProcessing={isProcessing}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground">
+                <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">{t("observations.noObservations")}</p>
+                <p className="text-xs mt-1">{t("observations.noObservationsHint")}</p>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Edit/Add Observation Dialog */}
+      <EditObservationDialog
+        open={!!editingObservation || isAddingObservation}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingObservation(null);
+            setIsAddingObservation(false);
+          }
+        }}
+        observation={editingObservation}
+        onSave={handleSaveObservation}
+        isNew={isAddingObservation}
+      />
+
       {/* Actions */}
-      <div className="flex items-center justify-end gap-3 border-t pt-6">
-        <Button
-          variant="secondary"
-          onClick={() => handleSave(false)}
-          disabled={!title.trim() || isProcessing}
-        >
-          {isProcessing ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
-          {t("records.add.saveDraft")}
-        </Button>
-        <Button
-          onClick={() => handleSave(true)}
-          disabled={!title.trim() || isProcessing}
-        >
-          {isProcessing ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <FileCheck className="mr-2 h-4 w-4" />
-          )}
-          {t("records.add.saveAndActivate")}
-        </Button>
+      <div className="flex items-center justify-between gap-3 border-t pt-6">
+        {onBack ? (
+          <Button
+            variant="outline"
+            onClick={onBack}
+            disabled={isProcessing}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            {t("records.structure.backToOcr")}
+          </Button>
+        ) : (
+          <div />
+        )}
+        <div className="flex items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => handleSave(false)}
+            disabled={!title.trim() || isProcessing}
+          >
+            {isProcessing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            {t("records.add.saveDraft")}
+          </Button>
+          <Button
+            onClick={() => handleSave(true)}
+            disabled={!title.trim() || isProcessing}
+          >
+            {isProcessing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <FileCheck className="mr-2 h-4 w-4" />
+            )}
+            {t("records.add.saveAndActivate")}
+          </Button>
+        </div>
       </div>
     </div>
   );

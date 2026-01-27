@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Heart, ChevronDown, Settings } from "lucide-react";
+import { Heart, ChevronDown, Settings, Plus } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,8 +49,16 @@ export function TopNav() {
           </DropdownMenu>
         </div>
 
-        {/* Right: Person selector, Settings, Profile */}
+        {/* Right: Quick add, Person selector, Settings, Profile */}
         <div className="flex items-center gap-2">
+          {/* Quick add button */}
+          <Button variant="ghost" size="icon" asChild>
+            <Link href="/health/records/new">
+              <Plus className="h-5 w-5" />
+              <span className="sr-only">{t("nav.quickAdd")}</span>
+            </Link>
+          </Button>
+
           {/* Person selector */}
           <PersonSelector />
 

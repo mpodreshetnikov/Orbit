@@ -82,6 +82,9 @@ export function useStructureExtraction() {
         queryClient.invalidateQueries({
           queryKey: ["medical-record", recordId],
         });
+        queryClient.invalidateQueries({
+          queryKey: ["record-observations", recordId],
+        });
 
         return { success: true, structured_data: data.structured_data };
       } catch (error) {

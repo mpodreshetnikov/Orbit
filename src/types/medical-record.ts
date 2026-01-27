@@ -145,3 +145,145 @@ export interface ExtractionResult {
   summary: string;
   keywords: string[];
 }
+
+// ============================================================================
+// Record Observations Types
+// ============================================================================
+
+export type ObservationStatus = 
+  | "normal" 
+  | "low" 
+  | "high" 
+  | "critical_low" 
+  | "critical_high" 
+  | "unknown";
+
+export interface RecordObservation {
+  id: string;
+  record_id: string;
+  catalog_id: string | null;
+  obs_code: string | null;
+  obs_name: string;
+  value_numeric: number | null;
+  value_text: string | null;
+  unit: string | null;
+  value_canonical: number | null;
+  unit_canonical: string | null;
+  ref_range_text: string | null;
+  ref_range_low: number | null;
+  ref_range_high: number | null;
+  ref_range_low_canonical: number | null;
+  ref_range_high_canonical: number | null;
+  status: ObservationStatus | null;
+  is_llm_extracted: boolean;
+  is_user_verified: boolean;
+  confidence: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Extended type with catalog details
+export interface RecordObservationWithCatalog extends RecordObservation {
+  catalog_name_ru: string | null;
+  catalog_name_en: string | null;
+  catalog_canonical_unit: string | null;
+}
+
+// Input type for creating/updating observations
+export interface CreateRecordObservationInput {
+  record_id: string;
+  catalog_id?: string | null;
+  obs_code?: string | null;
+  obs_name: string;
+  value_numeric?: number | null;
+  value_text?: string | null;
+  unit?: string | null;
+  value_canonical?: number | null;
+  unit_canonical?: string | null;
+  ref_range_text?: string | null;
+  ref_range_low?: number | null;
+  ref_range_high?: number | null;
+  ref_range_low_canonical?: number | null;
+  ref_range_high_canonical?: number | null;
+  status?: ObservationStatus | null;
+  is_llm_extracted?: boolean;
+  is_user_verified?: boolean;
+  confidence?: number | null;
+}
+
+export interface UpdateRecordObservationInput {
+  obs_code?: string | null;
+  obs_name?: string;
+  value_numeric?: number | null;
+  value_text?: string | null;
+  unit?: string | null;
+  value_canonical?: number | null;
+  unit_canonical?: string | null;
+  ref_range_text?: string | null;
+  ref_range_low?: number | null;
+  ref_range_high?: number | null;
+  ref_range_low_canonical?: number | null;
+  ref_range_high_canonical?: number | null;
+  status?: ObservationStatus | null;
+  is_user_verified?: boolean;
+}
+
+// LLM extraction output format
+export interface ExtractedObservation {
+  obs_code: string | null; // Matched catalog code or null
+  obs_name: string; // Name as found in document
+  value: string; // Original value text
+  value_numeric: number | null; // Parsed numeric value
+  unit: string | null; // Unit as written
+  ref_range: string | null; // Reference range text
+  status: ObservationStatus | null;
+  confidence: number;
+}
+
+// Extended StructuredData with observations
+export interface StructuredDataWithObservations extends StructuredData {
+  observations: ExtractedObservation[];
+}
+
+// ============================================================================
+// Observation History Types
+// ============================================================================
+
+// Single observation data point for history
+export interface ObservationHistoryPoint {
+  id: string;
+  record_id: string;
+  record_date: string | null;
+  value_numeric: number | null;
+  value_text: string | null;
+  value_canonical: number | null;
+  unit: string | null;
+  unit_canonical: string | null;
+  ref_range_low: number | null;
+  ref_range_high: number | null;
+  ref_range_low_canonical: number | null;
+  ref_range_high_canonical: number | null;
+  status: ObservationStatus | null;
+  created_at: string;
+}
+
+// Aggregated observation for cards view
+export interface ObservationSummary {
+  obs_code: string;
+  obs_name: string;
+  catalog_id: string | null;
+  catalog_name_ru: string | null;
+  catalog_name_en: string | null;
+  canonical_unit: string | null;
+  latest_value: number | null;
+  latest_value_text: string | null;
+  latest_unit: string | null;
+  latest_status: ObservationStatus | null;
+  latest_date: string | null;
+  latest_ref_low: number | null;
+  latest_ref_high: number | null;
+  latest_ref_low_canonical: number | null;
+  latest_ref_high_canonical: number | null;
+  measurement_count: number;
+  history: ObservationHistoryPoint[];
+}

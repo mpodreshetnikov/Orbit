@@ -5,3 +5,6 @@ export * from "./use-attachments";
 export * from "./use-background-ocr";
 export * from "./use-structure-extraction";
 export * from "./use-processing-monitor";
+export * from "./use-observation-catalog";
+export * from "./use-record-observations";
+export * from "./use-observation-history";

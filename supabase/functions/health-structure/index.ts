@@ -6,6 +6,7 @@ import { corsHeaders } from "../_shared/cors.ts";
  * 
  * This is step 2 of the medical record processing pipeline.
  * It extracts structured data (title, type, date, summary, keywords) from OCR text.
+ * It also extracts observations/lab values using the observation catalog.
  * 
  * Flow: Upload -> health-ocr -> OCR Review -> [health-structure] -> Structure Review -> Save
  */
@@ -27,8 +28,76 @@ interface StructuredData {
   keywords: string[];
 }
 
+interface ExtractedObservation {
+  obs_code: string | null;
+  obs_name: string;
+  value: string;
+  value_numeric: number | null;
+  unit: string | null;
+  ref_range: string | null;
+  ref_range_low: number | null;
+  ref_range_high: number | null;
+  status: "normal" | "low" | "high" | "critical_low" | "critical_high" | "unknown" | null;
+  confidence: number;
+}
+
+interface ObservationCatalogItem {
+  id: string;
+  obs_code: string;
+  name_ru: string;
+  name_en: string;
+  canonical_unit: string;
+  synonyms_ru: string[];
+  synonyms_en: string[];
+  accepted_units: Record<string, { factor_to_canonical?: number; formula_to_canonical?: string }>;
+}
+
+interface StructuredDataWithObservations extends StructuredData {
+  observations: ExtractedObservation[];
+}
+
+// Fetch observation catalog from database
+async function fetchObservationCatalog(supabase: ReturnType<typeof createClient>): Promise<ObservationCatalogItem[]> {
+  const { data, error } = await supabase
+    .from("observation_catalog")
+    .select("id, obs_code, name_ru, name_en, canonical_unit, synonyms_ru, synonyms_en, accepted_units")
+    .order("obs_code");
+
+  if (error) {
+    console.error("Error fetching observation catalog:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Build observation catalog prompt section
+function buildObservationCatalogPrompt(catalog: ObservationCatalogItem[]): string {
+  if (catalog.length === 0) {
+    return "Каталог показателей пуст. Извлекай показатели без привязки к коду.";
+  }
+
+  const items = catalog.map(item => {
+    const synonyms = [...new Set([...item.synonyms_ru, ...item.synonyms_en])].join(", ");
+    const units = Object.keys(item.accepted_units).join(", ");
+    return `- ${item.obs_code}: "${item.name_ru}" / "${item.name_en}" (синонимы: ${synonyms}) [ДОПУСТИМЫЕ ЕДИНИЦЫ: ${units}]`;
+  });
+
+  return `КАТАЛОГ ИЗВЕСТНЫХ ПОКАЗАТЕЛЕЙ:
+${items.join("\n")}
+
+ВАЖНО ДЛЯ КАТАЛОГА:
+- Если показатель соответствует одному из каталога, используй его obs_code
+- Если показатель найден в каталоге, единица измерения (unit) ДОЛЖНА быть одной из ДОПУСТИМЫХ ЕДИНИЦ этого показателя
+- Каталог указывает допустимые единицы для каждого показателя - используй ТОЛЬКО их для корректной конвертации
+- Если показатель не соответствует каталогу - оставь obs_code как null`;
+}
+
 // Call LLM to extract structured data from OCR text
-async function extractStructuredData(ocrText: string): Promise<StructuredData> {
+async function extractStructuredData(
+  ocrText: string,
+  observationCatalog: ObservationCatalogItem[]
+): Promise<StructuredDataWithObservations> {
   if (!ocrText || ocrText.trim().length === 0) {
     return {
       record_type: "other",
@@ -36,8 +105,11 @@ async function extractStructuredData(ocrText: string): Promise<StructuredData> {
       record_date: null,
       summary: "Текст не найден",
       keywords: [],
+      observations: [],
     };
   }
+
+  const catalogPrompt = buildObservationCatalogPrompt(observationCatalog);
 
   const systemPrompt = `Ты — анализатор медицинских документов. Тебе будет дан текст, извлечённый из медицинского документа (OCR).
 
@@ -49,6 +121,7 @@ async function extractStructuredData(ocrText: string): Promise<StructuredData> {
 - record_date: дата документа в формате YYYY-MM-DD, или null если не найдена
 - summary: ОЧЕНЬ КРАТКОЕ и ПОЛЕЗНОЕ описание результата НА РУССКОМ ЯЗЫКЕ (1-2 коротких предложения, максимум 150 символов)
 - keywords: массив из 3-7 релевантных ключевых слов/тегов НА РУССКОМ ЯЗЫКЕ
+- observations: массив извлечённых показателей/результатов анализов
 
 ВАЖНЫЕ ПРАВИЛА ДЛЯ ТИПА (record_type):
 - Если документ упоминает животных или ветеринарную помощь: "vet"
@@ -80,7 +153,36 @@ async function extractStructuredData(ocrText: string): Promise<StructuredData> {
 ВАЖНЫЕ ПРАВИЛА ДЛЯ КЛЮЧЕВЫХ СЛОВ (keywords):
 - Используй СТАНДАРТНЫЕ русские медицинские термины
 - Нормализуй сокращения: ОАК → общий анализ крови, УЗИ → ультразвуковое исследование
-- Добавляй ключевые слова по органам/системам: печень, почки, сердце, кровь и т.д.`;
+- Добавляй ключевые слова по органам/системам: печень, почки, сердце, кровь и т.д.
+- НЕ добавляй названия показателей анализов (гемоглобин, ферритин, глюкоза и т.д.) как ключевые слова - они извлекаются отдельно в observations
+
+${catalogPrompt}
+
+ПРАВИЛА ДЛЯ ИЗВЛЕЧЕНИЯ ПОКАЗАТЕЛЕЙ (observations):
+Каждый показатель — это объект с полями:
+- obs_code: код из каталога если есть соответствие, или null
+- obs_name: название показателя как в документе (на русском)
+- value: значение как строка (как написано в документе)
+- value_numeric: числовое значение если можно распарсить, иначе null
+- unit: единица измерения из документа (ВАЖНО: если показатель найден в каталоге, используй ТОЛЬКО допустимые единицы из каталога)
+- ref_range: референсный интервал как строка если указан (например "12.0-16.0" или интервал может быть в виде списка границ с пометками)
+- ref_range_low: нижняя граница нормы как число (например 12.0), или null если не указана
+- ref_range_high: верхняя граница нормы как число (например 16.0), или null если не указана
+- status: "normal" | "low" | "high" | "critical_low" | "critical_high" | "unknown" | null
+  - Определи статус по указанным в документе нормам или пометкам
+  - Если есть стрелки ↑↓, пометки "выше нормы", "ниже нормы", "дефицит", "избыток" или схожие синонимы - используй их
+  - Если значение в пределах ref_range - "normal"
+  - Если значение меньше ref_range_low - "low"
+  - Если значение больше ref_range_high - "high"
+  - Если не можешь определить - "unknown" или null
+- confidence: уверенность в извлечении от 0 до 1 (например 0.9 если точно уверен)
+
+ВАЖНО для observations:
+- Извлекай ВСЕ числовые показатели из документа (анализы, измерения)
+- Не извлекай текстовые описания как показатели (только если есть значение)
+- Для качественных результатов (положительный/отрицательный) - value_numeric = null
+- Если документ НЕ содержит анализов/показателей - оставь observations пустым массивом []
+- ОБЯЗАТЕЛЬНО извлекай ref_range_low и ref_range_high как отдельные числа, если в документе указан референсный интервал`;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -90,13 +192,13 @@ async function extractStructuredData(ocrText: string): Promise<StructuredData> {
       "HTTP-Referer": SUPABASE_URL || "http://localhost:3000",
     },
     body: JSON.stringify({
-      model: "openai/gpt-4o-mini", // Use cheaper model for text analysis
+      model: "openai/gpt-4o", // Use cheaper model for text analysis
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `Проанализируй этот текст медицинского документа:\n\n${ocrText}` },
       ],
       temperature: 0.3,
-      max_tokens: 1024,
+      max_tokens: 4096, // Increased for observations
       response_format: { type: "json_object" },
     }),
   });
@@ -121,10 +223,153 @@ async function extractStructuredData(ocrText: string): Promise<StructuredData> {
       record_date: parsed.record_date || null,
       summary: parsed.summary || "",
       keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
+      observations: Array.isArray(parsed.observations) ? parsed.observations.map((obs: Partial<ExtractedObservation>) => ({
+        obs_code: obs.obs_code || null,
+        obs_name: obs.obs_name || "Неизвестный показатель",
+        value: obs.value || "",
+        value_numeric: typeof obs.value_numeric === "number" ? obs.value_numeric : null,
+        unit: obs.unit || null,
+        ref_range: obs.ref_range || null,
+        ref_range_low: typeof obs.ref_range_low === "number" ? obs.ref_range_low : null,
+        ref_range_high: typeof obs.ref_range_high === "number" ? obs.ref_range_high : null,
+        status: obs.status || null,
+        confidence: typeof obs.confidence === "number" ? obs.confidence : 0.8,
+      })) : [],
     };
   } catch {
     throw new Error("Failed to parse OpenRouter response as JSON");
   }
+}
+
+// Find catalog entry by obs_code
+function findCatalogEntry(
+  obsCode: string | null,
+  catalog: ObservationCatalogItem[]
+): ObservationCatalogItem | null {
+  if (!obsCode) return null;
+  return catalog.find(c => c.obs_code === obsCode) || null;
+}
+
+// Evaluate a simple formula string for unit conversion
+// Supports formulas like "percent = (mmol_per_mol * 0.09148) + 2.152"
+function evaluateFormula(formula: string, inputValue: number): number | null {
+  try {
+    // Extract the expression part (after the "=")
+    const parts = formula.split("=");
+    if (parts.length !== 2) return null;
+    
+    let expression = parts[1].trim();
+    
+    // Replace common variable names with the input value
+    // Common patterns: mmol_per_mol, value, x, input, etc.
+    expression = expression.replace(/mmol_per_mol|value|input|x/gi, inputValue.toString());
+    
+    // Simple safe evaluation using Function constructor
+    // Only allows numbers, operators, and parentheses
+    if (!/^[\d\s+\-*/().]+$/.test(expression)) {
+      console.warn(`Unsafe formula expression: ${expression}`);
+      return null;
+    }
+    
+    // Evaluate the expression
+    const result = new Function(`return ${expression}`)();
+    return typeof result === "number" && !isNaN(result) ? result : null;
+  } catch (e) {
+    console.error(`Error evaluating formula "${formula}":`, e);
+    return null;
+  }
+}
+
+// Get unit config from catalog entry (case-insensitive matching)
+function getUnitConfig(
+  unit: string | null,
+  catalogEntry: ObservationCatalogItem | null
+): { factor_to_canonical?: number; formula_to_canonical?: string } | null {
+  if (!catalogEntry || !unit) return null;
+
+  // Try case-sensitive first
+  let unitConfig = catalogEntry.accepted_units[unit];
+  
+  if (!unitConfig) {
+    // Try case-insensitive match
+    const unitLower = unit.toLowerCase();
+    for (const [u, config] of Object.entries(catalogEntry.accepted_units)) {
+      if (u.toLowerCase() === unitLower) {
+        unitConfig = config;
+        break;
+      }
+    }
+  }
+  
+  return unitConfig || null;
+}
+
+// Convert a single value using unit config
+function convertValueWithConfig(
+  value: number | null,
+  unitConfig: { factor_to_canonical?: number; formula_to_canonical?: string } | null
+): number | null {
+  if (value === null || !unitConfig) return null;
+
+  // Try factor-based conversion first
+  if (unitConfig.factor_to_canonical !== undefined) {
+    return value * unitConfig.factor_to_canonical;
+  }
+  
+  // Try formula-based conversion
+  if (unitConfig.formula_to_canonical) {
+    return evaluateFormula(unitConfig.formula_to_canonical, value);
+  }
+
+  return null;
+}
+
+// Convert value to canonical unit
+function convertToCanonical(
+  value: number | null,
+  unit: string | null,
+  catalogEntry: ObservationCatalogItem | null
+): { value_canonical: number | null; unit_canonical: string | null } {
+  if (!catalogEntry || value === null || !unit) {
+    return { value_canonical: null, unit_canonical: null };
+  }
+
+  const unitConfig = getUnitConfig(unit, catalogEntry);
+  if (!unitConfig) {
+    return { value_canonical: null, unit_canonical: null };
+  }
+
+  const converted = convertValueWithConfig(value, unitConfig);
+  if (converted !== null) {
+    return {
+      value_canonical: converted,
+      unit_canonical: catalogEntry.canonical_unit,
+    };
+  }
+
+  return { value_canonical: null, unit_canonical: null };
+}
+
+// Convert ref range values to canonical units
+function convertRefRangeToCanonical(
+  refLow: number | null,
+  refHigh: number | null,
+  unit: string | null,
+  catalogEntry: ObservationCatalogItem | null
+): { ref_range_low_canonical: number | null; ref_range_high_canonical: number | null } {
+  if (!catalogEntry || !unit) {
+    return { ref_range_low_canonical: null, ref_range_high_canonical: null };
+  }
+
+  const unitConfig = getUnitConfig(unit, catalogEntry);
+  if (!unitConfig) {
+    return { ref_range_low_canonical: null, ref_range_high_canonical: null };
+  }
+
+  return {
+    ref_range_low_canonical: convertValueWithConfig(refLow, unitConfig),
+    ref_range_high_canonical: convertValueWithConfig(refHigh, unitConfig),
+  };
 }
 
 Deno.serve(async (req) => {
@@ -214,8 +459,14 @@ Deno.serve(async (req) => {
       throw new Error("No OCR text found for this record. Run health-ocr first.");
     }
 
+    // Fetch observation catalog for LLM context
+    const observationCatalog = await fetchObservationCatalog(supabaseAdmin);
+    console.log(`Loaded ${observationCatalog.length} observation catalog entries`);
+
     // Extract structured data from OCR text
-    const structuredData = await extractStructuredData(record.ocr_text);
+    const structuredData = await extractStructuredData(record.ocr_text, observationCatalog);
+    console.log(`Extracted ${structuredData.observations.length} observations`);
+    console.log("Extracted observations:", JSON.stringify(structuredData.observations, null, 2));
 
     // Update the medical record with structured data
     const { error: updateError } = await supabaseAdmin
@@ -235,7 +486,61 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to update record: ${updateError.message}`);
     }
 
-    // Return structured data
+    // Delete existing observations for this record (in case of re-extraction)
+    await supabaseAdmin
+      .from("record_observations")
+      .delete()
+      .eq("record_id", record_id);
+
+    // Insert extracted observations
+    if (structuredData.observations.length > 0) {
+      const observationsToInsert = structuredData.observations.map(obs => {
+        const catalogEntry = findCatalogEntry(obs.obs_code, observationCatalog);
+        const { value_canonical, unit_canonical } = convertToCanonical(
+          obs.value_numeric,
+          obs.unit,
+          catalogEntry
+        );
+        const { ref_range_low_canonical, ref_range_high_canonical } = convertRefRangeToCanonical(
+          obs.ref_range_low,
+          obs.ref_range_high,
+          obs.unit,
+          catalogEntry
+        );
+
+        return {
+          record_id,
+          catalog_id: catalogEntry?.id || null,
+          obs_code: obs.obs_code,
+          obs_name: obs.obs_name,
+          value_numeric: obs.value_numeric,
+          value_text: obs.value,
+          unit: obs.unit,
+          value_canonical,
+          unit_canonical,
+          ref_range_text: obs.ref_range,
+          ref_range_low: obs.ref_range_low,
+          ref_range_high: obs.ref_range_high,
+          ref_range_low_canonical,
+          ref_range_high_canonical,
+          status: obs.status,
+          is_llm_extracted: true,
+          is_user_verified: false,
+          confidence: obs.confidence,
+        };
+      });
+
+      const { error: obsInsertError } = await supabaseAdmin
+        .from("record_observations")
+        .insert(observationsToInsert);
+
+      if (obsInsertError) {
+        console.error("Error inserting observations:", obsInsertError);
+        // Don't fail the whole request, just log the error
+      }
+    }
+
+    // Return structured data with observations
     return new Response(
       JSON.stringify({
         success: true,

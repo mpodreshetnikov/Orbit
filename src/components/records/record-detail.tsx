@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
@@ -20,13 +20,22 @@ import {
   FileText,
   Plus,
   Loader2,
+  FlaskConical,
+  ArrowUp,
+  ArrowDown,
+  AlertTriangle,
+  Check,
+  ChevronsUpDown,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -44,6 +53,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { AttachmentGrid } from "./attachment-preview";
 import { OcrReviewStep } from "./ocr-review-step";
 import { StructureReviewStep } from "./structure-review-step";
@@ -53,8 +70,13 @@ import {
   useRestoreRecord,
   useHardDeleteRecord,
   useUpdateMedicalRecord,
+  useRecordObservations,
+  useUpdateRecordObservation,
+  useDeleteRecordObservation,
+  useCreateRecordObservation,
+  useObservationCatalog,
 } from "@/hooks";
-import type { RecordType } from "@/types";
+import type { RecordType, ObservationStatus, RecordObservationWithCatalog } from "@/types";
 import { RECORD_TYPES } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -77,11 +99,16 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const router = useRouter();
 
   const { data: record, isLoading, error, refetch } = useMedicalRecord(recordId);
+  const { data: observations } = useRecordObservations(recordId);
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showOcrText, setShowOcrText] = useState(false);
+  
+  // Observation editing state
+  const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(null);
+  const [isAddingObservation, setIsAddingObservation] = useState(false);
   
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -100,6 +127,85 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const restoreMutation = useRestoreRecord();
   const hardDeleteMutation = useHardDeleteRecord();
   const updateMutation = useUpdateMedicalRecord();
+  const updateObsMutation = useUpdateRecordObservation();
+  const deleteObsMutation = useDeleteRecordObservation();
+  const createObsMutation = useCreateRecordObservation();
+  
+  const isObsProcessing = updateObsMutation.isPending || deleteObsMutation.isPending || createObsMutation.isPending;
+  
+  const handleEditObservation = (obs: RecordObservationWithCatalog) => {
+    setEditingObservation(obs);
+    setIsAddingObservation(false);
+  };
+
+  const handleAddObservation = () => {
+    setEditingObservation(null);
+    setIsAddingObservation(true);
+  };
+
+  const handleSaveObservation = async (data: {
+    obs_name: string;
+    value_text: string;
+    value_numeric: number | null;
+    value_canonical: number | null;
+    unit: string;
+    unit_canonical: string | null;
+    ref_range_text: string;
+    ref_range_low: number | null;
+    ref_range_high: number | null;
+    ref_range_low_canonical: number | null;
+    ref_range_high_canonical: number | null;
+    status: ObservationStatus | null;
+    obs_code: string | null;
+  }) => {
+    if (isAddingObservation) {
+      await createObsMutation.mutateAsync({
+        record_id: recordId,
+        obs_name: data.obs_name,
+        value_text: data.value_text,
+        value_numeric: data.value_numeric,
+        value_canonical: data.value_canonical,
+        unit: data.unit || null,
+        unit_canonical: data.unit_canonical,
+        ref_range_text: data.ref_range_text || null,
+        ref_range_low: data.ref_range_low,
+        ref_range_high: data.ref_range_high,
+        ref_range_low_canonical: data.ref_range_low_canonical,
+        ref_range_high_canonical: data.ref_range_high_canonical,
+        status: data.status,
+        obs_code: data.obs_code,
+        is_llm_extracted: false,
+        is_user_verified: true,
+      });
+    } else if (editingObservation) {
+      await updateObsMutation.mutateAsync({
+        id: editingObservation.id,
+        updates: {
+          obs_name: data.obs_name,
+          value_text: data.value_text,
+          value_numeric: data.value_numeric,
+          value_canonical: data.value_canonical,
+          unit: data.unit || null,
+          unit_canonical: data.unit_canonical,
+          ref_range_text: data.ref_range_text || null,
+          ref_range_low: data.ref_range_low,
+          ref_range_high: data.ref_range_high,
+          ref_range_low_canonical: data.ref_range_low_canonical,
+          ref_range_high_canonical: data.ref_range_high_canonical,
+          status: data.status,
+          obs_code: data.obs_code,
+          is_user_verified: true,
+        },
+      });
+    }
+
+    setEditingObservation(null);
+    setIsAddingObservation(false);
+  };
+
+  const handleDeleteObservation = async (obs: RecordObservationWithCatalog) => {
+    await deleteObsMutation.mutateAsync({ id: obs.id, recordId });
+  };
 
   const startEditing = () => {
     if (record) {
@@ -293,6 +399,13 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 
   // Show structure review step
   if (isStructureReview) {
+    const handleBackToOcr = () => {
+      updateMutation.mutate(
+        { id: recordId, updates: { status: "ocr_review" } },
+        { onSuccess: () => refetch() }
+      );
+    };
+
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-4">
@@ -307,6 +420,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         <StructureReviewStep
           record={record}
           onComplete={() => refetch()}
+          onBack={handleBackToOcr}
         />
       </div>
     );
@@ -527,6 +641,65 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         </>
       ) : null}
 
+      {/* Observations */}
+      {record.status === "active" && (
+        <>
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <FlaskConical className="h-4 w-4" />
+                {t("records.detail.observations")} ({observations?.length || 0})
+              </h2>
+              {!isRemoved && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleAddObservation}
+                  disabled={isObsProcessing}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  {t("observations.add")}
+                </Button>
+              )}
+            </div>
+            {observations && observations.length > 0 ? (
+              <div className="space-y-2">
+                {observations.map((obs) => (
+                  <ObservationRowEditable 
+                    key={obs.id} 
+                    observation={obs} 
+                    onEdit={() => handleEditObservation(obs)}
+                    onDelete={() => handleDeleteObservation(obs)}
+                    isProcessing={isObsProcessing}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground border rounded-lg border-dashed">
+                <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">{t("observations.noObservations")}</p>
+                <p className="text-xs mt-1">{t("observations.noObservationsHint")}</p>
+              </div>
+            )}
+          </div>
+          <Separator />
+          
+          {/* Edit/Add Observation Dialog */}
+          <ObservationEditDialog
+            open={!!editingObservation || isAddingObservation}
+            onOpenChange={(open) => {
+              if (!open) {
+                setEditingObservation(null);
+                setIsAddingObservation(false);
+              }
+            }}
+            observation={editingObservation}
+            onSave={handleSaveObservation}
+            isNew={isAddingObservation}
+          />
+        </>
+      )}
+
       {/* Notes (used as summary) */}
       <div>
         <h2 className="text-lg font-semibold mb-2">{t("records.detail.notes")}</h2>
@@ -637,6 +810,513 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+// Helper component for displaying observation status
+function ObservationStatusBadge({ status }: { status: ObservationStatus | null }) {
+  if (!status || status === "unknown") return null;
+
+  const config: Record<ObservationStatus, { color: string; icon: React.ReactNode }> = {
+    normal: { color: "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20", icon: null },
+    low: { color: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20", icon: <ArrowDown className="h-3 w-3" /> },
+    high: { color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20", icon: <ArrowUp className="h-3 w-3" /> },
+    critical_low: { color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20", icon: <AlertTriangle className="h-3 w-3" /> },
+    critical_high: { color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20", icon: <AlertTriangle className="h-3 w-3" /> },
+    unknown: { color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20", icon: null },
+  };
+
+  const { color, icon } = config[status] || config.unknown;
+
+  return (
+    <Badge variant="outline" className={cn("gap-1 text-xs", color)}>
+      {icon}
+      {status.replace("_", " ")}
+    </Badge>
+  );
+}
+
+// Observation row component with edit/delete buttons
+function ObservationRowEditable({ 
+  observation, 
+  onEdit,
+  onDelete,
+  isProcessing, 
+}: { 
+  observation: RecordObservationWithCatalog;
+  onEdit: () => void;
+  onDelete: () => void;
+  isProcessing: boolean;
+}) {
+  const displayValue = observation.value_numeric !== null 
+    ? observation.value_numeric.toString() 
+    : observation.value_text || "—";
+
+  const isBad = observation.status === "low" || observation.status === "high" || 
+                observation.status === "critical_low" || observation.status === "critical_high";
+
+  // Format reference range display
+  const hasRefRange = observation.ref_range_low !== null || observation.ref_range_high !== null;
+  const refRangeLow = observation.ref_range_low !== null ? observation.ref_range_low : "—";
+  const refRangeHigh = observation.ref_range_high !== null ? observation.ref_range_high : "—";
+
+  return (
+    <div className={cn(
+      "flex items-center justify-between gap-4 rounded-lg border p-3",
+      isBad && "border-orange-500/30 bg-orange-500/5"
+    )}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-medium truncate">{observation.obs_name}</span>
+          {observation.obs_code && (
+            <span className="text-xs text-muted-foreground shrink-0">
+              ({observation.obs_code})
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        {/* Reference range */}
+        {hasRefRange && (
+          <div className="text-xs text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground/70">({refRangeLow}–{refRangeHigh})</span>
+          </div>
+        )}
+        {/* Value */}
+        <div className="text-right">
+          <span className="font-semibold">{displayValue}</span>
+          {observation.unit && (
+            <span className="ml-1 text-muted-foreground text-sm">{observation.unit}</span>
+          )}
+        </div>
+        <ObservationStatusBadge status={observation.status} />
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="h-8 w-8"
+          onClick={onEdit}
+          disabled={isProcessing}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="h-8 w-8 text-destructive hover:text-destructive"
+          onClick={onDelete}
+          disabled={isProcessing}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// Observation Edit Dialog
+function ObservationEditDialog({
+  open,
+  onOpenChange,
+  observation,
+  onSave,
+  isNew,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  observation: Partial<RecordObservationWithCatalog> | null;
+  onSave: (data: {
+    obs_name: string;
+    value_text: string;
+    value_numeric: number | null;
+    value_canonical: number | null;
+    unit: string;
+    unit_canonical: string | null;
+    ref_range_text: string;
+    ref_range_low: number | null;
+    ref_range_high: number | null;
+    ref_range_low_canonical: number | null;
+    ref_range_high_canonical: number | null;
+    status: ObservationStatus | null;
+    obs_code: string | null;
+  }) => void;
+  isNew: boolean;
+}) {
+  const t = useTranslations();
+  const { data: catalog } = useObservationCatalog();
+
+  const [obsName, setObsName] = useState("");
+  const [valueText, setValueText] = useState("");
+  const [unit, setUnit] = useState("");
+  const [refRange, setRefRange] = useState("");
+  const [refRangeLow, setRefRangeLow] = useState("");
+  const [refRangeHigh, setRefRangeHigh] = useState("");
+  const [status, setStatus] = useState<ObservationStatus | null>(null);
+  const [obsCode, setObsCode] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [isComboboxOpen, setIsComboboxOpen] = useState(false);
+  const comboboxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open && observation) {
+      setObsName(observation.obs_name || "");
+      setValueText(observation.value_text || "");
+      setUnit(observation.unit || "");
+      setRefRange(observation.ref_range_text || "");
+      setRefRangeLow(observation.ref_range_low?.toString() || "");
+      setRefRangeHigh(observation.ref_range_high?.toString() || "");
+      setStatus(observation.status as ObservationStatus || null);
+      setObsCode(observation.obs_code || null);
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+    } else if (open && isNew) {
+      setObsName("");
+      setValueText("");
+      setUnit("");
+      setRefRange("");
+      setRefRangeLow("");
+      setRefRangeHigh("");
+      setStatus(null);
+      setObsCode(null);
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+    }
+  }, [open, observation, isNew]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (comboboxRef.current && !comboboxRef.current.contains(event.target as Node)) {
+        setIsComboboxOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Convert value to canonical using catalog unit config
+  const convertToCanonical = (value: number | null, unitStr: string): number | null => {
+    if (value === null) return null;
+    if (!currentCatalogEntry?.accepted_units) return value;
+    
+    // Find unit config (case-insensitive)
+    const unitConfig = Object.entries(currentCatalogEntry.accepted_units).find(
+      ([u]) => u.toLowerCase() === unitStr.toLowerCase()
+    )?.[1] as { factor_to_canonical?: number; formula_to_canonical?: string } | undefined;
+    
+    if (!unitConfig) return value;
+    
+    // Apply formula if exists
+    if (unitConfig.formula_to_canonical) {
+      try {
+        // Formula uses 'x' as placeholder for value
+        const formula = unitConfig.formula_to_canonical.replace(/x/g, value.toString());
+        return eval(formula);
+      } catch {
+        return value;
+      }
+    }
+    
+    // Apply factor if exists
+    if (unitConfig.factor_to_canonical) {
+      return value * unitConfig.factor_to_canonical;
+    }
+    
+    return value;
+  };
+
+  const handleSave = () => {
+    const numericValue = parseFloat(valueText);
+    const refLow = parseFloat(refRangeLow);
+    const refHigh = parseFloat(refRangeHigh);
+    const valueNumeric = !isNaN(numericValue) ? numericValue : null;
+    const refLowVal = !isNaN(refLow) ? refLow : null;
+    const refHighVal = !isNaN(refHigh) ? refHigh : null;
+    const unitTrimmed = unit.trim();
+    
+    // Convert values to canonical
+    const valueCanonical = convertToCanonical(valueNumeric, unitTrimmed);
+    const refLowCanonical = convertToCanonical(refLowVal, unitTrimmed);
+    const refHighCanonical = convertToCanonical(refHighVal, unitTrimmed);
+    
+    // Get canonical unit from catalog
+    const unitCanonical = currentCatalogEntry?.canonical_unit || null;
+    
+    onSave({
+      obs_name: obsName.trim(),
+      value_text: valueText.trim(),
+      value_numeric: valueNumeric,
+      value_canonical: valueCanonical,
+      unit: unitTrimmed,
+      unit_canonical: unitCanonical,
+      ref_range_text: refRange.trim(),
+      ref_range_low: refLowVal,
+      ref_range_high: refHighVal,
+      ref_range_low_canonical: refLowCanonical,
+      ref_range_high_canonical: refHighCanonical,
+      status,
+      obs_code: obsCode,
+    });
+  };
+
+  const handleCatalogSelect = (code: string | null) => {
+    if (code === null) {
+      setObsCode(null);
+      setUnit("");
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+      return;
+    }
+    const entry = catalog?.find(c => c.obs_code === code);
+    if (entry) {
+      setObsCode(code);
+      setObsName(entry.name_ru);
+      setUnit(entry.canonical_unit);
+      setCatalogSearch("");
+      setIsComboboxOpen(false);
+    }
+  };
+
+  const currentCatalogEntry = obsCode ? catalog?.find(c => c.obs_code === obsCode) : null;
+  const acceptedUnits = currentCatalogEntry?.accepted_units 
+    ? Object.keys(currentCatalogEntry.accepted_units) 
+    : null;
+
+  const filteredCatalog = catalog?.filter(item => {
+    if (!catalogSearch.trim()) return true;
+    const search = catalogSearch.toLowerCase();
+    return (
+      item.obs_code.toLowerCase().includes(search) ||
+      item.name_ru.toLowerCase().includes(search) ||
+      item.name_en.toLowerCase().includes(search) ||
+      item.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
+      item.synonyms_en?.some(s => s.toLowerCase().includes(search))
+    );
+  }) || [];
+
+  const displayValue = currentCatalogEntry 
+    ? `${currentCatalogEntry.name_ru} (${currentCatalogEntry.obs_code})`
+    : "";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {isNew ? t("observations.addObservation") : t("observations.editObservation")}
+          </DialogTitle>
+          <DialogDescription>
+            {t("observations.editDescription")}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* Searchable catalog combobox */}
+          {catalog && catalog.length > 0 && (
+            <div className="space-y-2">
+              <Label>{t("observations.fromCatalog")}</Label>
+              <div className="relative" ref={comboboxRef}>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    ref={inputRef}
+                    value={isComboboxOpen ? catalogSearch : displayValue}
+                    onChange={(e) => {
+                      setCatalogSearch(e.target.value);
+                      if (!isComboboxOpen) setIsComboboxOpen(true);
+                    }}
+                    onFocus={() => {
+                      setIsComboboxOpen(true);
+                      setCatalogSearch("");
+                    }}
+                    placeholder={t("observations.searchOrSelect")}
+                    className="pl-9 pr-9"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
+                    onClick={() => {
+                      setIsComboboxOpen(!isComboboxOpen);
+                      if (!isComboboxOpen) {
+                        setCatalogSearch("");
+                        inputRef.current?.focus();
+                      }
+                    }}
+                  >
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
+                
+                {isComboboxOpen && (
+                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
+                    <ScrollArea className="max-h-60">
+                      <div className="p-1">
+                        <button
+                          type="button"
+                          onClick={() => handleCatalogSelect(null)}
+                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
+                            obsCode === null ? "bg-accent" : ""
+                          }`}
+                        >
+                          <Check className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`} />
+                          <span className="text-muted-foreground italic">
+                            {t("observations.customObservation")}
+                          </span>
+                        </button>
+                        
+                        {filteredCatalog.map((item) => (
+                          <button
+                            key={item.obs_code}
+                            type="button"
+                            onClick={() => handleCatalogSelect(item.obs_code)}
+                            className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
+                              obsCode === item.obs_code ? "bg-accent" : ""
+                            }`}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{item.name_ru}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {item.obs_code} · {item.canonical_unit}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                        
+                        {filteredCatalog.length === 0 && catalogSearch && (
+                          <div className="px-2 py-4 text-sm text-center text-muted-foreground">
+                            {t("catalogs.noSearchResults")}
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Name */}
+          <div className="space-y-2">
+            <Label htmlFor="obs_name">{t("observations.name")}</Label>
+            <Input
+              id="obs_name"
+              value={obsName}
+              onChange={(e) => setObsName(e.target.value)}
+              placeholder={t("observations.namePlaceholder")}
+              disabled={!!currentCatalogEntry}
+            />
+          </div>
+
+          {/* Value and Unit */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="value">{t("observations.value")}</Label>
+              <Input
+                id="value"
+                value={valueText}
+                onChange={(e) => setValueText(e.target.value)}
+                placeholder="14.2"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("observations.unit")}</Label>
+              {acceptedUnits && acceptedUnits.length > 0 ? (
+                <Select value={unit || "_none"} onValueChange={(v) => setUnit(v === "_none" ? "" : v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={t("observations.selectUnit")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">—</SelectItem>
+                    {acceptedUnits.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                  placeholder="g/L"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Reference range */}
+          <div className="space-y-2">
+            <Label>{t("observations.refRange")}</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="ref_low" className="text-xs text-muted-foreground">
+                  {t("observations.refLow")}
+                </Label>
+                <Input
+                  id="ref_low"
+                  type="number"
+                  step="any"
+                  value={refRangeLow}
+                  onChange={(e) => setRefRangeLow(e.target.value)}
+                  placeholder="12.0"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="ref_high" className="text-xs text-muted-foreground">
+                  {t("observations.refHigh")}
+                </Label>
+                <Input
+                  id="ref_high"
+                  type="number"
+                  step="any"
+                  value={refRangeHigh}
+                  onChange={(e) => setRefRangeHigh(e.target.value)}
+                  placeholder="16.0"
+                />
+              </div>
+            </div>
+            <Input
+              value={refRange}
+              onChange={(e) => setRefRange(e.target.value)}
+              placeholder={t("observations.refRangeText")}
+              className="text-xs"
+            />
+          </div>
+
+          {/* Status */}
+          <div className="space-y-2">
+            <Label>{t("observations.statusLabel")}</Label>
+            <Select 
+              value={status || "_unknown"} 
+              onValueChange={(v) => setStatus(v === "_unknown" ? null : v as ObservationStatus)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={t("observations.selectStatus")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_unknown">{t("observations.status.unknown")}</SelectItem>
+                <SelectItem value="normal">{t("observations.status.normal")}</SelectItem>
+                <SelectItem value="low">{t("observations.status.low")}</SelectItem>
+                <SelectItem value="high">{t("observations.status.high")}</SelectItem>
+                <SelectItem value="critical_low">{t("observations.status.critical_low")}</SelectItem>
+                <SelectItem value="critical_high">{t("observations.status.critical_high")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button onClick={handleSave} disabled={!obsName.trim()}>
+            {t("common.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
