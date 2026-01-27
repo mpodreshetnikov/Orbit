@@ -1,17 +1,21 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
-import { ArrowLeft, Calendar, Ruler, FileText, AlertTriangle, MapPin, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { ArrowLeft, Calendar, Ruler, FileText, AlertTriangle, MapPin, TrendingUp, TrendingDown, Minus, CheckCircle2 } from "lucide-react";
 import { AppShell } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSingleFindingHistory } from "@/hooks";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { useSingleFindingHistory, useMarkFindingResolved } from "@/hooks";
+import { useMedicalRecords } from "@/hooks/use-medical-records";
 import { useUIStore } from "@/stores/ui-store";
 import type { FindingSeverity, FindingLaterality, FindingHistoryPoint } from "@/types";
 
@@ -40,15 +44,18 @@ function SeverityBadge({ severity }: { severity: FindingSeverity }) {
 }
 
 // Size trend indicator
+// History is sorted with newest first, so [0] is latest and [1] is previous
 function SizeTrendIndicator({ history }: { history: FindingHistoryPoint[] }) {
   if (history.length < 2) return <Minus className="h-4 w-4 text-muted-foreground" />;
   
   const sizesWithData = history.filter(h => h.size_mm !== null);
   if (sizesWithData.length < 2) return <Minus className="h-4 w-4 text-muted-foreground" />;
 
-  const latest = sizesWithData[sizesWithData.length - 1].size_mm!;
-  const previous = sizesWithData[sizesWithData.length - 2].size_mm!;
+  // [0] is latest (newest), [1] is previous
+  const latest = sizesWithData[0].size_mm!;
+  const previous = sizesWithData[1].size_mm!;
   
+  // For findings (polyps, cysts, etc.), smaller is better (green), larger is worse (red)
   if (latest > previous) {
     return <TrendingUp className="h-4 w-4 text-red-500" />;
   } else if (latest < previous) {
@@ -62,6 +69,8 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
   const searchParams = useSearchParams();
   const siteCode = searchParams.get("site") || undefined;
   const { selectedPersonId } = useUIStore();
+  const [showResolveDialog, setShowResolveDialog] = useState(false);
+  const [selectedRecordId, setSelectedRecordId] = useState<string>("");
 
   const { data: finding, isLoading } = useSingleFindingHistory(
     selectedPersonId, 
@@ -69,10 +78,31 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
     siteCode ? decodeURIComponent(siteCode) : undefined
   );
 
+  // Fetch recent active records for the "attach to record" selector
+  const { data: records } = useMedicalRecords({ 
+    person_id: selectedPersonId || undefined,
+    status: "active",
+  });
+
+  const markResolvedMutation = useMarkFindingResolved();
+
+  const handleMarkResolved = async () => {
+    if (!finding || !selectedPersonId || !selectedRecordId) return;
+    
+    await markResolvedMutation.mutateAsync({
+      personId: selectedPersonId,
+      recordId: selectedRecordId,
+      finding,
+    });
+    
+    setShowResolveDialog(false);
+    setSelectedRecordId("");
+  };
+
   if (!selectedPersonId) {
     return (
       <div className="flex items-center justify-center h-64 text-muted-foreground">
-        <p>{t("common.selectPerson")}</p>
+        <p>{t("person.selectPrompt")}</p>
       </div>
     );
   }
@@ -106,6 +136,7 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
   const findingName = finding.catalog_finding_name_ru || finding.finding_type_text;
   const siteName = finding.catalog_site_name_ru || finding.body_site_text;
   const isSevere = finding.latest_severity === "severe" || finding.latest_severity === "moderate";
+  const isResolved = finding.is_resolved;
 
   return (
     <div className="space-y-6">
@@ -122,7 +153,11 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold">{findingName}</h1>
-            {isSevere && <AlertTriangle className="h-5 w-5 text-orange-500" />}
+            {isResolved ? (
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+            ) : isSevere ? (
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+            ) : null}
           </div>
           {finding.finding_code && (
             <code className="text-sm text-muted-foreground">{finding.finding_code}</code>
@@ -137,8 +172,66 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
             </div>
           )}
         </div>
-        <SeverityBadge severity={finding.latest_severity} />
+        <div className="flex items-center gap-2">
+          {!isResolved && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setShowResolveDialog(true)}
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              {t("findings.markAsResolved")}
+            </Button>
+          )}
+          {isResolved ? (
+            <Badge variant="outline" className="bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20">
+              {t("findings.resolved")}
+            </Badge>
+          ) : (
+            <SeverityBadge severity={finding.latest_severity} />
+          )}
+        </div>
       </div>
+
+      {/* Mark as Resolved Dialog */}
+      <Dialog open={showResolveDialog} onOpenChange={setShowResolveDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("findings.markAsResolved")}</DialogTitle>
+            <DialogDescription>
+              {t("findings.markAsResolvedDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>{t("findings.attachToRecord")}</Label>
+              <Select value={selectedRecordId} onValueChange={setSelectedRecordId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t("findings.selectRecord")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {records?.map((record) => (
+                    <SelectItem key={record.id} value={record.id}>
+                      {record.title} {record.record_date && `(${format(new Date(record.record_date), "dd.MM.yyyy")})`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowResolveDialog(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button 
+              onClick={handleMarkResolved}
+              disabled={!selectedRecordId || markResolvedMutation.isPending}
+            >
+              {markResolvedMutation.isPending ? t("common.saving") : t("findings.markAsResolved")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -253,11 +346,11 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
                   )}
 
                   {/* Link to record */}
-                  <Link 
-                    href={`/health/records/${point.record_id}`}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    {t("findings.viewRecord")}
+                  <Link href={`/health/records/${point.record_id}`}>
+                    <Button variant="outline" size="sm" className="h-7 mt-2">
+                      <FileText className="h-3 w-3 mr-1" />
+                      {t("findings.viewRecord")}
+                    </Button>
                   </Link>
                 </div>
               </div>

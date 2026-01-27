@@ -1,13 +1,19 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import type {
   FindingSummary,
   FindingHistoryPoint,
   FindingSeverity,
   FindingLaterality,
+  CreateRecordFindingInput,
 } from "@/types";
+
+// Helper to determine if a finding is resolved (size=0 or count=0)
+function isResolved(size: number | null, count: number | null): boolean {
+  return size === 0 || count === 0;
+}
 
 // ============================================================================
 // FETCH ALL FINDINGS FOR A PERSON (aggregated by finding_code + site_code)
@@ -100,7 +106,10 @@ async function fetchPersonFindingHistory(
   }
 
   // Group by finding_code + site_code (or finding_type_text + body_site_text for unrecognized)
-  const findingMap = new Map<string, FindingSummary>();
+  const findingMap = new Map<string, {
+    rows: RawFindingRow[];
+    history: FindingHistoryPoint[];
+  }>();
 
   for (const row of data as unknown[]) {
     const r = row as RawFindingRow;
@@ -127,40 +136,50 @@ async function fetchPersonFindingHistory(
 
     if (findingMap.has(key)) {
       const existing = findingMap.get(key)!;
+      existing.rows.push(r);
       existing.history.push(historyPoint);
-      existing.occurrence_count++;
     } else {
       findingMap.set(key, {
-        finding_code: r.finding_code,
-        finding_type_text: r.finding_type_text,
-        site_code: r.site_code,
-        body_site_text: r.body_site_text,
-        finding_type_id: r.finding_type_id,
-        body_site_id: r.body_site_id,
-        catalog_finding_name_ru: r.finding_type_catalog?.name_ru || null,
-        catalog_finding_name_en: r.finding_type_catalog?.name_en || null,
-        catalog_site_name_ru: r.body_site_catalog?.name_ru || null,
-        catalog_site_name_en: r.body_site_catalog?.name_en || null,
-        latest_size_mm: r.size_mm,
-        latest_count: r.count,
-        latest_severity: r.severity as FindingSeverity,
-        latest_laterality: r.laterality as FindingLaterality,
-        latest_date: r.medical_records.record_date,
-        occurrence_count: 1,
+        rows: [r],
         history: [historyPoint],
       });
     }
   }
 
-  // Convert map to array and sort history by date (oldest first for timelines)
-  let summaries = Array.from(findingMap.values()).map(summary => ({
-    ...summary,
-    history: summary.history.sort((a, b) => {
+  // Convert map to array, sort history, and compute latest values
+  let summaries: FindingSummary[] = Array.from(findingMap.values()).map(({ rows, history }) => {
+    // Sort history by date (newest first for display)
+    history.sort((a, b) => {
       const dateA = a.record_date || a.created_at;
       const dateB = b.record_date || b.created_at;
-      return new Date(dateA).getTime() - new Date(dateB).getTime();
-    }),
-  }));
+      return new Date(dateB).getTime() - new Date(dateA).getTime();
+    });
+
+    // Latest values come from the most recent entry (first in sorted history)
+    const latest = history[0];
+    const firstRow = rows[0]; // For catalog info
+
+    return {
+      finding_code: firstRow.finding_code,
+      finding_type_text: firstRow.finding_type_text,
+      site_code: firstRow.site_code,
+      body_site_text: firstRow.body_site_text,
+      finding_type_id: firstRow.finding_type_id,
+      body_site_id: firstRow.body_site_id,
+      catalog_finding_name_ru: firstRow.finding_type_catalog?.name_ru || null,
+      catalog_finding_name_en: firstRow.finding_type_catalog?.name_en || null,
+      catalog_site_name_ru: firstRow.body_site_catalog?.name_ru || null,
+      catalog_site_name_en: firstRow.body_site_catalog?.name_en || null,
+      latest_size_mm: latest.size_mm,
+      latest_count: latest.count,
+      latest_severity: latest.severity,
+      latest_laterality: latest.laterality,
+      latest_date: latest.record_date,
+      is_resolved: isResolved(latest.size_mm, latest.count),
+      occurrence_count: history.length,
+      history,
+    };
+  });
 
   // Apply search filter if provided
   if (search && search.trim()) {
@@ -255,8 +274,7 @@ async function fetchSingleFindingHistory(
     `)
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
-    .or(`finding_code.eq.${findingCode},finding_type_text.ilike.${findingCode}`)
-    .order("created_at", { ascending: false });
+    .or(`finding_code.eq.${findingCode},finding_type_text.ilike.${findingCode}`);
 
   // Filter by site if provided
   if (siteCode) {
@@ -273,9 +291,7 @@ async function fetchSingleFindingHistory(
     return null;
   }
 
-  // Build summary from data
-  const first = data[0] as unknown as RawFindingRow;
-
+  // Build history from data
   const history: FindingHistoryPoint[] = data.map((r: unknown) => {
     const row = r as RawFindingRow;
     return {
@@ -294,29 +310,36 @@ async function fetchSingleFindingHistory(
     };
   });
 
-  // Sort history by date (oldest first)
+  // Sort history by date (newest first for display)
   history.sort((a, b) => {
     const dateA = a.record_date || a.created_at;
     const dateB = b.record_date || b.created_at;
-    return new Date(dateA).getTime() - new Date(dateB).getTime();
+    return new Date(dateB).getTime() - new Date(dateA).getTime();
   });
 
+  // Find the most recent entry (first in sorted history)
+  const latestHistory = history[0];
+  
+  // Get catalog info from first data row (all rows have the same catalog info)
+  const firstRow = data[0] as unknown as RawFindingRow;
+
   return {
-    finding_code: first.finding_code,
-    finding_type_text: first.finding_type_text,
-    site_code: first.site_code,
-    body_site_text: first.body_site_text,
-    finding_type_id: first.finding_type_id,
-    body_site_id: first.body_site_id,
-    catalog_finding_name_ru: first.finding_type_catalog?.name_ru || null,
-    catalog_finding_name_en: first.finding_type_catalog?.name_en || null,
-    catalog_site_name_ru: first.body_site_catalog?.name_ru || null,
-    catalog_site_name_en: first.body_site_catalog?.name_en || null,
-    latest_size_mm: first.size_mm,
-    latest_count: first.count,
-    latest_severity: first.severity as FindingSeverity,
-    latest_laterality: first.laterality as FindingLaterality,
-    latest_date: first.medical_records.record_date,
+    finding_code: firstRow.finding_code,
+    finding_type_text: firstRow.finding_type_text,
+    site_code: firstRow.site_code,
+    body_site_text: firstRow.body_site_text,
+    finding_type_id: firstRow.finding_type_id,
+    body_site_id: firstRow.body_site_id,
+    catalog_finding_name_ru: firstRow.finding_type_catalog?.name_ru || null,
+    catalog_finding_name_en: firstRow.finding_type_catalog?.name_en || null,
+    catalog_site_name_ru: firstRow.body_site_catalog?.name_ru || null,
+    catalog_site_name_en: firstRow.body_site_catalog?.name_en || null,
+    latest_size_mm: latestHistory.size_mm,
+    latest_count: latestHistory.count,
+    latest_severity: latestHistory.severity,
+    latest_laterality: latestHistory.laterality,
+    latest_date: latestHistory.record_date,
+    is_resolved: isResolved(latestHistory.size_mm, latestHistory.count),
     occurrence_count: data.length,
     history,
   };
@@ -331,5 +354,65 @@ export function useSingleFindingHistory(
     queryKey: ["single-finding-history", personId, findingCode, siteCode],
     queryFn: () => fetchSingleFindingHistory(personId!, findingCode!, siteCode),
     enabled: !!personId && !!findingCode,
+  });
+}
+
+// ============================================================================
+// MARK FINDING AS RESOLVED
+// Creates a new entry with size=0, count=0 to indicate the finding is gone
+// ============================================================================
+
+interface MarkResolvedInput {
+  personId: string;
+  recordId: string; // The record to attach the "resolved" entry to
+  finding: FindingSummary;
+}
+
+async function markFindingResolved(input: MarkResolvedInput): Promise<void> {
+  const supabase = createClient();
+
+  const newFinding: CreateRecordFindingInput = {
+    person_id: input.personId,
+    record_id: input.recordId,
+    finding_type_id: input.finding.finding_type_id,
+    finding_code: input.finding.finding_code,
+    finding_type_text: input.finding.finding_type_text,
+    body_site_id: input.finding.body_site_id,
+    site_code: input.finding.site_code,
+    body_site_text: input.finding.body_site_text,
+    size_mm: 0,
+    count: 0,
+    severity: "unknown",
+    laterality: input.finding.latest_laterality,
+    source_anchor: "Marked as resolved by user",
+    is_llm_extracted: false,
+    is_user_verified: true,
+  };
+
+  const { error } = await supabase
+    .from("record_findings")
+    .insert(newFinding);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export function useMarkFindingResolved() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: markFindingResolved,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["person-finding-history", variables.personId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["single-finding-history"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["record-findings", variables.recordId],
+      });
+    },
   });
 }

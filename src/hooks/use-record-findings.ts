@@ -125,15 +125,25 @@ async function updateFinding({
 }): Promise<RecordFinding> {
   const supabase = createClient();
 
-  const { data, error } = await supabase
+  // Perform update first
+  const { error: updateError } = await supabase
     .from("record_findings")
     .update(updates)
-    .eq("id", id)
+    .eq("id", id);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  // Then fetch the updated record separately (avoids RLS issues with select after update)
+  const { data, error: selectError } = await supabase
+    .from("record_findings")
     .select()
+    .eq("id", id)
     .single();
 
-  if (error) {
-    throw new Error(error.message);
+  if (selectError) {
+    throw new Error(selectError.message);
   }
 
   return data as RecordFinding;

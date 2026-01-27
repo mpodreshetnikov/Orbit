@@ -55,9 +55,9 @@ export function PersonSelector() {
 
   if (personsLoading) {
     return (
-      <Button variant="ghost" size="sm" className="gap-1" disabled>
+      <Button variant="ghost" size="sm" className="gap-1 px-2 sm:px-3" disabled>
         <Users className="h-4 w-4" />
-        <span className="hidden sm:inline">{t("common.loading")}</span>
+        <span className="text-sm">{t("common.loading")}</span>
       </Button>
     );
   }
@@ -65,9 +65,9 @@ export function PersonSelector() {
   // If user only has their own person, just show their name (no dropdown needed)
   if (myPerson && otherHumans.length === 0 && pets.length === 0) {
     return (
-      <Button variant="ghost" size="sm" className="gap-1 cursor-default" disabled>
+      <Button variant="ghost" size="sm" className="gap-1 px-2 sm:px-3 cursor-default" disabled>
         <User className="h-4 w-4" />
-        <span className="hidden sm:inline max-w-[120px] truncate">
+        <span className="text-sm max-w-[100px] sm:max-w-[120px] truncate">
           {myPerson.name}
         </span>
       </Button>
@@ -77,29 +77,24 @@ export function PersonSelector() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-1">
+        <Button variant="ghost" size="sm" className="gap-1 px-2 sm:px-3">
           {selectedPerson ? (
             <>
               <PersonIcon kind={selectedPerson.kind} />
-              <span className="hidden sm:inline max-w-[120px] truncate">
+              <span className="text-sm max-w-[80px] sm:max-w-[120px] truncate">
                 {selectedPerson.name}
-                {selectedPerson.auth_user_id === currentUser?.id && (
-                  <span className="text-muted-foreground ml-1">
-                    ({t("person.you")})
-                  </span>
-                )}
               </span>
             </>
           ) : (
             <>
               <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">{t("person.select")}</span>
+              <span className="text-sm">{t("person.select")}</span>
             </>
           )}
           <ChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" sideOffset={8} className="w-56">
         {persons && persons.length === 0 ? (
           <DropdownMenuItem disabled>
             {t("person.noPersons")}

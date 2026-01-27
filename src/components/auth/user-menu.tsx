@@ -73,7 +73,7 @@ export function UserMenu() {
           <span className="sr-only">{t("nav.profile")}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" sideOffset={8} className="w-56">
         <div className="px-2 py-1.5">
           <p className="text-sm font-medium">{user.email}</p>
           <p className="text-xs text-muted-foreground">{t("nav.profile")}</p>

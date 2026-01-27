@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { format } from "date-fns";
-import { AlertTriangle, MapPin, Ruler, Calendar, FileText } from "lucide-react";
+import { AlertTriangle, MapPin, Ruler, Calendar, FileText, CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,7 @@ export function FindingCard({ finding }: FindingCardProps) {
   const lateralityText = getLateralityText(finding.latest_laterality, t);
 
   const isSevere = finding.latest_severity === "severe" || finding.latest_severity === "moderate";
+  const isResolved = finding.is_resolved;
 
   // Build link - use finding_code if available, otherwise finding_type_text
   const findingKey = finding.finding_code || encodeURIComponent(finding.finding_type_text);
@@ -57,7 +58,8 @@ export function FindingCard({ finding }: FindingCardProps) {
     <Link href={href}>
       <Card className={cn(
         "hover:shadow-md transition-shadow cursor-pointer h-full",
-        isSevere && "border-orange-300 dark:border-orange-700"
+        isSevere && !isResolved && "border-orange-300 dark:border-orange-700",
+        isResolved && "border-green-300 dark:border-green-700"
       )}>
         <CardContent className="p-4">
           {/* Header */}
@@ -65,7 +67,11 @@ export function FindingCard({ finding }: FindingCardProps) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="font-medium truncate">{findingName}</h3>
-                {isSevere && <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />}
+                {isResolved ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                ) : isSevere ? (
+                  <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
+                ) : null}
               </div>
               {finding.finding_code && (
                 <code className="text-xs text-muted-foreground">
@@ -73,7 +79,13 @@ export function FindingCard({ finding }: FindingCardProps) {
                 </code>
               )}
             </div>
-            <SeverityBadge severity={finding.latest_severity} />
+            {isResolved ? (
+              <Badge variant="outline" className="text-xs bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20">
+                {t("findings.resolved")}
+              </Badge>
+            ) : (
+              <SeverityBadge severity={finding.latest_severity} />
+            )}
           </div>
 
           {/* Body site */}

@@ -191,12 +191,9 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
     <div className="space-y-4">
       {/* Header with Add button */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {t("health.title")} — {personName}
-          </h1>
-          <p className="text-muted-foreground">{t("health.description")}</p>
-        </div>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {t("health.title")} — {personName}
+        </h1>
         <Button onClick={() => router.push("/health/records/new")}>
           <Plus className="mr-2 h-4 w-4" />
           {t("health.addRecord")}

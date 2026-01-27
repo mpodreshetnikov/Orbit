@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Heart, ChevronDown, Settings, Plus, FileText, Ruler } from "lucide-react";
+import { Heart, ChevronDown, Settings, Plus, FileText, Ruler, Smartphone } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,25 +26,24 @@ export function TopNav() {
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="fixed top-0 left-0 right-0 z-[60] h-16 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-full items-center justify-between px-4">
           {/* Left: App name + Mini-app switcher */}
-          <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-2 font-semibold">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Link href="/" className="flex items-center gap-2 font-semibold shrink-0">
               <Heart className="h-5 w-5 text-primary" />
               <span className="hidden sm:inline">{t("app.name")}</span>
             </Link>
 
-            {/* Mini-app switcher */}
+            {/* Mini-app switcher - always visible */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-1">
-                  <Heart className="h-4 w-4" />
-                  <span>{t("nav.health")}</span>
+                <Button variant="ghost" size="sm" className="gap-1 px-2 sm:px-3">
+                  <span className="text-sm">{t("nav.health")}</span>
                   <ChevronDown className="h-3 w-3" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
+              <DropdownMenuContent align="start" sideOffset={8}>
                 <DropdownMenuItem asChild>
                   <Link href="/health" className="flex items-center gap-2">
                     <Heart className="h-4 w-4" />
@@ -56,33 +55,35 @@ export function TopNav() {
           </div>
 
           {/* Right: Quick add, Person selector, Settings, Profile */}
-          <div className="flex items-center gap-2">
-            {/* Quick add dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <Plus className="h-5 w-5" />
-                  <span className="sr-only">{t("nav.quickAdd")}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <Link href="/health/records/new" className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    {t("nav.addMedicalRecord")}
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={() => setMeasurementDialogOpen(true)}
-                  className="flex items-center gap-2"
-                >
-                  <Ruler className="h-4 w-4" />
-                  {t("nav.addMeasurement")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div className="flex items-center gap-1 sm:gap-2">
+            {/* Quick add dropdown - desktop only */}
+            <div className="hidden md:block">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <Plus className="h-5 w-5" />
+                    <span className="sr-only">{t("nav.quickAdd")}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={8}>
+                  <DropdownMenuItem asChild>
+                    <Link href="/health/records/new" className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      {t("nav.addMedicalRecord")}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    onClick={() => setMeasurementDialogOpen(true)}
+                    className="flex items-center gap-2"
+                  >
+                    <Ruler className="h-4 w-4" />
+                    {t("nav.addMeasurement")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
-            {/* Person selector */}
+            {/* Person selector - shows name on all screen sizes */}
             <PersonSelector />
 
           {/* Settings dropdown */}
@@ -93,7 +94,7 @@ export function TopNav() {
                 <span className="sr-only">{t("nav.settings")}</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" sideOffset={8} className="w-48">
               <div className="px-2 py-1.5 text-sm font-semibold">
                 {t("settings.title")}
               </div>
@@ -110,6 +111,13 @@ export function TopNav() {
                   <LanguageToggle />
                 </div>
               </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/settings" className="flex items-center gap-2">
+                  <Smartphone className="h-4 w-4" />
+                  {t("settings.appSettings")}
+                </Link>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 

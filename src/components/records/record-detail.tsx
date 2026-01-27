@@ -505,13 +505,13 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   // Default view for draft, active, removed statuses
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+      {/* Header - Mobile responsive */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.back()}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap mb-1">
               {isEditing ? (
                 <Select
@@ -554,13 +554,13 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                 placeholder={t("records.add.recordTitlePlaceholder")}
               />
             ) : (
-              <h1 className="text-2xl font-bold tracking-tight">{record.title}</h1>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">{record.title}</h1>
             )}
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Actions - scrollable on mobile */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mb-1 shrink-0">
           {isEditing ? (
             <>
               <Button variant="outline" onClick={cancelEditing}>

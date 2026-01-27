@@ -237,30 +237,32 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
   }, [router]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header with step indicator */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-start gap-3 sm:gap-4">
         <Button
           variant="ghost"
           size="icon"
           onClick={handleBack}
           disabled={currentStep === 2}
+          className="shrink-0"
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
             {t("records.add.title")}
           </h1>
-          <p className="text-muted-foreground">
+          <p className="text-sm text-muted-foreground truncate">
             {personName} — {t(`records.wizard.step${currentStep}`)}
           </p>
         </div>
         {/* Active processing badge */}
         {activeJobs.length > 0 && (
-          <Badge variant="secondary" className="gap-1">
+          <Badge variant="secondary" className="gap-1 shrink-0">
             <Loader2 className="h-3 w-3 animate-spin" />
-            {activeJobs.length} {t("processing.inProgress")}
+            <span className="hidden sm:inline">{activeJobs.length} {t("processing.inProgress")}</span>
+            <span className="sm:hidden">{activeJobs.length}</span>
           </Badge>
         )}
       </div>
@@ -271,7 +273,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
           <div
             key={step}
             className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors",
+              "flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full text-xs sm:text-sm font-medium transition-colors",
               step === currentStep
                 ? "bg-primary text-primary-foreground"
                 : step < currentStep
@@ -279,10 +281,10 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
                 : "bg-muted text-muted-foreground"
             )}
           >
-            {step < currentStep ? <Check className="h-4 w-4" /> : step}
+            {step < currentStep ? <Check className="h-3 w-3 sm:h-4 sm:w-4" /> : step}
           </div>
         ))}
-        <div className="ml-2 text-sm text-muted-foreground">
+        <div className="ml-2 text-xs sm:text-sm text-muted-foreground">
           {t(`records.wizard.${STEP_LABELS[currentStep]}`)}
         </div>
       </div>
@@ -431,25 +433,26 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
               </div>
             )}
 
-            <div className="flex flex-wrap justify-center gap-3">
+            <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-2 sm:gap-3 w-full px-4 sm:px-0">
               {draftRecordId && (
                 <Button
                   variant="default"
                   onClick={() => router.push(`/health/records/${draftRecordId}`)}
+                  className="w-full sm:w-auto"
                 >
                   <Eye className="mr-2 h-4 w-4" />
                   {t("records.wizard.viewRecord")}
                 </Button>
               )}
-              <Button variant="outline" onClick={handleGoToList}>
+              <Button variant="outline" onClick={handleGoToList} className="w-full sm:w-auto">
                 <Eye className="mr-2 h-4 w-4" />
                 {t("records.wizard.viewAll")}
               </Button>
-              <Button variant="outline" onClick={handleViewDrafts}>
+              <Button variant="outline" onClick={handleViewDrafts} className="w-full sm:w-auto">
                 <FileStack className="mr-2 h-4 w-4" />
                 {t("records.wizard.viewDrafts")}
               </Button>
-              <Button variant="outline" onClick={handleAddAnother}>
+              <Button variant="outline" onClick={handleAddAnother} className="w-full sm:w-auto">
                 <Plus className="mr-2 h-4 w-4" />
                 {t("records.wizard.addAnother")}
               </Button>

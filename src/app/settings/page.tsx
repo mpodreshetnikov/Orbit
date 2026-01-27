@@ -2,17 +2,18 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Bell, BellOff, CheckCircle, XCircle, RefreshCw, Smartphone, Download } from "lucide-react";
+import { Bell, BellOff, CheckCircle, XCircle, RefreshCw, Smartphone, Download, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AppShell } from "@/components/layout/app-shell";
+import Link from "next/link";
 
 type PermissionStatus = "default" | "granted" | "denied" | "unsupported";
 type ServiceWorkerStatus = "checking" | "registered" | "not-registered" | "unsupported";
 
-export default function DebugPage() {
-  const t = useTranslations("debug");
+export default function SettingsPage() {
+  const t = useTranslations("settings");
+  const tCommon = useTranslations("common");
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>("default");
   const [swStatus, setSwStatus] = useState<ServiceWorkerStatus>("checking");
   const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
@@ -102,7 +103,7 @@ export default function DebugPage() {
     }
 
     const notificationOptions: NotificationOptions = {
-      body: t("testNotificationBody"),
+      body: t("pwa.testNotificationBody"),
       icon: "/icons/icon-192x192.png",
       badge: "/icons/icon-192x192.png",
       tag: "test-notification",
@@ -110,19 +111,16 @@ export default function DebugPage() {
     };
 
     try {
-      // Try to send via service worker first (for better PWA experience)
       if (swRegistration) {
-        await swRegistration.showNotification(t("testNotificationTitle"), notificationOptions);
+        await swRegistration.showNotification(t("pwa.testNotificationTitle"), notificationOptions);
       } else {
-        // Fallback to regular notification
-        new Notification(t("testNotificationTitle"), notificationOptions);
+        new Notification(t("pwa.testNotificationTitle"), notificationOptions);
       }
       setLastNotificationTime(new Date().toLocaleTimeString());
     } catch (error) {
       console.error("Error sending notification:", error);
-      // Fallback to regular notification
       try {
-        new Notification(t("testNotificationTitle"), notificationOptions);
+        new Notification(t("pwa.testNotificationTitle"), notificationOptions);
         setLastNotificationTime(new Date().toLocaleTimeString());
       } catch (fallbackError) {
         console.error("Fallback notification also failed:", fallbackError);
@@ -133,26 +131,26 @@ export default function DebugPage() {
   const getPermissionBadge = () => {
     switch (permissionStatus) {
       case "granted":
-        return <Badge variant="default" className="bg-green-600"><CheckCircle className="w-3 h-3 mr-1" />{t("permissionGranted")}</Badge>;
+        return <Badge variant="default" className="bg-green-600"><CheckCircle className="w-3 h-3 mr-1" />{t("pwa.permissionGranted")}</Badge>;
       case "denied":
-        return <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1" />{t("permissionDenied")}</Badge>;
+        return <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1" />{t("pwa.permissionDenied")}</Badge>;
       case "unsupported":
-        return <Badge variant="secondary">{t("permissionUnsupported")}</Badge>;
+        return <Badge variant="secondary">{t("pwa.permissionUnsupported")}</Badge>;
       default:
-        return <Badge variant="outline">{t("permissionDefault")}</Badge>;
+        return <Badge variant="outline">{t("pwa.permissionDefault")}</Badge>;
     }
   };
 
   const getSwStatusBadge = () => {
     switch (swStatus) {
       case "registered":
-        return <Badge variant="default" className="bg-green-600"><CheckCircle className="w-3 h-3 mr-1" />{t("swRegistered")}</Badge>;
+        return <Badge variant="default" className="bg-green-600"><CheckCircle className="w-3 h-3 mr-1" />{t("pwa.swRegistered")}</Badge>;
       case "not-registered":
-        return <Badge variant="outline"><XCircle className="w-3 h-3 mr-1" />{t("swNotRegistered")}</Badge>;
+        return <Badge variant="outline"><XCircle className="w-3 h-3 mr-1" />{t("pwa.swNotRegistered")}</Badge>;
       case "unsupported":
-        return <Badge variant="secondary">{t("swUnsupported")}</Badge>;
+        return <Badge variant="secondary">{t("pwa.swUnsupported")}</Badge>;
       default:
-        return <Badge variant="outline"><RefreshCw className="w-3 h-3 mr-1 animate-spin" />{t("swChecking")}</Badge>;
+        return <Badge variant="outline"><RefreshCw className="w-3 h-3 mr-1 animate-spin" />{t("pwa.swChecking")}</Badge>;
     }
   };
 
@@ -163,13 +161,22 @@ export default function DebugPage() {
   };
 
   return (
-    <AppShell>
+    <div className="min-h-screen bg-background">
       <div className="p-4 space-y-6 max-w-2xl mx-auto">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">{t("title")}</h1>
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" asChild>
+            <Link href="/health">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+          </Button>
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold">{t("appSettings")}</h1>
+            <p className="text-sm text-muted-foreground">{t("appSettingsDescription")}</p>
+          </div>
           <Button variant="outline" size="sm" onClick={refreshStatus}>
             <RefreshCw className="w-4 h-4 mr-2" />
-            {t("refresh")}
+            {tCommon("refresh")}
           </Button>
         </div>
 
@@ -178,18 +185,18 @@ export default function DebugPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Smartphone className="w-5 h-5" />
-              {t("pwaStatus")}
+              {t("pwa.status")}
             </CardTitle>
-            <CardDescription>{t("pwaStatusDescription")}</CardDescription>
+            <CardDescription>{t("pwa.statusDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">{t("serviceWorker")}</span>
+              <span className="text-sm font-medium">{t("pwa.serviceWorker")}</span>
               {getSwStatusBadge()}
             </div>
             {swRegistration && (
               <div className="text-xs text-muted-foreground">
-                {t("swScope")}: {swRegistration.scope}
+                {t("pwa.swScope")}: {swRegistration.scope}
               </div>
             )}
             {swStatus === "not-registered" && (
@@ -200,7 +207,7 @@ export default function DebugPage() {
                 size="sm"
               >
                 <Download className="w-4 h-4 mr-2" />
-                {isRegistering ? t("swRegistering") : t("registerSW")}
+                {isRegistering ? t("pwa.swRegistering") : t("pwa.registerSW")}
               </Button>
             )}
           </CardContent>
@@ -211,13 +218,13 @@ export default function DebugPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Bell className="w-5 h-5" />
-              {t("notifications")}
+              {t("pwa.notifications")}
             </CardTitle>
-            <CardDescription>{t("notificationsDescription")}</CardDescription>
+            <CardDescription>{t("pwa.notificationsDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">{t("permissionStatus")}</span>
+              <span className="text-sm font-medium">{t("pwa.permissionStatus")}</span>
               {getPermissionBadge()}
             </div>
 
@@ -231,12 +238,12 @@ export default function DebugPage() {
                 {permissionStatus === "denied" ? (
                   <>
                     <BellOff className="w-4 h-4 mr-2" />
-                    {t("permissionDeniedHelp")}
+                    {t("pwa.permissionDeniedHelp")}
                   </>
                 ) : (
                   <>
                     <Bell className="w-4 h-4 mr-2" />
-                    {t("requestPermission")}
+                    {t("pwa.requestPermission")}
                   </>
                 )}
               </Button>
@@ -247,19 +254,19 @@ export default function DebugPage() {
                 className="flex-1"
               >
                 <Bell className="w-4 h-4 mr-2" />
-                {t("sendTestNotification")}
+                {t("pwa.sendTestNotification")}
               </Button>
             </div>
 
             {permissionStatus === "denied" && (
               <p className="text-xs text-muted-foreground">
-                {t("deniedInstructions")}
+                {t("pwa.deniedInstructions")}
               </p>
             )}
 
             {lastNotificationTime && (
               <p className="text-xs text-muted-foreground">
-                {t("lastNotification")}: {lastNotificationTime}
+                {t("pwa.lastNotification")}: {lastNotificationTime}
               </p>
             )}
           </CardContent>
@@ -268,16 +275,16 @@ export default function DebugPage() {
         {/* Install Instructions Card */}
         <Card>
           <CardHeader>
-            <CardTitle>{t("installInstructions")}</CardTitle>
-            <CardDescription>{t("installDescription")}</CardDescription>
+            <CardTitle>{t("pwa.installInstructions")}</CardTitle>
+            <CardDescription>{t("pwa.installDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground space-y-2">
-            <p><strong>iOS Safari:</strong> {t("iosInstructions")}</p>
-            <p><strong>Android Chrome:</strong> {t("androidInstructions")}</p>
-            <p><strong>Desktop Chrome/Edge:</strong> {t("desktopInstructions")}</p>
+            <p><strong>iOS Safari:</strong> {t("pwa.iosInstructions")}</p>
+            <p><strong>Android Chrome:</strong> {t("pwa.androidInstructions")}</p>
+            <p><strong>Desktop Chrome/Edge:</strong> {t("pwa.desktopInstructions")}</p>
           </CardContent>
         </Card>
       </div>
-    </AppShell>
+    </div>
   );
 }

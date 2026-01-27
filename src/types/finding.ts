@@ -213,6 +213,8 @@ export interface FindingSummary {
   latest_severity: FindingSeverity;
   latest_laterality: FindingLaterality;
   latest_date: string | null;
+  // Resolved status (true if latest size=0 or count=0, meaning finding is gone)
+  is_resolved: boolean;
   // Aggregates
   occurrence_count: number;
   history: FindingHistoryPoint[];

@@ -96,37 +96,37 @@ function MeasurementCard({ measurement, locale }: { measurement: MeasurementSumm
   return (
     <Link href={`/health/measurements/${encodeURIComponent(measurement.code)}`}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer">
-        <CardContent className="p-4">
+        <CardContent className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <h3 className="font-medium truncate">{displayName}</h3>
-              <Badge variant="outline" className="text-xs mt-1">
+              <h3 className="font-medium truncate text-sm sm:text-base">{displayName}</h3>
+              <Badge variant="outline" className="text-[10px] sm:text-xs mt-1 px-1.5 py-0">
                 {t(`measurements.categories.${measurement.category}`)}
               </Badge>
             </div>
             <MiniChart data={chartData} />
           </div>
 
-          <div className="mt-3 flex items-end justify-between">
+          <div className="mt-2 sm:mt-3 flex items-end justify-between">
             <div>
               <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-bold">
+                <span className="text-xl sm:text-2xl font-bold">
                   {measurement.latest_value.toFixed(
                     measurement.latest_value % 1 === 0 ? 0 : 1
                   )}
                 </span>
                 {displayUnit && (
-                  <span className="text-sm text-muted-foreground">{displayUnit}</span>
+                  <span className="text-xs sm:text-sm text-muted-foreground">{displayUnit}</span>
                 )}
                 <TrendIndicator history={chartData} />
               </div>
               {measurement.latest_date && (
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
                   {format(new Date(measurement.latest_date), "dd.MM.yyyy")}
                 </p>
               )}
             </div>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-[10px] sm:text-xs text-muted-foreground">
               {measurement.measurement_count} {t("measurements.measurements")}
             </span>
           </div>
@@ -283,34 +283,37 @@ export default function MeasurementsPage() {
     <AppShell>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Ruler className="h-6 w-6 text-primary" />
-              {t("measurements.title")}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {t("measurements.description")}
-            </p>
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+                <Ruler className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
+                {t("measurements.title")}
+              </h1>
+              <p className="text-sm text-muted-foreground hidden sm:block">
+                {t("measurements.description")}
+              </p>
+            </div>
+
+            {/* Add button */}
+            <Button onClick={() => setAddDialogOpen(true)} size="sm" className="gap-1 shrink-0">
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("measurements.addMeasurement")}</span>
+              <span className="sm:hidden">{t("common.add")}</span>
+            </Button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Add button */}
-            <Button onClick={() => setAddDialogOpen(true)} size="sm" className="gap-1">
-              <Plus className="h-4 w-4" />
-              {t("measurements.addMeasurement")}
-            </Button>
-
-            {/* View toggle */}
+          {/* View toggle - scrollable on mobile */}
+          <div className="flex items-center justify-between gap-2">
             <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "cards" | "table")}>
-              <TabsList>
-                <TabsTrigger value="cards" className="gap-2">
+              <TabsList className="h-9">
+                <TabsTrigger value="cards" className="gap-1.5 px-2 sm:px-3">
                   <LayoutGrid className="h-4 w-4" />
-                  {t("measurements.cardsView")}
+                  <span className="hidden sm:inline">{t("measurements.cardsView")}</span>
                 </TabsTrigger>
-                <TabsTrigger value="table" className="gap-2">
+                <TabsTrigger value="table" className="gap-1.5 px-2 sm:px-3">
                   <TableIcon className="h-4 w-4" />
-                  {t("measurements.tableView")}
+                  <span className="hidden sm:inline">{t("measurements.tableView")}</span>
                 </TabsTrigger>
               </TabsList>
             </Tabs>
