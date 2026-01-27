@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { AppShell } from "@/components/layout";
-import { FlaskConical, ChevronRight } from "lucide-react";
+import { FlaskConical, Ruler, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
@@ -12,6 +12,12 @@ const catalogLinks = [
     icon: FlaskConical,
     titleKey: "catalogs.observations",
     descriptionKey: "catalogs.observationsDescription",
+  },
+  {
+    href: "/health/catalogs/measurements",
+    icon: Ruler,
+    titleKey: "catalogs.measurements",
+    descriptionKey: "catalogs.measurementsDescription",
   },
 ];
 

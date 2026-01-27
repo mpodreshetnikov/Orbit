@@ -53,14 +53,14 @@ ON CONFLICT (email) DO UPDATE SET auth_user_id = EXCLUDED.auth_user_id;
 -- Note: auth_user_id can be linked later via Supabase console after users sign in
 
 -- Human family members
-INSERT INTO public.persons (name, kind, birthday, auth_user_id) VALUES
-  ('Max', 'human', '2001-01-24', '00000000-0000-4000-8000-000000000001'),
-  ('Kate', 'human', '1998-08-14', NULL)
+INSERT INTO public.persons (name, kind, birthday, sex, auth_user_id) VALUES
+  ('Max', 'human', '2001-01-24', 'male', '00000000-0000-4000-8000-000000000001'),
+  ('Kate', 'human', '1998-08-14', 'female', NULL)
 ON CONFLICT DO NOTHING;
 
 -- Pet family members
-INSERT INTO public.persons (name, kind, species, birthday) VALUES
-  ('Demi', 'pet', 'dog', NULL)
+INSERT INTO public.persons (name, kind, species, sex, birthday, breed) VALUES
+  ('Demi', 'pet', 'dog', NULL, 'female', 'Labrador')
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
@@ -188,6 +188,75 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- MEASUREMENTS (Sample data for body tracking)
+-- ============================================================================
+-- Add sample measurements for Max to demonstrate the measurements feature
+DO $$
+DECLARE
+  v_max_person_id uuid;
+  v_user_id uuid := '00000000-0000-4000-8000-000000000001';
+  v_height_catalog_id uuid;
+  v_weight_catalog_id uuid;
+  v_chest_catalog_id uuid;
+  v_waist_catalog_id uuid;
+  v_bicep_left_catalog_id uuid;
+  v_bicep_right_catalog_id uuid;
+BEGIN
+  -- Get person ID for Max
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+  
+  -- Get catalog IDs
+  SELECT id INTO v_height_catalog_id FROM public.measurement_catalog WHERE code = 'height';
+  SELECT id INTO v_weight_catalog_id FROM public.measurement_catalog WHERE code = 'weight';
+  SELECT id INTO v_chest_catalog_id FROM public.measurement_catalog WHERE code = 'chest';
+  SELECT id INTO v_waist_catalog_id FROM public.measurement_catalog WHERE code = 'waist';
+  SELECT id INTO v_bicep_left_catalog_id FROM public.measurement_catalog WHERE code = 'bicep_left';
+  SELECT id INTO v_bicep_right_catalog_id FROM public.measurement_catalog WHERE code = 'bicep_right';
+
+  IF v_max_person_id IS NOT NULL AND v_height_catalog_id IS NOT NULL THEN
+    -- Height measurements (one value, as height doesn't change much)
+    INSERT INTO public.measurements (person_id, catalog_id, value, measured_at, notes, created_by_user_id) VALUES
+      (v_max_person_id, v_height_catalog_id, 180, '2025-01-15 10:00:00+00', 'Annual checkup measurement', v_user_id)
+    ON CONFLICT DO NOTHING;
+
+    -- Weight measurements over time (showing progress)
+    INSERT INTO public.measurements (person_id, catalog_id, value, measured_at, notes, created_by_user_id) VALUES
+      (v_max_person_id, v_weight_catalog_id, 82.5, '2025-07-01 08:30:00+00', 'Starting point', v_user_id),
+      (v_max_person_id, v_weight_catalog_id, 81.2, '2025-08-01 08:15:00+00', 'Down 1.3kg', v_user_id),
+      (v_max_person_id, v_weight_catalog_id, 80.8, '2025-09-01 08:00:00+00', NULL, v_user_id),
+      (v_max_person_id, v_weight_catalog_id, 79.5, '2025-10-01 08:30:00+00', 'Good progress!', v_user_id),
+      (v_max_person_id, v_weight_catalog_id, 79.8, '2025-11-01 08:00:00+00', 'Slight increase after holiday', v_user_id),
+      (v_max_person_id, v_weight_catalog_id, 78.2, '2025-12-01 08:15:00+00', NULL, v_user_id),
+      (v_max_person_id, v_weight_catalog_id, 77.5, '2026-01-15 08:00:00+00', 'Target reached!', v_user_id)
+    ON CONFLICT DO NOTHING;
+
+    -- Chest measurements
+    INSERT INTO public.measurements (person_id, catalog_id, value, measured_at, notes, created_by_user_id) VALUES
+      (v_max_person_id, v_chest_catalog_id, 98, '2025-07-01 08:35:00+00', NULL, v_user_id),
+      (v_max_person_id, v_chest_catalog_id, 99, '2025-10-01 08:35:00+00', NULL, v_user_id),
+      (v_max_person_id, v_chest_catalog_id, 100, '2026-01-15 08:05:00+00', 'Muscle gain', v_user_id)
+    ON CONFLICT DO NOTHING;
+
+    -- Waist measurements
+    INSERT INTO public.measurements (person_id, catalog_id, value, measured_at, notes, created_by_user_id) VALUES
+      (v_max_person_id, v_waist_catalog_id, 88, '2025-07-01 08:36:00+00', NULL, v_user_id),
+      (v_max_person_id, v_waist_catalog_id, 86, '2025-10-01 08:36:00+00', NULL, v_user_id),
+      (v_max_person_id, v_waist_catalog_id, 84, '2026-01-15 08:06:00+00', 'Good progress on waist', v_user_id)
+    ON CONFLICT DO NOTHING;
+
+    -- Bicep measurements
+    INSERT INTO public.measurements (person_id, catalog_id, value, measured_at, notes, created_by_user_id) VALUES
+      (v_max_person_id, v_bicep_left_catalog_id, 34, '2025-07-01 08:40:00+00', NULL, v_user_id),
+      (v_max_person_id, v_bicep_left_catalog_id, 35, '2025-10-01 08:40:00+00', NULL, v_user_id),
+      (v_max_person_id, v_bicep_left_catalog_id, 36, '2026-01-15 08:10:00+00', NULL, v_user_id),
+      (v_max_person_id, v_bicep_right_catalog_id, 34.5, '2025-07-01 08:41:00+00', NULL, v_user_id),
+      (v_max_person_id, v_bicep_right_catalog_id, 35.5, '2025-10-01 08:41:00+00', NULL, v_user_id),
+      (v_max_person_id, v_bicep_right_catalog_id, 36.5, '2026-01-15 08:11:00+00', NULL, v_user_id)
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
+-- ============================================================================
 -- NOTES
 -- ============================================================================
 -- 1. Auth users are created directly in the seed file, allowing us to reference
@@ -211,3 +280,6 @@ END $$;
 -- 6. Sample medical records are created for all persons to demonstrate the
 --    health records feature. Records include various types: lab, visit,
 --    vaccination, imaging, and vet visits.
+--
+-- 7. Sample measurements are created for Max to demonstrate the measurements
+--    tracking feature with historical data for charts.
