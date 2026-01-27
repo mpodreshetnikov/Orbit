@@ -40,7 +40,7 @@ async function fetchPersonObservationHistory(
 
   // First, get all observations for active records of this person
   // Join with medical_records to get record_date and filter by person_id
-  let query = supabase
+  const query = supabase
     .from("record_observations")
     .select(`
       id,

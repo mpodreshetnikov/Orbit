@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   Search,
   ChevronsUpDown,
+  Stethoscope,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,13 +58,21 @@ import {
   useDeleteRecordObservation,
   useCreateRecordObservation,
   useObservationCatalog,
+  useRecordFindings,
+  useUpdateRecordFinding,
+  useDeleteRecordFinding,
+  useCreateRecordFinding,
 } from "@/hooks";
+import { FindingRow, FindingEditDialog } from "@/components/findings";
 import { 
   RECORD_TYPES, 
   type RecordType, 
   type MedicalRecordWithAttachments,
   type RecordObservationWithCatalog,
   type ObservationStatus,
+  type RecordFindingWithCatalog,
+  type FindingSeverity,
+  type FindingLaterality,
 } from "@/types";
 
 interface StructureReviewStepProps {
@@ -145,7 +154,9 @@ function ObservationRow({
 
       {/* Confidence indicator */}
       {observation.confidence !== null && observation.confidence < 0.8 && (
-        <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" title={t("observations.lowConfidence")} />
+        <span title={t("observations.lowConfidence")}>
+          <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />
+        </span>
       )}
 
       {/* Actions */}
@@ -617,13 +628,23 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const [isAddingObservation, setIsAddingObservation] = useState(false);
   const [showObservations, setShowObservations] = useState(true);
 
+  // Findings
+  const { data: findings, isLoading: findingsLoading } = useRecordFindings(record.id);
+  const [editingFinding, setEditingFinding] = useState<RecordFindingWithCatalog | null>(null);
+  const [isAddingFinding, setIsAddingFinding] = useState(false);
+  const [showFindings, setShowFindings] = useState(true);
+
   const updateMutation = useUpdateMedicalRecord();
   const updateObsMutation = useUpdateRecordObservation();
   const deleteObsMutation = useDeleteRecordObservation();
   const createObsMutation = useCreateRecordObservation();
+  const updateFindingMutation = useUpdateRecordFinding();
+  const deleteFindingMutation = useDeleteRecordFinding();
+  const createFindingMutation = useCreateRecordFinding();
 
   const isProcessing = updateMutation.isPending || updateObsMutation.isPending || 
-    deleteObsMutation.isPending || createObsMutation.isPending;
+    deleteObsMutation.isPending || createObsMutation.isPending ||
+    updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending;
 
   const addKeyword = () => {
     const trimmed = newKeyword.trim();
@@ -659,9 +680,12 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       },
     });
 
-    // When activating, mark all observations as verified
+    // When activating, mark all observations and findings as verified
     if (activate) {
-      await verifyAllObservations();
+      await Promise.all([
+        verifyAllObservations(),
+        verifyAllFindings(),
+      ]);
       router.push("/health");
     } else {
       onComplete();
@@ -751,6 +775,74 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       unverified.map(obs => 
         updateObsMutation.mutateAsync({
           id: obs.id,
+          updates: { is_user_verified: true },
+        })
+      )
+    );
+  };
+
+  // Finding handlers
+  const handleEditFinding = (finding: RecordFindingWithCatalog) => {
+    setEditingFinding(finding);
+    setIsAddingFinding(false);
+  };
+
+  const handleAddFinding = () => {
+    setEditingFinding(null);
+    setIsAddingFinding(true);
+  };
+
+  const handleSaveFinding = async (data: {
+    finding_type_id: string | null;
+    finding_code: string | null;
+    finding_type_text: string;
+    body_site_id: string | null;
+    site_code: string | null;
+    body_site_text: string | null;
+    size_mm: number | null;
+    count: number | null;
+    severity: FindingSeverity;
+    laterality: FindingLaterality;
+    morphology: string | null;
+    description: string | null;
+    histology: string | null;
+    finding_date: string | null;
+    source_anchor: string;
+  }) => {
+    if (isAddingFinding) {
+      await createFindingMutation.mutateAsync({
+        person_id: record.person_id,
+        record_id: record.id,
+        ...data,
+        is_llm_extracted: false,
+        is_user_verified: true,
+      });
+    } else if (editingFinding) {
+      await updateFindingMutation.mutateAsync({
+        id: editingFinding.id,
+        updates: {
+          ...data,
+          is_user_verified: true,
+        },
+      });
+    }
+
+    setEditingFinding(null);
+    setIsAddingFinding(false);
+  };
+
+  const handleDeleteFinding = async (finding: RecordFindingWithCatalog) => {
+    await deleteFindingMutation.mutateAsync({ id: finding.id, recordId: record.id });
+  };
+
+  const verifyAllFindings = async () => {
+    if (!findings || findings.length === 0) return;
+    
+    const unverified = findings.filter(f => !f.is_user_verified);
+    await Promise.all(
+      unverified.map(f => 
+        updateFindingMutation.mutateAsync({
+          id: f.id,
           updates: { is_user_verified: true },
         })
       )
@@ -995,6 +1087,84 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         observation={editingObservation}
         onSave={handleSaveObservation}
         isNew={isAddingObservation}
+      />
+
+      {/* Findings Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setShowFindings(!showFindings)}
+              className="flex items-center gap-2 text-left"
+            >
+              <Stethoscope className="h-5 w-5 text-primary" />
+              <CardTitle className="text-base">
+                {t("findings.title")}
+                {findings && findings.length > 0 && (
+                  <Badge variant="secondary" className="ml-2">
+                    {findings.length}
+                  </Badge>
+                )}
+              </CardTitle>
+              {showFindings ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddFinding}
+              disabled={isProcessing}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              {t("findings.add")}
+            </Button>
+          </div>
+        </CardHeader>
+        {showFindings && (
+          <CardContent className="pt-0">
+            {findingsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : findings && findings.length > 0 ? (
+              <div className="space-y-2">
+                {findings.map((finding) => (
+                  <FindingRow
+                    key={finding.id}
+                    finding={finding}
+                    onEdit={() => handleEditFinding(finding)}
+                    onDelete={() => handleDeleteFinding(finding)}
+                    isProcessing={isProcessing}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground">
+                <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">{t("findings.noFindings")}</p>
+                <p className="text-xs mt-1">{t("findings.noFindingsHint")}</p>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Edit/Add Finding Dialog */}
+      <FindingEditDialog
+        open={!!editingFinding || isAddingFinding}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingFinding(null);
+            setIsAddingFinding(false);
+          }
+        }}
+        finding={editingFinding}
+        onSave={handleSaveFinding}
+        isNew={isAddingFinding}
       />
 
       {/* Actions */}

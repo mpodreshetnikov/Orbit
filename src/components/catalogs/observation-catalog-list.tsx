@@ -245,7 +245,7 @@ export function ObservationCatalogList() {
             <AlertDialogTitle>{t("catalogs.deleteObservation")}</AlertDialogTitle>
             <AlertDialogDescription>
               {t("catalogs.deleteObservationMessage", {
-                code: observationToDelete?.obs_code,
+                code: observationToDelete?.obs_code ?? "",
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
