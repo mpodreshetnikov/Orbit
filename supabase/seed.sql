@@ -60,7 +60,7 @@ ON CONFLICT DO NOTHING;
 
 -- Pet family members
 INSERT INTO public.persons (name, kind, species, sex, birthday, breed) VALUES
-  ('Demi', 'pet', 'dog', NULL, 'female', 'Labrador')
+  ('Demi', 'pet', 'dog', 'female', NULL, 'Labrador')
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================

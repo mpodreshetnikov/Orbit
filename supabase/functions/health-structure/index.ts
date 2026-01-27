@@ -7,6 +7,7 @@ import { corsHeaders } from "../_shared/cors.ts";
  * This is step 2 of the medical record processing pipeline.
  * It extracts structured data (title, type, date, summary, keywords) from OCR text.
  * It also extracts observations/lab values using the observation catalog.
+ * It also extracts findings (polyps, stones, cysts, etc.) using finding and body site catalogs.
  * 
  * Flow: Upload -> health-ocr -> OCR Review -> [health-structure] -> Structure Review -> Save
  */
@@ -41,6 +42,23 @@ interface ExtractedObservation {
   confidence: number;
 }
 
+interface ExtractedFinding {
+  finding_code: string | null;
+  finding_type_text: string;
+  site_code: string | null;
+  body_site_text: string | null;
+  size_mm: number | null;
+  count: number | null;
+  severity: "mild" | "moderate" | "severe" | "unknown";
+  laterality: "left" | "right" | "bilateral" | "none";
+  morphology: string | null;
+  description: string | null;
+  histology: string | null;
+  finding_date: string | null;
+  source_anchor: string;
+  confidence: number;
+}
+
 interface ObservationCatalogItem {
   id: string;
   obs_code: string;
@@ -52,8 +70,28 @@ interface ObservationCatalogItem {
   accepted_units: Record<string, { factor_to_canonical?: number; formula_to_canonical?: string }>;
 }
 
-interface StructuredDataWithObservations extends StructuredData {
+interface FindingTypeCatalogItem {
+  id: string;
+  finding_code: string;
+  name_ru: string;
+  name_en: string;
+  synonyms_ru: string[];
+  synonyms_en: string[];
+}
+
+interface BodySiteCatalogItem {
+  id: string;
+  site_code: string;
+  name_ru: string;
+  name_en: string;
+  parent_site_code: string | null;
+  synonyms_ru: string[];
+  synonyms_en: string[];
+}
+
+interface StructuredDataWithObservationsAndFindings extends StructuredData {
   observations: ExtractedObservation[];
+  findings: ExtractedFinding[];
 }
 
 // Fetch observation catalog from database
@@ -65,6 +103,36 @@ async function fetchObservationCatalog(supabase: ReturnType<typeof createClient>
 
   if (error) {
     console.error("Error fetching observation catalog:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Fetch finding type catalog from database
+async function fetchFindingTypeCatalog(supabase: ReturnType<typeof createClient>): Promise<FindingTypeCatalogItem[]> {
+  const { data, error } = await supabase
+    .from("finding_type_catalog")
+    .select("id, finding_code, name_ru, name_en, synonyms_ru, synonyms_en")
+    .order("finding_code");
+
+  if (error) {
+    console.error("Error fetching finding type catalog:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Fetch body site catalog from database
+async function fetchBodySiteCatalog(supabase: ReturnType<typeof createClient>): Promise<BodySiteCatalogItem[]> {
+  const { data, error } = await supabase
+    .from("body_site_catalog")
+    .select("id, site_code, name_ru, name_en, parent_site_code, synonyms_ru, synonyms_en")
+    .order("site_code");
+
+  if (error) {
+    console.error("Error fetching body site catalog:", error);
     return [];
   }
 
@@ -93,11 +161,44 @@ ${items.join("\n")}
 - Если показатель не соответствует каталогу - оставь obs_code как null`;
 }
 
+// Build finding type catalog prompt section
+function buildFindingTypeCatalogPrompt(catalog: FindingTypeCatalogItem[]): string {
+  if (catalog.length === 0) {
+    return "Каталог типов находок пуст.";
+  }
+
+  const items = catalog.map(item => {
+    const synonyms = [...new Set([...item.synonyms_ru, ...item.synonyms_en])].join(", ");
+    return `- ${item.finding_code}: "${item.name_ru}" / "${item.name_en}" (синонимы: ${synonyms})`;
+  });
+
+  return `КАТАЛОГ ТИПОВ НАХОДОК (finding_code):
+${items.join("\n")}`;
+}
+
+// Build body site catalog prompt section
+function buildBodySiteCatalogPrompt(catalog: BodySiteCatalogItem[]): string {
+  if (catalog.length === 0) {
+    return "Каталог локализаций пуст.";
+  }
+
+  const items = catalog.map(item => {
+    const synonyms = [...new Set([...item.synonyms_ru, ...item.synonyms_en])].join(", ");
+    const parent = item.parent_site_code ? ` [родитель: ${item.parent_site_code}]` : "";
+    return `- ${item.site_code}: "${item.name_ru}" / "${item.name_en}" (синонимы: ${synonyms})${parent}`;
+  });
+
+  return `КАТАЛОГ ЛОКАЛИЗАЦИЙ (site_code):
+${items.join("\n")}`;
+}
+
 // Call LLM to extract structured data from OCR text
 async function extractStructuredData(
   ocrText: string,
-  observationCatalog: ObservationCatalogItem[]
-): Promise<StructuredDataWithObservations> {
+  observationCatalog: ObservationCatalogItem[],
+  findingTypeCatalog: FindingTypeCatalogItem[],
+  bodySiteCatalog: BodySiteCatalogItem[]
+): Promise<StructuredDataWithObservationsAndFindings> {
   if (!ocrText || ocrText.trim().length === 0) {
     return {
       record_type: "other",
@@ -106,10 +207,13 @@ async function extractStructuredData(
       summary: "Текст не найден",
       keywords: [],
       observations: [],
+      findings: [],
     };
   }
 
-  const catalogPrompt = buildObservationCatalogPrompt(observationCatalog);
+  const observationCatalogPrompt = buildObservationCatalogPrompt(observationCatalog);
+  const findingTypeCatalogPrompt = buildFindingTypeCatalogPrompt(findingTypeCatalog);
+  const bodySiteCatalogPrompt = buildBodySiteCatalogPrompt(bodySiteCatalog);
 
   const systemPrompt = `Ты — анализатор медицинских документов. Тебе будет дан текст, извлечённый из медицинского документа (OCR).
 
@@ -122,6 +226,7 @@ async function extractStructuredData(
 - summary: ОЧЕНЬ КРАТКОЕ и ПОЛЕЗНОЕ описание результата НА РУССКОМ ЯЗЫКЕ (1-2 коротких предложения, максимум 150 символов)
 - keywords: массив из 3-7 релевантных ключевых слов/тегов НА РУССКОМ ЯЗЫКЕ
 - observations: массив извлечённых показателей/результатов анализов
+- findings: массив извлечённых находок (полипы, камни, кисты, образования и т.д.)
 
 ВАЖНЫЕ ПРАВИЛА ДЛЯ ТИПА (record_type):
 - Если документ упоминает животных или ветеринарную помощь: "vet"
@@ -156,7 +261,7 @@ async function extractStructuredData(
 - Добавляй ключевые слова по органам/системам: печень, почки, сердце, кровь и т.д.
 - НЕ добавляй названия показателей анализов (гемоглобин, ферритин, глюкоза и т.д.) как ключевые слова - они извлекаются отдельно в observations
 
-${catalogPrompt}
+${observationCatalogPrompt}
 
 ПРАВИЛА ДЛЯ ИЗВЛЕЧЕНИЯ ПОКАЗАТЕЛЕЙ (observations):
 Каждый показатель — это объект с полями:
@@ -182,7 +287,47 @@ ${catalogPrompt}
 - Не извлекай текстовые описания как показатели (только если есть значение)
 - Для качественных результатов (положительный/отрицательный) - value_numeric = null
 - Если документ НЕ содержит анализов/показателей - оставь observations пустым массивом []
-- ОБЯЗАТЕЛЬНО извлекай ref_range_low и ref_range_high как отдельные числа, если в документе указан референсный интервал`;
+- ОБЯЗАТЕЛЬНО извлекай ref_range_low и ref_range_high как отдельные числа, если в документе указан референсный интервал
+
+${findingTypeCatalogPrompt}
+
+${bodySiteCatalogPrompt}
+
+ПРАВИЛА ДЛЯ ИЗВЛЕЧЕНИЯ НАХОДОК (findings):
+Каждая находка — это объект с полями:
+- finding_code: КОД из КАТАЛОГА ТИПОВ НАХОДОК (ОБЯЗАТЕЛЬНО если есть совпадение!), или null
+- finding_type_text: название находки как в документе (на русском) - ОБЯЗАТЕЛЬНО
+- site_code: КОД из КАТАЛОГА ЛОКАЛИЗАЦИЙ (ОБЯЗАТЕЛЬНО если есть совпадение!), или null
+- body_site_text: локализация как в документе (на русском)
+- size_mm: размер в мм если указан, или null
+- count: количество если указано, или null (по умолчанию 1)
+- severity: "mild" | "moderate" | "severe" | "unknown" - степень выраженности
+- laterality: "left" | "right" | "bilateral" | "none" - сторона поражения
+- morphology: морфологическое описание (форма, структура) если есть
+- description: дополнительное описание если есть
+- histology: гистологическое заключение если есть
+- finding_date: дата обнаружения в формате YYYY-MM-DD если отличается от даты документа
+- source_anchor: ТОЧНАЯ ЦИТАТА из документа где описана находка - ОБЯЗАТЕЛЬНО
+- confidence: уверенность в извлечении от 0 до 1
+
+КРИТИЧЕСКИ ВАЖНО для findings:
+- ОБЯЗАТЕЛЬНО сопоставляй тип находки с finding_code из каталога!
+- ОБЯЗАТЕЛЬНО сопоставляй локализацию с site_code из каталога!
+- Используй синонимы из каталогов для поиска соответствия
+- Если точного совпадения в каталоге нет - оставь код как null, но заполни _text поле
+- Для laterality: используй "left"/"right" если указана сторона, "bilateral" если обе стороны, "none" если сторона не применима
+- source_anchor должен содержать ТОЧНУЮ цитату из документа (1-2 предложения)
+
+КОГДА извлекать findings:
+- Из УЗИ, КТ, МРТ, рентгена - образования, кисты, камни, узлы
+- Из эндоскопии (колоноскопия, гастроскопия) - полипы, эрозии, язвы
+- Из гистологии - результаты биопсии
+- Из любых заключений с патологическими находками
+
+КОГДА НЕ извлекать findings:
+- Нормальные заключения без патологии
+- Отрицательные находки ("камней не выявлено", "без особенностей")
+- Из лабораторных анализов - они идут в observations`;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -192,13 +337,13 @@ ${catalogPrompt}
       "HTTP-Referer": SUPABASE_URL || "http://localhost:3000",
     },
     body: JSON.stringify({
-      model: "openai/gpt-4o", // Use cheaper model for text analysis
+      model: "openai/gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `Проанализируй этот текст медицинского документа:\n\n${ocrText}` },
       ],
       temperature: 0.3,
-      max_tokens: 4096, // Increased for observations
+      max_tokens: 8192, // Increased for observations + findings
       response_format: { type: "json_object" },
     }),
   });
@@ -235,6 +380,22 @@ ${catalogPrompt}
         status: obs.status || null,
         confidence: typeof obs.confidence === "number" ? obs.confidence : 0.8,
       })) : [],
+      findings: Array.isArray(parsed.findings) ? parsed.findings.map((f: Partial<ExtractedFinding>) => ({
+        finding_code: f.finding_code || null,
+        finding_type_text: f.finding_type_text || "Неизвестная находка",
+        site_code: f.site_code || null,
+        body_site_text: f.body_site_text || null,
+        size_mm: typeof f.size_mm === "number" ? f.size_mm : null,
+        count: typeof f.count === "number" ? f.count : null,
+        severity: (f.severity === "mild" || f.severity === "moderate" || f.severity === "severe") ? f.severity : "unknown",
+        laterality: (f.laterality === "left" || f.laterality === "right" || f.laterality === "bilateral") ? f.laterality : "none",
+        morphology: f.morphology || null,
+        description: f.description || null,
+        histology: f.histology || null,
+        finding_date: f.finding_date || null,
+        source_anchor: f.source_anchor || "",
+        confidence: typeof f.confidence === "number" ? f.confidence : 0.8,
+      })) : [],
     };
   } catch {
     throw new Error("Failed to parse OpenRouter response as JSON");
@@ -248,6 +409,24 @@ function findCatalogEntry(
 ): ObservationCatalogItem | null {
   if (!obsCode) return null;
   return catalog.find(c => c.obs_code === obsCode) || null;
+}
+
+// Find finding type catalog entry by finding_code
+function findFindingTypeCatalogEntry(
+  findingCode: string | null,
+  catalog: FindingTypeCatalogItem[]
+): FindingTypeCatalogItem | null {
+  if (!findingCode) return null;
+  return catalog.find(c => c.finding_code === findingCode) || null;
+}
+
+// Find body site catalog entry by site_code
+function findBodySiteCatalogEntry(
+  siteCode: string | null,
+  catalog: BodySiteCatalogItem[]
+): BodySiteCatalogItem | null {
+  if (!siteCode) return null;
+  return catalog.find(c => c.site_code === siteCode) || null;
 }
 
 // Evaluate a simple formula string for unit conversion
@@ -459,14 +638,27 @@ Deno.serve(async (req) => {
       throw new Error("No OCR text found for this record. Run health-ocr first.");
     }
 
-    // Fetch observation catalog for LLM context
-    const observationCatalog = await fetchObservationCatalog(supabaseAdmin);
+    // Fetch all catalogs for LLM context
+    const [observationCatalog, findingTypeCatalog, bodySiteCatalog] = await Promise.all([
+      fetchObservationCatalog(supabaseAdmin),
+      fetchFindingTypeCatalog(supabaseAdmin),
+      fetchBodySiteCatalog(supabaseAdmin),
+    ]);
     console.log(`Loaded ${observationCatalog.length} observation catalog entries`);
+    console.log(`Loaded ${findingTypeCatalog.length} finding type catalog entries`);
+    console.log(`Loaded ${bodySiteCatalog.length} body site catalog entries`);
 
     // Extract structured data from OCR text
-    const structuredData = await extractStructuredData(record.ocr_text, observationCatalog);
+    const structuredData = await extractStructuredData(
+      record.ocr_text,
+      observationCatalog,
+      findingTypeCatalog,
+      bodySiteCatalog
+    );
     console.log(`Extracted ${structuredData.observations.length} observations`);
+    console.log(`Extracted ${structuredData.findings.length} findings`);
     console.log("Extracted observations:", JSON.stringify(structuredData.observations, null, 2));
+    console.log("Extracted findings:", JSON.stringify(structuredData.findings, null, 2));
 
     // Update the medical record with structured data
     const { error: updateError } = await supabaseAdmin
@@ -540,7 +732,57 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Return structured data with observations
+    // Delete existing findings for this record (in case of re-extraction)
+    await supabaseAdmin
+      .from("record_findings")
+      .delete()
+      .eq("record_id", record_id);
+
+    // Insert extracted findings
+    if (structuredData.findings.length > 0) {
+      const findingsToInsert = structuredData.findings
+        .filter(f => f.source_anchor && f.source_anchor.trim().length > 0) // source_anchor is required
+        .map(f => {
+          const findingTypeEntry = findFindingTypeCatalogEntry(f.finding_code, findingTypeCatalog);
+          const bodySiteEntry = findBodySiteCatalogEntry(f.site_code, bodySiteCatalog);
+
+          return {
+            person_id: record.person_id,
+            record_id,
+            finding_type_id: findingTypeEntry?.id || null,
+            finding_code: f.finding_code,
+            finding_type_text: f.finding_type_text,
+            body_site_id: bodySiteEntry?.id || null,
+            site_code: f.site_code,
+            body_site_text: f.body_site_text,
+            size_mm: f.size_mm,
+            count: f.count || 1,
+            severity: f.severity,
+            laterality: f.laterality,
+            morphology: f.morphology,
+            description: f.description,
+            histology: f.histology,
+            finding_date: f.finding_date,
+            source_anchor: f.source_anchor,
+            is_llm_extracted: true,
+            is_user_verified: false,
+            confidence: f.confidence,
+          };
+        });
+
+      if (findingsToInsert.length > 0) {
+        const { error: findingsInsertError } = await supabaseAdmin
+          .from("record_findings")
+          .insert(findingsToInsert);
+
+        if (findingsInsertError) {
+          console.error("Error inserting findings:", findingsInsertError);
+          // Don't fail the whole request, just log the error
+        }
+      }
+    }
+
+    // Return structured data with observations and findings
     return new Response(
       JSON.stringify({
         success: true,

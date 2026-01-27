@@ -27,6 +27,7 @@ import {
   Check,
   ChevronsUpDown,
   Search,
+  Stethoscope,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -75,8 +76,20 @@ import {
   useDeleteRecordObservation,
   useCreateRecordObservation,
   useObservationCatalog,
+  useRecordFindings,
+  useUpdateRecordFinding,
+  useDeleteRecordFinding,
+  useCreateRecordFinding,
 } from "@/hooks";
-import type { RecordType, ObservationStatus, RecordObservationWithCatalog } from "@/types";
+import { FindingRow, FindingEditDialog } from "@/components/findings";
+import type { 
+  RecordType, 
+  ObservationStatus, 
+  RecordObservationWithCatalog,
+  RecordFindingWithCatalog,
+  FindingSeverity,
+  FindingLaterality,
+} from "@/types";
 import { RECORD_TYPES } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -100,6 +113,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 
   const { data: record, isLoading, error, refetch } = useMedicalRecord(recordId);
   const { data: observations } = useRecordObservations(recordId);
+  const { data: findings } = useRecordFindings(recordId);
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -109,6 +123,10 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   // Observation editing state
   const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(null);
   const [isAddingObservation, setIsAddingObservation] = useState(false);
+  
+  // Finding editing state
+  const [editingFinding, setEditingFinding] = useState<RecordFindingWithCatalog | null>(null);
+  const [isAddingFinding, setIsAddingFinding] = useState(false);
   
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -130,8 +148,12 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const updateObsMutation = useUpdateRecordObservation();
   const deleteObsMutation = useDeleteRecordObservation();
   const createObsMutation = useCreateRecordObservation();
+  const updateFindingMutation = useUpdateRecordFinding();
+  const deleteFindingMutation = useDeleteRecordFinding();
+  const createFindingMutation = useCreateRecordFinding();
   
   const isObsProcessing = updateObsMutation.isPending || deleteObsMutation.isPending || createObsMutation.isPending;
+  const isFindingProcessing = updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending;
   
   const handleEditObservation = (obs: RecordObservationWithCatalog) => {
     setEditingObservation(obs);
@@ -205,6 +227,60 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 
   const handleDeleteObservation = async (obs: RecordObservationWithCatalog) => {
     await deleteObsMutation.mutateAsync({ id: obs.id, recordId });
+  };
+
+  // Finding handlers
+  const handleEditFinding = (finding: RecordFindingWithCatalog) => {
+    setEditingFinding(finding);
+    setIsAddingFinding(false);
+  };
+
+  const handleAddFinding = () => {
+    setEditingFinding(null);
+    setIsAddingFinding(true);
+  };
+
+  const handleSaveFinding = async (data: {
+    finding_type_id: string | null;
+    finding_code: string | null;
+    finding_type_text: string;
+    body_site_id: string | null;
+    site_code: string | null;
+    body_site_text: string | null;
+    size_mm: number | null;
+    count: number | null;
+    severity: FindingSeverity;
+    laterality: FindingLaterality;
+    morphology: string | null;
+    description: string | null;
+    histology: string | null;
+    finding_date: string | null;
+    source_anchor: string;
+  }) => {
+    if (isAddingFinding && record) {
+      await createFindingMutation.mutateAsync({
+        person_id: record.person_id,
+        record_id: recordId,
+        ...data,
+        is_llm_extracted: false,
+        is_user_verified: true,
+      });
+    } else if (editingFinding) {
+      await updateFindingMutation.mutateAsync({
+        id: editingFinding.id,
+        updates: {
+          ...data,
+          is_user_verified: true,
+        },
+      });
+    }
+
+    setEditingFinding(null);
+    setIsAddingFinding(false);
+  };
+
+  const handleDeleteFinding = async (finding: RecordFindingWithCatalog) => {
+    await deleteFindingMutation.mutateAsync({ id: finding.id, recordId });
   };
 
   const startEditing = () => {
@@ -696,6 +772,62 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             observation={editingObservation}
             onSave={handleSaveObservation}
             isNew={isAddingObservation}
+          />
+
+          {/* Findings Section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Stethoscope className="h-4 w-4" />
+                {t("findings.title")} ({findings?.length || 0})
+              </h2>
+              {!isRemoved && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleAddFinding}
+                  disabled={isFindingProcessing}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t("findings.add")}
+                </Button>
+              )}
+            </div>
+            {findings && findings.length > 0 ? (
+              <div className="space-y-2">
+                {findings.map((finding) => (
+                  <FindingRow
+                    key={finding.id}
+                    finding={finding}
+                    onEdit={isRemoved ? undefined : () => handleEditFinding(finding)}
+                    onDelete={isRemoved ? undefined : () => handleDeleteFinding(finding)}
+                    isProcessing={isFindingProcessing}
+                    showActions={!isRemoved}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground border rounded-lg border-dashed">
+                <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">{t("findings.noFindings")}</p>
+                <p className="text-xs mt-1">{t("findings.noFindingsHint")}</p>
+              </div>
+            )}
+          </div>
+          <Separator />
+          
+          {/* Edit/Add Finding Dialog */}
+          <FindingEditDialog
+            open={!!editingFinding || isAddingFinding}
+            onOpenChange={(open: boolean) => {
+              if (!open) {
+                setEditingFinding(null);
+                setIsAddingFinding(false);
+              }
+            }}
+            finding={editingFinding}
+            onSave={handleSaveFinding}
+            isNew={isAddingFinding}
           />
         </>
       )}
