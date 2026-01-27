@@ -6,3 +6,5 @@ export * from "./attachment-preview";
 export * from "./record-detail";
 export * from "./camera-capture";
 export * from "./add-record-wizard";
+export * from "./ocr-review-step";
+export * from "./structure-review-step";

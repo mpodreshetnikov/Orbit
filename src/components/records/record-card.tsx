@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
-import { Calendar, Paperclip, MoreVertical, Eye, Trash2, RotateCcw } from "lucide-react";
+import { Calendar, Paperclip, MoreVertical, Eye, Trash2, RotateCcw, Loader2, FileCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ interface RecordCardProps {
   onRemove: (record: MedicalRecordListItem) => void;
   onRestore?: (record: MedicalRecordListItem) => void;
   onDelete?: (record: MedicalRecordListItem) => void;
+  onActivate?: (record: MedicalRecordListItem) => void;
 }
 
 const RECORD_TYPE_COLORS: Record<RecordType, string> = {
@@ -40,17 +41,20 @@ export function RecordCard({
   onRemove,
   onRestore,
   onDelete,
+  onActivate,
 }: RecordCardProps) {
   const t = useTranslations();
 
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
+  const isProcessing = record.status === "processing";
 
   return (
     <Card
       className={cn(
         "group cursor-pointer transition-all hover:shadow-md",
-        isRemoved && "opacity-60"
+        isRemoved && "opacity-60",
+        isProcessing && "border-primary/50"
       )}
       onClick={() => onView(record)}
     >
@@ -65,6 +69,12 @@ export function RecordCard({
               >
                 {t(`records.types.${record.record_type}`)}
               </Badge>
+              {isProcessing && (
+                <Badge variant="outline" className="text-xs gap-1 border-primary/50 text-primary">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {t("records.status.processing")}
+                </Badge>
+              )}
               {isDraft && (
                 <Badge variant="secondary" className="text-xs">
                   {t("records.status.draft")}
@@ -121,10 +131,18 @@ export function RecordCard({
             <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem onClick={() => onView(record)}>
                 <Eye className="mr-2 h-4 w-4" />
-                {t("records.actions.view")}
+                {isDraft ? t("records.actions.viewEdit") : t("records.actions.view")}
               </DropdownMenuItem>
               
-              {!isRemoved && (
+              {/* Activate draft */}
+              {isDraft && onActivate && (
+                <DropdownMenuItem onClick={() => onActivate(record)}>
+                  <FileCheck className="mr-2 h-4 w-4" />
+                  {t("records.actions.activate")}
+                </DropdownMenuItem>
+              )}
+              
+              {!isRemoved && !isProcessing && (
                 <DropdownMenuItem
                   onClick={() => onRemove(record)}
                   className="text-destructive focus:text-destructive"

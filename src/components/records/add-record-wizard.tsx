@@ -9,26 +9,17 @@ import {
   ArrowRight,
   Check,
   Loader2,
-  FileCheck,
-  X,
   AlertCircle,
-  Bug,
-  ChevronDown,
-  ChevronUp,
   Plus,
+  FileStack,
+  Eye,
+  Upload,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,38 +32,29 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
 import { FileDropzone } from "./file-dropzone";
-import { AttachmentPreview } from "./attachment-preview";
 import {
   useCreateMedicalRecord,
-  useUpdateMedicalRecord,
-  useUploadMultipleAttachments,
   useHardDeleteRecord,
-  useIngestRecord,
-  useMedicalRecord,
+  useBackgroundOCR,
+  useUpdateMedicalRecord,
+  useStructureExtraction,
 } from "@/hooks";
-import { RECORD_TYPES, type RecordType, type ExtractionResult } from "@/types";
+import { useProcessingQueueStore } from "@/stores/processing-queue-store";
 import { cn } from "@/lib/utils";
 
-type WizardStep = 1 | 2 | 3 | 4;
+type InputMode = "upload" | "paste";
+
+type WizardStep = 1 | 2 | 3;
 
 interface AddRecordWizardProps {
   personId: string;
   personName: string;
 }
 
-interface FormData {
-  title: string;
-  recordType: RecordType;
-  recordDate: string;
-  notes: string;
-  keywords: string[];
-}
-
 const STEP_LABELS = {
   1: "upload",
-  2: "processing",
-  3: "review",
-  4: "complete",
+  2: "starting",
+  3: "queued",
 } as const;
 
 export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) {
@@ -81,44 +63,30 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
+  const [inputMode, setInputMode] = useState<InputMode>("upload");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [pastedText, setPastedText] = useState("");
   const [draftRecordId, setDraftRecordId] = useState<string | null>(null);
-  const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
-  const [formData, setFormData] = useState<FormData>({
-    title: "",
-    recordType: "other",
-    recordDate: format(new Date(), "yyyy-MM-dd"),
-    notes: "",
-    keywords: [],
-  });
-  const [newKeyword, setNewKeyword] = useState("");
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
-  const [processingError, setProcessingError] = useState<string | null>(null);
-  const [ocrText, setOcrText] = useState<string>("");
-  const [showOcrDebug, setShowOcrDebug] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [recordsStarted, setRecordsStarted] = useState(0);
+  const [isSubmittingPaste, setIsSubmittingPaste] = useState(false);
 
-  // Mutations
+  // Mutations and hooks
   const createMutation = useCreateMedicalRecord();
   const updateMutation = useUpdateMedicalRecord();
-  const uploadMutation = useUploadMultipleAttachments();
   const deleteMutation = useHardDeleteRecord();
-  const ingestMutation = useIngestRecord();
+  const { startBackgroundOCR } = useBackgroundOCR();
+  const { extractStructure } = useStructureExtraction();
 
-  // Fetch created record for preview
-  const { data: createdRecord } = useMedicalRecord(draftRecordId);
-
-  // Processing progress (upload = 30%, LLM vision OCR = 70%)
-  const totalProgress = uploadMutation.isPending
-    ? 0.15 // Uploading
-    : ingestMutation.isPending
-    ? 0.5 // LLM processing (halfway)
-    : extractionResult
-    ? 1
-    : 0;
+  // Processing queue state
+  const getActiveJobs = useProcessingQueueStore((state) => state.getActiveJobs);
+  const activeJobs = getActiveJobs();
 
   // Handle files selected
   const handleFilesSelected = useCallback((files: File[]) => {
     setSelectedFiles((prev) => [...prev, ...files]);
+    setStartError(null);
   }, []);
 
   // Handle file removal
@@ -129,24 +97,23 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
   // Navigate back
   const handleBack = useCallback(() => {
     if (currentStep === 1) {
-      if (selectedFiles.length > 0) {
+      if (selectedFiles.length > 0 || pastedText.trim().length > 0) {
         setShowDiscardDialog(true);
       } else {
         router.back();
       }
     } else if (currentStep === 2) {
-      // Cancel processing and go back to upload
-      setCurrentStep(1);
-      setProcessingError(null);
+      // Already processing, can't go back
+      return;
     } else if (currentStep === 3) {
-      // Show confirmation to discard and restart
-      setShowDiscardDialog(true);
+      // From queued screen, just go back to main page
+      router.push("/health");
     }
-  }, [currentStep, selectedFiles.length, router]);
+  }, [currentStep, selectedFiles.length, pastedText, router]);
 
   // Discard and go back
   const handleDiscard = useCallback(async () => {
-    // If we have a draft record, delete it
+    // If we have a draft record that wasn't started, delete it
     if (draftRecordId) {
       try {
         await deleteMutation.mutateAsync(draftRecordId);
@@ -154,186 +121,120 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
         // Ignore errors, continue with discard
       }
     }
-    
+
     // Reset state
     setSelectedFiles([]);
+    setPastedText("");
     setDraftRecordId(null);
-    setExtractionResult(null);
-    setFormData({
-      title: "",
-      recordType: "other",
-      recordDate: format(new Date(), "yyyy-MM-dd"),
-      notes: "",
-      keywords: [],
-    });
-    setProcessingError(null);
-    setOcrText("");
-    setShowOcrDebug(false);
+    setStartError(null);
+    setShowDiscardDialog(false);
+    router.back();
+  }, [draftRecordId, deleteMutation, router]);
 
-    if (currentStep === 3) {
-      // Go back to step 1 to redo
-      setCurrentStep(1);
-    } else {
-      router.back();
+  // Submit pasted text (skip OCR entirely, go directly to structure extraction)
+  const submitPastedText = useCallback(async () => {
+    if (pastedText.trim().length === 0) return;
+
+    setIsSubmittingPaste(true);
+    setStartError(null);
+
+    try {
+      // Create draft record with ocr_text already filled
+      const record = await createMutation.mutateAsync({
+        person_id: personId,
+        title: t("processing.processing"),
+        record_type: "other",
+        record_date: format(new Date(), "yyyy-MM-dd"),
+        status: "draft",
+      });
+
+      // Update with pasted text (status will be set to 'structuring' by extractStructure)
+      await updateMutation.mutateAsync({
+        id: record.id,
+        updates: {
+          ocr_text: pastedText.trim(),
+        },
+      });
+
+      // Start structure extraction immediately (this sets status to 'structuring')
+      // Don't await - let it run in background
+      extractStructure({ recordId: record.id });
+
+      // Navigate to the record page - it will show structuring state, then structure_review
+      router.push(`/health/records/${record.id}`);
+    } catch (error) {
+      console.error("Submit pasted text error:", error);
+      setStartError(
+        error instanceof Error ? error.message : "Failed to create record"
+      );
+    } finally {
+      setIsSubmittingPaste(false);
     }
-  }, [draftRecordId, deleteMutation, currentStep, router]);
+  }, [pastedText, personId, t, createMutation, updateMutation, extractStructure, router]);
 
-  // Start processing (Step 1 -> Step 2)
+  // Start processing (Step 1 -> Step 2 -> Step 3)
   const startProcessing = useCallback(async () => {
     if (selectedFiles.length === 0) return;
 
     setCurrentStep(2);
-    setProcessingError(null);
+    setStartError(null);
 
     try {
       // Step 1: Create draft record
       const record = await createMutation.mutateAsync({
         person_id: personId,
-        title: "Processing...",
+        title: t("processing.processing"),
         record_type: "other",
         record_date: format(new Date(), "yyyy-MM-dd"),
         status: "draft",
       });
       setDraftRecordId(record.id);
 
-      // Step 2: Upload files
-      await uploadMutation.mutateAsync({
+      // Step 2: Start background OCR (doesn't wait for completion)
+      startBackgroundOCR({
         recordId: record.id,
         personId: personId,
+        personName: personName,
         files: selectedFiles,
       });
 
-      // Step 3: Call LLM Vision for OCR + extraction (all done server-side)
-      const ingestResult = await ingestMutation.mutateAsync({
-        recordId: record.id,
-      });
-
-      if (ingestResult.extraction) {
-        const extraction = ingestResult.extraction;
-        
-        // Save OCR text for debug display
-        setOcrText(extraction.ocr_text || "");
-
-        setExtractionResult({
-          ocr_text: extraction.ocr_text || "",
-          record_type: extraction.record_type as RecordType,
-          title: extraction.title,
-          record_date: extraction.record_date,
-          summary: extraction.summary,
-          keywords: extraction.keywords,
-        });
-
-        // Pre-fill form with extraction results
-        setFormData({
-          title: extraction.title,
-          recordType: (extraction.record_type as RecordType) || "other",
-          recordDate: extraction.record_date || format(new Date(), "yyyy-MM-dd"),
-          notes: extraction.summary,
-          keywords: extraction.keywords || [],
-        });
-      } else {
-        // No extraction result, continue with empty
-        setExtractionResult({
-          ocr_text: "",
-          record_type: "other",
-          title: "",
-          record_date: null,
-          summary: "",
-          keywords: [],
-        });
-      }
-
-      // Move to review step
+      // Move to queued step
+      setRecordsStarted((prev) => prev + 1);
       setCurrentStep(3);
     } catch (error) {
-      console.error("Processing error:", error);
-      setProcessingError(
-        error instanceof Error ? error.message : "Processing failed"
+      console.error("Start processing error:", error);
+      setStartError(
+        error instanceof Error ? error.message : "Failed to start processing"
       );
+      setCurrentStep(1);
     }
   }, [
     selectedFiles,
     personId,
+    personName,
+    t,
     createMutation,
-    uploadMutation,
-    ingestMutation,
+    startBackgroundOCR,
   ]);
 
-  // Finalize record (Step 3 -> Step 4)
-  const finalizeRecord = useCallback(async () => {
-    if (!draftRecordId) return;
-
-    try {
-      await updateMutation.mutateAsync({
-        id: draftRecordId,
-        updates: {
-          title: formData.title || "Medical Record",
-          record_type: formData.recordType,
-          record_date: formData.recordDate || null,
-          notes: formData.notes || null,
-          ocr_text: ocrText || null,
-          status: "active",
-        },
-      });
-
-      setCurrentStep(4);
-    } catch (error) {
-      console.error("Finalize error:", error);
-      setProcessingError(
-        error instanceof Error ? error.message : "Failed to save record"
-      );
-    }
-  }, [draftRecordId, formData, ocrText, updateMutation]);
-
-  // Add keyword
-  const handleAddKeyword = useCallback(() => {
-    const keyword = newKeyword.trim();
-    if (keyword && !formData.keywords.includes(keyword)) {
-      setFormData((prev) => ({
-        ...prev,
-        keywords: [...prev.keywords, keyword],
-      }));
-      setNewKeyword("");
-    }
-  }, [newKeyword, formData.keywords]);
-
-  // Remove keyword
-  const handleRemoveKeyword = useCallback((keyword: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      keywords: prev.keywords.filter((k) => k !== keyword),
-    }));
+  // Add another record (reset wizard)
+  const handleAddAnother = useCallback(() => {
+    setSelectedFiles([]);
+    setPastedText("");
+    setDraftRecordId(null);
+    setStartError(null);
+    setCurrentStep(1);
   }, []);
-
-  // View record
-  const handleViewRecord = useCallback(() => {
-    if (draftRecordId) {
-      router.push(`/health/records/${draftRecordId}`);
-    }
-  }, [draftRecordId, router]);
 
   // Go to records list
   const handleGoToList = useCallback(() => {
     router.push("/health");
   }, [router]);
 
-  // Add another record (reset wizard)
-  const handleAddAnother = useCallback(() => {
-    setSelectedFiles([]);
-    setDraftRecordId(null);
-    setExtractionResult(null);
-    setFormData({
-      title: "",
-      recordType: "other",
-      recordDate: format(new Date(), "yyyy-MM-dd"),
-      notes: "",
-      keywords: [],
-    });
-    setProcessingError(null);
-    setOcrText("");
-    setShowOcrDebug(false);
-    setCurrentStep(1);
-  }, []);
+  // View drafts
+  const handleViewDrafts = useCallback(() => {
+    router.push("/health?showDrafts=true");
+  }, [router]);
 
   return (
     <div className="space-y-6">
@@ -343,7 +244,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
           variant="ghost"
           size="icon"
           onClick={handleBack}
-          disabled={currentStep === 4 || createMutation.isPending || uploadMutation.isPending}
+          disabled={currentStep === 2}
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -355,11 +256,18 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
             {personName} — {t(`records.wizard.step${currentStep}`)}
           </p>
         </div>
+        {/* Active processing badge */}
+        {activeJobs.length > 0 && (
+          <Badge variant="secondary" className="gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {activeJobs.length} {t("processing.inProgress")}
+          </Badge>
+        )}
       </div>
 
       {/* Step indicator */}
       <div className="flex items-center gap-2">
-        {([1, 2, 3, 4] as WizardStep[]).map((step) => (
+        {([1, 2, 3] as WizardStep[]).map((step) => (
           <div
             key={step}
             className={cn(
@@ -381,286 +289,167 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
 
       {/* Step content */}
       <div className="min-h-[400px]">
-        {/* Step 1: Upload */}
+        {/* Step 1: Upload or Paste */}
         {currentStep === 1 && (
           <div className="space-y-6">
-            <FileDropzone
-              onFilesSelected={handleFilesSelected}
-              selectedFiles={selectedFiles}
-              onRemoveFile={handleRemoveFile}
-              isUploading={false}
-              maxFiles={10}
-              showCamera={true}
-            />
-
-            <div className="flex justify-end">
-              <Button
-                onClick={startProcessing}
-                disabled={selectedFiles.length === 0}
-              >
-                {t("records.wizard.continue")}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Processing */}
-        {currentStep === 2 && (
-          <div className="flex flex-col items-center justify-center space-y-6 py-12">
-            {processingError ? (
-              <>
-                <AlertCircle className="h-16 w-16 text-destructive" />
-                <div className="text-center">
-                  <h3 className="text-lg font-semibold">
-                    {t("records.wizard.processingError")}
-                  </h3>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {processingError}
-                  </p>
+            {startError && (
+              <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-destructive" />
+                  <p className="text-destructive">{startError}</p>
                 </div>
-                <div className="flex gap-3">
-                  <Button variant="outline" onClick={handleBack}>
-                    {t("common.back")}
-                  </Button>
-                  <Button onClick={startProcessing}>
-                    {t("common.retry")}
+              </div>
+            )}
+
+            {/* Input mode tabs */}
+            <Tabs
+              value={inputMode}
+              onValueChange={(v) => setInputMode(v as InputMode)}
+              className="w-full"
+            >
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="upload" className="gap-2">
+                  <Upload className="h-4 w-4" />
+                  {t("records.wizard.uploadFiles")}
+                </TabsTrigger>
+                <TabsTrigger value="paste" className="gap-2">
+                  <FileText className="h-4 w-4" />
+                  {t("records.wizard.pasteText")}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            {/* Upload mode */}
+            {inputMode === "upload" && (
+              <>
+                <FileDropzone
+                  onFilesSelected={handleFilesSelected}
+                  selectedFiles={selectedFiles}
+                  onRemoveFile={handleRemoveFile}
+                  isUploading={false}
+                  maxFiles={10}
+                  showCamera={true}
+                />
+
+                <div className="flex items-center justify-between">
+                  {recordsStarted > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {t("records.wizard.recordsQueued", { count: recordsStarted })}
+                    </p>
+                  )}
+                  <div className="flex-1" />
+                  <Button
+                    onClick={startProcessing}
+                    disabled={selectedFiles.length === 0}
+                  >
+                    {t("records.wizard.startProcessing")}
+                    <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </div>
               </>
-            ) : (
+            )}
+
+            {/* Paste mode */}
+            {inputMode === "paste" && (
               <>
-                <Loader2 className="h-16 w-16 animate-spin text-primary" />
-                <div className="w-full max-w-md space-y-2">
-                  <Progress value={totalProgress * 100} />
-                  <p className="text-center text-sm text-muted-foreground">
-                    {uploadMutation.isPending
-                      ? t("records.wizard.uploading")
-                      : ingestMutation.isPending
-                      ? t("records.wizard.llmProcessing")
-                      : t("records.wizard.processing")}
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    {t("records.wizard.pasteDescription")}
+                  </p>
+                  <Textarea
+                    placeholder={t("records.wizard.pasteTextPlaceholder")}
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    className="min-h-[300px] font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground text-right">
+                    {pastedText.length.toLocaleString()} {t("common.characters")}
                   </p>
                 </div>
-                <Button variant="outline" onClick={handleBack}>
-                  {t("common.cancel")}
-                </Button>
+
+                <div className="flex items-center justify-between">
+                  {recordsStarted > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {t("records.wizard.recordsQueued", { count: recordsStarted })}
+                    </p>
+                  )}
+                  <div className="flex-1" />
+                  <Button
+                    onClick={submitPastedText}
+                    disabled={pastedText.trim().length === 0 || isSubmittingPaste}
+                  >
+                    {isSubmittingPaste ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : null}
+                    {t("records.wizard.proceedToReview")}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </div>
               </>
             )}
           </div>
         )}
 
-        {/* Step 3: Review */}
-        {currentStep === 3 && (
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Left: Preview */}
-            <div className="space-y-4">
-              <h3 className="font-semibold">{t("records.wizard.preview")}</h3>
-              
-              {/* Attachment thumbnails */}
-              {createdRecord?.attachments && createdRecord.attachments.length > 0 && (
-                <div className="grid grid-cols-2 gap-2">
-                  {createdRecord.attachments.slice(0, 4).map((attachment) => (
-                    <AttachmentPreview
-                      key={attachment.id}
-                      attachment={attachment}
-                      showActions={false}
-                    />
-                  ))}
-                  {createdRecord.attachments.length > 4 && (
-                    <div className="flex aspect-[4/3] items-center justify-center rounded-lg border bg-muted">
-                      <span className="text-sm text-muted-foreground">
-                        +{createdRecord.attachments.length - 4} more
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Raw OCR Text (collapsible, editable) */}
-              {ocrText && (
-                <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 p-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowOcrDebug(!showOcrDebug)}
-                    className="flex w-full items-center justify-between text-left"
-                  >
-                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                      <Bug className="h-4 w-4" />
-                      <span>{t("records.wizard.rawOcrText")} ({ocrText.length} {t("records.wizard.chars")})</span>
-                    </div>
-                    {showOcrDebug ? (
-                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </button>
-                  {showOcrDebug && (
-                    <Textarea
-                      value={ocrText}
-                      onChange={(e) => setOcrText(e.target.value)}
-                      className="mt-3 min-h-[200px] font-mono text-xs"
-                      placeholder={t("records.wizard.ocrTextPlaceholder")}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Right: Edit form */}
-            <div className="space-y-4">
-              <h3 className="font-semibold">{t("records.wizard.editFields")}</h3>
-
-              {/* Record Type */}
-              <div className="space-y-2">
-                <Label htmlFor="recordType">{t("records.add.recordType")}</Label>
-                <Select
-                  value={formData.recordType}
-                  onValueChange={(value) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      recordType: value as RecordType,
-                    }))
-                  }
-                >
-                  <SelectTrigger id="recordType">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RECORD_TYPES.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {t(`records.types.${type}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Record Date */}
-              <div className="space-y-2">
-                <Label htmlFor="recordDate">{t("records.add.recordDate")}</Label>
-                <Input
-                  id="recordDate"
-                  type="date"
-                  value={formData.recordDate}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      recordDate: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-
-              {/* Title */}
-              <div className="space-y-2">
-                <Label htmlFor="title">{t("records.add.recordTitle")}</Label>
-                <Input
-                  id="title"
-                  value={formData.title}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, title: e.target.value }))
-                  }
-                  placeholder={t("records.add.recordTitlePlaceholder")}
-                />
-              </div>
-
-              {/* Notes */}
-              <div className="space-y-2">
-                <Label htmlFor="notes">{t("records.add.notes")}</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, notes: e.target.value }))
-                  }
-                  placeholder={t("records.add.notesPlaceholder")}
-                  rows={3}
-                />
-              </div>
-
-              {/* Keywords */}
-              <div className="space-y-2">
-                <Label>{t("records.wizard.keywords")}</Label>
-                <div className="flex flex-wrap gap-2">
-                  {formData.keywords.map((keyword) => (
-                    <Badge
-                      key={keyword}
-                      variant="secondary"
-                      className="cursor-pointer"
-                      onClick={() => handleRemoveKeyword(keyword)}
-                    >
-                      {keyword}
-                      <X className="ml-1 h-3 w-3" />
-                    </Badge>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    value={newKeyword}
-                    onChange={(e) => setNewKeyword(e.target.value)}
-                    placeholder={t("records.wizard.addKeyword")}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleAddKeyword();
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleAddKeyword}
-                    disabled={!newKeyword.trim()}
-                  >
-                    {t("common.add")}
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="col-span-full flex items-center justify-between border-t pt-6">
-              <Button variant="outline" onClick={handleBack}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                {t("records.wizard.redoUpload")}
-              </Button>
-              <Button
-                onClick={finalizeRecord}
-                disabled={!formData.title.trim() || updateMutation.isPending}
-              >
-                {updateMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <FileCheck className="mr-2 h-4 w-4" />
-                )}
-                {t("records.add.saveAndActivate")}
-              </Button>
+        {/* Step 2: Starting OCR */}
+        {currentStep === 2 && (
+          <div className="flex flex-col items-center justify-center space-y-6 py-12">
+            <Loader2 className="h-16 w-16 animate-spin text-primary" />
+            <div className="w-full max-w-md space-y-2">
+              <Progress value={30} />
+              <p className="text-center text-sm text-muted-foreground">
+                {t("records.wizard.creatingRecord")}
+              </p>
             </div>
           </div>
         )}
 
-        {/* Step 4: Complete */}
-        {currentStep === 4 && (
+        {/* Step 3: Queued - Allow adding more */}
+        {currentStep === 3 && (
           <div className="flex flex-col items-center justify-center space-y-6 py-12">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-              <Check className="h-10 w-10 text-green-600 dark:text-green-400" />
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
+              <FileStack className="h-10 w-10 text-primary" />
             </div>
-            <div className="text-center">
+            <div className="text-center max-w-md">
               <h3 className="text-xl font-semibold">
-                {t("records.wizard.complete")}
+                {t("records.wizard.recordQueued")}
               </h3>
               <p className="mt-2 text-muted-foreground">
-                {t("records.wizard.completeDescription")}
+                {t("records.wizard.queuedDescription")}
+              </p>
+              <p className="mt-4 text-sm text-muted-foreground">
+                {t("records.wizard.notificationHint")}
               </p>
             </div>
+
+            {/* Active jobs indicator */}
+            {activeJobs.length > 0 && (
+              <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm">
+                  {t("processing.processingCount", { count: activeJobs.length })}
+                </span>
+              </div>
+            )}
+
             <div className="flex flex-wrap justify-center gap-3">
+              {draftRecordId && (
+                <Button
+                  variant="default"
+                  onClick={() => router.push(`/health/records/${draftRecordId}`)}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  {t("records.wizard.viewRecord")}
+                </Button>
+              )}
               <Button variant="outline" onClick={handleGoToList}>
+                <Eye className="mr-2 h-4 w-4" />
                 {t("records.wizard.viewAll")}
               </Button>
-              <Button variant="outline" onClick={handleViewRecord}>
-                {t("records.wizard.viewRecord")}
+              <Button variant="outline" onClick={handleViewDrafts}>
+                <FileStack className="mr-2 h-4 w-4" />
+                {t("records.wizard.viewDrafts")}
               </Button>
-              <Button onClick={handleAddAnother}>
+              <Button variant="outline" onClick={handleAddAnother}>
                 <Plus className="mr-2 h-4 w-4" />
                 {t("records.wizard.addAnother")}
               </Button>

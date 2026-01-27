@@ -16,19 +16,38 @@ import type {
 // ============================================================================
 // FETCH RECORDS LIST (using RPC for full-text search)
 // ============================================================================
+
+// Map UI status groups to actual database statuses
+const STATUS_GROUP_MAP: Record<string, string[]> = {
+  // Active records (finalized)
+  active: ["active"],
+  // Drafts and records needing user review
+  draft: ["draft", "ocr_review", "structure_review"],
+  // Records being processed by AI
+  processing: ["ocr_processing", "structuring", "processing"],
+  // Removed records
+  removed: ["removed"],
+};
+
 async function fetchMedicalRecords(
   filters: MedicalRecordFilters
 ): Promise<MedicalRecordListItem[]> {
   const supabase = createClient();
+
+  // Map the status filter to actual database statuses
+  const statuses = filters.status 
+    ? STATUS_GROUP_MAP[filters.status] || [filters.status]
+    : null;
 
   // Use the search_medical_records RPC function for proper FTS with ranking
   const { data, error } = await supabase.rpc("search_medical_records", {
     search_query: filters.search?.trim() || null,
     p_person_id: filters.person_id || null,
     p_record_type: filters.record_type || null,
-    p_status: filters.status || "active",
+    p_status: null, // Use p_statuses instead for multi-status support
     p_limit: 50,
     p_offset: 0,
+    p_statuses: statuses,
   });
 
   if (error) {
@@ -331,7 +350,6 @@ interface IngestRecordResponse {
     summary: string;
     keywords: string[];
   };
-  chunks_created?: number;
   error?: string;
 }
 

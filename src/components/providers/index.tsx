@@ -1,5 +1,6 @@
 "use client";
 
+import { Toaster } from "sonner";
 import { ThemeProvider } from "./theme-provider";
 import { QueryProvider } from "./query-provider";
 
@@ -12,7 +13,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
       disableTransitionOnChange
       storageKey="app.theme"
     >
-      <QueryProvider>{children}</QueryProvider>
+      <QueryProvider>
+        {children}
+        <Toaster
+          position="bottom-right"
+          richColors
+          closeButton
+          duration={5000}
+        />
+      </QueryProvider>
     </ThemeProvider>
   );
 }

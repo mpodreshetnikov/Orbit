@@ -375,7 +375,9 @@ deno_version = 2
 OPENROUTER_API_KEY = "env(OPENROUTER_API_KEY)"
 
 # Disable automatic JWT verification - we handle it manually in the function
-[functions.ingest-record]
+[functions.health-ocr]
+verify_jwt = false
+[functions.health-structure]
 verify_jwt = false
 
 [analytics]

@@ -18,6 +18,8 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  Plus,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +45,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { AttachmentGrid } from "./attachment-preview";
+import { OcrReviewStep } from "./ocr-review-step";
+import { StructureReviewStep } from "./structure-review-step";
 import {
   useMedicalRecord,
   useSoftDeleteRecord,
@@ -72,7 +76,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const t = useTranslations();
   const router = useRouter();
 
-  const { data: record, isLoading, error } = useMedicalRecord(recordId);
+  const { data: record, isLoading, error, refetch } = useMedicalRecord(recordId);
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -86,7 +90,11 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     record_date: "",
     notes: "",
     ocr_text: "",
+    llm_keywords: [] as string[],
   });
+  
+  // Tag input state
+  const [newTag, setNewTag] = useState("");
 
   const softDeleteMutation = useSoftDeleteRecord();
   const restoreMutation = useRestoreRecord();
@@ -101,7 +109,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         record_date: record.record_date || "",
         notes: record.notes || "",
         ocr_text: record.ocr_text || "",
+        llm_keywords: record.llm_keywords || [],
       });
+      setNewTag("");
       setIsEditing(true);
     }
   };
@@ -120,6 +130,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           record_date: editForm.record_date || null,
           notes: editForm.notes || null,
           ocr_text: editForm.ocr_text || null,
+          llm_keywords: editForm.llm_keywords.length > 0 ? editForm.llm_keywords : null,
         },
       },
       {
@@ -128,6 +139,31 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         },
       }
     );
+  };
+
+  const addTag = () => {
+    const trimmed = newTag.trim();
+    if (trimmed && !editForm.llm_keywords.includes(trimmed)) {
+      setEditForm((prev) => ({
+        ...prev,
+        llm_keywords: [...prev.llm_keywords, trimmed],
+      }));
+      setNewTag("");
+    }
+  };
+
+  const removeTag = (tagToRemove: string) => {
+    setEditForm((prev) => ({
+      ...prev,
+      llm_keywords: prev.llm_keywords.filter((tag) => tag !== tagToRemove),
+    }));
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addTag();
+    }
   };
 
   const handleRemove = () => {
@@ -194,7 +230,89 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
+  const isOcrReview = record.status === "ocr_review";
+  const isStructureReview = record.status === "structure_review";
+  const isProcessing = record.status === "ocr_processing" || record.status === "structuring";
 
+  // Show processing state
+  if (isProcessing) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{t("processing.processing")}</h1>
+            <p className="text-muted-foreground">
+              {record.status === "ocr_processing" 
+                ? t("processing.ocrInProgress") 
+                : t("processing.structureInProgress")}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center py-16">
+          <Loader2 className="h-16 w-16 animate-spin text-primary" />
+          <p className="mt-4 text-sm text-muted-foreground">
+            {t("processing.pleaseWait")}
+          </p>
+          <Button 
+            variant="outline" 
+            className="mt-6"
+            onClick={() => refetch()}
+          >
+            {t("common.refresh")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show OCR review step
+  if (isOcrReview) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <Badge variant="secondary" className="mb-1">{t("records.status.ocrReview")}</Badge>
+            <h1 className="text-2xl font-bold tracking-tight">{t("records.ocr.reviewTitle")}</h1>
+          </div>
+        </div>
+        <OcrReviewStep
+          recordId={recordId}
+          ocrText={record.ocr_text || ""}
+          attachments={record.attachments}
+          onComplete={() => refetch()}
+        />
+      </div>
+    );
+  }
+
+  // Show structure review step
+  if (isStructureReview) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <Badge variant="secondary" className="mb-1">{t("records.status.structureReview")}</Badge>
+            <h1 className="text-2xl font-bold tracking-tight">{t("records.structure.reviewTitle")}</h1>
+          </div>
+        </div>
+        <StructureReviewStep
+          record={record}
+          onComplete={() => refetch()}
+        />
+      </div>
+    );
+  }
+
+  // Default view for draft, active, removed statuses
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -353,24 +471,61 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
       <Separator />
 
       {/* Keywords */}
-      {record.llm_keywords && record.llm_keywords.length > 0 && (
+      {(record.llm_keywords && record.llm_keywords.length > 0) || isEditing ? (
         <>
           <div>
             <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
               <Tag className="h-4 w-4" />
               {t("records.detail.keywords")}
             </h2>
-            <div className="flex flex-wrap gap-2">
-              {record.llm_keywords.map((keyword, index) => (
-                <Badge key={index} variant="secondary">
-                  {keyword}
-                </Badge>
-              ))}
-            </div>
+            {isEditing ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {editForm.llm_keywords.map((keyword, index) => (
+                    <Badge key={index} variant="secondary" className="gap-1 pr-1">
+                      {keyword}
+                      <button
+                        type="button"
+                        onClick={() => removeTag(keyword)}
+                        className="ml-1 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={newTag}
+                    onChange={(e) => setNewTag(e.target.value)}
+                    onKeyDown={handleTagKeyDown}
+                    placeholder={t("records.wizard.addKeyword")}
+                    className="max-w-xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={addTag}
+                    disabled={!newTag.trim()}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {record.llm_keywords?.map((keyword, index) => (
+                  <Badge key={index} variant="secondary">
+                    {keyword}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
           <Separator />
         </>
-      )}
+      ) : null}
 
       {/* Notes (used as summary) */}
       <div>

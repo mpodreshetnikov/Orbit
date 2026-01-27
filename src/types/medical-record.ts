@@ -7,7 +7,15 @@ export type RecordType =
   | "vet"
   | "other";
 
-export type RecordStatus = "draft" | "active" | "removed";
+export type RecordStatus = 
+  | "draft"              // Initial state after upload
+  | "ocr_processing"     // OCR in progress
+  | "ocr_review"         // OCR complete, awaiting user review
+  | "structuring"        // Structure extraction in progress
+  | "structure_review"   // Structure complete, awaiting user review
+  | "processing"         // Legacy: kept for backward compatibility
+  | "active"             // Finalized record
+  | "removed";           // Soft deleted
 
 export interface MedicalRecord {
   id: string;
@@ -65,6 +73,7 @@ export interface UpdateMedicalRecordInput {
   notes?: string | null;
   status?: RecordStatus;
   ocr_text?: string | null;
+  llm_keywords?: string[] | null;
 }
 
 // Search/filter types
@@ -97,11 +106,23 @@ export const RECORD_TYPES: RecordType[] = [
 ];
 
 // ============================================================================
-// Stage 4: Extraction Types
+// OCR Workflow Types (Two-step pipeline)
 // ============================================================================
 
-export interface ExtractionResult {
+// Step 1: OCR extraction result (from health-ocr)
+export interface OcrResult {
   ocr_text: string;
+}
+
+export interface HealthOcrResponse {
+  success: boolean;
+  ocr_text?: string;
+  char_count?: number;
+  error?: string;
+}
+
+// Step 2: Structure extraction result (from health-structure)
+export interface StructuredData {
   record_type: RecordType;
   title: string;
   record_date: string | null;
@@ -109,18 +130,18 @@ export interface ExtractionResult {
   keywords: string[];
 }
 
-export interface IngestRecordResponse {
+export interface HealthStructureResponse {
   success: boolean;
-  extraction?: ExtractionResult;
-  chunks_created?: number;
+  structured_data?: StructuredData;
   error?: string;
 }
 
-export interface RecordChunk {
-  id: string;
-  record_id: string;
-  chunk_index: number;
-  content: string;
-  embedding?: number[] | null;
-  created_at: string;
+// Legacy type for backward compatibility
+export interface ExtractionResult {
+  ocr_text: string;
+  record_type: RecordType;
+  title: string;
+  record_date: string | null;
+  summary: string;
+  keywords: string[];
 }

@@ -63,16 +63,34 @@
     },
     "status": {
       "draft": "Draft",
+      "processing": "Processing",
+      "ocrProcessing": "OCR Processing",
+      "ocrReview": "OCR Review",
+      "structuring": "Structuring",
+      "structureReview": "Review",
       "active": "Active",
+      "removed": "Removed"
+    },
+    "statusFilter": {
+      "active": "Active",
+      "draft": "Draft",
+      "drafts": "Drafts",
+      "processing": "Processing",
       "removed": "Removed"
     },
     "actions": {
       "view": "View",
+      "viewEdit": "View & Edit",
       "edit": "Edit",
       "remove": "Remove",
       "restore": "Restore",
-      "delete": "Delete permanently"
+      "delete": "Delete permanently",
+      "activate": "Activate"
     },
+    "noDrafts": "No drafts",
+    "noDraftsDescription": "Records waiting for review will appear here after OCR processing completes.",
+    "noProcessing": "No records processing",
+    "noProcessingDescription": "Records currently being analyzed by OCR will appear here.",
     "add": {
       "title": "Add Medical Record",
       "subtitle": "Upload files and fill in record details",
@@ -112,14 +130,22 @@
       "deleteTitle": "Delete Permanently",
       "deleteMessage": "This action cannot be undone. The record and all attachments will be permanently deleted.",
       "discardTitle": "Discard Draft",
-      "discardMessage": "Are you sure you want to discard this draft? All uploaded files will be deleted."
+      "discardMessage": "Are you sure you want to discard this draft? All uploaded files will be deleted.",
+      "activateTitle": "Activate Record",
+      "activateMessage": "This will move the record from drafts to your active records list."
     },
     "wizard": {
-      "step1": "Step 1 of 4",
-      "step2": "Step 2 of 4",
-      "step3": "Step 3 of 4",
-      "step4": "Step 4 of 4",
+      "step1": "Step 1 of 3",
+      "step2": "Step 2 of 3",
+      "step3": "Step 3 of 3",
       "upload": "Upload Files",
+      "uploadFiles": "Upload Files",
+      "pasteText": "Paste Text",
+      "pasteDescription": "Paste raw text from a medical document (e.g., copied from PDF, email, or another source). AI will immediately extract structured data from your text.",
+      "pasteTextPlaceholder": "Paste medical document text here...\n\nExample:\nPatient: John Doe\nDate: 2024-01-15\nTest: Complete Blood Count\nResults:\n- Hemoglobin: 14.2 g/dL\n- White Blood Cells: 7500/µL\n...",
+      "proceedToReview": "Extract Data",
+      "starting": "Starting",
+      "queued": "Queued",
       "processing": "Processing",
       "review": "Review & Edit",
       "complete": "Complete",
@@ -136,14 +162,35 @@
       "processingError": "Processing Failed",
       "redoUpload": "Change Files",
       "viewRecord": "View Record",
-      "viewAll": "Back to Records",
+      "viewAll": "View All Records",
+      "viewDrafts": "View Drafts",
       "addAnother": "Add Another",
-      "completeDescription": "Your medical record has been saved successfully."
+      "completeDescription": "Your medical record has been saved successfully.",
+      "startProcessing": "Start Processing",
+      "creatingRecord": "Creating record...",
+      "recordQueued": "Record Queued for Processing",
+      "queuedDescription": "Your record has been uploaded and is now being processed. You can add more records or view your existing ones while OCR analysis runs in the background.",
+      "notificationHint": "You'll receive a notification when processing is complete.",
+      "recordsQueued": "{count, plural, one {# record queued} other {# records queued}} in this session"
     },
     "camera": {
       "title": "Take Photo",
       "takePhoto": "Take Photo",
       "errorAccessing": "Could not access camera. Please check permissions."
+    },
+    "ocr": {
+      "reviewTitle": "Review Extracted Text",
+      "reviewDescription": "Check the text extracted from your documents and fix any errors before proceeding.",
+      "originalImages": "Original Documents",
+      "extractedText": "Extracted Text",
+      "noTextExtracted": "No text was extracted from the images.",
+      "editHint": "You can edit the text to fix any OCR errors.",
+      "confirmAndExtract": "Confirm & Extract Data"
+    },
+    "structure": {
+      "reviewTitle": "Review Record Details",
+      "reviewDescription": "Check the extracted information and make any corrections before saving.",
+      "noKeywords": "No keywords extracted"
     }
   },
   "common": {
@@ -166,7 +213,10 @@
     "filter": "Filter",
     "clear": "Clear",
     "noResults": "No results found",
-    "add": "Add"
+    "add": "Add",
+    "modified": "modified",
+    "refresh": "Refresh",
+    "characters": "characters"
   },
   "auth": {
     "welcome": "Welcome",
@@ -180,5 +230,27 @@
       "message": "Your account is not authorized to access this application. Please contact an administrator if you believe this is an error.",
       "loggedInAs": "Logged in as"
     }
+  },
+  "processing": {
+    "title": "Processing Records",
+    "noJobs": "No records being processed",
+    "uploading": "Uploading...",
+    "analyzing": "Analyzing...",
+    "completed": "Completed",
+    "failed": "Failed",
+    "viewRecord": "View",
+    "processing": "Processing...",
+    "inProgress": "processing",
+    "processingCount": "{count, plural, one {# record processing} other {# records processing}}",
+    "completedMessage": "OCR analysis complete. Click to review and edit the record.",
+    "ocrComplete": "OCR Complete",
+    "ocrReviewNeeded": "Text extracted. Please review and confirm.",
+    "reviewOcr": "Review OCR",
+    "ocrInProgress": "Text is being extracted from your documents...",
+    "structureInProgress": "Extracting structured data from text...",
+    "pleaseWait": "This may take a moment. You can navigate away and come back.",
+    "structureComplete": "Structure Extracted",
+    "reviewStructure": "Please review the extracted information.",
+    "structureFailed": "Structure Extraction Failed"
   }
 }

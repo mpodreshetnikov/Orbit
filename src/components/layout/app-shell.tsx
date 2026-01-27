@@ -4,6 +4,7 @@ import { TopNav } from "./top-nav";
 import { Sidebar } from "./sidebar";
 import { MobileNav } from "./mobile-nav";
 import { LanguageSync } from "./language-sync";
+import { ProcessingIndicator } from "./processing-indicator";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -26,6 +27,8 @@ export function AppShell({ children }: AppShellProps) {
       </div>
       {/* Mobile bottom nav */}
       <MobileNav />
+      {/* Processing indicator for background OCR jobs */}
+      <ProcessingIndicator />
     </div>
   );
 }
