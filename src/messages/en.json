@@ -92,6 +92,7 @@
       "prescription": "Prescription",
       "vaccination": "Vaccination",
       "vet": "Vet Visit",
+      "procedure": "Procedure",
       "other": "Other"
     },
     "status": {

@@ -17,6 +17,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
+/** Record types allowed by DB enum - normalize LLM output to avoid constraint errors */
+const ALLOWED_RECORD_TYPES = ["lab", "visit", "imaging", "prescription", "vaccination", "vet", "procedure", "other"] as const;
+
 interface StructureRequest {
   record_id: string;
 }
@@ -512,7 +515,7 @@ async function extractStructuredData(
 Твоя задача: проанализировать текст и извлечь структурированную информацию.
 
 Ответь JSON-объектом с полями:
-- record_type: одно из "lab", "visit", "imaging", "prescription", "vaccination", "vet", "other"
+- record_type: одно из "lab", "visit", "imaging", "prescription", "vaccination", "vet", "procedure", "other"
 - title: короткое описательное название записи НА РУССКОМ ЯЗЫКЕ (максимум 100 символов)
 - record_date: дата документа в формате YYYY-MM-DD, или null если не найдена
 - summary: ОЧЕНЬ КРАТКОЕ и ПОЛЕЗНОЕ описание результата НА РУССКОМ ЯЗЫКЕ (1-2 коротких предложения, максимум 150 символов)
@@ -530,6 +533,7 @@ async function extractStructuredData(
 - Для рецептов или назначений лекарств: "prescription"
 - Для записей о вакцинации: "vaccination"
 - Для консультаций врача или записей о приёме: "visit"
+- Для операций, хирургических вмешательств, процедур (операция, процедура, манипуляция): "procedure"
 - Если не подходит ни под одну категорию: "other"
 
 ВАЖНЫЕ ПРАВИЛА ДЛЯ ОПИСАНИЯ (summary):
@@ -759,8 +763,12 @@ ${existingFindingsPrompt}
 
   try {
     const parsed = JSON.parse(responseContent);
+    const rawRecordType = parsed.record_type || "other";
+    const record_type = (typeof rawRecordType === "string" && (ALLOWED_RECORD_TYPES as readonly string[]).includes(rawRecordType))
+      ? rawRecordType
+      : "other";
     return {
-      record_type: parsed.record_type || "other",
+      record_type,
       title: parsed.title || "Медицинский документ",
       record_date: parsed.record_date || null,
       summary: parsed.summary || "",

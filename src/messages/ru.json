@@ -92,6 +92,7 @@
       "prescription": "Рецепт",
       "vaccination": "Вакцинация",
       "vet": "Визит к ветеринару",
+      "procedure": "Процедура / операция",
       "other": "Другое"
     },
     "status": {

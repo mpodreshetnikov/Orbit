@@ -5,6 +5,7 @@ export type RecordType =
   | "prescription"
   | "vaccination"
   | "vet"
+  | "procedure"
   | "other";
 
 export type RecordStatus = 
@@ -92,6 +93,7 @@ export const RECORD_TYPE_LABELS: Record<RecordType, { en: string; ru: string }> 
   prescription: { en: "Prescription", ru: "Рецепт" },
   vaccination: { en: "Vaccination", ru: "Вакцинация" },
   vet: { en: "Vet Visit", ru: "Визит к ветеринару" },
+  procedure: { en: "Procedure", ru: "Процедура / операция" },
   other: { en: "Other", ru: "Другое" },
 };
 
@@ -102,6 +104,7 @@ export const RECORD_TYPES: RecordType[] = [
   "prescription",
   "vaccination",
   "vet",
+  "procedure",
   "other",
 ];
 

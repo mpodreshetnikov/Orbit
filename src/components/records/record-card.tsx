@@ -32,6 +32,7 @@ const RECORD_TYPE_COLORS: Record<RecordType, string> = {
   prescription: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20",
   vaccination: "bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/20",
   vet: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20",
+  procedure: "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20",
   other: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20",
 };
 
