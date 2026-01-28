@@ -253,7 +253,7 @@ export function ConditionEditDialog({
 
                 {isConditionOpen && (
                   <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
-                    <ScrollArea className="max-h-60">
+                    <ScrollArea className="h-60">
                       <div className="p-1">
                         {/* Create new option */}
                         <button
