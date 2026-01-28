@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Pencil, Trash2, AlertTriangle, ChevronDown, ChevronUp, Quote, ArrowRight } from "lucide-react";
+import { Pencil, Trash2, AlertTriangle, ChevronDown, ChevronUp, Quote, ArrowRight, CircleDot, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -10,16 +10,42 @@ import { ConditionStatusBadge } from "./condition-status-badge";
 import { getConditionIcdName } from "@/hooks";
 import type { ConditionRecordWithDetails } from "@/types";
 
+/** Comparison data: is this condition new or an existing one (update)? */
+export interface ConditionComparison {
+  isNew: boolean;
+  previousOccurrences: number;
+}
+
 interface ConditionRecordRowProps {
   conditionRecord: ConditionRecordWithDetails;
+  comparison?: ConditionComparison | null;
   onEdit?: () => void;
   onDelete?: () => void;
   isProcessing?: boolean;
   showActions?: boolean;
 }
 
+function ConditionComparisonBadge({ comparison }: { comparison: ConditionComparison }) {
+  const t = useTranslations();
+  if (comparison.isNew) {
+    return (
+      <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1">
+        <CircleDot className="h-3 w-3" />
+        {t("conditions.comparison.new")}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1" title={t("conditions.comparison.knownTitle", { count: comparison.previousOccurrences })}>
+      <History className="h-3 w-3" />
+      {t("conditions.comparison.known", { count: comparison.previousOccurrences })}
+    </Badge>
+  );
+}
+
 export function ConditionRecordRow({
   conditionRecord,
+  comparison,
   onEdit,
   onDelete,
   isProcessing = false,
@@ -39,7 +65,8 @@ export function ConditionRecordRow({
   return (
     <div className={cn(
       "rounded-lg border p-3",
-      isActiveOrSuspected && "border-orange-500/30 bg-orange-500/5"
+      isActiveOrSuspected && "border-orange-500/30 bg-orange-500/5",
+      comparison?.isNew && "border-amber-500/30 bg-amber-500/5"
     )}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -96,6 +123,7 @@ export function ConditionRecordRow({
 
         {/* Badges and actions */}
         <div className="flex items-center gap-2 shrink-0">
+          {comparison && <ConditionComparisonBadge comparison={comparison} />}
           {!hasStatusChange && (
             <ConditionStatusBadge status={conditionRecord.status_in_record} />
           )}

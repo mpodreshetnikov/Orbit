@@ -296,6 +296,43 @@ export function useDeleteCondition() {
 }
 
 // ============================================================================
+// CONDITION RECORD HISTORY (for New/Known comparison)
+// ============================================================================
+
+/** Map condition_id -> record_ids from active medical records (for comparison: exclude current record to get previous count) */
+export async function fetchPersonConditionRecordHistory(
+  personId: string
+): Promise<Record<string, string[]>> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("condition_records")
+    .select("condition_id, record_id, conditions!inner(person_id), medical_records!inner(status)")
+    .eq("conditions.person_id", personId)
+    .eq("medical_records.status", "active");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const map: Record<string, string[]> = {};
+  for (const row of data || []) {
+    const r = row as { condition_id: string; record_id: string };
+    if (!map[r.condition_id]) map[r.condition_id] = [];
+    map[r.condition_id].push(r.record_id);
+  }
+  return map;
+}
+
+export function usePersonConditionRecordHistory(personId: string | null) {
+  return useQuery({
+    queryKey: ["condition-record-history", "person", personId],
+    queryFn: () => fetchPersonConditionRecordHistory(personId!),
+    enabled: !!personId,
+  });
+}
+
+// ============================================================================
 // CONDITION_RECORD HOOKS (mentions in records)
 // ============================================================================
 

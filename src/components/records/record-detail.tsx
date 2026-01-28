@@ -88,9 +88,10 @@ import {
   useCreateConditionWithRecord,
   useLinkConditionToRecord,
   usePersonFindingHistory,
+  usePersonConditionRecordHistory,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
-import { ConditionRecordRow, ConditionEditDialog } from "@/components/conditions";
+import { ConditionRecordRow, ConditionEditDialog, type ConditionComparison } from "@/components/conditions";
 import type { 
   RecordType, 
   ObservationStatus, 
@@ -128,6 +129,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const { data: conditionRecords } = useRecordConditions(recordId);
   const { data: personConditions } = usePersonConditions(record?.person_id ?? null);
   const { data: personFindingHistory } = usePersonFindingHistory(record?.person_id ?? null);
+  const { data: personConditionRecordHistory } = usePersonConditionRecordHistory(record?.person_id ?? null);
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -237,7 +239,17 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
       previousDate: mostRecentPrevious.record_date,
     };
   };
-  
+
+  const getComparisonForCondition = (cr: ConditionRecordWithDetails): ConditionComparison | null => {
+    if (!record || personConditionRecordHistory === undefined) return null;
+    const recordIds = personConditionRecordHistory[cr.condition_id] ?? [];
+    const previousOccurrences = recordIds.filter((id) => id !== recordId).length;
+    return {
+      isNew: previousOccurrences === 0,
+      previousOccurrences,
+    };
+  };
+
   const handleEditObservation = (obs: RecordObservationWithCatalog) => {
     setEditingObservation(obs);
     setIsAddingObservation(false);
@@ -1013,6 +1025,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                   <ConditionRecordRow
                     key={cr.id}
                     conditionRecord={cr}
+                    comparison={getComparisonForCondition(cr)}
                     onEdit={isRemoved ? undefined : () => handleEditCondition(cr)}
                     onDelete={isRemoved ? undefined : () => handleDeleteCondition(cr)}
                     isProcessing={isConditionProcessing}

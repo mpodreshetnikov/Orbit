@@ -575,6 +575,11 @@
     "suggestIcd": "Suggest ICD code",
     "showSource": "Show source text",
     "statusChange": "status change",
+    "comparison": {
+      "new": "New",
+      "known": "Known ({count})",
+      "knownTitle": "Previously mentioned in {count} record(s)"
+    },
     "searchPlaceholder": "Search conditions...",
     "cardsView": "Cards view",
     "tableView": "Table view",

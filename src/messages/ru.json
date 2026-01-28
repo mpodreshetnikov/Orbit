@@ -575,6 +575,11 @@
     "suggestIcd": "Подобрать код МКБ",
     "showSource": "Показать источник",
     "statusChange": "изменение статуса",
+    "comparison": {
+      "new": "Новый",
+      "known": "Известен ({count})",
+      "knownTitle": "Ранее упоминался в {count} записи(ях)"
+    },
     "searchPlaceholder": "Поиск диагнозов...",
     "cardsView": "Карточки",
     "tableView": "Таблица",
