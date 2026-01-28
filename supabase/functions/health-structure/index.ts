@@ -89,9 +89,35 @@ interface BodySiteCatalogItem {
   synonyms_en: string[];
 }
 
+interface ExtractedCondition {
+  existing_condition_id: string | null;  // ID from existing conditions list
+  name: string;                          // Name (required for new, optional for existing)
+  icd_code: string | null;               // ICD-10 code (e.g., "D50.9", "E11.9")
+  status: "active" | "resolved" | "suspected" | "history";
+  confidence: number;
+  source_anchor: string | null;
+}
+
+interface IcdLookupResult {
+  code: string;
+  name_en: string | null;
+  name_ru: string | null;
+  found: boolean;
+}
+
+interface ExistingCondition {
+  id: string;
+  name: string;
+  code: string | null;  // ICD-10 code
+  current_status: string;
+  onset_date: string | null;
+  resolved_date: string | null;
+}
+
 interface StructuredDataWithObservationsAndFindings extends StructuredData {
   observations: ExtractedObservation[];
   findings: ExtractedFinding[];
+  conditions: ExtractedCondition[];
 }
 
 // Fetch observation catalog from database
@@ -133,6 +159,26 @@ async function fetchBodySiteCatalog(supabase: ReturnType<typeof createClient>): 
 
   if (error) {
     console.error("Error fetching body site catalog:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Fetch existing conditions for a person (to provide context to LLM)
+async function fetchPersonConditions(
+  supabase: ReturnType<typeof createClient>,
+  personId: string
+): Promise<ExistingCondition[]> {
+  const { data, error } = await supabase
+    .from("conditions")
+    .select("id, name, code, current_status, onset_date, resolved_date")
+    .eq("person_id", personId)
+    .is("deleted_at", null)
+    .order("name");
+
+  if (error) {
+    console.error("Error fetching person conditions:", error);
     return [];
   }
 
@@ -192,12 +238,43 @@ function buildBodySiteCatalogPrompt(catalog: BodySiteCatalogItem[]): string {
 ${items.join("\n")}`;
 }
 
+// Build existing conditions context for LLM prompt
+function buildExistingConditionsPrompt(conditions: ExistingCondition[]): string {
+  if (conditions.length === 0) {
+    return "У пациента пока нет зарегистрированных диагнозов.";
+  }
+
+  const items = conditions.map(c => {
+    const dates = [];
+    if (c.onset_date) dates.push(`начало: ${c.onset_date}`);
+    if (c.resolved_date) dates.push(`окончание: ${c.resolved_date}`);
+    const dateStr = dates.length > 0 ? ` (${dates.join(", ")})` : "";
+    const codeStr = c.code ? `код: ${c.code} | ` : "";
+    return `- ID: "${c.id}" | ${codeStr}"${c.name}" | статус: ${c.current_status}${dateStr}`;
+  });
+
+  return `СУЩЕСТВУЮЩИЕ ДИАГНОЗЫ ПАЦИЕНТА:
+${items.join("\n")}
+
+ВАЖНО: Если документ упоминает один из существующих диагнозов (или его синоним/вариацию):
+- Используй existing_condition_id с ID из списка выше
+- Если у существующего диагноза есть МКБ-10 код — сопоставляй по нему!
+- Укажи НОВЫЙ статус если он изменился (например, "resolved" если вылечено)
+- name можно оставить пустым или указать как в документе
+
+Если диагноз НОВЫЙ (не найден в списке выше):
+- existing_condition_id = null
+- name = название диагноза из документа
+- icd_code = код МКБ-10 если известен`;
+}
+
 // Call LLM to extract structured data from OCR text
 async function extractStructuredData(
   ocrText: string,
   observationCatalog: ObservationCatalogItem[],
   findingTypeCatalog: FindingTypeCatalogItem[],
-  bodySiteCatalog: BodySiteCatalogItem[]
+  bodySiteCatalog: BodySiteCatalogItem[],
+  existingConditions: ExistingCondition[]
 ): Promise<StructuredDataWithObservationsAndFindings> {
   if (!ocrText || ocrText.trim().length === 0) {
     return {
@@ -208,12 +285,14 @@ async function extractStructuredData(
       keywords: [],
       observations: [],
       findings: [],
+      conditions: [],
     };
   }
 
   const observationCatalogPrompt = buildObservationCatalogPrompt(observationCatalog);
   const findingTypeCatalogPrompt = buildFindingTypeCatalogPrompt(findingTypeCatalog);
   const bodySiteCatalogPrompt = buildBodySiteCatalogPrompt(bodySiteCatalog);
+  const existingConditionsPrompt = buildExistingConditionsPrompt(existingConditions);
 
   const systemPrompt = `Ты — анализатор медицинских документов. Тебе будет дан текст, извлечённый из медицинского документа (OCR).
 
@@ -227,6 +306,7 @@ async function extractStructuredData(
 - keywords: массив из 3-7 релевантных ключевых слов/тегов НА РУССКОМ ЯЗЫКЕ
 - observations: массив извлечённых показателей/результатов анализов
 - findings: массив извлечённых находок (полипы, камни, кисты, образования и т.д.)
+- conditions: массив извлечённых диагнозов/заболеваний
 
 ВАЖНЫЕ ПРАВИЛА ДЛЯ ТИПА (record_type):
 - Если документ упоминает животных или ветеринарную помощь: "vet"
@@ -327,7 +407,49 @@ ${bodySiteCatalogPrompt}
 КОГДА НЕ извлекать findings:
 - Нормальные заключения без патологии
 - Отрицательные находки ("камней не выявлено", "без особенностей")
-- Из лабораторных анализов - они идут в observations`;
+- Из лабораторных анализов - они идут в observations
+
+${existingConditionsPrompt}
+
+ПРАВИЛА ДЛЯ ИЗВЛЕЧЕНИЯ ДИАГНОЗОВ (conditions):
+Каждый диагноз — это объект с полями:
+- existing_condition_id: ID существующего диагноза из списка выше, или null если новый
+- name: название диагноза КАК В ДОКУМЕНТЕ (ОБЯЗАТЕЛЬНО если новый)
+- icd_code: код МКБ-10 если можно определить (например "D50.9", "E11.9", "J06.9"), или null
+- status: текущий статус диагноза В ЭТОМ ДОКУМЕНТЕ
+  - "active" — подтверждённый текущий диагноз
+  - "suspected" — подозреваемый, требует подтверждения
+  - "resolved" — вылечено, в ремиссии
+  - "history" — перенесённое заболевание в анамнезе
+- confidence: уверенность в извлечении от 0 до 1
+- source_anchor: ТОЧНАЯ ЦИТАТА из документа где указан диагноз
+
+ВАЖНО ДЛЯ МКБ-10 КОДОВ:
+- Используй icd_code для сопоставления с существующими диагнозами!
+- Если у существующего диагноза есть код "D50.9" и в документе упоминается "анемия" с тем же кодом — это ТОТ ЖЕ диагноз
+- Распространённые коды: D50.9 (ЖДА), E11.9 (СД 2 типа), I10 (гипертония), K21 (ГЭРБ), J06.9 (ОРВИ)
+
+ПРИМЕРЫ СОПОСТАВЛЕНИЯ:
+- Документ: "Анемия купирована" + существует "Железодефицитная анемия (active)"
+  → existing_condition_id = "uuid...", status = "resolved"
+  
+- Документ: "Диагноз: Сахарный диабет 2 типа" + НЕТ в списке
+  → existing_condition_id = null, name = "Сахарный диабет 2 типа", status = "active"
+
+- Документ: "В анамнезе: ветряная оспа" + существует "Ветряная оспа (history)"
+  → existing_condition_id = "uuid...", status = "history" (статус не изменился)
+
+КОГДА извлекать conditions:
+- Явные диагнозы: "Диагноз: Железодефицитная анемия"
+- Заключения: "Заключение: ГЭРБ, хронический гастрит"
+- Анамнез: "Перенесённые заболевания: ветряная оспа, COVID-19"
+- Подозрения: "Подозрение на диабет 2 типа"
+- Упоминания об изменении статуса: "анемия вылечена", "диабет компенсирован"
+
+КОГДА НЕ извлекать conditions:
+- Симптомы без диагноза (головная боль, тошнота)
+- Находки из imaging/эндоскопии — они идут в findings
+- Показатели анализов — они идут в observations`;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -395,6 +517,14 @@ ${bodySiteCatalogPrompt}
         finding_date: f.finding_date || null,
         source_anchor: f.source_anchor || "",
         confidence: typeof f.confidence === "number" ? f.confidence : 0.8,
+      })) : [],
+      conditions: Array.isArray(parsed.conditions) ? parsed.conditions.map((c: Partial<ExtractedCondition>) => ({
+        existing_condition_id: c.existing_condition_id || null,
+        name: c.name || "",
+        icd_code: c.icd_code || null,
+        status: (c.status === "active" || c.status === "resolved" || c.status === "suspected" || c.status === "history") ? c.status : "suspected",
+        confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
+        source_anchor: c.source_anchor || null,
       })) : [],
     };
   } catch {
@@ -638,27 +768,32 @@ Deno.serve(async (req) => {
       throw new Error("No OCR text found for this record. Run health-ocr first.");
     }
 
-    // Fetch all catalogs for LLM context
-    const [observationCatalog, findingTypeCatalog, bodySiteCatalog] = await Promise.all([
+    // Fetch all catalogs and existing conditions for LLM context
+    const [observationCatalog, findingTypeCatalog, bodySiteCatalog, existingConditions] = await Promise.all([
       fetchObservationCatalog(supabaseAdmin),
       fetchFindingTypeCatalog(supabaseAdmin),
       fetchBodySiteCatalog(supabaseAdmin),
+      fetchPersonConditions(supabaseAdmin, record.person_id),
     ]);
     console.log(`Loaded ${observationCatalog.length} observation catalog entries`);
     console.log(`Loaded ${findingTypeCatalog.length} finding type catalog entries`);
     console.log(`Loaded ${bodySiteCatalog.length} body site catalog entries`);
+    console.log(`Loaded ${existingConditions.length} existing conditions for person`);
 
     // Extract structured data from OCR text
     const structuredData = await extractStructuredData(
       record.ocr_text,
       observationCatalog,
       findingTypeCatalog,
-      bodySiteCatalog
+      bodySiteCatalog,
+      existingConditions
     );
     console.log(`Extracted ${structuredData.observations.length} observations`);
     console.log(`Extracted ${structuredData.findings.length} findings`);
+    console.log(`Extracted ${structuredData.conditions.length} conditions`);
     console.log("Extracted observations:", JSON.stringify(structuredData.observations, null, 2));
     console.log("Extracted findings:", JSON.stringify(structuredData.findings, null, 2));
+    console.log("Extracted conditions:", JSON.stringify(structuredData.conditions, null, 2));
 
     // Update the medical record with structured data
     const { error: updateError } = await supabaseAdmin
@@ -782,7 +917,175 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Return structured data with observations and findings
+    // Delete existing condition_records for this record (in case of re-extraction)
+    await supabaseAdmin
+      .from("condition_records")
+      .delete()
+      .eq("record_id", record_id);
+
+    // Helper function to lookup ICD code via icd-lookup edge function
+    async function lookupIcdCode(code: string): Promise<IcdLookupResult | null> {
+      try {
+        const icdRes = await fetch(`${SUPABASE_URL}/functions/v1/icd-lookup`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ code }),
+        });
+        
+        if (!icdRes.ok) {
+          console.error(`ICD lookup failed for ${code}:`, icdRes.status);
+          return null;
+        }
+        
+        return await icdRes.json();
+      } catch (error) {
+        console.error(`ICD lookup error for ${code}:`, error);
+        return null;
+      }
+    }
+
+    // Process extracted conditions
+    if (structuredData.conditions.length > 0) {
+      for (const extracted of structuredData.conditions) {
+        let conditionId: string;
+        let shouldUpdateStatus = false;
+        let icdLookupResult: IcdLookupResult | null = null;
+
+        // If there's an ICD code, validate it first
+        if (extracted.icd_code) {
+          icdLookupResult = await lookupIcdCode(extracted.icd_code);
+          console.log(`ICD lookup for ${extracted.icd_code}:`, icdLookupResult);
+        }
+
+        if (extracted.existing_condition_id) {
+          // LLM matched to existing condition
+          conditionId = extracted.existing_condition_id;
+
+          // Check if we should update the condition's current_status
+          const existingCond = existingConditions.find(c => c.id === conditionId);
+          if (existingCond && existingCond.current_status !== extracted.status) {
+            // Status changed - update the condition
+            shouldUpdateStatus = true;
+          }
+
+          // Update ICD info if we have new validated data
+          if (icdLookupResult?.found && extracted.icd_code) {
+            await supabaseAdmin
+              .from("conditions")
+              .update({
+                code: extracted.icd_code,
+                icd_name_en: icdLookupResult.name_en,
+                icd_name_ru: icdLookupResult.name_ru,
+              })
+              .eq("id", conditionId);
+          }
+        } else if (extracted.icd_code && icdLookupResult?.found) {
+          // New condition with valid ICD code - check for duplicates by ICD code first
+          const { data: byCode } = await supabaseAdmin
+            .from("conditions")
+            .select("id")
+            .eq("person_id", record.person_id)
+            .eq("code", extracted.icd_code)
+            .is("deleted_at", null)
+            .maybeSingle();
+
+          if (byCode) {
+            // Found existing condition with same ICD code
+            conditionId = byCode.id;
+            console.log(`Found existing condition by ICD code ${extracted.icd_code}: ${conditionId}`);
+          } else {
+            // Create new condition with ICD info
+            const { data: newCondition, error: conditionError } = await supabaseAdmin
+              .from("conditions")
+              .insert({
+                person_id: record.person_id,
+                name: extracted.name,
+                code: extracted.icd_code,
+                icd_name_en: icdLookupResult.name_en,
+                icd_name_ru: icdLookupResult.name_ru,
+                current_status: extracted.status,
+              })
+              .select("id")
+              .single();
+
+            if (conditionError || !newCondition) {
+              console.error("Error creating condition with ICD:", conditionError);
+              continue;
+            }
+            conditionId = newCondition.id;
+            console.log(`Created new condition with ICD code ${extracted.icd_code}: ${conditionId}`);
+          }
+        } else if (extracted.name) {
+          // New condition without valid ICD code - check for duplicates by name (fallback)
+          const { data: existing } = await supabaseAdmin
+            .from("conditions")
+            .select("id")
+            .eq("person_id", record.person_id)
+            .ilike("name", extracted.name)
+            .is("deleted_at", null)
+            .maybeSingle();
+
+          if (existing) {
+            conditionId = existing.id;
+          } else {
+            // Create new condition (store ICD code even if validation failed - user can correct)
+            const { data: newCondition, error: conditionError } = await supabaseAdmin
+              .from("conditions")
+              .insert({
+                person_id: record.person_id,
+                name: extracted.name,
+                code: extracted.icd_code || null,
+                icd_name_en: icdLookupResult?.name_en || null,
+                icd_name_ru: icdLookupResult?.name_ru || null,
+                current_status: extracted.status,
+              })
+              .select("id")
+              .single();
+
+            if (conditionError || !newCondition) {
+              console.error("Error creating condition:", conditionError);
+              continue;
+            }
+            conditionId = newCondition.id;
+          }
+        } else {
+          // Neither existing_condition_id nor name provided - skip
+          console.warn("Skipping condition without existing_condition_id or name");
+          continue;
+        }
+
+        // Update condition status if needed (will be reviewed by user)
+        if (shouldUpdateStatus) {
+          await supabaseAdmin
+            .from("conditions")
+            .update({ current_status: extracted.status })
+            .eq("id", conditionId);
+        }
+
+        // Create condition_record linking condition to this record
+        const { error: crError } = await supabaseAdmin
+          .from("condition_records")
+          .insert({
+            condition_id: conditionId,
+            record_id: record_id,
+            status_in_record: extracted.status,
+            source_anchor: extracted.source_anchor,
+            confidence: extracted.confidence,
+            is_llm_extracted: true,
+            is_user_verified: false,
+          });
+
+        if (crError) {
+          console.error("Error inserting condition_record:", crError);
+          // Don't fail the whole request, just log the error
+        }
+      }
+    }
+
+    // Return structured data with observations, findings, and conditions
     return new Response(
       JSON.stringify({
         success: true,

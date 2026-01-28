@@ -1,0 +1,662 @@
+"use client";
+
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createClient } from "@/lib/supabase";
+import type {
+  Condition,
+  ConditionRecord,
+  ConditionRecordWithDetails,
+  ConditionWithHistory,
+  CreateConditionInput,
+  UpdateConditionInput,
+  CreateConditionRecordInput,
+  UpdateConditionRecordInput,
+  ConditionStatus,
+} from "@/types";
+
+// ============================================================================
+// CONDITION HOOKS (the persistent entity)
+// ============================================================================
+
+// Fetch all conditions for a person
+async function fetchPersonConditions(
+  personId: string
+): Promise<Condition[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("conditions")
+    .select("*")
+    .eq("person_id", personId)
+    .is("deleted_at", null)
+    .order("name");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data || []) as Condition[];
+}
+
+export function usePersonConditions(personId: string | null) {
+  return useQuery({
+    queryKey: ["conditions", "person", personId],
+    queryFn: () => fetchPersonConditions(personId!),
+    enabled: !!personId,
+  });
+}
+
+// Fetch all conditions for a person with history (using helper function)
+async function fetchPersonConditionsWithHistory(
+  personId: string
+): Promise<ConditionWithHistory[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase.rpc("get_person_conditions_with_history", {
+    p_person_id: personId,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data || []) as ConditionWithHistory[];
+}
+
+export function usePersonConditionsWithHistory(personId: string | null) {
+  return useQuery({
+    queryKey: ["conditions", "person", personId, "with-history"],
+    queryFn: () => fetchPersonConditionsWithHistory(personId!),
+    enabled: !!personId,
+  });
+}
+
+// Fetch a single condition by ID with its full history
+interface ConditionHistoryRecord {
+  id: string;
+  record_id: string;
+  status_in_record: string;
+  source_anchor: string | null;
+  confidence: number | null;
+  is_llm_extracted: boolean;
+  is_user_verified: boolean;
+  created_at: string;
+  record_title: string | null;
+  record_date: string | null;
+  record_type: string | null;
+}
+
+export interface ConditionDetail extends Condition {
+  history: ConditionHistoryRecord[];
+  mention_count: number;
+  first_mentioned_date: string | null;
+  last_mentioned_date: string | null;
+}
+
+async function fetchConditionDetail(conditionId: string): Promise<ConditionDetail | null> {
+  const supabase = createClient();
+
+  // Fetch condition
+  const { data: condition, error: condError } = await supabase
+    .from("conditions")
+    .select("*")
+    .eq("id", conditionId)
+    .is("deleted_at", null)
+    .single();
+
+  if (condError || !condition) {
+    return null;
+  }
+
+  // Fetch condition records with medical record info
+  const { data: records, error: recError } = await supabase
+    .from("condition_records")
+    .select(`
+      id,
+      record_id,
+      status_in_record,
+      source_anchor,
+      confidence,
+      is_llm_extracted,
+      is_user_verified,
+      created_at,
+      medical_records!inner (
+        title,
+        record_date,
+        record_type
+      )
+    `)
+    .eq("condition_id", conditionId)
+    .order("created_at", { ascending: false });
+
+  if (recError) {
+    throw new Error(recError.message);
+  }
+
+  // Transform the records to include record info
+  const history: ConditionHistoryRecord[] = (records || []).map((r: any) => ({
+    id: r.id,
+    record_id: r.record_id,
+    status_in_record: r.status_in_record,
+    source_anchor: r.source_anchor,
+    confidence: r.confidence,
+    is_llm_extracted: r.is_llm_extracted,
+    is_user_verified: r.is_user_verified,
+    created_at: r.created_at,
+    record_title: r.medical_records?.title || null,
+    record_date: r.medical_records?.record_date || null,
+    record_type: r.medical_records?.record_type || null,
+  }));
+
+  // Calculate stats
+  const dates = history
+    .map(h => h.record_date)
+    .filter((d): d is string => d !== null)
+    .sort();
+
+  return {
+    ...condition,
+    history,
+    mention_count: history.length,
+    first_mentioned_date: dates[0] || null,
+    last_mentioned_date: dates[dates.length - 1] || null,
+  } as ConditionDetail;
+}
+
+export function useConditionDetail(conditionId: string | null) {
+  return useQuery({
+    queryKey: ["condition", conditionId],
+    queryFn: () => fetchConditionDetail(conditionId!),
+    enabled: !!conditionId,
+  });
+}
+
+// Create a new condition
+async function createCondition(
+  input: CreateConditionInput
+): Promise<Condition> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("conditions")
+    .insert(input)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as Condition;
+}
+
+export function useCreateCondition() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createCondition,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conditions", "person", data.person_id],
+      });
+    },
+  });
+}
+
+// Update a condition
+async function updateCondition({
+  id,
+  updates,
+}: {
+  id: string;
+  updates: UpdateConditionInput;
+}): Promise<Condition> {
+  const supabase = createClient();
+
+  // Perform update first
+  const { error: updateError } = await supabase
+    .from("conditions")
+    .update(updates)
+    .eq("id", id);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  // Then fetch the updated record separately
+  const { data, error: selectError } = await supabase
+    .from("conditions")
+    .select()
+    .eq("id", id)
+    .single();
+
+  if (selectError) {
+    throw new Error(selectError.message);
+  }
+
+  return data as Condition;
+}
+
+export function useUpdateCondition() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: updateCondition,
+    onSuccess: (data) => {
+      // Invalidate the single condition detail query
+      queryClient.invalidateQueries({
+        queryKey: ["condition", data.id],
+      });
+      // Invalidate the person's conditions list
+      queryClient.invalidateQueries({
+        queryKey: ["conditions", "person", data.person_id],
+      });
+      // Invalidate any conditions lists
+      queryClient.invalidateQueries({
+        queryKey: ["conditions"],
+      });
+    },
+  });
+}
+
+// Soft delete a condition
+async function deleteCondition({
+  id,
+  personId,
+}: {
+  id: string;
+  personId: string;
+}): Promise<void> {
+  const supabase = createClient();
+
+  const { error } = await supabase
+    .from("conditions")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export function useDeleteCondition() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteCondition,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conditions", "person", variables.personId],
+      });
+    },
+  });
+}
+
+// ============================================================================
+// CONDITION_RECORD HOOKS (mentions in records)
+// ============================================================================
+
+// Fetch condition records for a specific medical record
+async function fetchRecordConditions(
+  recordId: string
+): Promise<ConditionRecordWithDetails[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase.rpc("get_record_conditions", {
+    p_record_id: recordId,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data || []) as ConditionRecordWithDetails[];
+}
+
+export function useRecordConditions(recordId: string | null) {
+  return useQuery({
+    queryKey: ["condition-records", "record", recordId],
+    queryFn: () => fetchRecordConditions(recordId!),
+    enabled: !!recordId,
+  });
+}
+
+// Create a condition record
+async function createConditionRecord(
+  input: CreateConditionRecordInput
+): Promise<ConditionRecord> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("condition_records")
+    .insert(input)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as ConditionRecord;
+}
+
+export function useCreateConditionRecord() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createConditionRecord,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: ["condition-records", "record", data.record_id],
+      });
+    },
+  });
+}
+
+// Update a condition record
+// If status_in_record changes and this is the most recent mention, auto-updates condition's current_status
+// Can also update condition's ICD code if provided
+async function updateConditionRecord({
+  id,
+  updates,
+  recordId,
+  conditionId,
+  code,
+  icd_name_en,
+}: {
+  id: string;
+  updates: UpdateConditionRecordInput;
+  recordId?: string;
+  conditionId?: string;
+  // Optional: update condition's ICD code
+  code?: string | null;
+  icd_name_en?: string | null;
+}): Promise<ConditionRecord> {
+  const supabase = createClient();
+
+  // Perform update first
+  const { error: updateError } = await supabase
+    .from("condition_records")
+    .update(updates)
+    .eq("id", id);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  // Then fetch the updated record separately
+  const { data, error: selectError } = await supabase
+    .from("condition_records")
+    .select()
+    .eq("id", id)
+    .single();
+
+  if (selectError) {
+    throw new Error(selectError.message);
+  }
+
+  const conditionRecord = data as ConditionRecord;
+
+  // Auto-update condition's current_status if status changed and this is most recent mention
+  if (updates.status_in_record && recordId && conditionId) {
+    // Get this record's date
+    const { data: thisRecord } = await supabase
+      .from("medical_records")
+      .select("record_date")
+      .eq("id", recordId)
+      .single();
+
+    // Get the most recent record date for this condition
+    const { data: mostRecentMention } = await supabase
+      .from("condition_records")
+      .select("medical_records!inner(record_date)")
+      .eq("condition_id", conditionId)
+      .order("medical_records(record_date)", { ascending: false })
+      .limit(1)
+      .single();
+
+    const thisRecordDate = thisRecord?.record_date || null;
+    const mostRecentDate = (mostRecentMention?.medical_records as any)?.record_date || null;
+
+    // Auto-update current_status if this record is the most recent (or equal)
+    const shouldUpdateStatus = !mostRecentDate || !thisRecordDate || 
+      thisRecordDate >= mostRecentDate;
+
+    // Build update object
+    const conditionUpdates: Record<string, any> = {};
+    if (shouldUpdateStatus) {
+      conditionUpdates.current_status = updates.status_in_record;
+    }
+    // Add ICD code if provided
+    if (code) {
+      conditionUpdates.code = code;
+      conditionUpdates.icd_name_en = icd_name_en || null;
+    }
+
+    // Update condition if there are changes
+    if (Object.keys(conditionUpdates).length > 0) {
+      await supabase
+        .from("conditions")
+        .update(conditionUpdates)
+        .eq("id", conditionId);
+    }
+  }
+
+  // Also update ICD code even if no status change (when conditionId is provided)
+  if (code && conditionId && !updates.status_in_record) {
+    await supabase
+      .from("conditions")
+      .update({ code, icd_name_en: icd_name_en || null })
+      .eq("id", conditionId);
+  }
+
+  return conditionRecord;
+}
+
+export function useUpdateConditionRecord() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: updateConditionRecord,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: ["condition-records", "record", data.record_id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["conditions"],
+      });
+    },
+  });
+}
+
+// Delete a condition record
+async function deleteConditionRecord({
+  id,
+  recordId,
+}: {
+  id: string;
+  recordId: string;
+}): Promise<void> {
+  const supabase = createClient();
+
+  const { error } = await supabase
+    .from("condition_records")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export function useDeleteConditionRecord() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteConditionRecord,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["condition-records", "record", variables.recordId],
+      });
+    },
+  });
+}
+
+// ============================================================================
+// COMBINED HOOKS
+// ============================================================================
+
+// Create condition + condition_record in one operation (for manual add during review)
+export function useCreateConditionWithRecord() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: {
+      person_id: string;
+      record_id: string;
+      name: string;
+      code?: string | null;
+      icd_name_en?: string | null;
+      icd_name_ru?: string | null;
+      status: ConditionStatus;
+      source_anchor?: string;
+    }) => {
+      const supabase = createClient();
+
+      // 1. Create condition with ICD info
+      const { data: condition, error: condError } = await supabase
+        .from("conditions")
+        .insert({
+          person_id: input.person_id,
+          name: input.name,
+          code: input.code || null,
+          icd_name_en: input.icd_name_en || null,
+          icd_name_ru: input.icd_name_ru || null,
+          current_status: input.status,
+        })
+        .select()
+        .single();
+
+      if (condError) {
+        throw new Error(condError.message);
+      }
+
+      // 2. Create condition_record
+      const { error: crError } = await supabase
+        .from("condition_records")
+        .insert({
+          condition_id: condition.id,
+          record_id: input.record_id,
+          status_in_record: input.status,
+          source_anchor: input.source_anchor || null,
+          is_llm_extracted: false,
+          is_user_verified: true,
+        });
+
+      if (crError) {
+        throw new Error(crError.message);
+      }
+
+      return { condition: condition as Condition, record_id: input.record_id };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conditions", "person", data.condition.person_id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["condition-records", "record", data.record_id],
+      });
+    },
+  });
+}
+
+// Link existing condition to a record (create condition_record for existing condition)
+// Automatically updates condition's current_status if this record is the most recent mention
+// Can also update condition's ICD code if provided
+export function useLinkConditionToRecord() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: {
+      condition_id: string;
+      record_id: string;
+      status_in_record: ConditionStatus;
+      source_anchor?: string;
+      // Optional: update condition's ICD code
+      code?: string | null;
+      icd_name_en?: string | null;
+    }) => {
+      const supabase = createClient();
+
+      // Create condition_record
+      const { data: conditionRecord, error: crError } = await supabase
+        .from("condition_records")
+        .insert({
+          condition_id: input.condition_id,
+          record_id: input.record_id,
+          status_in_record: input.status_in_record,
+          source_anchor: input.source_anchor || null,
+          is_llm_extracted: false,
+          is_user_verified: true,
+        })
+        .select()
+        .single();
+
+      if (crError) {
+        throw new Error(crError.message);
+      }
+
+      // Get this record's date
+      const { data: thisRecord } = await supabase
+        .from("medical_records")
+        .select("record_date")
+        .eq("id", input.record_id)
+        .single();
+
+      // Get the most recent record date for this condition
+      const { data: mostRecentMention } = await supabase
+        .from("condition_records")
+        .select("medical_records!inner(record_date)")
+        .eq("condition_id", input.condition_id)
+        .order("medical_records(record_date)", { ascending: false })
+        .limit(1)
+        .single();
+
+      const thisRecordDate = thisRecord?.record_date || null;
+      const mostRecentDate = (mostRecentMention?.medical_records as any)?.record_date || null;
+
+      // Auto-update current_status if this record is the most recent (or equal)
+      const shouldUpdateStatus = !mostRecentDate || !thisRecordDate || 
+        thisRecordDate >= mostRecentDate;
+
+      // Build update object for condition
+      const conditionUpdates: Record<string, any> = {};
+      if (shouldUpdateStatus) {
+        conditionUpdates.current_status = input.status_in_record;
+      }
+      // Add ICD code if provided
+      if (input.code) {
+        conditionUpdates.code = input.code;
+        conditionUpdates.icd_name_en = input.icd_name_en || null;
+      }
+
+      // Update condition if there are changes
+      if (Object.keys(conditionUpdates).length > 0) {
+        await supabase
+          .from("conditions")
+          .update(conditionUpdates)
+          .eq("id", input.condition_id);
+      }
+
+      return conditionRecord as ConditionRecord;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: ["condition-records", "record", data.record_id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["conditions"],
+      });
+    },
+  });
+}

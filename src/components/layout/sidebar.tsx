@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { FileText, Library, FlaskConical, Ruler, Stethoscope } from "lucide-react";
+import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,11 @@ const sidebarLinks = [
     href: "/health/findings",
     icon: Stethoscope,
     labelKey: "findings.navTitle",
+  },
+  {
+    href: "/health/conditions",
+    icon: HeartPulse,
+    labelKey: "conditions.navTitle",
   },
   {
     href: "/health/catalogs",
