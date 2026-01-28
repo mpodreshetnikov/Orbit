@@ -114,10 +114,45 @@ interface ExistingCondition {
   resolved_date: string | null;
 }
 
+// Existing active finding for a person (aggregated by finding_code + site_code)
+interface ExistingFinding {
+  finding_code: string | null;
+  finding_type_text: string;
+  site_code: string | null;
+  body_site_text: string | null;
+  finding_type_id: string | null;
+  body_site_id: string | null;
+  latest_size_mm: number | null;
+  latest_count: number | null;
+  severity: string;
+  latest_date: string | null;
+}
+
+// Finding that LLM determined should be marked as resolved
+interface FindingToResolve {
+  finding_code: string | null;
+  finding_type_text: string;
+  site_code: string | null;
+  body_site_text: string | null;
+  reason: string;
+  source_anchor: string;
+  confidence: number;
+}
+
+// Condition that LLM determined should be marked as resolved
+interface ConditionToResolve {
+  condition_id: string;
+  reason: string;
+  source_anchor: string;
+  confidence: number;
+}
+
 interface StructuredDataWithObservationsAndFindings extends StructuredData {
   observations: ExtractedObservation[];
   findings: ExtractedFinding[];
   conditions: ExtractedCondition[];
+  findings_to_resolve: FindingToResolve[];
+  conditions_to_resolve: ConditionToResolve[];
 }
 
 // Fetch observation catalog from database
@@ -185,6 +220,138 @@ async function fetchPersonConditions(
   return data || [];
 }
 
+// Helper to determine if a finding is resolved (size=0 or count=0)
+function isResolved(size: number | null, count: number | null): boolean {
+  return size === 0 || count === 0;
+}
+
+// Fetch existing active findings for a person (aggregated by finding_code + site_code)
+// Returns only findings that are NOT resolved (latest entry has size_mm > 0 or count > 0)
+async function fetchPersonActiveFindings(
+  supabase: ReturnType<typeof createClient>,
+  personId: string
+): Promise<ExistingFinding[]> {
+  // Fetch all findings from active records for this person
+  const { data, error } = await supabase
+    .from("record_findings")
+    .select(`
+      id,
+      finding_code,
+      finding_type_text,
+      site_code,
+      body_site_text,
+      finding_type_id,
+      body_site_id,
+      size_mm,
+      count,
+      severity,
+      finding_date,
+      created_at,
+      medical_records!inner(
+        person_id,
+        record_date,
+        status
+      )
+    `)
+    .eq("medical_records.person_id", personId)
+    .eq("medical_records.status", "active")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching person findings:", error);
+    return [];
+  }
+
+  if (!data || data.length === 0) {
+    return [];
+  }
+
+  // Group by finding_code + site_code (or finding_type_text + body_site_text for unrecognized)
+  const findingMap = new Map<string, {
+    rows: Array<{
+      finding_code: string | null;
+      finding_type_text: string;
+      site_code: string | null;
+      body_site_text: string | null;
+      finding_type_id: string | null;
+      body_site_id: string | null;
+      size_mm: number | null;
+      count: number | null;
+      severity: string;
+      finding_date: string | null;
+      created_at: string;
+      medical_records: { record_date: string | null };
+    }>;
+  }>();
+
+  for (const row of data as unknown[]) {
+    const r = row as {
+      finding_code: string | null;
+      finding_type_text: string;
+      site_code: string | null;
+      body_site_text: string | null;
+      finding_type_id: string | null;
+      body_site_id: string | null;
+      size_mm: number | null;
+      count: number | null;
+      severity: string;
+      finding_date: string | null;
+      created_at: string;
+      medical_records: { record_date: string | null };
+    };
+
+    // Create a unique key for grouping
+    const findingKey = r.finding_code || r.finding_type_text.toLowerCase().trim();
+    const siteKey = r.site_code || (r.body_site_text?.toLowerCase().trim() || "unknown");
+    const key = `${findingKey}::${siteKey}`;
+
+    if (findingMap.has(key)) {
+      findingMap.get(key)!.rows.push(r);
+    } else {
+      findingMap.set(key, { rows: [r] });
+    }
+  }
+
+  // Convert map to array, find latest values, filter out resolved
+  const activeFindings: ExistingFinding[] = [];
+
+  for (const { rows } of findingMap.values()) {
+    // Sort by date (newest first)
+    rows.sort((a, b) => {
+      const dateA = a.finding_date || a.medical_records.record_date || a.created_at;
+      const dateB = b.finding_date || b.medical_records.record_date || b.created_at;
+      return new Date(dateB).getTime() - new Date(dateA).getTime();
+    });
+
+    // Get latest entry
+    const latest = rows[0];
+
+    // Skip if the latest entry shows it's resolved
+    if (isResolved(latest.size_mm, latest.count)) {
+      continue;
+    }
+
+    // Find the most recent size/count values (in case latest has nulls)
+    const latestWithSize = rows.find(r => r.size_mm !== null);
+    const latestWithCount = rows.find(r => r.count !== null);
+
+    activeFindings.push({
+      finding_code: latest.finding_code,
+      finding_type_text: latest.finding_type_text,
+      site_code: latest.site_code,
+      body_site_text: latest.body_site_text,
+      finding_type_id: latest.finding_type_id,
+      body_site_id: latest.body_site_id,
+      latest_size_mm: latestWithSize?.size_mm ?? null,
+      latest_count: latestWithCount?.count ?? null,
+      severity: latest.severity,
+      latest_date: latest.finding_date || latest.medical_records.record_date,
+    });
+  }
+
+  return activeFindings;
+}
+
 // Build observation catalog prompt section
 function buildObservationCatalogPrompt(catalog: ObservationCatalogItem[]): string {
   if (catalog.length === 0) {
@@ -244,17 +411,32 @@ function buildExistingConditionsPrompt(conditions: ExistingCondition[]): string 
     return "У пациента пока нет зарегистрированных диагнозов.";
   }
 
-  const items = conditions.map(c => {
+  // Separate active conditions for emphasis
+  const activeConditions = conditions.filter(c => c.current_status === "active" || c.current_status === "suspected");
+  const otherConditions = conditions.filter(c => c.current_status !== "active" && c.current_status !== "suspected");
+
+  const formatCondition = (c: ExistingCondition) => {
     const dates = [];
     if (c.onset_date) dates.push(`начало: ${c.onset_date}`);
     if (c.resolved_date) dates.push(`окончание: ${c.resolved_date}`);
     const dateStr = dates.length > 0 ? ` (${dates.join(", ")})` : "";
     const codeStr = c.code ? `код: ${c.code} | ` : "";
     return `- ID: "${c.id}" | ${codeStr}"${c.name}" | статус: ${c.current_status}${dateStr}`;
-  });
+  };
 
-  return `СУЩЕСТВУЮЩИЕ ДИАГНОЗЫ ПАЦИЕНТА:
-${items.join("\n")}
+  let prompt = `СУЩЕСТВУЮЩИЕ ДИАГНОЗЫ ПАЦИЕНТА:`;
+  
+  if (activeConditions.length > 0) {
+    prompt += `\n\n*** АКТИВНЫЕ ДИАГНОЗЫ (проверь, не нужно ли закрыть на основе этого документа!) ***
+${activeConditions.map(formatCondition).join("\n")}`;
+  }
+  
+  if (otherConditions.length > 0) {
+    prompt += `\n\nПрочие диагнозы (resolved/history):
+${otherConditions.map(formatCondition).join("\n")}`;
+  }
+
+  prompt += `
 
 ВАЖНО: Если документ упоминает один из существующих диагнозов (или его синоним/вариацию):
 - Используй existing_condition_id с ID из списка выше
@@ -262,10 +444,37 @@ ${items.join("\n")}
 - Укажи НОВЫЙ статус если он изменился (например, "resolved" если вылечено)
 - name можно оставить пустым или указать как в документе
 
+ВАЖНО: Проверь АКТИВНЫЕ диагнозы — если документ показывает нормализацию/выздоровление, добавь в conditions_to_resolve!
+
 Если диагноз НОВЫЙ (не найден в списке выше):
 - existing_condition_id = null
 - name = название диагноза из документа
 - icd_code = код МКБ-10 если известен`;
+
+  return prompt;
+}
+
+// Build existing active findings context for LLM prompt
+function buildExistingFindingsPrompt(findings: ExistingFinding[]): string {
+  if (findings.length === 0) {
+    return "У пациента пока нет зарегистрированных активных находок.";
+  }
+
+  const items = findings.map(f => {
+    const parts = [];
+    if (f.finding_code) parts.push(`finding_code: "${f.finding_code}"`);
+    if (f.site_code) parts.push(`site_code: "${f.site_code}"`);
+    parts.push(`текст: "${f.finding_type_text}"`);
+    if (f.body_site_text) parts.push(`локализация: "${f.body_site_text}"`);
+    if (f.latest_size_mm !== null) parts.push(`размер: ${f.latest_size_mm}мм`);
+    if (f.latest_count !== null && f.latest_count > 1) parts.push(`кол-во: ${f.latest_count}`);
+    parts.push(`тяжесть: ${f.severity}`);
+    if (f.latest_date) parts.push(`дата: ${f.latest_date}`);
+    return `- ${parts.join(" | ")}`;
+  });
+
+  return `СУЩЕСТВУЮЩИЕ АКТИВНЫЕ НАХОДКИ ПАЦИЕНТА:
+${items.join("\n")}`;
 }
 
 // Call LLM to extract structured data from OCR text
@@ -274,7 +483,8 @@ async function extractStructuredData(
   observationCatalog: ObservationCatalogItem[],
   findingTypeCatalog: FindingTypeCatalogItem[],
   bodySiteCatalog: BodySiteCatalogItem[],
-  existingConditions: ExistingCondition[]
+  existingConditions: ExistingCondition[],
+  existingFindings: ExistingFinding[]
 ): Promise<StructuredDataWithObservationsAndFindings> {
   if (!ocrText || ocrText.trim().length === 0) {
     return {
@@ -286,6 +496,8 @@ async function extractStructuredData(
       observations: [],
       findings: [],
       conditions: [],
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
     };
   }
 
@@ -293,6 +505,7 @@ async function extractStructuredData(
   const findingTypeCatalogPrompt = buildFindingTypeCatalogPrompt(findingTypeCatalog);
   const bodySiteCatalogPrompt = buildBodySiteCatalogPrompt(bodySiteCatalog);
   const existingConditionsPrompt = buildExistingConditionsPrompt(existingConditions);
+  const existingFindingsPrompt = buildExistingFindingsPrompt(existingFindings);
 
   const systemPrompt = `Ты — анализатор медицинских документов. Тебе будет дан текст, извлечённый из медицинского документа (OCR).
 
@@ -307,6 +520,8 @@ async function extractStructuredData(
 - observations: массив извлечённых показателей/результатов анализов
 - findings: массив извлечённых находок (полипы, камни, кисты, образования и т.д.)
 - conditions: массив извлечённых диагнозов/заболеваний
+- findings_to_resolve: массив существующих находок, которые нужно закрыть (если документ указывает на их отсутствие)
+- conditions_to_resolve: массив существующих диагнозов, которые нужно закрыть (если документ указывает на выздоровление)
 
 ВАЖНЫЕ ПРАВИЛА ДЛЯ ТИПА (record_type):
 - Если документ упоминает животных или ветеринарную помощь: "vet"
@@ -449,7 +664,67 @@ ${existingConditionsPrompt}
 КОГДА НЕ извлекать conditions:
 - Симптомы без диагноза (головная боль, тошнота)
 - Находки из imaging/эндоскопии — они идут в findings
-- Показатели анализов — они идут в observations`;
+- Показатели анализов — они идут в observations
+
+${existingFindingsPrompt}
+
+ПРАВИЛА ДЛЯ РАЗРЕШЕНИЯ НАХОДОК (findings_to_resolve):
+Если документ ЯВНО указывает, что ранее зафиксированная находка больше НЕ обнаружена:
+- "полипов не обнаружено" при наличии записи о полипе в соответствующей локализации
+- "камни удалены успешно" или "камней не выявлено"
+- "киста не визуализируется"
+- "Дополнительные образования: не выявлены" при наличии записи об образовании в этом органе
+- "Эхопатологии не выявлено" при наличии записи о патологии в этом органе
+- "Без особенностей" при осмотре области с известной находкой
+→ Добавь в findings_to_resolve с ТОЧНОЙ цитатой из документа
+
+Каждый элемент findings_to_resolve:
+- finding_code: код находки из существующего списка (или null)
+- finding_type_text: текст находки
+- site_code: код локализации из существующего списка (или null)
+- body_site_text: текст локализации
+- reason: причина закрытия (кратко)
+- source_anchor: ТОЧНАЯ ЦИТАТА из документа, подтверждающая отсутствие
+- confidence: уверенность от 0 до 1
+
+НЕ закрывай находку если:
+- Область НЕ исследовалась в этом документе
+- Нет ЯВНОГО указания об отсутствии находки
+- Документ относится к другому органу/локализации
+
+ПРАВИЛА ДЛЯ РАЗРЕШЕНИЯ ДИАГНОЗОВ (conditions_to_resolve):
+ВАЖНО: Если у пациента есть активный диагноз и документ показывает, что он больше НЕ актуален — добавь в conditions_to_resolve!
+
+КОГДА добавлять в conditions_to_resolve:
+- Явное указание на выздоровление: "Анемия купирована", "Полное выздоровление", "Заболевание вылечено"
+- Лабораторные показатели нормализовались: если была "Железодефицитная анемия" и гемоглобин/ферритин в норме
+- Связанная находка закрыта: если была "Полипоз толстой кишки" и полипы не обнаружены при обследовании
+- Диагноз в ремиссии: "Диабет компенсирован", "Гипертония контролируемая"
+- Отрицательные результаты обследования: "Патологии не выявлено" при обследовании органа с известным диагнозом
+
+ПРИМЕРЫ:
+- Существует "Железодефицитная анемия (active)" + документ показывает гемоглобин 140 г/л (норма)
+  → Добавь в conditions_to_resolve: condition_id="uuid", reason="Гемоглобин в норме"
+
+- Существует "Полипоз толстой кишки (active)" + колоноскопия "Полипов не обнаружено"
+  → Добавь в conditions_to_resolve: condition_id="uuid", reason="Полипы не обнаружены при колоноскопии"
+
+- Существует "Мочекаменная болезнь (active)" + УЗИ "Конкременты не визуализируются"
+  → Добавь в conditions_to_resolve: condition_id="uuid", reason="Камни не обнаружены на УЗИ"
+
+ВАЖНО: Используй conditions_to_resolve ТОЛЬКО для диагнозов из списка СУЩЕСТВУЮЩИЕ ДИАГНОЗЫ ПАЦИЕНТА!
+Проверь список существующих диагнозов и сопоставь с результатами документа!
+
+Каждый элемент conditions_to_resolve:
+- condition_id: ID диагноза из списка существующих (ОБЯЗАТЕЛЬНО! Копируй точный UUID из списка)
+- reason: причина закрытия (кратко, на русском)
+- source_anchor: ТОЧНАЯ ЦИТАТА из документа, подтверждающая выздоровление/нормализацию
+- confidence: уверенность от 0 до 1
+
+НЕ закрывай диагноз если:
+- Нет связи между документом и диагнозом (документ об одном, диагноз о другом)
+- Документ НЕ исследует область/систему, связанную с диагнозом
+- Показатели немного улучшились, но ещё не в норме`;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -525,6 +800,21 @@ ${existingConditionsPrompt}
         status: (c.status === "active" || c.status === "resolved" || c.status === "suspected" || c.status === "history") ? c.status : "suspected",
         confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
         source_anchor: c.source_anchor || null,
+      })) : [],
+      findings_to_resolve: Array.isArray(parsed.findings_to_resolve) ? parsed.findings_to_resolve.map((f: Partial<FindingToResolve>) => ({
+        finding_code: f.finding_code || null,
+        finding_type_text: f.finding_type_text || "",
+        site_code: f.site_code || null,
+        body_site_text: f.body_site_text || null,
+        reason: f.reason || "",
+        source_anchor: f.source_anchor || "",
+        confidence: typeof f.confidence === "number" ? f.confidence : 0.8,
+      })) : [],
+      conditions_to_resolve: Array.isArray(parsed.conditions_to_resolve) ? parsed.conditions_to_resolve.map((c: Partial<ConditionToResolve>) => ({
+        condition_id: c.condition_id || "",
+        reason: c.reason || "",
+        source_anchor: c.source_anchor || "",
+        confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
       })) : [],
     };
   } catch {
@@ -768,17 +1058,19 @@ Deno.serve(async (req) => {
       throw new Error("No OCR text found for this record. Run health-ocr first.");
     }
 
-    // Fetch all catalogs and existing conditions for LLM context
-    const [observationCatalog, findingTypeCatalog, bodySiteCatalog, existingConditions] = await Promise.all([
+    // Fetch all catalogs, existing conditions, and existing findings for LLM context
+    const [observationCatalog, findingTypeCatalog, bodySiteCatalog, existingConditions, existingFindings] = await Promise.all([
       fetchObservationCatalog(supabaseAdmin),
       fetchFindingTypeCatalog(supabaseAdmin),
       fetchBodySiteCatalog(supabaseAdmin),
       fetchPersonConditions(supabaseAdmin, record.person_id),
+      fetchPersonActiveFindings(supabaseAdmin, record.person_id),
     ]);
     console.log(`Loaded ${observationCatalog.length} observation catalog entries`);
     console.log(`Loaded ${findingTypeCatalog.length} finding type catalog entries`);
     console.log(`Loaded ${bodySiteCatalog.length} body site catalog entries`);
     console.log(`Loaded ${existingConditions.length} existing conditions for person`);
+    console.log(`Loaded ${existingFindings.length} existing active findings for person`);
 
     // Extract structured data from OCR text
     const structuredData = await extractStructuredData(
@@ -786,14 +1078,19 @@ Deno.serve(async (req) => {
       observationCatalog,
       findingTypeCatalog,
       bodySiteCatalog,
-      existingConditions
+      existingConditions,
+      existingFindings
     );
     console.log(`Extracted ${structuredData.observations.length} observations`);
     console.log(`Extracted ${structuredData.findings.length} findings`);
     console.log(`Extracted ${structuredData.conditions.length} conditions`);
+    console.log(`Findings to resolve: ${structuredData.findings_to_resolve.length}`);
+    console.log(`Conditions to resolve: ${structuredData.conditions_to_resolve.length}`);
     console.log("Extracted observations:", JSON.stringify(structuredData.observations, null, 2));
     console.log("Extracted findings:", JSON.stringify(structuredData.findings, null, 2));
     console.log("Extracted conditions:", JSON.stringify(structuredData.conditions, null, 2));
+    console.log("Findings to resolve:", JSON.stringify(structuredData.findings_to_resolve, null, 2));
+    console.log("Conditions to resolve:", JSON.stringify(structuredData.conditions_to_resolve, null, 2));
 
     // Update the medical record with structured data
     const { error: updateError } = await supabaseAdmin
@@ -1082,6 +1379,113 @@ Deno.serve(async (req) => {
         if (crError) {
           console.error("Error inserting condition_record:", crError);
           // Don't fail the whole request, just log the error
+        }
+      }
+    }
+
+    // Process findings to resolve (create resolution entries with size=0, count=0)
+    if (structuredData.findings_to_resolve.length > 0) {
+      console.log(`Processing ${structuredData.findings_to_resolve.length} findings to resolve`);
+      
+      for (const toResolve of structuredData.findings_to_resolve) {
+        // Find matching existing finding to get catalog IDs
+        const matchingFinding = existingFindings.find(f => {
+          // Match by finding_code + site_code if available
+          if (toResolve.finding_code && toResolve.site_code) {
+            return f.finding_code === toResolve.finding_code && f.site_code === toResolve.site_code;
+          }
+          // Match by finding_code only
+          if (toResolve.finding_code) {
+            return f.finding_code === toResolve.finding_code;
+          }
+          // Match by text (fallback)
+          const findingTextMatch = f.finding_type_text.toLowerCase().trim() === toResolve.finding_type_text.toLowerCase().trim();
+          const siteTextMatch = !toResolve.body_site_text || 
+            (f.body_site_text?.toLowerCase().trim() === toResolve.body_site_text.toLowerCase().trim());
+          return findingTextMatch && siteTextMatch;
+        });
+
+        if (!matchingFinding) {
+          console.warn(`Could not find matching existing finding to resolve: ${toResolve.finding_type_text}`);
+          continue;
+        }
+
+        // Create resolution entry (finding with size=0, count=0)
+        const { error: resolveError } = await supabaseAdmin
+          .from("record_findings")
+          .insert({
+            person_id: record.person_id,
+            record_id,
+            finding_type_id: matchingFinding.finding_type_id,
+            finding_code: matchingFinding.finding_code,
+            finding_type_text: matchingFinding.finding_type_text,
+            body_site_id: matchingFinding.body_site_id,
+            site_code: matchingFinding.site_code,
+            body_site_text: matchingFinding.body_site_text,
+            size_mm: 0,
+            count: 0,
+            severity: "unknown",
+            laterality: "none",
+            finding_date: structuredData.record_date || null,
+            source_anchor: toResolve.source_anchor || `Resolved: ${toResolve.reason}`,
+            is_llm_extracted: true,
+            is_user_verified: false,
+            confidence: toResolve.confidence,
+          });
+
+        if (resolveError) {
+          console.error("Error creating resolution entry for finding:", resolveError);
+        } else {
+          console.log(`Created resolution entry for finding: ${matchingFinding.finding_type_text} at ${matchingFinding.body_site_text || matchingFinding.site_code}`);
+        }
+      }
+    }
+
+    // Process conditions to resolve (update status and create condition_record)
+    if (structuredData.conditions_to_resolve.length > 0) {
+      console.log(`Processing ${structuredData.conditions_to_resolve.length} conditions to resolve`);
+      
+      for (const toResolve of structuredData.conditions_to_resolve) {
+        if (!toResolve.condition_id) {
+          console.warn("Skipping condition to resolve without condition_id");
+          continue;
+        }
+
+        // Verify the condition exists and belongs to this person
+        const existingCond = existingConditions.find(c => c.id === toResolve.condition_id);
+        if (!existingCond) {
+          console.warn(`Condition to resolve not found in existing conditions: ${toResolve.condition_id}`);
+          continue;
+        }
+
+        // Update condition status to resolved
+        const { error: updateError } = await supabaseAdmin
+          .from("conditions")
+          .update({ current_status: "resolved" })
+          .eq("id", toResolve.condition_id);
+
+        if (updateError) {
+          console.error("Error updating condition status to resolved:", updateError);
+          continue;
+        }
+
+        // Create condition_record linking to this record
+        const { error: crError } = await supabaseAdmin
+          .from("condition_records")
+          .insert({
+            condition_id: toResolve.condition_id,
+            record_id: record_id,
+            status_in_record: "resolved",
+            source_anchor: toResolve.source_anchor,
+            confidence: toResolve.confidence,
+            is_llm_extracted: true,
+            is_user_verified: false,
+          });
+
+        if (crError) {
+          console.error("Error inserting condition_record for resolved condition:", crError);
+        } else {
+          console.log(`Marked condition as resolved: ${existingCond.name}`);
         }
       }
     }

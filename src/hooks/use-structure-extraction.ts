@@ -88,15 +88,22 @@ export function useStructureExtraction() {
         queryClient.invalidateQueries({
           queryKey: ["record-findings", recordId],
         });
+        // Invalidate finding history queries (includes auto-resolved findings)
         queryClient.invalidateQueries({
           queryKey: ["person-finding-history"],
         });
-        // Invalidate condition-related queries
+        queryClient.invalidateQueries({
+          queryKey: ["single-finding-history"],
+        });
+        // Invalidate condition-related queries (includes auto-resolved conditions)
         queryClient.invalidateQueries({
           queryKey: ["condition-records", "record", recordId],
         });
         queryClient.invalidateQueries({
           queryKey: ["conditions"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["person-conditions"],
         });
 
         return { success: true, structured_data: data.structured_data };
