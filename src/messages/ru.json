@@ -527,6 +527,18 @@
       "right": "Справа",
       "bilateral": "Двусторонняя",
       "none": "Н/Д"
+    },
+    "comparison": {
+      "new": "Новая",
+      "known": "Известна",
+      "previousSize": "было {size} мм",
+      "previousCount": "было x{count}",
+      "sizeChange": "{change} мм",
+      "countChange": "x{change}",
+      "increased": "увеличение",
+      "decreased": "уменьшение",
+      "unchanged": "без изменений",
+      "firstOccurrence": "первое обнаружение"
     }
   },
   "conditions": {

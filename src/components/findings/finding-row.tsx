@@ -1,14 +1,24 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Pencil, Trash2, AlertTriangle, MapPin, Ruler } from "lucide-react";
+import { Pencil, Trash2, AlertTriangle, MapPin, Ruler, TrendingUp, TrendingDown, Minus, CircleDot, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { RecordFindingWithCatalog, FindingSeverity, FindingLaterality } from "@/types";
 
+// Comparison data to show change from previous occurrence
+export interface FindingComparison {
+  isNew: boolean; // true if this finding type+site has never been seen before
+  previousOccurrences: number; // how many times this finding was seen before
+  previousSize: number | null; // size from the most recent previous occurrence
+  previousCount: number | null; // count from the most recent previous occurrence
+  previousDate: string | null; // date of the most recent previous occurrence
+}
+
 interface FindingRowProps {
   finding: RecordFindingWithCatalog;
+  comparison?: FindingComparison | null; // optional comparison data
   onEdit?: () => void;
   onDelete?: () => void;
   isProcessing?: boolean;
@@ -55,8 +65,79 @@ function LateralityBadge({ laterality }: { laterality: FindingLaterality }) {
   );
 }
 
+// Size change indicator component
+function SizeChangeIndicator({ 
+  currentSize, 
+  previousSize 
+}: { 
+  currentSize: number | null; 
+  previousSize: number | null;
+}) {
+  const t = useTranslations();
+  
+  if (currentSize === null || previousSize === null) return null;
+  
+  // Round to 1 decimal place to avoid floating point precision issues (e.g., 3.8 - 3.7 = 0.09999...)
+  const change = Math.round((currentSize - previousSize) * 10) / 10;
+  
+  if (change === 0) {
+    return (
+      <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+        <Minus className="h-3 w-3" />
+        <span>{t("findings.comparison.unchanged")}</span>
+      </span>
+    );
+  }
+  
+  const isIncrease = change > 0;
+  const changeText = isIncrease ? `+${change}` : `${change}`;
+  
+  return (
+    <span className={cn(
+      "flex items-center gap-0.5 text-xs font-medium",
+      isIncrease ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
+    )}>
+      {isIncrease ? (
+        <TrendingUp className="h-3 w-3" />
+      ) : (
+        <TrendingDown className="h-3 w-3" />
+      )}
+      <span>{t("findings.comparison.sizeChange", { change: changeText })}</span>
+    </span>
+  );
+}
+
+// New/Known badge component
+function ComparisonBadge({ comparison }: { comparison: FindingComparison }) {
+  const t = useTranslations();
+  
+  if (comparison.isNew) {
+    return (
+      <Badge 
+        variant="outline" 
+        className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+      >
+        <CircleDot className="h-3 w-3" />
+        {t("findings.comparison.new")}
+      </Badge>
+    );
+  }
+  
+  return (
+    <Badge 
+      variant="outline" 
+      className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1"
+      title={`${comparison.previousOccurrences} ${t("findings.occurrences")}`}
+    >
+      <History className="h-3 w-3" />
+      {t("findings.comparison.known")} ({comparison.previousOccurrences})
+    </Badge>
+  );
+}
+
 export function FindingRow({ 
   finding, 
+  comparison,
   onEdit, 
   onDelete, 
   isProcessing = false,
@@ -73,7 +154,8 @@ export function FindingRow({
   return (
     <div className={cn(
       "flex items-center justify-between gap-4 rounded-lg border p-3",
-      isSevere && "border-orange-500/30 bg-orange-500/5"
+      isSevere && "border-orange-500/30 bg-orange-500/5",
+      comparison?.isNew && "border-amber-500/30 bg-amber-500/5"
     )}>
       <div className="min-w-0 flex-1">
         {/* Finding type and code */}
@@ -100,12 +182,27 @@ export function FindingRow({
           </div>
         )}
 
-        {/* Size and count */}
-        <div className="flex items-center gap-3 mt-1 text-sm">
+        {/* Size and count with comparison */}
+        <div className="flex items-center gap-3 mt-1 text-sm flex-wrap">
           {finding.size_mm !== null && (
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <Ruler className="h-3 w-3" />
-              <span>{finding.size_mm} {t("findings.mm")}</span>
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <Ruler className="h-3 w-3" />
+                <span>{finding.size_mm} {t("findings.mm")}</span>
+              </div>
+              {/* Show previous size and change if available */}
+              {comparison && !comparison.isNew && comparison.previousSize !== null && (
+                <>
+                  <span className="text-muted-foreground/50">←</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("findings.comparison.previousSize", { size: comparison.previousSize })}
+                  </span>
+                  <SizeChangeIndicator 
+                    currentSize={finding.size_mm} 
+                    previousSize={comparison.previousSize} 
+                  />
+                </>
+              )}
             </div>
           )}
           {finding.count !== null && finding.count > 1 && (
@@ -118,6 +215,9 @@ export function FindingRow({
 
       {/* Badges and actions */}
       <div className="flex items-center gap-2 shrink-0">
+        {/* Show new/known badge if comparison data is available */}
+        {comparison && <ComparisonBadge comparison={comparison} />}
+        
         <SeverityBadge severity={finding.severity} />
         <LateralityBadge laterality={finding.laterality} />
         

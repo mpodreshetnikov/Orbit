@@ -87,8 +87,9 @@ import {
   useDeleteConditionRecord,
   useCreateConditionWithRecord,
   useLinkConditionToRecord,
+  usePersonFindingHistory,
 } from "@/hooks";
-import { FindingRow, FindingEditDialog } from "@/components/findings";
+import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
 import { ConditionRecordRow, ConditionEditDialog } from "@/components/conditions";
 import type { 
   RecordType, 
@@ -126,6 +127,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const { data: findings } = useRecordFindings(recordId);
   const { data: conditionRecords } = useRecordConditions(recordId);
   const { data: personConditions } = usePersonConditions(record?.person_id ?? null);
+  const { data: personFindingHistory } = usePersonFindingHistory(record?.person_id ?? null);
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -176,6 +178,65 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const isFindingProcessing = updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending;
   const isConditionProcessing = updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
     createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending;
+  
+  // Helper function to compute comparison data for a finding
+  // Compares the current finding with previous occurrences from the person's history
+  const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null => {
+    // Wait for record to load, but proceed even if history is empty (means everything is new)
+    if (!record) return null;
+    if (personFindingHistory === undefined) return null; // Still loading
+    
+    // Build the key for matching - same logic as in use-finding-history.ts
+    const findingKey = finding.finding_code || finding.finding_type_text.toLowerCase().trim();
+    const siteKey = finding.site_code || (finding.body_site_text?.toLowerCase().trim() || "unknown");
+    
+    // Find matching history entry
+    const historyMatch = personFindingHistory.find(h => {
+      const historyFindingKey = h.finding_code || h.finding_type_text.toLowerCase().trim();
+      const historySiteKey = h.site_code || (h.body_site_text?.toLowerCase().trim() || "unknown");
+      return historyFindingKey === findingKey && historySiteKey === siteKey;
+    });
+    
+    if (!historyMatch) {
+      // This is a completely new finding type+site combination
+      return {
+        isNew: true,
+        previousOccurrences: 0,
+        previousSize: null,
+        previousCount: null,
+        previousDate: null,
+      };
+    }
+    
+    // Filter out the current finding from history to find truly previous occurrences
+    // An occurrence is "previous" if it's from a different record (not the current one)
+    const previousOccurrences = historyMatch.history.filter(
+      h => h.record_id !== recordId
+    );
+    
+    if (previousOccurrences.length === 0) {
+      // This is the first occurrence of this finding (only this record has it)
+      return {
+        isNew: true,
+        previousOccurrences: 0,
+        previousSize: null,
+        previousCount: null,
+        previousDate: null,
+      };
+    }
+    
+    // Sort by date to get the most recent previous occurrence
+    // History is already sorted newest first, so the first item after filtering is the most recent previous
+    const mostRecentPrevious = previousOccurrences[0];
+    
+    return {
+      isNew: false,
+      previousOccurrences: previousOccurrences.length,
+      previousSize: mostRecentPrevious.size_mm,
+      previousCount: mostRecentPrevious.count,
+      previousDate: mostRecentPrevious.record_date,
+    };
+  };
   
   const handleEditObservation = (obs: RecordObservationWithCatalog) => {
     setEditingObservation(obs);
@@ -894,6 +955,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                   <FindingRow
                     key={finding.id}
                     finding={finding}
+                    comparison={getComparisonForFinding(finding)}
                     onEdit={isRemoved ? undefined : () => handleEditFinding(finding)}
                     onDelete={isRemoved ? undefined : () => handleDeleteFinding(finding)}
                     isProcessing={isFindingProcessing}

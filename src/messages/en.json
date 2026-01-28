@@ -527,6 +527,18 @@
       "right": "Right",
       "bilateral": "Bilateral",
       "none": "N/A"
+    },
+    "comparison": {
+      "new": "New",
+      "known": "Known",
+      "previousSize": "was {size} mm",
+      "previousCount": "was x{count}",
+      "sizeChange": "{change} mm",
+      "countChange": "x{change}",
+      "increased": "increased",
+      "decreased": "decreased",
+      "unchanged": "unchanged",
+      "firstOccurrence": "first occurrence"
     }
   },
   "conditions": {

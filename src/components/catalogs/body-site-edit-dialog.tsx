@@ -1,20 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { X, Plus } from "lucide-react";
+import { X, Plus, Search, ChevronsUpDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +50,10 @@ export function BodySiteEditDialog({
   const [notes, setNotes] = useState("");
   const [newSynonymRu, setNewSynonymRu] = useState("");
   const [newSynonymEn, setNewSynonymEn] = useState("");
+  const [parentSearch, setParentSearch] = useState("");
+  const [isParentComboboxOpen, setIsParentComboboxOpen] = useState(false);
+  const parentComboboxRef = useRef<HTMLDivElement>(null);
+  const parentInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize form
   useEffect(() => {
@@ -79,8 +77,21 @@ export function BodySiteEditDialog({
       }
       setNewSynonymRu("");
       setNewSynonymEn("");
+      setParentSearch("");
+      setIsParentComboboxOpen(false);
     }
   }, [open, bodySite]);
+
+  // Close parent combobox when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (parentComboboxRef.current && !parentComboboxRef.current.contains(event.target as Node)) {
+        setIsParentComboboxOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Get available parent sites (exclude self and descendants to prevent circular references)
   const availableParents = allSites.filter(s => {
@@ -97,6 +108,33 @@ export function BodySiteEditDialog({
     }
     return true;
   });
+
+  // Filter available parents based on search
+  const filteredParents = availableParents.filter(site => {
+    if (!parentSearch.trim()) return true;
+    const search = parentSearch.toLowerCase();
+    return (
+      site.site_code.toLowerCase().includes(search) ||
+      site.name_ru.toLowerCase().includes(search) ||
+      site.name_en.toLowerCase().includes(search) ||
+      site.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
+      site.synonyms_en?.some(s => s.toLowerCase().includes(search))
+    );
+  });
+
+  // Display value for parent site combobox
+  const parentDisplayValue = parentSiteCode
+    ? (() => {
+        const parent = allSites.find(s => s.site_code === parentSiteCode);
+        return parent ? `${parent.name_ru} (${parent.site_code})` : "";
+      })()
+    : "";
+
+  const handleParentSelect = (siteCode: string | null) => {
+    setParentSiteCode(siteCode);
+    setParentSearch("");
+    setIsParentComboboxOpen(false);
+  };
 
   const addSynonymRu = () => {
     const trimmed = newSynonymRu.trim().toLowerCase();
@@ -199,23 +237,91 @@ export function BodySiteEditDialog({
           {/* Parent Site */}
           <div className="space-y-2">
             <Label>{t("catalogs.parentSite")}</Label>
-            <Select
-              value={parentSiteCode || "__none__"}
-              onValueChange={(value) => setParentSiteCode(value === "__none__" ? null : value)}
-              disabled={isProcessing}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t("catalogs.selectParentSite")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">{t("catalogs.noParent")}</SelectItem>
-                {availableParents.map((site) => (
-                  <SelectItem key={site.site_code} value={site.site_code}>
-                    {site.name_ru} ({site.site_code})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="relative" ref={parentComboboxRef}>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  ref={parentInputRef}
+                  value={isParentComboboxOpen ? parentSearch : parentDisplayValue}
+                  onChange={(e) => {
+                    setParentSearch(e.target.value);
+                    if (!isParentComboboxOpen) setIsParentComboboxOpen(true);
+                  }}
+                  onFocus={() => {
+                    setIsParentComboboxOpen(true);
+                    setParentSearch("");
+                  }}
+                  placeholder={t("catalogs.selectParentSite")}
+                  className="pl-9 pr-9"
+                  disabled={isProcessing}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
+                  onClick={() => {
+                    setIsParentComboboxOpen(!isParentComboboxOpen);
+                    if (!isParentComboboxOpen) {
+                      setParentSearch("");
+                      parentInputRef.current?.focus();
+                    }
+                  }}
+                  disabled={isProcessing}
+                >
+                  <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </div>
+              
+              {/* Dropdown */}
+              {isParentComboboxOpen && (
+                <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
+                  <ScrollArea className="max-h-60">
+                    <div className="p-1">
+                      {/* No parent option */}
+                      <button
+                        type="button"
+                        onClick={() => handleParentSelect(null)}
+                        className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
+                          parentSiteCode === null ? "bg-accent" : ""
+                        }`}
+                      >
+                        <Check className={`h-4 w-4 ${parentSiteCode === null ? "opacity-100" : "opacity-0"}`} />
+                        <span className="text-muted-foreground italic">
+                          {t("catalogs.noParent")}
+                        </span>
+                      </button>
+                      
+                      {/* Available parent sites */}
+                      {filteredParents.map((site) => (
+                        <button
+                          key={site.site_code}
+                          type="button"
+                          onClick={() => handleParentSelect(site.site_code)}
+                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
+                            parentSiteCode === site.site_code ? "bg-accent" : ""
+                          }`}
+                        >
+                          <Check className={`h-4 w-4 shrink-0 ${parentSiteCode === site.site_code ? "opacity-100" : "opacity-0"}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="truncate">{site.name_ru}</div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {site.site_code}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                      
+                      {filteredParents.length === 0 && parentSearch && (
+                        <div className="px-2 py-4 text-sm text-center text-muted-foreground">
+                          {t("catalogs.noSearchResults")}
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Russian synonyms */}

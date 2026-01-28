@@ -58,7 +58,7 @@ async function fetchPersonFindingHistory(
 ): Promise<FindingSummary[]> {
   const supabase = createClient();
 
-  // Fetch all findings for active records of this person
+  // Fetch all findings for active records of this person (history baseline)
   const { data, error } = await supabase
     .from("record_findings")
     .select(`

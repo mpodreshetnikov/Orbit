@@ -69,8 +69,9 @@ import {
   useDeleteConditionRecord,
   useCreateConditionWithRecord,
   useLinkConditionToRecord,
+  usePersonFindingHistory,
 } from "@/hooks";
-import { FindingRow, FindingEditDialog } from "@/components/findings";
+import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
 import { ConditionRecordRow, ConditionEditDialog } from "@/components/conditions";
 import { 
   RECORD_TYPES, 
@@ -691,6 +692,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
   // Findings
   const { data: findings, isLoading: findingsLoading } = useRecordFindings(record.id);
+  const { data: personFindingHistory } = usePersonFindingHistory(record.person_id);
   const [editingFinding, setEditingFinding] = useState<RecordFindingWithCatalog | null>(null);
   const [isAddingFinding, setIsAddingFinding] = useState(false);
   const [showFindings, setShowFindings] = useState(true);
@@ -719,6 +721,52 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending ||
     updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
     createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending;
+
+  // Helper function to compute comparison data for a finding
+  const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null => {
+    if (personFindingHistory === undefined) return null; // Still loading
+    
+    const findingKey = finding.finding_code || finding.finding_type_text.toLowerCase().trim();
+    const siteKey = finding.site_code || (finding.body_site_text?.toLowerCase().trim() || "unknown");
+    
+    const historyMatch = personFindingHistory.find(h => {
+      const historyFindingKey = h.finding_code || h.finding_type_text.toLowerCase().trim();
+      const historySiteKey = h.site_code || (h.body_site_text?.toLowerCase().trim() || "unknown");
+      return historyFindingKey === findingKey && historySiteKey === siteKey;
+    });
+    
+    if (!historyMatch) {
+      return {
+        isNew: true,
+        previousOccurrences: 0,
+        previousSize: null,
+        previousCount: null,
+        previousDate: null,
+      };
+    }
+    
+    // Filter out findings from this same record
+    const previousOccurrences = historyMatch.history.filter(h => h.record_id !== record.id);
+    
+    if (previousOccurrences.length === 0) {
+      return {
+        isNew: true,
+        previousOccurrences: 0,
+        previousSize: null,
+        previousCount: null,
+        previousDate: null,
+      };
+    }
+    
+    const mostRecentPrevious = previousOccurrences[0];
+    return {
+      isNew: false,
+      previousOccurrences: previousOccurrences.length,
+      previousSize: mostRecentPrevious.size_mm,
+      previousCount: mostRecentPrevious.count,
+      previousDate: mostRecentPrevious.record_date,
+    };
+  };
 
   const addKeyword = () => {
     const trimmed = newKeyword.trim();
@@ -1309,6 +1357,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                   <FindingRow
                     key={finding.id}
                     finding={finding}
+                    comparison={getComparisonForFinding(finding)}
                     onEdit={() => handleEditFinding(finding)}
                     onDelete={() => handleDeleteFinding(finding)}
                     isProcessing={isProcessing}
