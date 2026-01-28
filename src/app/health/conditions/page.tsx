@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import Link from "next/link";
-import { AppShell } from "@/components/layout";
 import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -310,9 +309,5 @@ function ConditionsContent() {
 }
 
 export default function ConditionsPage() {
-  return (
-    <AppShell>
-      <ConditionsContent />
-    </AppShell>
-  );
+  return <ConditionsContent />;
 }

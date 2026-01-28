@@ -23,7 +23,6 @@ import {
   Line,
   ResponsiveContainer,
 } from "recharts";
-import { AppShell } from "@/components/layout/app-shell";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -336,100 +335,98 @@ export default function ObservationsHistoryPage() {
   );
 
   return (
-    <AppShell>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
-                <FlaskConical className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
-                {t("observationHistory.title")}
-              </h1>
-              <p className="text-sm text-muted-foreground hidden sm:block">
-                {t("observationHistory.description")}
-              </p>
-            </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+              <FlaskConical className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
+              {t("observationHistory.title")}
+            </h1>
+            <p className="text-sm text-muted-foreground hidden sm:block">
+              {t("observationHistory.description")}
+            </p>
           </div>
-
-          {/* View toggle */}
-          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "cards" | "table")}>
-            <TabsList className="h-9">
-              <TabsTrigger value="cards" className="gap-1.5 px-2 sm:px-3">
-                <LayoutGrid className="h-4 w-4" />
-                <span className="hidden sm:inline">{t("observationHistory.cardsView")}</span>
-              </TabsTrigger>
-              <TabsTrigger value="table" className="gap-1.5 px-2 sm:px-3">
-                <TableIcon className="h-4 w-4" />
-                <span className="hidden sm:inline">{t("observationHistory.tableView")}</span>
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("observationHistory.searchPlaceholder")}
-            className="pl-9"
-          />
-        </div>
-
-        {/* No person selected */}
-        {!selectedPersonId && (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <p className="text-muted-foreground">{t("person.selectPrompt")}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Loading */}
-        {selectedPersonId && isLoading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <Card className="border-destructive">
-            <CardContent className="py-8 text-center text-destructive">
-              {t("common.error")}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Content */}
-        {selectedPersonId && !isLoading && observations && (
-          <>
-            {observations.length === 0 ? (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                  <p className="text-muted-foreground">
-                    {search 
-                      ? t("observationHistory.noSearchResults")
-                      : t("observationHistory.noData")}
-                  </p>
-                </CardContent>
-              </Card>
-            ) : viewMode === "cards" ? (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {observations.map((obs) => (
-                  <ObservationCard key={obs.obs_code} observation={obs} />
-                ))}
-              </div>
-            ) : (
-              <ObservationsTable observations={observations} />
-            )}
-          </>
-        )}
+        {/* View toggle */}
+        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "cards" | "table")}>
+          <TabsList className="h-9">
+            <TabsTrigger value="cards" className="gap-1.5 px-2 sm:px-3">
+              <LayoutGrid className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("observationHistory.cardsView")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="table" className="gap-1.5 px-2 sm:px-3">
+              <TableIcon className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("observationHistory.tableView")}</span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
-    </AppShell>
+
+      {/* Search */}
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t("observationHistory.searchPlaceholder")}
+          className="pl-9"
+        />
+      </div>
+
+      {/* No person selected */}
+      {!selectedPersonId && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+            <p className="text-muted-foreground">{t("person.selectPrompt")}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Loading */}
+      {selectedPersonId && isLoading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <Card className="border-destructive">
+          <CardContent className="py-8 text-center text-destructive">
+            {t("common.error")}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Content */}
+      {selectedPersonId && !isLoading && observations && (
+        <>
+          {observations.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                <p className="text-muted-foreground">
+                  {search 
+                    ? t("observationHistory.noSearchResults")
+                    : t("observationHistory.noData")}
+                </p>
+              </CardContent>
+            </Card>
+          ) : viewMode === "cards" ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {observations.map((obs) => (
+                <ObservationCard key={obs.obs_code} observation={obs} />
+              ))}
+            </div>
+          ) : (
+            <ObservationsTable observations={observations} />
+          )}
+        </>
+      )}
+    </div>
   );
 }

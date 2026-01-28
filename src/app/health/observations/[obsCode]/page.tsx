@@ -28,7 +28,6 @@ import {
   ReferenceLine,
   ReferenceArea,
 } from "recharts";
-import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -477,210 +476,208 @@ export default function ObservationDetailPage({
   }, [observation, convertValue]);
 
   return (
-    <AppShell>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-start gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <FlaskConical className="h-5 w-5 text-primary" />
-              <Badge variant="outline">{decodedObsCode}</Badge>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">{displayName}</h1>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start gap-4">
+        <Button variant="ghost" size="icon" onClick={() => router.back()}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <FlaskConical className="h-5 w-5 text-primary" />
+            <Badge variant="outline">{decodedObsCode}</Badge>
           </div>
-          {/* Unit selector */}
-          {availableUnits.length > 1 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">{t("observations.displayUnit")}:</span>
-              <Select 
-                value={selectedUnit || canonicalUnit} 
-                onValueChange={setSelectedUnit}
-              >
-                <SelectTrigger className="w-24">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableUnits.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <h1 className="text-2xl font-bold tracking-tight">{displayName}</h1>
         </div>
-
-        {/* Loading */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        {/* Unit selector */}
+        {availableUnits.length > 1 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">{t("observations.displayUnit")}:</span>
+            <Select 
+              value={selectedUnit || canonicalUnit} 
+              onValueChange={setSelectedUnit}
+            >
+              <SelectTrigger className="w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableUnits.map((u) => (
+                  <SelectItem key={u} value={u}>
+                    {u}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <Card className="border-destructive">
-            <CardContent className="py-8 text-center text-destructive">
-              {t("common.error")}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Not found */}
-        {!isLoading && !error && !observation && (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <p className="text-muted-foreground">{t("observationHistory.noData")}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Content */}
-        {observation && (
-          <>
-            {/* Summary cards */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Latest value */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    {t("observationHistory.latestValue")}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-bold">
-                      {latestValue !== null && latestValue !== undefined
-                        ? latestValue.toFixed(latestValue % 1 === 0 ? 0 : 1)
-                        : observation.latest_value_text || "—"}
-                    </span>
-                    {displayUnit && (
-                      <span className="text-muted-foreground">{displayUnit}</span>
-                    )}
-                  </div>
-                  {observation.latest_date && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {format(new Date(observation.latest_date), "dd MMMM yyyy")}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Status */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    {t("observationHistory.status")}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <StatusBadge status={observation.latest_status} />
-                  {observation.latest_status && 
-                   observation.latest_status !== "normal" && 
-                   observation.latest_status !== "unknown" && (
-                    <div className="flex items-center gap-1 mt-2 text-orange-600">
-                      <AlertTriangle className="h-4 w-4" />
-                      <span className="text-sm">{t("observationHistory.outOfRange")}</span>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Reference range */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    {t("observationHistory.referenceRange")}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {displayRefLow !== null && displayRefHigh !== null ? (
-                    <div className="text-lg font-semibold">
-                      {displayRefLow.toFixed(displayRefLow % 1 === 0 ? 0 : 1)} – {displayRefHigh.toFixed(displayRefHigh % 1 === 0 ? 0 : 1)}
-                      {displayUnit && (
-                        <span className="text-sm font-normal text-muted-foreground ml-1">
-                          {displayUnit}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Trend */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    {t("observationHistory.trend")}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {trend ? (
-                    <div className="flex items-center gap-2">
-                      {trend.direction === "up" && (
-                        <>
-                          <TrendingUp className="h-5 w-5 text-orange-500" />
-                          <span className="text-lg font-semibold text-orange-500">
-                            +{trend.percent.toFixed(1)}%
-                          </span>
-                        </>
-                      )}
-                      {trend.direction === "down" && (
-                        <>
-                          <TrendingDown className="h-5 w-5 text-blue-500" />
-                          <span className="text-lg font-semibold text-blue-500">
-                            -{trend.percent.toFixed(1)}%
-                          </span>
-                        </>
-                      )}
-                      {trend.direction === "stable" && (
-                        <span className="text-muted-foreground">{t("observationHistory.stable")}</span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {observation.measurement_count} {t("observationHistory.measurements")}
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Chart */}
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("observationHistory.chartTitle")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ObservationChart 
-                  history={convertedHistory}
-                  unit={displayUnit}
-                  refLow={displayRefLow}
-                  refHigh={displayRefHigh}
-                />
-              </CardContent>
-            </Card>
-
-            {/* History table */}
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("observationHistory.historyTitle")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <HistoryTable history={convertedHistory} unit={displayUnit} />
-              </CardContent>
-            </Card>
-          </>
         )}
       </div>
-    </AppShell>
+
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <Card className="border-destructive">
+          <CardContent className="py-8 text-center text-destructive">
+            {t("common.error")}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Not found */}
+      {!isLoading && !error && !observation && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+            <p className="text-muted-foreground">{t("observationHistory.noData")}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Content */}
+      {observation && (
+        <>
+          {/* Summary cards */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Latest value */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {t("observationHistory.latestValue")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-bold">
+                    {latestValue !== null && latestValue !== undefined
+                      ? latestValue.toFixed(latestValue % 1 === 0 ? 0 : 1)
+                      : observation.latest_value_text || "—"}
+                  </span>
+                  {displayUnit && (
+                    <span className="text-muted-foreground">{displayUnit}</span>
+                  )}
+                </div>
+                {observation.latest_date && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {format(new Date(observation.latest_date), "dd MMMM yyyy")}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Status */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {t("observationHistory.status")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <StatusBadge status={observation.latest_status} />
+                {observation.latest_status && 
+                 observation.latest_status !== "normal" && 
+                 observation.latest_status !== "unknown" && (
+                  <div className="flex items-center gap-1 mt-2 text-orange-600">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="text-sm">{t("observationHistory.outOfRange")}</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Reference range */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {t("observationHistory.referenceRange")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {displayRefLow !== null && displayRefHigh !== null ? (
+                  <div className="text-lg font-semibold">
+                    {displayRefLow.toFixed(displayRefLow % 1 === 0 ? 0 : 1)} – {displayRefHigh.toFixed(displayRefHigh % 1 === 0 ? 0 : 1)}
+                    {displayUnit && (
+                      <span className="text-sm font-normal text-muted-foreground ml-1">
+                        {displayUnit}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Trend */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {t("observationHistory.trend")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {trend ? (
+                  <div className="flex items-center gap-2">
+                    {trend.direction === "up" && (
+                      <>
+                        <TrendingUp className="h-5 w-5 text-orange-500" />
+                        <span className="text-lg font-semibold text-orange-500">
+                          +{trend.percent.toFixed(1)}%
+                        </span>
+                      </>
+                    )}
+                    {trend.direction === "down" && (
+                      <>
+                        <TrendingDown className="h-5 w-5 text-blue-500" />
+                        <span className="text-lg font-semibold text-blue-500">
+                          -{trend.percent.toFixed(1)}%
+                        </span>
+                      </>
+                    )}
+                    {trend.direction === "stable" && (
+                      <span className="text-muted-foreground">{t("observationHistory.stable")}</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  {observation.measurement_count} {t("observationHistory.measurements")}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Chart */}
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("observationHistory.chartTitle")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ObservationChart 
+                history={convertedHistory}
+                unit={displayUnit}
+                refLow={displayRefLow}
+                refHigh={displayRefHigh}
+              />
+            </CardContent>
+          </Card>
+
+          {/* History table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("observationHistory.historyTitle")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <HistoryTable history={convertedHistory} unit={displayUnit} />
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
   );
 }

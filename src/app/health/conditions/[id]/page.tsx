@@ -22,7 +22,6 @@ import {
   Check,
   AlertTriangle,
 } from "lucide-react";
-import { AppShell } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -516,9 +515,5 @@ function ConditionDetailContent() {
 }
 
 export default function ConditionDetailPage() {
-  return (
-    <AppShell>
-      <ConditionDetailContent />
-    </AppShell>
-  );
+  return <ConditionDetailContent />;
 }

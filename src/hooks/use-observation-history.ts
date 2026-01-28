@@ -53,6 +53,7 @@ async function fetchPersonObservationHistory(
     `)
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
+    .eq("is_applied", true) // Only show applied observations in history
     .order("created_at", { ascending: false });
 
   const { data, error } = await query;
@@ -237,6 +238,7 @@ async function fetchSingleObservationHistory(
     `)
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
+    .eq("is_applied", true) // Only show applied observations in history
     .or(`obs_code.eq.${obsCode},obs_name.ilike.${obsCode}`)
     .order("created_at", { ascending: false });
 

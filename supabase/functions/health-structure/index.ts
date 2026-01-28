@@ -853,6 +853,7 @@ Deno.serve(async (req) => {
           status: obs.status,
           is_llm_extracted: true,
           is_user_verified: false,
+          is_applied: obs.obs_code !== null, // Catalog observations are applied by default, custom require user action
           confidence: obs.confidence,
         };
       });

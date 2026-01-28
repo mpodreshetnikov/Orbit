@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { AppShell } from "@/components/layout";
 import { UserX } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
 import { usePersons } from "@/hooks";
@@ -17,21 +16,17 @@ export default function HealthPage() {
   // No person selected state
   if (!selectedPerson) {
     return (
-      <AppShell>
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-          <UserX className="h-12 w-12 text-muted-foreground/50" />
-          <h3 className="mt-4 text-lg font-semibold">{t("person.noPerson")}</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {t("person.selectPrompt")}
-          </p>
-        </div>
-      </AppShell>
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
+        <UserX className="h-12 w-12 text-muted-foreground/50" />
+        <h3 className="mt-4 text-lg font-semibold">{t("person.noPerson")}</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("person.selectPrompt")}
+        </p>
+      </div>
     );
   }
 
   return (
-    <AppShell>
-      <RecordsList personId={selectedPerson.id} personName={selectedPerson.name} />
-    </AppShell>
+    <RecordsList personId={selectedPerson.id} personName={selectedPerson.name} />
   );
 }

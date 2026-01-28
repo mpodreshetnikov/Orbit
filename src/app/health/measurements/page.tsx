@@ -20,7 +20,6 @@ import {
   Line,
   ResponsiveContainer,
 } from "recharts";
-import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -280,7 +279,7 @@ export default function MeasurementsPage() {
   }, [measurements]);
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
         {/* Header */}
         <div className="space-y-4">
@@ -413,6 +412,6 @@ export default function MeasurementsPage() {
         onOpenChange={setAddDialogOpen}
         personId={selectedPersonId}
       />
-    </AppShell>
+    </>
   );
 }

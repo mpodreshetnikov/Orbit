@@ -2,7 +2,6 @@
 
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/layout";
 import { AddRecordWizard } from "@/components/records";
 import { useUIStore } from "@/stores/ui-store";
 import { usePersons } from "@/hooks";
@@ -26,31 +25,25 @@ export default function NewRecordPage() {
 
   if (isLoading) {
     return (
-      <AppShell>
-        <div className="flex items-center justify-center p-12">
-          <p className="text-muted-foreground">{t("common.loading")}</p>
-        </div>
-      </AppShell>
+      <div className="flex items-center justify-center p-12">
+        <p className="text-muted-foreground">{t("common.loading")}</p>
+      </div>
     );
   }
 
   if (!selectedPerson) {
     return (
-      <AppShell>
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-          <UserX className="h-12 w-12 text-muted-foreground/50" />
-          <h3 className="mt-4 text-lg font-semibold">{t("person.noPerson")}</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {t("person.selectPrompt")}
-          </p>
-        </div>
-      </AppShell>
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
+        <UserX className="h-12 w-12 text-muted-foreground/50" />
+        <h3 className="mt-4 text-lg font-semibold">{t("person.noPerson")}</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("person.selectPrompt")}
+        </p>
+      </div>
     );
   }
 
   return (
-    <AppShell>
-      <AddRecordWizard personId={selectedPerson.id} personName={selectedPerson.name} />
-    </AppShell>
+    <AddRecordWizard personId={selectedPerson.id} personName={selectedPerson.name} />
   );
 }

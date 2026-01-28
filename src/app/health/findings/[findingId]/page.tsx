@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ArrowLeft, Calendar, Ruler, FileText, AlertTriangle, MapPin, TrendingUp, TrendingDown, Minus, CheckCircle2 } from "lucide-react";
-import { AppShell } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -365,9 +364,5 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 export default function FindingDetailPage({ params }: FindingDetailPageProps) {
   const resolvedParams = use(params);
   
-  return (
-    <AppShell>
-      <FindingDetailContent findingId={resolvedParams.findingId} />
-    </AppShell>
-  );
+  return <FindingDetailContent findingId={resolvedParams.findingId} />;
 }

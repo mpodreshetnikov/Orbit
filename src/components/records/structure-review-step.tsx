@@ -122,26 +122,44 @@ function ObservationRow({
   observation, 
   onEdit, 
   onDelete,
+  onApply,
   isProcessing,
 }: { 
   observation: RecordObservationWithCatalog;
   onEdit: () => void;
   onDelete: () => void;
+  onApply: () => void;
   isProcessing: boolean;
 }) {
   const t = useTranslations();
   const isCustom = !observation.obs_code;
+  const isUnapplied = isCustom && !observation.is_applied;
 
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg border bg-card ${isCustom ? "border-dashed border-muted-foreground/40" : ""}`}>
+    <div className={`flex items-center gap-3 p-3 rounded-lg border bg-card ${
+      isUnapplied 
+        ? "border-dashed border-muted-foreground/40 opacity-70" 
+        : isCustom 
+          ? "border-dashed border-muted-foreground/40" 
+          : ""
+    }`}>
       {/* Name and value */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium truncate">{observation.obs_name}</span>
+          <span className={`font-medium truncate ${isUnapplied ? "text-muted-foreground" : ""}`}>
+            {observation.obs_name}
+          </span>
           {observation.obs_code ? (
             <code className="text-xs bg-muted px-1 py-0.5 rounded">
               {observation.obs_code}
             </code>
+          ) : isUnapplied ? (
+            <Badge 
+              variant="outline" 
+              className="text-xs border-dashed text-yellow-600 border-yellow-400"
+            >
+              {t("observations.pendingBadge")}
+            </Badge>
           ) : (
             <Badge 
               variant="outline" 
@@ -159,15 +177,21 @@ function ObservationRow({
               ({observation.ref_range_low ?? "—"}–{observation.ref_range_high ?? "—"})
             </span>
           )}
-          <span className="font-semibold">
+          <span className={`font-semibold ${isUnapplied ? "text-muted-foreground" : ""}`}>
             {observation.value_text || observation.value_numeric}
           </span>
           {observation.unit && (
             <span className="text-muted-foreground">{observation.unit}</span>
           )}
         </div>
-        {/* Subtle hint for custom observations */}
-        {isCustom && (
+        {/* Hint for unapplied custom observations */}
+        {isUnapplied && (
+          <p className="text-xs text-yellow-600 mt-1 italic">
+            {t("observations.applyHint")}
+          </p>
+        )}
+        {/* Subtle hint for applied custom observations */}
+        {isCustom && !isUnapplied && (
           <p className="text-xs text-muted-foreground/70 mt-1 italic">
             {t("observations.addToCatalogHint")}
           </p>
@@ -186,6 +210,19 @@ function ObservationRow({
 
       {/* Actions */}
       <div className="flex items-center gap-1 shrink-0">
+        {/* Apply button for unapplied custom observations */}
+        {isUnapplied && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1"
+            onClick={onApply}
+            disabled={isProcessing}
+          >
+            <Check className="h-3.5 w-3.5" />
+            {t("observations.applyButton")}
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -773,6 +810,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         obs_code: data.obs_code,
         is_llm_extracted: false,
         is_user_verified: true,
+        is_applied: true, // User manually added, so it's applied
       });
     } else if (editingObservation) {
       await updateObsMutation.mutateAsync({
@@ -792,6 +830,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           status: data.status,
           obs_code: data.obs_code,
           is_user_verified: true,
+          is_applied: true, // User edited, so it's applied
         },
       });
     }
@@ -802,6 +841,13 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
   const handleDeleteObservation = async (obs: RecordObservationWithCatalog) => {
     await deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id });
+  };
+
+  const handleApplyObservation = async (obs: RecordObservationWithCatalog) => {
+    await updateObsMutation.mutateAsync({
+      id: obs.id,
+      updates: { is_applied: true },
+    });
   };
 
   const verifyAllObservations = async () => {
@@ -1186,6 +1232,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                     observation={obs}
                     onEdit={() => handleEditObservation(obs)}
                     onDelete={() => handleDeleteObservation(obs)}
+                    onApply={() => handleApplyObservation(obs)}
                     isProcessing={isProcessing}
                   />
                 ))}

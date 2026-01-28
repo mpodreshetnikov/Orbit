@@ -24,7 +24,6 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -292,7 +291,7 @@ export default function MeasurementDetailPage({
   };
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-start gap-4">
@@ -520,6 +519,6 @@ export default function MeasurementDetailPage({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AppShell>
+    </>
   );
 }

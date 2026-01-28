@@ -177,6 +177,7 @@ export interface RecordObservation {
   status: ObservationStatus | null;
   is_llm_extracted: boolean;
   is_user_verified: boolean;
+  is_applied: boolean;
   confidence: number | null;
   created_at: string;
   updated_at: string;
@@ -208,6 +209,7 @@ export interface CreateRecordObservationInput {
   status?: ObservationStatus | null;
   is_llm_extracted?: boolean;
   is_user_verified?: boolean;
+  is_applied?: boolean;
   confidence?: number | null;
 }
 
@@ -226,6 +228,7 @@ export interface UpdateRecordObservationInput {
   ref_range_high_canonical?: number | null;
   status?: ObservationStatus | null;
   is_user_verified?: boolean;
+  is_applied?: boolean;
 }
 
 // LLM extraction output format

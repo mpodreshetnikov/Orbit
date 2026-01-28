@@ -3,7 +3,6 @@
 import { useState, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Search, LayoutGrid, List, CheckCircle2 } from "lucide-react";
-import { AppShell } from "@/components/layout";
 import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -196,9 +195,5 @@ function FindingsContent() {
 }
 
 export default function FindingsPage() {
-  return (
-    <AppShell>
-      <FindingsContent />
-    </AppShell>
-  );
+  return <FindingsContent />;
 }
