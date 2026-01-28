@@ -897,7 +897,7 @@ Deno.serve(async (req) => {
             morphology: f.morphology,
             description: f.description,
             histology: f.histology,
-            finding_date: f.finding_date,
+            finding_date: f.finding_date || structuredData.record_date || null,
             source_anchor: f.source_anchor,
             is_llm_extracted: true,
             is_user_verified: false,

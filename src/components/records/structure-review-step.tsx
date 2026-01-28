@@ -1289,6 +1289,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           }
         }}
         finding={editingFinding}
+        recordDate={record.record_date ?? null}
         onSave={handleSaveFinding}
         isNew={isAddingFinding}
       />

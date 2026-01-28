@@ -921,6 +921,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
               }
             }}
             finding={editingFinding}
+            recordDate={record?.record_date ?? null}
             onSave={handleSaveFinding}
             isNew={isAddingFinding}
           />

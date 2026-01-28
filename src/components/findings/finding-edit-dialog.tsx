@@ -34,6 +34,8 @@ interface FindingEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   finding: Partial<RecordFindingWithCatalog> | null;
+  /** Record date of the parent medical record; used to prefill finding date when empty */
+  recordDate?: string | null;
   onSave: (data: {
     finding_type_id: string | null;
     finding_code: string | null;
@@ -58,6 +60,7 @@ export function FindingEditDialog({
   open,
   onOpenChange,
   finding,
+  recordDate,
   onSave,
   isNew,
 }: FindingEditDialogProps) {
@@ -106,10 +109,10 @@ export function FindingEditDialog({
         setMorphology(finding.morphology || "");
         setDescription(finding.description || "");
         setHistology(finding.histology || "");
-        setFindingDate(finding.finding_date || "");
+        setFindingDate(finding.finding_date || recordDate || "");
         setSourceAnchor(finding.source_anchor || "");
       } else if (isNew) {
-        // Reset form for new finding
+        // Reset form for new finding; prefill date with record date
         setFindingTypeText("");
         setSelectedFindingCode(null);
         setBodySiteText("");
@@ -121,7 +124,7 @@ export function FindingEditDialog({
         setMorphology("");
         setDescription("");
         setHistology("");
-        setFindingDate("");
+        setFindingDate(recordDate || "");
         setSourceAnchor("");
       }
       setFindingTypeSearch("");
