@@ -159,6 +159,11 @@ async function fetchPersonFindingHistory(
     const latest = history[0];
     const firstRow = rows[0]; // For catalog info
 
+    // For size and count, fall back to earlier occurrences if latest has no data
+    // This ensures we show the most recent known value, not just the latest occurrence
+    const latestWithSize = history.find(h => h.size_mm !== null);
+    const latestWithCount = history.find(h => h.count !== null);
+
     return {
       finding_code: firstRow.finding_code,
       finding_type_text: firstRow.finding_type_text,
@@ -170,8 +175,8 @@ async function fetchPersonFindingHistory(
       catalog_finding_name_en: firstRow.finding_type_catalog?.name_en || null,
       catalog_site_name_ru: firstRow.body_site_catalog?.name_ru || null,
       catalog_site_name_en: firstRow.body_site_catalog?.name_en || null,
-      latest_size_mm: latest.size_mm,
-      latest_count: latest.count,
+      latest_size_mm: latestWithSize?.size_mm ?? null,
+      latest_count: latestWithCount?.count ?? null,
       latest_severity: latest.severity,
       latest_laterality: latest.laterality,
       latest_date: latest.record_date,
@@ -199,12 +204,12 @@ async function fetchPersonFindingHistory(
 
   // Sort: severe findings first, then by most recent date
   summaries.sort((a, b) => {
-    // Severity priority: severe > moderate > mild > unknown
+    // Severity priority: severe > moderate > unknown > mild
     const severityOrder: Record<FindingSeverity, number> = {
       severe: 0,
       moderate: 1,
-      mild: 2,
-      unknown: 3,
+      unknown: 2,
+      mild: 3,
     };
     
     const severityDiff = severityOrder[a.latest_severity] - severityOrder[b.latest_severity];
@@ -320,6 +325,11 @@ async function fetchSingleFindingHistory(
   // Find the most recent entry (first in sorted history)
   const latestHistory = history[0];
   
+  // For size and count, fall back to earlier occurrences if latest has no data
+  // This ensures we show the most recent known value, not just the latest occurrence
+  const latestWithSize = history.find(h => h.size_mm !== null);
+  const latestWithCount = history.find(h => h.count !== null);
+  
   // Get catalog info from first data row (all rows have the same catalog info)
   const firstRow = data[0] as unknown as RawFindingRow;
 
@@ -334,8 +344,8 @@ async function fetchSingleFindingHistory(
     catalog_finding_name_en: firstRow.finding_type_catalog?.name_en || null,
     catalog_site_name_ru: firstRow.body_site_catalog?.name_ru || null,
     catalog_site_name_en: firstRow.body_site_catalog?.name_en || null,
-    latest_size_mm: latestHistory.size_mm,
-    latest_count: latestHistory.count,
+    latest_size_mm: latestWithSize?.size_mm ?? null,
+    latest_count: latestWithCount?.count ?? null,
     latest_severity: latestHistory.severity,
     latest_laterality: latestHistory.laterality,
     latest_date: latestHistory.record_date,
