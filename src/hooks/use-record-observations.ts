@@ -151,7 +151,7 @@ export function useUpdateRecordObservation() {
 // ============================================================================
 async function deleteObservation({
   id,
-  recordId,
+  recordId: _recordId,
 }: {
   id: string;
   recordId: string;

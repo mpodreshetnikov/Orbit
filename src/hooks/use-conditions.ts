@@ -134,19 +134,22 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
   }
 
   // Transform the records to include record info
-  const history: ConditionHistoryRecord[] = (records || []).map((r: any) => ({
-    id: r.id,
-    record_id: r.record_id,
-    status_in_record: r.status_in_record,
-    source_anchor: r.source_anchor,
-    confidence: r.confidence,
-    is_llm_extracted: r.is_llm_extracted,
-    is_user_verified: r.is_user_verified,
-    created_at: r.created_at,
-    record_title: r.medical_records?.title || null,
-    record_date: r.medical_records?.record_date || null,
-    record_type: r.medical_records?.record_type || null,
-  }));
+  const history: ConditionHistoryRecord[] = (records || []).map((r) => {
+    const medRec = r.medical_records as { title?: string; record_date?: string; record_type?: string } | null;
+    return {
+      id: r.id as string,
+      record_id: r.record_id as string,
+      status_in_record: r.status_in_record as string,
+      source_anchor: r.source_anchor as string | null,
+      confidence: r.confidence as number | null,
+      is_llm_extracted: r.is_llm_extracted as boolean,
+      is_user_verified: r.is_user_verified as boolean,
+      created_at: r.created_at as string,
+      record_title: medRec?.title || null,
+      record_date: medRec?.record_date || null,
+      record_type: medRec?.record_type || null,
+    };
+  });
 
   // Calculate stats
   const dates = history
@@ -262,7 +265,7 @@ export function useUpdateCondition() {
 // Soft delete a condition
 async function deleteCondition({
   id,
-  personId,
+  personId: _personId,
 }: {
   id: string;
   personId: string;
@@ -416,14 +419,15 @@ async function updateConditionRecord({
       .single();
 
     const thisRecordDate = thisRecord?.record_date || null;
-    const mostRecentDate = (mostRecentMention?.medical_records as any)?.record_date || null;
+    const medicalRecords = mostRecentMention?.medical_records as { record_date?: string } | null;
+    const mostRecentDate = medicalRecords?.record_date || null;
 
     // Auto-update current_status if this record is the most recent (or equal)
     const shouldUpdateStatus = !mostRecentDate || !thisRecordDate || 
       thisRecordDate >= mostRecentDate;
 
     // Build update object
-    const conditionUpdates: Record<string, any> = {};
+    const conditionUpdates: Record<string, string | null> = {};
     if (shouldUpdateStatus) {
       conditionUpdates.current_status = updates.status_in_record;
     }
@@ -472,7 +476,7 @@ export function useUpdateConditionRecord() {
 // Delete a condition record
 async function deleteConditionRecord({
   id,
-  recordId,
+  recordId: _recordId,
 }: {
   id: string;
   recordId: string;
@@ -623,14 +627,15 @@ export function useLinkConditionToRecord() {
         .single();
 
       const thisRecordDate = thisRecord?.record_date || null;
-      const mostRecentDate = (mostRecentMention?.medical_records as any)?.record_date || null;
+      const linkMedicalRecords = mostRecentMention?.medical_records as { record_date?: string } | null;
+      const mostRecentDate = linkMedicalRecords?.record_date || null;
 
       // Auto-update current_status if this record is the most recent (or equal)
       const shouldUpdateStatus = !mostRecentDate || !thisRecordDate || 
         thisRecordDate >= mostRecentDate;
 
       // Build update object for condition
-      const conditionUpdates: Record<string, any> = {};
+      const conditionUpdates: Record<string, string | null> = {};
       if (shouldUpdateStatus) {
         conditionUpdates.current_status = input.status_in_record;
       }

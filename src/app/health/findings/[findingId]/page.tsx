@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { useSingleFindingHistory, useMarkFindingResolved } from "@/hooks";
 import { useMedicalRecords } from "@/hooks/use-medical-records";
 import { useUIStore } from "@/stores/ui-store";
-import type { FindingSeverity, FindingLaterality, FindingHistoryPoint } from "@/types";
+import type { FindingSeverity, FindingHistoryPoint } from "@/types";
 
 interface FindingDetailPageProps {
   params: Promise<{ findingId: string }>;

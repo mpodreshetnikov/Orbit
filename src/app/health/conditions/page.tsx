@@ -10,7 +10,6 @@ import {
   AlertCircle,
   HelpCircle,
   History,
-  Plus,
   HeartPulse,
   Info,
   ChevronDown,
@@ -23,7 +22,6 @@ import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ConditionCard } from "@/components/conditions/condition-card";
 import { usePersonConditionsWithHistory } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";

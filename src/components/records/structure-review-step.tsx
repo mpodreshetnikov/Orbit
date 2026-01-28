@@ -308,7 +308,6 @@ function EditObservationDialog({
     if (unitConfig.formula_to_canonical) {
       try {
         const formula = unitConfig.formula_to_canonical.replace(/x/g, value.toString());
-        // eslint-disable-next-line no-eval
         return eval(formula);
       } catch {
         return value;

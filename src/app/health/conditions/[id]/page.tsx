@@ -312,7 +312,7 @@ function ConditionDetailContent() {
               <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
               
               <div className="space-y-4">
-                {condition.history.map((record, index) => (
+                {condition.history.map((record) => (
                   <div key={record.id} className="relative pl-10">
                     {/* Timeline dot */}
                     <div className={cn(

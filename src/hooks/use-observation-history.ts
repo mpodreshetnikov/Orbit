@@ -11,27 +11,6 @@ import type {
 // ============================================================================
 // FETCH ALL OBSERVATIONS FOR A PERSON (aggregated by obs_code/obs_name)
 // ============================================================================
-interface RawObservationRow {
-  id: string;
-  record_id: string;
-  obs_code: string | null;
-  obs_name: string;
-  catalog_id: string | null;
-  value_numeric: number | null;
-  value_text: string | null;
-  value_canonical: number | null;
-  unit: string | null;
-  unit_canonical: string | null;
-  ref_range_low: number | null;
-  ref_range_high: number | null;
-  status: string | null;
-  created_at: string;
-  record_date: string | null;
-  catalog_name_ru: string | null;
-  catalog_name_en: string | null;
-  catalog_canonical_unit: string | null;
-}
-
 async function fetchPersonObservationHistory(
   personId: string,
   search?: string

@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
-import { createServerSupabaseClient, isUserAllowed } from "@/lib/supabase-server";
+import { isUserAllowed } from "@/lib/supabase-server";
 import { LoginForm } from "@/components/auth/login-form";
 
 export default async function LoginPage() {

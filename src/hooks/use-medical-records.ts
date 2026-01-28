@@ -395,7 +395,7 @@ async function ingestRecord({
         record_id: recordId,
       }),
     });
-  } catch (networkError) {
+  } catch {
     // Network error - Edge Functions might not be running
     throw new Error(
       "Cannot connect to Edge Functions. Make sure 'supabase functions serve' is running."

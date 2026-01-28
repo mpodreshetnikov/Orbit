@@ -28,8 +28,6 @@ import type {
   RecordFindingWithCatalog,
   FindingSeverity,
   FindingLaterality,
-  FINDING_SEVERITIES,
-  FINDING_LATERALITIES,
 } from "@/types";
 
 interface FindingEditDialogProps {

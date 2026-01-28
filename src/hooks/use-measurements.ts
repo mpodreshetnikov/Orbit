@@ -305,7 +305,7 @@ export function useCreateMeasurement() {
 // ============================================================================
 async function updateMeasurement({
   id,
-  personId,
+  personId: _personId,
   updates,
 }: {
   id: string;
@@ -349,7 +349,7 @@ export function useUpdateMeasurement() {
 // ============================================================================
 async function deleteMeasurement({
   id,
-  personId,
+  personId: _personId,
 }: {
   id: string;
   personId: string;
