@@ -28,6 +28,7 @@ import {
   ChevronsUpDown,
   Search,
   Stethoscope,
+  HeartPulse,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -80,8 +81,15 @@ import {
   useUpdateRecordFinding,
   useDeleteRecordFinding,
   useCreateRecordFinding,
+  useRecordConditions,
+  usePersonConditions,
+  useUpdateConditionRecord,
+  useDeleteConditionRecord,
+  useCreateConditionWithRecord,
+  useLinkConditionToRecord,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog } from "@/components/findings";
+import { ConditionRecordRow, ConditionEditDialog } from "@/components/conditions";
 import type { 
   RecordType, 
   ObservationStatus, 
@@ -89,6 +97,8 @@ import type {
   RecordFindingWithCatalog,
   FindingSeverity,
   FindingLaterality,
+  ConditionRecordWithDetails,
+  ConditionStatus,
 } from "@/types";
 import { RECORD_TYPES } from "@/types";
 import { cn } from "@/lib/utils";
@@ -114,6 +124,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const { data: record, isLoading, error, refetch } = useMedicalRecord(recordId);
   const { data: observations } = useRecordObservations(recordId);
   const { data: findings } = useRecordFindings(recordId);
+  const { data: conditionRecords } = useRecordConditions(recordId);
+  const { data: personConditions } = usePersonConditions(record?.person_id ?? null);
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -127,6 +139,10 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   // Finding editing state
   const [editingFinding, setEditingFinding] = useState<RecordFindingWithCatalog | null>(null);
   const [isAddingFinding, setIsAddingFinding] = useState(false);
+  
+  // Condition editing state
+  const [editingCondition, setEditingCondition] = useState<ConditionRecordWithDetails | null>(null);
+  const [isAddingCondition, setIsAddingCondition] = useState(false);
   
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -151,9 +167,15 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const updateFindingMutation = useUpdateRecordFinding();
   const deleteFindingMutation = useDeleteRecordFinding();
   const createFindingMutation = useCreateRecordFinding();
+  const updateConditionRecordMutation = useUpdateConditionRecord();
+  const deleteConditionRecordMutation = useDeleteConditionRecord();
+  const createConditionWithRecordMutation = useCreateConditionWithRecord();
+  const linkConditionToRecordMutation = useLinkConditionToRecord();
   
   const isObsProcessing = updateObsMutation.isPending || deleteObsMutation.isPending || createObsMutation.isPending;
   const isFindingProcessing = updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending;
+  const isConditionProcessing = updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
+    createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending;
   
   const handleEditObservation = (obs: RecordObservationWithCatalog) => {
     setEditingObservation(obs);
@@ -281,6 +303,79 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 
   const handleDeleteFinding = async (finding: RecordFindingWithCatalog) => {
     await deleteFindingMutation.mutateAsync({ id: finding.id, recordId });
+  };
+
+  // Condition handlers
+  const handleEditCondition = (cr: ConditionRecordWithDetails) => {
+    setEditingCondition(cr);
+    setIsAddingCondition(false);
+  };
+
+  const handleAddCondition = () => {
+    setEditingCondition(null);
+    setIsAddingCondition(true);
+  };
+
+  const handleSaveCondition = async (data: {
+    condition_id?: string;
+    name?: string;
+    code?: string | null;
+    icd_name_en?: string | null;
+    icd_name_ru?: string | null;
+    status_in_record: ConditionStatus;
+    source_anchor: string | null;
+  }) => {
+    if (isAddingCondition && record) {
+      if (data.condition_id) {
+        // Linking to existing condition (auto-updates current_status if most recent)
+        await linkConditionToRecordMutation.mutateAsync({
+          condition_id: data.condition_id,
+          record_id: recordId,
+          status_in_record: data.status_in_record,
+          source_anchor: data.source_anchor || undefined,
+          // Pass ICD code if user added one
+          code: data.code,
+          icd_name_en: data.icd_name_en,
+        });
+      } else if (data.name) {
+        // Creating new condition
+        await createConditionWithRecordMutation.mutateAsync({
+          person_id: record.person_id,
+          record_id: recordId,
+          name: data.name,
+          code: data.code,
+          icd_name_en: data.icd_name_en,
+          icd_name_ru: data.icd_name_ru,
+          status: data.status_in_record,
+          source_anchor: data.source_anchor || undefined,
+        });
+      }
+    } else if (editingCondition) {
+      // Updating existing condition record (auto-updates current_status if most recent)
+      await updateConditionRecordMutation.mutateAsync({
+        id: editingCondition.id,
+        updates: {
+          status_in_record: data.status_in_record,
+          source_anchor: data.source_anchor,
+          is_user_verified: true,
+        },
+        recordId: recordId,
+        conditionId: editingCondition.condition_id,
+        // Pass ICD code to update the condition if provided
+        code: data.code,
+        icd_name_en: data.icd_name_en,
+      });
+    }
+
+    setEditingCondition(null);
+    setIsAddingCondition(false);
+  };
+
+  const handleDeleteCondition = async (cr: ConditionRecordWithDetails) => {
+    await deleteConditionRecordMutation.mutateAsync({
+      id: cr.id,
+      recordId: recordId,
+    });
   };
 
   const startEditing = () => {
@@ -828,6 +923,63 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             finding={editingFinding}
             onSave={handleSaveFinding}
             isNew={isAddingFinding}
+          />
+
+          {/* Conditions Section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <HeartPulse className="h-4 w-4" />
+                {t("conditions.title")} ({conditionRecords?.length || 0})
+              </h2>
+              {!isRemoved && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleAddCondition}
+                  disabled={isConditionProcessing}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t("conditions.add")}
+                </Button>
+              )}
+            </div>
+            {conditionRecords && conditionRecords.length > 0 ? (
+              <div className="space-y-2">
+                {conditionRecords.map((cr) => (
+                  <ConditionRecordRow
+                    key={cr.id}
+                    conditionRecord={cr}
+                    onEdit={isRemoved ? undefined : () => handleEditCondition(cr)}
+                    onDelete={isRemoved ? undefined : () => handleDeleteCondition(cr)}
+                    isProcessing={isConditionProcessing}
+                    showActions={!isRemoved}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground border rounded-lg border-dashed">
+                <HeartPulse className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">{t("conditions.noConditions")}</p>
+                <p className="text-xs mt-1">{t("conditions.noConditionsHint")}</p>
+              </div>
+            )}
+          </div>
+          <Separator />
+          
+          {/* Edit/Add Condition Dialog */}
+          <ConditionEditDialog
+            open={!!editingCondition || isAddingCondition}
+            onOpenChange={(open: boolean) => {
+              if (!open) {
+                setEditingCondition(null);
+                setIsAddingCondition(false);
+              }
+            }}
+            conditionRecord={editingCondition}
+            existingConditions={personConditions || []}
+            onSave={handleSaveCondition}
+            isNew={isAddingCondition}
           />
         </>
       )}

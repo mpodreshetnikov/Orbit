@@ -88,6 +88,24 @@ export function useProcessingMonitor(personId: string | null) {
           queryClient.invalidateQueries({
             queryKey: ["medical-records"],
           });
+          
+          // Also invalidate observations, findings, and conditions for each completed record
+          for (const record of completedRecords) {
+            queryClient.invalidateQueries({
+              queryKey: ["record-observations", record.id],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["record-findings", record.id],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["condition-records", "record", record.id],
+            });
+          }
+          
+          // Invalidate person-level condition queries
+          queryClient.invalidateQueries({
+            queryKey: ["conditions", "person", personId],
+          });
         }
 
         // Update the tracking set

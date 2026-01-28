@@ -23,6 +23,7 @@ import {
   Search,
   ChevronsUpDown,
   Stethoscope,
+  HeartPulse,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,8 +63,15 @@ import {
   useUpdateRecordFinding,
   useDeleteRecordFinding,
   useCreateRecordFinding,
+  useRecordConditions,
+  usePersonConditions,
+  useUpdateConditionRecord,
+  useDeleteConditionRecord,
+  useCreateConditionWithRecord,
+  useLinkConditionToRecord,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog } from "@/components/findings";
+import { ConditionRecordRow, ConditionEditDialog } from "@/components/conditions";
 import { 
   RECORD_TYPES, 
   type RecordType, 
@@ -73,6 +81,8 @@ import {
   type RecordFindingWithCatalog,
   type FindingSeverity,
   type FindingLaterality,
+  type ConditionRecordWithDetails,
+  type ConditionStatus,
 } from "@/types";
 
 interface StructureReviewStepProps {
@@ -634,6 +644,13 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const [isAddingFinding, setIsAddingFinding] = useState(false);
   const [showFindings, setShowFindings] = useState(true);
 
+  // Conditions
+  const { data: conditionRecords, isLoading: conditionsLoading } = useRecordConditions(record.id);
+  const { data: personConditions } = usePersonConditions(record.person_id);
+  const [editingCondition, setEditingCondition] = useState<ConditionRecordWithDetails | null>(null);
+  const [isAddingCondition, setIsAddingCondition] = useState(false);
+  const [showConditions, setShowConditions] = useState(true);
+
   const updateMutation = useUpdateMedicalRecord();
   const updateObsMutation = useUpdateRecordObservation();
   const deleteObsMutation = useDeleteRecordObservation();
@@ -641,10 +658,16 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const updateFindingMutation = useUpdateRecordFinding();
   const deleteFindingMutation = useDeleteRecordFinding();
   const createFindingMutation = useCreateRecordFinding();
+  const updateConditionRecordMutation = useUpdateConditionRecord();
+  const deleteConditionRecordMutation = useDeleteConditionRecord();
+  const createConditionWithRecordMutation = useCreateConditionWithRecord();
+  const linkConditionToRecordMutation = useLinkConditionToRecord();
 
   const isProcessing = updateMutation.isPending || updateObsMutation.isPending || 
     deleteObsMutation.isPending || createObsMutation.isPending ||
-    updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending;
+    updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending ||
+    updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
+    createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending;
 
   const addKeyword = () => {
     const trimmed = newKeyword.trim();
@@ -680,11 +703,12 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       },
     });
 
-    // When activating, mark all observations and findings as verified
+    // When activating, mark all observations, findings, and conditions as verified
     if (activate) {
       await Promise.all([
         verifyAllObservations(),
         verifyAllFindings(),
+        verifyAllConditions(),
       ]);
       router.push("/health");
     } else {
@@ -843,6 +867,94 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       unverified.map(f => 
         updateFindingMutation.mutateAsync({
           id: f.id,
+          updates: { is_user_verified: true },
+        })
+      )
+    );
+  };
+
+  // Condition handlers
+  const handleEditCondition = (cr: ConditionRecordWithDetails) => {
+    setEditingCondition(cr);
+    setIsAddingCondition(false);
+  };
+
+  const handleAddCondition = () => {
+    setEditingCondition(null);
+    setIsAddingCondition(true);
+  };
+
+  const handleSaveCondition = async (data: {
+    condition_id?: string;
+    name?: string;
+    code?: string | null;
+    icd_name_en?: string | null;
+    icd_name_ru?: string | null;
+    status_in_record: ConditionStatus;
+    source_anchor: string | null;
+  }) => {
+    if (isAddingCondition) {
+      if (data.condition_id) {
+        // Linking to existing condition (auto-updates current_status if most recent)
+        await linkConditionToRecordMutation.mutateAsync({
+          condition_id: data.condition_id,
+          record_id: record.id,
+          status_in_record: data.status_in_record,
+          source_anchor: data.source_anchor || undefined,
+          // Pass ICD code if user added one
+          code: data.code,
+          icd_name_en: data.icd_name_en,
+        });
+      } else if (data.name) {
+        // Creating new condition
+        await createConditionWithRecordMutation.mutateAsync({
+          person_id: record.person_id,
+          record_id: record.id,
+          name: data.name,
+          code: data.code,
+          icd_name_en: data.icd_name_en,
+          icd_name_ru: data.icd_name_ru,
+          status: data.status_in_record,
+          source_anchor: data.source_anchor || undefined,
+        });
+      }
+    } else if (editingCondition) {
+      // Updating existing condition record
+      await updateConditionRecordMutation.mutateAsync({
+        id: editingCondition.id,
+        updates: {
+          status_in_record: data.status_in_record,
+          source_anchor: data.source_anchor,
+          is_user_verified: true,
+        },
+        // Pass record_id for auto-update logic
+        recordId: record.id,
+        conditionId: editingCondition.condition_id,
+        // Pass ICD code to update the condition if provided
+        code: data.code,
+        icd_name_en: data.icd_name_en,
+      });
+    }
+
+    setEditingCondition(null);
+    setIsAddingCondition(false);
+  };
+
+  const handleDeleteCondition = async (cr: ConditionRecordWithDetails) => {
+    await deleteConditionRecordMutation.mutateAsync({
+      id: cr.id,
+      recordId: record.id,
+    });
+  };
+
+  const verifyAllConditions = async () => {
+    if (!conditionRecords || conditionRecords.length === 0) return;
+    
+    const unverified = conditionRecords.filter(cr => !cr.is_user_verified);
+    await Promise.all(
+      unverified.map(cr => 
+        updateConditionRecordMutation.mutateAsync({
+          id: cr.id,
           updates: { is_user_verified: true },
         })
       )
@@ -1165,6 +1277,85 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         finding={editingFinding}
         onSave={handleSaveFinding}
         isNew={isAddingFinding}
+      />
+
+      {/* Conditions Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setShowConditions(!showConditions)}
+              className="flex items-center gap-2 text-left"
+            >
+              <HeartPulse className="h-5 w-5 text-primary" />
+              <CardTitle className="text-base">
+                {t("conditions.title")}
+                {conditionRecords && conditionRecords.length > 0 && (
+                  <Badge variant="secondary" className="ml-2">
+                    {conditionRecords.length}
+                  </Badge>
+                )}
+              </CardTitle>
+              {showConditions ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddCondition}
+              disabled={isProcessing}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              {t("conditions.add")}
+            </Button>
+          </div>
+        </CardHeader>
+        {showConditions && (
+          <CardContent className="pt-0">
+            {conditionsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : conditionRecords && conditionRecords.length > 0 ? (
+              <div className="space-y-2">
+                {conditionRecords.map((cr) => (
+                  <ConditionRecordRow
+                    key={cr.id}
+                    conditionRecord={cr}
+                    onEdit={() => handleEditCondition(cr)}
+                    onDelete={() => handleDeleteCondition(cr)}
+                    isProcessing={isProcessing}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground">
+                <HeartPulse className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">{t("conditions.noConditions")}</p>
+                <p className="text-xs mt-1">{t("conditions.noConditionsHint")}</p>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Edit/Add Condition Dialog */}
+      <ConditionEditDialog
+        open={!!editingCondition || isAddingCondition}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingCondition(null);
+            setIsAddingCondition(false);
+          }
+        }}
+        conditionRecord={editingCondition}
+        existingConditions={personConditions || []}
+        onSave={handleSaveCondition}
+        isNew={isAddingCondition}
       />
 
       {/* Actions */}

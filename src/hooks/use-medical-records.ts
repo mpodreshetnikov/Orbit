@@ -199,6 +199,16 @@ export function useUpdateMedicalRecord() {
           (query.queryKey[1] as MedicalRecordFilters)?.person_id ===
             data.person_id,
       });
+      // Invalidate condition-related queries (record info like title/date may have changed)
+      queryClient.invalidateQueries({
+        queryKey: ["condition-records", "record", data.id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["condition"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["conditions"],
+      });
     },
   });
 }

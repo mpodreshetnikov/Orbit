@@ -91,6 +91,13 @@ export function useStructureExtraction() {
         queryClient.invalidateQueries({
           queryKey: ["person-finding-history"],
         });
+        // Invalidate condition-related queries
+        queryClient.invalidateQueries({
+          queryKey: ["condition-records", "record", recordId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["conditions"],
+        });
 
         return { success: true, structured_data: data.structured_data };
       } catch (error) {
