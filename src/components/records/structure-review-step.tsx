@@ -130,17 +130,26 @@ function ObservationRow({
   isProcessing: boolean;
 }) {
   const t = useTranslations();
+  const isCustom = !observation.obs_code;
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+    <div className={`flex items-center gap-3 p-3 rounded-lg border bg-card ${isCustom ? "border-dashed border-muted-foreground/40" : ""}`}>
       {/* Name and value */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium truncate">{observation.obs_name}</span>
-          {observation.obs_code && (
+          {observation.obs_code ? (
             <code className="text-xs bg-muted px-1 py-0.5 rounded">
               {observation.obs_code}
             </code>
+          ) : (
+            <Badge 
+              variant="outline" 
+              className="text-xs border-dashed text-muted-foreground"
+              title={t("observations.addToCatalogHint")}
+            >
+              {t("observations.customBadge")}
+            </Badge>
           )}
         </div>
         <div className="flex items-center gap-2 mt-1 text-sm">
@@ -157,6 +166,12 @@ function ObservationRow({
             <span className="text-muted-foreground">{observation.unit}</span>
           )}
         </div>
+        {/* Subtle hint for custom observations */}
+        {isCustom && (
+          <p className="text-xs text-muted-foreground/70 mt-1 italic">
+            {t("observations.addToCatalogHint")}
+          </p>
+        )}
       </div>
 
       {/* Status */}

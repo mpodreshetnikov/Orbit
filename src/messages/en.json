@@ -379,6 +379,8 @@
     "selectedFromCatalog": "Selected from catalog",
     "nameFromCatalog": "Name is set from catalog",
     "customObservation": "Custom (not in catalog)",
+    "customBadge": "Custom",
+    "addToCatalogHint": "Consider adding to catalog for better tracking",
     "verify": "Verify",
     "verified": "Verified by user",
     "lowConfidence": "Low extraction confidence",

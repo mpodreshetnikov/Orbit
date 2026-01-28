@@ -1132,12 +1132,14 @@ function ObservationRowEditable({
   onDelete: () => void;
   isProcessing: boolean;
 }) {
+  const t = useTranslations();
   const displayValue = observation.value_numeric !== null 
     ? observation.value_numeric.toString() 
     : observation.value_text || "—";
 
   const isBad = observation.status === "low" || observation.status === "high" || 
                 observation.status === "critical_low" || observation.status === "critical_high";
+  const isCustom = !observation.obs_code;
 
   // Format reference range display
   const hasRefRange = observation.ref_range_low !== null || observation.ref_range_high !== null;
@@ -1147,17 +1149,32 @@ function ObservationRowEditable({
   return (
     <div className={cn(
       "flex items-center justify-between gap-4 rounded-lg border p-3",
-      isBad && "border-orange-500/30 bg-orange-500/5"
+      isBad && "border-orange-500/30 bg-orange-500/5",
+      isCustom && !isBad && "border-dashed border-muted-foreground/40"
     )}>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium truncate">{observation.obs_name}</span>
-          {observation.obs_code && (
+          {observation.obs_code ? (
             <span className="text-xs text-muted-foreground shrink-0">
               ({observation.obs_code})
             </span>
+          ) : (
+            <Badge 
+              variant="outline" 
+              className="text-xs border-dashed text-muted-foreground"
+              title={t("observations.addToCatalogHint")}
+            >
+              {t("observations.customBadge")}
+            </Badge>
           )}
         </div>
+        {/* Subtle hint for custom observations */}
+        {isCustom && (
+          <p className="text-xs text-muted-foreground/70 mt-1 italic">
+            {t("observations.addToCatalogHint")}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-3 shrink-0">
         {/* Reference range */}

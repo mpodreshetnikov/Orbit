@@ -379,6 +379,8 @@
     "selectedFromCatalog": "Выбрано из каталога",
     "nameFromCatalog": "Название из каталога",
     "customObservation": "Произвольный (не из каталога)",
+    "customBadge": "Свой",
+    "addToCatalogHint": "Добавьте в каталог для лучшего отслеживания",
     "verify": "Подтвердить",
     "verified": "Подтверждено пользователем",
     "lowConfidence": "Низкая уверенность извлечения",
