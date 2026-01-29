@@ -23,9 +23,7 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Family Superapp",
   },
-  icons: {
-    apple: "/icons/icon-192x192.png",
-  },
+  icons: "/icons/icon-512x512.png",
 };
 
 export const viewport: Viewport = {
