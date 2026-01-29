@@ -48,7 +48,9 @@ async function fetchPersonObservationHistory(
         name_en,
         canonical_unit,
         synonyms_ru,
-        synonyms_en
+        synonyms_en,
+        default_ref_low,
+        default_ref_high
       )
     `)
     .eq("medical_records.person_id", personId)
@@ -98,6 +100,8 @@ async function fetchPersonObservationHistory(
         canonical_unit: string | null;
         synonyms_ru: string[] | null;
         synonyms_en: string[] | null;
+        default_ref_low: number | null;
+        default_ref_high: number | null;
       } | null;
     };
 
@@ -142,6 +146,8 @@ async function fetchPersonObservationHistory(
         latest_ref_high: r.ref_range_high,
         latest_ref_low_canonical: r.ref_range_low_canonical,
         latest_ref_high_canonical: r.ref_range_high_canonical,
+        default_ref_low: r.observation_catalog?.default_ref_low ?? null,
+        default_ref_high: r.observation_catalog?.default_ref_high ?? null,
         measurement_count: 1,
         history: [historyPoint],
       });
@@ -233,7 +239,9 @@ async function fetchSingleObservationHistory(
       observation_catalog(
         name_ru,
         name_en,
-        canonical_unit
+        canonical_unit,
+        default_ref_low,
+        default_ref_high
       )
     `)
     .eq("medical_records.person_id", personId)
@@ -277,6 +285,8 @@ async function fetchSingleObservationHistory(
       name_ru: string | null;
       name_en: string | null;
       canonical_unit: string | null;
+      default_ref_low: number | null;
+      default_ref_high: number | null;
     } | null;
   };
 
@@ -323,6 +333,8 @@ async function fetchSingleObservationHistory(
     latest_ref_high: first.ref_range_high,
     latest_ref_low_canonical: first.ref_range_low_canonical,
     latest_ref_high_canonical: first.ref_range_high_canonical,
+    default_ref_low: first.observation_catalog?.default_ref_low ?? null,
+    default_ref_high: first.observation_catalog?.default_ref_high ?? null,
     measurement_count: data.length,
     history,
   };

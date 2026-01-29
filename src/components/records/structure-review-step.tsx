@@ -133,14 +133,23 @@ type ObservationComparisonData = {
 };
 
 // Observation value change indicator
+// Uses "closer to middle of reference range is better" logic
 function ObservationValueChangeIndicator({ 
   currentValue, 
   previousValue,
   unit,
+  refLow,
+  refHigh,
+  defaultRefLow,
+  defaultRefHigh,
 }: { 
   currentValue: number | null; 
   previousValue: number | null;
   unit?: string | null;
+  refLow?: number | null;
+  refHigh?: number | null;
+  defaultRefLow?: number | null;
+  defaultRefHigh?: number | null;
 }) {
   const t = useTranslations();
   
@@ -160,17 +169,36 @@ function ObservationValueChangeIndicator({
   const isIncrease = change > 0;
   const changeText = isIncrease ? `+${change}` : `${change}`;
   
+  // Use specific ref range if available, otherwise use defaults
+  const effectiveRefLow = refLow ?? defaultRefLow;
+  const effectiveRefHigh = refHigh ?? defaultRefHigh;
+  
+  // Determine if change is an improvement based on distance from reference range middle
+  let isImprovement: boolean | null = null;
+  if (effectiveRefLow != null && effectiveRefHigh != null) {
+    const middle = (effectiveRefLow + effectiveRefHigh) / 2;
+    const prevDistance = Math.abs(previousValue - middle);
+    const currDistance = Math.abs(currentValue - middle);
+    isImprovement = currDistance < prevDistance;
+  }
+  
+  // Determine color: green = improvement, red = worsening, gray = unknown
+  let colorClass = "text-muted-foreground"; // fallback if no ref range
+  if (isImprovement === true) {
+    colorClass = "text-green-600 dark:text-green-400";
+  } else if (isImprovement === false) {
+    colorClass = "text-red-600 dark:text-red-400";
+  }
+  
   return (
-    <span className={`flex items-center gap-0.5 text-xs ${
-      isIncrease ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
-    }`}>
+    <span className={`flex items-center gap-0.5 text-xs ${colorClass}`}>
       {isIncrease ? (
         <TrendingUp className="h-3 w-3" />
       ) : (
         <TrendingDown className="h-3 w-3" />
       )}
       <span>{changeText}</span>
-      <span className="text-muted-foreground/70">({t("observations.comparison.was")} {previousValue})</span>
+      <span className="text-muted-foreground/70">({t("observations.comparison.was")} {previousValue.toFixed(2)})</span>
     </span>
   );
 }
@@ -270,6 +298,10 @@ function ObservationRow({
               currentValue={observation.value_numeric}
               previousValue={comparison.previousValue}
               unit={observation.unit}
+              refLow={observation.ref_range_low}
+              refHigh={observation.ref_range_high}
+              defaultRefLow={observation.default_ref_low}
+              defaultRefHigh={observation.default_ref_high}
             />
           )}
         </div>

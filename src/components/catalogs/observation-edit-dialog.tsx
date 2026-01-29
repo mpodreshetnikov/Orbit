@@ -48,6 +48,8 @@ export function ObservationEditDialog({
   const [nameEn, setNameEn] = useState("");
   const [canonicalUnit, setCanonicalUnit] = useState("");
   const [notes, setNotes] = useState("");
+  const [defaultRefLow, setDefaultRefLow] = useState<string>("");
+  const [defaultRefHigh, setDefaultRefHigh] = useState<string>("");
 
   // Synonyms state
   const [synonymsRu, setSynonymsRu] = useState<string[]>([]);
@@ -76,6 +78,8 @@ export function ObservationEditDialog({
         setNotes(observation.notes || "");
         setSynonymsRu(observation.synonyms_ru || []);
         setSynonymsEn(observation.synonyms_en || []);
+        setDefaultRefLow(observation.default_ref_low?.toString() || "");
+        setDefaultRefHigh(observation.default_ref_high?.toString() || "");
         
         // Convert accepted_units object to array
         const units: AcceptedUnitEntry[] = Object.entries(
@@ -96,6 +100,8 @@ export function ObservationEditDialog({
         setSynonymsRu([]);
         setSynonymsEn([]);
         setAcceptedUnits([]);
+        setDefaultRefLow("");
+        setDefaultRefHigh("");
       }
       setNewSynonymRu("");
       setNewSynonymEn("");
@@ -184,6 +190,8 @@ export function ObservationEditDialog({
       synonyms_en: synonymsEn,
       accepted_units: buildAcceptedUnits(),
       notes: notes.trim() || null,
+      default_ref_low: defaultRefLow.trim() ? parseFloat(defaultRefLow) : null,
+      default_ref_high: defaultRefHigh.trim() ? parseFloat(defaultRefHigh) : null,
     };
 
     try {
@@ -266,6 +274,36 @@ export function ObservationEditDialog({
                 onChange={(e) => setNameEn(e.target.value)}
                 placeholder="Name in English"
               />
+            </div>
+          </div>
+
+          {/* Default Reference Range */}
+          <div className="space-y-2">
+            <Label>{t("catalogs.defaultRefRange")}</Label>
+            <p className="text-xs text-muted-foreground">{t("catalogs.defaultRefRangeDescription")}</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="default_ref_low" className="text-xs">{t("catalogs.refLow")}</Label>
+                <Input
+                  id="default_ref_low"
+                  type="number"
+                  step="any"
+                  value={defaultRefLow}
+                  onChange={(e) => setDefaultRefLow(e.target.value)}
+                  placeholder="e.g., 148"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="default_ref_high" className="text-xs">{t("catalogs.refHigh")}</Label>
+                <Input
+                  id="default_ref_high"
+                  type="number"
+                  step="any"
+                  value={defaultRefHigh}
+                  onChange={(e) => setDefaultRefHigh(e.target.value)}
+                  placeholder="e.g., 738"
+                />
+              </div>
             </div>
           </div>
 

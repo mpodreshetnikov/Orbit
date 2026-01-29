@@ -352,7 +352,13 @@
     "noObservations": "No observations in catalog",
     "noObservationsDescription": "Add observation definitions to enable structured data extraction from medical records.",
     "searchObservations": "Search observations...",
-    "noSearchResults": "No items match your search."
+    "noSearchResults": "No items match your search.",
+    "refRange": "Ref range",
+    "notSet": "not set",
+    "defaultRefRange": "Default Reference Range",
+    "defaultRefRangeDescription": "Standard reference range in canonical units. Used when specific document range is not available.",
+    "refLow": "Low",
+    "refHigh": "High"
   },
   "observations": {
     "title": "Extracted Observations",

@@ -15,6 +15,9 @@ export interface ObservationCatalog {
   synonyms_en: string[];
   accepted_units: Record<string, UnitConversion>;
   notes: string | null;
+  // Default reference range (in canonical units)
+  default_ref_low: number | null;
+  default_ref_high: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +32,8 @@ export interface CreateObservationInput {
   synonyms_en?: string[];
   accepted_units?: Record<string, UnitConversion>;
   notes?: string | null;
+  default_ref_low?: number | null;
+  default_ref_high?: number | null;
 }
 
 // Input for updating an observation
@@ -41,4 +46,6 @@ export interface UpdateObservationInput {
   synonyms_en?: string[];
   accepted_units?: Record<string, UnitConversion>;
   notes?: string | null;
+  default_ref_low?: number | null;
+  default_ref_high?: number | null;
 }

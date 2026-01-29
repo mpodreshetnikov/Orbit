@@ -168,8 +168,8 @@ function ObservationCard({ observation }: { observation: ObservationSummary }) {
             </div>
             <MiniChart 
               data={chartData} 
-              refLow={observation.latest_ref_low}
-              refHigh={observation.latest_ref_high}
+              refLow={observation.latest_ref_low ?? observation.default_ref_low}
+              refHigh={observation.latest_ref_high ?? observation.default_ref_high}
             />
           </div>
 

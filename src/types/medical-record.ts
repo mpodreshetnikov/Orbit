@@ -191,6 +191,9 @@ export interface RecordObservationWithCatalog extends RecordObservation {
   catalog_name_ru: string | null;
   catalog_name_en: string | null;
   catalog_canonical_unit: string | null;
+  // Default reference ranges from catalog (used when specific ref range is not available)
+  default_ref_low: number | null;
+  default_ref_high: number | null;
 }
 
 // Input type for creating/updating observations
@@ -290,6 +293,9 @@ export interface ObservationSummary {
   latest_ref_high: number | null;
   latest_ref_low_canonical: number | null;
   latest_ref_high_canonical: number | null;
+  // Default reference ranges from catalog (used when specific ref range is not available)
+  default_ref_low: number | null;
+  default_ref_high: number | null;
   measurement_count: number;
   history: ObservationHistoryPoint[];
 }

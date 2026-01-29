@@ -183,6 +183,18 @@ export function ObservationCatalogList() {
                   <Badge variant="outline">{obs.canonical_unit}</Badge>
                 </div>
 
+                {/* Reference range */}
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">{t("catalogs.refRange")}:</span>
+                  {obs.default_ref_low !== null || obs.default_ref_high !== null ? (
+                    <span className="font-mono">
+                      {obs.default_ref_low ?? "—"} – {obs.default_ref_high ?? "—"}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/50 italic">{t("catalogs.notSet")}</span>
+                  )}
+                </div>
+
                 {/* Accepted units count */}
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-muted-foreground">{t("catalogs.acceptedUnits")}:</span>

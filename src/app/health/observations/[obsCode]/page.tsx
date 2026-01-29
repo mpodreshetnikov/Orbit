@@ -439,9 +439,19 @@ export default function ObservationDetailPage({
   const displayName = observation?.catalog_name_ru || observation?.obs_name || decodedObsCode;
   const latestValue = convertValue(observation?.latest_value ?? null);
   
-  // Convert ref ranges for display
-  const displayRefLow = convertValue(observation?.latest_ref_low_canonical ?? observation?.latest_ref_low ?? null);
-  const displayRefHigh = convertValue(observation?.latest_ref_high_canonical ?? observation?.latest_ref_high ?? null);
+  // Convert ref ranges for display (use specific ref range first, then fall back to default)
+  const displayRefLow = convertValue(
+    observation?.latest_ref_low_canonical ?? 
+    observation?.latest_ref_low ?? 
+    observation?.default_ref_low ?? 
+    null
+  );
+  const displayRefHigh = convertValue(
+    observation?.latest_ref_high_canonical ?? 
+    observation?.latest_ref_high ?? 
+    observation?.default_ref_high ?? 
+    null
+  );
 
   // Calculate trend
   const trend = (() => {
