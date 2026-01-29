@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar";
 import { MobileNav } from "./mobile-nav";
 import { LanguageSync } from "./language-sync";
 import { ProcessingIndicator } from "./processing-indicator";
+import { ScrollToTop } from "./scroll-to-top";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -29,6 +30,8 @@ export function AppShell({ children }: AppShellProps) {
       <MobileNav />
       {/* Processing indicator for background OCR jobs */}
       <ProcessingIndicator />
+      {/* Scroll to top floating button when user scrolls down */}
+      <ScrollToTop />
     </div>
   );
 }

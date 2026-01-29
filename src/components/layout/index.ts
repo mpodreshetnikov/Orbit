@@ -7,3 +7,4 @@ export { LanguageToggle } from "./language-toggle";
 export { LanguageSync } from "./language-sync";
 export { PersonSelector } from "./person-selector";
 export { ProcessingIndicator } from "./processing-indicator";
+export { ScrollToTop } from "./scroll-to-top";
