@@ -1,10 +1,13 @@
 "use client";
 
 import { Toaster } from "sonner";
+import { useIsMobile } from "@/hooks/use-media-query";
 import { ThemeProvider } from "./theme-provider";
 import { QueryProvider } from "./query-provider";
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  const isMobile = useIsMobile();
+
   return (
     <ThemeProvider
       attribute="class"
@@ -16,7 +19,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <QueryProvider>
         {children}
         <Toaster
-          position="bottom-right"
+          position={isMobile ? "top-center" : "bottom-right"}
           richColors
           closeButton
           duration={5000}

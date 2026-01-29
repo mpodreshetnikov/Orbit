@@ -66,8 +66,9 @@ export function ProcessingIndicator() {
     }
   };
 
+  // On mobile/PWA: do not show the permanent panel; users only see toasts when processing finishes
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border bg-card shadow-lg md:bottom-6 md:right-6">
+    <div className="fixed bottom-4 right-4 z-50 hidden w-80 max-w-[calc(100vw-2rem)] rounded-lg border bg-card shadow-lg md:bottom-6 md:right-6 md:block">
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
