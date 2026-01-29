@@ -15,6 +15,28 @@
   }
 }
 
+/* Mobile app: prevent zoom-to-fit and horizontal overflow */
+@layer base {
+  html {
+    width: 100%;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    /* Safe area for notched devices (used with viewport-fit=cover) */
+    --safe-area-inset-top: env(safe-area-inset-top, 0px);
+    --safe-area-inset-right: env(safe-area-inset-right, 0px);
+    --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  }
+
+  body {
+    width: 100%;
+    overflow-x: hidden;
+    position: relative;
+    /* Faster tap response on mobile */
+    touch-action: manipulation;
+  }
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -77,5 +99,14 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Mobile: ensure main content doesn't force horizontal scroll */
+@layer utilities {
+  .mobile-full-width {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 }

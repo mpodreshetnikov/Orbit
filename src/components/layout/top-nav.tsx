@@ -26,8 +26,8 @@ export function TopNav() {
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-[60] h-16 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-full items-center justify-between px-4">
+      <header className="fixed top-0 left-0 right-0 z-[60] h-16 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pt-[var(--safe-area-inset-top)] pl-[var(--safe-area-inset-left)] pr-[var(--safe-area-inset-right)]">
+        <div className="w-full max-w-full md:container md:mx-auto flex h-full min-h-[4rem] items-center justify-between px-4">
           {/* Left: App name + Mini-app switcher */}
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Link href="/" className="flex items-center gap-2 font-semibold shrink-0">
