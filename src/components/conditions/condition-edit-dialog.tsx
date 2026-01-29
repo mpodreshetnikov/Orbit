@@ -202,7 +202,7 @@ export function ConditionEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>
             {isNew ? t("conditions.add") : t("conditions.edit")}
@@ -322,30 +322,32 @@ export function ConditionEditDialog({
           {(mode === "new" || (mode === "existing" && isNew && selectedCondition && !selectedCondition.code) || (!isNew && conditionRecord)) && (
             <div className="space-y-2">
               <Label htmlFor="icdCode">{t("conditions.icdCode")}</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="icdCode"
-                  value={icdCode}
-                  onChange={(e) => setIcdCode(e.target.value.toUpperCase())}
-                  placeholder="D50.9"
-                  className="font-mono w-28"
-                />
-                {icdLoading && (
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                )}
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Input
+                    id="icdCode"
+                    value={icdCode}
+                    onChange={(e) => setIcdCode(e.target.value.toUpperCase())}
+                    placeholder="D50.9"
+                    className="font-mono w-28 shrink-0"
+                  />
+                  {icdLoading && (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
+                  )}
+                  {icdLookup?.found && (
+                    <Check className="h-4 w-4 shrink-0 text-green-600" />
+                  )}
+                  {icdCode && !icdLoading && icdLookup && !icdLookup.found && (
+                    <div className="flex items-center gap-1 text-yellow-600 shrink-0">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span className="text-sm">{t("conditions.icdNotFound")}</span>
+                    </div>
+                  )}
+                </div>
                 {icdLookup?.found && (
-                  <div className="flex items-center gap-1 text-green-600 flex-1 min-w-0">
-                    <Check className="h-4 w-4 shrink-0" />
-                    <span className="text-sm truncate">
-                      {icdLookup.name_en}
-                    </span>
-                  </div>
-                )}
-                {icdCode && !icdLoading && icdLookup && !icdLookup.found && (
-                  <div className="flex items-center gap-1 text-yellow-600">
-                    <AlertTriangle className="h-4 w-4" />
-                    <span className="text-sm">{t("conditions.icdNotFound")}</span>
-                  </div>
+                  <p className="text-sm text-green-600 break-words min-w-0">
+                    {icdLookup.name_en}
+                  </p>
                 )}
               </div>
               
