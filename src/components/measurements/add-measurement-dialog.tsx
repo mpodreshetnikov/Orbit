@@ -214,7 +214,7 @@ export function AddMeasurementDialog({
                   </div>
 
                   {/* Options list */}
-                  <ScrollArea className="max-h-60">
+                  <ScrollArea className="h-60">
                     {catalogLoading ? (
                       <div className="p-4 text-center">
                         <Loader2 className="h-4 w-4 animate-spin mx-auto" />
