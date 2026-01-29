@@ -31,6 +31,8 @@ import {
   HeartPulse,
   CircleDot,
   History,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -70,7 +72,6 @@ import { OcrReviewStep } from "./ocr-review-step";
 import { StructureReviewStep } from "./structure-review-step";
 import {
   useMedicalRecord,
-  useMedicalRecords,
   useSoftDeleteRecord,
   useRestoreRecord,
   useHardDeleteRecord,
@@ -95,7 +96,7 @@ import {
   usePersonObservationHistory,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
-import { ConditionRecordRow, ConditionEditDialog, ConditionAddHistoryDialog, type ConditionComparison } from "@/components/conditions";
+import { ConditionRecordRow, ConditionEditDialog, type ConditionComparison } from "@/components/conditions";
 import type { 
   RecordType, 
   ObservationStatus, 
@@ -129,9 +130,6 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const router = useRouter();
 
   const { data: record, isLoading, error, refetch } = useMedicalRecord(recordId);
-  const { data: personRecords } = useMedicalRecords(
-    record?.person_id ? { person_id: record.person_id } : {}
-  );
   const { data: observations } = useRecordObservations(recordId);
   const { data: findings } = useRecordFindings(recordId);
   const { data: conditionRecords } = useRecordConditions(recordId);
@@ -156,7 +154,6 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   // Condition editing state
   const [editingCondition, setEditingCondition] = useState<ConditionRecordWithDetails | null>(null);
   const [isAddingCondition, setIsAddingCondition] = useState(false);
-  const [addHistoryCondition, setAddHistoryCondition] = useState<ConditionRecordWithDetails | null>(null);
   
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -260,7 +257,12 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     };
   };
 
-  const getComparisonForObservation = (obs: RecordObservationWithCatalog): { isNew: boolean; previousOccurrences: number } | null => {
+  const getComparisonForObservation = (obs: RecordObservationWithCatalog): { 
+    isNew: boolean; 
+    previousOccurrences: number; 
+    previousValue: number | null;
+    previousUnit: string | null;
+  } | null => {
     if (!record || personObservationHistory === undefined) return null;
     const obsKey = obs.obs_code || obs.obs_name.toLowerCase().trim();
     const historySummary = personObservationHistory.find(h => {
@@ -268,12 +270,25 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
       return historyKey === obsKey;
     });
     if (!historySummary) {
-      return { isNew: true, previousOccurrences: 0 };
+      return { isNew: true, previousOccurrences: 0, previousValue: null, previousUnit: null };
     }
-    const previousOccurrences = historySummary.history.filter(h => h.record_id !== recordId).length;
+    // Filter out current record and sort by date descending to get most recent previous
+    const previousHistory = historySummary.history
+      .filter(h => h.record_id !== recordId)
+      .sort((a, b) => {
+        const dateA = new Date(a.record_date || a.created_at).getTime();
+        const dateB = new Date(b.record_date || b.created_at).getTime();
+        return dateB - dateA;
+      });
+    if (previousHistory.length === 0) {
+      return { isNew: true, previousOccurrences: 0, previousValue: null, previousUnit: null };
+    }
+    const mostRecent = previousHistory[0];
     return {
-      isNew: previousOccurrences === 0,
-      previousOccurrences,
+      isNew: false,
+      previousOccurrences: previousHistory.length,
+      previousValue: mostRecent.value_canonical ?? mostRecent.value_numeric,
+      previousUnit: mostRecent.unit_canonical || mostRecent.unit,
     };
   };
 
@@ -414,13 +429,6 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const handleAddCondition = () => {
     setEditingCondition(null);
     setIsAddingCondition(true);
-    setAddHistoryCondition(null);
-  };
-
-  const handleAddHistoryCondition = (cr: ConditionRecordWithDetails) => {
-    setAddHistoryCondition(cr);
-    setEditingCondition(null);
-    setIsAddingCondition(false);
   };
 
   const handleSaveCondition = async (data: {
@@ -458,10 +466,11 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         });
       }
     } else if (editingCondition) {
-      // Editing: only base info (no status change — use "Change status" to add history)
+      // Editing existing condition record (auto-updates current_status if most recent)
       await updateConditionRecordMutation.mutateAsync({
         id: editingCondition.id,
         updates: {
+          status_in_record: data.status_in_record,
           source_anchor: data.source_anchor,
           is_user_verified: true,
         },
@@ -1060,7 +1069,6 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                     conditionRecord={cr}
                     comparison={getComparisonForCondition(cr)}
                     onEdit={isRemoved ? undefined : () => handleEditCondition(cr)}
-                    onAddHistory={isRemoved ? undefined : () => handleAddHistoryCondition(cr)}
                     onDelete={isRemoved ? undefined : () => handleDeleteCondition(cr)}
                     isProcessing={isConditionProcessing}
                     showActions={!isRemoved}
@@ -1091,20 +1099,6 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             onSave={handleSaveCondition}
             isNew={isAddingCondition}
           />
-
-          {/* Add to history (change status) dialog */}
-          {addHistoryCondition && record && (
-            <ConditionAddHistoryDialog
-              open={!!addHistoryCondition}
-              onOpenChange={(open) => !open && setAddHistoryCondition(null)}
-              conditionId={addHistoryCondition.condition_id}
-              conditionName={addHistoryCondition.condition_name}
-              personId={record.person_id}
-              records={personRecords || []}
-              preselectedRecordId={recordId}
-              onSaved={() => refetch()}
-            />
-          )}
         </>
       )}
 
@@ -1244,8 +1238,60 @@ function ObservationStatusBadge({ status }: { status: ObservationStatus | null }
   );
 }
 
+// Type for observation comparison
+type ObservationComparisonData = { 
+  isNew: boolean; 
+  previousOccurrences: number;
+  previousValue: number | null;
+  previousUnit: string | null;
+};
+
+// Observation value change indicator
+function ObservationValueChangeIndicator({ 
+  currentValue, 
+  previousValue,
+  unit,
+}: { 
+  currentValue: number | null; 
+  previousValue: number | null;
+  unit?: string | null;
+}) {
+  const t = useTranslations();
+  
+  if (currentValue === null || previousValue === null) return null;
+  
+  // Round to 2 decimal places to avoid floating point issues
+  const change = Math.round((currentValue - previousValue) * 100) / 100;
+  
+  if (change === 0) {
+    return (
+      <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+        <span>= {previousValue}{unit ? ` ${unit}` : ""}</span>
+      </span>
+    );
+  }
+  
+  const isIncrease = change > 0;
+  const changeText = isIncrease ? `+${change}` : `${change}`;
+  
+  return (
+    <span className={cn(
+      "flex items-center gap-0.5 text-xs",
+      isIncrease ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
+    )}>
+      {isIncrease ? (
+        <TrendingUp className="h-3 w-3" />
+      ) : (
+        <TrendingDown className="h-3 w-3" />
+      )}
+      <span>{changeText}</span>
+      <span className="text-muted-foreground/70">({t("observations.comparison.was")} {previousValue})</span>
+    </span>
+  );
+}
+
 // Observation comparison badge
-function ObservationComparisonBadge({ comparison }: { comparison: { isNew: boolean; previousOccurrences: number } }) {
+function ObservationComparisonBadge({ comparison }: { comparison: ObservationComparisonData }) {
   const t = useTranslations();
   if (comparison.isNew) {
     return (
@@ -1272,7 +1318,7 @@ function ObservationRowEditable({
   isProcessing, 
 }: { 
   observation: RecordObservationWithCatalog;
-  comparison?: { isNew: boolean; previousOccurrences: number } | null;
+  comparison?: ObservationComparisonData | null;
   onEdit: () => void;
   onDelete: () => void;
   isProcessing: boolean;
@@ -1331,11 +1377,20 @@ function ObservationRowEditable({
             <span className="text-[10px] text-muted-foreground/70">({refRangeLow}–{refRangeHigh})</span>
           </div>
         )}
-        {/* Value */}
-        <div className="text-right">
-          <span className="font-semibold">{displayValue}</span>
-          {observation.unit && (
-            <span className="ml-1 text-muted-foreground text-sm">{observation.unit}</span>
+        {/* Value with change indicator */}
+        <div className="flex items-center gap-2">
+          <div className="text-right">
+            <span className="font-semibold">{displayValue}</span>
+            {observation.unit && (
+              <span className="ml-1 text-muted-foreground text-sm">{observation.unit}</span>
+            )}
+          </div>
+          {comparison && !comparison.isNew && comparison.previousValue !== null && (
+            <ObservationValueChangeIndicator
+              currentValue={observation.value_numeric}
+              previousValue={comparison.previousValue}
+              unit={observation.unit}
+            />
           )}
         </div>
         <ObservationStatusBadge status={observation.status} />

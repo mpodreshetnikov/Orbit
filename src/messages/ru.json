@@ -399,7 +399,8 @@
     "comparison": {
       "new": "Новый",
       "known": "Известен ({count})",
-      "knownTitle": "Ранее измерялся в {count} записи(ях)"
+      "knownTitle": "Ранее измерялся в {count} записи(ях)",
+      "was": "было"
     }
   },
   "observationHistory": {

@@ -399,7 +399,8 @@
     "comparison": {
       "new": "New",
       "known": "Known ({count})",
-      "knownTitle": "Previously measured in {count} record(s)"
+      "knownTitle": "Previously measured in {count} record(s)",
+      "was": "was"
     }
   },
   "observationHistory": {

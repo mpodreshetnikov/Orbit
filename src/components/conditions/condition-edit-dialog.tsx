@@ -366,10 +366,9 @@ export function ConditionEditDialog({
             </div>
           )}
 
-          {/* Status in this record — only when adding new (editing allows only base info) */}
-          {isNew && (
-            <div className="space-y-2">
-              <Label>{t("conditions.statusInRecord")}</Label>
+          {/* Status in this record */}
+          <div className="space-y-2">
+            <Label>{t("conditions.statusInRecord")}</Label>
               <Select value={statusInRecord} onValueChange={(v) => setStatusInRecord(v as ConditionStatus)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -439,7 +438,6 @@ export function ConditionEditDialog({
                 </div>
               )}
             </div>
-          )}
 
           {/* Source Anchor */}
           <div className="space-y-2">
