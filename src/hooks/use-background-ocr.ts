@@ -130,7 +130,7 @@ export function useBackgroundOCR() {
           completedAt: Date.now(),
         });
 
-        // Add notification - OCR complete, needs review
+        // Add notification - OCR complete, needs review (toast is shown by use-processing-monitor on realtime status change)
         addNotification({
           jobId,
           recordId,
@@ -138,17 +138,6 @@ export function useBackgroundOCR() {
           personName,
           type: "success",
           message: t("processing.ocrReviewNeeded"),
-        });
-
-        // Show toast
-        toast.success(t("processing.ocrComplete"), {
-          description: t("processing.ocrReviewNeeded"),
-          action: {
-            label: t("processing.reviewOcr"),
-            onClick: () => {
-              window.location.href = `/health/records/${recordId}`;
-            },
-          },
         });
 
         // Invalidate queries
