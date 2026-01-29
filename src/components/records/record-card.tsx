@@ -53,7 +53,7 @@ export function RecordCard({
   return (
     <Card
       className={cn(
-        "group cursor-pointer transition-all hover:shadow-md min-w-0 w-full overflow-hidden",
+        "group cursor-pointer select-none transition-all hover:shadow-md min-w-0 w-full overflow-hidden",
         isRemoved && "opacity-60",
         isProcessing && "border-primary/50"
       )}

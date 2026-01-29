@@ -35,6 +35,18 @@
     /* Faster tap response on mobile */
     touch-action: manipulation;
   }
+
+  /* PWA: prevent text selection on interactive elements (better mobile tap UX) */
+  button,
+  [role="button"],
+  a,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"] {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 @layer base {
