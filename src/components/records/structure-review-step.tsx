@@ -24,6 +24,8 @@ import {
   ChevronsUpDown,
   Stethoscope,
   HeartPulse,
+  CircleDot,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +55,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { 
-  useUpdateMedicalRecord, 
+  useUpdateMedicalRecord,
+  useMedicalRecords,
   useRecordObservations,
   useUpdateRecordObservation,
   useDeleteRecordObservation,
@@ -71,9 +74,10 @@ import {
   useLinkConditionToRecord,
   usePersonFindingHistory,
   usePersonConditionRecordHistory,
+  usePersonObservationHistory,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
-import { ConditionRecordRow, ConditionEditDialog, type ConditionComparison } from "@/components/conditions";
+import { ConditionRecordRow, ConditionEditDialog, ConditionAddHistoryDialog, type ConditionComparison } from "@/components/conditions";
 import { 
   RECORD_TYPES, 
   type RecordType, 
@@ -119,15 +123,36 @@ function ObservationStatusBadge({ status }: { status: ObservationStatus | null }
   );
 }
 
+// Observation comparison badge
+function ObservationComparisonBadge({ comparison }: { comparison: { isNew: boolean; previousOccurrences: number } }) {
+  const t = useTranslations();
+  if (comparison.isNew) {
+    return (
+      <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1">
+        <CircleDot className="h-3 w-3" />
+        {t("observations.comparison.new")}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1" title={t("observations.comparison.knownTitle", { count: comparison.previousOccurrences })}>
+      <History className="h-3 w-3" />
+      {t("observations.comparison.known", { count: comparison.previousOccurrences })}
+    </Badge>
+  );
+}
+
 // Observation row component
 function ObservationRow({ 
-  observation, 
+  observation,
+  comparison,
   onEdit, 
   onDelete,
   onApply,
   isProcessing,
 }: { 
   observation: RecordObservationWithCatalog;
+  comparison?: { isNew: boolean; previousOccurrences: number } | null;
   onEdit: () => void;
   onDelete: () => void;
   onApply: () => void;
@@ -142,7 +167,9 @@ function ObservationRow({
       isUnapplied 
         ? "border-dashed border-muted-foreground/40 opacity-70" 
         : isCustom 
-          ? "border-dashed border-muted-foreground/40" 
+          ? "border-dashed border-muted-foreground/40"
+          : comparison?.isNew
+            ? "border-amber-500/30 bg-amber-500/5" 
           : ""
     }`}>
       {/* Name and value */}
@@ -199,6 +226,9 @@ function ObservationRow({
           </p>
         )}
       </div>
+
+      {/* Comparison badge */}
+      {comparison && <ObservationComparisonBadge comparison={comparison} />}
 
       {/* Status */}
       <ObservationStatusBadge status={observation.status as ObservationStatus} />
@@ -702,9 +732,13 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const { data: conditionRecords, isLoading: conditionsLoading } = useRecordConditions(record.id);
   const { data: personConditions } = usePersonConditions(record.person_id);
   const { data: personConditionRecordHistory } = usePersonConditionRecordHistory(record.person_id);
+  const { data: personObservationHistory } = usePersonObservationHistory(record.person_id);
   const [editingCondition, setEditingCondition] = useState<ConditionRecordWithDetails | null>(null);
   const [isAddingCondition, setIsAddingCondition] = useState(false);
+  const [addHistoryCondition, setAddHistoryCondition] = useState<ConditionRecordWithDetails | null>(null);
   const [showConditions, setShowConditions] = useState(true);
+
+  const { data: personRecords } = useMedicalRecords({ person_id: record.person_id });
 
   const updateMutation = useUpdateMedicalRecord();
   const updateObsMutation = useUpdateRecordObservation();
@@ -774,6 +808,23 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     if (personConditionRecordHistory === undefined) return null;
     const recordIds = personConditionRecordHistory[cr.condition_id] ?? [];
     const previousOccurrences = recordIds.filter((id) => id !== record.id).length;
+    return {
+      isNew: previousOccurrences === 0,
+      previousOccurrences,
+    };
+  };
+
+  const getComparisonForObservation = (obs: RecordObservationWithCatalog): { isNew: boolean; previousOccurrences: number } | null => {
+    if (personObservationHistory === undefined) return null;
+    const obsKey = obs.obs_code || obs.obs_name.toLowerCase().trim();
+    const historySummary = personObservationHistory.find(h => {
+      const historyKey = h.obs_code || h.obs_name.toLowerCase().trim();
+      return historyKey === obsKey;
+    });
+    if (!historySummary) {
+      return { isNew: true, previousOccurrences: 0 };
+    }
+    const previousOccurrences = historySummary.history.filter(h => h.record_id !== record.id).length;
     return {
       isNew: previousOccurrences === 0,
       previousOccurrences,
@@ -1002,6 +1053,13 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const handleAddCondition = () => {
     setEditingCondition(null);
     setIsAddingCondition(true);
+    setAddHistoryCondition(null);
+  };
+
+  const handleAddHistoryCondition = (cr: ConditionRecordWithDetails) => {
+    setAddHistoryCondition(cr);
+    setEditingCondition(null);
+    setIsAddingCondition(false);
   };
 
   const handleSaveCondition = async (data: {
@@ -1039,18 +1097,15 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         });
       }
     } else if (editingCondition) {
-      // Updating existing condition record
+      // Editing: only base info (no status change — use "Change status" to add history)
       await updateConditionRecordMutation.mutateAsync({
         id: editingCondition.id,
         updates: {
-          status_in_record: data.status_in_record,
           source_anchor: data.source_anchor,
           is_user_verified: true,
         },
-        // Pass record_id for auto-update logic
         recordId: record.id,
         conditionId: editingCondition.condition_id,
-        // Pass ICD code to update the condition if provided
         code: data.code,
         icd_name_en: data.icd_name_en,
       });
@@ -1290,6 +1345,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                   <ObservationRow
                     key={obs.id}
                     observation={obs}
+                    comparison={getComparisonForObservation(obs)}
                     onEdit={() => handleEditObservation(obs)}
                     onDelete={() => handleDeleteObservation(obs)}
                     onApply={() => handleApplyObservation(obs)}
@@ -1451,6 +1507,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                     conditionRecord={cr}
                     comparison={getComparisonForCondition(cr)}
                     onEdit={() => handleEditCondition(cr)}
+                    onAddHistory={() => handleAddHistoryCondition(cr)}
                     onDelete={() => handleDeleteCondition(cr)}
                     isProcessing={isProcessing}
                   />
@@ -1481,6 +1538,18 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         onSave={handleSaveCondition}
         isNew={isAddingCondition}
       />
+
+      {/* Add to history (change status) dialog */}
+      {addHistoryCondition && (
+        <ConditionAddHistoryDialog
+          open={!!addHistoryCondition}
+          onOpenChange={(open) => !open && setAddHistoryCondition(null)}
+          conditionId={addHistoryCondition.condition_id}
+          personId={record.person_id}
+          records={personRecords || []}
+          preselectedRecordId={record.id}
+        />
+      )}
 
       {/* Actions */}
       <div className="flex items-center justify-between gap-3 border-t pt-6">

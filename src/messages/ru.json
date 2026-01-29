@@ -395,6 +395,11 @@
       "critical_low": "Критически низкий",
       "critical_high": "Критически высокий",
       "unknown": "Неизвестно"
+    },
+    "comparison": {
+      "new": "Новый",
+      "known": "Известен ({count})",
+      "knownTitle": "Ранее измерялся в {count} записи(ях)"
     }
   },
   "observationHistory": {
@@ -597,6 +602,18 @@
     "mentionHistory": "История упоминаний",
     "timeline": "Хронология",
     "noHistory": "История упоминаний пуста",
+    "addToHistory": "Добавить в историю",
+    "addToHistoryDescription": "Добавить запись о статусе/дате в историю состояния. Можно привязать к медицинской записи.",
+    "changeStatus": "Изменить статус",
+    "manualEntryTitle": "Ручная запись",
+    "historyDate": "Дата",
+    "historyNote": "Заметка",
+    "historyNotePlaceholder": "Необязательная заметка к записи...",
+    "linkToRecord": "Привязать к медицинской записи",
+    "searchRecordPlaceholder": "Поиск по названию или дате...",
+    "noRecordSearchResults": "Записи не найдены",
+    "noLinkToRecord": "Нет (только ручная запись)",
+    "linkToRecordHint": "При желании привяжите запись к существующей медицинской записи.",
     "firstMentioned": "Первое упоминание",
     "lastMentioned": "Последнее упоминание",
     "viewRecord": "Открыть запись",

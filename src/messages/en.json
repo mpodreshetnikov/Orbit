@@ -395,6 +395,11 @@
       "critical_low": "Critical Low",
       "critical_high": "Critical High",
       "unknown": "Unknown"
+    },
+    "comparison": {
+      "new": "New",
+      "known": "Known ({count})",
+      "knownTitle": "Previously measured in {count} record(s)"
     }
   },
   "observationHistory": {
@@ -597,6 +602,18 @@
     "mentionHistory": "Mention History",
     "timeline": "Timeline",
     "noHistory": "No mention history yet",
+    "addToHistory": "Add to history",
+    "addToHistoryDescription": "Add a status/date entry to this condition's history. Optionally link to a medical record.",
+    "changeStatus": "Change status",
+    "manualEntryTitle": "Manual entry",
+    "historyDate": "Date",
+    "historyNote": "Note",
+    "historyNotePlaceholder": "Optional note for this entry...",
+    "linkToRecord": "Link to medical record",
+    "searchRecordPlaceholder": "Search by title or date...",
+    "noRecordSearchResults": "No records match your search",
+    "noLinkToRecord": "None (manual entry only)",
+    "linkToRecordHint": "Optionally link this entry to an existing medical record.",
     "firstMentioned": "First mentioned",
     "lastMentioned": "Last mentioned",
     "viewRecord": "View record",
