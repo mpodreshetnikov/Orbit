@@ -32,7 +32,6 @@ import {
   useRestoreRecord,
   useHardDeleteRecord,
   useUpdateMedicalRecord,
-  useProcessingMonitor,
 } from "@/hooks";
 import type { MedicalRecordListItem, RecordType, RecordStatus } from "@/types";
 import { RECORD_TYPES } from "@/types";
@@ -49,9 +48,6 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const t = useTranslations();
   const router = useRouter();
   const searchParams = useSearchParams();
-
-  // Monitor for completed processing jobs and show notifications
-  useProcessingMonitor(personId);
 
   // Check if we should show drafts from URL param
   const showDraftsFromUrl = searchParams.get("showDrafts") === "true";

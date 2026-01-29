@@ -79,9 +79,11 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
   const { startBackgroundOCR } = useBackgroundOCR();
   const { extractStructure } = useStructureExtraction();
 
-  // Processing queue state
-  const getActiveJobs = useProcessingQueueStore((state) => state.getActiveJobs);
-  const activeJobs = getActiveJobs();
+  // Processing queue state - subscribe to jobs directly to get re-renders on changes
+  const jobs = useProcessingQueueStore((state) => state.jobs);
+  const activeJobs = Object.values(jobs).filter(
+    (job) => job.stage === "uploading" || job.stage === "processing"
+  );
 
   // Handle files selected
   const handleFilesSelected = useCallback((files: File[]) => {

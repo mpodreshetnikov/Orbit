@@ -8,3 +8,4 @@ export { LanguageSync } from "./language-sync";
 export { PersonSelector } from "./person-selector";
 export { ProcessingIndicator } from "./processing-indicator";
 export { ScrollToTop } from "./scroll-to-top";
+export { RealtimeMonitor } from "./realtime-monitor";
