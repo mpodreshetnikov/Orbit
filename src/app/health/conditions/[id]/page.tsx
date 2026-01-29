@@ -38,15 +38,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useConditionDetail, useUpdateCondition, useIcdLookup } from "@/hooks";
-import { ConditionStatusBadge } from "@/components/conditions";
+import { useConditionDetail, useUpdateCondition, useIcdLookup, useMedicalRecords } from "@/hooks";
+import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
 
@@ -67,15 +60,18 @@ function ConditionDetailContent() {
   const t = useTranslations();
   const conditionId = params.id as string;
 
-  const { data: condition, isLoading, error } = useConditionDetail(conditionId);
+  const { data: condition, isLoading, error, refetch } = useConditionDetail(conditionId);
   const updateConditionMutation = useUpdateCondition();
+  const { data: personRecords } = useMedicalRecords(
+    condition?.person_id ? { person_id: condition.person_id } : {}
+  );
   
-  // Edit dialog state
+  // Edit dialog state (base info only; use Add to history for status)
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editCode, setEditCode] = useState("");
-  const [editStatus, setEditStatus] = useState<ConditionStatus>("active");
   const [editNotes, setEditNotes] = useState("");
+  const [addHistoryOpen, setAddHistoryOpen] = useState(false);
   
   // ICD validation (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
@@ -86,7 +82,6 @@ function ConditionDetailContent() {
     if (condition) {
       setEditName(condition.name);
       setEditCode(condition.code || "");
-      setEditStatus(condition.current_status);
       setEditNotes(condition.notes || "");
       setIsEditing(true);
     }
@@ -101,7 +96,6 @@ function ConditionDetailContent() {
         name: editName.trim(),
         code: editCode.trim() || null,
         icd_name_en: icdLookup?.found ? icdLookup.name_en : null,
-        current_status: editStatus,
         notes: editNotes.trim() || null,
       },
     });
@@ -162,10 +156,16 @@ function ConditionDetailContent() {
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight">{condition.name}</h1>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={openEditDialog}>
-          <Pencil className="h-4 w-4 mr-2" />
-          {t("common.edit")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setAddHistoryOpen(true)}>
+            <History className="h-4 w-4 mr-2" />
+            {t("conditions.addToHistory")}
+          </Button>
+          <Button variant="outline" size="sm" onClick={openEditDialog}>
+            <Pencil className="h-4 w-4 mr-2" />
+            {t("common.edit")}
+          </Button>
+        </div>
       </div>
 
       {/* ICD Info Card */}
@@ -446,42 +446,6 @@ function ConditionDetailContent() {
               )}
             </div>
             
-            {/* Status */}
-            <div className="space-y-2">
-              <Label>{t("conditions.currentStatus")}</Label>
-              <Select value={editStatus} onValueChange={(v) => setEditStatus(v as ConditionStatus)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 text-orange-500" />
-                      {t("conditions.status.active")}
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="suspected">
-                    <div className="flex items-center gap-2">
-                      <HelpCircle className="h-3.5 w-3.5 text-yellow-500" />
-                      {t("conditions.status.suspected")}
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="resolved">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                      {t("conditions.status.resolved")}
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="history">
-                    <div className="flex items-center gap-2">
-                      <History className="h-3.5 w-3.5 text-gray-500" />
-                      {t("conditions.status.history")}
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
             {/* Notes */}
             <div className="space-y-2">
               <Label htmlFor="editNotes">{t("conditions.notes")}</Label>
@@ -510,6 +474,18 @@ function ConditionDetailContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add to history dialog */}
+      {condition && (
+        <ConditionAddHistoryDialog
+          open={addHistoryOpen}
+          onOpenChange={setAddHistoryOpen}
+          conditionId={condition.id}
+          personId={condition.person_id}
+          records={personRecords || []}
+          onSaved={() => refetch()}
+        />
+      )}
     </div>
   );
 }

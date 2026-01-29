@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Pencil, Trash2, AlertTriangle, ChevronDown, ChevronUp, Quote, ArrowRight, CircleDot, History } from "lucide-react";
+import { Pencil, Trash2, AlertTriangle, ChevronDown, ChevronUp, Quote, ArrowRight, CircleDot, History, CirclePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ interface ConditionRecordRowProps {
   conditionRecord: ConditionRecordWithDetails;
   comparison?: ConditionComparison | null;
   onEdit?: () => void;
+  onAddHistory?: () => void;
   onDelete?: () => void;
   isProcessing?: boolean;
   showActions?: boolean;
@@ -47,6 +48,7 @@ export function ConditionRecordRow({
   conditionRecord,
   comparison,
   onEdit,
+  onAddHistory,
   onDelete,
   isProcessing = false,
   showActions = true,
@@ -144,8 +146,21 @@ export function ConditionRecordRow({
                   className="h-8 w-8"
                   onClick={onEdit}
                   disabled={isProcessing}
+                  title={t("conditions.edit")}
                 >
                   <Pencil className="h-4 w-4" />
+                </Button>
+              )}
+              {onAddHistory && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={onAddHistory}
+                  disabled={isProcessing}
+                  title={t("conditions.changeStatus")}
+                >
+                  <CirclePlus className="h-4 w-4" />
                 </Button>
               )}
               {onDelete && (

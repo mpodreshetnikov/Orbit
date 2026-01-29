@@ -134,7 +134,7 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
   }
 
   // Transform the records to include record info
-  const history: ConditionHistoryRecord[] = (records || []).map((r) => {
+  const mapped: ConditionHistoryRecord[] = (records || []).map((r) => {
     const medRec = r.medical_records as { title?: string; record_date?: string; record_type?: string } | null;
     return {
       id: r.id as string,
@@ -149,6 +149,16 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
       record_date: medRec?.record_date || null,
       record_type: medRec?.record_type || null,
     };
+  });
+
+  // Sort history by record_date (timeline order: newest first; null dates last)
+  const history = [...mapped].sort((a, b) => {
+    const dateA = a.record_date || a.created_at?.slice(0, 10) || "";
+    const dateB = b.record_date || b.created_at?.slice(0, 10) || "";
+    if (!dateA && !dateB) return 0;
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    return dateB.localeCompare(dateA); // descending (newest first)
   });
 
   // Calculate stats
@@ -698,6 +708,9 @@ export function useLinkConditionToRecord() {
       });
       queryClient.invalidateQueries({
         queryKey: ["conditions"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["condition", data.condition_id],
       });
     },
   });

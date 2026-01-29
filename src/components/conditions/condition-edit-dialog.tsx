@@ -366,78 +366,80 @@ export function ConditionEditDialog({
             </div>
           )}
 
-          {/* Status in this record */}
-          <div className="space-y-2">
-            <Label>{t("conditions.statusInRecord")}</Label>
-            <Select value={statusInRecord} onValueChange={(v) => setStatusInRecord(v as ConditionStatus)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="h-3.5 w-3.5 text-orange-500" />
-                    {t("conditions.status.active")}
+          {/* Status in this record — only when adding new (editing allows only base info) */}
+          {isNew && (
+            <div className="space-y-2">
+              <Label>{t("conditions.statusInRecord")}</Label>
+              <Select value={statusInRecord} onValueChange={(v) => setStatusInRecord(v as ConditionStatus)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-3.5 w-3.5 text-orange-500" />
+                      {t("conditions.status.active")}
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="suspected">
+                    <div className="flex items-center gap-2">
+                      <HelpCircle className="h-3.5 w-3.5 text-yellow-500" />
+                      {t("conditions.status.suspected")}
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="resolved">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                      {t("conditions.status.resolved")}
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="history">
+                    <div className="flex items-center gap-2">
+                      <History className="h-3.5 w-3.5 text-gray-500" />
+                      {t("conditions.status.history")}
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {/* Status tips toggle */}
+              <button
+                type="button"
+                onClick={() => setShowStatusTips(!showStatusTips)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Info className="h-3.5 w-3.5" />
+                <span>{t("conditions.statusTips.title")}</span>
+                {showStatusTips ? (
+                  <ChevronUp className="h-3 w-3" />
+                ) : (
+                  <ChevronDown className="h-3 w-3" />
+                )}
+              </button>
+              
+              {/* Status tips content */}
+              {showStatusTips && (
+                <div className="rounded-md bg-muted/50 p-3 space-y-2 text-xs">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 text-orange-500 mt-0.5 shrink-0" />
+                    <span>{t("conditions.statusTips.active")}</span>
                   </div>
-                </SelectItem>
-                <SelectItem value="suspected">
-                  <div className="flex items-center gap-2">
-                    <HelpCircle className="h-3.5 w-3.5 text-yellow-500" />
-                    {t("conditions.status.suspected")}
+                  <div className="flex items-start gap-2">
+                    <HelpCircle className="h-3.5 w-3.5 text-yellow-500 mt-0.5 shrink-0" />
+                    <span>{t("conditions.statusTips.suspected")}</span>
                   </div>
-                </SelectItem>
-                <SelectItem value="resolved">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                    {t("conditions.status.resolved")}
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                    <span>{t("conditions.statusTips.resolved")}</span>
                   </div>
-                </SelectItem>
-                <SelectItem value="history">
-                  <div className="flex items-center gap-2">
-                    <History className="h-3.5 w-3.5 text-gray-500" />
-                    {t("conditions.status.history")}
+                  <div className="flex items-start gap-2">
+                    <History className="h-3.5 w-3.5 text-gray-500 mt-0.5 shrink-0" />
+                    <span>{t("conditions.statusTips.history")}</span>
                   </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            
-            {/* Status tips toggle */}
-            <button
-              type="button"
-              onClick={() => setShowStatusTips(!showStatusTips)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Info className="h-3.5 w-3.5" />
-              <span>{t("conditions.statusTips.title")}</span>
-              {showStatusTips ? (
-                <ChevronUp className="h-3 w-3" />
-              ) : (
-                <ChevronDown className="h-3 w-3" />
+                </div>
               )}
-            </button>
-            
-            {/* Status tips content */}
-            {showStatusTips && (
-              <div className="rounded-md bg-muted/50 p-3 space-y-2 text-xs">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="h-3.5 w-3.5 text-orange-500 mt-0.5 shrink-0" />
-                  <span>{t("conditions.statusTips.active")}</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <HelpCircle className="h-3.5 w-3.5 text-yellow-500 mt-0.5 shrink-0" />
-                  <span>{t("conditions.statusTips.suspected")}</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
-                  <span>{t("conditions.statusTips.resolved")}</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <History className="h-3.5 w-3.5 text-gray-500 mt-0.5 shrink-0" />
-                  <span>{t("conditions.statusTips.history")}</span>
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Source Anchor */}
           <div className="space-y-2">
