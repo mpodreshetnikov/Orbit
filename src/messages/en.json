@@ -130,6 +130,8 @@
       "subtitle": "Upload files and fill in record details",
       "dropzone": "Drop files here or click to browse",
       "dropzoneHint": "Supports images (PNG, JPG, WebP, HEIC) and PDFs up to 20MB",
+      "dropzoneMobile": "Tap to take photo or choose from gallery",
+      "dropzoneHintMobile": "Images and PDFs up to 20MB",
       "uploading": "Uploading...",
       "processing": "Processing...",
       "recordType": "Record type",

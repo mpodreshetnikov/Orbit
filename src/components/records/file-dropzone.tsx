@@ -2,10 +2,11 @@
 
 import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Upload, X, FileText, Image as ImageIcon, Loader2, Camera } from "lucide-react";
+import { Upload, X, FileText, Image as ImageIcon, Loader2, Camera, ImagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CameraCapture } from "./camera-capture";
+import { useIsMobile } from "@/hooks";
 
 interface FileDropzoneProps {
   onFilesSelected: (files: File[]) => void;
@@ -37,6 +38,7 @@ export function FileDropzone({
   showCamera = true,
 }: FileDropzoneProps) {
   const t = useTranslations();
+  const isMobile = useIsMobile();
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -181,15 +183,21 @@ export function FileDropzone({
 
         {isUploading ? (
           <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
+        ) : isMobile ? (
+          <ImagePlus className="h-10 w-10 text-muted-foreground" />
         ) : (
           <Upload className="h-10 w-10 text-muted-foreground" />
         )}
 
         <p className="mt-4 text-sm font-medium">
-          {isUploading ? t("records.add.uploading") : t("records.add.dropzone")}
+          {isUploading
+            ? t("records.add.uploading")
+            : isMobile
+              ? t("records.add.dropzoneMobile")
+              : t("records.add.dropzone")}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          {t("records.add.dropzoneHint")}
+          {isMobile ? t("records.add.dropzoneHintMobile") : t("records.add.dropzoneHint")}
         </p>
         {maxFiles > 0 && (
           <p className="mt-2 text-xs text-muted-foreground">
@@ -198,8 +206,8 @@ export function FileDropzone({
         )}
       </div>
 
-      {/* Camera button */}
-      {showCamera && canAddMore && (
+      {/* Camera button (desktop only; on mobile, tap dropzone opens camera/gallery) */}
+      {showCamera && canAddMore && !isMobile && (
         <Button
           type="button"
           variant="outline"
