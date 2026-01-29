@@ -31,6 +31,7 @@ interface ConditionAddHistoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   conditionId: string;
+  conditionName: string;
   personId: string;
   records: MedicalRecordListItem[];
   /** When opening from a record context (e.g. record detail), pre-select this record */
@@ -42,6 +43,7 @@ export function ConditionAddHistoryDialog({
   open,
   onOpenChange,
   conditionId,
+  conditionName,
   personId,
   records,
   preselectedRecordId,
@@ -102,10 +104,11 @@ export function ConditionAddHistoryDialog({
     if (recordId && recordId !== "none") {
       targetRecordId = recordId;
     } else {
-      // Create a "Manual entry" medical record for this date; duplicate note into record so it shows in records list
+      // Create a "Manual entry" medical record for this date; title = "Manual entry (Condition name)"; duplicate note into record
+      const manualTitle = `${t("conditions.manualEntryTitle")} (${conditionName})`;
       const newRecord = await createRecordMutation.mutateAsync({
         person_id: personId,
-        title: t("conditions.manualEntryTitle"),
+        title: manualTitle,
         record_date: date || null,
         record_type: "other",
         status: "active",

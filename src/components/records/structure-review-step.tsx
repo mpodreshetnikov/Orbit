@@ -1545,6 +1545,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           open={!!addHistoryCondition}
           onOpenChange={(open) => !open && setAddHistoryCondition(null)}
           conditionId={addHistoryCondition.condition_id}
+          conditionName={addHistoryCondition.condition_name}
           personId={record.person_id}
           records={personRecords || []}
           preselectedRecordId={record.id}

@@ -1098,6 +1098,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
               open={!!addHistoryCondition}
               onOpenChange={(open) => !open && setAddHistoryCondition(null)}
               conditionId={addHistoryCondition.condition_id}
+              conditionName={addHistoryCondition.condition_name}
               personId={record.person_id}
               records={personRecords || []}
               preselectedRecordId={recordId}

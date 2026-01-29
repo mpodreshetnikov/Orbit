@@ -481,6 +481,7 @@ function ConditionDetailContent() {
           open={addHistoryOpen}
           onOpenChange={setAddHistoryOpen}
           conditionId={condition.id}
+          conditionName={condition.name}
           personId={condition.person_id}
           records={personRecords || []}
           onSaved={() => refetch()}
