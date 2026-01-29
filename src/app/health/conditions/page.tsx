@@ -77,9 +77,11 @@ function ConditionsContent() {
   }
 
   const renderConditionsGrid = (items: ConditionWithHistory[], isInactive = false) => (
-    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 ${isInactive ? "opacity-60" : ""}`}>
+    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0 ${isInactive ? "opacity-60" : ""}`}>
       {items.map((condition) => (
-        <ConditionCard key={condition.id} condition={condition} />
+        <div key={condition.id} className="min-w-0">
+          <ConditionCard condition={condition} />
+        </div>
       ))}
     </div>
   );
@@ -169,7 +171,7 @@ function ConditionsContent() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 overflow-x-hidden">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -251,9 +253,9 @@ function ConditionsContent() {
 
       {/* Content */}
       {isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-40" />
+            <Skeleton key={i} className="h-40 min-w-0" />
           ))}
         </div>
       ) : filteredConditions && filteredConditions.length > 0 ? (

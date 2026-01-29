@@ -188,13 +188,13 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const hasActiveFilters = searchQuery || typeFilter !== "all" || statusFilter !== "active";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 overflow-x-hidden">
       {/* Header with Add button */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight truncate min-w-0">
           {t("health.title")} — {personName}
         </h1>
-        <Button onClick={() => router.push("/health/records/new")}>
+        <Button onClick={() => router.push("/health/records/new")} className="shrink-0">
           <Plus className="mr-2 h-4 w-4" />
           {t("health.addRecord")}
         </Button>
@@ -322,9 +322,9 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
 
       {/* Loading state */}
       {isLoading && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
           {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-32" />
+            <Skeleton key={i} className="h-32 min-w-0" />
           ))}
         </div>
       )}
@@ -339,8 +339,9 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
 
       {/* Records grid */}
       {!isLoading && !error && records && records.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
           {records.map((record) => (
+            <div key={record.id} className="min-w-0">
             <RecordCard
               key={record.id}
               record={record}
@@ -350,6 +351,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
               onDelete={statusFilter === "removed" ? handleDelete : undefined}
               onActivate={statusFilter === "draft" ? handleActivate : undefined}
             />
+            </div>
           ))}
         </div>
       )}

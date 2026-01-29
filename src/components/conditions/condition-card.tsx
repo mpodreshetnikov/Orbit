@@ -63,7 +63,7 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
   const cardContent = (
     <Card 
       className={cn(
-        "hover:shadow-md transition-shadow h-full",
+        "hover:shadow-md transition-shadow h-full min-w-0 w-full overflow-hidden",
         (onClick || true) && "cursor-pointer",
         isActive && "border-orange-300 dark:border-orange-700",
         isSuspected && "border-yellow-300 dark:border-yellow-700",

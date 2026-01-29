@@ -38,10 +38,14 @@ function FindingsContent() {
   }
 
   const renderFindingsGrid = (items: FindingSummary[], isResolved = false) => (
-    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 ${isResolved ? "opacity-60" : ""}`}>
+    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0 ${isResolved ? "opacity-60" : ""}`}>
       {items.map((finding, index) => {
         const key = `${finding.finding_code || finding.finding_type_text}-${finding.site_code || finding.body_site_text || "none"}-${index}`;
-        return <FindingCard key={key} finding={finding} />;
+        return (
+          <div key={key} className="min-w-0">
+            <FindingCard finding={finding} />
+          </div>
+        );
       })}
     </div>
   );
@@ -104,7 +108,7 @@ function FindingsContent() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 overflow-x-hidden">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">{t("findings.title")}</h1>
@@ -144,9 +148,9 @@ function FindingsContent() {
 
       {/* Content */}
       {isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-40" />
+            <Skeleton key={i} className="h-40 min-w-0" />
           ))}
         </div>
       ) : findings && findings.length > 0 ? (

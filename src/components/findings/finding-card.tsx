@@ -55,9 +55,9 @@ export function FindingCard({ finding }: FindingCardProps) {
   const href = `/health/findings/${findingKey}${siteKey ? `?site=${siteKey}` : ""}`;
 
   return (
-    <Link href={href}>
+    <Link href={href} className="min-w-0 w-full block overflow-hidden">
       <Card className={cn(
-        "hover:shadow-md transition-shadow cursor-pointer h-full",
+        "hover:shadow-md transition-shadow cursor-pointer h-full min-w-0 w-full overflow-hidden",
         isSevere && !isResolved && "border-orange-300 dark:border-orange-700",
         isResolved && "border-green-300 dark:border-green-700"
       )}>
