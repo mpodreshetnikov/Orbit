@@ -179,7 +179,7 @@ async function fetchPersonObservationHistory(
     });
   }
 
-  // Sort: bad observations first (not normal), then by name
+  // Sort: bad observations first, then by last observation date (newest first), then by name
   summaries.sort((a, b) => {
     const aIsBad = a.latest_status && a.latest_status !== "normal" && a.latest_status !== "unknown";
     const bIsBad = b.latest_status && b.latest_status !== "normal" && b.latest_status !== "unknown";
@@ -187,7 +187,11 @@ async function fetchPersonObservationHistory(
     if (aIsBad && !bIsBad) return -1;
     if (!aIsBad && bIsBad) return 1;
     
-    // Then sort by name
+    const dateA = a.latest_date ? new Date(a.latest_date).getTime() : 0;
+    const dateB = b.latest_date ? new Date(b.latest_date).getTime() : 0;
+    const byDate = dateB - dateA;
+    if (byDate !== 0) return byDate;
+    
     return a.obs_name.localeCompare(b.obs_name);
   });
 
