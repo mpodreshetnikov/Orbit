@@ -38,6 +38,7 @@
     "supabase": "^2.72.8",
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
+    "yet-another-react-lightbox": "^3.28.0",
     "zustand": "^5.0.10"
   },
   "devDependencies": {
