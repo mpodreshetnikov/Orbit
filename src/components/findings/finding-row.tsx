@@ -145,7 +145,12 @@ export function FindingRow({
   showActions = true,
 }: FindingRowProps) {
   const t = useTranslations();
-  
+
+  // History page: /health/findings/[findingId]?site=...
+  const viewHref =
+    `/health/findings/${encodeURIComponent(finding.finding_code ?? finding.finding_type_text)}` +
+    (finding.site_code ? `?site=${encodeURIComponent(finding.site_code)}` : "");
+
   // Get display names
   const findingName = finding.catalog_finding_name_ru || finding.finding_type_text;
   const siteName = finding.catalog_site_name_ru || finding.body_site_text;
