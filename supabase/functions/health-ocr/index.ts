@@ -131,7 +131,7 @@ async function callVisionOcr(
         { role: "user", content },
       ],
       temperature: 0.1, // Low temperature for accurate OCR
-      max_tokens: 8192, // Allow more tokens for long documents
+      max_tokens: 12000, // Allow more tokens for long documents
       response_format: { type: "json_object" },
     }),
   });

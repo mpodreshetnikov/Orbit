@@ -744,7 +744,7 @@ ${existingFindingsPrompt}
         { role: "user", content: `Проанализируй этот текст медицинского документа:\n\n${ocrText}` },
       ],
       temperature: 0.3,
-      max_tokens: 8192, // Increased for observations + findings
+      max_tokens: 18000, // Increased for observations + findings
       response_format: { type: "json_object" },
     }),
   });
