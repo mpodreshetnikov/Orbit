@@ -58,13 +58,26 @@ function ConditionsContent() {
     );
   }, [conditions, search]);
 
-  // Split conditions by status
+  // Split conditions by status and sort each group by last mention date (most recent first; nulls last)
   const { activeConditions, suspectedConditions, resolvedConditions, historyConditions } = useMemo(() => {
+    const sortByLastMention = (a: ConditionWithHistory, b: ConditionWithHistory) => {
+      const aTime = a.last_mentioned_date ? new Date(a.last_mentioned_date).getTime() : 0;
+      const bTime = b.last_mentioned_date ? new Date(b.last_mentioned_date).getTime() : 0;
+      return bTime - aTime;
+    };
     return {
-      activeConditions: filteredConditions.filter(c => c.current_status === "active"),
-      suspectedConditions: filteredConditions.filter(c => c.current_status === "suspected"),
-      resolvedConditions: filteredConditions.filter(c => c.current_status === "resolved"),
-      historyConditions: filteredConditions.filter(c => c.current_status === "history"),
+      activeConditions: filteredConditions
+        .filter(c => c.current_status === "active")
+        .sort(sortByLastMention),
+      suspectedConditions: filteredConditions
+        .filter(c => c.current_status === "suspected")
+        .sort(sortByLastMention),
+      resolvedConditions: filteredConditions
+        .filter(c => c.current_status === "resolved")
+        .sort(sortByLastMention),
+      historyConditions: filteredConditions
+        .filter(c => c.current_status === "history")
+        .sort(sortByLastMention),
     };
   }, [filteredConditions]);
 
