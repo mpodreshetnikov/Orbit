@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import Image from "next/image";
 import {
@@ -26,6 +26,21 @@ import { useAttachmentUrl, useStructureExtraction, useUpdateMedicalRecord } from
 import type { RecordAttachment } from "@/types";
 import { cn } from "@/lib/utils";
 
+function getTouchDistance(touches: React.TouchList): number {
+  if (touches.length < 2) return 0;
+  const a = touches[0];
+  const b = touches[1];
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+}
+
+function getTouchCenter(touches: React.TouchList): { x: number; y: number } {
+  if (touches.length < 2) return { x: 0, y: 0 };
+  return {
+    x: (touches[0].clientX + touches[1].clientX) / 2,
+    y: (touches[0].clientY + touches[1].clientY) / 2,
+  };
+}
+
 interface OcrReviewStepProps {
   recordId: string;
   ocrText: string;
@@ -39,7 +54,12 @@ function ImageCarousel({ attachments }: { attachments: RecordAttachment[] }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
-  
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const pinchStart = useRef<{ distance: number; zoom: number; center: { x: number; y: number } } | null>(null);
+  const touchPanStart = useRef<{ x: number; y: number; posX: number; posY: number } | null>(null);
+
   const currentAttachment = attachments[currentIndex];
   const { data: url, isLoading } = useAttachmentUrl(currentAttachment?.storage_path || "");
 
@@ -61,12 +81,88 @@ function ImageCarousel({ attachments }: { attachments: RecordAttachment[] }) {
 
   const handleResetZoom = useCallback(() => {
     setZoom(1);
+    setPosition({ x: 0, y: 0 });
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom > 1) {
+      setIsDragging(true);
+      dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+    }
+  }, [zoom, position]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isDragging && zoom > 1) {
+      setPosition({
+        x: e.clientX - dragStart.current.x,
+        y: e.clientY - dragStart.current.y,
+      });
+    }
+  }, [isDragging, zoom]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.25 : 0.25;
+    setZoom((prev) => Math.min(Math.max(prev + delta, 0.5), 5));
+  }, []);
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 2) {
+        pinchStart.current = {
+          distance: getTouchDistance(e.touches),
+          zoom,
+          center: getTouchCenter(e.touches),
+        };
+        touchPanStart.current = null;
+      } else if (e.touches.length === 1 && zoom > 1) {
+        touchPanStart.current = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+          posX: position.x,
+          posY: position.y,
+        };
+        pinchStart.current = null;
+      }
+    },
+    [zoom, position]
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 2 && pinchStart.current) {
+        e.preventDefault();
+        const distance = getTouchDistance(e.touches);
+        if (pinchStart.current.distance > 0) {
+          const scale = distance / pinchStart.current.distance;
+          setZoom(Math.min(Math.max(pinchStart.current.zoom * scale, 0.5), 5));
+        }
+        pinchStart.current = { ...pinchStart.current, distance };
+      } else if (e.touches.length === 1 && touchPanStart.current && zoom > 1) {
+        e.preventDefault();
+        setPosition({
+          x: touchPanStart.current.posX + e.touches[0].clientX - touchPanStart.current.x,
+          y: touchPanStart.current.posY + e.touches[0].clientY - touchPanStart.current.y,
+        });
+      }
+    },
+    [zoom]
+  );
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinchStart.current = null;
+    if (e.touches.length < 1) touchPanStart.current = null;
   }, []);
 
   const handleLightboxClose = useCallback((open: boolean) => {
     setIsLightboxOpen(open);
     if (!open) {
       setZoom(1);
+      setPosition({ x: 0, y: 0 });
     }
   }, []);
 
@@ -183,12 +279,25 @@ function ImageCarousel({ attachments }: { attachments: RecordAttachment[] }) {
             </DialogHeader>
             {url && (
               <div
-                className="relative min-h-[50vh] h-[85vh] overflow-hidden bg-black/90 cursor-zoom-in"
+                className={cn(
+                  "relative min-h-[50vh] h-[85vh] overflow-hidden bg-black/90 touch-none",
+                  zoom > 1 ? "cursor-grab" : "cursor-zoom-in",
+                  isDragging && "cursor-grabbing"
+                )}
+                style={{ touchAction: "none" }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onWheel={handleWheel}
                 onClick={() => zoom === 1 && handleZoomIn()}
               >
                 <div
                   className="absolute inset-0 flex items-center justify-center transition-transform duration-100"
-                  style={{ transform: `scale(${zoom})` }}
+                  style={{ transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})` }}
                 >
                   <Image
                     src={url}
