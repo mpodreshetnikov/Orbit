@@ -85,7 +85,7 @@ function ImageCarousel({ attachments }: { attachments: RecordAttachment[] }) {
       <div className="relative h-full min-h-[400px] rounded-lg border bg-muted/30 overflow-hidden">
         {/* Image display */}
         <div
-          className="relative h-full cursor-pointer"
+          className="tap-target relative h-full cursor-pointer"
           onClick={() => isImage && slides.length > 0 && setIsLightboxOpen(true)}
         >
           {isLoading ? (

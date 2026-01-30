@@ -72,7 +72,7 @@ export function ProcessingIndicator() {
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex w-full items-center justify-between p-3 hover:bg-muted/50"
+        className="tap-target flex w-full items-center justify-between p-3 hover:bg-muted/50"
       >
         <div className="flex items-center gap-2">
           {activeJobs.length > 0 && (

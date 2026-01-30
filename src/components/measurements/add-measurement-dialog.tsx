@@ -184,7 +184,7 @@ export function AddMeasurementDialog({
                 onClick={() => !preselectedCode && setDropdownOpen(!dropdownOpen)}
                 disabled={!!preselectedCode}
                 className={cn(
-                  "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background",
+                  "tap-target flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background",
                   "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
                   "disabled:cursor-not-allowed disabled:opacity-50",
                   !selectedDisplayName && "text-muted-foreground"
@@ -240,7 +240,7 @@ export function AddMeasurementDialog({
                                   type="button"
                                   onClick={() => handleSelectType(item)}
                                   className={cn(
-                                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none",
+                                    "tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none",
                                     "hover:bg-accent hover:text-accent-foreground",
                                     "focus:bg-accent focus:text-accent-foreground",
                                     catalogId === item.id && "bg-accent"

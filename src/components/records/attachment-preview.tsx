@@ -48,7 +48,7 @@ export function AttachmentPreview({
     <>
       <div
         className={cn(
-          "group relative overflow-hidden rounded-lg border bg-muted/50",
+          "tap-target group relative overflow-hidden rounded-lg border bg-muted/50",
           isImage && "cursor-pointer"
         )}
         onClick={() => isImage && setIsLightboxOpen(true)}

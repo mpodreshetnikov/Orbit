@@ -149,7 +149,7 @@ function ObservationCard({ observation }: { observation: ObservationSummary }) {
     observation.latest_status !== "unknown";
 
   return (
-    <Link href={`/health/observations/${encodeURIComponent(observation.obs_code)}`}>
+    <Link href={`/health/observations/${encodeURIComponent(observation.obs_code)}`} className="tap-target block">
       <Card className={`hover:shadow-md transition-shadow cursor-pointer ${
         isBad ? "border-orange-300 dark:border-orange-700" : ""
       }`}>

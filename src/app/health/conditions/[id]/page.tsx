@@ -126,73 +126,74 @@ function ConditionDetailContent() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Skeleton className="h-10 w-10" />
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-64" />
-            <Skeleton className="h-4 w-32" />
+      <div className="space-y-3 sm:space-y-6">
+        <div className="flex items-center gap-2 sm:gap-4">
+          <Skeleton className="h-9 w-9 sm:h-10 sm:w-10 shrink-0" />
+          <div className="space-y-1.5 sm:space-y-2 min-w-0 flex-1">
+            <Skeleton className="h-6 sm:h-8 w-48 sm:w-64" />
+            <Skeleton className="h-3 sm:h-4 w-24 sm:w-32" />
           </div>
         </div>
-        <Skeleton className="h-48 w-full" />
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-36 sm:h-48 w-full" />
+        <Skeleton className="h-48 sm:h-64 w-full" />
       </div>
     );
   }
 
   if (error || !condition) {
     return (
-      <div className="space-y-6">
-        <Button variant="ghost" onClick={() => router.back()}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          {t("common.back")}
+      <div className="space-y-3 sm:space-y-6">
+        <Button variant="ghost" size="sm" className="h-8 sm:h-9 gap-1.5" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          <span className="hidden sm:inline">{t("common.back")}</span>
         </Button>
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-8 text-center">
-          <HeartPulse className="h-12 w-12 mx-auto mb-4 text-destructive opacity-50" />
-          <p className="text-destructive font-medium">{t("conditions.conditionNotFound")}</p>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 sm:p-8 text-center">
+          <HeartPulse className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 text-destructive opacity-50" />
+          <p className="text-destructive font-medium text-sm sm:text-base">{t("conditions.conditionNotFound")}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3 min-w-0 flex-1">
-          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
+      <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-2 sm:gap-3 min-w-0 flex-1">
+          <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-10 sm:w-10 shrink-0" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <StatusIcon status={condition.current_status} className="h-5 w-5" />
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap mb-0.5">
+              <StatusIcon status={condition.current_status} className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
               <ConditionStatusBadge status={condition.current_status} />
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">{condition.name}</h1>
+            <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">{condition.name}</h1>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setAddHistoryOpen(true)}>
-            <History className="h-4 w-4 mr-2" />
-            {t("conditions.addToHistory")}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0">
+          <Button variant="outline" size="sm" className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5" onClick={() => setAddHistoryOpen(true)}>
+            <History className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+            <span className="hidden sm:inline">{t("conditions.addToHistory")}</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={openEditDialog}>
-            <Pencil className="h-4 w-4 mr-2" />
-            {t("common.edit")}
+          <Button variant="outline" size="sm" className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5" onClick={openEditDialog}>
+            <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+            <span className="hidden sm:inline">{t("common.edit")}</span>
           </Button>
           {canDeleteCondition && (
             <Button
               variant="destructive"
               size="sm"
+              className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5"
               onClick={() => setDeleteConfirmOpen(true)}
               disabled={deleteConditionMutation.isPending}
             >
               {deleteConditionMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin shrink-0" />
               ) : (
-                <Trash2 className="h-4 w-4 mr-2" />
+                <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
               )}
-              {t("conditions.deleteCondition")}
+              <span className="hidden sm:inline">{t("conditions.deleteCondition")}</span>
             </Button>
           )}
         </div>
@@ -201,25 +202,25 @@ function ConditionDetailContent() {
       {/* ICD Info Card */}
       {(condition.code || condition.icd_name_en) && (
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Badge variant="outline" className="font-mono">
+          <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+            <CardTitle className="text-sm sm:text-base flex items-center gap-2">
+              <Badge variant="outline" className="font-mono text-xs">
                 {t("conditions.icdName")}
               </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="p-3 sm:p-6 pt-0 space-y-2">
             {condition.code && (
               <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="font-mono">
+                <Badge variant="secondary" className="font-mono text-xs">
                   {condition.code}
                 </Badge>
               </div>
             )}
             {condition.icd_name_en && (
               <div>
-                <span className="text-sm text-muted-foreground">{t("conditions.icdOfficialName")}:</span>
-                <p className="mt-1 font-medium">{condition.icd_name_en}</p>
+                <span className="text-xs sm:text-sm text-muted-foreground">{t("conditions.icdOfficialName")}:</span>
+                <p className="mt-0.5 sm:mt-1 font-medium text-sm sm:text-base">{condition.icd_name_en}</p>
               </div>
             )}
           </CardContent>
@@ -228,13 +229,13 @@ function ConditionDetailContent() {
 
       {/* Details Card */}
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">{t("conditions.title")}</CardTitle>
+        <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+          <CardTitle className="text-sm sm:text-base">{t("conditions.title")}</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="p-3 sm:p-6 pt-0 space-y-3 sm:space-y-4">
           {/* Status */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">{t("conditions.currentStatus")}</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs sm:text-sm text-muted-foreground">{t("conditions.currentStatus")}</span>
             <ConditionStatusBadge status={condition.current_status} />
           </div>
           
@@ -243,22 +244,22 @@ function ConditionDetailContent() {
           {/* Timeline dates - only show if at least one date is set */}
           {(condition.onset_date || condition.resolved_date) && (
             <>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2 sm:gap-3 sm:grid-cols-2">
                 {condition.onset_date && (
                   <div>
-                    <span className="text-sm text-muted-foreground block">{t("conditions.onsetDate")}</span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <span>{format(new Date(condition.onset_date), "dd MMMM yyyy")}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.onsetDate")}</span>
+                    <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1 text-sm">
+                      <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                      <span>{format(new Date(condition.onset_date), "dd MMM yyyy")}</span>
                     </div>
                   </div>
                 )}
                 {condition.resolved_date && (
                   <div>
-                    <span className="text-sm text-muted-foreground block">{t("conditions.resolvedDate")}</span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-                      <span>{format(new Date(condition.resolved_date), "dd MMMM yyyy")}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.resolvedDate")}</span>
+                    <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1 text-sm">
+                      <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                      <span>{format(new Date(condition.resolved_date), "dd MMM yyyy")}</span>
                     </div>
                   </div>
                 )}
@@ -268,26 +269,26 @@ function ConditionDetailContent() {
           )}
 
           {/* Mention stats */}
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-3 sm:gap-4">
             <div>
-              <span className="text-sm text-muted-foreground block">{t("conditions.mentions")}</span>
-              <div className="flex items-center gap-2 mt-1">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                <span className="font-semibold">{condition.mention_count}</span>
+              <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.mentions")}</span>
+              <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1">
+                <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                <span className="font-semibold text-sm sm:text-base">{condition.mention_count}</span>
               </div>
             </div>
             {condition.first_mentioned_date && (
               <div>
-                <span className="text-sm text-muted-foreground block">{t("conditions.firstMentioned")}</span>
-                <span className="text-sm">
+                <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.firstMentioned")}</span>
+                <span className="text-xs sm:text-sm">
                   {format(new Date(condition.first_mentioned_date), "dd.MM.yyyy")}
                 </span>
               </div>
             )}
             {condition.last_mentioned_date && condition.last_mentioned_date !== condition.first_mentioned_date && (
               <div>
-                <span className="text-sm text-muted-foreground block">{t("conditions.lastMentioned")}</span>
-                <span className="text-sm">
+                <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.lastMentioned")}</span>
+                <span className="text-xs sm:text-sm">
                   {format(new Date(condition.last_mentioned_date), "dd.MM.yyyy")}
                 </span>
               </div>
@@ -299,24 +300,24 @@ function ConditionDetailContent() {
             <>
               <Separator />
               <div>
-                <span className="text-sm text-muted-foreground block mb-1">{t("conditions.notes")}</span>
-                <p className="text-sm whitespace-pre-wrap">{condition.notes}</p>
+                <span className="text-xs sm:text-sm text-muted-foreground block mb-0.5 sm:mb-1">{t("conditions.notes")}</span>
+                <p className="text-xs sm:text-sm whitespace-pre-wrap">{condition.notes}</p>
               </div>
             </>
           )}
 
           {/* Timestamps */}
           <Separator />
-          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-3 sm:gap-4 text-[10px] sm:text-xs text-muted-foreground">
             <div className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
+              <Clock className="h-3 w-3 shrink-0" />
               <span>
                 {t("records.detail.createdAt")}: {format(new Date(condition.created_at), "dd.MM.yyyy HH:mm")}
               </span>
             </div>
             {condition.updated_at !== condition.created_at && (
               <div className="flex items-center gap-1">
-                <Pencil className="h-3 w-3" />
+                <Pencil className="h-3 w-3 shrink-0" />
                 <span>
                   {t("records.detail.updatedAt")}: {format(new Date(condition.updated_at), "dd.MM.yyyy HH:mm")}
                 </span>
@@ -328,53 +329,53 @@ function ConditionDetailContent() {
 
       {/* Timeline / History Card */}
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <History className="h-4 w-4" />
+        <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+          <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+            <History className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
             {t("conditions.mentionHistory")}
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-3 sm:p-6 pt-0">
           {condition.history.length > 0 ? (
             <div className="relative">
               {/* Timeline line */}
-              <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
+              <div className="absolute left-3 sm:left-4 top-0 bottom-0 w-px bg-border" />
               
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 {condition.history.map((record) => (
-                  <div key={record.id} className="relative pl-10">
+                  <div key={record.id} className="relative pl-8 sm:pl-10">
                     {/* Timeline dot */}
                     <div className={cn(
-                      "absolute left-2 top-2 w-4 h-4 rounded-full border-2 bg-background",
+                      "absolute left-1.5 sm:left-2 top-2 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 bg-background",
                       record.status_in_record === "active" && "border-orange-500",
                       record.status_in_record === "suspected" && "border-yellow-500",
                       record.status_in_record === "resolved" && "border-green-500",
                       record.status_in_record === "history" && "border-gray-500",
                     )} />
                     
-                    <div className="rounded-lg border p-3 hover:bg-muted/50 transition-colors">
+                    <div className="rounded-lg border p-2.5 sm:p-3 hover:bg-muted/50 transition-colors">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           {/* Record title */}
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                             <Link 
                               href={`/health/records/${record.record_id}`}
-                              className="font-medium hover:underline truncate"
+                              className="font-medium hover:underline truncate text-sm sm:text-base"
                             >
                               {record.record_title || t("records.title")}
                             </Link>
                             {record.record_type && (
-                              <Badge variant="outline" className="text-xs">
+                              <Badge variant="outline" className="text-[10px] sm:text-xs">
                                 {t(`records.types.${record.record_type}`)}
                               </Badge>
                             )}
                           </div>
                           
                           {/* Date and status */}
-                          <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-xs sm:text-sm text-muted-foreground flex-wrap">
                             {record.record_date && (
                               <div className="flex items-center gap-1">
-                                <Calendar className="h-3 w-3" />
+                                <Calendar className="h-3 w-3 shrink-0" />
                                 {format(new Date(record.record_date), "dd.MM.yyyy")}
                               </div>
                             )}
@@ -383,7 +384,7 @@ function ConditionDetailContent() {
 
                           {/* Source anchor */}
                           {record.source_anchor && (
-                            <div className="mt-2 flex items-start gap-2 text-xs text-muted-foreground bg-muted/50 rounded p-2">
+                            <div className="mt-1.5 sm:mt-2 flex items-start gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-muted-foreground bg-muted/50 rounded p-1.5 sm:p-2">
                               <Quote className="h-3 w-3 shrink-0 mt-0.5" />
                               <span className="italic line-clamp-2">{record.source_anchor}</span>
                             </div>
@@ -395,8 +396,8 @@ function ConditionDetailContent() {
                           href={`/health/records/${record.record_id}`}
                           className="shrink-0"
                         >
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <ExternalLink className="h-4 w-4" />
+                          <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
+                            <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                           </Button>
                         </Link>
                       </div>
@@ -407,9 +408,9 @@ function ConditionDetailContent() {
               </div>
             </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">{t("conditions.noHistory")}</p>
+            <div className="text-center py-6 sm:py-8 text-muted-foreground">
+              <History className="h-6 w-6 sm:h-8 sm:w-8 mx-auto mb-1.5 sm:mb-2 opacity-50" />
+              <p className="text-xs sm:text-sm">{t("conditions.noHistory")}</p>
             </div>
           )}
         </CardContent>

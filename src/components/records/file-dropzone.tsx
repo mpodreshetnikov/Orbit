@@ -165,7 +165,7 @@ export function FileDropzone({
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         className={cn(
-          "relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors",
+          "tap-target relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors",
           isDragging
             ? "border-primary bg-primary/5"
             : "border-muted-foreground/25 hover:border-primary/50",

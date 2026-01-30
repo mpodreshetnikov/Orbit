@@ -198,7 +198,7 @@ function ConditionsContent() {
         <button
           type="button"
           onClick={() => setShowStatusTips(!showStatusTips)}
-          className="w-full flex items-center justify-between gap-2 p-3 text-sm hover:bg-muted/50 transition-colors"
+          className="tap-target w-full flex items-center justify-between gap-2 p-3 text-sm hover:bg-muted/50 transition-colors"
         >
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-muted-foreground" />

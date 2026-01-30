@@ -108,24 +108,24 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-48" />
-        <Skeleton className="h-64" />
+      <div className="space-y-3 sm:space-y-6">
+        <Skeleton className="h-8 w-48 sm:w-64" />
+        <Skeleton className="h-32 sm:h-48" />
+        <Skeleton className="h-48 sm:h-64" />
       </div>
     );
   }
 
   if (!finding) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-3 sm:space-y-6">
         <Link href="/health/findings">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            {t("common.back")}
+          <Button variant="ghost" size="sm" className="h-8 sm:h-9 gap-1.5">
+            <ArrowLeft className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">{t("common.back")}</span>
           </Button>
         </Link>
-        <div className="flex items-center justify-center h-64 text-muted-foreground">
+        <div className="flex items-center justify-center h-48 sm:h-64 text-muted-foreground text-sm sm:text-base">
           <p>{t("findings.notFound")}</p>
         </div>
       </div>
@@ -138,52 +138,53 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
   const isResolved = finding.is_resolved;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-6">
       {/* Back button */}
       <Link href="/health/findings">
-        <Button variant="ghost" size="sm">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          {t("common.back")}
+        <Button variant="ghost" size="sm" className="h-8 sm:h-9 gap-1.5">
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          <span className="hidden sm:inline">{t("common.back")}</span>
         </Button>
       </Link>
 
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{findingName}</h1>
+      <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <h1 className="text-lg sm:text-2xl font-bold truncate">{findingName}</h1>
             {isResolved ? (
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-500 shrink-0" />
             ) : isSevere ? (
-              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500 shrink-0" />
             ) : null}
           </div>
           {finding.finding_code && (
-            <code className="text-sm text-muted-foreground">{finding.finding_code}</code>
+            <code className="text-xs sm:text-sm text-muted-foreground block mt-0.5 truncate">{finding.finding_code}</code>
           )}
           {siteName && (
-            <div className="flex items-center gap-1 mt-2 text-muted-foreground">
-              <MapPin className="h-4 w-4" />
-              <span>{siteName}</span>
+            <div className="flex items-center gap-1 mt-1.5 sm:mt-2 text-muted-foreground text-sm">
+              <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+              <span className="truncate">{siteName}</span>
               {finding.site_code && (
-                <code className="text-xs ml-1">({finding.site_code})</code>
+                <code className="text-xs ml-1 shrink-0">({finding.site_code})</code>
               )}
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
           {!isResolved && (
             <Button 
               variant="outline" 
               size="sm"
+              className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5"
               onClick={() => setShowResolveDialog(true)}
             >
-              <CheckCircle2 className="h-4 w-4 mr-2" />
+              <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               {t("findings.markAsResolved")}
             </Button>
           )}
           {isResolved ? (
-            <Badge variant="outline" className="bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20">
+            <Badge variant="outline" className="bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 text-xs">
               {t("findings.resolved")}
             </Badge>
           ) : (
@@ -233,55 +234,55 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
       </Dialog>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-4">
         {/* Latest Size */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+        <Card className="overflow-hidden">
+          <CardHeader className="p-3 sm:p-6 sm:pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
               {t("findings.latestSize")}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <Ruler className="h-4 w-4 text-muted-foreground" />
+          <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <Ruler className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
               {finding.latest_size_mm !== null ? (
                 <>
-                  <span className="text-2xl font-bold">{finding.latest_size_mm}</span>
-                  <span className="text-muted-foreground">{t("findings.mm")}</span>
+                  <span className="text-lg sm:text-2xl font-bold">{finding.latest_size_mm}</span>
+                  <span className="text-muted-foreground text-xs sm:text-sm">{t("findings.mm")}</span>
                   <SizeTrendIndicator history={finding.history} />
                 </>
               ) : (
-                <span className="text-muted-foreground">{t("findings.noSize")}</span>
+                <span className="text-muted-foreground text-sm">{t("findings.noSize")}</span>
               )}
             </div>
           </CardContent>
         </Card>
 
         {/* Occurrences */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+        <Card className="overflow-hidden">
+          <CardHeader className="p-3 sm:p-6 sm:pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
               {t("findings.totalOccurrences")}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-muted-foreground" />
-              <span className="text-2xl font-bold">{finding.occurrence_count}</span>
-              <span className="text-muted-foreground">{t("findings.records")}</span>
+          <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+              <span className="text-lg sm:text-2xl font-bold">{finding.occurrence_count}</span>
+              <span className="text-muted-foreground text-xs sm:text-sm">{t("findings.records")}</span>
             </div>
           </CardContent>
         </Card>
 
         {/* Laterality */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+        <Card className="overflow-hidden md:col-span-1">
+          <CardHeader className="p-3 sm:p-6 sm:pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
               {t("findings.laterality")}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <span className="text-xl font-semibold">
+          <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+            <span className="text-sm sm:text-xl font-semibold">
               {finding.latest_laterality !== "none" 
                 ? t(`findings.lateralityOptions.${finding.latest_laterality}`)
                 : t("findings.lateralityOptions.none")
@@ -293,16 +294,16 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 
       {/* History Timeline */}
       <Card>
-        <CardHeader>
-          <CardTitle>{t("findings.history")}</CardTitle>
+        <CardHeader className="p-3 sm:p-6">
+          <CardTitle className="text-sm sm:text-base">{t("findings.history")}</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
+        <CardContent className="p-3 sm:p-6 pt-0">
+          <div className="space-y-3 sm:space-y-4">
             {finding.history.map((point) => (
-              <div key={point.id} className="flex items-start gap-4 border-b pb-4 last:border-b-0 last:pb-0">
+              <div key={point.id} className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 border-b pb-3 sm:pb-4 last:border-b-0 last:pb-0">
                 {/* Date */}
-                <div className="flex items-center gap-2 shrink-0 w-32 text-sm text-muted-foreground">
-                  <Calendar className="h-4 w-4" />
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 sm:w-32 text-xs sm:text-sm text-muted-foreground">
+                  <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                   {point.record_date 
                     ? format(new Date(point.record_date), "dd.MM.yyyy")
                     : format(new Date(point.created_at), "dd.MM.yyyy")
@@ -311,16 +312,16 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 
                 {/* Details */}
                 <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                     {point.size_mm !== null && (
                       <div className="flex items-center gap-1">
-                        <Ruler className="h-3 w-3 text-muted-foreground" />
-                        <span className="font-medium">{point.size_mm}</span>
+                        <Ruler className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <span className="font-medium text-sm sm:text-base">{point.size_mm}</span>
                         <span className="text-xs text-muted-foreground">{t("findings.mm")}</span>
                       </div>
                     )}
                     {point.count !== null && point.count > 1 && (
-                      <span className="text-sm text-muted-foreground">x{point.count}</span>
+                      <span className="text-xs sm:text-sm text-muted-foreground">x{point.count}</span>
                     )}
                     <SeverityBadge severity={point.severity} />
                     {point.laterality !== "none" && (
@@ -332,22 +333,22 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 
                   {/* Description or morphology */}
                   {(point.description || point.morphology) && (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 sm:line-clamp-none">
                       {point.description || point.morphology}
                     </p>
                   )}
 
                   {/* Source anchor */}
                   {point.source_anchor && (
-                    <blockquote className="text-xs text-muted-foreground italic border-l-2 pl-2 mt-2">
+                    <blockquote className="text-xs text-muted-foreground italic border-l-2 pl-2 mt-1.5 sm:mt-2 line-clamp-2">
                       &ldquo;{point.source_anchor}&rdquo;
                     </blockquote>
                   )}
 
                   {/* Link to record */}
                   <Link href={`/health/records/${point.record_id}`}>
-                    <Button variant="outline" size="sm" className="h-7 mt-2">
-                      <FileText className="h-3 w-3 mr-1" />
+                    <Button variant="outline" size="sm" className="h-6 sm:h-7 mt-1.5 sm:mt-2 text-xs gap-1">
+                      <FileText className="h-3 w-3 shrink-0" />
                       {t("findings.viewRecord")}
                     </Button>
                   </Link>

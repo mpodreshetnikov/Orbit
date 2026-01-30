@@ -267,7 +267,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <X className="h-4 w-4" />
             </button>
@@ -299,7 +299,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {searchQuery && (
             <Badge variant="secondary" className="gap-1">
               {searchQuery}
-              <button onClick={() => setSearchQuery("")}>
+              <button onClick={() => setSearchQuery("")} className="tap-target">
                 <X className="h-3 w-3" />
               </button>
             </Badge>
@@ -307,7 +307,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {typeFilter !== "all" && (
             <Badge variant="secondary" className="gap-1">
               {t(`records.types.${typeFilter}`)}
-              <button onClick={() => setTypeFilter("all")}>
+              <button onClick={() => setTypeFilter("all")} className="tap-target">
                 <X className="h-3 w-3" />
               </button>
             </Badge>
@@ -315,7 +315,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {statusFilter !== "active" && (
             <Badge variant="secondary" className="gap-1">
               {t(`records.statusFilter.${statusFilter}`)}
-              <button onClick={() => setTabInUrl("active")}>
+              <button onClick={() => setTabInUrl("active")} className="tap-target">
                 <X className="h-3 w-3" />
               </button>
             </Badge>

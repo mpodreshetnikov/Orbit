@@ -102,21 +102,25 @@ function MeasurementChart({
   const yMax = maxVal + padding;
 
   return (
-    <div className="h-80">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+    <div
+      className="w-full min-w-0 h-52 sm:h-72 md:h-80 [&_*]:outline-none [&_*]:focus:outline-none [&_*]:focus-visible:outline-none [&_*]:focus:ring-0 [&_*]:focus-visible:ring-0"
+      style={{ minHeight: 208 }}
+    >
+      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={208}>
+        <LineChart data={chartData} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
           <XAxis 
             dataKey="date" 
-            tick={{ fontSize: 12 }}
+            tick={{ fontSize: 11 }}
             tickLine={false}
+            axisLine={false}
           />
           <YAxis 
             domain={[yMin, yMax]}
-            tick={{ fontSize: 12 }}
+            tick={{ fontSize: 11 }}
             tickLine={false}
             axisLine={false}
-            width={60}
+            width={36}
             tickFormatter={(v) => v.toFixed(v % 1 === 0 ? 0 : 1)}
           />
           <Tooltip content={<CustomTooltip unit={unit} />} />
@@ -154,26 +158,26 @@ function HistoryTable({
   });
 
   return (
-    <div className="rounded-md border overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="rounded-md border overflow-x-auto">
+      <table className="w-full text-sm min-w-[420px]">
         <thead className="bg-muted/50">
           <tr>
-            <th className="text-left p-3 font-medium">{t("measurements.date")}</th>
-            <th className="text-right p-3 font-medium">{t("measurements.value")}</th>
-            <th className="text-left p-3 font-medium">{t("measurements.notes")}</th>
-            <th className="p-3 w-24"></th>
+            <th className="text-left p-2 sm:p-3 font-medium">{t("measurements.date")}</th>
+            <th className="text-right p-2 sm:p-3 font-medium">{t("measurements.value")}</th>
+            <th className="text-left p-2 sm:p-3 font-medium">{t("measurements.notes")}</th>
+            <th className="p-2 sm:p-3 w-20 sm:w-24"></th>
           </tr>
         </thead>
         <tbody className="divide-y">
           {sortedHistory.map((point) => (
             <tr key={point.id} className="hover:bg-muted/30">
-              <td className="p-3 whitespace-nowrap">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  {format(new Date(point.measured_at), "dd MMMM yyyy, HH:mm")}
+              <td className="p-2 sm:p-3 whitespace-nowrap">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                  {format(new Date(point.measured_at), "dd MMM yyyy, HH:mm")}
                 </div>
               </td>
-              <td className="p-3 text-right">
+              <td className="p-2 sm:p-3 text-right whitespace-nowrap">
                 <span className="font-mono font-semibold">
                   {point.value.toFixed(point.value % 1 === 0 ? 0 : 2)}
                 </span>
@@ -181,26 +185,26 @@ function HistoryTable({
                   <span className="text-muted-foreground ml-1">{unit}</span>
                 )}
               </td>
-              <td className="p-3 text-muted-foreground max-w-xs truncate">
+              <td className="p-2 sm:p-3 text-muted-foreground max-w-xs truncate">
                 {point.notes || "—"}
               </td>
-              <td className="p-3">
+              <td className="p-2 sm:p-3">
                 <div className="flex items-center gap-1 justify-end">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-7 w-7 sm:h-8 sm:w-8"
                     onClick={() => onEdit(point)}
                   >
-                    <Edit2 className="h-4 w-4" />
+                    <Edit2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-destructive hover:text-destructive"
+                    className="h-7 w-7 sm:h-8 sm:w-8 text-destructive hover:text-destructive"
                     onClick={() => onDelete(point)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   </Button>
                 </div>
               </td>
@@ -292,36 +296,36 @@ export default function MeasurementDetailPage({
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="space-y-3 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-start gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
+        <div className="flex items-start gap-2 sm:gap-4">
+          <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-10 sm:w-10 shrink-0" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <Ruler className="h-5 w-5 text-primary" />
-              <Badge variant="outline">{decodedCode}</Badge>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-0.5">
+              <Ruler className="h-4 w-4 sm:h-5 sm:w-5 text-primary shrink-0" />
+              <Badge variant="outline" className="text-xs">{decodedCode}</Badge>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">{displayName || decodedCode}</h1>
+            <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">{displayName || decodedCode}</h1>
           </div>
-          <Button onClick={() => setAddDialogOpen(true)} size="sm" className="gap-1">
-            <Plus className="h-4 w-4" />
-            {t("measurements.addMeasurement")}
+          <Button onClick={() => setAddDialogOpen(true)} size="sm" className="gap-1 shrink-0 h-8 sm:h-9 text-xs sm:text-sm">
+            <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">{t("measurements.addMeasurement")}</span>
           </Button>
         </div>
 
         {/* Loading */}
         {isLoading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <div className="flex items-center justify-center py-6 sm:py-12">
+            <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {/* Error */}
         {error && (
           <Card className="border-destructive">
-            <CardContent className="py-8 text-center text-destructive">
+            <CardContent className="py-6 sm:py-8 text-center text-destructive text-sm sm:text-base">
               {t("common.error")}
             </CardContent>
           </Card>
@@ -330,9 +334,9 @@ export default function MeasurementDetailPage({
         {/* Not found */}
         {!isLoading && !error && !measurement && (
           <Card>
-            <CardContent className="py-12 text-center">
-              <Ruler className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <p className="text-muted-foreground">{t("measurements.noData")}</p>
+            <CardContent className="py-6 sm:py-12 text-center">
+              <Ruler className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 text-muted-foreground opacity-50" />
+              <p className="text-sm sm:text-base text-muted-foreground">{t("measurements.noData")}</p>
             </CardContent>
           </Card>
         )}
@@ -341,92 +345,92 @@ export default function MeasurementDetailPage({
         {measurement && (
           <>
             {/* Summary cards */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
               {/* Latest value */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
+              <Card className="overflow-hidden">
+                <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                     {t("measurements.latestValue")}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-bold">
+                <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+                  <div className="flex items-baseline gap-1 sm:gap-2 flex-wrap">
+                    <span className="text-xl sm:text-3xl font-bold">
                       {measurement.latest_value.toFixed(
                         measurement.latest_value % 1 === 0 ? 0 : 1
                       )}
                     </span>
                     {displayUnit && (
-                      <span className="text-muted-foreground">{displayUnit}</span>
+                      <span className="text-muted-foreground text-sm sm:text-base">{displayUnit}</span>
                     )}
                   </div>
                   {measurement.latest_date && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {format(new Date(measurement.latest_date), "dd MMMM yyyy")}
+                    <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
+                      {format(new Date(measurement.latest_date), "dd MMM yyyy")}
                     </p>
                   )}
                 </CardContent>
               </Card>
 
               {/* Trend */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
+              <Card className="overflow-hidden">
+                <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                     {t("measurements.trend")}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                   {trend ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
                       {trend.direction === "up" && (
                         <>
-                          <TrendingUp className="h-5 w-5 text-orange-500" />
-                          <span className="text-lg font-semibold text-orange-500">
+                          <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500 shrink-0" />
+                          <span className="text-sm sm:text-lg font-semibold text-orange-500">
                             +{trend.percent.toFixed(1)}%
                           </span>
                         </>
                       )}
                       {trend.direction === "down" && (
                         <>
-                          <TrendingDown className="h-5 w-5 text-blue-500" />
-                          <span className="text-lg font-semibold text-blue-500">
+                          <TrendingDown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500 shrink-0" />
+                          <span className="text-sm sm:text-lg font-semibold text-blue-500">
                             -{trend.percent.toFixed(1)}%
                           </span>
                         </>
                       )}
                       {trend.direction === "stable" && (
-                        <span className="text-muted-foreground">{t("measurements.stable")}</span>
+                        <span className="text-muted-foreground text-sm sm:text-base">{t("measurements.stable")}</span>
                       )}
                     </div>
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                    <span className="text-muted-foreground text-sm">—</span>
                   )}
                 </CardContent>
               </Card>
 
               {/* Total measurements */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
+              <Card className="overflow-hidden">
+                <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                     {t("measurements.totalMeasurements")}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <span className="text-3xl font-bold">
+                <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+                  <span className="text-xl sm:text-3xl font-bold">
                     {measurement.measurement_count}
                   </span>
                 </CardContent>
               </Card>
 
               {/* Category */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
+              <Card className="overflow-hidden">
+                <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                     {t("measurements.category")}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <Badge variant="outline">
+                <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+                  <Badge variant="outline" className="text-xs">
                     {t(`measurements.categories.${measurement.category}`)}
                   </Badge>
                 </CardContent>
@@ -436,10 +440,10 @@ export default function MeasurementDetailPage({
             {/* Chart */}
             {measurement.history.length > 0 && (
               <Card>
-                <CardHeader>
-                  <CardTitle>{t("measurements.chartTitle")}</CardTitle>
+                <CardHeader className="p-3 sm:p-6">
+                  <CardTitle className="text-sm sm:text-base">{t("measurements.chartTitle")}</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-3 sm:p-6 pt-0">
                   <MeasurementChart 
                     history={measurement.history}
                     unit={displayUnit}
@@ -451,16 +455,18 @@ export default function MeasurementDetailPage({
             {/* History table */}
             {measurement.history.length > 0 && (
               <Card>
-                <CardHeader>
-                  <CardTitle>{t("measurements.historyTitle")}</CardTitle>
+                <CardHeader className="p-3 sm:p-6">
+                  <CardTitle className="text-sm sm:text-base">{t("measurements.historyTitle")}</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <HistoryTable 
-                    history={measurement.history} 
-                    unit={displayUnit}
-                    onEdit={handleEdit}
-                    onDelete={handleDeleteClick}
-                  />
+                <CardContent className="p-0 sm:p-6 pt-0">
+                  <div className="overflow-x-auto">
+                    <HistoryTable 
+                      history={measurement.history} 
+                      unit={displayUnit}
+                      onEdit={handleEdit}
+                      onDelete={handleDeleteClick}
+                    />
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -468,11 +474,11 @@ export default function MeasurementDetailPage({
             {/* Empty state */}
             {measurement.history.length === 0 && (
               <Card>
-                <CardContent className="py-12 text-center">
-                  <Ruler className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                  <p className="text-muted-foreground mb-4">{t("measurements.noData")}</p>
-                  <Button onClick={() => setAddDialogOpen(true)} variant="outline">
-                    <Plus className="h-4 w-4 mr-2" />
+                <CardContent className="py-6 sm:py-12 text-center">
+                  <Ruler className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">{t("measurements.noData")}</p>
+                  <Button onClick={() => setAddDialogOpen(true)} variant="outline" size="sm" className="gap-1.5">
+                    <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     {t("measurements.addFirst")}
                   </Button>
                 </CardContent>

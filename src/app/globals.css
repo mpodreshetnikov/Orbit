@@ -13,6 +13,16 @@
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */
   }
+
+  /* Mobile tap feedback: press-in effect on touch devices only */
+  .tap-target {
+    transition: transform 0.12s ease-out;
+  }
+  @media (hover: none) {
+    .tap-target:active {
+      transform: scale(0.98);
+    }
+  }
 }
 
 /* Mobile app: prevent zoom-to-fit and horizontal overflow */

@@ -257,6 +257,171 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- RECORD OBSERVATIONS (lab values on medical records)
+-- ============================================================================
+-- Add observations to Max's blood test record for debugging observations UI
+DO $$
+DECLARE
+  v_record_id uuid := 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  v_cat_hemoglobin uuid;
+  v_cat_glucose uuid;
+  v_cat_vitamin_b12 uuid;
+  v_cat_ferritin uuid;
+  v_cat_creatinine uuid;
+  v_cat_tsh uuid;
+  v_cat_vitamin_d uuid;
+BEGIN
+  SELECT id INTO v_cat_hemoglobin FROM public.observation_catalog WHERE obs_code = 'hemoglobin' LIMIT 1;
+  SELECT id INTO v_cat_glucose FROM public.observation_catalog WHERE obs_code = 'glucose' LIMIT 1;
+  SELECT id INTO v_cat_vitamin_b12 FROM public.observation_catalog WHERE obs_code = 'vitamin_b12' LIMIT 1;
+  SELECT id INTO v_cat_ferritin FROM public.observation_catalog WHERE obs_code = 'ferritin' LIMIT 1;
+  SELECT id INTO v_cat_creatinine FROM public.observation_catalog WHERE obs_code = 'creatinine' LIMIT 1;
+  SELECT id INTO v_cat_tsh FROM public.observation_catalog WHERE obs_code = 'tsh' LIMIT 1;
+  SELECT id INTO v_cat_vitamin_d FROM public.observation_catalog WHERE obs_code = 'vitamin_d_25oh' LIMIT 1;
+
+  IF v_cat_hemoglobin IS NOT NULL THEN
+    DELETE FROM public.record_observations WHERE record_id = v_record_id;
+    INSERT INTO public.record_observations (
+      record_id, catalog_id, obs_code, obs_name, value_numeric, value_text, unit,
+      value_canonical, unit_canonical, ref_range_text, ref_range_low, ref_range_high, status,
+      is_llm_extracted, is_user_verified, confidence
+    ) VALUES
+      (v_record_id, v_cat_hemoglobin, 'hemoglobin', 'Hemoglobin', 142, '142', 'g/L', 142, 'g/L', '130-170', 130, 170, 'normal', true, false, 0.95),
+      (v_record_id, v_cat_glucose, 'glucose', 'Glucose', 5.2, '5.2', 'mmol/L', 5.2, 'mmol/L', '3.9-6.1', 3.9, 6.1, 'normal', true, false, 0.98),
+      (v_record_id, v_cat_vitamin_b12, 'vitamin_b12', 'Vitamin B12', 280, '280', 'pmol/L', 280, 'pmol/L', '133-675', 133, 675, 'normal', true, false, 0.92),
+      (v_record_id, v_cat_ferritin, 'ferritin', 'Ferritin', 85, '85', 'ug/L', 85, 'ug/L', '30-400', 30, 400, 'normal', true, false, 0.94),
+      (v_record_id, v_cat_creatinine, 'creatinine', 'Creatinine', 88, '88', 'umol/L', 88, 'umol/L', '62-106', 62, 106, 'normal', true, false, 0.96),
+      (v_record_id, v_cat_tsh, 'tsh', 'TSH', 2.1, '2.1', 'mIU/L', 2.1, 'mIU/L', '0.27-4.2', 0.27, 4.2, 'normal', true, false, 0.97),
+      (v_record_id, v_cat_vitamin_d, 'vitamin_d_25oh', '25(OH) Vitamin D', 52, '52', 'nmol/L', 52, 'nmol/L', '50-125', 50, 125, 'normal', true, false, 0.93);
+  END IF;
+END $$;
+
+-- ============================================================================
+-- RECORD FINDINGS (imaging/endoscopy findings on medical records)
+-- ============================================================================
+-- Add findings to Kate's imaging record for debugging findings UI
+DO $$
+DECLARE
+  v_kate_person_id uuid;
+  v_record_id uuid := 'd4e5f6a7-b8c9-0123-defa-234567890123';
+  v_finding_polyp uuid;
+  v_finding_cyst uuid;
+  v_site_colon_sigmoid uuid;
+  v_site_kidney_left uuid;
+BEGIN
+  SELECT id INTO v_kate_person_id FROM public.persons WHERE name = 'Kate' LIMIT 1;
+  SELECT id INTO v_finding_polyp FROM public.finding_type_catalog WHERE finding_code = 'polyp' LIMIT 1;
+  SELECT id INTO v_finding_cyst FROM public.finding_type_catalog WHERE finding_code = 'cyst' LIMIT 1;
+  SELECT id INTO v_site_colon_sigmoid FROM public.body_site_catalog WHERE site_code = 'colon_sigmoid' LIMIT 1;
+  SELECT id INTO v_site_kidney_left FROM public.body_site_catalog WHERE site_code = 'kidney_left' LIMIT 1;
+
+  IF v_kate_person_id IS NOT NULL AND v_finding_polyp IS NOT NULL THEN
+    DELETE FROM public.record_findings WHERE record_id = v_record_id;
+    INSERT INTO public.record_findings (
+      person_id, record_id, finding_type_id, finding_code, finding_type_text,
+      body_site_id, site_code, body_site_text, size_mm, count, severity, laterality,
+      description, finding_date, source_anchor, is_llm_extracted, is_user_verified, confidence
+    ) VALUES
+      (v_kate_person_id, v_record_id, v_finding_polyp, 'polyp', 'Polyp',
+       v_site_colon_sigmoid, 'colon_sigmoid', 'Sigmoid colon', 5, 1, 'mild', 'none',
+       'Small hyperplastic polyp. Recommended follow-up in 5 years.',
+       '2025-09-15', '«Полип сигмовидной кишки до 5 мм, гиперпластический»', true, false, 0.9),
+      (v_kate_person_id, v_record_id, v_finding_cyst, 'cyst', 'Simple cyst',
+       v_site_kidney_left, 'kidney_left', 'Left kidney', 12, 1, 'mild', 'left',
+       'Simple cortical cyst, no septations. Incidental finding.',
+       '2025-09-15', '«Простая киста левой почки 12 мм»', true, false, 0.88);
+  END IF;
+END $$;
+
+-- ============================================================================
+-- CONDITIONS & CONDITION_RECORDS (diagnoses linked to records)
+-- ============================================================================
+-- Add conditions for Max and link them to medical records
+DO $$
+DECLARE
+  v_max_person_id uuid;
+  v_cond_b12_id uuid;
+  v_cond_hypertension_id uuid;
+  v_cond_rhinitis_id uuid;
+  v_blood_record_id uuid := 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  v_visit_record_id uuid := 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
+BEGIN
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+
+  IF v_max_person_id IS NOT NULL THEN
+    -- Get or create condition: Vitamin B12 deficiency (resolved)
+    SELECT id INTO v_cond_b12_id FROM public.conditions WHERE person_id = v_max_person_id AND code = 'E53.8' AND deleted_at IS NULL LIMIT 1;
+    IF v_cond_b12_id IS NULL THEN
+      INSERT INTO public.conditions (person_id, name, icd_name_en, code, current_status, onset_date, resolved_date, notes)
+      VALUES (
+        v_max_person_id,
+        'Vitamin B12 deficiency',
+        'Dietary vitamin B12 deficiency',
+        'E53.8',
+        'resolved',
+        '2024-06-01',
+        '2024-12-01',
+        'Treated with oral B12. Levels normalized on repeat labs.'
+      )
+      RETURNING id INTO v_cond_b12_id;
+    END IF;
+
+    -- Get or create condition: Essential hypertension (active)
+    SELECT id INTO v_cond_hypertension_id FROM public.conditions WHERE person_id = v_max_person_id AND code = 'I10' AND deleted_at IS NULL LIMIT 1;
+    IF v_cond_hypertension_id IS NULL THEN
+      INSERT INTO public.conditions (person_id, name, icd_name_en, code, current_status, onset_date, notes)
+      VALUES (
+        v_max_person_id,
+        'Essential hypertension',
+        'Essential (primary) hypertension',
+        'I10',
+        'active',
+        '2023-01-01',
+        'Controlled with lifestyle. BP 120/80 at last checkup.'
+      )
+      RETURNING id INTO v_cond_hypertension_id;
+    END IF;
+
+    -- Get or create condition: Allergic rhinitis (active)
+    SELECT id INTO v_cond_rhinitis_id FROM public.conditions WHERE person_id = v_max_person_id AND code = 'J30.4' AND deleted_at IS NULL LIMIT 1;
+    IF v_cond_rhinitis_id IS NULL THEN
+      INSERT INTO public.conditions (person_id, name, icd_name_en, code, current_status, onset_date, notes)
+      VALUES (
+        v_max_person_id,
+        'Allergic rhinitis',
+        'Allergic rhinitis, unspecified',
+        'J30.4',
+        'active',
+        '2020-05-01',
+        NULL
+      )
+      RETURNING id INTO v_cond_rhinitis_id;
+    END IF;
+
+    -- Link conditions to records via condition_records
+    IF v_cond_b12_id IS NOT NULL THEN
+      INSERT INTO public.condition_records (condition_id, record_id, status_in_record, source_anchor, confidence, is_llm_extracted, is_user_verified)
+      VALUES (v_cond_b12_id, v_blood_record_id, 'resolved', 'B12 within normal range on current labs', 0.9, true, false)
+      ON CONFLICT (condition_id, record_id) DO NOTHING;
+    END IF;
+
+    IF v_cond_hypertension_id IS NOT NULL THEN
+      INSERT INTO public.condition_records (condition_id, record_id, status_in_record, source_anchor, confidence, is_llm_extracted, is_user_verified)
+      VALUES
+        (v_cond_hypertension_id, v_blood_record_id, 'active', 'Hypertension; BP well controlled', 0.92, true, false),
+        (v_cond_hypertension_id, v_visit_record_id, 'active', 'Blood pressure 120/80', 0.95, true, false)
+      ON CONFLICT (condition_id, record_id) DO NOTHING;
+    END IF;
+
+    IF v_cond_rhinitis_id IS NOT NULL THEN
+      INSERT INTO public.condition_records (condition_id, record_id, status_in_record, source_anchor, confidence, is_llm_extracted, is_user_verified)
+      VALUES (v_cond_rhinitis_id, v_visit_record_id, 'active', 'Allergic rhinitis, seasonal', 0.88, true, false)
+      ON CONFLICT (condition_id, record_id) DO NOTHING;
+    END IF;
+  END IF;
+END $$;
+
+-- ============================================================================
 -- NOTES
 -- ============================================================================
 -- 1. Auth users are created directly in the seed file, allowing us to reference
@@ -283,3 +448,13 @@ END $$;
 --
 -- 7. Sample measurements are created for Max to demonstrate the measurements
 --    tracking feature with historical data for charts.
+--
+-- 8. Record observations (lab values) are added to Max's blood test record
+--    (Annual Blood Test Results) for debugging the observations UI.
+--
+-- 9. Record findings are added to Kate's imaging record (Dental X-Ray) for
+--    debugging the findings UI (polyp in sigmoid colon, cyst in left kidney).
+--
+-- 10. Conditions and condition_records are added for Max (B12 deficiency,
+--     hypertension, allergic rhinitis) and linked to his blood test and
+--     visit records for debugging the conditions UI.

@@ -225,21 +225,25 @@ function ObservationChart({
   const yMax = maxVal + padding;
 
   return (
-    <div className="h-80">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+    <div
+      className="w-full min-w-0 h-52 sm:h-72 md:h-80 [&_*]:outline-none [&_*]:focus:outline-none [&_*]:focus-visible:outline-none [&_*]:focus:ring-0 [&_*]:focus-visible:ring-0"
+      style={{ minHeight: 208 }}
+    >
+      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={208}>
+        <LineChart data={chartData} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
           <XAxis 
             dataKey="date" 
-            tick={{ fontSize: 12 }}
+            tick={{ fontSize: 11 }}
             tickLine={false}
+            axisLine={false}
           />
           <YAxis 
             domain={[yMin, yMax]}
-            tick={{ fontSize: 12 }}
+            tick={{ fontSize: 11 }}
             tickLine={false}
             axisLine={false}
-            width={60}
+            width={36}
             tickFormatter={(v) => v.toFixed(v % 1 === 0 ? 0 : 1)}
           />
           <Tooltip content={<CustomTooltip unit={unit || undefined} />} />
@@ -310,15 +314,15 @@ function HistoryTable({
   });
 
   return (
-    <div className="rounded-md border overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="rounded-md border overflow-x-auto">
+      <table className="w-full text-sm min-w-[520px]">
         <thead className="bg-muted/50">
           <tr>
-            <th className="text-left p-3 font-medium">{t("observationHistory.date")}</th>
-            <th className="text-right p-3 font-medium">{t("observationHistory.value")}</th>
-            <th className="text-left p-3 font-medium">{t("observationHistory.reference")}</th>
-            <th className="text-left p-3 font-medium">{t("observationHistory.status")}</th>
-            <th className="p-3"></th>
+            <th className="text-left p-2 sm:p-3 font-medium">{t("observationHistory.date")}</th>
+            <th className="text-right p-2 sm:p-3 font-medium">{t("observationHistory.value")}</th>
+            <th className="text-left p-2 sm:p-3 font-medium">{t("observationHistory.reference")}</th>
+            <th className="text-left p-2 sm:p-3 font-medium">{t("observationHistory.status")}</th>
+            <th className="p-2 sm:p-3 w-10"></th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -326,15 +330,15 @@ function HistoryTable({
             const value = point.value_canonical ?? point.value_numeric;
             return (
               <tr key={point.id} className="hover:bg-muted/30">
-                <td className="p-3 whitespace-nowrap">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                <td className="p-2 sm:p-3 whitespace-nowrap">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
                     {point.record_date 
-                      ? format(new Date(point.record_date), "dd MMMM yyyy")
-                      : format(new Date(point.created_at), "dd MMMM yyyy")}
+                      ? format(new Date(point.record_date), "dd MMM yyyy")
+                      : format(new Date(point.created_at), "dd MMM yyyy")}
                   </div>
                 </td>
-                <td className="p-3 text-right">
+                <td className="p-2 sm:p-3 text-right whitespace-nowrap">
                   <span className="font-mono font-semibold">
                     {value !== null 
                       ? value.toFixed(value % 1 === 0 ? 0 : 2)
@@ -344,18 +348,18 @@ function HistoryTable({
                     <span className="text-muted-foreground ml-1">{unit}</span>
                   )}
                 </td>
-                <td className="p-3 text-muted-foreground">
+                <td className="p-2 sm:p-3 text-muted-foreground whitespace-nowrap">
                   {point.ref_range_low !== null && point.ref_range_high !== null
                     ? `${point.ref_range_low}–${point.ref_range_high}`
                     : "—"}
                 </td>
-                <td className="p-3">
+                <td className="p-2 sm:p-3">
                   <StatusBadge status={point.status} />
                 </td>
-                <td className="p-3">
+                <td className="p-2 sm:p-3">
                   <Link href={`/health/records/${point.record_id}`}>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                      <ExternalLink className="h-4 w-4" />
+                    <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
+                      <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     </Button>
                   </Link>
                 </td>
@@ -486,28 +490,28 @@ export default function ObservationDetailPage({
   }, [observation, convertValue]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-start gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.back()}>
-          <ArrowLeft className="h-5 w-5" />
+      <div className="flex items-start gap-2 sm:gap-4">
+        <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-10 sm:w-10 shrink-0" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <FlaskConical className="h-5 w-5 text-primary" />
-            <Badge variant="outline">{decodedObsCode}</Badge>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-0.5">
+            <FlaskConical className="h-4 w-4 sm:h-5 sm:w-5 text-primary shrink-0" />
+            <Badge variant="outline" className="text-xs">{decodedObsCode}</Badge>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">{displayName}</h1>
+          <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">{displayName}</h1>
         </div>
         {/* Unit selector */}
         {availableUnits.length > 1 && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">{t("observations.displayUnit")}:</span>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <span className="text-xs sm:text-sm text-muted-foreground hidden sm:inline">{t("observations.displayUnit")}:</span>
             <Select 
               value={selectedUnit || canonicalUnit} 
               onValueChange={setSelectedUnit}
             >
-              <SelectTrigger className="w-24">
+              <SelectTrigger className="w-20 sm:w-24 h-8 sm:h-9">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -524,8 +528,8 @@ export default function ObservationDetailPage({
 
       {/* Loading */}
       {isLoading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="flex items-center justify-center py-6 sm:py-12">
+          <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
         </div>
       )}
 
@@ -541,9 +545,9 @@ export default function ObservationDetailPage({
       {/* Not found */}
       {!isLoading && !error && !observation && (
         <Card>
-          <CardContent className="py-12 text-center">
-            <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-            <p className="text-muted-foreground">{t("observationHistory.noData")}</p>
+          <CardContent className="py-6 sm:py-12 text-center">
+            <FlaskConical className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 text-muted-foreground opacity-50" />
+            <p className="text-sm sm:text-base text-muted-foreground">{t("observationHistory.noData")}</p>
           </CardContent>
         </Card>
       )}
@@ -552,110 +556,110 @@ export default function ObservationDetailPage({
       {observation && (
         <>
           {/* Summary cards */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
             {/* Latest value */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
+            <Card className="overflow-hidden">
+              <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                   {t("observationHistory.latestValue")}
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold">
+              <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
+                <div className="flex items-baseline gap-1 sm:gap-2 flex-wrap">
+                  <span className="text-xl sm:text-3xl font-bold">
                     {latestValue !== null && latestValue !== undefined
                       ? latestValue.toFixed(latestValue % 1 === 0 ? 0 : 1)
                       : observation.latest_value_text || "—"}
                   </span>
                   {displayUnit && (
-                    <span className="text-muted-foreground">{displayUnit}</span>
+                    <span className="text-muted-foreground text-sm sm:text-base">{displayUnit}</span>
                   )}
                 </div>
                 {observation.latest_date && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {format(new Date(observation.latest_date), "dd MMMM yyyy")}
+                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
+                    {format(new Date(observation.latest_date), "dd MMM yyyy")}
                   </p>
                 )}
               </CardContent>
             </Card>
 
             {/* Status */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
+            <Card className="overflow-hidden">
+              <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                   {t("observationHistory.status")}
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                 <StatusBadge status={observation.latest_status} />
                 {observation.latest_status && 
                  observation.latest_status !== "normal" && 
                  observation.latest_status !== "unknown" && (
-                  <div className="flex items-center gap-1 mt-2 text-orange-600">
-                    <AlertTriangle className="h-4 w-4" />
-                    <span className="text-sm">{t("observationHistory.outOfRange")}</span>
+                  <div className="flex items-center gap-1 mt-1 sm:mt-2 text-orange-600">
+                    <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                    <span className="text-xs sm:text-sm">{t("observationHistory.outOfRange")}</span>
                   </div>
                 )}
               </CardContent>
             </Card>
 
             {/* Reference range */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
+            <Card className="overflow-hidden">
+              <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                   {t("observationHistory.referenceRange")}
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                 {displayRefLow !== null && displayRefHigh !== null ? (
-                  <div className="text-lg font-semibold">
+                  <div className="text-sm sm:text-lg font-semibold">
                     {displayRefLow.toFixed(displayRefLow % 1 === 0 ? 0 : 1)} – {displayRefHigh.toFixed(displayRefHigh % 1 === 0 ? 0 : 1)}
                     {displayUnit && (
-                      <span className="text-sm font-normal text-muted-foreground ml-1">
+                      <span className="text-xs sm:text-sm font-normal text-muted-foreground ml-1">
                         {displayUnit}
                       </span>
                     )}
                   </div>
                 ) : (
-                  <span className="text-muted-foreground">—</span>
+                  <span className="text-muted-foreground text-sm">—</span>
                 )}
               </CardContent>
             </Card>
 
             {/* Trend */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
+            <Card className="overflow-hidden">
+              <CardHeader className="p-3 sm:p-6 sm:pb-2">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                   {t("observationHistory.trend")}
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                 {trend ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     {trend.direction === "up" && (
                       <>
-                        <TrendingUp className="h-5 w-5 text-orange-500" />
-                        <span className="text-lg font-semibold text-orange-500">
+                        <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500 shrink-0" />
+                        <span className="text-sm sm:text-lg font-semibold text-orange-500">
                           +{trend.percent.toFixed(1)}%
                         </span>
                       </>
                     )}
                     {trend.direction === "down" && (
                       <>
-                        <TrendingDown className="h-5 w-5 text-blue-500" />
-                        <span className="text-lg font-semibold text-blue-500">
+                        <TrendingDown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500 shrink-0" />
+                        <span className="text-sm sm:text-lg font-semibold text-blue-500">
                           -{trend.percent.toFixed(1)}%
                         </span>
                       </>
                     )}
                     {trend.direction === "stable" && (
-                      <span className="text-muted-foreground">{t("observationHistory.stable")}</span>
+                      <span className="text-muted-foreground text-sm sm:text-base">{t("observationHistory.stable")}</span>
                     )}
                   </div>
                 ) : (
-                  <span className="text-muted-foreground">—</span>
+                  <span className="text-muted-foreground text-sm">—</span>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
                   {observation.measurement_count} {t("observationHistory.measurements")}
                 </p>
               </CardContent>
@@ -664,10 +668,10 @@ export default function ObservationDetailPage({
 
           {/* Chart */}
           <Card>
-            <CardHeader>
-              <CardTitle>{t("observationHistory.chartTitle")}</CardTitle>
+            <CardHeader className="p-3 sm:p-6">
+              <CardTitle className="text-sm sm:text-base">{t("observationHistory.chartTitle")}</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-3 sm:p-6 pt-0">
               <ObservationChart 
                 history={convertedHistory}
                 unit={displayUnit}
@@ -679,11 +683,13 @@ export default function ObservationDetailPage({
 
           {/* History table */}
           <Card>
-            <CardHeader>
-              <CardTitle>{t("observationHistory.historyTitle")}</CardTitle>
+            <CardHeader className="p-3 sm:p-6">
+              <CardTitle className="text-sm sm:text-base">{t("observationHistory.historyTitle")}</CardTitle>
             </CardHeader>
-            <CardContent>
-              <HistoryTable history={convertedHistory} unit={displayUnit} />
+            <CardContent className="p-0 sm:p-6 pt-0">
+              <div className="overflow-x-auto">
+                <HistoryTable history={convertedHistory} unit={displayUnit} />
+              </div>
             </CardContent>
           </Card>
         </>

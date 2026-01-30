@@ -111,7 +111,7 @@ export function ConditionRecordRow({
             <button
               type="button"
               onClick={() => setShowAnchor(!showAnchor)}
-              className="flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="tap-target flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               <Quote className="h-3 w-3 shrink-0" />
               <span>{t("conditions.showSource")}</span>

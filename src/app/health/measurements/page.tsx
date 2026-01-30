@@ -93,7 +93,7 @@ function MeasurementCard({ measurement, locale }: { measurement: MeasurementSumm
   }));
 
   return (
-    <Link href={`/health/measurements/${encodeURIComponent(measurement.code)}`}>
+    <Link href={`/health/measurements/${encodeURIComponent(measurement.code)}`} className="tap-target block">
       <Card className="hover:shadow-md transition-shadow cursor-pointer">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
