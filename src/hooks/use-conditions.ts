@@ -695,13 +695,13 @@ export function useLinkConditionToRecord() {
         .limit(1)
         .single();
 
-      const thisRecordDate = thisRecord?.record_date || null;
+      const thisRecordDate = thisRecord?.record_date ?? null;
       const linkMedicalRecords = mostRecentMention?.medical_records as { record_date?: string } | null;
-      const mostRecentDate = linkMedicalRecords?.record_date || null;
+      const mostRecentDate = linkMedicalRecords?.record_date ?? null;
 
-      // Auto-update current_status if this record is the most recent (or equal)
-      const shouldUpdateStatus = !mostRecentDate || !thisRecordDate || 
-        thisRecordDate >= mostRecentDate;
+      // Only update condition current_status when this record is the most recent by date.
+      // If this record has no date, or its date is before the latest mention, leave condition status unchanged.
+      const shouldUpdateStatus = thisRecordDate != null && (!mostRecentDate || thisRecordDate >= mostRecentDate);
 
       // Build update object for condition
       const conditionUpdates: Record<string, string | null> = {};

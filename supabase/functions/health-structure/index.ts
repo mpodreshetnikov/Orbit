@@ -1229,6 +1229,24 @@ Deno.serve(async (req) => {
       .delete()
       .eq("record_id", record_id);
 
+    // Recompute condition's current_status from the most recent condition_record by record_date
+    async function recomputeConditionCurrentStatus(conditionId: string): Promise<void> {
+      const { data: latest } = await supabaseAdmin
+        .from("condition_records")
+        .select("status_in_record, medical_records!inner(record_date)")
+        .eq("condition_id", conditionId)
+        .order("medical_records(record_date)", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const status = (latest as { status_in_record?: string } | null)?.status_in_record;
+      if (status) {
+        await supabaseAdmin
+          .from("conditions")
+          .update({ current_status: status })
+          .eq("id", conditionId);
+      }
+    }
+
     // Helper function to lookup ICD code via icd-lookup edge function
     async function lookupIcdCode(code: string): Promise<IcdLookupResult | null> {
       try {
@@ -1257,7 +1275,6 @@ Deno.serve(async (req) => {
     if (structuredData.conditions.length > 0) {
       for (const extracted of structuredData.conditions) {
         let conditionId: string;
-        let shouldUpdateStatus = false;
         let icdLookupResult: IcdLookupResult | null = null;
 
         // If there's an ICD code, validate it first
@@ -1269,13 +1286,6 @@ Deno.serve(async (req) => {
         if (extracted.existing_condition_id) {
           // LLM matched to existing condition
           conditionId = extracted.existing_condition_id;
-
-          // Check if we should update the condition's current_status
-          const existingCond = existingConditions.find(c => c.id === conditionId);
-          if (existingCond && existingCond.current_status !== extracted.status) {
-            // Status changed - update the condition
-            shouldUpdateStatus = true;
-          }
 
           // Update ICD info if we have new validated data
           if (icdLookupResult?.found && extracted.icd_code) {
@@ -1363,14 +1373,6 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Update condition status if needed (will be reviewed by user)
-        if (shouldUpdateStatus) {
-          await supabaseAdmin
-            .from("conditions")
-            .update({ current_status: extracted.status })
-            .eq("id", conditionId);
-        }
-
         // Create condition_record linking condition to this record
         const { error: crError } = await supabaseAdmin
           .from("condition_records")
@@ -1387,6 +1389,10 @@ Deno.serve(async (req) => {
         if (crError) {
           console.error("Error inserting condition_record:", crError);
           // Don't fail the whole request, just log the error
+        } else {
+          // Recompute condition current_status from most recent mention by record_date
+          // (so an older record with "Active" does not override a newer "Suspected")
+          await recomputeConditionCurrentStatus(conditionId);
         }
       }
     }
@@ -1466,18 +1472,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Update condition status to resolved
-        const { error: updateError } = await supabaseAdmin
-          .from("conditions")
-          .update({ current_status: "resolved" })
-          .eq("id", toResolve.condition_id);
-
-        if (updateError) {
-          console.error("Error updating condition status to resolved:", updateError);
-          continue;
-        }
-
-        // Create condition_record linking to this record
+        // Create condition_record linking to this record (status "resolved" in this record)
         const { error: crError } = await supabaseAdmin
           .from("condition_records")
           .insert({
@@ -1493,6 +1488,8 @@ Deno.serve(async (req) => {
         if (crError) {
           console.error("Error inserting condition_record for resolved condition:", crError);
         } else {
+          // Recompute condition current_status from most recent mention by record_date
+          await recomputeConditionCurrentStatus(toResolve.condition_id);
           console.log(`Marked condition as resolved: ${existingCond.name}`);
         }
       }
