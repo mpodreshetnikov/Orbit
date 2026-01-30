@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { Search, ChevronsUpDown, Check } from "lucide-react";
+import { Search, ChevronsUpDown, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,6 +54,7 @@ interface FindingEditDialogProps {
     source_anchor: string;
   }) => void;
   isNew: boolean;
+  isSaving?: boolean;
 }
 
 export function FindingEditDialog({
@@ -63,6 +64,7 @@ export function FindingEditDialog({
   recordDate,
   onSave,
   isNew,
+  isSaving,
 }: FindingEditDialogProps) {
   const t = useTranslations();
   const { data: findingTypeCatalog } = useFindingTypeCatalog();
@@ -572,14 +574,21 @@ export function FindingEditDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("common.cancel")}
           </Button>
           <Button 
             onClick={handleSave} 
-            disabled={!findingTypeText.trim() || !sourceAnchor.trim()}
+            disabled={!findingTypeText.trim() || !sourceAnchor.trim() || isSaving}
           >
-            {t("common.save")}
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                {t("common.save")}
+              </>
+            ) : (
+              t("common.save")
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

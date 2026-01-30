@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
@@ -373,6 +373,7 @@ function EditObservationDialog({
   observation,
   onSave,
   isNew,
+  isSaving,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -393,6 +394,7 @@ function EditObservationDialog({
     obs_code: string | null;
   }) => void;
   isNew: boolean;
+  isSaving?: boolean;
 }) {
   const t = useTranslations();
   const { data: catalog } = useObservationCatalog();
@@ -778,11 +780,18 @@ function EditObservationDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={handleSave} disabled={!obsName.trim()}>
-            {t("common.save")}
+          <Button onClick={handleSave} disabled={!obsName.trim() || isSaving}>
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                {t("common.save")}
+              </>
+            ) : (
+              t("common.save")
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -842,6 +851,28 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending ||
     updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
     createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending;
+
+  // Stable sort by created_at so edited items don't jump in the list
+  const observationsSorted = useMemo(() => {
+    if (!observations?.length) return observations ?? [];
+    return [...observations].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+  }, [observations]);
+
+  const findingsSorted = useMemo(() => {
+    if (!findings?.length) return findings ?? [];
+    return [...findings].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+  }, [findings]);
+
+  const conditionRecordsSorted = useMemo(() => {
+    if (!conditionRecords?.length) return conditionRecords ?? [];
+    return [...conditionRecords].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+  }, [conditionRecords]);
 
   // Helper function to compute comparison data for a finding
   const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null => {
@@ -1447,9 +1478,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : observations && observations.length > 0 ? (
+            ) : observationsSorted.length > 0 ? (
               <div className="space-y-2">
-                {observations.map((obs) => (
+                {observationsSorted.map((obs) => (
                   <ObservationRow
                     key={obs.id}
                     observation={obs}
@@ -1484,6 +1515,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         observation={editingObservation}
         onSave={handleSaveObservation}
         isNew={isAddingObservation}
+        isSaving={(!!editingObservation && updateObsMutation.isPending) || (isAddingObservation && createObsMutation.isPending)}
       />
 
       {/* Findings Section */}
@@ -1528,9 +1560,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : findings && findings.length > 0 ? (
+            ) : findingsSorted.length > 0 ? (
               <div className="space-y-2">
-                {findings.map((finding) => (
+                {findingsSorted.map((finding) => (
                   <FindingRow
                     key={finding.id}
                     finding={finding}
@@ -1565,6 +1597,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         recordDate={record.record_date ?? null}
         onSave={handleSaveFinding}
         isNew={isAddingFinding}
+        isSaving={(!!editingFinding && updateFindingMutation.isPending) || (isAddingFinding && createFindingMutation.isPending)}
       />
 
       {/* Conditions Section */}
@@ -1609,9 +1642,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : conditionRecords && conditionRecords.length > 0 ? (
+            ) : conditionRecordsSorted.length > 0 ? (
               <div className="space-y-2">
-                {conditionRecords.map((cr) => (
+                {conditionRecordsSorted.map((cr) => (
                   <ConditionRecordRow
                     key={cr.id}
                     conditionRecord={cr}
