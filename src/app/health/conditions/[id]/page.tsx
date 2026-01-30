@@ -21,6 +21,7 @@ import {
   Loader2,
   Check,
   AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +39,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useConditionDetail, useUpdateCondition, useIcdLookup, useMedicalRecords } from "@/hooks";
+import { useConditionDetail, useUpdateCondition, useDeleteCondition, useIcdLookup, useMedicalRecords } from "@/hooks";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
@@ -62,6 +63,7 @@ function ConditionDetailContent() {
 
   const { data: condition, isLoading, error, refetch } = useConditionDetail(conditionId);
   const updateConditionMutation = useUpdateCondition();
+  const deleteConditionMutation = useDeleteCondition();
   const { data: personRecords } = useMedicalRecords(
     condition?.person_id ? { person_id: condition.person_id } : {}
   );
@@ -72,6 +74,7 @@ function ConditionDetailContent() {
   const [editCode, setEditCode] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [addHistoryOpen, setAddHistoryOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   
   // ICD validation (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
@@ -107,6 +110,18 @@ function ConditionDetailContent() {
   const getGoogleSearchUrl = (conditionName: string) => {
     const searchQuery = encodeURIComponent(`${conditionName} ICD-10 code`);
     return `https://www.google.com/search?q=${searchQuery}`;
+  };
+
+  const canDeleteCondition = condition && condition.mention_count === 0;
+
+  const handleDeleteCondition = async () => {
+    if (!condition || !canDeleteCondition) return;
+    await deleteConditionMutation.mutateAsync({
+      id: condition.id,
+      personId: condition.person_id,
+    });
+    setDeleteConfirmOpen(false);
+    router.push("/health/conditions");
   };
 
   if (isLoading) {
@@ -165,6 +180,21 @@ function ConditionDetailContent() {
             <Pencil className="h-4 w-4 mr-2" />
             {t("common.edit")}
           </Button>
+          {canDeleteCondition && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setDeleteConfirmOpen(true)}
+              disabled={deleteConditionMutation.isPending}
+            >
+              {deleteConditionMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              {t("conditions.deleteCondition")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -487,6 +517,33 @@ function ConditionDetailContent() {
           onSaved={() => refetch()}
         />
       )}
+
+      {/* Delete condition confirmation */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("conditions.deleteCondition")}</DialogTitle>
+            <DialogDescription>
+              {t("conditions.deleteConditionConfirm")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteCondition}
+              disabled={deleteConditionMutation.isPending}
+            >
+              {deleteConditionMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              {t("conditions.deleteCondition")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

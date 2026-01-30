@@ -46,7 +46,7 @@ interface ConditionEditDialogProps {
     // Common fields
     status_in_record: ConditionStatus;
     source_anchor: string | null;
-  }) => void;
+  }) => void | Promise<void>;
   isNew: boolean;
 }
 
@@ -67,6 +67,7 @@ export function ConditionEditDialog({
   const [icdCode, setIcdCode] = useState("");
   const [statusInRecord, setStatusInRecord] = useState<ConditionStatus>("suspected");
   const [sourceAnchor, setSourceAnchor] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Combobox state
   const [conditionSearch, setConditionSearch] = useState("");
@@ -161,8 +162,7 @@ export function ConditionEditDialog({
     : name.trim();
 
   // Handle save
-  const handleSave = () => {
-    // Always include ICD code if it was entered/changed
+  const handleSave = async () => {
     const icdCodeTrimmed = icdCode.trim();
     const hasIcdCode = !!icdCodeTrimmed;
     const icdData = hasIcdCode ? {
@@ -171,25 +171,31 @@ export function ConditionEditDialog({
       icd_name_ru: null,
     } : {};
 
+    let payload: Parameters<typeof onSave>[0] | null = null;
     if (mode === "existing" && selectedConditionId) {
-      // Linking to existing condition OR editing existing record
-      onSave({
+      payload = {
         condition_id: selectedConditionId,
         status_in_record: statusInRecord,
         source_anchor: sourceAnchor.trim() || null,
-        // Include ICD code to update the condition
         ...icdData,
-      });
+      };
     } else if (mode === "new" && name.trim()) {
-      // Creating new condition with ICD info
-      onSave({
+      payload = {
         name: name.trim(),
         code: icdCodeTrimmed || null,
         icd_name_en: icdLookup?.found ? icdLookup.name_en : null,
         icd_name_ru: null,
         status_in_record: statusInRecord,
         source_anchor: sourceAnchor.trim() || null,
-      });
+      };
+    }
+    if (!payload) return;
+
+    setSaving(true);
+    try {
+      await Promise.resolve(onSave(payload));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -456,8 +462,15 @@ export function ConditionEditDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
-            {t("common.save")}
+          <Button onClick={handleSave} disabled={!canSave || saving}>
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                {t("common.save")}
+              </>
+            ) : (
+              t("common.save")
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

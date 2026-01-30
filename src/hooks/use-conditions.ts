@@ -447,44 +447,16 @@ async function updateConditionRecord({
 
   const conditionRecord = data as ConditionRecord;
 
-  // Auto-update condition's current_status if status changed and this is most recent mention
-  if (updates.status_in_record && recordId && conditionId) {
-    // Get this record's date
-    const { data: thisRecord } = await supabase
-      .from("medical_records")
-      .select("record_date")
-      .eq("id", recordId)
-      .single();
-
-    // Get the most recent record date for this condition
-    const { data: mostRecentMention } = await supabase
-      .from("condition_records")
-      .select("medical_records!inner(record_date)")
-      .eq("condition_id", conditionId)
-      .order("medical_records(record_date)", { ascending: false })
-      .limit(1)
-      .single();
-
-    const thisRecordDate = thisRecord?.record_date || null;
-    const medicalRecords = mostRecentMention?.medical_records as { record_date?: string } | null;
-    const mostRecentDate = medicalRecords?.record_date || null;
-
-    // Auto-update current_status if this record is the most recent (or equal)
-    const shouldUpdateStatus = !mostRecentDate || !thisRecordDate || 
-      thisRecordDate >= mostRecentDate;
-
-    // Build update object
+  // When status_in_record changed, recompute condition's current_status from history
+  // (status of the most recent mention by record_date). This avoids leaving a condition
+  // "resolved" when the user edits the only resolved history entry to suspected/active.
+  if (updates.status_in_record && conditionId) {
+    await recomputeConditionCurrentStatus(supabase, conditionId);
     const conditionUpdates: Record<string, string | null> = {};
-    if (shouldUpdateStatus) {
-      conditionUpdates.current_status = updates.status_in_record;
-    }
-    // Add ICD code if provided
-    if (code) {
+    if (code !== undefined) {
       conditionUpdates.code = code;
-      conditionUpdates.icd_name_en = icd_name_en || null;
+      conditionUpdates.icd_name_en = icd_name_en ?? null;
     }
-
-    // Update condition if there are changes
     if (Object.keys(conditionUpdates).length > 0) {
       await supabase
         .from("conditions")
@@ -493,11 +465,11 @@ async function updateConditionRecord({
     }
   }
 
-  // Also update ICD code even if no status change (when conditionId is provided)
-  if (code && conditionId && !updates.status_in_record) {
+  // Update only ICD code when status didn't change (conditionId provided, no status_in_record)
+  if (code !== undefined && conditionId && !updates.status_in_record) {
     await supabase
       .from("conditions")
-      .update({ code, icd_name_en: icd_name_en || null })
+      .update({ code, icd_name_en: icd_name_en ?? null })
       .eq("id", conditionId);
   }
 
@@ -516,19 +488,58 @@ export function useUpdateConditionRecord() {
       queryClient.invalidateQueries({
         queryKey: ["conditions"],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["condition", data.condition_id],
+      });
     },
   });
 }
 
-// Delete a condition record
+// Recompute condition's current_status from the most recent condition_record by record_date
+async function recomputeConditionCurrentStatus(
+  supabase: ReturnType<typeof createClient>,
+  conditionId: string
+): Promise<void> {
+  const { data: latestMention } = await supabase
+    .from("condition_records")
+    .select("status_in_record, medical_records!inner(record_date)")
+    .eq("condition_id", conditionId)
+    .order("medical_records(record_date)", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const derivedStatus = latestMention?.status_in_record;
+  if (derivedStatus) {
+    await supabase
+      .from("conditions")
+      .update({ current_status: derivedStatus })
+      .eq("id", conditionId);
+  }
+}
+
+// Delete a condition record; recomputes condition's current_status from remaining history
 async function deleteConditionRecord({
   id,
   recordId: _recordId,
 }: {
   id: string;
   recordId: string;
-}): Promise<void> {
+}): Promise<{ conditionId: string | null }> {
   const supabase = createClient();
+
+  const { data: row, error: fetchError } = await supabase
+    .from("condition_records")
+    .select("condition_id")
+    .eq("id", id)
+    .single();
+
+  if (fetchError || !row) {
+    const { error } = await supabase.from("condition_records").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return { conditionId: null };
+  }
+
+  const conditionId = row.condition_id as string;
 
   const { error } = await supabase
     .from("condition_records")
@@ -538,6 +549,9 @@ async function deleteConditionRecord({
   if (error) {
     throw new Error(error.message);
   }
+
+  await recomputeConditionCurrentStatus(supabase, conditionId);
+  return { conditionId };
 }
 
 export function useDeleteConditionRecord() {
@@ -545,10 +559,18 @@ export function useDeleteConditionRecord() {
 
   return useMutation({
     mutationFn: deleteConditionRecord,
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({
         queryKey: ["condition-records", "record", variables.recordId],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["conditions"],
+      });
+      if (result.conditionId) {
+        queryClient.invalidateQueries({
+          queryKey: ["condition", result.conditionId],
+        });
+      }
     },
   });
 }

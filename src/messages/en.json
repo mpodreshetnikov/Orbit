@@ -634,6 +634,9 @@
     "notes": "Notes",
     "noNotes": "No notes",
     "conditionNotFound": "Condition not found",
+    "deleteCondition": "Delete condition",
+    "deleteConditionConfirm": "Remove this condition? It has no mention history and can be deleted.",
+    "cannotDeleteHasHistory": "Remove all mention history first to delete this condition.",
     "status": {
       "active": "Active",
       "suspected": "Suspected",
