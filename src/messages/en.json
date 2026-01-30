@@ -291,7 +291,9 @@
     "pleaseWait": "This may take a moment. You can navigate away and come back.",
     "structureComplete": "Structure Extracted",
     "reviewStructure": "Please review the extracted information.",
-    "structureFailed": "Structure Extraction Failed"
+    "structureFailed": "Structure Extraction Failed",
+    "ocrFailed": "OCR failed",
+    "retryOcr": "Retry OCR"
   },
   "catalogs": {
     "title": "Catalogs",

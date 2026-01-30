@@ -4,10 +4,11 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 /**
  * health-ocr: Vision LLM function for OCR text extraction only
- * 
+ *
  * This is step 1 of the medical record processing pipeline.
  * It extracts raw text from images using GPT-4o Vision.
- * 
+ * Processes one image at a time to stay under Edge Function memory limit (256MB).
+ *
  * Flow: Upload -> [health-ocr] -> OCR Review -> health-structure -> Structure Review -> Save
  */
 
@@ -17,6 +18,8 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 const BUCKET_NAME = "medical-attachments";
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10MB per file
+const MAX_OCR_ERROR_LENGTH = 500;
 
 interface OcrRequest {
   record_id: string;
@@ -31,64 +34,51 @@ interface Attachment {
 
 interface OcrResult {
   ocr_text: string;
-  /** Short descriptive name for the document (e.g. "Blood test 15.01.2024", "Discharge summary") */
   suggested_title: string;
 }
 
-// Fetch attachment files and convert to base64 data URLs
-async function getAttachmentDataUrls(
+// Download one attachment and convert to base64 data URL (single image in memory)
+async function downloadOneDataUrl(
   supabase: ReturnType<typeof createClient>,
-  attachments: Attachment[]
-): Promise<{ url: string; mimeType: string }[]> {
-  const results: { url: string; mimeType: string }[] = [];
+  attachment: Attachment
+): Promise<{ url: string; mimeType: string } | null> {
+  const { data, error } = await supabase.storage
+    .from(BUCKET_NAME)
+    .download(attachment.storage_path);
 
-  for (const attachment of attachments) {
-    try {
-      // Download the file from storage
-      const { data, error } = await supabase.storage
-        .from(BUCKET_NAME)
-        .download(attachment.storage_path);
-
-      if (error || !data) {
-        console.error(`Failed to download ${attachment.storage_path}:`, error);
-        continue;
-      }
-
-      // Convert blob to base64
-      const arrayBuffer = await data.arrayBuffer();
-      const base64 = encodeBase64(new Uint8Array(arrayBuffer));
-      
-      // Create data URL
-      const dataUrl = `data:${attachment.mime_type};base64,${base64}`;
-      
-      results.push({
-        url: dataUrl,
-        mimeType: attachment.mime_type,
-      });
-    } catch (err) {
-      console.error(`Error processing ${attachment.storage_path}:`, err);
-    }
+  if (error || !data) {
+    console.error(`Failed to download ${attachment.storage_path}:`, error);
+    return null;
   }
 
-  return results;
+  const size = data.size;
+  if (size > MAX_ATTACHMENT_BYTES) {
+    console.error(`Skipping ${attachment.storage_path}: size ${size} exceeds ${MAX_ATTACHMENT_BYTES}`);
+    return null;
+  }
+
+  const arrayBuffer = await data.arrayBuffer();
+  const base64 = encodeBase64(new Uint8Array(arrayBuffer));
+  const dataUrl = `data:${attachment.mime_type};base64,${base64}`;
+  return { url: dataUrl, mimeType: attachment.mime_type };
 }
 
-// Call GPT-4o Vision for OCR only (text extraction)
-async function callVisionOcr(
-  imageDataUrls: { url: string; mimeType: string }[]
+// Call GPT-4o Vision for a single image (OCR only). When requestTitle is true, also ask for suggested_title.
+async function callVisionOcrSingle(
+  imageDataUrl: { url: string; mimeType: string },
+  options: { requestTitle: boolean }
 ): Promise<OcrResult> {
-  if (imageDataUrls.length === 0) {
-    return { ocr_text: "", suggested_title: "" };
-  }
+  const requestTitle = options.requestTitle ?? true;
 
-  const systemPrompt = `Ты — OCR-система для извлечения текста из изображений медицинских документов.
+  const systemPrompt = requestTitle
+    ? `Ты — OCR-система для извлечения текста из изображений медицинских документов.
 
 Твои задачи:
-1. Извлечь ВЕСЬ видимый текст из изображений
+1. Извлечь ВЕСЬ видимый текст из изображения
 2. Предложить короткое название документа для отображения в списке (1–10 слов)
 
 Правила извлечения текста:
-1. Извлеки АБСОЛЮТНО ВЕСЬ текст, видимый на изображениях
+1. Извлеки АБСОЛЮТНО ВЕСЬ текст, видимый на изображении
 2. Сохрани оригинальную структуру документа насколько возможно (заголовки, таблицы, списки)
 3. Включи ВСЕ: заголовки, подписи, даты, имена, значения, единицы измерения, номера, штампы, печати
 4. Для таблиц используй разделители | или табуляцию для сохранения структуры
@@ -101,21 +91,20 @@ async function callVisionOcr(
 - На русском языке
 
 Ответь JSON-объектом с полями:
-- ocr_text: полный извлечённый текст из всех изображений
-- suggested_title: короткое название документа для списка записей`;
+- ocr_text: полный извлечённый текст из изображения
+- suggested_title: короткое название документа для списка записей`
+    : `Ты — OCR-система для извлечения текста из изображений медицинских документов.
 
-  // Build the content array with text prompt and images
+Извлеки АБСОЛЮТНО ВЕСЬ видимый текст. Сохрани структуру (заголовки, таблицы, списки). Включи заголовки, подписи, даты, имена, значения, единицы, номера, штампы. Для таблиц используй | или табуляцию. НЕ интерпретируй — только извлеки текст.
+
+Ответь JSON-объектом с полями:
+- ocr_text: полный извлечённый текст
+- suggested_title: "" (оставь пустым)`;
+
   const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-    { type: "text", text: "Извлеки весь текст из этих изображений:" },
+    { type: "text", text: requestTitle ? "Извлеки весь текст из этого изображения и предложи короткое название документа:" : "Извлеки весь текст из этого изображения:" },
+    { type: "image_url", image_url: { url: imageDataUrl.url } },
   ];
-
-  // Add all images
-  for (const img of imageDataUrls) {
-    content.push({
-      type: "image_url",
-      image_url: { url: img.url },
-    });
-  }
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -130,8 +119,8 @@ async function callVisionOcr(
         { role: "system", content: systemPrompt },
         { role: "user", content },
       ],
-      temperature: 0.1, // Low temperature for accurate OCR
-      max_tokens: 12000, // Allow more tokens for long documents
+      temperature: 0.1,
+      max_tokens: 12000,
       response_format: { type: "json_object" },
     }),
   });
@@ -143,7 +132,7 @@ async function callVisionOcr(
 
   const data = await response.json();
   const responseContent = data.choices[0]?.message?.content;
-  
+
   if (!responseContent) {
     throw new Error("No response from OpenRouter");
   }
@@ -163,13 +152,13 @@ async function callVisionOcr(
 }
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  let recordId: string | null = null;
+
   try {
-    // Validate environment
     if (!OPENROUTER_API_KEY) {
       throw new Error("OPENROUTER_API_KEY not configured");
     }
@@ -177,7 +166,6 @@ Deno.serve(async (req) => {
       throw new Error("Supabase environment not configured");
     }
 
-    // Get auth header
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       throw new Error("Missing authorization header");
@@ -185,7 +173,6 @@ Deno.serve(async (req) => {
 
     const token = authHeader.replace("Bearer ", "");
 
-    // Create Supabase client with anon key and user's token for RLS
     const supabaseClient = createClient(
       SUPABASE_URL,
       SUPABASE_ANON_KEY || SUPABASE_SERVICE_ROLE_KEY,
@@ -200,15 +187,13 @@ Deno.serve(async (req) => {
       }
     );
 
-    // Verify user is authenticated by getting user info
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
-    
+
     if (authError || !user) {
       console.error("Auth error:", authError);
       throw new Error("Unauthorized - invalid token");
     }
 
-    // Check allowlist using service role (bypasses RLS)
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: {
         autoRefreshToken: false,
@@ -226,30 +211,27 @@ Deno.serve(async (req) => {
       throw new Error("User not in allowlist");
     }
 
-    // Parse request body
     const body: OcrRequest = await req.json();
-    const { record_id } = body;
+    recordId = body.record_id ?? null;
 
-    if (!record_id) {
+    if (!recordId) {
       throw new Error("Missing required field: record_id");
     }
 
-    // Verify record exists
     const { data: record, error: recordError } = await supabaseAdmin
       .from("medical_records")
       .select("id, person_id, status")
-      .eq("id", record_id)
+      .eq("id", recordId)
       .single();
 
     if (recordError || !record) {
       throw new Error("Record not found or access denied");
     }
 
-    // Get attachments for this record
     const { data: attachments, error: attachmentsError } = await supabaseAdmin
       .from("record_attachments")
       .select("id, storage_path, mime_type, original_filename")
-      .eq("record_id", record_id)
+      .eq("record_id", recordId)
       .order("sort_order", { ascending: true });
 
     if (attachmentsError) {
@@ -260,37 +242,57 @@ Deno.serve(async (req) => {
       throw new Error("No attachments found for this record");
     }
 
-    // Download and convert attachments to base64 data URLs
-    const imageDataUrls = await getAttachmentDataUrls(supabaseAdmin, attachments);
+    const pageTexts: string[] = [];
+    let suggestedTitle = "Медицинский документ";
 
-    if (imageDataUrls.length === 0) {
-      throw new Error("Failed to process any attachments");
+    for (let i = 0; i < attachments.length; i++) {
+      const attachment = attachments[i];
+      const dataUrl = await downloadOneDataUrl(supabaseAdmin, attachment);
+      if (!dataUrl) {
+        pageTexts.push("");
+        continue;
+      }
+
+      try {
+        const result = await callVisionOcrSingle(dataUrl, { requestTitle: i === 0 });
+        pageTexts.push(result.ocr_text);
+        if (i === 0 && result.suggested_title) {
+          suggestedTitle = result.suggested_title;
+        }
+      } catch (err) {
+        console.error(`OCR failed for ${attachment.storage_path}:`, err);
+        pageTexts.push("");
+      }
     }
 
-    // Call GPT-4o Vision for OCR only
-    const ocrResult = await callVisionOcr(imageDataUrls);
+    const fullOcrText = pageTexts
+      .map((text, idx) => (text ? `--- Страница ${idx + 1} ---\n\n${text}` : `--- Страница ${idx + 1} ---\n\n[Не удалось извлечь текст]`))
+      .join("\n\n");
 
-    // Update the medical record with OCR text, suggested title, and set status to ocr_review
+    if (pageTexts.every((t) => !t.trim())) {
+      throw new Error("Failed to extract text from any attachment");
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from("medical_records")
       .update({
-        ocr_text: ocrResult.ocr_text,
-        title: ocrResult.suggested_title,
-        status: "ocr_review", // Ready for user to review OCR results
+        ocr_text: fullOcrText,
+        title: suggestedTitle,
+        status: "ocr_review",
+        ocr_error: null,
       })
-      .eq("id", record_id);
+      .eq("id", recordId);
 
     if (updateError) {
       throw new Error(`Failed to update record: ${updateError.message}`);
     }
 
-    // Return OCR result (include suggested_title so client can show it immediately)
     return new Response(
       JSON.stringify({
         success: true,
-        ocr_text: ocrResult.ocr_text,
-        char_count: ocrResult.ocr_text.length,
-        suggested_title: ocrResult.suggested_title || undefined,
+        ocr_text: fullOcrText,
+        char_count: fullOcrText.length,
+        suggested_title: suggestedTitle || undefined,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -299,10 +301,30 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("OCR error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const truncatedMessage = errorMessage.slice(0, MAX_OCR_ERROR_LENGTH);
+
+    if (recordId) {
+      try {
+        const supabaseAdmin = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
+        await supabaseAdmin
+          .from("medical_records")
+          .update({
+            status: "ocr_failed",
+            ocr_error: truncatedMessage,
+          })
+          .eq("id", recordId);
+      } catch (updateErr) {
+        console.error("Failed to update record with ocr_failed:", updateErr);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: errorMessage,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

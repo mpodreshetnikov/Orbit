@@ -97,6 +97,8 @@ import {
   usePersonFindingHistory,
   usePersonConditionRecordHistory,
   usePersonObservationHistory,
+  useBackgroundOCR,
+  usePersons,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
 import { ConditionRecordRow, ConditionEditDialog, type ConditionComparison } from "@/components/conditions";
@@ -140,6 +142,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const { data: personFindingHistory } = usePersonFindingHistory(record?.person_id ?? null);
   const { data: personConditionRecordHistory } = usePersonConditionRecordHistory(record?.person_id ?? null);
   const { data: personObservationHistory } = usePersonObservationHistory(record?.person_id ?? null);
+  const { retryOcr } = useBackgroundOCR();
+  const { data: persons } = usePersons();
 
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -625,8 +629,40 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
   const isOcrReview = record.status === "ocr_review";
+  const isOcrFailed = record.status === "ocr_failed";
   const isStructureReview = record.status === "structure_review";
   const isProcessing = record.status === "ocr_processing" || record.status === "structuring";
+
+  // Show OCR failed state: error message and Retry OCR button
+  if (isOcrFailed) {
+    const personName = persons?.find((p) => p.id === record.person_id)?.name ?? record.title ?? "";
+    const handleRetryOcr = async () => {
+      await retryOcr({
+        recordId,
+        personId: record.person_id,
+        personName,
+      });
+      refetch();
+    };
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <h1 className="text-2xl font-bold tracking-tight">{t("processing.ocrFailed")}</h1>
+        </div>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            {record.ocr_error || t("processing.failed")}
+          </p>
+          <Button onClick={handleRetryOcr}>
+            {t("processing.retryOcr")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   // Show processing state (use record title from OCR when available)
   if (isProcessing) {

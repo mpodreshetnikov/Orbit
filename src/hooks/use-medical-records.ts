@@ -23,8 +23,8 @@ const STATUS_GROUP_MAP: Record<string, string[]> = {
   active: ["active"],
   // Drafts and records needing user review
   draft: ["draft", "ocr_review", "structure_review"],
-  // Records being processed by AI
-  processing: ["ocr_processing", "structuring", "processing"],
+  // Records being processed by AI or OCR failed (user can retry)
+  processing: ["ocr_processing", "structuring", "processing", "ocr_failed"],
   // Removed records
   removed: ["removed"],
 };

@@ -15,6 +15,12 @@ interface BackgroundOCRInput {
   files: File[];
 }
 
+interface RetryOCRInput {
+  recordId: string;
+  personId: string;
+  personName: string;
+}
+
 export function useBackgroundOCR() {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -113,13 +119,53 @@ export function useBackgroundOCR() {
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`OCR failed: ${errorText || response.statusText}`);
+          let errorMessage = response.statusText;
+          try {
+            const parsed = JSON.parse(errorText) as { error?: string };
+            if (parsed?.error) errorMessage = parsed.error;
+          } catch {
+            if (errorText) errorMessage = errorText;
+          }
+          await supabase
+            .from("medical_records")
+            .update({ status: "ocr_failed", ocr_error: errorMessage })
+            .eq("id", recordId);
+          queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+          queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+          updateJob(jobId, { stage: "failed", error: errorMessage });
+          addNotification({
+            jobId,
+            recordId,
+            title: t("processing.failed"),
+            personName,
+            type: "error",
+            message: errorMessage,
+          });
+          toast.error(t("processing.failed"), { description: errorMessage });
+          return { success: false, error: errorMessage };
         }
 
         const data: HealthOcrResponse = await response.json();
 
         if (!data.success) {
-          throw new Error(data.error || "OCR processing failed");
+          const errorMessage = data.error || "OCR processing failed";
+          await supabase
+            .from("medical_records")
+            .update({ status: "ocr_failed", ocr_error: errorMessage })
+            .eq("id", recordId);
+          queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+          queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+          updateJob(jobId, { stage: "failed", error: errorMessage });
+          addNotification({
+            jobId,
+            recordId,
+            title: t("processing.failed"),
+            personName,
+            type: "error",
+            message: errorMessage,
+          });
+          toast.error(t("processing.failed"), { description: errorMessage });
+          return { success: false, error: errorMessage };
         }
 
         // Mark job as completed; use LLM-suggested record name when available
@@ -154,13 +200,7 @@ export function useBackgroundOCR() {
         const errorMessage =
           error instanceof Error ? error.message : "Processing failed";
 
-        // Mark job as failed
-        updateJob(jobId, {
-          stage: "failed",
-          error: errorMessage,
-        });
-
-        // Add notification
+        updateJob(jobId, { stage: "failed", error: errorMessage });
         addNotification({
           jobId,
           recordId,
@@ -169,23 +209,17 @@ export function useBackgroundOCR() {
           type: "error",
           message: errorMessage,
         });
+        toast.error(t("processing.failed"), { description: errorMessage });
 
-        // Show error toast
-        toast.error(t("processing.failed"), {
-          description: errorMessage,
-        });
-
-        // Update record status back to draft (failed)
+        // Persist OCR failure so UI can show error and Retry
         const supabase = createClient();
         await supabase
           .from("medical_records")
-          .update({ status: "draft" })
+          .update({ status: "ocr_failed", ocr_error: errorMessage })
           .eq("id", recordId);
 
-        // Invalidate queries
-        queryClient.invalidateQueries({
-          queryKey: ["medical-records"],
-        });
+        queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+        queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
 
         return { success: false, error: errorMessage };
       }
@@ -193,5 +227,128 @@ export function useBackgroundOCR() {
     [t, queryClient, addJob, updateJob, addNotification]
   );
 
-  return { startBackgroundOCR };
+  const retryOcr = useCallback(
+    async ({ recordId, personId, personName }: RetryOCRInput) => {
+      const jobId = recordId;
+      addJob({
+        id: jobId,
+        recordId,
+        personId,
+        personName,
+        stage: "processing",
+        progress: 40,
+      });
+
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        updateJob(jobId, { stage: "failed", error: "Not authenticated" });
+        toast.error(t("processing.failed"), { description: "Not authenticated" });
+        return { success: false, error: "Not authenticated" };
+      }
+
+      await supabase
+        .from("medical_records")
+        .update({ status: "ocr_processing", ocr_error: null })
+        .eq("id", recordId);
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        const err = "Supabase URL not configured";
+        updateJob(jobId, { stage: "failed", error: err });
+        await supabase
+          .from("medical_records")
+          .update({ status: "ocr_failed", ocr_error: err })
+          .eq("id", recordId);
+        queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+        queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+        return { success: false, error: err };
+      }
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/health-ocr`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ record_id: recordId }),
+      });
+
+      updateJob(jobId, { progress: 80 });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = response.statusText;
+        try {
+          const parsed = JSON.parse(errorText) as { error?: string };
+          if (parsed?.error) errorMessage = parsed.error;
+        } catch {
+          if (errorText) errorMessage = errorText;
+        }
+        await supabase
+          .from("medical_records")
+          .update({ status: "ocr_failed", ocr_error: errorMessage })
+          .eq("id", recordId);
+        queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+        queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+        updateJob(jobId, { stage: "failed", error: errorMessage });
+        addNotification({
+          jobId,
+          recordId,
+          title: t("processing.failed"),
+          personName,
+          type: "error",
+          message: errorMessage,
+        });
+        toast.error(t("processing.failed"), { description: errorMessage });
+        return { success: false, error: errorMessage };
+      }
+
+      const data: HealthOcrResponse = await response.json();
+      if (!data.success) {
+        const errorMessage = data.error || "OCR processing failed";
+        await supabase
+          .from("medical_records")
+          .update({ status: "ocr_failed", ocr_error: errorMessage })
+          .eq("id", recordId);
+        queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+        queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+        updateJob(jobId, { stage: "failed", error: errorMessage });
+        addNotification({
+          jobId,
+          recordId,
+          title: t("processing.failed"),
+          personName,
+          type: "error",
+          message: errorMessage,
+        });
+        toast.error(t("processing.failed"), { description: errorMessage });
+        return { success: false, error: errorMessage };
+      }
+
+      const displayTitle = data.suggested_title?.trim() || t("processing.ocrComplete");
+      updateJob(jobId, {
+        stage: "completed",
+        progress: 100,
+        title: displayTitle,
+        completedAt: Date.now(),
+      });
+      addNotification({
+        jobId,
+        recordId,
+        title: displayTitle,
+        personName,
+        type: "success",
+        message: t("processing.ocrReviewNeeded"),
+      });
+      queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+      queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+      return { success: true, ocr_text: data.ocr_text };
+    },
+    [t, queryClient, addJob, updateJob, addNotification]
+  );
+
+  return { startBackgroundOCR, retryOcr };
 }

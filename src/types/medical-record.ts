@@ -11,6 +11,7 @@ export type RecordType =
 export type RecordStatus = 
   | "draft"              // Initial state after upload
   | "ocr_processing"     // OCR in progress
+  | "ocr_failed"         // OCR failed; error in ocr_error, user can retry
   | "ocr_review"         // OCR complete, awaiting user review
   | "structuring"        // Structure extraction in progress
   | "structure_review"   // Structure complete, awaiting user review
@@ -32,6 +33,7 @@ export interface MedicalRecord {
   updated_at: string;
   // Extraction fields (populated by LLM in Stage 4)
   ocr_text: string | null;
+  ocr_error: string | null;  // Set when OCR fails; cleared on success or retry
   llm_summary: string | null;
   llm_keywords: string[] | null;
 }
@@ -74,6 +76,7 @@ export interface UpdateMedicalRecordInput {
   notes?: string | null;
   status?: RecordStatus;
   ocr_text?: string | null;
+  ocr_error?: string | null;
   llm_keywords?: string[] | null;
 }
 
