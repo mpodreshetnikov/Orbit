@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Pencil, Trash2, AlertTriangle, ChevronDown, ChevronUp, Quote, ArrowRight, CircleDot, History, CirclePlus } from "lucide-react";
+import Link from "next/link";
+import { Pencil, Trash2, AlertTriangle, ChevronDown, ChevronUp, Quote, ArrowRight, CircleDot, History, CirclePlus, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -70,13 +71,13 @@ export function ConditionRecordRow({
       isActiveOrSuspected && "border-orange-500/30 bg-orange-500/5",
       comparison?.isNew && "border-amber-500/30 bg-amber-500/5"
     )}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 flex-1 space-y-1">
           {/* Condition name with ICD code */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium">{displayName}</span>
             {conditionRecord.condition_code ? (
-              <Badge variant="outline" className="font-mono text-xs">
+              <Badge variant="outline" className="font-mono text-xs shrink-0">
                 {conditionRecord.condition_code}
               </Badge>
             ) : (
@@ -95,9 +96,9 @@ export function ConditionRecordRow({
 
           {/* Status change indicator */}
           {hasStatusChange && (
-            <div className="flex items-center gap-2 mt-1 text-sm">
+            <div className="flex items-center gap-2 mt-1 text-sm flex-wrap">
               <ConditionStatusBadge status={conditionRecord.condition_current_status} />
-              <ArrowRight className="h-3 w-3 text-muted-foreground" />
+              <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
               <ConditionStatusBadge status={conditionRecord.status_in_record} />
               <span className="text-xs text-muted-foreground">
                 ({t("conditions.statusChange")})
@@ -112,7 +113,7 @@ export function ConditionRecordRow({
               onClick={() => setShowAnchor(!showAnchor)}
               className="flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Quote className="h-3 w-3" />
+              <Quote className="h-3 w-3 shrink-0" />
               <span>{t("conditions.showSource")}</span>
               {showAnchor ? (
                 <ChevronUp className="h-3 w-3" />
@@ -123,8 +124,8 @@ export function ConditionRecordRow({
           )}
         </div>
 
-        {/* Badges and actions */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Badges and actions - wrap on mobile, row on desktop */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0 sm:flex-nowrap">
           {comparison && <ConditionComparisonBadge comparison={comparison} />}
           {!hasStatusChange && (
             <ConditionStatusBadge status={conditionRecord.status_in_record} />
@@ -138,7 +139,18 @@ export function ConditionRecordRow({
           )}
 
           {showActions && (
-            <>
+            <div className="flex items-center gap-0.5 ms-auto sm:ms-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                asChild
+                title={t("conditions.openDetails")}
+              >
+                <Link href={`/health/conditions/${conditionRecord.condition_id}`}>
+                  <ExternalLink className="h-4 w-4" />
+                </Link>
+              </Button>
               {onEdit && (
                 <Button
                   variant="ghost"
@@ -174,7 +186,7 @@ export function ConditionRecordRow({
                   <Trash2 className="h-4 w-4" />
                 </Button>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>

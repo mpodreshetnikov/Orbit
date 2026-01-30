@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Search, X, FileText, Plus, FileStack, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -44,21 +44,40 @@ interface RecordsListProps {
   personName: string;
 }
 
+const TAB_VALUES: StatusFilter[] = ["active", "draft", "processing", "removed"];
+
+function tabFromSearchParams(searchParams: URLSearchParams): StatusFilter {
+  const tab = searchParams.get("tab");
+  if (tab && TAB_VALUES.includes(tab as StatusFilter)) return tab as StatusFilter;
+  if (searchParams.get("showDrafts") === "true") return "draft";
+  return "active";
+}
+
 export function RecordsList({ personId, personName }: RecordsListProps) {
   const t = useTranslations();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // Check if we should show drafts from URL param
-  const showDraftsFromUrl = searchParams.get("showDrafts") === "true";
+  // Tab (status filter) is driven by URL so back/forward navigates tabs
+  const statusFilter = tabFromSearchParams(searchParams);
+
+  const setTabInUrl = (tab: StatusFilter) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "active") {
+      params.delete("tab");
+      params.delete("showDrafts");
+    } else {
+      params.set("tab", tab);
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  };
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<RecordType | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
-    showDraftsFromUrl ? "draft" : "active"
-  );
 
   // Debounce search query (300ms delay)
   useEffect(() => {
@@ -67,13 +86,6 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
-
-  // Update status filter if URL param changes
-  useEffect(() => {
-    if (showDraftsFromUrl && statusFilter === "active") {
-      setStatusFilter("draft");
-    }
-  }, [showDraftsFromUrl, statusFilter]);
 
   // Confirmation dialog state
   const [recordToRemove, setRecordToRemove] = useState<MedicalRecordListItem | null>(null);
@@ -176,9 +188,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const clearFilters = () => {
     setSearchQuery("");
     setTypeFilter("all");
-    setStatusFilter("active");
-    // Clear URL param
-    router.replace("/health");
+    router.replace(pathname);
   };
 
   const hasActiveFilters = searchQuery || typeFilter !== "all" || statusFilter !== "active";
@@ -201,7 +211,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <Button
           variant={statusFilter === "active" ? "secondary" : "ghost"}
           size="sm"
-          onClick={() => setStatusFilter("active")}
+          onClick={() => setTabInUrl("active")}
           className="shrink-0"
         >
           {t("records.statusFilter.active")}
@@ -209,7 +219,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <Button
           variant={statusFilter === "draft" ? "secondary" : "ghost"}
           size="sm"
-          onClick={() => setStatusFilter("draft")}
+          onClick={() => setTabInUrl("draft")}
           className={cn("shrink-0 gap-1", draftsCount > 0 && statusFilter !== "draft" && "text-primary")}
         >
           <FileStack className="h-4 w-4" />
@@ -223,7 +233,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <Button
           variant={statusFilter === "processing" ? "secondary" : "ghost"}
           size="sm"
-          onClick={() => setStatusFilter("processing")}
+          onClick={() => setTabInUrl("processing")}
           className={cn("shrink-0 gap-1", processingCount > 0 && statusFilter !== "processing" && "text-primary")}
         >
           <Loader2 className={cn("h-4 w-4", processingCount > 0 && "animate-spin")} />
@@ -237,7 +247,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <Button
           variant={statusFilter === "removed" ? "secondary" : "ghost"}
           size="sm"
-          onClick={() => setStatusFilter("removed")}
+          onClick={() => setTabInUrl("removed")}
           className="shrink-0"
         >
           {t("records.statusFilter.removed")}
@@ -305,7 +315,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {statusFilter !== "active" && (
             <Badge variant="secondary" className="gap-1">
               {t(`records.statusFilter.${statusFilter}`)}
-              <button onClick={() => setStatusFilter("active")}>
+              <button onClick={() => setTabInUrl("active")}>
                 <X className="h-3 w-3" />
               </button>
             </Badge>

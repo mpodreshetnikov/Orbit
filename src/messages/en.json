@@ -216,13 +216,15 @@
       "errorAccessing": "Could not access camera. Please check permissions."
     },
     "ocr": {
-      "reviewTitle": "Review Extracted Text",
+      "pageTitle": "Extracted Text",
       "reviewDescription": "Check the text extracted from your documents and fix any errors before proceeding.",
       "originalImages": "Original Documents",
       "extractedText": "Extracted Text",
       "noTextExtracted": "No text was extracted from the images.",
       "editHint": "You can edit the text to fix any OCR errors.",
-      "confirmAndExtract": "Confirm & Extract Data"
+      "confirmAndExtract": "Confirm & Extract Data",
+      "openText": "Open text",
+      "saveAndClose": "Save & close"
     },
     "structure": {
       "reviewTitle": "Review Record Details",
@@ -393,6 +395,7 @@
     "applyButton": "Apply",
     "applyHint": "Click Apply to include in your health data",
     "addToCatalogHint": "Consider adding to catalog for better tracking",
+    "openHistory": "View observation history",
     "verify": "Verify",
     "verified": "Verified by user",
     "lowConfidence": "Low extraction confidence",
@@ -482,6 +485,7 @@
     "add": "Add Finding",
     "edit": "Edit Finding",
     "editDescription": "Edit finding details and attributes",
+    "openHistory": "View finding history",
     "noFindings": "No findings",
     "noFindingsHint": "Findings will appear here after extraction from imaging or endoscopy reports",
     "noFindingsDescription": "Findings from imaging studies, endoscopies, and other procedures will appear here.",
@@ -562,6 +566,7 @@
     "description": "View and manage medical conditions and diagnoses",
     "add": "Add Condition",
     "edit": "Edit Condition",
+    "openDetails": "View condition details",
     "addDescription": "Add a new condition or link to an existing one",
     "editDescription": "Edit condition details",
     "noConditions": "No conditions",

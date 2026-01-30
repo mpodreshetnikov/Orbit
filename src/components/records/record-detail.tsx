@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { format } from "date-fns";
 import {
   ArrowLeft,
@@ -33,6 +34,7 @@ import {
   History,
   TrendingUp,
   TrendingDown,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -625,7 +628,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const isStructureReview = record.status === "structure_review";
   const isProcessing = record.status === "ocr_processing" || record.status === "structuring";
 
-  // Show processing state
+  // Show processing state (use record title from OCR when available)
   if (isProcessing) {
     return (
       <div className="space-y-6">
@@ -634,7 +637,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">{t("processing.processing")}</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {record.title || t("processing.processing")}
+            </h1>
             <p className="text-muted-foreground">
               {record.status === "ocr_processing" 
                 ? t("processing.ocrInProgress") 
@@ -667,10 +672,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           <Button variant="ghost" size="icon" onClick={() => router.back()}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div>
-            <Badge variant="secondary" className="mb-1">{t("records.status.ocrReview")}</Badge>
-            <h1 className="text-2xl font-bold tracking-tight">{t("records.ocr.reviewTitle")}</h1>
-          </div>
+          <h1 className="text-2xl font-bold tracking-tight">{t("records.ocr.pageTitle")}</h1>
         </div>
         <OcrReviewStep
           recordId={recordId}
@@ -929,45 +931,50 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
       {/* Observations */}
       {record.status === "active" && (
         <>
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <FlaskConical className="h-4 w-4" />
-                {t("records.detail.observations")} ({observations?.length || 0})
-              </h2>
-              {!isRemoved && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleAddObservation}
-                  disabled={isObsProcessing}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  {t("observations.add")}
-                </Button>
+          <Card className="p-4 sm:p-6">
+            <CardHeader className="p-0 pb-3 sm:pb-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <FlaskConical className="h-4 w-4 shrink-0" />
+                  {t("records.detail.observations")} ({observations?.length || 0})
+                </h2>
+                {!isRemoved && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleAddObservation}
+                    disabled={isObsProcessing}
+                    className="w-full sm:w-auto shrink-0"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    {t("observations.add")}
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {observations && observations.length > 0 ? (
+                <div className="space-y-2">
+                  {observations.map((obs) => (
+                    <ObservationRowEditable 
+                      key={obs.id} 
+                      observation={obs}
+                      comparison={getComparisonForObservation(obs)}
+                      onEdit={() => handleEditObservation(obs)}
+                      onDelete={() => handleDeleteObservation(obs)}
+                      isProcessing={isObsProcessing}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 sm:py-8 text-muted-foreground border rounded-lg border-dashed">
+                  <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">{t("observations.noObservations")}</p>
+                  <p className="text-xs mt-1">{t("observations.noObservationsHint")}</p>
+                </div>
               )}
-            </div>
-            {observations && observations.length > 0 ? (
-              <div className="space-y-2">
-                {observations.map((obs) => (
-                  <ObservationRowEditable 
-                    key={obs.id} 
-                    observation={obs}
-                    comparison={getComparisonForObservation(obs)}
-                    onEdit={() => handleEditObservation(obs)}
-                    onDelete={() => handleDeleteObservation(obs)}
-                    isProcessing={isObsProcessing}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground border rounded-lg border-dashed">
-                <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">{t("observations.noObservations")}</p>
-                <p className="text-xs mt-1">{t("observations.noObservationsHint")}</p>
-              </div>
-            )}
-          </div>
+            </CardContent>
+          </Card>
           <Separator />
           
           {/* Edit/Add Observation Dialog */}
@@ -985,46 +992,51 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           />
 
           {/* Findings Section */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Stethoscope className="h-4 w-4" />
-                {t("findings.title")} ({findings?.length || 0})
-              </h2>
-              {!isRemoved && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleAddFinding}
-                  disabled={isFindingProcessing}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t("findings.add")}
-                </Button>
+          <Card className="p-4 sm:p-6">
+            <CardHeader className="p-0 pb-3 sm:pb-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Stethoscope className="h-4 w-4 shrink-0" />
+                  {t("findings.title")} ({findings?.length || 0})
+                </h2>
+                {!isRemoved && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleAddFinding}
+                    disabled={isFindingProcessing}
+                    className="w-full sm:w-auto shrink-0"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    {t("findings.add")}
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {findings && findings.length > 0 ? (
+                <div className="space-y-2">
+                  {findings.map((finding) => (
+                    <FindingRow
+                      key={finding.id}
+                      finding={finding}
+                      comparison={getComparisonForFinding(finding)}
+                      onEdit={isRemoved ? undefined : () => handleEditFinding(finding)}
+                      onDelete={isRemoved ? undefined : () => handleDeleteFinding(finding)}
+                      isProcessing={isFindingProcessing}
+                      showActions={!isRemoved}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 sm:py-8 text-muted-foreground border rounded-lg border-dashed">
+                  <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">{t("findings.noFindings")}</p>
+                  <p className="text-xs mt-1">{t("findings.noFindingsHint")}</p>
+                </div>
               )}
-            </div>
-            {findings && findings.length > 0 ? (
-              <div className="space-y-2">
-                {findings.map((finding) => (
-                  <FindingRow
-                    key={finding.id}
-                    finding={finding}
-                    comparison={getComparisonForFinding(finding)}
-                    onEdit={isRemoved ? undefined : () => handleEditFinding(finding)}
-                    onDelete={isRemoved ? undefined : () => handleDeleteFinding(finding)}
-                    isProcessing={isFindingProcessing}
-                    showActions={!isRemoved}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground border rounded-lg border-dashed">
-                <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">{t("findings.noFindings")}</p>
-                <p className="text-xs mt-1">{t("findings.noFindingsHint")}</p>
-              </div>
-            )}
-          </div>
+            </CardContent>
+          </Card>
           <Separator />
           
           {/* Edit/Add Finding Dialog */}
@@ -1043,46 +1055,51 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           />
 
           {/* Conditions Section */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <HeartPulse className="h-4 w-4" />
-                {t("conditions.title")} ({conditionRecords?.length || 0})
-              </h2>
-              {!isRemoved && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleAddCondition}
-                  disabled={isConditionProcessing}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t("conditions.add")}
-                </Button>
+          <Card className="p-4 sm:p-6">
+            <CardHeader className="p-0 pb-3 sm:pb-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <HeartPulse className="h-4 w-4 shrink-0" />
+                  {t("conditions.title")} ({conditionRecords?.length || 0})
+                </h2>
+                {!isRemoved && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleAddCondition}
+                    disabled={isConditionProcessing}
+                    className="w-full sm:w-auto shrink-0"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    {t("conditions.add")}
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {conditionRecords && conditionRecords.length > 0 ? (
+                <div className="space-y-2">
+                  {conditionRecords.map((cr) => (
+                    <ConditionRecordRow
+                      key={cr.id}
+                      conditionRecord={cr}
+                      comparison={getComparisonForCondition(cr)}
+                      onEdit={isRemoved ? undefined : () => handleEditCondition(cr)}
+                      onDelete={isRemoved ? undefined : () => handleDeleteCondition(cr)}
+                      isProcessing={isConditionProcessing}
+                      showActions={!isRemoved}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 sm:py-8 text-muted-foreground border rounded-lg border-dashed">
+                  <HeartPulse className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">{t("conditions.noConditions")}</p>
+                  <p className="text-xs mt-1">{t("conditions.noConditionsHint")}</p>
+                </div>
               )}
-            </div>
-            {conditionRecords && conditionRecords.length > 0 ? (
-              <div className="space-y-2">
-                {conditionRecords.map((cr) => (
-                  <ConditionRecordRow
-                    key={cr.id}
-                    conditionRecord={cr}
-                    comparison={getComparisonForCondition(cr)}
-                    onEdit={isRemoved ? undefined : () => handleEditCondition(cr)}
-                    onDelete={isRemoved ? undefined : () => handleDeleteCondition(cr)}
-                    isProcessing={isConditionProcessing}
-                    showActions={!isRemoved}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground border rounded-lg border-dashed">
-                <HeartPulse className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">{t("conditions.noConditions")}</p>
-                <p className="text-xs mt-1">{t("conditions.noConditionsHint")}</p>
-              </div>
-            )}
-          </div>
+            </CardContent>
+          </Card>
           <Separator />
           
           {/* Edit/Add Condition Dialog */}
@@ -1366,7 +1383,7 @@ function ObservationRowEditable({
 
   return (
     <div className={cn(
-      "flex items-center justify-between gap-4 rounded-lg border p-3",
+      "rounded-lg border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
       isBad && "border-orange-500/30 bg-orange-500/5",
       isCustom && !isBad && "border-dashed border-muted-foreground/40",
       comparison?.isNew && !isBad && !isCustom && "border-amber-500/30 bg-amber-500/5"
@@ -1395,7 +1412,7 @@ function ObservationRowEditable({
           </p>
         )}
       </div>
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 shrink-0">
         {/* Comparison badge */}
         {comparison && <ObservationComparisonBadge comparison={comparison} />}
         {/* Reference range */}
@@ -1425,24 +1442,39 @@ function ObservationRowEditable({
           )}
         </div>
         <ObservationStatusBadge status={observation.status} />
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="h-8 w-8"
-          onClick={onEdit}
-          disabled={isProcessing}
-        >
-          <Pencil className="h-4 w-4" />
-        </Button>
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="h-8 w-8 text-destructive hover:text-destructive"
-          onClick={onDelete}
-          disabled={isProcessing}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0.5 ms-auto sm:ms-0">
+          {observation.obs_code && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              asChild
+              title={t("observations.openHistory")}
+            >
+              <Link href={`/health/observations/${encodeURIComponent(observation.obs_code)}`}>
+                <ExternalLink className="h-4 w-4" />
+              </Link>
+            </Button>
+          )}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-8 w-8"
+            onClick={onEdit}
+            disabled={isProcessing}
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={onDelete}
+            disabled={isProcessing}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -134,6 +134,11 @@ export function useProcessingMonitor(personId: string | null) {
           console.log("[Realtime] Record started processing:", newRecord.id, newStatus);
           processingRecordsRef.current.add(newRecord.id);
         }
+
+        // Update job title when record title changes (e.g. after OCR sets suggested name)
+        if (processingRecordsRef.current.has(newRecord.id) && newRecord.title) {
+          updateJob(newRecord.id, { title: newRecord.title });
+        }
       }
 
       // Track new records that are created with "processing" status

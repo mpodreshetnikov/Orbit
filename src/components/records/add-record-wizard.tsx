@@ -235,7 +235,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
 
   // View drafts
   const handleViewDrafts = useCallback(() => {
-    router.push("/health?showDrafts=true");
+    router.push("/health?tab=draft");
   }, [router]);
 
   return (

@@ -121,6 +121,8 @@ export interface HealthOcrResponse {
   success: boolean;
   ocr_text?: string;
   char_count?: number;
+  /** Document name suggested by OCR LLM; shown instead of "Processing" */
+  suggested_title?: string;
   error?: string;
 }
 

@@ -70,10 +70,7 @@ export function useStructureExtraction() {
           throw new Error(data.error || "Structure extraction failed");
         }
 
-        // Show success toast
-        toast.success(t("processing.structureComplete"), {
-          description: data.structured_data?.title || t("processing.reviewStructure"),
-        });
+        // Success toast is shown by useProcessingMonitor when status flips to structure_review
 
         // Invalidate queries
         queryClient.invalidateQueries({

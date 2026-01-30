@@ -243,7 +243,7 @@ function ObservationRow({
   const isUnapplied = isCustom && !observation.is_applied;
 
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg border bg-card ${
+    <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 p-3 rounded-lg border bg-card ${
       isUnapplied 
         ? "border-dashed border-muted-foreground/40 opacity-70" 
         : isCustom 
@@ -319,21 +319,16 @@ function ObservationRow({
         )}
       </div>
 
-      {/* Comparison badge */}
-      {comparison && <ObservationComparisonBadge comparison={comparison} />}
-
-      {/* Status */}
-      <ObservationStatusBadge status={observation.status as ObservationStatus} />
-
-      {/* Confidence indicator */}
-      {observation.confidence !== null && observation.confidence < 0.8 && (
-        <span title={t("observations.lowConfidence")}>
-          <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />
-        </span>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center gap-1 shrink-0">
+      {/* Comparison badge, status, confidence, actions - wrap on mobile */}
+      <div className="flex flex-wrap items-center gap-2 shrink-0 sm:flex-nowrap">
+        {comparison && <ObservationComparisonBadge comparison={comparison} />}
+        <ObservationStatusBadge status={observation.status as ObservationStatus} />
+        {observation.confidence !== null && observation.confidence < 0.8 && (
+          <span title={t("observations.lowConfidence")}>
+            <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />
+          </span>
+        )}
+        <div className="flex items-center gap-1 ms-auto sm:ms-0">
         {/* Apply button for unapplied custom observations */}
         {isUnapplied && (
           <Button
@@ -365,6 +360,7 @@ function ObservationRow({
         >
           <Trash2 className="h-4 w-4" />
         </Button>
+        </div>
       </div>
     </div>
   );
@@ -960,6 +956,16 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const handleSave = async (activate: boolean) => {
     if (!title.trim()) return;
 
+    // Remove unapplied custom observations so they are not persisted with the record
+    const unappliedCustom = observations?.filter(
+      (obs) => !obs.obs_code && !obs.is_applied
+    ) ?? [];
+    await Promise.all(
+      unappliedCustom.map((obs) =>
+        deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id })
+      )
+    );
+
     await updateMutation.mutateAsync({
       id: record.id,
       updates: {
@@ -1400,15 +1406,15 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       </div>
 
       {/* Observations Section */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+      <Card className="p-4 sm:p-6">
+        <CardHeader className="p-0 pb-3 sm:pb-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
               onClick={() => setShowObservations(!showObservations)}
-              className="flex items-center gap-2 text-left"
+              className="flex items-center gap-2 text-left min-w-0"
             >
-              <FlaskConical className="h-5 w-5 text-primary" />
+              <FlaskConical className="h-5 w-5 text-primary shrink-0" />
               <CardTitle className="text-base">
                 {t("observations.title")}
                 {observations && observations.length > 0 && (
@@ -1418,9 +1424,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                 )}
               </CardTitle>
               {showObservations ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
               ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
               )}
             </button>
             <Button
@@ -1428,6 +1434,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
               size="sm"
               onClick={handleAddObservation}
               disabled={isProcessing}
+              className="w-full sm:w-auto shrink-0"
             >
               <Plus className="mr-2 h-4 w-4" />
               {t("observations.add")}
@@ -1435,7 +1442,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           </div>
         </CardHeader>
         {showObservations && (
-          <CardContent className="pt-0">
+          <CardContent className="p-0 pt-0">
             {observationsLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1480,15 +1487,15 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       />
 
       {/* Findings Section */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+      <Card className="p-4 sm:p-6">
+        <CardHeader className="p-0 pb-3 sm:pb-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
               onClick={() => setShowFindings(!showFindings)}
-              className="flex items-center gap-2 text-left"
+              className="flex items-center gap-2 text-left min-w-0"
             >
-              <Stethoscope className="h-5 w-5 text-primary" />
+              <Stethoscope className="h-5 w-5 text-primary shrink-0" />
               <CardTitle className="text-base">
                 {t("findings.title")}
                 {findings && findings.length > 0 && (
@@ -1498,9 +1505,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                 )}
               </CardTitle>
               {showFindings ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
               ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
               )}
             </button>
             <Button
@@ -1508,6 +1515,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
               size="sm"
               onClick={handleAddFinding}
               disabled={isProcessing}
+              className="w-full sm:w-auto shrink-0"
             >
               <Plus className="mr-2 h-4 w-4" />
               {t("findings.add")}
@@ -1515,7 +1523,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           </div>
         </CardHeader>
         {showFindings && (
-          <CardContent className="pt-0">
+          <CardContent className="p-0 pt-0">
             {findingsLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1560,15 +1568,15 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       />
 
       {/* Conditions Section */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+      <Card className="p-4 sm:p-6">
+        <CardHeader className="p-0 pb-3 sm:pb-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
               onClick={() => setShowConditions(!showConditions)}
-              className="flex items-center gap-2 text-left"
+              className="flex items-center gap-2 text-left min-w-0"
             >
-              <HeartPulse className="h-5 w-5 text-primary" />
+              <HeartPulse className="h-5 w-5 text-primary shrink-0" />
               <CardTitle className="text-base">
                 {t("conditions.title")}
                 {conditionRecords && conditionRecords.length > 0 && (
@@ -1578,9 +1586,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                 )}
               </CardTitle>
               {showConditions ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
               ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
               )}
             </button>
             <Button
@@ -1588,6 +1596,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
               size="sm"
               onClick={handleAddCondition}
               disabled={isProcessing}
+              className="w-full sm:w-auto shrink-0"
             >
               <Plus className="mr-2 h-4 w-4" />
               {t("conditions.add")}
@@ -1595,7 +1604,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           </div>
         </CardHeader>
         {showConditions && (
-          <CardContent className="pt-0">
+          <CardContent className="p-0 pt-0">
             {conditionsLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1639,13 +1648,14 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         isNew={isAddingCondition}
       />
 
-      {/* Actions */}
-      <div className="flex items-center justify-between gap-3 border-t pt-6">
+      {/* Actions: stack on mobile so all buttons are visible */}
+      <div className="flex flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
         {onBack ? (
           <Button
             variant="outline"
             onClick={onBack}
             disabled={isProcessing}
+            className="w-full shrink-0 sm:w-auto"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             {t("records.structure.backToOcr")}
@@ -1653,11 +1663,12 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         ) : (
           <div />
         )}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 min-w-0">
           <Button
             variant="secondary"
             onClick={() => handleSave(false)}
             disabled={!title.trim() || isProcessing}
+            className="w-full shrink-0 sm:w-auto"
           >
             {isProcessing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1669,6 +1680,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           <Button
             onClick={() => handleSave(true)}
             disabled={!title.trim() || isProcessing}
+            className="w-full shrink-0 sm:w-auto"
           >
             {isProcessing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

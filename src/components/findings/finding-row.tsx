@@ -1,7 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Pencil, Trash2, AlertTriangle, MapPin, Ruler, TrendingUp, TrendingDown, Minus, CircleDot, History } from "lucide-react";
+import Link from "next/link";
+import { Pencil, Trash2, AlertTriangle, MapPin, Ruler, TrendingUp, TrendingDown, Minus, CircleDot, History, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -153,7 +154,7 @@ export function FindingRow({
 
   return (
     <div className={cn(
-      "flex items-center justify-between gap-4 rounded-lg border p-3",
+      "rounded-lg border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
       isSevere && "border-orange-500/30 bg-orange-500/5",
       comparison?.isNew && "border-amber-500/30 bg-amber-500/5"
     )}>
@@ -172,7 +173,7 @@ export function FindingRow({
         {/* Body site */}
         {siteName && (
           <div className="flex items-center gap-1 mt-1 text-sm text-muted-foreground">
-            <MapPin className="h-3 w-3" />
+            <MapPin className="h-3 w-3 shrink-0" />
             <span>{siteName}</span>
             {finding.site_code && (
               <code className="text-xs bg-muted px-1 py-0.5 rounded">
@@ -213,8 +214,8 @@ export function FindingRow({
         </div>
       </div>
 
-      {/* Badges and actions */}
-      <div className="flex items-center gap-2 shrink-0">
+      {/* Badges and actions - wrap on mobile */}
+      <div className="flex flex-wrap items-center gap-2 shrink-0 sm:flex-nowrap">
         {/* Show new/known badge if comparison data is available */}
         {comparison && <ComparisonBadge comparison={comparison} />}
         
@@ -229,7 +230,18 @@ export function FindingRow({
         )}
 
         {showActions && (
-          <>
+          <div className="flex items-center gap-0.5 ms-auto sm:ms-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              asChild
+              title={t("findings.openHistory")}
+            >
+              <Link href={viewHref}>
+                <ExternalLink className="h-4 w-4" />
+              </Link>
+            </Button>
             {onEdit && (
               <Button
                 variant="ghost"
@@ -252,7 +264,7 @@ export function FindingRow({
                 <Trash2 className="h-4 w-4" />
               </Button>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

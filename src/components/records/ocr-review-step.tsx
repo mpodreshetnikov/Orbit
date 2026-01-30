@@ -218,6 +218,7 @@ export function OcrReviewStep({
   const t = useTranslations();
   const [editedOcrText, setEditedOcrText] = useState(initialOcrText);
   const [isSaving, setIsSaving] = useState(false);
+  const [isFullscreenTextOpen, setIsFullscreenTextOpen] = useState(false);
   
   const { extractStructure, isExtracting } = useStructureExtraction();
   const updateMutation = useUpdateMedicalRecord();
@@ -249,27 +250,10 @@ export function OcrReviewStep({
   };
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">{t("records.ocr.reviewTitle")}</h2>
-          <p className="text-sm text-muted-foreground">
-            {t("records.ocr.reviewDescription")}
-          </p>
-        </div>
-        <Button
-          onClick={handleConfirmAndExtract}
-          disabled={isProcessing || !editedOcrText.trim()}
-        >
-          {isProcessing ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <ArrowRight className="mr-2 h-4 w-4" />
-          )}
-          {t("records.ocr.confirmAndExtract")}
-        </Button>
-      </div>
+    <div className="space-y-4 md:pb-24">
+      <p className="text-sm text-muted-foreground">
+        {t("records.ocr.reviewDescription")}
+      </p>
 
       {/* Side-by-side view */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -298,20 +282,106 @@ export function OcrReviewStep({
               )}
             </span>
           </div>
-          <Textarea
-            value={editedOcrText}
-            onChange={(e) => setEditedOcrText(e.target.value)}
-            placeholder={t("records.ocr.noTextExtracted")}
-            className={cn(
-              "flex-1 min-h-[400px] font-mono text-sm resize-none",
-              hasChanges && "border-amber-500"
-            )}
-            disabled={isProcessing}
-          />
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t("records.ocr.editHint")}
-          </p>
+
+          {/* Mobile: check text + confirm buttons at top (no inline textarea) */}
+          <div className="lg:hidden flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+              <Button
+                variant="default"
+                onClick={() => setIsFullscreenTextOpen(true)}
+                className="flex-1"
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                {t("records.ocr.openText")}
+              </Button>
+              <Button
+                onClick={handleConfirmAndExtract}
+                disabled={isProcessing || !editedOcrText.trim()}
+                className="flex-1"
+              >
+                {isProcessing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ArrowRight className="mr-2 h-4 w-4" />
+                )}
+                {t("records.ocr.confirmAndExtract")}
+              </Button>
+            </div>
+          </div>
+
+          {/* Desktop: inline textarea + optional fullscreen link */}
+          <div className="hidden lg:flex flex-col flex-1">
+            <Textarea
+              value={editedOcrText}
+              onChange={(e) => setEditedOcrText(e.target.value)}
+              placeholder={t("records.ocr.noTextExtracted")}
+              className={cn(
+                "flex-1 min-h-[400px] font-mono text-sm resize-none",
+                hasChanges && "border-amber-500"
+              )}
+              disabled={isProcessing}
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                {t("records.ocr.editHint")}
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 text-xs"
+                onClick={() => setIsFullscreenTextOpen(true)}
+              >
+                {t("records.ocr.openText")}
+              </Button>
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Fullscreen text view for comparison with paper (mobile) or optional on desktop */}
+      <Dialog open={isFullscreenTextOpen} onOpenChange={setIsFullscreenTextOpen}>
+        <DialogContent
+          className="inset-0 left-0 top-0 translate-x-0 translate-y-0 max-w-none w-full h-full max-h-[100dvh] rounded-none p-0 flex flex-col gap-0 border-0"
+          aria-describedby={undefined}
+        >
+          <DialogTitle className="sr-only">
+            {t("records.ocr.openText")}
+          </DialogTitle>
+          <div className="flex-1 min-h-0 flex flex-col pt-14 px-4 pb-4">
+            <Textarea
+              id="fullscreen-ocr-text"
+              value={editedOcrText}
+              onChange={(e) => setEditedOcrText(e.target.value)}
+              placeholder={t("records.ocr.noTextExtracted")}
+              className={cn(
+                "flex-1 min-h-0 font-mono text-sm resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0",
+                hasChanges && "border-amber-500"
+              )}
+              disabled={isProcessing}
+            />
+            <div className="mt-4 pt-4 border-t flex justify-end">
+              <Button onClick={() => setIsFullscreenTextOpen(false)}>
+                {t("records.ocr.saveAndClose")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sticky confirmation bar on desktop only; on mobile confirm is at top near Check text */}
+      <div className="hidden md:block sticky bottom-0 z-10 -mx-4 px-4 py-3 bg-background border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] lg:mx-0 lg:rounded-none">
+        <Button
+          onClick={handleConfirmAndExtract}
+          disabled={isProcessing || !editedOcrText.trim()}
+          className="w-full"
+        >
+          {isProcessing ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <ArrowRight className="mr-2 h-4 w-4" />
+          )}
+          {t("records.ocr.confirmAndExtract")}
+        </Button>
       </div>
     </div>
   );

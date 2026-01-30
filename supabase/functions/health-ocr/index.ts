@@ -31,6 +31,8 @@ interface Attachment {
 
 interface OcrResult {
   ocr_text: string;
+  /** Short descriptive name for the document (e.g. "Blood test 15.01.2024", "Discharge summary") */
+  suggested_title: string;
 }
 
 // Fetch attachment files and convert to base64 data URLs
@@ -76,14 +78,16 @@ async function callVisionOcr(
   imageDataUrls: { url: string; mimeType: string }[]
 ): Promise<OcrResult> {
   if (imageDataUrls.length === 0) {
-    return { ocr_text: "" };
+    return { ocr_text: "", suggested_title: "" };
   }
 
   const systemPrompt = `Ты — OCR-система для извлечения текста из изображений медицинских документов.
 
-Твоя ЕДИНСТВЕННАЯ задача: извлечь ВЕСЬ видимый текст из изображений.
+Твои задачи:
+1. Извлечь ВЕСЬ видимый текст из изображений
+2. Предложить короткое название документа для отображения в списке (1–10 слов)
 
-Правила:
+Правила извлечения текста:
 1. Извлеки АБСОЛЮТНО ВЕСЬ текст, видимый на изображениях
 2. Сохрани оригинальную структуру документа насколько возможно (заголовки, таблицы, списки)
 3. Включи ВСЕ: заголовки, подписи, даты, имена, значения, единицы измерения, номера, штампы, печати
@@ -91,8 +95,14 @@ async function callVisionOcr(
 5. НЕ интерпретируй и НЕ анализируй текст — только извлеки его
 6. НЕ добавляй никаких комментариев или пояснений
 
-Ответь JSON-объектом с единственным полем:
-- ocr_text: полный извлечённый текст из всех изображений`;
+Правила для названия (suggested_title):
+- Краткое описание типа документа, если видны (например: "Анализ крови", "Выписка из стационара", "Результаты УЗИ")
+- Только факты из документа, без интерпретации
+- На русском языке
+
+Ответь JSON-объектом с полями:
+- ocr_text: полный извлечённый текст из всех изображений
+- suggested_title: короткое название документа для списка записей`;
 
   // Build the content array with text prompt and images
   const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
@@ -140,8 +150,12 @@ async function callVisionOcr(
 
   try {
     const parsed = JSON.parse(responseContent);
+    const suggestedTitle = typeof parsed.suggested_title === "string"
+      ? parsed.suggested_title.trim()
+      : "";
     return {
       ocr_text: parsed.ocr_text || "",
+      suggested_title: suggestedTitle || "Медицинский документ",
     };
   } catch {
     throw new Error("Failed to parse OpenRouter response as JSON");
@@ -256,11 +270,12 @@ Deno.serve(async (req) => {
     // Call GPT-4o Vision for OCR only
     const ocrResult = await callVisionOcr(imageDataUrls);
 
-    // Update the medical record with OCR text and set status to ocr_review
+    // Update the medical record with OCR text, suggested title, and set status to ocr_review
     const { error: updateError } = await supabaseAdmin
       .from("medical_records")
       .update({
         ocr_text: ocrResult.ocr_text,
+        title: ocrResult.suggested_title,
         status: "ocr_review", // Ready for user to review OCR results
       })
       .eq("id", record_id);
@@ -269,12 +284,13 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to update record: ${updateError.message}`);
     }
 
-    // Return OCR result
+    // Return OCR result (include suggested_title so client can show it immediately)
     return new Response(
       JSON.stringify({
         success: true,
         ocr_text: ocrResult.ocr_text,
         char_count: ocrResult.ocr_text.length,
+        suggested_title: ocrResult.suggested_title || undefined,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

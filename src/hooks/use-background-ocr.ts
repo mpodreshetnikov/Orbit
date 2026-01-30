@@ -122,19 +122,20 @@ export function useBackgroundOCR() {
           throw new Error(data.error || "OCR processing failed");
         }
 
-        // Mark job as completed (OCR done, waiting for user review)
+        // Mark job as completed; use LLM-suggested record name when available
+        const displayTitle = data.suggested_title?.trim() || t("processing.ocrComplete");
         updateJob(jobId, {
           stage: "completed",
           progress: 100,
-          title: t("processing.ocrComplete"),
+          title: displayTitle,
           completedAt: Date.now(),
         });
 
-        // Add notification - OCR complete, needs review (toast is shown by use-processing-monitor on realtime status change)
+        // Add notification - use record name so user sees what finished
         addNotification({
           jobId,
           recordId,
-          title: t("processing.ocrComplete"),
+          title: displayTitle,
           personName,
           type: "success",
           message: t("processing.ocrReviewNeeded"),
