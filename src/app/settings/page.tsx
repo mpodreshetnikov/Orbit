@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Bell, BellOff, CheckCircle, XCircle, RefreshCw, Smartphone, Download, ArrowLeft } from "lucide-react";
+import { Bell, BellOff, Bug, CheckCircle, XCircle, RefreshCw, Smartphone, Download, ArrowLeft, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import Link from "next/link";
+import { useUserPreferences, useUpdateUserPreferences, usePushSubscribe } from "@/hooks";
 
 type PermissionStatus = "default" | "granted" | "denied" | "unsupported";
 type ServiceWorkerStatus = "checking" | "registered" | "not-registered" | "unsupported";
@@ -160,6 +163,75 @@ export default function SettingsPage() {
     checkServiceWorker();
   };
 
+  // Checkup reminders: time + timezone
+  const { data: preferences } = useUserPreferences();
+  const updatePreferences = useUpdateUserPreferences();
+  const pushSubscribe = usePushSubscribe();
+  const [notificationTime, setNotificationTime] = useState("09:00");
+  const [notificationTimezone, setNotificationTimezone] = useState("");
+  const [isEnablingReminders, setIsEnablingReminders] = useState(false);
+
+  useEffect(() => {
+    if (preferences) {
+      setNotificationTime(preferences.checkup_notification_time?.slice(0, 5) ?? "09:00");
+      setNotificationTimezone(preferences.checkup_notification_timezone ?? "");
+    }
+  }, [preferences]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && !preferences?.checkup_notification_timezone && notificationTimezone === "") {
+      try {
+        setNotificationTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+      } catch {
+        setNotificationTimezone("UTC");
+      }
+    }
+  }, [preferences?.checkup_notification_timezone, notificationTimezone]);
+
+  const handleSaveCheckupReminders = async () => {
+    const timeValue = notificationTime.trim() || "09:00";
+    const [h, m] = timeValue.split(":").map(Number);
+    const normalized = `${String(h ?? 9).padStart(2, "0")}:${String(m ?? 0).padStart(2, "0")}`;
+    await updatePreferences.mutateAsync({
+      checkup_notification_time: normalized,
+      checkup_notification_timezone: notificationTimezone.trim() || null,
+    });
+  };
+
+  const handleEnableCheckupReminders = async () => {
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    setIsEnablingReminders(true);
+    try {
+      if (Notification.permission !== "granted") {
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") {
+          setIsEnablingReminders(false);
+          return;
+        }
+      }
+      let reg: ServiceWorkerRegistration | null | undefined =
+        await navigator.serviceWorker.getRegistration();
+      if (!reg) reg = await registerServiceWorker();
+      if (!reg) throw new Error("Service worker not registered");
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) throw new Error("VAPID public key not configured");
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: vapidKey,
+      });
+      const subscription = sub.toJSON();
+      await pushSubscribe.mutateAsync({
+        endpoint: subscription.endpoint!,
+        keys: { p256dh: subscription.keys!.p256dh!, auth: subscription.keys!.auth! },
+      });
+      await handleSaveCheckupReminders();
+    } catch (e) {
+      console.error("Enable checkup reminders failed:", e);
+    } finally {
+      setIsEnablingReminders(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="p-4 space-y-6 max-w-2xl mx-auto">
@@ -269,6 +341,62 @@ export default function SettingsPage() {
                 {t("pwa.lastNotification")}: {lastNotificationTime}
               </p>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Checkup reminders Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarClock className="w-5 h-5" />
+              {t("pwa.checkupReminders")}
+            </CardTitle>
+            <CardDescription>{t("pwa.checkupRemindersDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="notification-time">{t("pwa.notificationTime")}</Label>
+              <Input
+                id="notification-time"
+                type="time"
+                value={notificationTime}
+                onChange={(e) => setNotificationTime(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">{t("pwa.notificationTimeHint")}</p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="notification-timezone">{t("pwa.notificationTimezone")}</Label>
+              <Input
+                id="notification-timezone"
+                type="text"
+                placeholder="UTC"
+                value={notificationTimezone}
+                onChange={(e) => setNotificationTimezone(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">{t("pwa.notificationTimezoneHint")}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={handleSaveCheckupReminders}
+                disabled={updatePreferences.isPending}
+              >
+                {updatePreferences.isPending ? tCommon("loading") : t("pwa.saveCheckupReminders")}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleEnableCheckupReminders}
+                disabled={isEnablingReminders || permissionStatus !== "granted"}
+              >
+                {isEnablingReminders ? tCommon("loading") : t("pwa.enableCheckupReminders")}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("pwa.enableCheckupRemindersDescription")}</p>
+            <Button variant="outline" size="sm" className="mt-2" asChild>
+              <Link href="/settings/notifications-debug">
+                <Bug className="w-4 h-4 mr-2" />
+                {t("pwa.notificationsDebug")}
+              </Link>
+            </Button>
           </CardContent>
         </Card>
 

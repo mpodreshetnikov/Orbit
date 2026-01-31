@@ -22,6 +22,7 @@ import {
   Check,
   AlertTriangle,
   Trash2,
+  CalendarCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useConditionDetail, useUpdateCondition, useDeleteCondition, useIcdLookup, useMedicalRecords } from "@/hooks";
+import { useConditionDetail, useUpdateCondition, useDeleteCondition, useIcdLookup, useMedicalRecords, useCheckupsForCondition } from "@/hooks";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
@@ -64,6 +65,7 @@ function ConditionDetailContent() {
   const { data: condition, isLoading, error, refetch } = useConditionDetail(conditionId);
   const updateConditionMutation = useUpdateCondition();
   const deleteConditionMutation = useDeleteCondition();
+  const { data: linkedCheckups } = useCheckupsForCondition(conditionId);
   const { data: personRecords } = useMedicalRecords(
     condition?.person_id ? { person_id: condition.person_id } : {}
   );
@@ -412,6 +414,36 @@ function ConditionDetailContent() {
               <History className="h-6 w-6 sm:h-8 sm:w-8 mx-auto mb-1.5 sm:mb-2 opacity-50" />
               <p className="text-xs sm:text-sm">{t("conditions.noHistory")}</p>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Linked checkups */}
+      <Card>
+        <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+          <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+            <CalendarCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+            {t("conditions.linkedCheckups")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-3 sm:p-6 pt-0">
+          {linkedCheckups && linkedCheckups.length > 0 ? (
+            <div className="space-y-2">
+              {linkedCheckups.map((item) => (
+                <Link
+                  key={item.id}
+                  href={`/health/checkups/${item.id}`}
+                  className="flex items-center justify-between gap-2 rounded-lg border p-2.5 sm:p-3 hover:bg-muted/50 transition-colors"
+                >
+                  <span className="font-medium text-sm sm:text-base truncate">{item.title}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {item.next_due_at ? format(new Date(item.next_due_at), "dd.MM.yyyy") : "—"}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs sm:text-sm text-muted-foreground py-2">{t("conditions.linkedCheckupsEmpty")}</p>
           )}
         </CardContent>
       </Card>

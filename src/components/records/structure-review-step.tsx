@@ -28,6 +28,8 @@ import {
   History,
   TrendingUp,
   TrendingDown,
+  CalendarCheck,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +78,7 @@ import {
   usePersonFindingHistory,
   usePersonConditionRecordHistory,
   usePersonObservationHistory,
+  useCompleteCheckupItem,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
 import { ConditionRecordRow, ConditionEditDialog, type ConditionComparison } from "@/components/conditions";
@@ -90,6 +93,7 @@ import {
   type FindingLaterality,
   type ConditionRecordWithDetails,
   type ConditionStatus,
+  type LlmSuggestedCheckupCompletion,
 } from "@/types";
 
 interface StructureReviewStepProps {
@@ -833,8 +837,10 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const [editingCondition, setEditingCondition] = useState<ConditionRecordWithDetails | null>(null);
   const [isAddingCondition, setIsAddingCondition] = useState(false);
   const [showConditions, setShowConditions] = useState(true);
+  const [showSuggestedCheckups, setShowSuggestedCheckups] = useState(true);
 
   const updateMutation = useUpdateMedicalRecord();
+  const completeCheckupMutation = useCompleteCheckupItem();
   const updateObsMutation = useUpdateRecordObservation();
   const deleteObsMutation = useDeleteRecordObservation();
   const createObsMutation = useCreateRecordObservation();
@@ -850,7 +856,8 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     deleteObsMutation.isPending || createObsMutation.isPending ||
     updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending ||
     updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
-    createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending;
+    createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending ||
+    completeCheckupMutation.isPending;
 
   // Stable sort by created_at so edited items don't jump in the list
   const observationsSorted = useMemo(() => {
@@ -1009,13 +1016,28 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       },
     });
 
-    // When activating, mark all observations, findings, and conditions as verified
+    // When activating, mark all observations, findings, and conditions as verified, and apply suggested checkup completions
     if (activate) {
       await Promise.all([
         verifyAllObservations(),
         verifyAllFindings(),
         verifyAllConditions(),
       ]);
+      const suggested = record.llm_suggested_checkup_completions ?? [];
+      if (suggested.length > 0) {
+        for (const s of suggested) {
+          await completeCheckupMutation.mutateAsync({
+            checkup_item_id: s.checkup_item_id,
+            done_at: s.suggested_done_at,
+            note: s.reason || null,
+            evidence_record_id: record.id,
+          });
+        }
+        await updateMutation.mutateAsync({
+          id: record.id,
+          updates: { llm_suggested_checkup_completions: null },
+        });
+      }
       router.push("/health");
     } else {
       onComplete();
@@ -1272,6 +1294,19 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         })
       )
     );
+  };
+
+  const suggestedCheckups = record.llm_suggested_checkup_completions ?? [];
+
+  const handleDismissSuggestion = async (suggestion: LlmSuggestedCheckupCompletion) => {
+    const next = suggestedCheckups.filter(
+      (s) => s.checkup_item_id !== suggestion.checkup_item_id
+    );
+    await updateMutation.mutateAsync({
+      id: record.id,
+      updates: { llm_suggested_checkup_completions: next.length > 0 ? next : null },
+    });
+    onComplete();
   };
 
   return (
@@ -1665,6 +1700,66 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           </CardContent>
         )}
       </Card>
+
+      {/* Suggested checkup completions (applied only on Save & activate) */}
+      {suggestedCheckups.length > 0 && (
+        <Card className="p-4 sm:p-6">
+          <CardHeader className="p-0 pb-3 sm:pb-4">
+            <button
+              type="button"
+              onClick={() => setShowSuggestedCheckups(!showSuggestedCheckups)}
+              className="flex items-center gap-2 text-left min-w-0 w-full"
+            >
+              <CalendarCheck className="h-5 w-5 text-primary shrink-0" />
+              <CardTitle className="text-base">
+                {t("checkups.suggestedCompletions.title")}
+                <Badge variant="secondary" className="ml-2">
+                  {suggestedCheckups.length}
+                </Badge>
+              </CardTitle>
+              {showSuggestedCheckups ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0 ml-auto" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 ml-auto" />
+              )}
+            </button>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t("checkups.suggestedCompletions.hint")}
+            </p>
+          </CardHeader>
+          {showSuggestedCheckups && (
+            <CardContent className="p-0 pt-0">
+              <div className="space-y-2">
+                {suggestedCheckups.map((s) => (
+                  <div
+                    key={s.checkup_item_id}
+                    className="flex items-start justify-between gap-2 rounded-lg border bg-muted/30 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm">{s.checkup_title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{s.reason}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {t("checkups.suggestedCompletions.doneAt")}: {s.suggested_done_at}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDismissSuggestion(s)}
+                      disabled={isProcessing}
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      title={t("checkups.suggestedCompletions.dismiss")}
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* Edit/Add Condition Dialog */}
       <ConditionEditDialog

@@ -150,12 +150,36 @@ interface ConditionToResolve {
   confidence: number;
 }
 
+// Checkup item for LLM context (upcoming/overdue)
+interface CheckupItemForContext {
+  id: string;
+  title: string;
+  category: string;
+  next_due_at: string | null;
+}
+
+// LLM output: checkup that this document could complete
+interface CheckupToComplete {
+  checkup_item_id: string;
+  reason: string;
+  suggested_done_at: string;
+}
+
+// Stored on medical_records.llm_suggested_checkup_completions (enriched with checkup_title)
+interface LlmSuggestedCheckupCompletionStored {
+  checkup_item_id: string;
+  reason: string;
+  suggested_done_at: string;
+  checkup_title: string;
+}
+
 interface StructuredDataWithObservationsAndFindings extends StructuredData {
   observations: ExtractedObservation[];
   findings: ExtractedFinding[];
   conditions: ExtractedCondition[];
   findings_to_resolve: FindingToResolve[];
   conditions_to_resolve: ConditionToResolve[];
+  checkups_to_complete: CheckupToComplete[];
 }
 
 // Fetch observation catalog from database
@@ -355,6 +379,32 @@ async function fetchPersonActiveFindings(
   return activeFindings;
 }
 
+// Fetch upcoming/overdue checkup items for a person (active, with next_due_at)
+async function fetchUpcomingOverdueCheckupItems(
+  supabase: ReturnType<typeof createClient>,
+  personId: string
+): Promise<CheckupItemForContext[]> {
+  const { data, error } = await supabase
+    .from("checkup_items")
+    .select("id, title, category, next_due_at")
+    .eq("person_id", personId)
+    .eq("status", "active")
+    .not("next_due_at", "is", null)
+    .order("next_due_at", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching checkup items for person:", error);
+    return [];
+  }
+
+  return (data || []).map((row: { id: string; title: string; category: string; next_due_at: string | null }) => ({
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    next_due_at: row.next_due_at,
+  }));
+}
+
 // Build observation catalog prompt section
 function buildObservationCatalogPrompt(catalog: ObservationCatalogItem[]): string {
   if (catalog.length === 0) {
@@ -480,6 +530,23 @@ function buildExistingFindingsPrompt(findings: ExistingFinding[]): string {
 ${items.join("\n")}`;
 }
 
+// Build upcoming/overdue checkups context for LLM prompt
+function buildCheckupsPrompt(checkups: CheckupItemForContext[]): string {
+  if (checkups.length === 0) {
+    return "У пациента нет предстоящих или просроченных обследований (checkups).";
+  }
+
+  const items = checkups.map(c => {
+    const due = c.next_due_at ? ` next_due_at: ${c.next_due_at}` : "";
+    return `- id: "${c.id}" | title: "${c.title}" | category: ${c.category}${due}`;
+  });
+
+  return `ПРЕДСТОЯЩИЕ ИЛИ ПРОСРОЧЕННЫЕ ОБСЛЕДОВАНИЯ (checkups) ПАЦИЕНТА:
+${items.join("\n")}
+
+Определи, какие из этих обследований этот документ мог бы ЗАКРЫТЬ (выполнить). Например: анализ крови — закрывает "Общий анализ крови"; результат УЗИ — закрывает "УЗИ брюшной полости".`;
+}
+
 // Call LLM to extract structured data from OCR text
 async function extractStructuredData(
   ocrText: string,
@@ -487,7 +554,8 @@ async function extractStructuredData(
   findingTypeCatalog: FindingTypeCatalogItem[],
   bodySiteCatalog: BodySiteCatalogItem[],
   existingConditions: ExistingCondition[],
-  existingFindings: ExistingFinding[]
+  existingFindings: ExistingFinding[],
+  checkupItems: CheckupItemForContext[]
 ): Promise<StructuredDataWithObservationsAndFindings> {
   if (!ocrText || ocrText.trim().length === 0) {
     return {
@@ -501,6 +569,7 @@ async function extractStructuredData(
       conditions: [],
       findings_to_resolve: [],
       conditions_to_resolve: [],
+      checkups_to_complete: [],
     };
   }
 
@@ -509,6 +578,7 @@ async function extractStructuredData(
   const bodySiteCatalogPrompt = buildBodySiteCatalogPrompt(bodySiteCatalog);
   const existingConditionsPrompt = buildExistingConditionsPrompt(existingConditions);
   const existingFindingsPrompt = buildExistingFindingsPrompt(existingFindings);
+  const checkupsPrompt = buildCheckupsPrompt(checkupItems);
 
   const systemPrompt = `Ты — анализатор медицинских документов. Тебе будет дан текст, извлечённый из медицинского документа (OCR).
 
@@ -525,6 +595,7 @@ async function extractStructuredData(
 - conditions: массив извлечённых диагнозов/заболеваний
 - findings_to_resolve: массив существующих находок, которые нужно закрыть (если документ указывает на их отсутствие)
 - conditions_to_resolve: массив существующих диагнозов, которые нужно закрыть (если документ указывает на выздоровление)
+- checkups_to_complete: массив предстоящих/просроченных обследований (checkups), которые этот документ мог бы ЗАКРЫТЬ (подтвердить выполнение)
 
 ВАЖНЫЕ ПРАВИЛА ДЛЯ ТИПА (record_type):
 - Если документ упоминает животных или ветеринарную помощь: "vet"
@@ -728,7 +799,18 @@ ${existingFindingsPrompt}
 НЕ закрывай диагноз если:
 - Нет связи между документом и диагнозом (документ об одном, диагноз о другом)
 - Документ НЕ исследует область/систему, связанную с диагнозом
-- Показатели немного улучшились, но ещё не в норме`;
+- Показатели немного улучшились, но ещё не в норме
+
+${checkupsPrompt}
+
+ПРАВИЛА ДЛЯ checkups_to_complete:
+Если у пациента есть предстоящие/просроченные обследования (список выше), определи, какие из них этот документ мог бы ЗАКРЫТЬ (подтвердить выполнение).
+Примеры: результат ОАК — закрывает checkup "Общий анализ крови"; результат УЗИ печени — закрывает "УЗИ брюшной полости"; запись о прививке — закрывает "Вакцинация".
+Каждый элемент checkups_to_complete:
+- checkup_item_id: ID из списка ПРЕДСТОЯЩИЕ/ПРОСРОЧЕННЫЕ ОБСЛЕДОВАНИЯ (ОБЯЗАТЕЛЬНО, точный UUID)
+- reason: краткая причина на русском (что в документе подтверждает выполнение)
+- suggested_done_at: дата выполнения в формате YYYY-MM-DD (дата документа или record_date)
+Добавляй только те checkups, которые документ ОДНОЗНАЧНО подтверждает. Если сомневаешься — не добавляй.`;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -823,6 +905,11 @@ ${existingFindingsPrompt}
         reason: c.reason || "",
         source_anchor: c.source_anchor || "",
         confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
+      })) : [],
+      checkups_to_complete: Array.isArray(parsed.checkups_to_complete) ? parsed.checkups_to_complete.map((c: Partial<CheckupToComplete>) => ({
+        checkup_item_id: c.checkup_item_id || "",
+        reason: c.reason || "",
+        suggested_done_at: (typeof c.suggested_done_at === "string" && c.suggested_done_at.trim().length > 0) ? c.suggested_done_at.trim().slice(0, 10) : (parsed.record_date || new Date().toISOString().slice(0, 10)),
       })) : [],
     };
   } catch {
@@ -1066,19 +1153,21 @@ Deno.serve(async (req) => {
       throw new Error("No OCR text found for this record. Run health-ocr first.");
     }
 
-    // Fetch all catalogs, existing conditions, and existing findings for LLM context
-    const [observationCatalog, findingTypeCatalog, bodySiteCatalog, existingConditions, existingFindings] = await Promise.all([
+    // Fetch all catalogs, existing conditions, existing findings, and checkup items for LLM context
+    const [observationCatalog, findingTypeCatalog, bodySiteCatalog, existingConditions, existingFindings, checkupItems] = await Promise.all([
       fetchObservationCatalog(supabaseAdmin),
       fetchFindingTypeCatalog(supabaseAdmin),
       fetchBodySiteCatalog(supabaseAdmin),
       fetchPersonConditions(supabaseAdmin, record.person_id),
       fetchPersonActiveFindings(supabaseAdmin, record.person_id),
+      fetchUpcomingOverdueCheckupItems(supabaseAdmin, record.person_id),
     ]);
     console.log(`Loaded ${observationCatalog.length} observation catalog entries`);
     console.log(`Loaded ${findingTypeCatalog.length} finding type catalog entries`);
     console.log(`Loaded ${bodySiteCatalog.length} body site catalog entries`);
     console.log(`Loaded ${existingConditions.length} existing conditions for person`);
     console.log(`Loaded ${existingFindings.length} existing active findings for person`);
+    console.log(`Loaded ${checkupItems.length} upcoming/overdue checkup items for person`);
 
     // Extract structured data from OCR text
     const structuredData = await extractStructuredData(
@@ -1087,20 +1176,38 @@ Deno.serve(async (req) => {
       findingTypeCatalog,
       bodySiteCatalog,
       existingConditions,
-      existingFindings
+      existingFindings,
+      checkupItems
     );
     console.log(`Extracted ${structuredData.observations.length} observations`);
     console.log(`Extracted ${structuredData.findings.length} findings`);
     console.log(`Extracted ${structuredData.conditions.length} conditions`);
     console.log(`Findings to resolve: ${structuredData.findings_to_resolve.length}`);
     console.log(`Conditions to resolve: ${structuredData.conditions_to_resolve.length}`);
+    console.log(`Checkups to complete: ${structuredData.checkups_to_complete.length}`);
+
+    // Enrich checkups_to_complete with checkup_title for storage
+    const llmSuggestedCheckupCompletions: LlmSuggestedCheckupCompletionStored[] | null =
+      structuredData.checkups_to_complete.length > 0
+        ? structuredData.checkups_to_complete
+            .filter(c => c.checkup_item_id && c.checkup_item_id.trim().length > 0)
+            .map(c => {
+              const item = checkupItems.find(ci => ci.id === c.checkup_item_id);
+              return {
+                checkup_item_id: c.checkup_item_id,
+                reason: c.reason || "",
+                suggested_done_at: c.suggested_done_at,
+                checkup_title: item?.title || "Обследование",
+              };
+            })
+        : null;
     console.log("Extracted observations:", JSON.stringify(structuredData.observations, null, 2));
     console.log("Extracted findings:", JSON.stringify(structuredData.findings, null, 2));
     console.log("Extracted conditions:", JSON.stringify(structuredData.conditions, null, 2));
     console.log("Findings to resolve:", JSON.stringify(structuredData.findings_to_resolve, null, 2));
     console.log("Conditions to resolve:", JSON.stringify(structuredData.conditions_to_resolve, null, 2));
 
-    // Update the medical record with structured data
+    // Update the medical record with structured data (including LLM-suggested checkup completions)
     const { error: updateError } = await supabaseAdmin
       .from("medical_records")
       .update({
@@ -1110,6 +1217,7 @@ Deno.serve(async (req) => {
         notes: structuredData.summary,
         llm_summary: structuredData.summary,
         llm_keywords: structuredData.keywords,
+        llm_suggested_checkup_completions: llmSuggestedCheckupCompletions,
         status: "structure_review", // Ready for user to review structured data
       })
       .eq("id", record_id);

@@ -422,6 +422,159 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- CHECKUPS (checkup_items + checkup_completions for dev testing)
+-- ============================================================================
+DO $$
+DECLARE
+  v_max_person_id uuid;
+  v_kate_person_id uuid;
+  v_demi_person_id uuid;
+  v_cond_hypertension_id uuid;
+  v_blood_record_id uuid := 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  v_visit_record_id uuid := 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
+  v_item_blood_id uuid := '10000001-0000-4000-8000-000000000001';
+  v_item_visit_id uuid := '10000001-0000-4000-8000-000000000002';
+  v_item_flu_id uuid := '10000001-0000-4000-8000-000000000003';
+  v_item_dental_id uuid := '10000001-0000-4000-8000-000000000004';
+  v_item_demi_vet_id uuid := '10000001-0000-4000-8000-000000000005';
+  v_item_demi_rabies_id uuid := '10000001-0000-4000-8000-000000000006';
+  v_item_oneoff_id uuid := '10000001-0000-4000-8000-000000000007';
+BEGIN
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+  SELECT id INTO v_kate_person_id FROM public.persons WHERE name = 'Kate' LIMIT 1;
+  SELECT id INTO v_demi_person_id FROM public.persons WHERE name = 'Demi' LIMIT 1;
+  SELECT c.id INTO v_cond_hypertension_id FROM public.conditions c
+    JOIN public.persons p ON p.id = c.person_id
+    WHERE p.name = 'Max' AND c.code = 'I10' AND c.deleted_at IS NULL LIMIT 1;
+
+  -- Max: annual blood work (interval, every 12 months)
+  IF v_max_person_id IS NOT NULL THEN
+    INSERT INTO public.checkup_items (
+      id, person_id, title, category, schedule, status, why_text, why_links, notes
+    ) VALUES (
+      v_item_blood_id,
+      v_max_person_id,
+      'Annual blood work',
+      'lab',
+      '{"type": "interval", "every": 12, "unit": "month", "anchor_date": "2025-12-15"}'::jsonb,
+      'active',
+      'Monitor hypertension and general health',
+      CASE WHEN v_cond_hypertension_id IS NOT NULL
+        THEN jsonb_build_array(jsonb_build_object('type', 'condition', 'id', v_cond_hypertension_id::text, 'label', 'Essential hypertension'))
+        ELSE '[]'::jsonb
+      END,
+      'CBC, metabolic panel, lipids.'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    -- Max: annual physical (interval, every 12 months)
+    INSERT INTO public.checkup_items (
+      id, person_id, title, category, schedule, status, notes
+    ) VALUES (
+      v_item_visit_id,
+      v_max_person_id,
+      'Annual physical',
+      'visit',
+      '{"type": "interval", "every": 12, "unit": "month", "anchor_date": "2025-11-20"}'::jsonb,
+      'active',
+      'BP check, weight, general exam.'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    -- Max: flu shot (interval, every 12 months)
+    INSERT INTO public.checkup_items (
+      id, person_id, title, category, schedule, status
+    ) VALUES (
+      v_item_flu_id,
+      v_max_person_id,
+      'Flu vaccination',
+      'vaccination',
+      '{"type": "interval", "every": 12, "unit": "year", "anchor_date": "2025-10-01"}'::jsonb,
+      'active'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    -- One-off checkup (e.g. follow-up)
+    INSERT INTO public.checkup_items (
+      id, person_id, title, category, schedule, status, notes
+    ) VALUES (
+      v_item_oneoff_id,
+      v_max_person_id,
+      'Follow-up thyroid check',
+      'lab',
+      '{"type": "one_off", "due_at": "2026-03-15"}'::jsonb,
+      'active',
+      'TSH recheck after adjustment.'
+    ) ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  -- Kate: dental cleaning (interval, every 6 months)
+  IF v_kate_person_id IS NOT NULL THEN
+    INSERT INTO public.checkup_items (
+      id, person_id, title, category, schedule, status, notes
+    ) VALUES (
+      v_item_dental_id,
+      v_kate_person_id,
+      'Dental cleaning',
+      'dental',
+      '{"type": "interval", "every": 6, "unit": "month", "anchor_date": "2025-09-15"}'::jsonb,
+      'active',
+      'Routine cleaning and x-rays.'
+    ) ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  -- Demi: vet checkup + rabies (intervals)
+  IF v_demi_person_id IS NOT NULL THEN
+    INSERT INTO public.checkup_items (
+      id, person_id, title, category, schedule, status, notes
+    ) VALUES (
+      v_item_demi_vet_id,
+      v_demi_person_id,
+      'Annual vet checkup',
+      'visit',
+      '{"type": "interval", "every": 12, "unit": "year", "anchor_date": "2025-08-10"}'::jsonb,
+      'active',
+      'Weight, teeth, heart, lungs.'
+    ) ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO public.checkup_items (
+      id, person_id, title, category, schedule, status, notes
+    ) VALUES (
+      v_item_demi_rabies_id,
+      v_demi_person_id,
+      'Rabies vaccination',
+      'vaccination',
+      '{"type": "interval", "every": 12, "unit": "year", "anchor_date": "2025-08-10"}'::jsonb,
+      'active',
+      'Next due August 2026.'
+    ) ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  -- Completions: mark some as done so next_due_at advances (triggers run on insert)
+  -- Use fixed IDs so re-run is idempotent (ON CONFLICT (id) DO NOTHING).
+  -- Blood work done 2025-12-15 -> next_due 2026-12-15
+  INSERT INTO public.checkup_completions (id, checkup_item_id, done_at, note, evidence_record_id)
+  VALUES ('20000001-0000-4000-8000-000000000001', v_item_blood_id, '2025-12-15', 'All within range.', v_blood_record_id)
+  ON CONFLICT (id) DO NOTHING;
+
+  -- Annual physical done 2025-11-20 -> next_due 2026-11-20
+  INSERT INTO public.checkup_completions (id, checkup_item_id, done_at, note, evidence_record_id)
+  VALUES ('20000001-0000-4000-8000-000000000002', v_item_visit_id, '2025-11-20', 'BP 120/80.', v_visit_record_id)
+  ON CONFLICT (id) DO NOTHING;
+
+  -- Flu shot done 2025-10-01
+  INSERT INTO public.checkup_completions (id, checkup_item_id, done_at, note)
+  VALUES ('20000001-0000-4000-8000-000000000003', v_item_flu_id, '2025-10-01', 'No adverse reactions.')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- Demi vet + rabies done 2025-08-10
+  INSERT INTO public.checkup_completions (id, checkup_item_id, done_at, note)
+  VALUES ('20000001-0000-4000-8000-000000000004', v_item_demi_vet_id, '2025-08-10', 'Healthy.')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.checkup_completions (id, checkup_item_id, done_at, note)
+  VALUES ('20000001-0000-4000-8000-000000000005', v_item_demi_rabies_id, '2025-08-10', 'Rabies + DHPP.')
+  ON CONFLICT (id) DO NOTHING;
+END $$;
+
+-- ============================================================================
 -- NOTES
 -- ============================================================================
 -- 1. Auth users are created directly in the seed file, allowing us to reference
@@ -458,3 +611,9 @@ END $$;
 -- 10. Conditions and condition_records are added for Max (B12 deficiency,
 --     hypertension, allergic rhinitis) and linked to his blood test and
 --     visit records for debugging the conditions UI.
+--
+-- 11. Checkups: checkup_items and checkup_completions for Max, Kate, and Demi
+--     (annual blood work, annual physical, flu shot, dental cleaning, vet +
+--     rabies). Some items have why_links to conditions; some have completions
+--     with evidence_record_id pointing to medical_records. Re-run safe via
+--     ON CONFLICT (id) DO NOTHING.

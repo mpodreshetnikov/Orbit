@@ -19,6 +19,14 @@ export type RecordStatus =
   | "active"             // Finalized record
   | "removed";           // Soft deleted
 
+/** LLM-suggested checkup completion (stored on record; applied only on Save & activate) */
+export interface LlmSuggestedCheckupCompletion {
+  checkup_item_id: string;
+  reason: string;
+  suggested_done_at: string; // date only YYYY-MM-DD
+  checkup_title: string;
+}
+
 export interface MedicalRecord {
   id: string;
   person_id: string;
@@ -36,6 +44,8 @@ export interface MedicalRecord {
   ocr_error: string | null;  // Set when OCR fails; cleared on success or retry
   llm_summary: string | null;
   llm_keywords: string[] | null;
+  /** LLM-suggested checkup completions; applied only when record is activated */
+  llm_suggested_checkup_completions: LlmSuggestedCheckupCompletion[] | null;
 }
 
 export interface RecordAttachment {
@@ -78,6 +88,7 @@ export interface UpdateMedicalRecordInput {
   ocr_text?: string | null;
   ocr_error?: string | null;
   llm_keywords?: string[] | null;
+  llm_suggested_checkup_completions?: LlmSuggestedCheckupCompletion[] | null;
 }
 
 // Search/filter types

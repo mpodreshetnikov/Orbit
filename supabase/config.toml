@@ -375,6 +375,8 @@ deno_version = 2
 OPENROUTER_API_KEY = "env(OPENROUTER_API_KEY)"
 WHO_ICD_CLIENT_ID = "env(WHO_ICD_CLIENT_ID)"
 WHO_ICD_CLIENT_SECRET = "env(WHO_ICD_CLIENT_SECRET)"
+VAPID_PUBLIC_KEY = "env(VAPID_PUBLIC_KEY)"
+VAPID_PRIVATE_KEY = "env(VAPID_PRIVATE_KEY)"
 
 # Disable automatic JWT verification - we handle it manually in the function
 [functions.health-ocr]
@@ -382,6 +384,8 @@ verify_jwt = false
 [functions.health-structure]
 verify_jwt = false
 [functions.icd-lookup]
+verify_jwt = false
+[functions.notifications-cron]
 verify_jwt = false
 
 [analytics]

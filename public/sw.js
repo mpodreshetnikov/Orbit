@@ -11,8 +11,39 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  if (event.data) {
-    const data = event.data.json();
+  if (!event.data) return;
+  const data = event.data.json();
+  if (data.notifications && Array.isArray(data.notifications)) {
+    const promise = self.registration.showNotification
+      ? Promise.all(
+          data.notifications.map((n) => {
+            const url = n.url && n.url.startsWith("/") ? self.location.origin + n.url : (n.url || "/");
+            return self.registration
+              .showNotification(n.title || "Notification", {
+                body: n.body,
+                icon: "/icons/icon-192x192.png",
+                badge: "/icons/icon-192x192.png",
+                vibrate: [100, 50, 100],
+                tag: n.id ? "notification-" + n.id : "notification-" + Date.now(),
+                data: { url },
+              })
+              .then(() => {
+                if (n.id) {
+                  return fetch(self.location.origin + "/api/notifications/mark-shown", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: n.id }),
+                  });
+                }
+              });
+          })
+        )
+      : Promise.resolve();
+    event.waitUntil(promise);
+    return;
+  }
+  if (data.title) {
     const options = {
       body: data.body,
       icon: data.icon || "/icons/icon-192x192.png",

@@ -4,3 +4,5 @@ export * from "./observation-catalog";
 export * from "./measurement";
 export * from "./finding";
 export * from "./condition";
+export * from "./checkup";
+export * from "./notifications";
