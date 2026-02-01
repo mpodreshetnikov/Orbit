@@ -26,6 +26,7 @@ async function fetchUserPreferences(): Promise<UserPreferences | null> {
     auth_user_id: data.auth_user_id as string,
     checkup_notification_time: data.checkup_notification_time as string,
     checkup_notification_timezone: (data.checkup_notification_timezone as string | null) ?? null,
+    overdue_reminder_interval_minutes: (data.overdue_reminder_interval_minutes as number) ?? 30,
     created_at: data.created_at as string,
     updated_at: data.updated_at as string,
   };
@@ -52,6 +53,8 @@ async function updateUserPreferences(
     payload.checkup_notification_time = input.checkup_notification_time;
   if (input.checkup_notification_timezone !== undefined)
     payload.checkup_notification_timezone = input.checkup_notification_timezone;
+  if (input.overdue_reminder_interval_minutes !== undefined)
+    payload.overdue_reminder_interval_minutes = input.overdue_reminder_interval_minutes;
 
   const { data, error } = await supabase
     .from("user_preferences")
@@ -68,6 +71,7 @@ async function updateUserPreferences(
     auth_user_id: data.auth_user_id as string,
     checkup_notification_time: data.checkup_notification_time as string,
     checkup_notification_timezone: (data.checkup_notification_timezone as string | null) ?? null,
+    overdue_reminder_interval_minutes: (data.overdue_reminder_interval_minutes as number) ?? 30,
     created_at: data.created_at as string,
     updated_at: data.updated_at as string,
   };

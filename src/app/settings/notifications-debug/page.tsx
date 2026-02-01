@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, Bug, Play } from "lucide-react";
+import { ArrowLeft, Bug, Pill, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
@@ -12,6 +12,8 @@ export default function NotificationsDebugPage() {
   const tCommon = useTranslations("common");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ ok?: boolean; processed?: number; error?: string; details?: unknown } | null>(null);
+  const [medLoading, setMedLoading] = useState(false);
+  const [medResult, setMedResult] = useState<{ ok?: boolean; eventsGenerated?: number; eventsCleared?: number; refillDigestsCreated?: number; timezone?: string; error?: string; details?: unknown } | null>(null);
 
   const runCron = async () => {
     setLoading(true);
@@ -32,6 +34,42 @@ export default function NotificationsDebugPage() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runMedicationCron = async () => {
+    setMedLoading(true);
+    setMedResult(null);
+    try {
+      const timezone = typeof Intl !== "undefined" && Intl.DateTimeFormat
+        ? Intl.DateTimeFormat().resolvedOptions().timeZone
+        : undefined;
+      const res = await fetch("/api/medications/run-cron", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(timezone ? { timezone } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMedResult({ ok: false, error: data.error ?? "Request failed", details: data.details });
+        return;
+      }
+      setMedResult({
+        ok: data.ok,
+        eventsGenerated: data.eventsGenerated,
+        eventsCleared: data.eventsCleared,
+        refillDigestsCreated: data.refillDigestsCreated,
+        timezone: data.timezone,
+        details: data,
+      });
+    } catch (e) {
+      setMedResult({
+        ok: false,
+        error: e instanceof Error ? e.message : "Unknown error",
+        details: undefined,
+      });
+    } finally {
+      setMedLoading(false);
     }
   };
 
@@ -84,6 +122,55 @@ export default function NotificationsDebugPage() {
                 {result.details != null && (
                   <pre className="mt-2 text-xs overflow-auto max-h-40">
                     {JSON.stringify(result.details, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Pill className="h-5 w-5" />
+              {t("runMedicationCronTitle")}
+            </CardTitle>
+            <CardDescription>{t("runMedicationCronDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button
+              onClick={runMedicationCron}
+              disabled={medLoading}
+            >
+              {medLoading ? (
+                tCommon("loading")
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" />
+                  {t("runMedicationCron")}
+                </>
+              )}
+            </Button>
+            {medResult && (
+              <div className="rounded-lg border p-3 text-sm font-mono bg-muted/50">
+                {medResult.ok !== false ? (
+                  <p className="text-green-600 dark:text-green-400">
+                    {t("runMedicationCronSuccess")}
+                    {(medResult.eventsGenerated != null || medResult.eventsCleared != null || medResult.refillDigestsCreated != null || medResult.timezone) && (
+                      <span className="block mt-1 text-muted-foreground">
+                        {medResult.timezone && `Timezone: ${medResult.timezone}. `}
+                        {medResult.eventsCleared != null && medResult.eventsCleared > 0 && `Cleared: ${medResult.eventsCleared}. `}
+                        {medResult.eventsGenerated != null && `Events generated: ${medResult.eventsGenerated}. `}
+                        {medResult.refillDigestsCreated != null && `Refill digests: ${medResult.refillDigestsCreated}.`}
+                      </span>
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-destructive">{t("runMedicationCronError")}: {medResult.error}</p>
+                )}
+                {medResult.details != null && (
+                  <pre className="mt-2 text-xs overflow-auto max-h-40">
+                    {JSON.stringify(medResult.details, null, 2)}
                   </pre>
                 )}
               </div>

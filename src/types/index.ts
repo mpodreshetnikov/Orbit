@@ -5,4 +5,6 @@ export * from "./measurement";
 export * from "./finding";
 export * from "./condition";
 export * from "./checkup";
+export * from "./medication";
+export * from "./regimen";
 export * from "./notifications";

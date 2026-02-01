@@ -2,13 +2,16 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Heart, ChevronDown, Settings, Plus, FileText, Ruler, Smartphone } from "lucide-react";
+import { Heart, ChevronDown, Settings, Plus, FileText, Ruler, Pill, Smartphone } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -62,14 +65,14 @@ export function TopNav() {
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon">
                     <Plus className="h-5 w-5" />
-                    <span className="sr-only">{t("nav.quickAdd")}</span>
+                    <span className="sr-only">{t("nav.quickCreate")}</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" sideOffset={8}>
                   <DropdownMenuItem asChild>
                     <Link href="/health/records/new" className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
-                      {t("nav.addMedicalRecord")}
+                      {t("nav.medicalRecord")}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem 
@@ -77,8 +80,26 @@ export function TopNav() {
                     className="flex items-center gap-2"
                   >
                     <Ruler className="h-4 w-4" />
-                    {t("nav.addMeasurement")}
+                    {t("nav.measurement")}
                   </DropdownMenuItem>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="gap-2">
+                      <Pill className="h-4 w-4" />
+                      {t("nav.medication")}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      <DropdownMenuItem asChild>
+                        <Link href="/health/medications/new?kind=regular" className="flex items-center gap-2">
+                          {t("nav.regularMedication")}
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href="/health/medications/new?kind=one_time" className="flex items-center gap-2">
+                          {t("nav.oneTimeMedication")}
+                        </Link>
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -127,7 +148,7 @@ export function TopNav() {
       </div>
     </header>
 
-    {/* Add Measurement Dialog */}
+    {/* Measurement dialog */}
     <AddMeasurementDialog
       open={measurementDialogOpen}
       onOpenChange={setMeasurementDialogOpen}

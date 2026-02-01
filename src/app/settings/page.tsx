@@ -105,12 +105,22 @@ export default function SettingsPage() {
       return;
     }
 
-    const notificationOptions: NotificationOptions = {
-      body: t("pwa.testNotificationBody"),
-      icon: "/icons/icon-192x192.png",
-      badge: "/icons/icon-192x192.png",
+    const notificationOptions: NotificationOptions & {
+      image?: string;
+      actions?: Array<{ action: string; title: string; icon?: string }>;
+    } = {
+      body: t("pwa.testNotificationBodyRich"),
+      icon: "/icons/icon-512x512.png",
+      badge: "/icons/icon-512x512.png",
+      image: "/icons/icon-512x512.png",
       tag: "test-notification",
       requireInteraction: false,
+      data: { url: "/", actionBaseUrl: typeof window !== "undefined" ? window.location.origin : "" },
+      actions: [
+        { action: "open", title: t("pwa.notificationActionOpen") },
+        { action: "settings", title: t("pwa.notificationActionSettings") },
+        { action: "dismiss", title: t("pwa.notificationActionDismiss") },
+      ],
     };
 
     try {

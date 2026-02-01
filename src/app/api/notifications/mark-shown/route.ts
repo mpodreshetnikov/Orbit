@@ -12,22 +12,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { id?: string };
+  let body: { id?: string; ids?: string[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const id = body.id;
-  if (!id || typeof id !== "string") {
-    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  const idsToMark = Array.isArray(body.ids) && body.ids.length > 0
+    ? body.ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : typeof body.id === "string" && body.id
+      ? [body.id]
+      : null;
+
+  if (!idsToMark || idsToMark.length === 0) {
+    return NextResponse.json({ error: "Missing id or ids" }, { status: 400 });
   }
 
   const { error } = await supabase
     .from("notification_digests")
     .update({ sent_at: new Date().toISOString() })
-    .eq("id", id)
+    .in("id", idsToMark)
     .eq("auth_user_id", user.id);
 
   if (error) {

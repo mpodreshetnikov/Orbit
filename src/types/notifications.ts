@@ -6,6 +6,8 @@ export interface UserPreferences {
   auth_user_id: string;
   checkup_notification_time: string; // "HH:mm" or time from DB
   checkup_notification_timezone: string | null; // IANA e.g. "Europe/Moscow"
+  /** Notify for overdue medication doses every this many minutes within the same day. Default 30. */
+  overdue_reminder_interval_minutes: number;
   created_at: string;
   updated_at: string;
 }
@@ -13,6 +15,7 @@ export interface UserPreferences {
 export interface UpdateUserPreferencesInput {
   checkup_notification_time?: string;
   checkup_notification_timezone?: string | null;
+  overdue_reminder_interval_minutes?: number | null;
 }
 
 // ============================================================================
@@ -65,6 +68,9 @@ export interface NotificationForDevice {
   body: string;
   url: string;
   scheduledAt: string; // ISO
+  /** For medication type: dose event id(s) to confirm/skip from notification actions */
+  dose_event_id?: string;
+  dose_event_ids?: string[];
 }
 
 export interface NotificationsResponse {
