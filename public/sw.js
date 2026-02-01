@@ -103,7 +103,6 @@ var NOTIFICATION_TYPE_HANDLERS = {
   medication: {
     icon: "/icons/icon-512x512.png",
     badge: "/icons/pills-128x128.png",
-    image: "/icons/pills-128x128.png",
     getActions: function (lang) {
       var labels = getMedicationActionLabels(lang);
       return [
