@@ -45,26 +45,72 @@ var DEFAULT_ICON = "/icons/icon-192x192.png";
 // Each handler can define: icon, badge, image, getActions(lang), getTitle(n, lang), getBody(n, lang), getData(n), onActionClick(event, data, action).
 // ---------------------------------------------------------------------------
 
+// Plural category for unit labels (CLDR-style: en one/other; ru one/few/many/other).
+function getPluralCategory(lang, count) {
+  var n = Math.abs(parseInt(count, 10)) || 0;
+  if (lang === "ru") {
+    var mod10 = n % 10, mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return "one";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "few";
+    if (mod10 === 0 || (mod10 >= 5 && mod10 <= 9) || (mod100 >= 11 && mod100 <= 14)) return "many";
+    return "other";
+  }
+  return n === 1 ? "one" : "other";
+}
+
 var UNIT_LABELS = {
   en: {
-    pill: "pills", capsule: "capsules", ml: "ml", drops: "drops", milligram: "mg", gram: "g", iu: "IU",
-    ampoule: "ampoules", injection: "injections", inhalation: "inhalations", patch: "patches",
-    application: "applications", spray: "sprays", portion: "portions", tablespoon: "tablespoons",
-    teaspoon: "teaspoons", unit: "units", suppository: "suppositories", other: "other",
+    pill: { one: "pill", other: "pills" },
+    capsule: { one: "capsule", other: "capsules" },
+    ml: { one: "ml", other: "ml" },
+    drops: { one: "drops", other: "drops" },
+    milligram: { one: "mg", other: "mg" },
+    gram: { one: "g", other: "g" },
+    iu: { one: "IU", other: "IU" },
+    ampoule: { one: "ampoule", other: "ampoules" },
+    injection: { one: "injection", other: "injections" },
+    inhalation: { one: "inhalation", other: "inhalations" },
+    patch: { one: "patch", other: "patches" },
+    application: { one: "application", other: "applications" },
+    spray: { one: "spray", other: "sprays" },
+    portion: { one: "portion", other: "portions" },
+    tablespoon: { one: "tablespoon", other: "tablespoons" },
+    teaspoon: { one: "teaspoon", other: "teaspoons" },
+    unit: { one: "unit", other: "units" },
+    suppository: { one: "suppository", other: "suppositories" },
+    other: { one: "other", other: "other" },
   },
   ru: {
-    pill: "таблеток", capsule: "капсул", ml: "мл", drops: "капель", milligram: "мг", gram: "г", iu: "МЕ",
-    ampoule: "ампул", injection: "инъекций", inhalation: "ингаляций", patch: "пластырей",
-    application: "нанесений", spray: "впрыскиваний", portion: "порций", tablespoon: "ст. ложек",
-    teaspoon: "ч. ложек", unit: "единиц", suppository: "свечей", other: "другое",
+    pill: { one: "таблетка", few: "таблетки", many: "таблеток", other: "таблеток" },
+    capsule: { one: "капсула", few: "капсулы", many: "капсул", other: "капсул" },
+    ml: { one: "мл", few: "мл", many: "мл", other: "мл" },
+    drops: { one: "капля", few: "капли", many: "капель", other: "капель" },
+    milligram: { one: "мг", few: "мг", many: "мг", other: "мг" },
+    gram: { one: "г", few: "г", many: "г", other: "г" },
+    iu: { one: "МЕ", few: "МЕ", many: "МЕ", other: "МЕ" },
+    ampoule: { one: "ампула", few: "ампулы", many: "ампул", other: "ампул" },
+    injection: { one: "инъекция", few: "инъекции", many: "инъекций", other: "инъекций" },
+    inhalation: { one: "ингаляция", few: "ингаляции", many: "ингаляций", other: "ингаляций" },
+    patch: { one: "пластырь", few: "пластыря", many: "пластырей", other: "пластырей" },
+    application: { one: "нанесение", few: "нанесения", many: "нанесений", other: "нанесений" },
+    spray: { one: "впрыскивание", few: "впрыскивания", many: "впрыскиваний", other: "впрыскиваний" },
+    portion: { one: "порция", few: "порции", many: "порций", other: "порций" },
+    tablespoon: { one: "ст. ложка", few: "ст. ложки", many: "ст. ложек", other: "ст. ложек" },
+    teaspoon: { one: "ч. ложка", few: "ч. ложки", many: "ч. ложек", other: "ч. ложек" },
+    unit: { one: "единица", few: "единицы", many: "единиц", other: "единиц" },
+    suppository: { one: "свеча", few: "свечи", many: "свечей", other: "свечей" },
+    other: { one: "другое", few: "другое", many: "другое", other: "другое" },
   },
 };
 
-function translateUnit(unitKey, lang) {
-  if (!unitKey || typeof unitKey !== "string") return "pills";
+function translateUnit(unitKey, lang, count) {
+  if (!unitKey || typeof unitKey !== "string") return translateUnit("pill", lang, count);
   var key = unitKey.toLowerCase();
   var langMap = UNIT_LABELS[lang] || UNIT_LABELS.en;
-  return langMap[key] || UNIT_LABELS.en[key] || key;
+  var forms = langMap[key] || UNIT_LABELS.en[key];
+  if (!forms || typeof forms !== "object") return key;
+  var category = getPluralCategory(lang, count);
+  return forms[category] != null ? forms[category] : forms.other;
 }
 
 var MEDICATION_TITLES = { en: "Medications", ru: "Лекарства" };
@@ -80,7 +126,8 @@ function getMedicationActionLabels(lang) {
 
 function getMedicationBody(n, lang) {
   if (n.medicationName == null || n.amount == null) return n.body;
-  var unitLabel = translateUnit(n.unit, lang);
+  var amount = parseInt(n.amount, 10) || 0;
+  var unitLabel = translateUnit(n.unit, lang, amount);
   return n.medicationName + " — " + n.amount + " " + unitLabel;
 }
 

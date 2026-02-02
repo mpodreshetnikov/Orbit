@@ -46,20 +46,20 @@ export function getUnitIcon(unit: MedicationUnit): LucideIcon {
   return UNIT_ICONS[unit] ?? Package;
 }
 
-/** Format amount with unit for display: "1 ml", "2 pills". */
+/** Format amount with unit for display: "1 pill", "2 pills". */
 export function formatAmountWithUnit(
   amount: number,
   unit: MedicationUnit,
-  t: (key: string) => string
+  t: (key: string, values?: { count?: number }) => string
 ): string {
-  const label = t(medicationUnitKey(unit));
+  const label = t(medicationUnitKey(unit), { count: amount });
   return formatMedicationAmount(amount, label);
 }
 
-/** Get translated unit label. */
+/** Get translated unit label (category form for dropdowns/labels). */
 export function getUnitLabel(
   unit: MedicationUnit,
-  t: (key: string) => string
+  t: (key: string, values?: { count?: number }) => string
 ): string {
-  return t(medicationUnitKey(unit));
+  return t(medicationUnitKey(unit), { count: 2 });
 }
