@@ -66,7 +66,7 @@ COMMENT ON FUNCTION public.run_med_event_generation_for_all_users IS
 -- Prerequisite: Enable "Cron" (pg_cron) in Supabase Dashboard →
 -- Project Settings → Integrations → Cron. Then run this migration.
 -- On local: CREATE EXTENSION IF NOT EXISTS pg_cron; in SQL if needed.
-
+CREATE EXTENSION IF NOT EXISTS pg_cron;
 -- Idempotent: remove existing job then schedule (avoids duplicate on re-run).
 DO $$
 BEGIN
@@ -75,7 +75,6 @@ BEGIN
   END IF;
 END
 $$;
-
 -- Schedule job: every hour at minute 0 (0 * * * *).
 -- Run before notifications-cron so dose events exist when pushes are sent.
 SELECT cron.schedule(
