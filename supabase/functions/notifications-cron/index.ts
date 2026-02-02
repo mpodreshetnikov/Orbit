@@ -218,6 +218,8 @@ Deno.serve(async (req) => {
         }
         continue;
       }
+      // Refill digests: send only once per day during the user's reminder window (same as checkup time).
+      if (type === "medication_refill" && !inWindow) continue;
       notificationsForUser.push({
         id: r.id,
         type,
