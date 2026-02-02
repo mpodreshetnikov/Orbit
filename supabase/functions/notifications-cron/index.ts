@@ -134,13 +134,15 @@ Deno.serve(async (req) => {
     const tz = prefs.checkup_notification_timezone ?? undefined;
     const inWindow = isNotificationWindowForUser(now, timeStr, tz ?? null);
 
-    // Load all unsent digests (medication digests created by create_medication_reminder_digests at start)
+    // Load all unsent digests (medication digests created by create_medication_reminder_digests at start).
+    // One row per dose — do not limit; we need every dose (e.g. 2 from one med + 1 from another = 3 rows).
     const { data: unsentRows } = await supabase
       .from("notification_digests")
       .select("id, type, scheduled_at, payload_json")
       .eq("auth_user_id", authUserId)
       .is("sent_at", null)
-      .order("scheduled_at", { ascending: true });
+      .order("scheduled_at", { ascending: true })
+      .limit(1000);
 
     const notificationsForUser: {
       id: string;
@@ -167,24 +169,53 @@ Deno.serve(async (req) => {
         unit?: string;
         time_str?: string;
         is_overdue_reminder?: boolean;
+        doses?: Array<{
+          dose_event_id?: string;
+          medication_name?: string;
+          amount?: string;
+          unit?: string;
+          time_str?: string;
+          body?: string;
+          is_overdue_reminder?: boolean;
+        }>;
       };
       const type = r.type as string;
       const scheduledAt = r.scheduled_at as string;
       if (type === "medication" || type === "medication_snoozed") {
-        notificationsForUser.push({
-          id: r.id,
-          type,
-          title: p?.title ?? "",
-          body: p?.body ?? "",
-          url: p?.url ?? "/",
-          scheduledAt,
-          dose_event_id: p?.dose_event_id ?? null,
-          isOverdueReminder: p?.is_overdue_reminder === true,
-          medicationName: p?.medication_name ?? null,
-          amount: p?.amount ?? null,
-          unit: p?.unit ?? null,
-          timeStr: p?.time_str ?? null,
-        });
+        const doses = Array.isArray(p?.doses) ? p.doses : null;
+        if (doses && doses.length > 0) {
+          for (const dose of doses) {
+            notificationsForUser.push({
+              id: r.id,
+              type,
+              title: p?.title ?? "",
+              body: dose?.body ?? p?.body ?? "",
+              url: p?.url ?? "/",
+              scheduledAt,
+              dose_event_id: dose?.dose_event_id ?? null,
+              isOverdueReminder: dose?.is_overdue_reminder === true,
+              medicationName: dose?.medication_name ?? null,
+              amount: dose?.amount ?? null,
+              unit: dose?.unit ?? null,
+              timeStr: dose?.time_str ?? null,
+            });
+          }
+        } else {
+          notificationsForUser.push({
+            id: r.id,
+            type,
+            title: p?.title ?? "",
+            body: p?.body ?? "",
+            url: p?.url ?? "/",
+            scheduledAt,
+            dose_event_id: p?.dose_event_id ?? null,
+            isOverdueReminder: p?.is_overdue_reminder === true,
+            medicationName: p?.medication_name ?? null,
+            amount: p?.amount ?? null,
+            unit: p?.unit ?? null,
+            timeStr: p?.time_str ?? null,
+          });
+        }
         continue;
       }
       notificationsForUser.push({
@@ -358,32 +389,29 @@ Deno.serve(async (req) => {
             scheduledAt: string;
             dose_event_ids: string[];
           } | null = null;
+        // Build aggregated payload from unsent digests. Supports (1) one digest per user with
+        // payload.doses array (all doses in one row) and (2) legacy one digest per dose.
         if (medItemsFromDigests.length > 0) {
-          const { data: payloadRows } = await supabase.rpc(
-            "get_medication_dose_reminder_payload",
-            {
-              p_auth_user_id: authUserId,
-              p_now_timestamptz: now.toISOString(),
-              p_timezone: tz ?? null,
-            }
-          );
-          const allMeds = (payloadRows ?? []) as PayloadRow[];
           aggregatedMed = {
             id: medItemsFromDigests[0].id,
             ids: medItemsFromDigests.map((n) => n.id),
             type: "medication" as const,
             title: "Medications",
-            medItems: allMeds.map((row) => ({
-              medicationName: row.medication_name ?? null,
-              amount: row.amount ?? null,
-              unit: row.unit ?? "pill",
-              body: row.body ?? "",
+            medItems: medItemsFromDigests.map((n) => ({
+              medicationName: n.medicationName ?? null,
+              amount: n.amount ?? null,
+              unit: n.unit ?? "pill",
+              body:
+                n.body ||
+                (n.medicationName && n.timeStr
+                  ? `${n.amount ?? "1"} ${n.unit ?? "pill"} · ${n.timeStr}`
+                  : ""),
             })),
             url: "/health/medications",
             scheduledAt: medItemsFromDigests[0].scheduledAt,
-            dose_event_ids: allMeds
-              .map((r) => r.dose_event_id)
-              .filter((id): id is string => id != null),
+            dose_event_ids: medItemsFromDigests
+              .map((n) => n.dose_event_id)
+              .filter((id): id is string => id != null && id !== ""),
           };
         }
         const payloadToSend = [
@@ -424,7 +452,7 @@ Deno.serve(async (req) => {
             }
           }
         }
-        const sentDigestIds = notificationsForUser.map((n) => n.id);
+        const sentDigestIds = [...new Set(notificationsForUser.map((n) => n.id))];
         if (sentDigestIds.length > 0) {
           await supabase
             .from("notification_digests")
