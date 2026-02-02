@@ -13,7 +13,7 @@ export default function NotificationsDebugPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ ok?: boolean; processed?: number; error?: string; details?: unknown } | null>(null);
   const [medLoading, setMedLoading] = useState(false);
-  const [medResult, setMedResult] = useState<{ ok?: boolean; eventsGenerated?: number; eventsCleared?: number; refillDigestsCreated?: number; timezone?: string; error?: string; details?: unknown } | null>(null);
+  const [medResult, setMedResult] = useState<{ ok?: boolean; usersProcessed?: number; eventsGenerated?: number; refillDigestsCreated?: number; error?: string; details?: unknown } | null>(null);
 
   const runCron = async () => {
     setLoading(true);
@@ -41,14 +41,7 @@ export default function NotificationsDebugPage() {
     setMedLoading(true);
     setMedResult(null);
     try {
-      const timezone = typeof Intl !== "undefined" && Intl.DateTimeFormat
-        ? Intl.DateTimeFormat().resolvedOptions().timeZone
-        : undefined;
-      const res = await fetch("/api/medications/run-cron", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(timezone ? { timezone } : {}),
-      });
+      const res = await fetch("/api/medications/run-cron", { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         setMedResult({ ok: false, error: data.error ?? "Request failed", details: data.details });
@@ -56,10 +49,9 @@ export default function NotificationsDebugPage() {
       }
       setMedResult({
         ok: data.ok,
+        usersProcessed: data.usersProcessed,
         eventsGenerated: data.eventsGenerated,
-        eventsCleared: data.eventsCleared,
         refillDigestsCreated: data.refillDigestsCreated,
-        timezone: data.timezone,
         details: data,
       });
     } catch (e) {
@@ -156,10 +148,11 @@ export default function NotificationsDebugPage() {
                 {medResult.ok !== false ? (
                   <p className="text-green-600 dark:text-green-400">
                     {t("runMedicationCronSuccess")}
-                    {(medResult.eventsGenerated != null || medResult.eventsCleared != null || medResult.refillDigestsCreated != null || medResult.timezone) && (
+                    {(medResult.usersProcessed != null || medResult.eventsGenerated != null || medResult.refillDigestsCreated != null) && (
                       <span className="block mt-1 text-muted-foreground">
                         {medResult.timezone && `Timezone: ${medResult.timezone}. `}
                         {medResult.eventsCleared != null && medResult.eventsCleared > 0 && `Cleared: ${medResult.eventsCleared}. `}
+                        {medResult.usersProcessed != null && `Users processed: ${medResult.usersProcessed}. `}
                         {medResult.eventsGenerated != null && `Events generated: ${medResult.eventsGenerated}. `}
                         {medResult.refillDigestsCreated != null && `Refill digests: ${medResult.refillDigestsCreated}.`}
                       </span>

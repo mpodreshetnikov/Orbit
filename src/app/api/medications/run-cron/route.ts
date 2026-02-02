@@ -3,9 +3,8 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 /**
  * POST /api/medications/run-cron
- * Run medication event generator + refill digests for current user, then invoke notifications-cron.
- * Body: optional { timezone?: string }. When provided, future scheduled/sent events are cleared
- * and regenerated in that timezone (fixes wrong-TZ intakes when user runs from debug UI).
+ * Run medication event generator + refill digests for all users (same as pg_cron),
+ * then invoke notifications-cron.
  */
 export async function POST(request: Request) {
   try {
@@ -28,109 +27,81 @@ export async function POST(request: Request) {
       );
     }
 
-    let body: { timezone?: string } = {};
-    try {
-      const raw = await request.text();
-      if (raw?.trim()) body = JSON.parse(raw) as { timezone?: string };
-    } catch {
-      // ignore invalid body
-    }
-
-    const prefsTz =
-      (await supabase
-        .from("user_preferences")
-        .select("checkup_notification_timezone")
-        .eq("auth_user_id", user.id)
-        .maybeSingle())
-        .data?.checkup_notification_timezone ?? "UTC";
-
-    const tz =
-      typeof body.timezone === "string" && body.timezone.trim()
-        ? body.timezone.trim()
-        : (prefsTz ?? "UTC");
-
     let eventsGenerated = 0;
     let refillDigestsCreated = 0;
-    let eventsCleared = 0;
+    let usersProcessed = 0;
 
-    if (typeof body.timezone === "string" && body.timezone.trim()) {
-      const { data: cleared, error: clearError } = await supabase.rpc("clear_future_med_dose_events", {
-        p_auth_user_id: user.id,
-        p_horizon_days: 7,
-      });
-      if (!clearError && typeof cleared === "number") eventsCleared = cleared;
-    }
-
-    const { data: genData, error: genError } = await supabase.rpc(
-      "generate_med_dose_events_for_horizon",
-      { p_auth_user_id: user.id, p_timezone: tz, p_horizon_days: 7 }
+    const { data: genRows, error: genError } = await supabase.rpc(
+      "run_med_event_generation_for_all_users",
+      { p_horizon_days: 7 }
     );
     if (genError) {
-    return NextResponse.json(
-      { error: "Event generator failed", details: genError.message },
-      { status: 500 }
-    );
-  }
-  eventsGenerated = typeof genData === "number" ? genData : 0;
-
-  const { data: refillData, error: refillError } = await supabase.rpc(
-    "create_medication_refill_digests",
-    { p_auth_user_id: user.id }
-  );
-  if (!refillError && typeof refillData === "number") {
-    refillDigestsCreated = refillData;
-  }
-
-  const functionUrl = `${url}/functions/v1/notifications-cron`;
-  try {
-    const res = await fetch(functionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
-    });
-    const raw = await res.text();
-    let data: Record<string, unknown> = {};
-    try {
-      if (raw.length > 0 && raw.trimStart().startsWith("{")) {
-        data = JSON.parse(raw) as Record<string, unknown>;
+      return NextResponse.json(
+        { error: "Event generator failed", details: genError.message },
+        { status: 500 }
+      );
+    }
+    if (Array.isArray(genRows)) {
+      usersProcessed = genRows.length;
+      for (const row of genRows as { events_generated?: number; refill_digests_created?: number }[]) {
+        eventsGenerated += typeof row.events_generated === "number" ? row.events_generated : 0;
+        refillDigestsCreated += typeof row.refill_digests_created === "number" ? row.refill_digests_created : 0;
       }
-    } catch {
-      // Response was HTML or invalid JSON (e.g. gateway error page)
+    }
+
+    const functionUrl = `${url}/functions/v1/notifications-cron`;
+    try {
+      const res = await fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+      });
+      const raw = await res.text();
+      let data: Record<string, unknown> = {};
+      try {
+        if (raw.length > 0 && raw.trimStart().startsWith("{")) {
+          data = JSON.parse(raw) as Record<string, unknown>;
+        }
+      } catch {
+        if (!res.ok) {
+          return NextResponse.json(
+            {
+              error: "Cron function returned non-JSON response",
+              details: raw.slice(0, 200),
+              eventsGenerated,
+              refillDigestsCreated,
+            },
+            { status: res.status }
+          );
+        }
+      }
       if (!res.ok) {
         return NextResponse.json(
           {
-            error: "Cron function returned non-JSON response",
-            details: raw.slice(0, 200),
+            error: (data as { error?: string }).error ?? "Cron function failed",
+            details: data,
             eventsGenerated,
             refillDigestsCreated,
           },
           { status: res.status }
         );
       }
-    }
-    if (!res.ok) {
+      return NextResponse.json({
+        ok: true,
+        usersProcessed,
+        eventsGenerated,
+        refillDigestsCreated,
+        cron: data,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
       return NextResponse.json(
-        { error: (data as { error?: string }).error ?? "Cron function failed", details: data, eventsGenerated, refillDigestsCreated },
-        { status: res.status }
+        { error: "Failed to invoke notifications-cron", details: message, eventsGenerated, refillDigestsCreated },
+        { status: 500 }
       );
     }
-    return NextResponse.json({
-      ok: true,
-      eventsGenerated,
-      eventsCleared,
-      refillDigestsCreated,
-      timezone: tz,
-      cron: data,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json(
-      { error: "Failed to invoke notifications-cron", details: message, eventsGenerated: 0, refillDigestsCreated: 0 },
-      { status: 500 }
-    );
-  }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(

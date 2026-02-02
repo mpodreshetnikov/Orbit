@@ -71,7 +71,7 @@ var MEDICATION_TITLES = { en: "Medications", ru: "Лекарства" };
 var MEDICATION_ACTION_LABELS = { en: { confirm: "Confirm", skip: "Skip" }, ru: { confirm: "Подтвердить", skip: "Пропустить" } };
 
 function getMedicationTitle(n, lang) {
-  return MEDICATION_TITLES[lang] || MEDICATION_TITLES.en + " · " + (n.timeStr || "");
+  return MEDICATION_TITLES[lang] || MEDICATION_TITLES.en;
 }
 
 function getMedicationActionLabels(lang) {
@@ -81,7 +81,7 @@ function getMedicationActionLabels(lang) {
 function getMedicationBody(n, lang) {
   if (n.medicationName == null || n.amount == null) return n.body;
   var unitLabel = translateUnit(n.unit, lang);
-  return "• " + n.medicationName + " — " + n.amount + " " + unitLabel;
+  return n.medicationName + " — " + n.amount + " " + unitLabel;
 }
 
 function getMedicationData(n) {
@@ -114,7 +114,21 @@ var NOTIFICATION_TYPE_HANDLERS = {
       return (n.medicationName != null && n.amount != null) ? getMedicationTitle(n, lang) : (n.title || "Notification");
     },
     getBody: function (n, lang) {
-      return (n.medicationName != null && n.amount != null) ? getMedicationBody(n, lang) : n.body;
+      var items = n.medItems || (n.med_items && Array.isArray(n.med_items) ? n.med_items : null);
+      if (Array.isArray(items) && items.length > 0) {
+        return items.map(function (item) {
+          return getMedicationBody(
+            {
+              medicationName: item.medicationName,
+              amount: item.amount,
+              unit: item.unit,
+              body: item.body,
+            },
+            lang
+          );
+        }).join("\n");
+      }
+      return (n.medicationName != null && n.amount != null) ? getMedicationBody(n, lang) : (n.body || "");
     },
     getData: function (n, baseData) {
       var extra = getMedicationData(n);
