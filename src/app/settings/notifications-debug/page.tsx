@@ -150,8 +150,6 @@ export default function NotificationsDebugPage() {
                     {t("runMedicationCronSuccess")}
                     {(medResult.usersProcessed != null || medResult.eventsGenerated != null || medResult.refillDigestsCreated != null) && (
                       <span className="block mt-1 text-muted-foreground">
-                        {medResult.timezone && `Timezone: ${medResult.timezone}. `}
-                        {medResult.eventsCleared != null && medResult.eventsCleared > 0 && `Cleared: ${medResult.eventsCleared}. `}
                         {medResult.usersProcessed != null && `Users processed: ${medResult.usersProcessed}. `}
                         {medResult.eventsGenerated != null && `Events generated: ${medResult.eventsGenerated}. `}
                         {medResult.refillDigestsCreated != null && `Refill digests: ${medResult.refillDigestsCreated}.`}
