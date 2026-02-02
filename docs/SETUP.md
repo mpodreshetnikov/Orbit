@@ -57,6 +57,15 @@ To get your anon key, run `supabase status` after starting Supabase locally.
 
    For the initial setup, use `supabase db reset` to create the `allowed_users` table with RLS policies.
 
+### Notifications cron
+
+The **notifications** pg_cron job (migration) calls the notifications-cron Edge Function every minute via pg_net. The URL is read from Vault (`project_url`).
+
+- **Local**: After `supabase db reset`, the seed file sets `project_url` to `http://kong:8000` so the cron can reach the Edge Function from inside Docker. No extra step.
+- **Hosted**: After deploy, run once in the Dashboard SQL Editor (or CI):  
+  `SELECT vault.create_secret('https://<your-project-ref>.supabase.co', 'project_url');`  
+  Remove any manually created "notifications" cron from the Dashboard to avoid duplicate runs.
+
 ### Google OAuth Configuration
 
 For **local development**, you need to configure Google OAuth in the `supabase/config.toml` file:
