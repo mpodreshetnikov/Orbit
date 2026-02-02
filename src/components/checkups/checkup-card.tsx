@@ -50,7 +50,17 @@ export function CheckupCard({
   onToggleSelect,
 }: CheckupCardProps) {
   const t = useTranslations();
-  const isOverdue = item.next_due_at && item.status === "active" && item.next_due_at < new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const isOverdueByDue =
+    item.status === "active" &&
+    item.next_due_at &&
+    item.next_due_at < today;
+  const isOverdueByPlan =
+    item.status === "active" &&
+    item.planned_on &&
+    item.planned_on < today &&
+    (!item.next_due_at || item.next_due_at >= today);
+  const isOverdue = isOverdueByDue || isOverdueByPlan;
   const canMarkComplete = item.status === "active";
   const canPlan = item.status === "active" && item.next_due_at;
 
@@ -87,9 +97,14 @@ export function CheckupCard({
               <div className="flex items-center gap-2 flex-wrap mb-0.5">
                 <CategoryLabel category={item.category} />
                 <StatusBadge status={item.status} />
-                {isOverdue && (
+                {isOverdueByDue && (
                   <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20">
                     {t("checkups.overdue")}
+                  </Badge>
+                )}
+                {isOverdueByPlan && (
+                  <Badge variant="outline" className="text-xs bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20">
+                    {t("checkups.plannedOverdue")}
                   </Badge>
                 )}
               </div>

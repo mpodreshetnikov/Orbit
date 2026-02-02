@@ -128,10 +128,15 @@ export default function CheckupsPage() {
 
     // Groups for "All" tab: overdue, upcoming (within 7 days), later (due after 7 days), inactive
     const overdue = filtered.filter(
-      (i) => i.status === "active" && i.next_due_at && i.next_due_at < today
+      (i) =>
+        i.status === "active" &&
+        ((i.next_due_at && i.next_due_at < today) ||
+          (i.planned_on && i.planned_on < today))
     );
+    const overdueIds = new Set(overdue.map((i) => i.id));
     const upcoming = filtered.filter(
       (i) =>
+        !overdueIds.has(i.id) &&
         i.status === "active" &&
         i.next_due_at &&
         i.next_due_at >= today &&
@@ -139,12 +144,15 @@ export default function CheckupsPage() {
     );
     const later = filtered.filter(
       (i) =>
+        !overdueIds.has(i.id) &&
         i.status === "active" &&
         i.next_due_at &&
         i.next_due_at > weekFromTodayStr
     );
     const rest = filtered.filter(
-      (i) => i.status !== "active" || !i.next_due_at
+      (i) =>
+        i.status !== "active" ||
+        (!i.next_due_at && !(i.planned_on && i.planned_on < today))
     );
 
     // Apply status tab filter (single list when a tab is selected)

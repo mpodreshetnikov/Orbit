@@ -703,6 +703,7 @@
     "noItemsHint": "Add a checkup or follow-up to track lab work, visits, vaccinations, and more.",
     "dueWindow": "Show",
     "overdue": "Overdue",
+    "plannedOverdue": "Planned overdue",
     "upcoming": "Upcoming",
     "later": "Later",
     "all": "All",
