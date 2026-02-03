@@ -116,7 +116,7 @@ export default function SettingsPage() {
       badge: "/icons/icon-512x512.png",
       image: "/icons/icon-512x512.png",
       tag: "test-notification",
-      requireInteraction: false,
+      requireInteraction: true,
       data: { url: "/", actionBaseUrl: typeof window !== "undefined" ? window.location.origin : "" },
       actions: [
         { action: "open", title: t("pwa.notificationActionOpen") },

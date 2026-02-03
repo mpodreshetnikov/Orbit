@@ -83,6 +83,7 @@ async function showNotificationFallback(notification: NotificationForDevice): Pr
     badge: "/icons/icon-192x192.png",
     data: { url },
     tag: `notification-${notification.id}`,
+    requireInteraction: true,
   };
   const reg = await navigator.serviceWorker?.getRegistration();
   if (reg) {

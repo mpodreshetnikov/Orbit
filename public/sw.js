@@ -243,6 +243,7 @@ function buildNotificationOptions(n, lang) {
     vibrate: [100, 50, 100],
     tag: tag,
     renotify: renotify,
+    requireInteraction: true,
     data: data,
   };
   if (image != null) options.image = image;
@@ -337,6 +338,7 @@ self.addEventListener("push", function (event) {
       icon: data.icon || DEFAULT_ICON,
       badge: data.badge || DEFAULT_ICON,
       vibrate: [100, 50, 100],
+      requireInteraction: true,
       data: {
         dateOfArrival: Date.now(),
         primaryKey: data.primaryKey || "1",
