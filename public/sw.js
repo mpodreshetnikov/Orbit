@@ -150,6 +150,8 @@ var NOTIFICATION_TYPE_HANDLERS = {
   medication: {
     icon: "/icons/icon-512x512.png",
     badge: "/icons/pills-128x128.png",
+    tag: "medication-reminder",
+    renotify: true,
     getActions: function (lang) {
       var labels = getMedicationActionLabels(lang);
       return [
@@ -230,12 +232,17 @@ function buildNotificationOptions(n, lang) {
     if (typeof handler.getData === "function") data = handler.getData(n, baseData);
   }
 
+  var tag = (handler && handler.tag != null)
+    ? (typeof handler.tag === "function" ? handler.tag(n) : handler.tag)
+    : (n.id ? "notification-" + n.id : "notification-" + Date.now());
+  var renotify = (handler && handler.renotify != null) ? handler.renotify : false;
   var options = {
     body: body,
     icon: icon,
     badge: badge,
     vibrate: [100, 50, 100],
-    tag: n.id ? "notification-" + n.id : "notification-" + Date.now(),
+    tag: tag,
+    renotify: renotify,
     data: data,
   };
   if (image != null) options.image = image;
