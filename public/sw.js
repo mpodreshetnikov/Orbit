@@ -365,6 +365,44 @@ self.addEventListener("notificationclick", function (event) {
 });
 
 // ---------------------------------------------------------------------------
+// Message: show notification (poll path — same logic as push)
+// ---------------------------------------------------------------------------
+self.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "showNotification" || !data.notification) return;
+  var notification = data.notification;
+  var client = event.source;
+  getAppLang()
+    .then(function (lang) {
+      if (!self.registration.showNotification) return;
+      var built = buildNotificationOptions(notification, lang);
+      return self.registration.showNotification(built.title, built.options).then(function () {
+        var ids = notification.ids && Array.isArray(notification.ids)
+          ? notification.ids
+          : (notification.id ? [notification.id] : null);
+        if (ids && ids.length > 0) {
+          return fetch(self.location.origin + "/api/notifications/mark-shown", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(ids.length === 1 ? { id: ids[0] } : { ids: ids }),
+          });
+        }
+      });
+    })
+    .then(function () {
+      if (client && client.postMessage) {
+        client.postMessage({ type: "notificationShown", id: notification.id });
+      }
+    })
+    .catch(function () {
+      if (client && client.postMessage) {
+        client.postMessage({ type: "notificationShown", id: notification.id });
+      }
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Fetch (offline support)
 // ---------------------------------------------------------------------------
 self.addEventListener("fetch", function (event) {

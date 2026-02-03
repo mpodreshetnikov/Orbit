@@ -62,10 +62,17 @@ async function callMarkShown(id: string): Promise<void> {
   }
 }
 
-async function showNotification(notification: NotificationForDevice): Promise<void> {
+/** Ask the SW to show a notification (reuses SW buildNotificationOptions + show + mark-shown). */
+function requestSwShowNotification(notification: NotificationForDevice): void {
+  const controller = navigator.serviceWorker?.controller;
+  if (!controller) return;
+  controller.postMessage({ type: "showNotification", notification });
+}
+
+/** Fallback when no SW: show a basic notification and mark shown. */
+async function showNotificationFallback(notification: NotificationForDevice): Promise<void> {
   if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
-  const reg = await navigator.serviceWorker?.getRegistration();
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const url = notification.url?.startsWith("/")
     ? `${origin}${notification.url}`
@@ -77,6 +84,7 @@ async function showNotification(notification: NotificationForDevice): Promise<vo
     data: { url },
     tag: `notification-${notification.id}`,
   };
+  const reg = await navigator.serviceWorker?.getRegistration();
   if (reg) {
     await reg.showNotification(notification.title, options);
   } else {
@@ -95,11 +103,16 @@ export function useNotifications(): void {
       const notifications = await fetchNotifications();
       if (notifications.length === 0) return;
       const now = Date.now();
+      const hasSw = !!navigator.serviceWorker?.controller;
       for (const n of notifications) {
         if (getShownToday().has(n.id)) continue;
         const scheduledAt = new Date(n.scheduledAt).getTime();
         if (scheduledAt <= now + BUFFER_MS) {
-          await showNotification(n);
+          if (hasSw) {
+            requestSwShowNotification(n);
+          } else {
+            await showNotificationFallback(n);
+          }
         }
       }
     } catch {
@@ -109,11 +122,19 @@ export function useNotifications(): void {
 
   useEffect(() => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data;
+      if (data?.type === "notificationShown" && typeof data.id === "string") {
+        markShownToday(data.id);
+      }
+    };
+    navigator.serviceWorker?.addEventListener("message", onMessage);
     run();
     const onOnline = () => run();
     window.addEventListener("online", onOnline);
     intervalRef.current = setInterval(run, 60 * 60 * 1000);
     return () => {
+      navigator.serviceWorker?.removeEventListener("message", onMessage);
       window.removeEventListener("online", onOnline);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
