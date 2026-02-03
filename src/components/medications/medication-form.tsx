@@ -392,7 +392,7 @@ export function MedicationForm({
               <SelectContent>
                 {[...MEDICATION_UNITS]
                   .sort((a, b) =>
-                    t(medicationUnitKey(a)).localeCompare(t(medicationUnitKey(b)))
+                    t(medicationUnitKey(a), { count: 1 }).localeCompare(t(medicationUnitKey(b), { count: 1 }))
                   )
                   .map((u) => {
                     const Icon = getUnitIcon(u);
@@ -400,7 +400,7 @@ export function MedicationForm({
                       <SelectItem key={u} value={u}>
                         <span className="flex items-center gap-2">
                           <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          {t(medicationUnitKey(u))}
+                          {t(medicationUnitKey(u), { count: 1 })}
                         </span>
                       </SelectItem>
                     );
