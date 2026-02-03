@@ -1,0 +1,21 @@
+name: Deploy Supabase
+on:
+  push:
+    branches:
+      - main
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASEACCESSTOKEN }}
+  PROJECT_ID: vvriurabgusbdysfrcem
+
+jobs:
+  deploy:
+    environment: Production - Supabase
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@latest
+        with:
+          version: latest
+      - run: supabase functions deploy --project-ref $PROJECT_ID
+      - run: supabase db push --project-ref $PROJECT_ID
