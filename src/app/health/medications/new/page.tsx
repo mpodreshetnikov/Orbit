@@ -36,7 +36,7 @@ export default function NewMedicationPage() {
   ) => {
     const input = createMedicationInputToRegimenInput(data as CreateMedicationInput);
     const regimen = await createMutation.mutateAsync(input);
-    await regenerateMedicationEvents(getClientTimezone());
+    await regenerateMedicationEvents(getClientTimezone(), regimen.person_id);
     router.push(`/health/medications/${regimen.id}`);
   };
 

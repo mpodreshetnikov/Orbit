@@ -25,7 +25,7 @@ export default function EditMedicationPage() {
   const handleSubmit = async (data: UpdateMedicationInput) => {
     const updates = updateMedicationInputToRegimenInput(data);
     await updateMutation.mutateAsync({ id, updates });
-    await regenerateMedicationEvents(getClientTimezone());
+    await regenerateMedicationEvents(getClientTimezone(), regimen.person_id);
     router.push(`/health/medications/${id}`);
   };
 

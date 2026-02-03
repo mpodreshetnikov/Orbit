@@ -1,13 +1,21 @@
 /**
- * Trigger regeneration of medication dose events (Today's intakes) for the
- * current user. Call after creating or editing a regimen.
- * Pass client timezone so events are generated in the user's local time.
+ * Trigger regeneration of medication dose events (Today's intakes).
+ * Call after creating or editing a regimen.
+ * - personId: when provided, regenerates events for that person only (use when
+ *   adding/editing a regimen for a person that may not be linked to the current user).
+ * - timezone: client timezone so events are generated in the user's local time.
  */
-export async function regenerateMedicationEvents(timezone?: string): Promise<void> {
+export async function regenerateMedicationEvents(
+  timezone?: string,
+  personId?: string
+): Promise<void> {
+  const body: { timezone?: string; person_id?: string } = {};
+  if (timezone) body.timezone = timezone;
+  if (personId) body.person_id = personId;
   const res = await fetch("/api/medications/regenerate-events", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(timezone ? { timezone } : {}),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
