@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import { ArrowLeft, Calendar, Ruler, FileText, AlertTriangle, MapPin, TrendingUp, TrendingDown, Minus, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,7 @@ function SizeTrendIndicator({ history }: { history: FindingHistoryPoint[] }) {
 
 function FindingDetailContent({ findingId }: { findingId: string }) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const searchParams = useSearchParams();
   const siteCode = searchParams.get("site") || undefined;
   const { selectedPersonId } = useUIStore();
@@ -212,7 +214,7 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
                 <SelectContent>
                   {records?.map((record) => (
                     <SelectItem key={record.id} value={record.id}>
-                      {record.title} {record.record_date && `(${format(new Date(record.record_date), "dd.MM.yyyy")})`}
+                      {record.title} {record.record_date && `(${format(new Date(record.record_date), "dd.MM.yyyy", { locale: dateLocale })})`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -305,8 +307,8 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 sm:w-32 text-xs sm:text-sm text-muted-foreground">
                   <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                   {point.record_date 
-                    ? format(new Date(point.record_date), "dd.MM.yyyy")
-                    : format(new Date(point.created_at), "dd.MM.yyyy")
+                    ? format(new Date(point.record_date), "dd.MM.yyyy", { locale: dateLocale })
+                    : format(new Date(point.created_at), "dd.MM.yyyy", { locale: dateLocale })
                   }
                 </div>
 

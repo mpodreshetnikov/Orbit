@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import Link from "next/link";
 import { Calendar, CheckCircle2, CalendarPlus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -50,6 +51,7 @@ export function CheckupCard({
   onToggleSelect,
 }: CheckupCardProps) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const today = new Date().toISOString().slice(0, 10);
   const isOverdueByDue =
     item.status === "active" &&
@@ -116,7 +118,7 @@ export function CheckupCard({
                 {item.next_due_at ? (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Calendar className="h-3.5 w-3.5 shrink-0" />
-                    {t("checkups.nextDue")}: {format(new Date(item.next_due_at), "dd MMM yyyy")}
+                    {t("checkups.nextDue")}: {format(new Date(item.next_due_at), "dd MMM yyyy", { locale: dateLocale })}
                   </div>
                 ) : (
                   <div className="h-4" aria-hidden />
@@ -124,7 +126,7 @@ export function CheckupCard({
                 {item.planned_on ? (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <CalendarPlus className="h-3.5 w-3.5 shrink-0" />
-                    {t("checkups.plannedOn")}: {format(new Date(item.planned_on), "dd MMM yyyy")}
+                    {t("checkups.plannedOn")}: {format(new Date(item.planned_on), "dd MMM yyyy", { locale: dateLocale })}
                   </div>
                 ) : (
                   <div className="h-4" aria-hidden />

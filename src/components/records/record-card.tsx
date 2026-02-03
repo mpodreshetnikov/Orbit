@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import { Calendar, Paperclip, MoreVertical, Eye, Trash2, RotateCcw, Loader2, FileCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +46,7 @@ export function RecordCard({
   onActivate,
 }: RecordCardProps) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
 
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
@@ -97,7 +99,7 @@ export function RecordCard({
                 <Calendar className="h-3.5 w-3.5" />
                 <span>
                   {record.record_date
-                    ? format(new Date(record.record_date), "MMM d, yyyy")
+                    ? format(new Date(record.record_date), "MMM d, yyyy", { locale: dateLocale })
                     : t("records.noDate")}
                 </span>
               </div>

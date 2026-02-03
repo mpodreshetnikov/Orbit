@@ -23,6 +23,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import {
   useDoseEventsForPerson,
   useMarkDoseTaken,
   useMarkDoseSkipped,
@@ -30,7 +36,9 @@ import {
   useUpdateDoseEventResolutionDetails,
   useDeleteRegimen,
 } from "@/hooks";
+import { useDateFnsLocale, useDateHeaderFormat } from "@/lib/date-locale";
 import { useUIStore } from "@/stores/ui-store";
+import { enUS, ru } from "react-day-picker/locale";
 import type { MedDoseEventStatus, MedDoseEventWithRegimen } from "@/types/regimen";
 import { getPlannedIntakeAmount, getPlannedIntakeUnit } from "@/types/regimen";
 import type { MedicationUnit } from "@/types";
@@ -116,6 +124,8 @@ const todayStr = getTodayDateStr();
 
 export function MedicationDashboard() {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
+  const dateHeaderFormat = useDateHeaderFormat();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
   const [selectedDateStr, setSelectedDateStr] = useState(todayStr);
   const { dayStartIso, dayEndIso } = useMemo(
@@ -126,6 +136,7 @@ export function MedicationDashboard() {
   const isPast = selectedDateStr < todayStr;
   const isFuture = selectedDateStr > todayStr;
   const [resolvedOpen, setResolvedOpen] = useState(false);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [editIntakeEvent, setEditIntakeEvent] = useState<MedDoseEventWithRegimen | null>(null);
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<Set<string>>(() => new Set());
   const inactivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -205,8 +216,15 @@ export function MedicationDashboard() {
 
   const displayDateLabel = useMemo(() => {
     const d = new Date(selectedDateStr + "T12:00:00");
-    return format(d, "EEE, MMM d");
-  }, [selectedDateStr]);
+    return format(d, dateHeaderFormat, { locale: dateLocale });
+  }, [selectedDateStr, dateLocale, dateHeaderFormat]);
+
+  const language = useUIStore((s) => s.language);
+  const dayPickerLocale = language === "ru" ? ru : enUS;
+  const selectedDate = useMemo(
+    () => new Date(selectedDateStr + "T12:00:00"),
+    [selectedDateStr]
+  );
 
   const handleTaken = async (e: MedDoseEventWithRegimen) => {
     setRecentlyCompletedIds((prev) => new Set(prev).add(e.id));
@@ -246,41 +264,64 @@ export function MedicationDashboard() {
   return (
     <div className="space-y-4 min-w-0">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          {sectionTitle}
-        </h2>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={goPrev}
-            aria-label={t("medications.datePrev")}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="min-w-[7rem] text-center text-sm tabular-nums">
-            {displayDateLabel}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={goNext}
-            aria-label={t("medications.dateNext")}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {sectionTitle}
+          </h2>
           {!isToday && (
             <Button
               variant="ghost"
               size="sm"
-              className="ml-1 text-xs"
+              className="h-7 shrink-0 text-xs"
               onClick={goToday}
             >
               {t("medications.dateToday")}
             </Button>
           )}
+        </div>
+        <div className="flex w-full sm:w-auto items-center gap-1 min-w-0">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={goPrev}
+            aria-label={t("medications.datePrev")}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className="flex-1 min-w-0 h-8 justify-center text-sm font-medium tabular-nums"
+                aria-label={t("medications.selectDate")}
+              >
+                {displayDateLabel}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="center">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={(date) => {
+                  if (date) {
+                    setSelectedDateStr(format(date, "yyyy-MM-dd"));
+                    setDatePickerOpen(false);
+                  }
+                }}
+                locale={dayPickerLocale}
+              />
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={goNext}
+            aria-label={t("medications.dateNext")}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 

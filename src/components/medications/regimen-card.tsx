@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useIntlLocale } from "@/lib/date-locale";
 import { cn } from "@/lib/utils";
 import type { MedRegimen, MedSchedule } from "@/types/regimen";
 import { formatAmountWithUnit, getUnitIcon } from "./medication-units";
@@ -13,14 +14,15 @@ const DAY_SUFFIX = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 function formatRegimenScheduleSummary(
   regimen: MedRegimen,
-  t: (key: string) => string
+  t: (key: string) => string,
+  intlLocale: string
 ): string | null {
   const schedule = regimen.schedule as MedSchedule | null;
   if (!schedule) return null;
   const mode = schedule.mode;
   if (mode === "one_off") {
     const due = (schedule as { due_at?: string }).due_at;
-    if (due) return new Date(due).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    if (due) return new Date(due).toLocaleString(intlLocale, { dateStyle: "medium", timeStyle: "short" });
     return null;
   }
   if (mode === "daily_times") {
@@ -73,6 +75,7 @@ function StatusBadge({ status }: { status: MedRegimen["status"] }) {
 
 export function RegimenCard({ regimen }: RegimenCardProps) {
   const t = useTranslations();
+  const intlLocale = useIntlLocale();
   const inv = regimen.inventory;
   const isLowInventory =
     inv?.enabled &&
@@ -80,7 +83,7 @@ export function RegimenCard({ regimen }: RegimenCardProps) {
     inv.current_amount != null &&
     inv.current_amount <= inv.refill_threshold_amount;
 
-  const scheduleSummary = formatRegimenScheduleSummary(regimen, t);
+  const scheduleSummary = formatRegimenScheduleSummary(regimen, t, intlLocale);
 
   return (
     <Link href={`/health/medications/${regimen.id}`}>

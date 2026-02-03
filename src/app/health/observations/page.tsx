@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import {
   Search,
   LayoutGrid,
@@ -135,6 +136,7 @@ function TrendIndicator({ history }: { history: { value: number | null }[] }) {
 // Observation card component
 function ObservationCard({ observation }: { observation: ObservationSummary }) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const displayName = observation.catalog_name_ru || observation.obs_name;
   const displayValue = observation.latest_value ?? observation.latest_value_text;
   const displayUnit = observation.latest_unit || observation.canonical_unit;
@@ -188,7 +190,7 @@ function ObservationCard({ observation }: { observation: ObservationSummary }) {
               </div>
               {observation.latest_date && (
                 <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                  {format(new Date(observation.latest_date), "dd.MM.yyyy")}
+                  {format(new Date(observation.latest_date), "dd.MM.yyyy", { locale: dateLocale })}
                 </p>
               )}
             </div>
@@ -208,6 +210,7 @@ function ObservationCard({ observation }: { observation: ObservationSummary }) {
 // Table view component
 function ObservationsTable({ observations }: { observations: ObservationSummary[] }) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
 
   // Flatten all observations into a table sorted by date
   const tableData = useMemo(() => {
@@ -279,7 +282,7 @@ function ObservationsTable({ observations }: { observations: ObservationSummary[
             {tableData.map((row) => (
               <tr key={row.id} className="hover:bg-muted/30">
                 <td className="p-3 whitespace-nowrap">
-                  {row.date ? format(new Date(row.date), "dd.MM.yyyy") : "—"}
+                  {row.date ? format(new Date(row.date), "dd.MM.yyyy", { locale: dateLocale }) : "—"}
                 </td>
                 <td className="p-3">
                   <Link 

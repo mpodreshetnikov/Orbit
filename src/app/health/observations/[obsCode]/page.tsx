@@ -4,6 +4,8 @@ import { use, useState, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
+import type { Locale } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import {
   ArrowLeft,
   FlaskConical,
@@ -153,11 +155,13 @@ function ObservationChart({
   unit,
   refLow,
   refHigh,
+  dateLocale,
 }: { 
   history: ObservationHistoryPoint[];
   unit?: string | null;
   refLow?: number | null;
   refHigh?: number | null;
+  dateLocale: Locale;
 }) {
   // Group by date and take last value, mark duplicates
   const dateMap = new Map<string, { 
@@ -169,8 +173,8 @@ function ObservationChart({
     .filter(h => (h.value_canonical ?? h.value_numeric) !== null)
     .forEach(h => {
       const dateKey = h.record_date 
-        ? format(new Date(h.record_date), "dd.MM.yy")
-        : format(new Date(h.created_at), "dd.MM.yy");
+        ? format(new Date(h.record_date), "dd.MM.yy", { locale: dateLocale })
+        : format(new Date(h.created_at), "dd.MM.yy", { locale: dateLocale });
       
       if (!dateMap.has(dateKey)) {
         dateMap.set(dateKey, { values: [], dateKey });
@@ -299,10 +303,12 @@ function ObservationChart({
 // History table
 function HistoryTable({ 
   history, 
-  unit 
+  unit,
+  dateLocale,
 }: { 
   history: ObservationHistoryPoint[];
   unit?: string | null;
+  dateLocale: Locale;
 }) {
   const t = useTranslations();
 
@@ -334,8 +340,8 @@ function HistoryTable({
                   <div className="flex items-center gap-1.5 sm:gap-2">
                     <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
                     {point.record_date 
-                      ? format(new Date(point.record_date), "dd MMM yyyy")
-                      : format(new Date(point.created_at), "dd MMM yyyy")}
+                      ? format(new Date(point.record_date), "dd MMM yyyy", { locale: dateLocale })
+                      : format(new Date(point.created_at), "dd MMM yyyy", { locale: dateLocale })}
                   </div>
                 </td>
                 <td className="p-2 sm:p-3 text-right whitespace-nowrap">
@@ -402,6 +408,7 @@ export default function ObservationDetailPage({
   const decodedObsCode = decodeURIComponent(obsCode);
   const t = useTranslations();
   const router = useRouter();
+  const dateLocale = useDateFnsLocale();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
 
   const { data: observation, isLoading, error } = useSingleObservationHistory(
@@ -577,7 +584,7 @@ export default function ObservationDetailPage({
                 </div>
                 {observation.latest_date && (
                   <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                    {format(new Date(observation.latest_date), "dd MMM yyyy")}
+                    {format(new Date(observation.latest_date), "dd MMM yyyy", { locale: dateLocale })}
                   </p>
                 )}
               </CardContent>
@@ -675,6 +682,7 @@ export default function ObservationDetailPage({
               <ObservationChart 
                 history={convertedHistory}
                 unit={displayUnit}
+                dateLocale={dateLocale}
                 refLow={displayRefLow}
                 refHigh={displayRefHigh}
               />
@@ -688,7 +696,7 @@ export default function ObservationDetailPage({
             </CardHeader>
             <CardContent className="p-0 sm:p-6 pt-0">
               <div className="overflow-x-auto">
-                <HistoryTable history={convertedHistory} unit={displayUnit} />
+                <HistoryTable history={convertedHistory} unit={displayUnit} dateLocale={dateLocale} />
               </div>
             </CardContent>
           </Card>

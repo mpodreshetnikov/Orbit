@@ -170,6 +170,15 @@ export function useDoseEventsForPerson(
 // DOSE EVENTS (history for regimen)
 // ============================================================================
 
+const REGIMEN_HISTORY_STATUSES: MedDoseEvent["status"][] = [
+  "taken",
+  "skipped",
+  "missed",
+  "scheduled",
+  "sent",
+  "snoozed",
+];
+
 async function fetchDoseEventsForRegimen(regimenId: string): Promise<MedDoseEvent[]> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -177,10 +186,21 @@ async function fetchDoseEventsForRegimen(regimenId: string): Promise<MedDoseEven
     .select("*")
     .eq("regimen_id", regimenId)
     .is("deleted_at", null)
-    .in("status", ["taken", "skipped", "missed"])
-    .order("taken_at", { ascending: false });
+    .in("status", REGIMEN_HISTORY_STATUSES)
+    .order("actual_at", { ascending: false });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => rowToDoseEvent(row));
+  const nowIso = new Date().toISOString();
+  const events = (data ?? []).map((row) => rowToDoseEvent(row));
+  const filtered = events.filter((ev) => {
+    if (ev.status === "taken" || ev.status === "skipped" || ev.status === "missed") return true;
+    if (ev.status === "scheduled" || ev.status === "sent" || ev.status === "snoozed") {
+      return ev.actual_at < nowIso;
+    }
+    return false;
+  });
+  const effectiveDate = (ev: MedDoseEvent) => ev.taken_at ?? ev.actual_at;
+  filtered.sort((a, b) => effectiveDate(b).localeCompare(effectiveDate(a)));
+  return filtered;
 }
 
 export function useDoseEventsForRegimen(regimenId: string | null) {

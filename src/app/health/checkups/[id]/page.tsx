@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
+import type { Locale } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -61,12 +63,12 @@ function StatusBadge({ status }: { status: CheckupItemStatus }) {
   );
 }
 
-function ScheduleSummary({ schedule }: { schedule: CheckupSchedule }) {
+function ScheduleSummary({ schedule, dateLocale }: { schedule: CheckupSchedule; dateLocale: Locale }) {
   const t = useTranslations();
   if (isCheckupScheduleOneOff(schedule)) {
     return (
       <span>
-        {t("checkups.oneOff")}: {format(new Date(schedule.due_at), "dd MMM yyyy")}
+        {t("checkups.oneOff")}: {format(new Date(schedule.due_at), "dd MMM yyyy", { locale: dateLocale })}
       </span>
     );
   }
@@ -86,6 +88,7 @@ export default function CheckupDetailPage() {
   const params = useParams();
   const router = useRouter();
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const id = params.id as string;
 
   const { data: item, isLoading, error, refetch } = useCheckupItem(id);
@@ -233,17 +236,17 @@ export default function CheckupDetailPage() {
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2 text-sm">
             <Calendar className="h-4 w-4 text-muted-foreground" />
-            <ScheduleSummary schedule={item.schedule} />
+            <ScheduleSummary schedule={item.schedule} dateLocale={dateLocale} />
           </div>
           {item.next_due_at && (
             <div className="text-sm text-muted-foreground">
-              {t("checkups.nextDue")}: {format(new Date(item.next_due_at), "dd MMM yyyy")}
+              {t("checkups.nextDue")}: {format(new Date(item.next_due_at), "dd MMM yyyy", { locale: dateLocale })}
             </div>
           )}
           {item.planned_on && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>
-                {t("checkups.plannedOn")}: {format(new Date(item.planned_on), "dd MMM yyyy")}
+                {t("checkups.plannedOn")}: {format(new Date(item.planned_on), "dd MMM yyyy", { locale: dateLocale })}
               </span>
               <Button
                 type="button"
@@ -334,7 +337,7 @@ export default function CheckupDetailPage() {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-sm font-medium">
-                      {format(new Date(c.done_at), "dd MMM yyyy")}
+                      {format(new Date(c.done_at), "dd MMM yyyy", { locale: dateLocale })}
                     </div>
                     {c.note && (
                       <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap">{c.note}</p>

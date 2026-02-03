@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
+import { useIntlLocale } from "@/lib/date-locale";
 import { useUserPreferences, useUpdateUserPreferences, usePushSubscribe } from "@/hooks";
 
 type PermissionStatus = "default" | "granted" | "denied" | "unsupported";
@@ -17,6 +18,7 @@ type ServiceWorkerStatus = "checking" | "registered" | "not-registered" | "unsup
 export default function SettingsPage() {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
+  const intlLocale = useIntlLocale();
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>("default");
   const [swStatus, setSwStatus] = useState<ServiceWorkerStatus>("checking");
   const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
@@ -129,12 +131,12 @@ export default function SettingsPage() {
       } else {
         new Notification(t("pwa.testNotificationTitle"), notificationOptions);
       }
-      setLastNotificationTime(new Date().toLocaleTimeString());
+      setLastNotificationTime(new Date().toLocaleTimeString(intlLocale));
     } catch (error) {
       console.error("Error sending notification:", error);
       try {
         new Notification(t("pwa.testNotificationTitle"), notificationOptions);
-        setLastNotificationTime(new Date().toLocaleTimeString());
+        setLastNotificationTime(new Date().toLocaleTimeString(intlLocale));
       } catch (fallbackError) {
         console.error("Fallback notification also failed:", fallbackError);
       }

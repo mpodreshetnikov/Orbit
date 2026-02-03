@@ -16,6 +16,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
@@ -38,6 +39,7 @@ function StatusIcon({ status }: { status: ConditionStatus }) {
 
 function ConditionsContent() {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const { selectedPersonId } = useUIStore();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
@@ -144,9 +146,9 @@ function ConditionsContent() {
                 </td>
                 <td className="p-3 text-sm text-muted-foreground">
                   {condition.onset_date 
-                    ? format(new Date(condition.onset_date), "dd.MM.yyyy")
-                    : condition.first_mentioned_date
-                      ? format(new Date(condition.first_mentioned_date), "dd.MM.yyyy")
+? format(new Date(condition.onset_date), "dd.MM.yyyy", { locale: dateLocale })
+                      : condition.first_mentioned_date
+                      ? format(new Date(condition.first_mentioned_date), "dd.MM.yyyy", { locale: dateLocale })
                       : "-"
                   }
                 </td>

@@ -2,10 +2,12 @@
 
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
+import type { Locale } from "date-fns";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import { cn } from "@/lib/utils";
 import type { Medication, MedicationStatus } from "@/types";
 import type { MedicationSchedule } from "@/types";
@@ -15,11 +17,12 @@ const DAY_SUFFIX = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 function formatScheduleSummary(
   medication: Medication,
-  t: (key: string) => string
+  t: (key: string) => string,
+  dateLocale: Locale
 ): string | null {
   if (medication.kind === "one_time") {
     if (medication.scheduled_at)
-      return format(new Date(medication.scheduled_at), "PP");
+      return format(new Date(medication.scheduled_at), "PP", { locale: dateLocale });
     return null;
   }
   const schedule = medication.schedule as MedicationSchedule | null | undefined;
@@ -69,13 +72,14 @@ function StatusBadge({ status }: { status: MedicationStatus }) {
 
 export function MedicationCard({ medication }: MedicationCardProps) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const isLowInventory =
     medication.inventory_enabled &&
     medication.inventory_refill_threshold != null &&
     medication.inventory_current != null &&
     medication.inventory_current <= medication.inventory_refill_threshold;
 
-  const scheduleSummary = formatScheduleSummary(medication, t);
+  const scheduleSummary = formatScheduleSummary(medication, t, dateLocale);
 
   return (
     <Link href={`/health/medications/${medication.id}`}>

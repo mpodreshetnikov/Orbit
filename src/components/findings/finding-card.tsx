@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import { AlertTriangle, MapPin, Ruler, Calendar, FileText, CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +42,7 @@ function getLateralityText(laterality: FindingLaterality, t: ReturnType<typeof u
 
 export function FindingCard({ finding }: FindingCardProps) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   
   const findingName = finding.catalog_finding_name_ru || finding.finding_type_text;
   const siteName = finding.catalog_site_name_ru || finding.body_site_text;
@@ -122,7 +124,7 @@ export function FindingCard({ finding }: FindingCardProps) {
               {finding.latest_date && (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  {format(new Date(finding.latest_date), "dd.MM.yyyy")}
+                  {format(new Date(finding.latest_date), "dd.MM.yyyy", { locale: dateLocale })}
                 </div>
               )}
             </div>

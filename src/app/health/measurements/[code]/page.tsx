@@ -4,6 +4,8 @@ import { use, useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
+import type { Locale } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import {
   ArrowLeft,
   Ruler,
@@ -74,14 +76,16 @@ function CustomTooltip({
 function MeasurementChart({ 
   history, 
   unit,
+  dateLocale,
 }: { 
   history: MeasurementHistoryPoint[];
   unit?: string;
+  dateLocale: Locale;
 }) {
   const chartData = history
     .filter(h => h.value !== null)
     .map(h => ({
-      date: format(new Date(h.measured_at), "dd.MM.yy"),
+      date: format(new Date(h.measured_at), "dd.MM.yy", { locale: dateLocale }),
       value: h.value,
     }));
 
@@ -142,11 +146,13 @@ function MeasurementChart({
 function HistoryTable({ 
   history, 
   unit,
+  dateLocale,
   onEdit,
   onDelete,
 }: { 
   history: MeasurementHistoryPoint[];
   unit?: string;
+  dateLocale: Locale;
   onEdit: (point: MeasurementHistoryPoint) => void;
   onDelete: (point: MeasurementHistoryPoint) => void;
 }) {
@@ -174,7 +180,7 @@ function HistoryTable({
               <td className="p-2 sm:p-3 whitespace-nowrap">
                 <div className="flex items-center gap-1.5 sm:gap-2">
                   <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                  {format(new Date(point.measured_at), "dd MMM yyyy, HH:mm")}
+                  {format(new Date(point.measured_at), "dd MMM yyyy, HH:mm", { locale: dateLocale })}
                 </div>
               </td>
               <td className="p-2 sm:p-3 text-right whitespace-nowrap">
@@ -225,6 +231,7 @@ export default function MeasurementDetailPage({
   const decodedCode = decodeURIComponent(code);
   const t = useTranslations();
   const router = useRouter();
+  const dateLocale = useDateFnsLocale();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
   const [locale, setLocale] = useState("en");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -366,7 +373,7 @@ export default function MeasurementDetailPage({
                   </div>
                   {measurement.latest_date && (
                     <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                      {format(new Date(measurement.latest_date), "dd MMM yyyy")}
+                      {format(new Date(measurement.latest_date), "dd MMM yyyy", { locale: dateLocale })}
                     </p>
                   )}
                 </CardContent>
@@ -447,6 +454,7 @@ export default function MeasurementDetailPage({
                   <MeasurementChart 
                     history={measurement.history}
                     unit={displayUnit}
+                    dateLocale={dateLocale}
                   />
                 </CardContent>
               </Card>
@@ -463,6 +471,7 @@ export default function MeasurementDetailPage({
                     <HistoryTable 
                       history={measurement.history} 
                       unit={displayUnit}
+                      dateLocale={dateLocale}
                       onEdit={handleEdit}
                       onDelete={handleDeleteClick}
                     />

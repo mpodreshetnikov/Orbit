@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import {
   ArrowLeft,
   Calendar,
@@ -133,6 +134,7 @@ interface RecordDetailProps {
 export function RecordDetail({ recordId }: RecordDetailProps) {
   const t = useTranslations();
   const router = useRouter();
+  const dateLocale = useDateFnsLocale();
 
   const { data: record, isLoading, error, refetch } = useMedicalRecord(recordId);
   const { data: observations } = useRecordObservations(recordId);
@@ -882,7 +884,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           ) : (
             <span>
               {record.record_date
-                ? format(new Date(record.record_date), "MMMM d, yyyy")
+                ? format(new Date(record.record_date), "MMMM d, yyyy", { locale: dateLocale })
                 : t("records.noDate")}
             </span>
           )}
@@ -891,7 +893,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           <Clock className="h-4 w-4" />
           <span>
             {t("records.detail.createdAt")}:{" "}
-            {format(new Date(record.created_at), "MMM d, yyyy 'at' HH:mm")}
+            {format(new Date(record.created_at), "MMM d, yyyy 'at' HH:mm", { locale: dateLocale })}
           </span>
         </div>
         {record.updated_at !== record.created_at && (
@@ -899,7 +901,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             <Clock className="h-4 w-4" />
             <span>
               {t("records.detail.updatedAt")}:{" "}
-              {format(new Date(record.updated_at), "MMM d, yyyy 'at' HH:mm")}
+              {format(new Date(record.updated_at), "MMM d, yyyy 'at' HH:mm", { locale: dateLocale })}
             </span>
           </div>
         )}

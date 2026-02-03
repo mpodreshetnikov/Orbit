@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import Link from "next/link";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import { 
   AlertCircle, 
   CheckCircle2, 
@@ -54,6 +55,7 @@ function StatusBadge({ status }: { status: ConditionStatus }) {
 
 export function ConditionCard({ condition, onClick }: ConditionCardProps) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
 
   const isActive = condition.current_status === "active";
   const isSuspected = condition.current_status === "suspected";
@@ -107,7 +109,7 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <Calendar className="h-3 w-3 shrink-0" />
               <span>
-                {t("conditions.onset")}: {format(new Date(condition.onset_date), "dd.MM.yyyy")}
+                {t("conditions.onset")}: {format(new Date(condition.onset_date), "dd.MM.yyyy", { locale: dateLocale })}
               </span>
             </div>
           )}
@@ -115,7 +117,7 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <CheckCircle2 className="h-3 w-3 shrink-0 text-green-500" />
               <span>
-                {t("conditions.resolvedOn")}: {format(new Date(condition.resolved_date), "dd.MM.yyyy")}
+                {t("conditions.resolvedOn")}: {format(new Date(condition.resolved_date), "dd.MM.yyyy", { locale: dateLocale })}
               </span>
             </div>
           )}
@@ -140,10 +142,10 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
           {condition.first_mentioned_date && (
             <div className="flex items-center gap-1">
               <span>
-                {format(new Date(condition.first_mentioned_date), "MM.yyyy")}
+                {format(new Date(condition.first_mentioned_date), "MM.yyyy", { locale: dateLocale })}
                 {condition.last_mentioned_date && 
                   condition.first_mentioned_date !== condition.last_mentioned_date && (
-                    <> — {format(new Date(condition.last_mentioned_date), "MM.yyyy")}</>
+                    <> — {format(new Date(condition.last_mentioned_date), "MM.yyyy", { locale: dateLocale })}</>
                   )}
               </span>
             </div>

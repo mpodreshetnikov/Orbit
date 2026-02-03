@@ -930,6 +930,7 @@
     "datePrev": "Previous day",
     "dateNext": "Next day",
     "dateToday": "Today",
+    "selectDate": "Choose date",
     "noIntakesDueToday": "No intakes due today",
     "noIntakesForDate": "No intakes for this day",
     "noIntakesPlannedForDate": "No intakes planned for this day",

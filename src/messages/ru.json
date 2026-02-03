@@ -930,6 +930,7 @@
     "datePrev": "Предыдущий день",
     "dateNext": "Следующий день",
     "dateToday": "Сегодня",
+    "selectDate": "Выбрать дату",
     "noIntakesDueToday": "Нет приёмов на сегодня",
     "noIntakesForDate": "Нет приёмов в этот день",
     "noIntakesPlannedForDate": "Нет запланированных приёмов на этот день",

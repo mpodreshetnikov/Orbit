@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -75,6 +76,7 @@ export default function MedicationDetailPage() {
   const params = useParams();
   const router = useRouter();
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const id = params.id as string;
 
   const { data: regimen, isLoading, error } = useRegimen(id);
@@ -208,7 +210,7 @@ export default function MedicationDetailPage() {
           {schedule?.mode === "one_off" && (schedule as { due_at?: string }).due_at && (
             <div className="flex items-center gap-1.5 text-sm">
               <Clock className="h-4 w-4 text-muted-foreground" />
-              {format(new Date((schedule as { due_at: string }).due_at), "PPp")}
+              {format(new Date((schedule as { due_at: string }).due_at), "PPp", { locale: dateLocale })}
             </div>
           )}
           {nextReminders.length > 0 && (
@@ -252,7 +254,9 @@ export default function MedicationDetailPage() {
                 const isTaken = ev.status === "taken";
                 const isSkipped = ev.status === "skipped";
                 const isMissed = ev.status === "missed";
-                const canEdit = isTaken || isSkipped || isMissed;
+                const isUnspecified =
+                  ev.status === "scheduled" || ev.status === "sent" || ev.status === "snoozed";
+                const canEdit = isTaken || isSkipped || isMissed || isUnspecified;
                 const isEditing = editingEventId === ev.id;
                 const pending =
                   isEditing &&
@@ -268,8 +272,8 @@ export default function MedicationDetailPage() {
                     <UnitIcon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
                     <span className="min-w-0 flex-1">
                       {ev.taken_at
-                        ? format(new Date(ev.taken_at), "PPp")
-                        : format(new Date(ev.actual_at), "PPp")}
+                        ? format(new Date(ev.taken_at), "PPp", { locale: dateLocale })
+                        : format(new Date(ev.actual_at), "PPp", { locale: dateLocale })}
                       {ev.status === "skipped" ? (
                         <Badge variant="secondary" className="ml-2 text-xs">
                           {t("medications.skipped")}
@@ -278,6 +282,13 @@ export default function MedicationDetailPage() {
                         <Badge variant="outline" className="ml-2 text-xs text-muted-foreground">
                           {t("medications.missed")}
                         </Badge>
+                      ) : isUnspecified ? (
+                        <>
+                          <Badge variant="outline" className="ml-2 text-xs text-muted-foreground">
+                            {t("medications.unspecified")}
+                          </Badge>
+                          <> — {formatAmountWithUnit(getPlannedIntakeAmount(ev.planned_intake), getPlannedIntakeUnit(ev.planned_intake) as MedicationUnit, t)}</>
+                        </>
                       ) : (
                         <> — {formatAmountWithUnit(getPlannedIntakeAmount(ev.planned_intake), getPlannedIntakeUnit(ev.planned_intake) as MedicationUnit, t)}</>
                       )}
@@ -350,6 +361,32 @@ export default function MedicationDetailPage() {
                               <Minus className="h-4 w-4 mr-2" />
                               {t("medications.markAsSkipped")}
                             </DropdownMenuItem>
+                          )}
+                          {isUnspecified && (
+                            <>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  markTaken.mutate(
+                                    { doseEventId: ev.id },
+                                    { onSettled: () => setEditingEventId(null) }
+                                  );
+                                }}
+                              >
+                                <Check className="h-4 w-4 mr-2" />
+                                {t("medications.markAsTaken")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  markSkipped.mutate(
+                                    { doseEventId: ev.id },
+                                    { onSettled: () => setEditingEventId(null) }
+                                  );
+                                }}
+                              >
+                                <Minus className="h-4 w-4 mr-2" />
+                                {t("medications.markAsSkipped")}
+                              </DropdownMenuItem>
+                            </>
                           )}
                         </DropdownMenuContent>
                       </DropdownMenu>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -60,6 +61,7 @@ function ConditionDetailContent() {
   const params = useParams();
   const router = useRouter();
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const conditionId = params.id as string;
 
   const { data: condition, isLoading, error, refetch } = useConditionDetail(conditionId);
@@ -252,7 +254,7 @@ function ConditionDetailContent() {
                     <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.onsetDate")}</span>
                     <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1 text-sm">
                       <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                      <span>{format(new Date(condition.onset_date), "dd MMM yyyy")}</span>
+                      <span>{format(new Date(condition.onset_date), "dd MMM yyyy", { locale: dateLocale })}</span>
                     </div>
                   </div>
                 )}
@@ -261,7 +263,7 @@ function ConditionDetailContent() {
                     <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.resolvedDate")}</span>
                     <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1 text-sm">
                       <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                      <span>{format(new Date(condition.resolved_date), "dd MMM yyyy")}</span>
+                      <span>{format(new Date(condition.resolved_date), "dd MMM yyyy", { locale: dateLocale })}</span>
                     </div>
                   </div>
                 )}
@@ -283,7 +285,7 @@ function ConditionDetailContent() {
               <div>
                 <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.firstMentioned")}</span>
                 <span className="text-xs sm:text-sm">
-                  {format(new Date(condition.first_mentioned_date), "dd.MM.yyyy")}
+                  {format(new Date(condition.first_mentioned_date), "dd.MM.yyyy", { locale: dateLocale })}
                 </span>
               </div>
             )}
@@ -291,7 +293,7 @@ function ConditionDetailContent() {
               <div>
                 <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.lastMentioned")}</span>
                 <span className="text-xs sm:text-sm">
-                  {format(new Date(condition.last_mentioned_date), "dd.MM.yyyy")}
+                  {format(new Date(condition.last_mentioned_date), "dd.MM.yyyy", { locale: dateLocale })}
                 </span>
               </div>
             )}
@@ -314,14 +316,14 @@ function ConditionDetailContent() {
             <div className="flex items-center gap-1">
               <Clock className="h-3 w-3 shrink-0" />
               <span>
-                {t("records.detail.createdAt")}: {format(new Date(condition.created_at), "dd.MM.yyyy HH:mm")}
+                {t("records.detail.createdAt")}: {format(new Date(condition.created_at), "dd.MM.yyyy HH:mm", { locale: dateLocale })}
               </span>
             </div>
             {condition.updated_at !== condition.created_at && (
               <div className="flex items-center gap-1">
                 <Pencil className="h-3 w-3 shrink-0" />
                 <span>
-                  {t("records.detail.updatedAt")}: {format(new Date(condition.updated_at), "dd.MM.yyyy HH:mm")}
+                  {t("records.detail.updatedAt")}: {format(new Date(condition.updated_at), "dd.MM.yyyy HH:mm", { locale: dateLocale })}
                 </span>
               </div>
             )}
@@ -378,7 +380,7 @@ function ConditionDetailContent() {
                             {record.record_date && (
                               <div className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3 shrink-0" />
-                                {format(new Date(record.record_date), "dd.MM.yyyy")}
+                                {format(new Date(record.record_date), "dd.MM.yyyy", { locale: dateLocale })}
                               </div>
                             )}
                             <ConditionStatusBadge status={record.status_in_record as ConditionStatus} />
@@ -437,7 +439,7 @@ function ConditionDetailContent() {
                 >
                   <span className="font-medium text-sm sm:text-base truncate">{item.title}</span>
                   <span className="text-xs text-muted-foreground shrink-0">
-                    {item.next_due_at ? format(new Date(item.next_due_at), "dd.MM.yyyy") : "—"}
+                    {item.next_due_at ? format(new Date(item.next_due_at), "dd.MM.yyyy", { locale: dateLocale }) : "—"}
                   </span>
                 </Link>
               ))}

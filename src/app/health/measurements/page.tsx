@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { format } from "date-fns";
+import { useDateFnsLocale } from "@/lib/date-locale";
 import {
   Search,
   LayoutGrid,
@@ -84,6 +85,7 @@ function TrendIndicator({ history }: { history: { value: number }[] }) {
 // Measurement card component
 function MeasurementCard({ measurement, locale }: { measurement: MeasurementSummary; locale: string }) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
   const displayName = locale === "ru" ? measurement.name_ru : measurement.name_en;
   const displayUnit = locale === "ru" ? measurement.unit_ru : measurement.unit_en;
   
@@ -121,7 +123,7 @@ function MeasurementCard({ measurement, locale }: { measurement: MeasurementSumm
               </div>
               {measurement.latest_date && (
                 <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                  {format(new Date(measurement.latest_date), "dd.MM.yyyy")}
+                  {format(new Date(measurement.latest_date), "dd.MM.yyyy", { locale: dateLocale })}
                 </p>
               )}
             </div>
@@ -138,6 +140,7 @@ function MeasurementCard({ measurement, locale }: { measurement: MeasurementSumm
 // Table view component
 function MeasurementsTable({ measurements, locale }: { measurements: MeasurementSummary[]; locale: string }) {
   const t = useTranslations();
+  const dateLocale = useDateFnsLocale();
 
   // Flatten all measurements into a table sorted by date
   const tableData = useMemo(() => {
@@ -200,7 +203,7 @@ function MeasurementsTable({ measurements, locale }: { measurements: Measurement
             {tableData.map((row) => (
               <tr key={row.id} className="hover:bg-muted/30">
                 <td className="p-3 whitespace-nowrap">
-                  {format(new Date(row.date), "dd.MM.yyyy HH:mm")}
+                  {format(new Date(row.date), "dd.MM.yyyy HH:mm", { locale: dateLocale })}
                 </td>
                 <td className="p-3">
                   <Link 
