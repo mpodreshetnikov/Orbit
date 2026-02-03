@@ -57,6 +57,10 @@ export interface NotificationPayload {
   title: string;
   body: string;
   url: string;
+  person_id?: string | null;
+  person_name?: string | null;
+  title_prefix?: string | null;
+  tag?: string | null;
   [key: string]: unknown;
 }
 
@@ -68,6 +72,10 @@ export interface NotificationForDevice {
   body: string;
   url: string;
   scheduledAt: string; // ISO
+  person_id?: string | null;
+  person_name?: string | null;
+  title_prefix?: string | null;
+  tag?: string | null;
   /** For medication type: dose event id(s) to confirm/skip from notification actions */
   dose_event_id?: string;
   dose_event_ids?: string[];
@@ -75,4 +83,24 @@ export interface NotificationForDevice {
 
 export interface NotificationsResponse {
   notifications: NotificationForDevice[];
+}
+
+// ============================================================================
+// Notification routing (per-person subscriptions)
+// ============================================================================
+
+export interface NotificationRoutingRow {
+  id: string;
+  recipient_user_id: string;
+  person_id: string;
+  enabled: boolean;
+  custom_prefix: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationRoutingUpsertInput {
+  person_id: string;
+  enabled: boolean;
+  custom_prefix?: string | null;
 }

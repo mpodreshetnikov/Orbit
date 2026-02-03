@@ -69,7 +69,15 @@
       "enableCheckupReminders": "Enable checkup reminders",
       "enableCheckupRemindersDescription": "Subscribe this device to receive checkup reminder notifications",
       "notificationsDebug": "Notifications debug",
-      "notificationsDebugDescription": "Manually run the notifications cron for testing"
+      "notificationsDebugDescription": "Manually run the notifications cron for testing",
+      "routingTitle": "Who to notify",
+      "routingDescription": "Choose which people/pets you want to receive reminders for. Your own person is enabled by default.",
+      "routingNoPersons": "No persons available yet.",
+      "routingEnabled": "Enabled",
+      "routingDisabled": "Disabled",
+      "routingPrefixLabel": "Title prefix",
+      "routingPrefixPlaceholder": "e.g., My Dog",
+      "routingPrefixHint": "Shown as (Prefix) in the notification title. Leave empty to use the person's name."
     },
     "notificationsDebug": {
       "title": "Notifications debug",

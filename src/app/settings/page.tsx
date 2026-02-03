@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Bell, BellOff, Bug, CheckCircle, XCircle, RefreshCw, Smartphone, Download, ArrowLeft, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useIntlLocale } from "@/lib/date-locale";
-import { useUserPreferences, useUpdateUserPreferences, usePushSubscribe } from "@/hooks";
+import { useUserPreferences, useUpdateUserPreferences, usePushSubscribe, usePersons, useNotificationRouting, useUpdateNotificationRouting } from "@/hooks";
 
 type PermissionStatus = "default" | "granted" | "denied" | "unsupported";
 type ServiceWorkerStatus = "checking" | "registered" | "not-registered" | "unsupported";
@@ -182,6 +182,25 @@ export default function SettingsPage() {
   const [notificationTime, setNotificationTime] = useState("09:00");
   const [notificationTimezone, setNotificationTimezone] = useState("");
   const [isEnablingReminders, setIsEnablingReminders] = useState(false);
+  const { data: persons } = usePersons();
+  const { data: routingState } = useNotificationRouting();
+  const updateRouting = useUpdateNotificationRouting();
+  const [prefixByPerson, setPrefixByPerson] = useState<Record<string, string>>({});
+  const routingRows = routingState?.rows ?? [];
+  const currentUserId = routingState?.userId ?? null;
+  const routingByPersonId = useMemo(
+    () => new Map(routingRows.map((row) => [row.person_id, row] as const)),
+    [routingRows]
+  );
+
+  useEffect(() => {
+    if (!routingRows) return;
+    const next: Record<string, string> = {};
+    for (const row of routingRows) {
+      next[row.person_id] = row.custom_prefix ?? "";
+    }
+    setPrefixByPerson((prev) => ({ ...next, ...prev }));
+  }, [routingRows]);
 
   useEffect(() => {
     if (preferences) {
@@ -242,6 +261,34 @@ export default function SettingsPage() {
     } finally {
       setIsEnablingReminders(false);
     }
+  };
+
+  const isPersonEnabled = (personId: string, personOwnerId: string | null | undefined) => {
+    const row = routingByPersonId.get(personId);
+    if (row) return row.enabled;
+    return currentUserId != null && personOwnerId === currentUserId;
+  };
+
+  const handleToggleRouting = async (personId: string, personOwnerId: string | null | undefined) => {
+    const enabled = !isPersonEnabled(personId, personOwnerId);
+    const isOwnPerson = currentUserId != null && personOwnerId === currentUserId;
+    const customPrefix = prefixByPerson[personId] ?? "";
+    await updateRouting.mutateAsync({
+      person_id: personId,
+      enabled,
+      custom_prefix: isOwnPerson ? null : (customPrefix.trim() ? customPrefix.trim() : null),
+    });
+  };
+
+  const handlePrefixSave = async (personId: string, personOwnerId: string | null | undefined) => {
+    const enabled = isPersonEnabled(personId, personOwnerId);
+    const isOwnPerson = currentUserId != null && personOwnerId === currentUserId;
+    const customPrefix = prefixByPerson[personId] ?? "";
+    await updateRouting.mutateAsync({
+      person_id: personId,
+      enabled,
+      custom_prefix: isOwnPerson ? null : (customPrefix.trim() ? customPrefix.trim() : null),
+    });
   };
 
   return (
@@ -409,6 +456,65 @@ export default function SettingsPage() {
                 {t("pwa.notificationsDebug")}
               </Link>
             </Button>
+          </CardContent>
+        </Card>
+
+        {/* Notification routing Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bell className="w-5 h-5" />
+              {t("pwa.routingTitle")}
+            </CardTitle>
+            <CardDescription>{t("pwa.routingDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(persons ?? []).length === 0 && (
+              <p className="text-sm text-muted-foreground">{t("pwa.routingNoPersons")}</p>
+            )}
+            {(persons ?? []).map((person) => {
+              const enabled = isPersonEnabled(person.id, person.auth_user_id);
+              const prefixValue = prefixByPerson[person.id] ?? "";
+              const isOwnPerson = currentUserId != null && person.auth_user_id === currentUserId;
+              return (
+                <div key={person.id} className="rounded-lg border p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{person.name}</p>
+                      {person.kind === "pet" && person.species && (
+                        <p className="text-xs text-muted-foreground">{person.species}</p>
+                      )}
+                    </div>
+                    <Button
+                      variant={enabled ? "default" : "outline"}
+                      size="sm"
+                      disabled={updateRouting.isPending}
+                      onClick={() => handleToggleRouting(person.id, person.auth_user_id)}
+                    >
+                      {enabled ? t("pwa.routingEnabled") : t("pwa.routingDisabled")}
+                    </Button>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor={`routing-prefix-${person.id}`}>{t("pwa.routingPrefixLabel")}</Label>
+                    <Input
+                      id={`routing-prefix-${person.id}`}
+                      type="text"
+                      placeholder={t("pwa.routingPrefixPlaceholder")}
+                      value={prefixValue}
+                      disabled={!enabled || updateRouting.isPending || isOwnPerson}
+                      onChange={(e) =>
+                        setPrefixByPerson((prev) => ({
+                          ...prev,
+                          [person.id]: e.target.value,
+                        }))
+                      }
+                      onBlur={() => handlePrefixSave(person.id, person.auth_user_id)}
+                    />
+                    <p className="text-xs text-muted-foreground">{t("pwa.routingPrefixHint")}</p>
+                  </div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
 

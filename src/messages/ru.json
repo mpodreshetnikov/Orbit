@@ -69,7 +69,15 @@
       "enableCheckupReminders": "Включить напоминания о чек-апах",
       "enableCheckupRemindersDescription": "Подписать это устройство на уведомления о чек-апах",
       "notificationsDebug": "Отладка уведомлений",
-      "notificationsDebugDescription": "Вручную запустить крон уведомлений для теста"
+      "notificationsDebugDescription": "Вручную запустить крон уведомлений для теста",
+      "routingTitle": "Кого уведомлять",
+      "routingDescription": "Выберите людей и питомцев, по которым хотите получать напоминания. Ваш профиль включён по умолчанию.",
+      "routingNoPersons": "Нет доступных профилей.",
+      "routingEnabled": "Включено",
+      "routingDisabled": "Выключено",
+      "routingPrefixLabel": "Префикс заголовка",
+      "routingPrefixPlaceholder": "Например, Мой пёс",
+      "routingPrefixHint": "Показывается как (Префикс) в заголовке уведомления. Оставьте пустым, чтобы использовать имя."
     },
     "notificationsDebug": {
       "title": "Отладка уведомлений",

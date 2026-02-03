@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 
   const { data: rows, error } = await supabase
     .from("notification_digests")
-    .select("id, type, scheduled_at, payload_json")
+    .select("id, type, scheduled_at, payload_json, person_id")
     .eq("auth_user_id", user.id)
     .is("sent_at", null)
     .gte("scheduled_at", fromDate)
@@ -46,8 +46,29 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const notifications: NotificationForDevice[] = (rows ?? []).map((r) => {
-    const payload = r.payload_json as { title?: string; body?: string; url?: string };
+  const { data: routedPersons } = await supabase.rpc("get_routed_persons_for_recipient", {
+    p_recipient_user_id: user.id,
+  });
+  const allowedPersonIds = new Set(
+    (routedPersons ?? []).map((p: { person_id: string }) => p.person_id)
+  );
+
+  const notifications: NotificationForDevice[] = (rows ?? [])
+    .filter((r) => {
+      const personId = (r.person_id as string | null) ?? null;
+      if (!personId) return true;
+      return allowedPersonIds.has(personId);
+    })
+    .map((r) => {
+    const payload = r.payload_json as {
+      title?: string;
+      body?: string;
+      url?: string;
+      person_id?: string | null;
+      person_name?: string | null;
+      title_prefix?: string | null;
+      tag?: string | null;
+    };
     return {
       id: r.id,
       type: r.type,
@@ -55,6 +76,10 @@ export async function GET(request: Request) {
       body: payload?.body ?? "",
       url: payload?.url ?? "/",
       scheduledAt: r.scheduled_at,
+      person_id: (r.person_id as string | null) ?? payload?.person_id ?? null,
+      person_name: payload?.person_name ?? null,
+      title_prefix: payload?.title_prefix ?? null,
+      tag: payload?.tag ?? null,
     };
   });
 

@@ -6,6 +6,21 @@ import type { NotificationForDevice } from "@/types";
 const NOTIFICATIONS_STORAGE_KEY = "notifications_shown";
 const BUFFER_MS = 60 * 1000;
 
+function resolveTitlePrefix(notification: NotificationForDevice): string | null {
+  if ("title_prefix" in notification) {
+    return notification.title_prefix ?? null;
+  }
+  return notification.person_name ?? null;
+}
+
+function applyTitlePrefix(title: string, prefix?: string | null): string {
+  if (!prefix) return title;
+  const trimmed = prefix.trim();
+  if (!trimmed) return title;
+  const prefixText = `(${trimmed}) `;
+  return title.startsWith(prefixText) ? title : `${prefixText}${title}`;
+}
+
 function getShownToday(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
@@ -77,19 +92,27 @@ async function showNotificationFallback(notification: NotificationForDevice): Pr
   const url = notification.url?.startsWith("/")
     ? `${origin}${notification.url}`
     : notification.url ?? `${origin}/`;
+  const baseTitle = notification.title || "Notification";
+  const prefix = resolveTitlePrefix(notification);
+  const title = applyTitlePrefix(baseTitle, prefix);
+  const tagBase =
+    notification.tag ??
+    (notification.person_id
+      ? `notification-${notification.person_id}-${notification.id}`
+      : `notification-${notification.id}`);
   const options: NotificationOptions = {
     body: notification.body,
     icon: "/icons/icon-192x192.png",
     badge: "/icons/icon-192x192.png",
     data: { url },
-    tag: `notification-${notification.id}`,
+    tag: tagBase,
     requireInteraction: true,
   };
   const reg = await navigator.serviceWorker?.getRegistration();
   if (reg) {
-    await reg.showNotification(notification.title, options);
+    await reg.showNotification(title, options);
   } else {
-    new Notification(notification.title, options);
+    new Notification(title, options);
   }
   await callMarkShown(notification.id);
   markShownToday(notification.id);
@@ -125,8 +148,16 @@ export function useNotifications(): void {
     if (typeof window === "undefined" || !("Notification" in window)) return;
     const onMessage = (event: MessageEvent) => {
       const data = event.data;
-      if (data?.type === "notificationShown" && typeof data.id === "string") {
-        markShownToday(data.id);
+      if (data?.type === "notificationShown") {
+        if (Array.isArray(data.ids)) {
+          data.ids.forEach((id: string) => {
+            if (typeof id === "string") markShownToday(id);
+          });
+          return;
+        }
+        if (typeof data.id === "string") {
+          markShownToday(data.id);
+        }
       }
     };
     navigator.serviceWorker?.addEventListener("message", onMessage);

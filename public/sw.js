@@ -40,6 +40,28 @@ function getAppLang() {
 var DEFAULT_ICON = "/icons/icon-192x192.png";
 
 // ---------------------------------------------------------------------------
+// Title prefix helpers
+// ---------------------------------------------------------------------------
+function resolveTitlePrefix(n) {
+  if (!n) return null;
+  if (Object.prototype.hasOwnProperty.call(n, "title_prefix")) {
+    return n.title_prefix || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(n, "titlePrefix")) {
+    return n.titlePrefix || null;
+  }
+  return n.person_name || n.personName || null;
+}
+
+function applyTitlePrefix(title, prefix) {
+  if (!prefix) return title;
+  var prefixLabel = String(prefix).trim();
+  if (!prefixLabel) return title;
+  var prefixText = "(" + prefixLabel + ") ";
+  return title.startsWith(prefixText) ? title : (prefixText + title);
+}
+
+// ---------------------------------------------------------------------------
 // Notification type handlers
 // Add a new type by adding an entry to NOTIFICATION_TYPE_HANDLERS.
 // Each handler can define: icon, badge, image, getActions(lang), getTitle(n, lang), getBody(n, lang), getData(n), onActionClick(event, data, action).
@@ -150,7 +172,14 @@ var NOTIFICATION_TYPE_HANDLERS = {
   medication: {
     icon: "/icons/icon-512x512.png",
     badge: "/icons/pills-128x128.png",
-    tag: "medication-reminder",
+    tag: function (n) {
+      if (n && n.tag) return n.tag;
+      var personId = n.person_id || n.personId || "";
+      if (n && n.id) {
+        return "medication-" + (personId ? personId + "-" : "") + n.id;
+      }
+      return "medication-" + Date.now();
+    },
     renotify: true,
     getActions: function (lang) {
       var labels = getMedicationActionLabels(lang);
@@ -232,9 +261,18 @@ function buildNotificationOptions(n, lang) {
     if (typeof handler.getData === "function") data = handler.getData(n, baseData);
   }
 
-  var tag = (handler && handler.tag != null)
-    ? (typeof handler.tag === "function" ? handler.tag(n) : handler.tag)
-    : (n.id ? "notification-" + n.id : "notification-" + Date.now());
+  var tag = n && n.tag ? n.tag : null;
+  if (!tag && handler && handler.tag != null) {
+    tag = (typeof handler.tag === "function" ? handler.tag(n) : handler.tag);
+  }
+  if (!tag) {
+    var fallbackPersonId = n && (n.person_id || n.personId) ? (n.person_id || n.personId) : "";
+    if (n && n.id) {
+      tag = "notification-" + (fallbackPersonId ? fallbackPersonId + "-" : "") + n.id;
+    } else {
+      tag = "notification-" + Date.now();
+    }
+  }
   var renotify = (handler && handler.renotify != null) ? handler.renotify : false;
   var options = {
     body: body,
@@ -246,6 +284,8 @@ function buildNotificationOptions(n, lang) {
     requireInteraction: true,
     data: data,
   };
+  var prefix = resolveTitlePrefix(n);
+  title = applyTitlePrefix(title, prefix);
   if (image != null) options.image = image;
   if (actions != null && actions.length > 0) options.actions = actions;
   return { title: title, options: options };
@@ -394,12 +434,18 @@ self.addEventListener("message", function (event) {
     })
     .then(function () {
       if (client && client.postMessage) {
-        client.postMessage({ type: "notificationShown", id: notification.id });
+        var idsToNotify = notification.ids && Array.isArray(notification.ids)
+          ? notification.ids
+          : (notification.id ? [notification.id] : []);
+        client.postMessage({ type: "notificationShown", ids: idsToNotify });
       }
     })
     .catch(function () {
       if (client && client.postMessage) {
-        client.postMessage({ type: "notificationShown", id: notification.id });
+        var idsToNotify = notification.ids && Array.isArray(notification.ids)
+          ? notification.ids
+          : (notification.id ? [notification.id] : []);
+        client.postMessage({ type: "notificationShown", ids: idsToNotify });
       }
     });
 });

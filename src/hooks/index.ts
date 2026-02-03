@@ -23,4 +23,5 @@ export * from "./use-user-preferences";
 export * from "./use-push-subscribe";
 export * from "./use-ensure-push-subscription";
 export * from "./use-notifications";
+export * from "./use-notification-routing";
 export * from "./use-icd-lookup";
