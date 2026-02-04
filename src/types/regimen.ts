@@ -73,8 +73,8 @@ export type MedSchedule =
   | MedScheduleDaysOfWeek
   | MedScheduleOneOff;
 
-export type MedDurationEndless = { type: "endless" };
-export type MedDurationUntilDate = { type: "until_date"; end_date: string };
+export type MedDurationEndless = { type: "endless"; start_date?: string };
+export type MedDurationUntilDate = { type: "until_date"; end_date: string; start_date?: string };
 export type MedDurationForDays = { type: "for_days"; days: number; start_date?: string };
 
 export type MedDuration =

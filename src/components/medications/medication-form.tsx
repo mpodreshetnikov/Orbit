@@ -110,14 +110,15 @@ function getInitialSchedule(initial: MedRegimen | null | undefined, defaultKind:
 function getInitialDuration(initial: MedRegimen | null | undefined): MedDuration {
   if (!initial?.duration) return DEFAULT_DURATION;
   const d = initial.duration;
-  if (d.type === "until_date") return { type: "until_date", end_date: d.end_date ?? "" };
-  if (d.type === "for_days") return { type: "for_days", days: d.days ?? 1, start_date: (d as { start_date?: string }).start_date };
-  return { type: "endless" };
+  const start = (d as { start_date?: string }).start_date;
+  if (d.type === "until_date") return { type: "until_date", end_date: d.end_date ?? "", start_date: start };
+  if (d.type === "for_days") return { type: "for_days", days: d.days ?? 1, start_date: start };
+  return { type: "endless", start_date: start };
 }
 
 function getInitialStartDate(initial: MedRegimen | null | undefined): string {
-  if (initial?.duration?.type === "for_days" && (initial.duration as { start_date?: string }).start_date)
-    return (initial.duration as { start_date: string }).start_date;
+  const start = initial?.duration && (initial.duration as { start_date?: string }).start_date;
+  if (start) return start;
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -265,7 +266,9 @@ export function MedicationForm({
     const durationToSubmit: MedDuration =
       duration.type === "for_days"
         ? { type: "for_days", days: duration.days ?? 1, start_date: startDate }
-        : duration;
+        : duration.type === "until_date"
+          ? { type: "until_date", end_date: duration.end_date ?? "", start_date: startDate }
+          : { type: "endless", start_date: startDate };
 
     if (mode === "create") {
       (onSubmit as (d: CreateMedRegimenInput) => void)({
@@ -330,14 +333,6 @@ export function MedicationForm({
 
   const setScheduleMode = (next: MedSchedule) => {
     setSchedule(next);
-  };
-
-  const setDurationUpdate = (updates: Partial<MedDuration> & { end_type?: "endless" | "end_date" | "days_from_start"; end_date?: string; days_count?: number }) => {
-    const { end_type, end_date, days_count, ...rest } = updates as MedDuration & { end_type?: string; end_date?: string; days_count?: number };
-    if (end_type === "endless") setDuration({ type: "endless" });
-    else if (end_type === "end_date" && end_date != null) setDuration({ type: "until_date", end_date });
-    else if (end_type === "days_from_start" && days_count != null) setDuration({ type: "for_days", days: days_count, start_date: startDate });
-    else if (Object.keys(rest).length) setDuration((prev) => ({ ...prev, ...rest } as MedDuration));
   };
 
   const toggleDayOfWeek = (d: number) => {
@@ -631,6 +626,10 @@ export function MedicationForm({
                   setStartDate(v);
                   if (duration.type === "for_days") {
                     setDuration({ type: "for_days", days: duration.days ?? 1, start_date: v });
+                  } else if (duration.type === "until_date") {
+                    setDuration({ type: "until_date", end_date: duration.end_date ?? "", start_date: v });
+                  } else {
+                    setDuration({ type: "endless", start_date: v });
                   }
                 }}
               />
@@ -641,8 +640,8 @@ export function MedicationForm({
                 value={duration.type === "endless" ? "endless" : duration.type === "until_date" ? "end_date" : "days_from_start"}
                 onValueChange={(v) => {
                   setScheduleError("");
-                  if (v === "endless") setDuration({ type: "endless" });
-                  else if (v === "end_date") setDuration({ type: "until_date", end_date: duration.type === "until_date" ? duration.end_date : "" });
+                  if (v === "endless") setDuration({ type: "endless", start_date: startDate });
+                  else if (v === "end_date") setDuration({ type: "until_date", end_date: duration.type === "until_date" ? duration.end_date : "", start_date: startDate });
                   else setDuration({ type: "for_days", days: duration.type === "for_days" ? duration.days : 1, start_date: startDate });
                 }}
               >
