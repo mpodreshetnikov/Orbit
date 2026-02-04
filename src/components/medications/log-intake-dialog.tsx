@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,48 +16,45 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Medication, CreateMedicationIntakeInput } from "@/types";
+import type { MedRegimen } from "@/types/regimen";
+import { getPlannedIntakeAmount } from "@/types/regimen";
 import { getUnitLabel } from "./medication-units";
+
+export interface LogIntakeDialogSubmitInput {
+  regimen_id: string;
+  amount: number;
+  skipped: boolean;
+  note: string | null;
+}
 
 interface LogIntakeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  medication: Medication | null;
-  onSubmit: (input: CreateMedicationIntakeInput) => Promise<void>;
+  regimen: MedRegimen | null;
+  onSubmit: (input: LogIntakeDialogSubmitInput) => Promise<void>;
 }
 
 export function LogIntakeDialog({
   open,
   onOpenChange,
-  medication,
+  regimen,
   onSubmit,
 }: LogIntakeDialogProps) {
   const t = useTranslations();
-  const defaultAmount =
-    medication?.kind === "regular" && medication?.schedule?.reminder_times?.[0] != null
-      ? medication.schedule.reminder_times[0].amount
-      : 1;
+  const defaultAmount = regimen ? Math.max(1, getPlannedIntakeAmount(regimen.dose_definition)) : 1;
   const [amount, setAmount] = useState(() => defaultAmount);
   const [skipped, setSkipped] = useState(false);
   const [note, setNote] = useState("");
   const [isPending, setIsPending] = useState(false);
 
   useEffect(() => {
-    if (open && medication) {
-      setAmount(
-        medication.kind === "regular" && medication.schedule?.reminder_times?.[0] != null
-          ? medication.schedule.reminder_times[0].amount
-          : 1
-      );
+    if (open && regimen) {
+      setAmount(Math.max(1, getPlannedIntakeAmount(regimen.dose_definition)));
     }
-  }, [open, medication]);
+  }, [open, regimen]);
 
   const reset = () => {
-    setAmount(
-      medication?.kind === "regular" && medication?.schedule?.reminder_times?.[0] != null
-        ? medication.schedule.reminder_times[0].amount
-        : 1
-    );
+    setAmount(regimen ? Math.max(1, getPlannedIntakeAmount(regimen.dose_definition)) : 1);
     setSkipped(false);
     setNote("");
   };
@@ -68,11 +66,11 @@ export function LogIntakeDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!medication) return;
+    if (!regimen) return;
     setIsPending(true);
     try {
       await onSubmit({
-        medication_id: medication.id,
+        regimen_id: regimen.id,
         amount: skipped ? 0 : amount,
         skipped,
         note: note.trim() || null,
@@ -89,16 +87,15 @@ export function LogIntakeDialog({
         <DialogHeader>
           <DialogTitle>{t("medications.logIntake")}</DialogTitle>
           <DialogDescription>
-            {medication?.name}
+            {regimen?.custom_name}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               id="skipped"
               checked={skipped}
-              onChange={(e) => setSkipped(e.target.checked)}
+              onCheckedChange={(checked) => setSkipped(Boolean(checked))}
             />
             <Label htmlFor="skipped">{t("medications.logIntakeSkipped")}</Label>
           </div>
@@ -106,9 +103,9 @@ export function LogIntakeDialog({
             <div className="space-y-2">
               <Label htmlFor="amount">
                 {t("medications.logIntakeAmount")}
-                {medication && (
+                {regimen && (
                   <span className="text-muted-foreground font-normal ml-1">
-                    ({getUnitLabel(medication.unit, t)})
+                    ({getUnitLabel(regimen.intake_unit, t)})
                   </span>
                 )}
               </Label>
@@ -122,9 +119,9 @@ export function LogIntakeDialog({
                   onChange={(e) => setAmount(Number(e.target.value) || 1)}
                   className="w-24"
                 />
-                {medication && (
+                {regimen && (
                   <span className="text-sm text-muted-foreground">
-                    {getUnitLabel(medication.unit, t)}
+                    {getUnitLabel(regimen.intake_unit, t)}
                   </span>
                 )}
               </div>

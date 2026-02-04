@@ -37,12 +37,26 @@ export async function POST(request: Request) {
         .select("checkup_notification_timezone")
         .eq("auth_user_id", user.id)
         .maybeSingle())
-        .data?.checkup_notification_timezone ?? "UTC";
+        .data?.checkup_notification_timezone ?? null;
 
-    const tz =
+    const clientTz =
       typeof body.timezone === "string" && body.timezone.trim()
         ? body.timezone.trim()
-        : (prefsTz ?? "UTC");
+        : null;
+
+    const tz = clientTz ?? prefsTz ?? "UTC";
+
+    // Persist client timezone to user_preferences so cron uses the same timezone.
+    // This prevents duplicate events at different times when cron runs with UTC
+    // while client uses the actual local timezone.
+    if (clientTz && clientTz !== prefsTz) {
+      await supabase
+        .from("user_preferences")
+        .upsert(
+          { auth_user_id: user.id, checkup_notification_timezone: clientTz },
+          { onConflict: "auth_user_id" }
+        );
+    }
 
     const horizonDays = 7;
 

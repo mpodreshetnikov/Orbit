@@ -53,6 +53,8 @@ import {
   useUpdateDoseEventResolutionDetails,
 } from "@/hooks";
 import { formatAmountWithUnit, getUnitIcon } from "@/components/medications/medication-units";
+import { formatRegimenScheduleSummary } from "@/components/medications/regimen-card";
+import { useIntlLocale } from "@/lib/date-locale";
 import type { MedDoseEvent, MedDoseEventStatus } from "@/types/regimen";
 import { getPlannedIntakeAmount, getPlannedIntakeUnit } from "@/types/regimen";
 import type { MedicationUnit } from "@/types";
@@ -77,6 +79,7 @@ export default function MedicationDetailPage() {
   const router = useRouter();
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
+  const intlLocale = useIntlLocale();
   const id = params.id as string;
 
   const { data: regimen, isLoading, error } = useRegimen(id);
@@ -142,24 +145,7 @@ export default function MedicationDetailPage() {
     );
   }
 
-  const schedule = regimen.schedule as {
-    mode?: string;
-    times?: string[];
-    time_of_day?: string;
-    amounts?: number[];
-  };
-  const defaultAmount = getPlannedIntakeAmount(regimen.dose_definition);
-  const nextReminders =
-    schedule?.mode === "daily_times" && schedule.times?.length
-      ? schedule.times.map((time, i) => ({
-          time,
-          amount: schedule.amounts != null && schedule.amounts[i] != null
-            ? Math.max(1, schedule.amounts[i])
-            : defaultAmount,
-        }))
-      : schedule?.mode === "interval_days" && schedule.time_of_day
-        ? [{ time: schedule.time_of_day, amount: defaultAmount }]
-        : [];
+  const scheduleSummary = regimen ? formatRegimenScheduleSummary(regimen, t, intlLocale) : null;
 
   return (
     <div className="space-y-6">
@@ -207,22 +193,10 @@ export default function MedicationDetailPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {schedule?.mode === "one_off" && (schedule as { due_at?: string }).due_at && (
-            <div className="flex items-center gap-1.5 text-sm">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              {format(new Date((schedule as { due_at: string }).due_at), "PPp", { locale: dateLocale })}
-            </div>
-          )}
-          {nextReminders.length > 0 && (
-            <div>
-              <h3 className="text-sm font-medium mb-2">{t("medications.nextReminders")}</h3>
-              <ul className="text-sm text-muted-foreground space-y-1">
-                {nextReminders.map((r, i) => (
-                  <li key={i}>
-                    {r.time} — {formatAmountWithUnit(r.amount, regimen.intake_unit, t)}
-                  </li>
-                ))}
-              </ul>
+          {scheduleSummary && (
+            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
+              {scheduleSummary}
             </div>
           )}
           {inv?.enabled && (

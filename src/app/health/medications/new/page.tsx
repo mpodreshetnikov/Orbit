@@ -7,10 +7,9 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MedicationForm } from "@/components/medications";
 import { useCreateRegimen } from "@/hooks";
-import { createMedicationInputToRegimenInput } from "@/lib/medication-regimen-adapter";
 import { regenerateMedicationEvents, getClientTimezone } from "@/lib/medication-events";
 import { useUIStore } from "@/stores/ui-store";
-import type { CreateMedicationInput } from "@/types";
+import type { CreateMedRegimenInput } from "@/types/regimen";
 import type { MedicationKind } from "@/types";
 
 export default function NewMedicationPage() {
@@ -31,11 +30,8 @@ export default function NewMedicationPage() {
     );
   }
 
-  const handleSubmit = async (
-    data: CreateMedicationInput | import("@/types").UpdateMedicationInput
-  ) => {
-    const input = createMedicationInputToRegimenInput(data as CreateMedicationInput);
-    const regimen = await createMutation.mutateAsync(input);
+  const handleSubmit = async (data: CreateMedRegimenInput) => {
+    const regimen = await createMutation.mutateAsync(data);
     await regenerateMedicationEvents(getClientTimezone(), regimen.person_id);
     router.push(`/health/medications/${regimen.id}`);
   };

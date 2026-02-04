@@ -886,6 +886,8 @@
     "dayFri": "Fri",
     "daySat": "Sat",
     "every": "Every",
+    "everyXHours": "Every x hours",
+    "everyXDays": "Every x days",
     "hours": "hours",
     "days": "days",
     "daysOfWeek": "Days of week",

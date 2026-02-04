@@ -41,12 +41,18 @@ export type MedScheduleDailyTimes = {
 export type MedScheduleIntervalHours = {
   mode: "interval_hours";
   interval: { every: number };
+  /** Amount per intake (pills/units). Default 1. */
+  amount?: number;
 };
 
 export type MedScheduleIntervalDays = {
   mode: "interval_days";
   interval: { every: number };
-  time_of_day: string;
+  /** Full schedule: multiple times per day with optional per-slot amounts. */
+  times: string[];
+  amounts?: number[];
+  /** @deprecated Use times[0] when reading legacy data. */
+  time_of_day?: string;
 };
 
 export type MedScheduleDaysOfWeek = {

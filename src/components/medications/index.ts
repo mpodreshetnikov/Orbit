@@ -1,4 +1,3 @@
-export { MedicationCard } from "./medication-card";
 export { RegimenCard } from "./regimen-card";
 export { MedicationForm } from "./medication-form";
 export { MedicationDashboard } from "./medication-dashboard";

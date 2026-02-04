@@ -8,11 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { useIntlLocale } from "@/lib/date-locale";
 import { cn } from "@/lib/utils";
 import type { MedRegimen, MedSchedule } from "@/types/regimen";
+import { medicationUnitKey } from "@/types";
 import { formatAmountWithUnit, getUnitIcon } from "./medication-units";
 
 const DAY_SUFFIX = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-function formatRegimenScheduleSummary(
+export function formatRegimenScheduleSummary(
   regimen: MedRegimen,
   t: (key: string) => string,
   intlLocale: string
@@ -30,13 +31,19 @@ function formatRegimenScheduleSummary(
     if (times?.length) return `${t("medications.frequencyDaily")} ${t("medications.scheduleAt")} ${times.join(", ")}`;
   }
   if (mode === "interval_hours") {
-    const every = (schedule as { interval?: { every?: number } }).interval?.every;
-    if (every != null) return `${t("medications.every")} ${every} ${t("medications.hours")}`;
+    const every = (schedule as { interval?: { every?: number }; amount?: number }).interval?.every;
+    const amount = (schedule as { amount?: number }).amount;
+    if (every != null) {
+      const base = `${t("medications.every")} ${every} ${t("medications.hours")}`;
+      return amount != null && amount > 1 ? `${base} · ${amount} ${t(medicationUnitKey(regimen.intake_unit), { count: amount })}` : base;
+    }
   }
   if (mode === "interval_days") {
-    const every = (schedule as { interval?: { every?: number }; time_of_day?: string }).interval?.every;
-    const timeOfDay = (schedule as { time_of_day?: string }).time_of_day ?? "09:00";
-    if (every != null) return `${t("medications.every")} ${every} ${t("medications.days")} ${t("medications.scheduleAt")} ${timeOfDay}`;
+    const every = (schedule as { interval?: { every?: number }; times?: string[]; time_of_day?: string }).interval?.every;
+    const times = (schedule as { times?: string[] }).times;
+    const timeOfDay = (schedule as { time_of_day?: string }).time_of_day;
+    const timeStr = times?.length ? times.join(", ") : (timeOfDay ?? "09:00");
+    if (every != null) return `${t("medications.every")} ${every} ${t("medications.days")} ${t("medications.scheduleAt")} ${timeStr}`;
   }
   if (mode === "days_of_week") {
     const days = (schedule as { days_of_week?: number[] }).days_of_week;

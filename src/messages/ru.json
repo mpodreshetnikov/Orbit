@@ -886,6 +886,8 @@
     "dayFri": "Пт",
     "daySat": "Сб",
     "every": "Каждые",
+    "everyXHours": "Каждые x часов",
+    "everyXDays": "Каждые x дней",
     "hours": "часов",
     "days": "дней",
     "daysOfWeek": "Дни недели",

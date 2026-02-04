@@ -8,9 +8,8 @@ import { Button } from "@/components/ui/button";
 import { MedicationForm } from "@/components/medications";
 import { useRegimen, useUpdateRegimen } from "@/hooks";
 import { Skeleton } from "@/components/ui/skeleton";
-import { regimenToMedication, updateMedicationInputToRegimenInput } from "@/lib/medication-regimen-adapter";
 import { regenerateMedicationEvents, getClientTimezone } from "@/lib/medication-events";
-import type { UpdateMedicationInput } from "@/types";
+import type { UpdateMedRegimenInput } from "@/types/regimen";
 
 export default function EditMedicationPage() {
   const params = useParams();
@@ -20,18 +19,16 @@ export default function EditMedicationPage() {
 
   const { data: regimen, isLoading, error } = useRegimen(id);
   const updateMutation = useUpdateRegimen();
-  const medication = regimen ? regimenToMedication(regimen) : null;
 
-  const handleSubmit = async (data: UpdateMedicationInput) => {
-    const updates = updateMedicationInputToRegimenInput(data);
-    await updateMutation.mutateAsync({ id, updates });
+  const handleSubmit = async (data: UpdateMedRegimenInput) => {
+    await updateMutation.mutateAsync({ id, updates: data });
     if (regimen) {
       await regenerateMedicationEvents(getClientTimezone(), regimen.person_id);
     }
     router.push(`/health/medications/${id}`);
   };
 
-  if (isLoading || !regimen || !medication) {
+  if (isLoading || !regimen) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-48" />
@@ -62,7 +59,7 @@ export default function EditMedicationPage() {
       <div className="max-w-md">
         <MedicationForm
           mode="edit"
-          initial={medication}
+          initial={regimen}
           personId={regimen.person_id}
           onSubmit={handleSubmit}
           isPending={updateMutation.isPending}

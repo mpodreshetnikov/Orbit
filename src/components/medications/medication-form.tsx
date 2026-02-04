@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,36 +18,36 @@ import {
 } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
-import type {
-  Medication,
-  MedicationKind,
-  MedicationUnit,
-  MedicationSchedule,
-  MedicationScheduleFrequency,
-  CreateMedicationInput,
-  UpdateMedicationInput,
-} from "@/types";
+import type { MedicationKind, MedicationUnit } from "@/types";
 import { MEDICATION_UNITS, INTAKE_ADVICE_OPTIONS, medicationUnitKey } from "@/types";
 import { getUnitIcon, getUnitLabel } from "./medication-units";
+import type {
+  MedRegimen,
+  MedSchedule,
+  MedDuration,
+  CreateMedRegimenInput,
+  UpdateMedRegimenInput,
+  PlannedIntake,
+  RegimenInventory,
+} from "@/types/regimen";
 
 interface MedicationFormProps {
   mode: "create" | "edit";
-  initial?: Medication | null;
+  initial?: MedRegimen | null;
   personId: string;
   defaultKind?: MedicationKind;
-  onSubmit: (data: CreateMedicationInput | UpdateMedicationInput) => void | Promise<void>;
+  onSubmit: (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void | Promise<void>;
   isPending?: boolean;
   onCancel?: () => void;
 }
 
-const DEFAULT_SCHEDULE: MedicationSchedule = {
-  frequency: { type: "daily" },
-  duration: {
-    start_date: new Date().toISOString().slice(0, 10),
-    end_type: "endless",
-  },
-  reminder_times: [{ time: "08:00", amount: 1 }],
+const DEFAULT_SCHEDULE: MedSchedule = {
+  mode: "daily_times",
+  times: ["09:00"],
+  amounts: [1],
 };
+
+const DEFAULT_DURATION: MedDuration = { type: "endless" };
 
 // Preset intake times: morning (9AM), midday (12), late afternoon (3PM), evening (8PM), night (11PM), plus extras for 6–10
 const PRESET_INTAKE_TIMES: string[] = [
@@ -75,6 +76,50 @@ function getReminderSlotsForIntakesPerDay(n: number): { time: string; amount: nu
   return ordered.slice(0, n).map((time) => ({ time, amount: 1 }));
 }
 
+function getInitialSchedule(initial: MedRegimen | null | undefined, defaultKind: MedicationKind | undefined): MedSchedule {
+  if (!initial?.schedule) {
+    return defaultKind === "one_time"
+      ? { mode: "one_off", due_at: "" }
+      : DEFAULT_SCHEDULE;
+  }
+  const s = initial.schedule;
+  if (s.mode === "one_off") return { ...s };
+  if (s.mode === "daily_times") return { mode: "daily_times", times: s.times ?? ["09:00"], amounts: s.amounts ?? [1] };
+  if (s.mode === "interval_hours") return { mode: "interval_hours", interval: { every: s.interval?.every ?? 1 }, amount: Math.max(1, (s as { amount?: number }).amount ?? 1) };
+  if (s.mode === "interval_days") {
+    const sd = s as { interval?: { every?: number }; time_of_day?: string; times?: string[]; amounts?: number[] };
+    const times = sd.times?.length ? sd.times : [sd.time_of_day ?? "09:00"];
+    const amounts = sd.amounts?.length ? sd.amounts : times.map(() => 1);
+    return { mode: "interval_days", interval: { every: sd.interval?.every ?? 1 }, times, amounts };
+  }
+  if (s.mode === "days_of_week") return { mode: "days_of_week", days_of_week: (s as { days_of_week?: number[] }).days_of_week ?? [1, 2, 3, 4, 5], times: (s as { times?: string[] }).times ?? ["09:00"] };
+  return DEFAULT_SCHEDULE;
+}
+
+function getInitialDuration(initial: MedRegimen | null | undefined): MedDuration {
+  if (!initial?.duration) return DEFAULT_DURATION;
+  const d = initial.duration;
+  if (d.type === "until_date") return { type: "until_date", end_date: d.end_date ?? "" };
+  if (d.type === "for_days") return { type: "for_days", days: d.days ?? 1, start_date: (d as { start_date?: string }).start_date };
+  return { type: "endless" };
+}
+
+function getInitialStartDate(initial: MedRegimen | null | undefined): string {
+  if (initial?.duration?.type === "for_days" && (initial.duration as { start_date?: string }).start_date)
+    return (initial.duration as { start_date: string }).start_date;
+  return new Date().toISOString().slice(0, 10);
+}
+
+const mapLegacyIntakeAdvice = (v: string | null | undefined): string => {
+  if (!v) return "";
+  const legacyToNew: Record<string, string> = {
+    before_breakfast: "before_meal", before_lunch: "before_meal", before_dinner: "before_meal",
+    before_bed: "before_bed", with_breakfast: "with_meal", with_lunch: "with_meal", with_dinner: "with_meal",
+    after_breakfast: "after_meal", after_lunch: "after_meal", after_dinner: "after_meal",
+  };
+  return legacyToNew[v] ?? (["before_meal", "with_meal", "after_meal", "before_bed", "morning_fasting", "custom"].includes(v) ? v : "");
+};
+
 export function MedicationForm({
   mode,
   initial,
@@ -85,63 +130,46 @@ export function MedicationForm({
   onCancel,
 }: MedicationFormProps) {
   const t = useTranslations();
-  const [name, setName] = useState(() => initial?.name ?? "");
-  const [kind, setKind] = useState<MedicationKind>(
-    () => initial?.kind ?? defaultKind ?? "regular"
-  );
-  const [unit, setUnit] = useState<MedicationUnit>(() => initial?.unit ?? "pill");
-  const [dosePerUnit, setDosePerUnit] = useState(() => initial?.dose_per_unit ?? "");
-  const mapLegacyIntakeAdvice = (v: string | null | undefined): string => {
-    if (!v) return "";
-    const legacyToNew: Record<string, string> = {
-      before_breakfast: "before_meal",
-      before_lunch: "before_meal",
-      before_dinner: "before_meal",
-      before_bed: "before_bed",
-      with_breakfast: "with_meal",
-      with_lunch: "with_meal",
-      with_dinner: "with_meal",
-      after_breakfast: "after_meal",
-      after_lunch: "after_meal",
-      after_dinner: "after_meal",
-    };
-    return legacyToNew[v] ?? (["before_meal", "with_meal", "after_meal", "before_bed", "morning_fasting", "custom"].includes(v) ? v : "");
-  };
+  const [name, setName] = useState(() => initial?.custom_name ?? "");
+  const [kind, setKind] = useState<MedicationKind>(() => {
+    if (initial?.schedule?.mode === "one_off") return "one_time";
+    return defaultKind ?? "regular";
+  });
+  const [unit, setUnit] = useState<MedicationUnit>(() => initial?.intake_unit ?? "pill");
+  const [dosePerUnit, setDosePerUnit] = useState(() => "");
   const [intakeAdvice, setIntakeAdvice] = useState(() =>
-    mapLegacyIntakeAdvice(initial?.intake_advice as string) || ""
+    mapLegacyIntakeAdvice(initial?.intake_advice_type ?? null) || (initial?.intake_advice_type === "none" ? "" : (initial?.intake_advice_type ?? ""))
   );
   const [intakeAdviceCustom, setIntakeAdviceCustom] = useState(() =>
-    initial?.intake_advice_custom ?? ""
+    initial?.intake_advice_text ?? ""
   );
-  const [schedule, setSchedule] = useState<MedicationSchedule>(() =>
-    initial?.schedule ?? DEFAULT_SCHEDULE
+  const [schedule, setSchedule] = useState<MedSchedule>(() =>
+    getInitialSchedule(initial, defaultKind)
   );
+  const [duration, setDuration] = useState<MedDuration>(() =>
+    getInitialDuration(initial)
+  );
+  const [startDate, setStartDate] = useState(() => getInitialStartDate(initial));
   const [inventoryEnabled, setInventoryEnabled] = useState(() =>
-    initial?.inventory_enabled ?? false
+    initial?.inventory?.enabled ?? false
   );
   const [inventoryCurrent, setInventoryCurrent] = useState(() =>
-    initial?.inventory_current?.toString() ?? ""
+    (initial?.inventory?.current_amount ?? "").toString()
   );
   const [inventoryRefillThreshold, setInventoryRefillThreshold] = useState(() =>
-    initial?.inventory_refill_threshold?.toString() ?? ""
+    (initial?.inventory?.refill_threshold_amount ?? "").toString()
   );
   const [notes, setNotes] = useState(() => initial?.notes ?? "");
   const [scheduleError, setScheduleError] = useState("");
   const [basicErrorType, setBasicErrorType] = useState<"" | "name" | "scheduled_at">("");
   const [oneTimeAmount, setOneTimeAmount] = useState(() =>
-    initial?.kind === "one_time" && initial?.one_time_amount != null
-      ? Number(initial.one_time_amount)
-      : 1
+    Math.max(1, Number(initial?.dose_definition?.intake?.amount) || 1)
   );
   const [scheduledAt, setScheduledAt] = useState(() => {
-    if (initial?.kind === "one_time" && initial?.scheduled_at) {
-      const d = new Date(initial.scheduled_at);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      const h = String(d.getHours()).padStart(2, "0");
-      const min = String(d.getMinutes()).padStart(2, "0");
-      return `${y}-${m}-${day}T${h}:${min}`;
+    const due = (initial?.schedule as { mode?: string; due_at?: string })?.due_at;
+    if (due) {
+      const d = new Date(due);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     }
     return "";
   });
@@ -153,93 +181,100 @@ export function MedicationForm({
     setWizardStep((s) => Math.min(s, totalWizardSteps - 1));
   }, [kind, totalWizardSteps]);
 
+  const buildDoseDefinition = (amount: number): PlannedIntake => ({
+    intake: { amount, unit },
+    active: [],
+  });
+
+  const buildInventory = (): RegimenInventory | null =>
+    inventoryEnabled
+      ? {
+          enabled: true,
+          current_amount: Number(inventoryCurrent) || 0,
+          refill_threshold_amount: inventoryRefillThreshold ? Number(inventoryRefillThreshold) : undefined,
+          unit,
+          auto_decrement_on_taken: true,
+        }
+      : null;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isMobile && currentStep < totalWizardSteps - 1) {
-      return;
-    }
+    if (isMobile && currentStep < totalWizardSteps - 1) return;
     setScheduleError("");
     setBasicErrorType("");
     if (!name.trim()) {
       setBasicErrorType("name");
       return;
     }
+    const advice = intakeAdvice?.trim() || null;
+    const intake_advice_type = !advice || advice === "__none__" ? "none" : advice === "custom" ? "custom" : advice;
+    const intake_advice_text = intake_advice_type === "custom" ? (intakeAdviceCustom.trim() || null) : null;
+
     if (kind === "one_time") {
-      const scheduledAtISO =
-        scheduledAt ? new Date(scheduledAt).toISOString() : null;
+      const scheduledAtISO = scheduledAt ? new Date(scheduledAt).toISOString() : "";
+      if (!scheduledAtISO && mode === "create") {
+        setBasicErrorType("scheduled_at");
+        return;
+      }
+      const payload = {
+        ...(mode === "create" ? { person_id: personId } : {}),
+        custom_name: name.trim(),
+        intake_unit: unit,
+        dose_definition: buildDoseDefinition(Math.max(1, oneTimeAmount)),
+        intake_advice_type: "none" as const,
+        intake_advice_text: null as string | null,
+        schedule: { mode: "one_off" as const, due_at: scheduledAtISO },
+        duration: { type: "endless" as const },
+        inventory: null,
+        notes: notes.trim() || null,
+      };
       if (mode === "create") {
-        (onSubmit as (d: CreateMedicationInput) => void)({
-          person_id: personId,
-          name: name.trim(),
-          kind: "one_time",
-          unit,
-          dose_per_unit: dosePerUnit.trim() || null,
-          intake_advice: null,
-          intake_advice_custom: null,
-          scheduled_at: scheduledAtISO,
-          one_time_amount: Math.max(1, oneTimeAmount),
-          inventory_enabled: false,
-          inventory_current: null,
-          inventory_refill_threshold: null,
-          notes: notes.trim() || null,
-        });
+        (onSubmit as (d: CreateMedRegimenInput) => void)(payload as CreateMedRegimenInput);
       } else {
-        (onSubmit as (d: UpdateMedicationInput) => void)({
-          name: name.trim(),
-          kind: "one_time",
-          unit,
-          dose_per_unit: dosePerUnit.trim() || null,
-          intake_advice: null,
-          intake_advice_custom: null,
-          scheduled_at: scheduledAtISO,
-          one_time_amount: Math.max(1, oneTimeAmount),
-          inventory_enabled: false,
-          inventory_current: null,
-          inventory_refill_threshold: null,
-          notes: notes.trim() || null,
-        });
+        (onSubmit as (d: UpdateMedRegimenInput) => void)(payload as UpdateMedRegimenInput);
       }
       return;
     }
-    if (
-      kind === "regular" &&
-      schedule.duration.end_type === "days_from_start" &&
-      (!schedule.duration.days_count || schedule.duration.days_count < 1)
-    ) {
+
+    if (duration.type === "for_days" && (!duration.days || duration.days < 1)) {
       setScheduleError(t("medications.daysCountRequired"));
       return;
     }
+
+    const amount = schedule.mode === "daily_times" && schedule.amounts?.length
+      ? Math.max(1, schedule.amounts[0] ?? 1)
+      : schedule.mode === "interval_hours"
+        ? Math.max(1, (schedule as { amount?: number }).amount ?? 1)
+        : schedule.mode === "interval_days" && (schedule as { amounts?: number[] }).amounts?.length
+          ? Math.max(1, (schedule as { amounts: number[] }).amounts[0] ?? 1)
+          : schedule.mode === "days_of_week"
+            ? 1
+            : 1;
+
     if (mode === "create") {
-      (onSubmit as (d: CreateMedicationInput) => void)({
+      (onSubmit as (d: CreateMedRegimenInput) => void)({
         person_id: personId,
-        name: name.trim(),
-        kind: "regular",
-        unit,
-        dose_per_unit: dosePerUnit.trim() || null,
-        intake_advice: intakeAdvice || null,
-        intake_advice_custom: intakeAdviceCustom.trim() || null,
+        custom_name: name.trim(),
+        status: "active",
+        intake_unit: unit,
+        dose_definition: buildDoseDefinition(amount),
+        intake_advice_type,
+        intake_advice_text,
         schedule,
-        inventory_enabled: inventoryEnabled,
-        inventory_current: inventoryCurrent ? Number(inventoryCurrent) : null,
-        inventory_refill_threshold: inventoryRefillThreshold
-          ? Number(inventoryRefillThreshold)
-          : null,
+        duration,
+        inventory: buildInventory(),
         notes: notes.trim() || null,
       });
     } else {
-      (onSubmit as (d: UpdateMedicationInput) => void)({
-        name: name.trim(),
-        kind: "regular",
-        unit,
-        dose_per_unit: dosePerUnit.trim() || null,
-        intake_advice: intakeAdvice || null,
-        intake_advice_custom: intakeAdviceCustom.trim() || null,
+      (onSubmit as (d: UpdateMedRegimenInput) => void)({
+        custom_name: name.trim(),
+        intake_unit: unit,
+        dose_definition: buildDoseDefinition(amount),
+        intake_advice_type,
+        intake_advice_text,
         schedule,
-        inventory_enabled: inventoryEnabled,
-        inventory_current: inventoryCurrent ? Number(inventoryCurrent) : null,
-        inventory_refill_threshold: inventoryRefillThreshold
-          ? Number(inventoryRefillThreshold)
-          : null,
+        duration,
+        inventory: buildInventory(),
         notes: notes.trim() || null,
       });
     }
@@ -247,51 +282,63 @@ export function MedicationForm({
 
   const updateReminderTime = (index: number, field: "time" | "amount", value: string | number) => {
     setSchedule((prev) => {
-      const next = [...prev.reminder_times];
-      next[index] = { ...next[index], [field]: value };
-      return { ...prev, reminder_times: next };
+      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
+      const times = [...(prev.times ?? [])];
+      const amounts = [...(prev.amounts ?? [])];
+      if (field === "time") times[index] = value as string;
+      else amounts[index] = Math.max(1, value as number);
+      return { ...prev, times, amounts };
     });
   };
 
   const addReminderTime = () => {
     setSchedule((prev) => {
-      const amount = Math.max(1, Number(prev.reminder_times[0]?.amount) || 1);
+      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
+      const amount = Math.max(1, prev.amounts?.[0] ?? 1);
       return {
         ...prev,
-        reminder_times: [...prev.reminder_times, { time: "08:00", amount }],
+        times: [...(prev.times ?? []), "08:00"],
+        amounts: [...(prev.amounts ?? []), amount],
       };
     });
   };
 
   const removeReminderTime = (index: number) => {
-    setSchedule((prev) => ({
-      ...prev,
-      reminder_times: prev.reminder_times.filter((_, i) => i !== index),
-    }));
+    setSchedule((prev) => {
+      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
+      const times = (prev.times ?? []).filter((_, i) => i !== index);
+      const amounts = (prev.amounts ?? []).filter((_, i) => i !== index);
+      return { ...prev, times: times.length ? times : ["09:00"], amounts: amounts.length ? amounts : [1] };
+    });
   };
 
-  const setFrequency = (f: MedicationScheduleFrequency) => {
-    setSchedule((prev) => ({ ...prev, frequency: f }));
+  const setScheduleMode = (next: MedSchedule) => {
+    setSchedule(next);
   };
 
-  const setDuration = (updates: Partial<MedicationSchedule["duration"]>) => {
-    setSchedule((prev) => ({
-      ...prev,
-      duration: { ...prev.duration, ...updates },
-    }));
+  const setDurationUpdate = (updates: Partial<MedDuration> & { end_type?: "endless" | "end_date" | "days_from_start"; end_date?: string; days_count?: number }) => {
+    const { end_type, end_date, days_count, ...rest } = updates as MedDuration & { end_type?: string; end_date?: string; days_count?: number };
+    if (end_type === "endless") setDuration({ type: "endless" });
+    else if (end_type === "end_date" && end_date != null) setDuration({ type: "until_date", end_date });
+    else if (end_type === "days_from_start" && days_count != null) setDuration({ type: "for_days", days: days_count, start_date: startDate });
+    else if (Object.keys(rest).length) setDuration((prev) => ({ ...prev, ...rest } as MedDuration));
   };
 
   const toggleDayOfWeek = (d: number) => {
     setSchedule((prev) => {
-      if (prev.frequency.type !== "days_of_week") return prev;
-      const days = prev.frequency.days.includes(d)
-        ? prev.frequency.days.filter((x) => x !== d)
-        : [...prev.frequency.days, d].sort((a, b) => a - b);
-      return { ...prev, frequency: { ...prev.frequency, days } };
+      if (prev.mode !== "days_of_week") return prev;
+      const days = (prev.days_of_week ?? []).includes(d)
+        ? (prev.days_of_week ?? []).filter((x) => x !== d)
+        : [...(prev.days_of_week ?? []), d].sort((a, b) => a - b);
+      return { ...prev, days_of_week: days };
     });
   };
 
   const DAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+  const reminderSlots = schedule.mode === "daily_times" || schedule.mode === "interval_days"
+    ? ((schedule as { times?: string[]; amounts?: number[] }).times ?? []).map((time, i) => ({ time, amount: ((schedule as { amounts?: number[] }).amounts ?? [])[i] ?? 1 }))
+    : [];
 
   const currentStep = Math.min(wizardStep, totalWizardSteps - 1);
 
@@ -319,8 +366,8 @@ export function MedicationForm({
     if (
       kind === "regular" &&
       currentStep === 1 &&
-      schedule.duration.end_type === "days_from_start" &&
-      (!schedule.duration.days_count || schedule.duration.days_count < 1)
+      duration.type === "for_days" &&
+      (!duration.days || duration.days < 1)
     ) {
       setScheduleError(t("medications.daysCountRequired"));
       return;
@@ -477,70 +524,64 @@ export function MedicationForm({
           <div className="space-y-2">
             <Label>{t("medications.frequency")}</Label>
             <Select
-              value={schedule.frequency.type}
+              value={schedule.mode}
               onValueChange={(v) => {
-                if (v === "daily") setFrequency({ type: "daily" });
-                else if (v === "interval")
-                  setFrequency({
-                    type: "interval",
-                    every: schedule.frequency.type === "interval" ? schedule.frequency.every : 1,
-                    unit: schedule.frequency.type === "interval" ? schedule.frequency.unit : "day",
-                  });
-                else if (v === "days_of_week")
-                  setFrequency({
-                    type: "days_of_week",
-                    days: schedule.frequency.type === "days_of_week" ? schedule.frequency.days : [1, 2, 3, 4, 5],
-                  });
+                if (v === "daily_times") setScheduleMode({ mode: "daily_times", times: ["09:00"], amounts: [1] });
+                else if (v === "interval_hours") setScheduleMode({ mode: "interval_hours", interval: { every: schedule.mode === "interval_hours" ? (schedule as { interval?: { every?: number } }).interval?.every ?? 1 : 1 }, amount: schedule.mode === "interval_hours" ? Math.max(1, (schedule as { amount?: number }).amount ?? 1) : 1 });
+                else if (v === "interval_days") {
+                  const prev = schedule.mode === "interval_days" ? schedule as { times?: string[]; amounts?: number[]; interval?: { every?: number } } : null;
+                  setScheduleMode({ mode: "interval_days", interval: { every: prev?.interval?.every ?? 1 }, times: prev?.times?.length ? prev.times : ["09:00"], amounts: prev?.amounts?.length ? prev.amounts : [1] });
+                }
+                else if (v === "days_of_week") setScheduleMode({ mode: "days_of_week", days_of_week: schedule.mode === "days_of_week" ? (schedule as { days_of_week?: number[] }).days_of_week ?? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5], times: schedule.mode === "days_of_week" ? (schedule as { times?: string[] }).times ?? ["09:00"] : ["09:00"] });
               }}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="daily">{t("medications.frequencyDaily")}</SelectItem>
-                <SelectItem value="interval">{t("medications.frequencyInterval")}</SelectItem>
+                <SelectItem value="daily_times">{t("medications.frequencyDaily")}</SelectItem>
+                <SelectItem value="interval_hours">{t("medications.everyXHours")}</SelectItem>
+                <SelectItem value="interval_days">{t("medications.everyXDays")}</SelectItem>
                 <SelectItem value="days_of_week">{t("medications.frequencyDaysOfWeek")}</SelectItem>
               </SelectContent>
             </Select>
-            {schedule.frequency.type === "interval" && (
-              <div className="flex gap-2 mt-2">
-                <Input
-                  type="number"
-                  min={1}
-                  value={schedule.frequency.every}
-                  onChange={(e) =>
-                    setFrequency({
-                      ...schedule.frequency,
-                      every: Number(e.target.value) || 1,
-                    } as MedicationScheduleFrequency)
-                  }
-                  className="w-24"
-                />
-                <Select
-                  value={schedule.frequency.unit}
-                  onValueChange={(v) =>
-                    setFrequency({
-                      ...schedule.frequency,
-                      unit: v as "hour" | "day",
-                    } as MedicationScheduleFrequency)
-                  }
-                >
-                  <SelectTrigger className="w-28">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hour">{t("medications.hours")}</SelectItem>
-                    <SelectItem value="day">{t("medications.days")}</SelectItem>
-                  </SelectContent>
-                </Select>
+            {(schedule.mode === "interval_hours" || schedule.mode === "interval_days") && (
+              <div className="space-y-2 mt-2">
+                <div className="flex gap-2 items-center flex-wrap">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={(schedule as { interval?: { every?: number } }).interval?.every ?? 1}
+                    onChange={(e) => {
+                      const every = Number(e.target.value) || 1;
+                      if (schedule.mode === "interval_hours") setSchedule({ ...schedule, interval: { every }, amount: (schedule as { amount?: number }).amount ?? 1 });
+                      else setSchedule({ ...schedule, interval: { every }, times: (schedule as { times?: string[] }).times ?? ["09:00"], amounts: (schedule as { amounts?: number[] }).amounts ?? [1] });
+                    }}
+                    className="w-24"
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {schedule.mode === "interval_hours" ? t("medications.hours") : t("medications.days")}
+                  </span>
+                </div>
+                {schedule.mode === "interval_hours" && (
+                  <div className="flex gap-2 items-center">
+                    <Label className="text-sm">{t("medications.amountPerIntake")}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      className="w-24"
+                      value={Math.max(1, (schedule as { amount?: number }).amount ?? 1)}
+                      onChange={(e) => setSchedule({ ...schedule, amount: Math.max(1, Number(e.target.value) || 1) })}
+                    />
+                    <span className="text-sm text-muted-foreground">{getUnitLabel(unit, t)}</span>
+                  </div>
+                )}
               </div>
             )}
-            {schedule.frequency.type === "days_of_week" && (() => {
-              const freq = schedule.frequency;
-              return (
+            {schedule.mode === "days_of_week" && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {([0, 1, 2, 3, 4, 5, 6] as const).map((d) => {
-                  const isSelected = freq.days.includes(d);
+                  const isSelected = (schedule as { days_of_week?: number[] }).days_of_week?.includes(d) ?? false;
                   return (
                     <Toggle
                       key={d}
@@ -560,8 +601,7 @@ export function MedicationForm({
                   );
                 })}
               </div>
-              );
-            })()}
+            )}
           </div>
 
           <div className={cn("grid gap-4", isMobile ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
@@ -569,19 +609,19 @@ export function MedicationForm({
               <Label>{t("medications.startDate")}</Label>
               <Input
                 type="date"
-                value={schedule.duration.start_date}
-                onChange={(e) => setDuration({ start_date: e.target.value })}
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
               />
             </div>
             <div className="space-y-2">
               <Label>{t("medications.endType")}</Label>
               <Select
-                value={schedule.duration.end_type}
+                value={duration.type === "endless" ? "endless" : duration.type === "until_date" ? "end_date" : "days_from_start"}
                 onValueChange={(v) => {
                   setScheduleError("");
-                  setDuration({
-                    end_type: v as "endless" | "end_date" | "days_from_start",
-                  });
+                  if (v === "endless") setDuration({ type: "endless" });
+                  else if (v === "end_date") setDuration({ type: "until_date", end_date: duration.type === "until_date" ? duration.end_date : "" });
+                  else setDuration({ type: "for_days", days: duration.type === "for_days" ? duration.days : 1, start_date: startDate });
                 }}
               >
                 <SelectTrigger>
@@ -595,7 +635,7 @@ export function MedicationForm({
               </Select>
             </div>
           </div>
-          {schedule.duration.end_type === "end_date" && (
+          {duration.type === "until_date" && (
             <div className="space-y-2">
               <Label>
                 {t("medications.endDate")}{" "}
@@ -603,12 +643,12 @@ export function MedicationForm({
               </Label>
               <Input
                 type="date"
-                value={schedule.duration.end_date ?? ""}
-                onChange={(e) => setDuration({ end_date: e.target.value })}
+                value={duration.end_date ?? ""}
+                onChange={(e) => setDuration({ type: "until_date", end_date: e.target.value })}
               />
             </div>
           )}
-          {schedule.duration.end_type === "days_from_start" && (
+          {duration.type === "for_days" && (
             <div className="space-y-2">
               <Label htmlFor="med-days-count">{t("medications.daysFromStartCount")}</Label>
               <Input
@@ -618,10 +658,11 @@ export function MedicationForm({
                 required
                 aria-invalid={!!scheduleError}
                 aria-describedby={scheduleError ? "med-days-count-error" : undefined}
-                value={schedule.duration.days_count ?? ""}
+                value={duration.days ?? ""}
                 onChange={(e) => {
                   setScheduleError("");
-                  setDuration({ days_count: e.target.value ? Number(e.target.value) : undefined });
+                  const n = e.target.value ? Number(e.target.value) : undefined;
+                  setDuration({ type: "for_days", days: n ?? 1, start_date: startDate });
                 }}
               />
               {scheduleError && (
@@ -632,6 +673,7 @@ export function MedicationForm({
             </div>
           )}
 
+          {(schedule.mode === "daily_times" || schedule.mode === "interval_days") && (
           <div className="space-y-2">
             <Label>{t("medications.reminderTimes")}</Label>
             <div className="space-y-1.5">
@@ -641,27 +683,26 @@ export function MedicationForm({
                   <Button
                     key={num}
                     type="button"
-                    variant={schedule.reminder_times.length === num ? "default" : "outline"}
+                    variant={reminderSlots.length === num ? "default" : "outline"}
                     size="sm"
                     className="min-w-8"
-                    onClick={() =>
-                      setSchedule((prev) => {
-                        const nextSlots = getReminderSlotsForIntakesPerDay(num);
-                        const currentAmount = prev.reminder_times[0]?.amount ?? 1;
-                        const amount = Math.max(1, Number(currentAmount) || 1);
-                        return {
-                          ...prev,
-                          reminder_times: nextSlots.map((slot) => ({ ...slot, amount })),
-                        };
-                      })
-                    }
+                    onClick={() => {
+                      const nextSlots = getReminderSlotsForIntakesPerDay(num);
+                      const currentAmount = (schedule as { amounts?: number[] }).amounts?.[0] ?? 1;
+                      const amount = Math.max(1, Number(currentAmount) || 1);
+                      if (schedule.mode === "daily_times") {
+                        setSchedule({ mode: "daily_times", times: nextSlots.map((s) => s.time), amounts: nextSlots.map(() => amount) });
+                      } else {
+                        setSchedule({ ...schedule, times: nextSlots.map((s) => s.time), amounts: nextSlots.map(() => amount) });
+                      }
+                    }}
                   >
                     {num}
                   </Button>
                 ))}
               </div>
             </div>
-            {schedule.reminder_times.map((slot, i) => (
+            {reminderSlots.map((slot, i) => (
               <div key={i} className="flex gap-2 items-center flex-wrap">
                 <Input
                   type="time"
@@ -689,7 +730,7 @@ export function MedicationForm({
                   variant="ghost"
                   size="icon"
                   onClick={() => removeReminderTime(i)}
-                  disabled={schedule.reminder_times.length <= 1}
+                  disabled={reminderSlots.length <= 1}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -700,6 +741,7 @@ export function MedicationForm({
               {t("medications.addReminder")}
             </Button>
           </div>
+          )}
 
           <div className="space-y-2">
             <Label>
@@ -747,11 +789,10 @@ export function MedicationForm({
             </h3>
           )}
           <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               id="inventoryEnabled"
               checked={inventoryEnabled}
-              onChange={(e) => setInventoryEnabled(e.target.checked)}
+              onCheckedChange={(checked) => setInventoryEnabled(Boolean(checked))}
             />
             <Label htmlFor="inventoryEnabled">{t("medications.inventoryEnabled")}</Label>
           </div>
