@@ -262,6 +262,11 @@ export function MedicationForm({
             ? 1
             : 1;
 
+    const durationToSubmit: MedDuration =
+      duration.type === "for_days"
+        ? { type: "for_days", days: duration.days ?? 1, start_date: startDate }
+        : duration;
+
     if (mode === "create") {
       (onSubmit as (d: CreateMedRegimenInput) => void)({
         person_id: personId,
@@ -272,7 +277,7 @@ export function MedicationForm({
         intake_advice_type,
         intake_advice_text,
         schedule,
-        duration,
+        duration: durationToSubmit,
         inventory: buildInventory(),
         notes: notes.trim() || null,
       });
@@ -284,7 +289,7 @@ export function MedicationForm({
         intake_advice_type,
         intake_advice_text,
         schedule,
-        duration,
+        duration: durationToSubmit,
         inventory: buildInventory(),
         notes: notes.trim() || null,
       });
@@ -621,7 +626,13 @@ export function MedicationForm({
               <Input
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setStartDate(v);
+                  if (duration.type === "for_days") {
+                    setDuration({ type: "for_days", days: duration.days ?? 1, start_date: v });
+                  }
+                }}
               />
             </div>
             <div className="space-y-2">
