@@ -32,7 +32,10 @@ import { usePersonObservationHistory } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { ObservationSummary, ObservationStatus } from "@/types";
 
-// Mini sparkline chart for cards
+// Mini sparkline chart for cards (fixed size so Recharts gets valid dimensions)
+const MINI_CHART_WIDTH = 64;
+const MINI_CHART_HEIGHT = 32;
+
 function MiniChart({ 
   data, 
   refLow, 
@@ -47,7 +50,7 @@ function MiniChart({
     .map(d => ({ value: d.value }));
 
   if (chartData.length < 2) {
-    return <div className="w-16 h-8" />;
+    return <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }} />;
   }
 
   // Determine color based on latest value and ref range
@@ -64,8 +67,8 @@ function MiniChart({
   }
 
   return (
-    <div className="w-16 h-8">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }}>
+      <ResponsiveContainer width={MINI_CHART_WIDTH} height={MINI_CHART_HEIGHT}>
         <LineChart data={chartData}>
           <Line 
             type="monotone" 

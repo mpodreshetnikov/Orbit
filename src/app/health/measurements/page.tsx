@@ -32,7 +32,10 @@ import type { MeasurementSummary, MeasurementCategory } from "@/types";
 import { MEASUREMENT_CATEGORY_LABELS } from "@/types";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
 
-// Mini sparkline chart for cards
+// Mini sparkline chart for cards (fixed size so Recharts gets valid dimensions)
+const MINI_CHART_WIDTH = 64;
+const MINI_CHART_HEIGHT = 32;
+
 function MiniChart({ 
   data,
 }: { 
@@ -41,12 +44,12 @@ function MiniChart({
   const chartData = data.map(d => ({ value: d.value }));
 
   if (chartData.length < 2) {
-    return <div className="w-16 h-8" />;
+    return <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }} />;
   }
 
   return (
-    <div className="w-16 h-8">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }}>
+      <ResponsiveContainer width={MINI_CHART_WIDTH} height={MINI_CHART_HEIGHT}>
         <LineChart data={chartData}>
           <Line 
             type="monotone" 
