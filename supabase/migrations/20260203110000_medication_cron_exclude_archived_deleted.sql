@@ -175,7 +175,10 @@ BEGIN
     END IF;
 
     v_times := v_schedule->'times';
-    IF v_times IS NULL OR jsonb_typeof(v_times) != 'array' THEN
+    IF v_mode = 'interval_days' AND (v_times IS NULL OR jsonb_typeof(v_times) != 'array' OR jsonb_array_length(v_times) = 0) THEN
+      v_times := jsonb_build_array(COALESCE(v_schedule->>'time_of_day', '09:00'));
+    END IF;
+    IF (v_times IS NULL OR jsonb_typeof(v_times) != 'array') AND v_mode != 'interval_days' THEN
       CONTINUE;
     END IF;
 
@@ -238,19 +241,34 @@ BEGIN
         END IF;
       ELSIF v_mode = 'interval_days' THEN
         v_every := (v_schedule->'interval'->>'every')::int;
-        v_time_of_day := COALESCE(v_schedule->>'time_of_day', '09:00');
         IF v_every IS NOT NULL AND v_every > 0 THEN
           IF (v_date - v_start_date) % v_every = 0 THEN
-            v_slot_ts := (v_date::text || ' ' || v_time_of_day)::timestamp AT TIME ZONE v_tz;
-            IF v_slot_ts >= now() THEN
-              INSERT INTO public.med_dose_events (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status)
-              SELECT v_reg.person_id, v_reg.id, v_slot_ts, v_slot_ts, v_planned_intake, 'scheduled'
-              WHERE NOT EXISTS (
-                SELECT 1 FROM public.med_dose_events
-                WHERE regimen_id = v_reg.id AND date_trunc('minute', scheduled_at) = date_trunc('minute', v_slot_ts)
-              );
-              IF FOUND THEN v_inserted := v_inserted + 1; END IF;
-            END IF;
+            FOR v_slot IN SELECT t.ordinality::int AS idx, t.elem AS time FROM jsonb_array_elements_text(v_times) WITH ORDINALITY AS t(elem, ordinality)
+            LOOP
+              v_slot_amount := (v_schedule->'amounts'->(v_slot.idx - 1))::text::numeric;
+              IF v_slot_amount IS NULL OR v_slot_amount < 1 THEN
+                v_slot_amount := (v_planned_intake->'intake'->>'amount')::numeric;
+              END IF;
+              IF v_slot_amount IS NULL THEN v_slot_amount := 1; END IF;
+              v_slot_planned := jsonb_set(v_planned_intake, '{intake,amount}', to_jsonb(v_slot_amount));
+
+              v_slot_ts := (v_date::text || ' ' || v_slot.time)::timestamp AT TIME ZONE v_tz;
+              IF v_slot_ts >= now() AND v_slot_ts < now() + (p_horizon_days || ' days')::interval THEN
+                IF v_end_type = 'until_date' AND v_end_date IS NOT NULL AND v_date > v_end_date THEN
+                  NULL;
+                ELSIF v_end_type = 'for_days' AND v_days_count IS NOT NULL AND v_date >= v_start_date + (v_days_count || ' days')::interval THEN
+                  NULL;
+                ELSE
+                  INSERT INTO public.med_dose_events (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status)
+                  SELECT v_reg.person_id, v_reg.id, v_slot_ts, v_slot_ts, v_slot_planned, 'scheduled'
+                  WHERE NOT EXISTS (
+                    SELECT 1 FROM public.med_dose_events
+                    WHERE regimen_id = v_reg.id AND date_trunc('minute', scheduled_at) = date_trunc('minute', v_slot_ts)
+                  );
+                  IF FOUND THEN v_inserted := v_inserted + 1; END IF;
+                END IF;
+              END IF;
+            END LOOP;
           END IF;
         END IF;
       END IF;
