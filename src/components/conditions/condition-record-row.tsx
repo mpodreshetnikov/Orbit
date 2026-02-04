@@ -108,10 +108,12 @@ export function ConditionRecordRow({
 
           {/* Source anchor toggle */}
           {conditionRecord.source_anchor && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setShowAnchor(!showAnchor)}
-              className="tap-target flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="tap-target h-auto p-0 mt-1 text-xs font-normal text-muted-foreground hover:text-foreground hover:bg-transparent"
             >
               <Quote className="h-3 w-3 shrink-0" />
               <span>{t("conditions.showSource")}</span>
@@ -120,7 +122,7 @@ export function ConditionRecordRow({
               ) : (
                 <ChevronDown className="h-3 w-3" />
               )}
-            </button>
+            </Button>
           )}
         </div>
 

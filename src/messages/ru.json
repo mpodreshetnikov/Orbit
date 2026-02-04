@@ -726,6 +726,8 @@
     "linkedConditions": "Связанные диагнозы",
     "linkedConditionsPlaceholder": "Поиск диагнозов...",
     "linkedConditionsSelected": "Выбрано: {count}",
+    "linkedConditionsEmpty": "У этого пациента пока нет диагнозов. Добавьте диагнозы в разделе «Диагнозы», чтобы связать их здесь.",
+    "linkedConditionsGoToConditions": "Перейти к диагнозам",
     "notes": "Заметки",
     "notesPlaceholder": "Необязательные заметки...",
     "recurring": "Повторяющийся",

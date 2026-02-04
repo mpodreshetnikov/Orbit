@@ -314,13 +314,15 @@ export function ObservationEditDialog({
               {synonymsRu.map((synonym) => (
                 <Badge key={synonym} variant="secondary" className="gap-1">
                   {synonym}
-                  <button
+                  <Button
                     type="button"
                     onClick={() => removeSynonymRu(synonym)}
-                    className="ml-1 hover:text-destructive"
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 ml-1 p-0 hover:text-destructive"
                   >
                     <X className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </Badge>
               ))}
             </div>
@@ -349,13 +351,15 @@ export function ObservationEditDialog({
               {synonymsEn.map((synonym) => (
                 <Badge key={synonym} variant="secondary" className="gap-1">
                   {synonym}
-                  <button
+                  <Button
                     type="button"
                     onClick={() => removeSynonymEn(synonym)}
-                    className="ml-1 hover:text-destructive"
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 ml-1 p-0 hover:text-destructive"
                   >
                     <X className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </Badge>
               ))}
             </div>

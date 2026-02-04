@@ -593,9 +593,10 @@ export function MedicationDashboard() {
                 </div>
               ) : (
                 <>
-                  <button
+                  <Button
                     type="button"
-                    className="w-full flex items-center justify-between gap-2 py-2 px-3 text-left text-sm font-medium hover:bg-muted/50"
+                    variant="ghost"
+                    className="w-full justify-between gap-2 py-2 px-3 text-left text-sm font-medium h-auto hover:bg-muted/50"
                     onClick={() => setResolvedOpen((o) => !o)}
                   >
                     <span className="text-muted-foreground">
@@ -606,7 +607,7 @@ export function MedicationDashboard() {
                     ) : (
                       <ChevronRight className="h-4 w-4 shrink-0" />
                     )}
-                  </button>
+                  </Button>
                   {resolvedOpen && (
                 <div className="border-t bg-muted/30 max-h-64 overflow-y-auto">
                   {completedSectionSlots.map(({ time, events: slotEvents }) => (

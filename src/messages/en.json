@@ -726,6 +726,8 @@
     "linkedConditions": "Linked conditions",
     "linkedConditionsPlaceholder": "Search conditions...",
     "linkedConditionsSelected": "{count} selected",
+    "linkedConditionsEmpty": "No conditions for this person yet. Add conditions in the Conditions section to link them here.",
+    "linkedConditionsGoToConditions": "Go to Conditions",
     "notes": "Notes",
     "notesPlaceholder": "Optional notes...",
     "recurring": "Recurring",

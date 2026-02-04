@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { Search, ChevronsUpDown, Check, Loader2 } from "lucide-react";
+import { ChevronsUpDown, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Select,
   SelectContent,
@@ -91,10 +99,6 @@ export function FindingEditDialog({
   const [isFindingTypeOpen, setIsFindingTypeOpen] = useState(false);
   const [isBodySiteOpen, setIsBodySiteOpen] = useState(false);
   
-  const findingTypeRef = useRef<HTMLDivElement>(null);
-  const bodySiteRef = useRef<HTMLDivElement>(null);
-  const findingTypeInputRef = useRef<HTMLInputElement>(null);
-  const bodySiteInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize form when dialog opens
   useEffect(() => {
@@ -135,20 +139,6 @@ export function FindingEditDialog({
       setIsBodySiteOpen(false);
     }
   }, [open, finding, isNew]);
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (findingTypeRef.current && !findingTypeRef.current.contains(event.target as Node)) {
-        setIsFindingTypeOpen(false);
-      }
-      if (bodySiteRef.current && !bodySiteRef.current.contains(event.target as Node)) {
-        setIsBodySiteOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // Get current catalog entries
   const currentFindingType = selectedFindingCode 
@@ -265,83 +255,70 @@ export function FindingEditDialog({
           {/* Finding Type Selector */}
           <div className="space-y-2">
             <Label>{t("findings.findingType")}</Label>
-            <div className="relative" ref={findingTypeRef}>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  ref={findingTypeInputRef}
-                  value={isFindingTypeOpen ? findingTypeSearch : findingTypeDisplayValue}
-                  onChange={(e) => {
-                    setFindingTypeSearch(e.target.value);
-                    if (!isFindingTypeOpen) setIsFindingTypeOpen(true);
-                  }}
-                  onFocus={() => {
-                    setIsFindingTypeOpen(true);
-                    setFindingTypeSearch("");
-                  }}
-                  placeholder={t("findings.searchFindingType")}
-                  className="pl-9 pr-9"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
-                  onClick={() => {
-                    setIsFindingTypeOpen(!isFindingTypeOpen);
-                    if (!isFindingTypeOpen) {
-                      setFindingTypeSearch("");
-                      findingTypeInputRef.current?.focus();
-                    }
-                  }}
-                >
-                  <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </div>
-              
-              {isFindingTypeOpen && (
-                <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
-                  <ScrollArea className="max-h-60">
-                    <div className="p-1">
-                      <button
-                        type="button"
-                        onClick={() => handleFindingTypeSelect(null)}
-                        className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                          selectedFindingCode === null ? "bg-accent" : ""
-                        }`}
-                      >
-                        <Check className={`h-4 w-4 ${selectedFindingCode === null ? "opacity-100" : "opacity-0"}`} />
-                        <span className="text-muted-foreground italic">{t("findings.customFinding")}</span>
-                      </button>
-                      
-                      {filteredFindingTypes.map((item) => (
-                        <button
-                          key={item.finding_code}
-                          type="button"
-                          onClick={() => handleFindingTypeSelect(item.finding_code)}
-                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                            selectedFindingCode === item.finding_code ? "bg-accent" : ""
-                          }`}
+            <div className="relative">
+              <Popover
+                open={isFindingTypeOpen}
+                onOpenChange={(open) => {
+                  setIsFindingTypeOpen(open);
+                  if (open) setFindingTypeSearch("");
+                }}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isFindingTypeOpen}
+                    className={`h-10 w-full justify-between px-3 py-2 text-sm ${!findingTypeDisplayValue ? "text-muted-foreground" : ""}`}
+                  >
+                    <span className="truncate">
+                      {findingTypeDisplayValue || t("findings.searchFindingType")}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      value={findingTypeSearch}
+                      onValueChange={setFindingTypeSearch}
+                      placeholder={t("findings.searchFindingType")}
+                      autoFocus
+                    />
+                    <CommandList className="max-h-60">
+                      <CommandGroup>
+                        <CommandItem
+                          value="__custom__"
+                          onSelect={() => handleFindingTypeSelect(null)}
+                          className={selectedFindingCode === null ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 shrink-0 ${selectedFindingCode === item.finding_code ? "opacity-100" : "opacity-0"}`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate">{item.name_ru}</div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {item.finding_code}
+                          <Check className={`h-4 w-4 ${selectedFindingCode === null ? "opacity-100" : "opacity-0"}`} />
+                          <span className="text-muted-foreground italic">{t("findings.customFinding")}</span>
+                        </CommandItem>
+                        {filteredFindingTypes.map((item) => (
+                          <CommandItem
+                            key={item.finding_code}
+                            value={item.finding_code}
+                            onSelect={() => handleFindingTypeSelect(item.finding_code)}
+                            className={selectedFindingCode === item.finding_code ? "bg-accent" : ""}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${selectedFindingCode === item.finding_code ? "opacity-100" : "opacity-0"}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{item.name_ru}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {item.finding_code}
+                              </div>
                             </div>
-                          </div>
-                        </button>
-                      ))}
-                      
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
                       {filteredFindingTypes.length === 0 && findingTypeSearch && (
-                        <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                          {t("catalogs.noSearchResults")}
-                        </div>
+                        <CommandEmpty>{t("catalogs.noSearchResults")}</CommandEmpty>
                       )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -361,84 +338,71 @@ export function FindingEditDialog({
           {/* Body Site Selector */}
           <div className="space-y-2">
             <Label>{t("findings.bodySite")}</Label>
-            <div className="relative" ref={bodySiteRef}>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  ref={bodySiteInputRef}
-                  value={isBodySiteOpen ? bodySiteSearch : bodySiteDisplayValue}
-                  onChange={(e) => {
-                    setBodySiteSearch(e.target.value);
-                    if (!isBodySiteOpen) setIsBodySiteOpen(true);
-                  }}
-                  onFocus={() => {
-                    setIsBodySiteOpen(true);
-                    setBodySiteSearch("");
-                  }}
-                  placeholder={t("findings.searchBodySite")}
-                  className="pl-9 pr-9"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
-                  onClick={() => {
-                    setIsBodySiteOpen(!isBodySiteOpen);
-                    if (!isBodySiteOpen) {
-                      setBodySiteSearch("");
-                      bodySiteInputRef.current?.focus();
-                    }
-                  }}
-                >
-                  <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </div>
-              
-              {isBodySiteOpen && (
-                <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
-                  <ScrollArea className="max-h-60">
-                    <div className="p-1">
-                      <button
-                        type="button"
-                        onClick={() => handleBodySiteSelect(null)}
-                        className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                          selectedSiteCode === null ? "bg-accent" : ""
-                        }`}
-                      >
-                        <Check className={`h-4 w-4 ${selectedSiteCode === null ? "opacity-100" : "opacity-0"}`} />
-                        <span className="text-muted-foreground italic">{t("findings.customSite")}</span>
-                      </button>
-                      
-                      {filteredBodySites.map((item) => (
-                        <button
-                          key={item.site_code}
-                          type="button"
-                          onClick={() => handleBodySiteSelect(item.site_code)}
-                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                            selectedSiteCode === item.site_code ? "bg-accent" : ""
-                          }`}
+            <div className="relative">
+              <Popover
+                open={isBodySiteOpen}
+                onOpenChange={(open) => {
+                  setIsBodySiteOpen(open);
+                  if (open) setBodySiteSearch("");
+                }}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isBodySiteOpen}
+                    className={`h-10 w-full justify-between px-3 py-2 text-sm ${!bodySiteDisplayValue ? "text-muted-foreground" : ""}`}
+                  >
+                    <span className="truncate">
+                      {bodySiteDisplayValue || t("findings.searchBodySite")}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      value={bodySiteSearch}
+                      onValueChange={setBodySiteSearch}
+                      placeholder={t("findings.searchBodySite")}
+                      autoFocus
+                    />
+                    <CommandList className="max-h-60">
+                      <CommandGroup>
+                        <CommandItem
+                          value="__custom__"
+                          onSelect={() => handleBodySiteSelect(null)}
+                          className={selectedSiteCode === null ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 shrink-0 ${selectedSiteCode === item.site_code ? "opacity-100" : "opacity-0"}`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate">{item.name_ru}</div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {item.site_code}
-                              {item.parent_site_code && ` (${item.parent_site_code})`}
+                          <Check className={`h-4 w-4 ${selectedSiteCode === null ? "opacity-100" : "opacity-0"}`} />
+                          <span className="text-muted-foreground italic">{t("findings.customSite")}</span>
+                        </CommandItem>
+                        {filteredBodySites.map((item) => (
+                          <CommandItem
+                            key={item.site_code}
+                            value={item.site_code}
+                            onSelect={() => handleBodySiteSelect(item.site_code)}
+                            className={selectedSiteCode === item.site_code ? "bg-accent" : ""}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${selectedSiteCode === item.site_code ? "opacity-100" : "opacity-0"}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{item.name_ru}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {item.site_code}
+                                {item.parent_site_code && ` (${item.parent_site_code})`}
+                              </div>
                             </div>
-                          </div>
-                        </button>
-                      ))}
-                      
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
                       {filteredBodySites.length === 0 && bodySiteSearch && (
-                        <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                          {t("catalogs.noSearchResults")}
-                        </div>
+                        <CommandEmpty>{t("catalogs.noSearchResults")}</CommandEmpty>
                       )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 

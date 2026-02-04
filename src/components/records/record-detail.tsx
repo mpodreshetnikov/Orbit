@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -28,7 +28,6 @@ import {
   AlertTriangle,
   Check,
   ChevronsUpDown,
-  Search,
   Stethoscope,
   HeartPulse,
   CircleDot,
@@ -44,7 +43,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Select,
   SelectContent,
@@ -923,13 +930,15 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                   {editForm.llm_keywords.map((keyword, index) => (
                     <Badge key={index} variant="secondary" className="gap-1 pr-1">
                       {keyword}
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon"
                         onClick={() => removeTag(keyword)}
-                        className="ml-1 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                        className="h-5 w-5 ml-1 rounded-full p-0 hover:bg-muted-foreground/20"
                       >
                         <X className="h-3 w-3" />
-                      </button>
+                      </Button>
                     </Badge>
                   ))}
                 </div>
@@ -1180,10 +1189,11 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
       {(record.ocr_text || isEditing) && (
         <>
           <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 p-3">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setShowOcrText(!showOcrText)}
-              className="flex w-full items-center justify-between text-left"
+              className="w-full justify-between text-left h-auto p-0 hover:bg-transparent"
             >
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <FileText className="h-4 w-4" />
@@ -1197,7 +1207,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
               ) : (
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               )}
-            </button>
+            </Button>
             {showOcrText && (
               isEditing ? (
                 <Textarea
@@ -1559,8 +1569,6 @@ function ObservationEditDialog({
   const [obsCode, setObsCode] = useState<string | null>(null);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [isComboboxOpen, setIsComboboxOpen] = useState(false);
-  const comboboxRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open && observation) {
@@ -1587,16 +1595,6 @@ function ObservationEditDialog({
       setIsComboboxOpen(false);
     }
   }, [open, observation, isNew]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (comboboxRef.current && !comboboxRef.current.contains(event.target as Node)) {
-        setIsComboboxOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // Convert value to canonical using catalog unit config
   const convertToCanonical = (value: number | null, unitStr: string): number | null => {
@@ -1719,85 +1717,72 @@ function ObservationEditDialog({
           {catalog && catalog.length > 0 && (
             <div className="space-y-2">
               <Label>{t("observations.fromCatalog")}</Label>
-              <div className="relative" ref={comboboxRef}>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    ref={inputRef}
-                    value={isComboboxOpen ? catalogSearch : displayValue}
-                    onChange={(e) => {
-                      setCatalogSearch(e.target.value);
-                      if (!isComboboxOpen) setIsComboboxOpen(true);
-                    }}
-                    onFocus={() => {
-                      setIsComboboxOpen(true);
-                      setCatalogSearch("");
-                    }}
-                    placeholder={t("observations.searchOrSelect")}
-                    className="pl-9 pr-9"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
-                    onClick={() => {
-                      setIsComboboxOpen(!isComboboxOpen);
-                      if (!isComboboxOpen) {
-                        setCatalogSearch("");
-                        inputRef.current?.focus();
-                      }
-                    }}
-                  >
-                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                </div>
-                
-                {isComboboxOpen && (
-                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
-                    <ScrollArea className="max-h-60">
-                      <div className="p-1">
-                        <button
-                          type="button"
-                          onClick={() => handleCatalogSelect(null)}
-                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                            obsCode === null ? "bg-accent" : ""
-                          }`}
-                        >
-                          <Check className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`} />
-                          <span className="text-muted-foreground italic">
-                            {t("observations.customObservation")}
-                          </span>
-                        </button>
-                        
-                        {filteredCatalog.map((item) => (
-                          <button
-                            key={item.obs_code}
-                            type="button"
-                            onClick={() => handleCatalogSelect(item.obs_code)}
-                            className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                              obsCode === item.obs_code ? "bg-accent" : ""
-                            }`}
+              <div className="relative">
+                <Popover
+                  open={isComboboxOpen}
+                  onOpenChange={(open) => {
+                    setIsComboboxOpen(open);
+                    if (open) setCatalogSearch("");
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={isComboboxOpen}
+                      className={`h-10 w-full justify-between px-3 py-2 text-sm ${!displayValue ? "text-muted-foreground" : ""}`}
+                    >
+                      <span className="truncate">
+                        {displayValue || t("observations.searchOrSelect")}
+                      </span>
+                      <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        value={catalogSearch}
+                        onValueChange={setCatalogSearch}
+                        placeholder={t("observations.searchOrSelect")}
+                        autoFocus
+                      />
+                      <CommandList className="max-h-60">
+                        <CommandGroup>
+                          <CommandItem
+                            value="__custom__"
+                            onSelect={() => handleCatalogSelect(null)}
+                            className={obsCode === null ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="truncate">{item.name_ru}</div>
-                              <div className="text-xs text-muted-foreground truncate">
-                                {item.obs_code} · {item.canonical_unit}
+                            <Check className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`} />
+                            <span className="text-muted-foreground italic">
+                              {t("observations.customObservation")}
+                            </span>
+                          </CommandItem>
+                          {filteredCatalog.map((item) => (
+                            <CommandItem
+                              key={item.obs_code}
+                              value={item.obs_code}
+                              onSelect={() => handleCatalogSelect(item.obs_code)}
+                              className={obsCode === item.obs_code ? "bg-accent" : ""}
+                            >
+                              <Check className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`} />
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate">{item.name_ru}</div>
+                                <div className="text-xs text-muted-foreground truncate">
+                                  {item.obs_code} · {item.canonical_unit}
+                                </div>
                               </div>
-                            </div>
-                          </button>
-                        ))}
-                        
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
                         {filteredCatalog.length === 0 && catalogSearch && (
-                          <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                            {t("catalogs.noSearchResults")}
-                          </div>
+                          <CommandEmpty>{t("catalogs.noSearchResults")}</CommandEmpty>
                         )}
-                      </div>
-                    </ScrollArea>
-                  </div>
-                )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
           )}

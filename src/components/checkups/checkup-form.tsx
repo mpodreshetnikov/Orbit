@@ -2,13 +2,22 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { Loader2, Search, ChevronsUpDown, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Select,
   SelectContent,
@@ -276,17 +285,6 @@ export function CheckupForm({
       setReminderDaysBefore([7]);
     }
   }, [initial?.id, initial]);
-
-  // Close condition dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (conditionRef.current && !conditionRef.current.contains(e.target as Node)) {
-        setConditionOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // Reset anchor preset when frequency changes (if current preset not available)
   useEffect(() => {
@@ -594,97 +592,104 @@ export function CheckupForm({
         />
       </div>
 
-      {/* Linked Conditions — searchable multi-select */}
-      {conditions.length > 0 && (
-        <div className="space-y-1.5 relative" ref={conditionRef}>
-          <Label>{t("checkups.linkedConditions")}</Label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              value={conditionOpen ? conditionSearch : ""}
-              onChange={(e) => {
-                setConditionSearch(e.target.value);
-                if (!conditionOpen) setConditionOpen(true);
-              }}
-              onFocus={() => {
-                setConditionOpen(true);
-                setConditionSearch("");
-              }}
-              placeholder={
-                conditionOpen
+      {/* Linked Conditions — searchable multi-select (always shown; empty state when person has no conditions) */}
+      <div className="space-y-1.5 relative" ref={conditionRef}>
+        <Label>{t("checkups.linkedConditions")}</Label>
+        <Popover
+          open={conditionOpen}
+          onOpenChange={(open) => {
+            setConditionOpen(open);
+            if (open) setConditionSearch("");
+          }}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              role="combobox"
+              aria-expanded={conditionOpen}
+              className="h-10 w-full justify-between px-3 py-2 text-sm"
+            >
+              <span className="flex items-center gap-2 truncate">
+                <Search className="h-4 w-4 text-muted-foreground" />
+                {conditionOpen
                   ? t("checkups.linkedConditionsPlaceholder")
                   : whyLinks.length > 0
                     ? t("checkups.linkedConditionsSelected", { count: whyLinks.length })
-                    : t("checkups.linkedConditionsPlaceholder")
-              }
-              className="pl-9 pr-9"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
-              onClick={() => {
-                setConditionOpen(!conditionOpen);
-                if (!conditionOpen) setConditionSearch("");
-              }}
-            >
+                    : t("checkups.linkedConditionsPlaceholder")}
+              </span>
               <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
             </Button>
-          </div>
-
-          {conditionOpen && (
-            <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md min-w-0">
-              <ScrollArea className="h-48">
-                <div className="p-1">
-                  {filteredConditions.map((c) => {
-                    const selected = whyLinks.some((l) => l.type === "condition" && l.id === c.id);
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => toggleCondition(c)}
-                        className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${selected ? "bg-accent" : ""}`}
-                      >
-                        <Check className={`h-4 w-4 shrink-0 ${selected ? "opacity-100" : "opacity-0"}`} />
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate">{c.name}</div>
-                          {c.code && (
-                            <div className="text-xs text-muted-foreground">{c.code}</div>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {filteredConditions.length === 0 && (
-                    <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                      {t("common.noResults")}
-                    </div>
-                  )}
+          </PopoverTrigger>
+          <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+            <Command shouldFilter={false}>
+              {conditions.length > 0 ? (
+                <>
+                  <CommandInput
+                    value={conditionSearch}
+                    onValueChange={setConditionSearch}
+                    placeholder={t("checkups.linkedConditionsPlaceholder")}
+                    autoFocus
+                  />
+                  <CommandList className="max-h-48">
+                    <CommandGroup>
+                      {filteredConditions.map((c) => {
+                        const selected = whyLinks.some((l) => l.type === "condition" && l.id === c.id);
+                        return (
+                          <CommandItem
+                            key={c.id}
+                            value={c.id}
+                            onSelect={() => toggleCondition(c)}
+                            className={selected ? "bg-accent" : ""}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${selected ? "opacity-100" : "opacity-0"}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{c.name}</div>
+                              {c.code && (
+                                <div className="text-xs text-muted-foreground">{c.code}</div>
+                              )}
+                            </div>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                    {filteredConditions.length === 0 && (
+                      <CommandEmpty>{t("common.noResults")}</CommandEmpty>
+                    )}
+                  </CommandList>
+                </>
+              ) : (
+                <div className="py-4 px-3 text-sm text-muted-foreground space-y-3">
+                  <p>{t("checkups.linkedConditionsEmpty")}</p>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/health/conditions">{t("checkups.linkedConditionsGoToConditions")}</Link>
+                  </Button>
                 </div>
-              </ScrollArea>
-            </div>
-          )}
+              )}
+            </Command>
+          </PopoverContent>
+        </Popover>
 
-          {whyLinks.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {whyLinks.map((l) => (
-                <Badge key={l.id} variant="secondary" className="gap-1 pr-1">
-                  {l.label}
-                  <button
-                    type="button"
-                    onClick={() => setWhyLinks(whyLinks.filter((x) => x.id !== l.id))}
-                    className="hover:bg-muted rounded p-0.5"
-                    aria-label={t("common.remove")}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+        {whyLinks.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {whyLinks.map((l) => (
+              <Badge key={l.id} variant="secondary" className="gap-1 pr-1">
+                {l.label}
+                <Button
+                  type="button"
+                  onClick={() => setWhyLinks(whyLinks.filter((x) => x.id !== l.id))}
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 rounded p-0 hover:bg-muted"
+                  aria-label={t("common.remove")}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex gap-2 pt-2">

@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { Search, ChevronsUpDown, Check, Plus, Loader2, AlertTriangle, Info, ChevronDown, ChevronUp, AlertCircle, HelpCircle, CheckCircle2, History, ExternalLink } from "lucide-react";
+import { ChevronsUpDown, Check, Plus, Loader2, AlertTriangle, Info, ChevronDown, ChevronUp, AlertCircle, HelpCircle, CheckCircle2, History, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Select,
   SelectContent,
@@ -24,6 +32,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useIcdLookup } from "@/hooks";
+import { cn } from "@/lib/utils";
 import type {
   Condition,
   ConditionRecordWithDetails,
@@ -73,8 +82,6 @@ export function ConditionEditDialog({
   const [conditionSearch, setConditionSearch] = useState("");
   const [isConditionOpen, setIsConditionOpen] = useState(false);
   const [showStatusTips, setShowStatusTips] = useState(false);
-  const conditionRef = useRef<HTMLDivElement>(null);
-  const conditionInputRef = useRef<HTMLInputElement>(null);
 
   // ICD validation hook (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
@@ -105,17 +112,6 @@ export function ConditionEditDialog({
       setIsConditionOpen(false);
     }
   }, [open, conditionRecord, isNew]);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (conditionRef.current && !conditionRef.current.contains(event.target as Node)) {
-        setIsConditionOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // Get current selected condition
   const selectedCondition = selectedConditionId
@@ -223,88 +219,75 @@ export function ConditionEditDialog({
           {isNew && existingConditions.length > 0 && (
             <div className="space-y-2">
               <Label>{t("conditions.selectOrCreate")}</Label>
-              <div className="relative" ref={conditionRef}>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    ref={conditionInputRef}
-                    value={isConditionOpen ? conditionSearch : conditionDisplayValue}
-                    onChange={(e) => {
-                      setConditionSearch(e.target.value);
-                      if (!isConditionOpen) setIsConditionOpen(true);
-                    }}
-                    onFocus={() => {
-                      setIsConditionOpen(true);
-                      setConditionSearch("");
-                    }}
-                    placeholder={t("conditions.searchOrCreate")}
-                    className="pl-9 pr-9"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
-                    onClick={() => {
-                      setIsConditionOpen(!isConditionOpen);
-                      if (!isConditionOpen) {
-                        setConditionSearch("");
-                        conditionInputRef.current?.focus();
-                      }
-                    }}
-                  >
-                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                </div>
-
-                {isConditionOpen && (
-                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
-                    <ScrollArea className="h-60">
-                      <div className="p-1">
-                        {/* Create new option */}
-                        <button
-                          type="button"
-                          onClick={() => handleConditionSelect(null)}
-                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                            mode === "new" ? "bg-accent" : ""
-                          }`}
-                        >
-                          <Plus className="h-4 w-4 shrink-0" />
-                          <span className="text-muted-foreground italic">
-                            {t("conditions.createNew")}
-                          </span>
-                        </button>
-
-                        {/* Existing conditions */}
-                        {filteredConditions.map((condition) => (
-                          <button
-                            key={condition.id}
-                            type="button"
-                            onClick={() => handleConditionSelect(condition.id)}
-                            className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                              selectedConditionId === condition.id ? "bg-accent" : ""
-                            }`}
+              <div className="relative">
+                <Popover open={isConditionOpen} onOpenChange={setIsConditionOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={isConditionOpen}
+                      className={cn(
+                        "h-10 w-full justify-between px-3 py-2 text-sm",
+                        !conditionDisplayValue && "text-muted-foreground"
+                      )}
+                    >
+                      <span className="truncate">
+                        {conditionDisplayValue || t("conditions.searchOrCreate")}
+                      </span>
+                      <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        value={conditionSearch}
+                        onValueChange={setConditionSearch}
+                        placeholder={t("conditions.searchOrCreate")}
+                        autoFocus
+                      />
+                      <CommandList className="max-h-60">
+                        <CommandGroup>
+                          <CommandItem
+                            value="__create__"
+                            onSelect={() => handleConditionSelect(null)}
+                            className={cn(mode === "new" && "bg-accent")}
                           >
-                            <Check className={`h-4 w-4 shrink-0 ${selectedConditionId === condition.id ? "opacity-100" : "opacity-0"}`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="truncate">{condition.name}</div>
-                              <div className="text-xs text-muted-foreground truncate">
-                                {t(`conditions.status.${condition.current_status}`)}
-                                {condition.code && ` · ${condition.code}`}
-                              </div>
-                            </div>
-                          </button>
-                        ))}
-
-                        {filteredConditions.length === 0 && conditionSearch && (
-                          <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                            {t("conditions.noSearchResults")}
-                          </div>
+                            <Plus className="h-4 w-4 shrink-0" />
+                            <span className="text-muted-foreground italic">
+                              {t("conditions.createNew")}
+                            </span>
+                          </CommandItem>
+                        </CommandGroup>
+                        {filteredConditions.length === 0 && conditionSearch ? (
+                          <CommandEmpty>{t("conditions.noSearchResults")}</CommandEmpty>
+                        ) : (
+                          <CommandGroup>
+                            {filteredConditions.map((condition) => (
+                              <CommandItem
+                                key={condition.id}
+                                value={condition.id}
+                                onSelect={() => handleConditionSelect(condition.id)}
+                                className={cn(
+                                  selectedConditionId === condition.id && "bg-accent"
+                                )}
+                              >
+                                <Check className={`h-4 w-4 shrink-0 ${selectedConditionId === condition.id ? "opacity-100" : "opacity-0"}`} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="truncate">{condition.name}</div>
+                                  <div className="text-xs text-muted-foreground truncate">
+                                    {t(`conditions.status.${condition.current_status}`)}
+                                    {condition.code && ` · ${condition.code}`}
+                                  </div>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
                         )}
-                      </div>
-                    </ScrollArea>
-                  </div>
-                )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
           )}
@@ -408,10 +391,12 @@ export function ConditionEditDialog({
               </Select>
               
               {/* Status tips toggle */}
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowStatusTips(!showStatusTips)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="h-auto p-0 text-xs font-normal text-muted-foreground hover:text-foreground hover:bg-transparent"
               >
                 <Info className="h-3.5 w-3.5" />
                 <span>{t("conditions.statusTips.title")}</span>
@@ -420,7 +405,7 @@ export function ConditionEditDialog({
                 ) : (
                   <ChevronDown className="h-3 w-3" />
                 )}
-              </button>
+              </Button>
               
               {/* Status tips content */}
               {showStatusTips && (

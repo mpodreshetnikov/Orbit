@@ -19,6 +19,7 @@ import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/toggle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -197,10 +198,11 @@ function ConditionsContent() {
 
       {/* Status Tips */}
       <div className="rounded-lg border bg-card">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setShowStatusTips(!showStatusTips)}
-          className="tap-target w-full flex items-center justify-between gap-2 p-3 text-sm hover:bg-muted/50 transition-colors"
+          className="tap-target w-full justify-between gap-2 p-3 text-sm h-auto hover:bg-muted/50 transition-colors"
         >
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-muted-foreground" />
@@ -211,7 +213,7 @@ function ConditionsContent() {
           ) : (
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           )}
-        </button>
+        </Button>
         
         {showStatusTips && (
           <div className="px-3 pb-3 grid gap-3 sm:grid-cols-2">

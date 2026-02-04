@@ -298,12 +298,15 @@ export default function CheckupsPage() {
             className="pl-9"
           />
           {searchQuery && (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
               onClick={() => setSearchQuery("")}
-              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
             >
               <X className="h-4 w-4" />
-            </button>
+            </Button>
           )}
         </div>
 
@@ -332,25 +335,43 @@ export default function CheckupsPage() {
           {searchQuery && (
             <Badge variant="secondary" className="gap-1">
               &quot;{searchQuery}&quot;
-              <button onClick={() => setSearchQuery("")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setSearchQuery("")}
+                className="h-5 w-5 p-0"
+              >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {categoryFilter !== "all" && (
             <Badge variant="secondary" className="gap-1">
               {t(`checkups.category${categoryFilter.charAt(0).toUpperCase() + categoryFilter.slice(1)}`)}
-              <button onClick={() => setCategoryFilter("all")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setCategoryFilter("all")}
+                className="h-5 w-5 p-0"
+              >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {statusTab !== "all" && (
             <Badge variant="secondary" className="gap-1">
               {t(`checkups.${statusTab}`)}
-              <button onClick={() => setStatusTab("all")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setStatusTab("all")}
+                className="h-5 w-5 p-0"
+              >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           <Button variant="ghost" size="sm" onClick={clearFilters} className="h-6 px-2 text-xs">

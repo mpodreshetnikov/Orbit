@@ -193,14 +193,16 @@ export function FindingTypeEditDialog({
                 {synonymsRu.map((syn) => (
                   <Badge key={syn} variant="secondary" className="gap-1">
                     {syn}
-                    <button
+                    <Button
                       type="button"
                       onClick={() => removeSynonymRu(syn)}
-                      className="hover:text-destructive"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:text-destructive"
                       disabled={isProcessing}
                     >
                       <X className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </Badge>
                 ))}
               </div>
@@ -233,14 +235,16 @@ export function FindingTypeEditDialog({
                 {synonymsEn.map((syn) => (
                   <Badge key={syn} variant="secondary" className="gap-1">
                     {syn}
-                    <button
+                    <Button
                       type="button"
                       onClick={() => removeSynonymEn(syn)}
-                      className="hover:text-destructive"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:text-destructive"
                       disabled={isProcessing}
                     >
                       <X className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </Badge>
                 ))}
               </div>

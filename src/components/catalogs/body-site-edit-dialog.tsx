@@ -1,14 +1,22 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { X, Plus, Search, ChevronsUpDown, Check } from "lucide-react";
+import { X, Plus, ChevronsUpDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -52,8 +60,6 @@ export function BodySiteEditDialog({
   const [newSynonymEn, setNewSynonymEn] = useState("");
   const [parentSearch, setParentSearch] = useState("");
   const [isParentComboboxOpen, setIsParentComboboxOpen] = useState(false);
-  const parentComboboxRef = useRef<HTMLDivElement>(null);
-  const parentInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize form
   useEffect(() => {
@@ -81,17 +87,6 @@ export function BodySiteEditDialog({
       setIsParentComboboxOpen(false);
     }
   }, [open, bodySite]);
-
-  // Close parent combobox when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (parentComboboxRef.current && !parentComboboxRef.current.contains(event.target as Node)) {
-        setIsParentComboboxOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // Get available parent sites (exclude self and descendants to prevent circular references)
   const availableParents = allSites.filter(s => {
@@ -237,90 +232,73 @@ export function BodySiteEditDialog({
           {/* Parent Site */}
           <div className="space-y-2">
             <Label>{t("catalogs.parentSite")}</Label>
-            <div className="relative" ref={parentComboboxRef}>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  ref={parentInputRef}
-                  value={isParentComboboxOpen ? parentSearch : parentDisplayValue}
-                  onChange={(e) => {
-                    setParentSearch(e.target.value);
-                    if (!isParentComboboxOpen) setIsParentComboboxOpen(true);
-                  }}
-                  onFocus={() => {
-                    setIsParentComboboxOpen(true);
-                    setParentSearch("");
-                  }}
-                  placeholder={t("catalogs.selectParentSite")}
-                  className="pl-9 pr-9"
-                  disabled={isProcessing}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
-                  onClick={() => {
-                    setIsParentComboboxOpen(!isParentComboboxOpen);
-                    if (!isParentComboboxOpen) {
-                      setParentSearch("");
-                      parentInputRef.current?.focus();
-                    }
-                  }}
-                  disabled={isProcessing}
-                >
-                  <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </div>
-              
-              {/* Dropdown */}
-              {isParentComboboxOpen && (
-                <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
-                  <ScrollArea className="max-h-60">
-                    <div className="p-1">
-                      {/* No parent option */}
-                      <button
-                        type="button"
-                        onClick={() => handleParentSelect(null)}
-                        className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                          parentSiteCode === null ? "bg-accent" : ""
-                        }`}
-                      >
-                        <Check className={`h-4 w-4 ${parentSiteCode === null ? "opacity-100" : "opacity-0"}`} />
-                        <span className="text-muted-foreground italic">
-                          {t("catalogs.noParent")}
-                        </span>
-                      </button>
-                      
-                      {/* Available parent sites */}
-                      {filteredParents.map((site) => (
-                        <button
-                          key={site.site_code}
-                          type="button"
-                          onClick={() => handleParentSelect(site.site_code)}
-                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                            parentSiteCode === site.site_code ? "bg-accent" : ""
-                          }`}
+            <div className="relative">
+              <Popover
+                open={isParentComboboxOpen}
+                onOpenChange={(open) => {
+                  setIsParentComboboxOpen(open);
+                  if (open) setParentSearch("");
+                }}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isParentComboboxOpen}
+                    className={`h-10 w-full justify-between px-3 py-2 text-sm ${!parentDisplayValue ? "text-muted-foreground" : ""}`}
+                    disabled={isProcessing}
+                  >
+                    <span className="truncate">
+                      {parentDisplayValue || t("catalogs.selectParentSite")}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      value={parentSearch}
+                      onValueChange={setParentSearch}
+                      placeholder={t("catalogs.selectParentSite")}
+                      autoFocus
+                    />
+                    <CommandList className="max-h-60">
+                      <CommandGroup>
+                        <CommandItem
+                          value="__none__"
+                          onSelect={() => handleParentSelect(null)}
+                          className={parentSiteCode === null ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 shrink-0 ${parentSiteCode === site.site_code ? "opacity-100" : "opacity-0"}`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate">{site.name_ru}</div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {site.site_code}
+                          <Check className={`h-4 w-4 ${parentSiteCode === null ? "opacity-100" : "opacity-0"}`} />
+                          <span className="text-muted-foreground italic">
+                            {t("catalogs.noParent")}
+                          </span>
+                        </CommandItem>
+                        {filteredParents.map((site) => (
+                          <CommandItem
+                            key={site.site_code}
+                            value={site.site_code}
+                            onSelect={() => handleParentSelect(site.site_code)}
+                            className={parentSiteCode === site.site_code ? "bg-accent" : ""}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${parentSiteCode === site.site_code ? "opacity-100" : "opacity-0"}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{site.name_ru}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {site.site_code}
+                              </div>
                             </div>
-                          </div>
-                        </button>
-                      ))}
-                      
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
                       {filteredParents.length === 0 && parentSearch && (
-                        <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                          {t("catalogs.noSearchResults")}
-                        </div>
+                        <CommandEmpty>{t("catalogs.noSearchResults")}</CommandEmpty>
                       )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -350,14 +328,16 @@ export function BodySiteEditDialog({
                 {synonymsRu.map((syn) => (
                   <Badge key={syn} variant="secondary" className="gap-1">
                     {syn}
-                    <button
+                    <Button
                       type="button"
                       onClick={() => removeSynonymRu(syn)}
-                      className="hover:text-destructive"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:text-destructive"
                       disabled={isProcessing}
                     >
                       <X className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </Badge>
                 ))}
               </div>
@@ -390,14 +370,16 @@ export function BodySiteEditDialog({
                 {synonymsEn.map((syn) => (
                   <Badge key={syn} variant="secondary" className="gap-1">
                     {syn}
-                    <button
+                    <Button
                       type="button"
                       onClick={() => removeSynonymEn(syn)}
-                      className="hover:text-destructive"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:text-destructive"
                       disabled={isProcessing}
                     >
                       <X className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </Badge>
                 ))}
               </div>

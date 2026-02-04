@@ -129,23 +129,25 @@ export function MarkCompleteDialog({
               </div>
             </div>
             <ScrollArea className="h-[120px] rounded-md border p-2">
-              <button
+              <Button
                 type="button"
                 onClick={() => setEvidenceRecordId("none")}
-                className={`block w-full rounded px-2 py-1.5 text-left text-sm ${evidenceRecordId === "none" ? "bg-muted font-medium" : "hover:bg-muted/50"}`}
+                variant="ghost"
+                className={`w-full justify-start px-2 py-1.5 text-sm h-auto ${evidenceRecordId === "none" ? "bg-muted font-medium" : "hover:bg-muted/50"}`}
               >
                 {t("checkups.noRecord")}
-              </button>
+              </Button>
               {filteredRecords.slice(0, 20).map((r) => (
-                <button
+                <Button
                   key={r.id}
                   type="button"
                   onClick={() => setEvidenceRecordId(r.id)}
-                  className={`block w-full rounded px-2 py-1.5 text-left text-sm truncate ${evidenceRecordId === r.id ? "bg-muted font-medium" : "hover:bg-muted/50"}`}
+                  variant="ghost"
+                  className={`w-full justify-start px-2 py-1.5 text-sm h-auto truncate ${evidenceRecordId === r.id ? "bg-muted font-medium" : "hover:bg-muted/50"}`}
                 >
                   {r.title}
                   {r.record_date ? ` (${r.record_date})` : ""}
-                </button>
+                </Button>
               ))}
             </ScrollArea>
             {selectedRecord && (

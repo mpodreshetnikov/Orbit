@@ -70,9 +70,11 @@ export function ProcessingIndicator() {
   return (
     <div className="fixed bottom-4 right-4 z-50 hidden w-80 max-w-[calc(100vw-2rem)] rounded-lg border bg-card shadow-lg md:bottom-6 md:right-6 md:block">
       {/* Header */}
-      <button
+      <Button
+        type="button"
+        variant="ghost"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="tap-target flex w-full items-center justify-between p-3 hover:bg-muted/50"
+        className="tap-target w-full justify-between p-3 h-auto hover:bg-muted/50"
       >
         <div className="flex items-center gap-2">
           {activeJobs.length > 0 && (
@@ -92,7 +94,7 @@ export function ProcessingIndicator() {
         ) : (
           <ChevronUp className="h-4 w-4 text-muted-foreground" />
         )}
-      </button>
+      </Button>
 
       {/* Jobs list */}
       {isExpanded && (

@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { AlertCircle, HelpCircle, CheckCircle2, History, Loader2, Search, ChevronsUpDown, Check } from "lucide-react";
+import { AlertCircle, HelpCircle, CheckCircle2, History, Loader2, ChevronsUpDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Select,
   SelectContent,
@@ -56,8 +64,6 @@ export function ConditionAddHistoryDialog({
   const [recordId, setRecordId] = useState<string>("none");
   const [recordSearch, setRecordSearch] = useState("");
   const [isRecordOpen, setIsRecordOpen] = useState(false);
-  const recordRef = useRef<HTMLDivElement>(null);
-  const recordInputRef = useRef<HTMLInputElement>(null);
 
   const linkMutation = useLinkConditionToRecord();
   const createRecordMutation = useCreateMedicalRecord();
@@ -72,17 +78,6 @@ export function ConditionAddHistoryDialog({
       setIsRecordOpen(false);
     }
   }, [open, preselectedRecordId]);
-
-  // Close record dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (recordRef.current && !recordRef.current.contains(event.target as Node)) {
-        setIsRecordOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const selectedRecord = recordId && recordId !== "none" ? records.find((r) => r.id === recordId) : null;
   const recordDisplayValue = selectedRecord
@@ -203,89 +198,78 @@ export function ConditionAddHistoryDialog({
           {/* Link to medical record (optional) — searchable */}
           <div className="space-y-2">
             <Label>{t("conditions.linkToRecord")}</Label>
-            <div className="relative" ref={recordRef}>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  ref={recordInputRef}
-                  value={isRecordOpen ? recordSearch : recordDisplayValue}
-                  onChange={(e) => {
-                    setRecordSearch(e.target.value);
-                    if (!isRecordOpen) setIsRecordOpen(true);
-                  }}
-                  onFocus={() => {
-                    setIsRecordOpen(true);
-                    setRecordSearch("");
-                  }}
-                  placeholder={t("conditions.searchRecordPlaceholder")}
-                  className="pl-9 pr-9"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full w-9 hover:bg-transparent"
-                  onClick={() => {
-                    setIsRecordOpen(!isRecordOpen);
-                    if (!isRecordOpen) {
-                      setRecordSearch("");
-                      recordInputRef.current?.focus();
-                    }
-                  }}
-                >
-                  <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </div>
-
-              {isRecordOpen && (
-                <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md">
-                  <ScrollArea className="h-48">
-                    <div className="p-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRecordId("none");
-                          setRecordSearch("");
-                          setIsRecordOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                          recordId === "none" ? "bg-accent" : ""
-                        }`}
-                      >
-                        <Check className={`h-4 w-4 shrink-0 ${recordId === "none" ? "opacity-100" : "opacity-0"}`} />
-                        {t("conditions.noLinkToRecord")}
-                      </button>
-                      {filteredRecords.map((r) => (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => {
-                            setRecordId(r.id);
+            <div className="relative">
+              <Popover
+                open={isRecordOpen}
+                onOpenChange={(open) => {
+                  setIsRecordOpen(open);
+                  if (open) setRecordSearch("");
+                }}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isRecordOpen}
+                    className={`h-10 w-full justify-between px-3 py-2 text-sm ${!recordDisplayValue ? "text-muted-foreground" : ""}`}
+                  >
+                    <span className="truncate">
+                      {recordDisplayValue || t("conditions.searchRecordPlaceholder")}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      value={recordSearch}
+                      onValueChange={setRecordSearch}
+                      placeholder={t("conditions.searchRecordPlaceholder")}
+                      autoFocus
+                    />
+                    <CommandList className="max-h-48">
+                      <CommandGroup>
+                        <CommandItem
+                          value="none"
+                          onSelect={() => {
+                            setRecordId("none");
                             setRecordSearch("");
                             setIsRecordOpen(false);
                           }}
-                          className={`w-full flex items-center gap-2 px-2 py-2 text-sm rounded hover:bg-accent text-left ${
-                            recordId === r.id ? "bg-accent" : ""
-                          }`}
+                          className={recordId === "none" ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 shrink-0 ${recordId === r.id ? "opacity-100" : "opacity-0"}`} />
-                          <div className="flex-1 min-w-0 text-left">
-                            <div className="truncate">{r.title}</div>
-                            {r.record_date && (
-                              <div className="text-xs text-muted-foreground">{r.record_date}</div>
-                            )}
-                          </div>
-                        </button>
-                      ))}
+                          <Check className={`h-4 w-4 shrink-0 ${recordId === "none" ? "opacity-100" : "opacity-0"}`} />
+                          {t("conditions.noLinkToRecord")}
+                        </CommandItem>
+                        {filteredRecords.map((r) => (
+                          <CommandItem
+                            key={r.id}
+                            value={r.id}
+                            onSelect={() => {
+                              setRecordId(r.id);
+                              setRecordSearch("");
+                              setIsRecordOpen(false);
+                            }}
+                            className={recordId === r.id ? "bg-accent" : ""}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${recordId === r.id ? "opacity-100" : "opacity-0"}`} />
+                            <div className="flex-1 min-w-0 text-left">
+                              <div className="truncate">{r.title}</div>
+                              {r.record_date && (
+                                <div className="text-xs text-muted-foreground">{r.record_date}</div>
+                              )}
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
                       {filteredRecords.length === 0 && recordSearch && (
-                        <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                          {t("conditions.noRecordSearchResults")}
-                        </div>
+                        <CommandEmpty>{t("conditions.noRecordSearchResults")}</CommandEmpty>
                       )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             <p className="text-xs text-muted-foreground">
               {t("conditions.linkToRecordHint")}

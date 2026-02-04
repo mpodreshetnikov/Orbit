@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
-import { Loader2, Search, Check, ChevronDown } from "lucide-react";
+import { Loader2, Check, ChevronDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +16,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { useMeasurementCatalog, useCreateMeasurement } from "@/hooks";
 import type { MeasurementCategory, MeasurementCatalog } from "@/types";
@@ -43,7 +51,11 @@ export function AddMeasurementDialog({
   const [notes, setNotes] = useState("");
   const [typeSearch, setTypeSearch] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [popoverContainer, setPopoverContainer] = useState<HTMLElement | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const dialogContentRef = useCallback((el: HTMLDivElement | null) => {
+    setPopoverContainer(el);
+  }, []);
 
   // Get locale from document
   useEffect(() => {
@@ -166,6 +178,7 @@ export function AddMeasurementDialog({
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md">
+        <div ref={dialogContentRef}>
         <DialogHeader>
           <DialogTitle>{t("measurements.addMeasurement")}</DialogTitle>
           <DialogDescription>
@@ -178,71 +191,62 @@ export function AddMeasurementDialog({
           <div className="space-y-2">
             <Label>{t("measurements.selectType")}</Label>
             <div className="relative" ref={dropdownRef}>
-              {/* Trigger button */}
-              <button
-                type="button"
-                onClick={() => !preselectedCode && setDropdownOpen(!dropdownOpen)}
-                disabled={!!preselectedCode}
-                className={cn(
-                  "tap-target flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background",
-                  "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                  !selectedDisplayName && "text-muted-foreground"
-                )}
-              >
-                <span className="truncate">
-                  {selectedDisplayName || t("measurements.selectTypePlaceholder")}
-                </span>
-                <ChevronDown className="h-4 w-4 opacity-50" />
-              </button>
-
-              {/* Dropdown */}
-              {dropdownOpen && (
-                <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
-                  {/* Search input */}
-                  <div className="p-2 border-b">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        value={typeSearch}
-                        onChange={(e) => setTypeSearch(e.target.value)}
-                        placeholder={t("measurements.searchPlaceholder")}
-                        className="pl-8 h-9"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-
-                  {/* Options list */}
-                  <ScrollArea className="h-60">
-                    {catalogLoading ? (
-                      <div className="p-4 text-center">
-                        <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                      </div>
-                    ) : !hasResults ? (
-                      <div className="p-4 text-center text-sm text-muted-foreground">
-                        {t("common.noResults")}
-                      </div>
-                    ) : (
-                      <div className="p-1">
-                        {Object.entries(filteredGroupedCatalog).map(([category, items]) => {
+              <Popover open={dropdownOpen} onOpenChange={setDropdownOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={dropdownOpen}
+                    disabled={!!preselectedCode}
+                    className={cn(
+                      "tap-target h-10 w-full justify-between px-3 py-2 text-sm ring-offset-background",
+                      "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                      "disabled:cursor-not-allowed disabled:opacity-50",
+                      !selectedDisplayName && "text-muted-foreground"
+                    )}
+                  >
+                    <span className="truncate">
+                      {selectedDisplayName || t("measurements.selectTypePlaceholder")}
+                    </span>
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="z-[80] w-[--radix-popover-trigger-width] p-0"
+                  align="start"
+                  container={popoverContainer}
+                >
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      value={typeSearch}
+                      onValueChange={setTypeSearch}
+                      placeholder={t("measurements.searchPlaceholder")}
+                      autoFocus
+                    />
+                    <CommandList className="max-h-60">
+                      {catalogLoading ? (
+                        <div className="p-4 text-center">
+                          <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                        </div>
+                      ) : !hasResults ? (
+                        <CommandEmpty>{t("common.noResults")}</CommandEmpty>
+                      ) : (
+                        Object.entries(filteredGroupedCatalog).map(([category, items]) => {
                           if (!items || items.length === 0) return null;
+                          const categoryLabel = MEASUREMENT_CATEGORY_LABELS[category as MeasurementCategory];
                           return (
-                            <div key={category}>
-                              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                                {locale === "ru"
-                                  ? MEASUREMENT_CATEGORY_LABELS[category as MeasurementCategory].ru
-                                  : MEASUREMENT_CATEGORY_LABELS[category as MeasurementCategory].en}
-                              </div>
+                            <CommandGroup
+                              key={category}
+                              heading={locale === "ru" ? categoryLabel.ru : categoryLabel.en}
+                            >
                               {items.map((item) => (
-                                <button
+                                <CommandItem
                                   key={item.id}
-                                  type="button"
-                                  onClick={() => handleSelectType(item)}
+                                  value={item.id}
+                                  onSelect={() => handleSelectType(item)}
                                   className={cn(
-                                    "tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none",
-                                    "hover:bg-accent hover:text-accent-foreground",
-                                    "focus:bg-accent focus:text-accent-foreground",
+                                    "tap-target gap-2",
                                     catalogId === item.id && "bg-accent"
                                   )}
                                 >
@@ -260,16 +264,16 @@ export function AddMeasurementDialog({
                                       {locale === "ru" ? item.unit_ru : item.unit_en}
                                     </span>
                                   )}
-                                </button>
+                                </CommandItem>
                               ))}
-                            </div>
+                            </CommandGroup>
                           );
-                        })}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-              )}
+                        })
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -334,6 +338,7 @@ export function AddMeasurementDialog({
             </Button>
           </DialogFooter>
         </form>
+        </div>
       </DialogContent>
     </Dialog>
   );

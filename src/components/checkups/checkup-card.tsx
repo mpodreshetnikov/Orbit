@@ -8,6 +8,7 @@ import { Calendar, CheckCircle2, CalendarPlus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import type { CheckupItem, CheckupItemStatus, CheckupCategory } from "@/types";
 
@@ -85,12 +86,10 @@ export function CheckupCard({
                   onToggleSelect(item);
                 }}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selected}
-                  onChange={() => onToggleSelect(item)}
+                  onCheckedChange={() => onToggleSelect(item)}
                   aria-label={t("checkups.selectToPlan")}
-                  className="h-4 w-4 rounded border-input"
                   onClick={(e) => e.stopPropagation()}
                 />
               </div>

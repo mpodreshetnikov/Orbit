@@ -265,12 +265,15 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
             className="pl-9"
           />
           {searchQuery && (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
               onClick={() => setSearchQuery("")}
-              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
             >
               <X className="h-4 w-4" />
-            </button>
+            </Button>
           )}
         </div>
 
@@ -299,25 +302,43 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           {searchQuery && (
             <Badge variant="secondary" className="gap-1">
               {searchQuery}
-              <button onClick={() => setSearchQuery("")} className="tap-target">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setSearchQuery("")}
+                className="h-5 w-5 p-0"
+              >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {typeFilter !== "all" && (
             <Badge variant="secondary" className="gap-1">
               {t(`records.types.${typeFilter}`)}
-              <button onClick={() => setTypeFilter("all")} className="tap-target">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setTypeFilter("all")}
+                className="h-5 w-5 p-0"
+              >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           {statusFilter !== "active" && (
             <Badge variant="secondary" className="gap-1">
               {t(`records.statusFilter.${statusFilter}`)}
-              <button onClick={() => setTabInUrl("active")} className="tap-target">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setTabInUrl("active")}
+                className="h-5 w-5 p-0"
+              >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </Badge>
           )}
           <Button variant="ghost" size="sm" onClick={clearFilters}>
