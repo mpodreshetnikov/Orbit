@@ -175,10 +175,7 @@ var NOTIFICATION_TYPE_HANDLERS = {
     tag: function (n) {
       if (n && n.tag) return n.tag;
       var personId = n.person_id || n.personId || "";
-      if (n && n.id) {
-        return "medication-" + (personId ? personId + "-" : "") + n.id;
-      }
-      return "medication-" + Date.now();
+      return "medication-" + (personId ? personId : "no-person");
     },
     renotify: true,
     getActions: function (lang) {
