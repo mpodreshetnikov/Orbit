@@ -15,7 +15,7 @@ const DAY_SUFFIX = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 export function formatRegimenScheduleSummary(
   regimen: MedRegimen,
-  t: (key: string) => string,
+  t: (key: string, values?: { count?: number }) => string,
   intlLocale: string
 ): string | null {
   const schedule = regimen.schedule as MedSchedule | null;

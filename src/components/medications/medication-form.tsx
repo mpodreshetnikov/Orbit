@@ -31,15 +31,26 @@ import type {
   RegimenInventory,
 } from "@/types/regimen";
 
-interface MedicationFormProps {
+interface MedicationFormPropsBase {
   mode: "create" | "edit";
   initial?: MedRegimen | null;
   personId: string;
   defaultKind?: MedicationKind;
-  onSubmit: (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void | Promise<void>;
   isPending?: boolean;
   onCancel?: () => void;
 }
+
+interface MedicationFormPropsCreate extends MedicationFormPropsBase {
+  mode: "create";
+  onSubmit: (data: CreateMedRegimenInput) => void | Promise<void>;
+}
+
+interface MedicationFormPropsEdit extends MedicationFormPropsBase {
+  mode: "edit";
+  onSubmit: (data: UpdateMedRegimenInput) => void | Promise<void>;
+}
+
+type MedicationFormProps = MedicationFormPropsCreate | MedicationFormPropsEdit;
 
 const DEFAULT_SCHEDULE: MedSchedule = {
   mode: "daily_times",
