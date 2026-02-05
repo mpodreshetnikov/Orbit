@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.generate_med_dose_events_for_person_ids(
 RETURNS int
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public
 AS $$
 DECLARE
   v_tz text;
@@ -95,13 +95,15 @@ BEGIN
         END IF;
         IF v_slot_amount IS NULL THEN v_slot_amount := 1; END IF;
         v_slot_planned := jsonb_set(v_planned_intake, '{intake,amount}', to_jsonb(v_slot_amount));
-        v_ref := (v_today::date || ' 00:00:00')::timestamp AT TIME ZONE v_tz;
+        v_ref := (greatest(v_start_date, v_today)::text || ' 00:00:00')::timestamp AT TIME ZONE v_tz;
         v_slot_ts := v_ref;
         WHILE v_slot_ts < now() LOOP
           v_slot_ts := v_slot_ts + (v_every || ' hours')::interval;
         END LOOP;
         WHILE v_slot_ts < now() + (p_horizon_days || ' days')::interval LOOP
-          IF v_end_type = 'until_date' AND v_end_date IS NOT NULL AND (v_slot_ts AT TIME ZONE v_tz)::date > v_end_date THEN
+          IF (v_slot_ts AT TIME ZONE v_tz)::date < v_start_date THEN
+            NULL;
+          ELSIF v_end_type = 'until_date' AND v_end_date IS NOT NULL AND (v_slot_ts AT TIME ZONE v_tz)::date > v_end_date THEN
             NULL;
           ELSIF v_end_type = 'for_days' AND v_days_count IS NOT NULL AND (v_slot_ts AT TIME ZONE v_tz)::date >= v_start_date + (v_days_count || ' days')::interval THEN
             NULL;
@@ -131,6 +133,9 @@ BEGIN
     FOR v_i IN 0 .. (p_horizon_days - 1)
     LOOP
       v_date := v_today + (v_i || ' days')::interval;
+      IF v_date < v_start_date THEN
+        CONTINUE;
+      END IF;
       v_dow := extract(isodow from v_date)::int;
       IF v_dow = 7 THEN v_dow := 0; END IF;
 
@@ -226,4 +231,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.generate_med_dose_events_for_person_ids(uuid[], text, int) IS
-  'Single reusable generator: med_dose_events for given person ids over horizon. Supports one_off, interval_hours, daily_times, days_of_week, interval_days.';
+  'Single reusable generator: med_dose_events for given person ids over horizon. Supports one_off, interval_hours, daily_times, days_of_week, interval_days. Respects duration.start_date so intakes only start on or after start date. Used by cron and by post create/edit.';
