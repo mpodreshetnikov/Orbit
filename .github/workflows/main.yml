@@ -6,6 +6,7 @@ on:
 env:
   SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASEACCESSTOKEN }}
   PROJECT_ID: vvriurabgusbdysfrcem
+  DATABASE_URL: postgresql://postgres.vvriurabgusbdysfrcem:${{ secrets.SUPABASEDBPASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
 
 jobs:
   deploy:
@@ -20,3 +21,4 @@ jobs:
       - run: supabase link --project-ref $PROJECT_ID
       - run: supabase functions deploy 
       - run: supabase db push --yes
+      - run: npm run db:deploy
