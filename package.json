@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:deploy": "node supabase/db/run-deploy.js",
+    "db:deploy:local": "node supabase/db/run-deploy.js local"
   },
   "dependencies": {
     "@eslint/eslintrc": "^3.3.3",
