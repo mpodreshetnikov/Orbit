@@ -4,6 +4,7 @@
 CREATE OR REPLACE FUNCTION public.checkup_completion_after_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = public
 AS $$
 DECLARE
   item_schedule jsonb;

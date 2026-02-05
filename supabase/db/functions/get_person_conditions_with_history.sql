@@ -23,6 +23,7 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 STABLE
+SET search_path = public
 AS $$
   SELECT 
     c.id,

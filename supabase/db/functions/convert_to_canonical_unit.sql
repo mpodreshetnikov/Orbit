@@ -9,6 +9,7 @@ CREATE OR REPLACE FUNCTION public.convert_to_canonical_unit(
 RETURNS numeric
 LANGUAGE plpgsql
 STABLE
+SET search_path = public
 AS $$
 DECLARE
   v_accepted_units jsonb;

@@ -8,6 +8,7 @@ CREATE OR REPLACE FUNCTION public.find_observation_by_synonym(
 RETURNS text
 LANGUAGE plpgsql
 STABLE
+SET search_path = public
 AS $$
 DECLARE
   v_normalized text;

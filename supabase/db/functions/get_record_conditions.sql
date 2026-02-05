@@ -25,6 +25,7 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 STABLE
+SET search_path = public
 AS $$
   SELECT 
     cr.id,

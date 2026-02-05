@@ -4,6 +4,7 @@
 CREATE OR REPLACE FUNCTION public.checkup_item_set_next_due_on_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = public
 AS $$
 DECLARE
   s_type text;

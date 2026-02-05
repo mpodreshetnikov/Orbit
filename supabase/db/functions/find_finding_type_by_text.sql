@@ -11,6 +11,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 STABLE
+SET search_path = public
 AS $$
 DECLARE
   v_normalized text;

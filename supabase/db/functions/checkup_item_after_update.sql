@@ -4,6 +4,7 @@
 CREATE OR REPLACE FUNCTION public.checkup_item_after_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = public
 AS $$
 BEGIN
   IF OLD.schedule IS DISTINCT FROM NEW.schedule THEN

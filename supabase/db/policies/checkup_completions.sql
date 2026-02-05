@@ -8,7 +8,7 @@ CREATE POLICY "checkup_completions_select" ON public.checkup_completions
       SELECT 1 FROM public.checkup_items ci
       WHERE ci.id = checkup_item_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );
 
 DROP POLICY IF EXISTS "checkup_completions_insert" ON public.checkup_completions;
@@ -19,7 +19,7 @@ CREATE POLICY "checkup_completions_insert" ON public.checkup_completions
       SELECT 1 FROM public.checkup_items ci
       WHERE ci.id = checkup_item_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );
 
 DROP POLICY IF EXISTS "checkup_completions_update" ON public.checkup_completions;
@@ -30,7 +30,7 @@ CREATE POLICY "checkup_completions_update" ON public.checkup_completions
       SELECT 1 FROM public.checkup_items ci
       WHERE ci.id = checkup_item_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );
 
 DROP POLICY IF EXISTS "checkup_completions_delete" ON public.checkup_completions;
@@ -41,5 +41,5 @@ CREATE POLICY "checkup_completions_delete" ON public.checkup_completions
       SELECT 1 FROM public.checkup_items ci
       WHERE ci.id = checkup_item_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );

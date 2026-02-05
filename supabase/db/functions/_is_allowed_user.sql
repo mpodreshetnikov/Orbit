@@ -11,8 +11,8 @@ AS $$
   SELECT EXISTS (
     SELECT 1
     FROM public.allowed_users au
-    WHERE au.auth_user_id = auth.uid()
-       OR au.email = auth.email()
+    WHERE au.auth_user_id = (select auth.uid())
+       OR au.email = (select auth.email())
   );
 $$;
 

@@ -4,6 +4,7 @@
 CREATE OR REPLACE FUNCTION public.checkup_completion_after_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = public
 AS $$
 BEGIN
   PERFORM public.checkup_recompute_next_due_for_item(NEW.checkup_item_id);

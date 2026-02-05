@@ -8,6 +8,7 @@ CREATE OR REPLACE FUNCTION public.checkup_compute_next_due(
 RETURNS date
 LANGUAGE plpgsql
 IMMUTABLE
+SET search_path = public
 AS $$
 DECLARE
   s_type text;

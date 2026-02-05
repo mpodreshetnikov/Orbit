@@ -8,7 +8,7 @@ CREATE POLICY "record_observations_select" ON public.record_observations
       SELECT 1 FROM public.medical_records mr
       WHERE mr.id = record_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );
 
 DROP POLICY IF EXISTS "record_observations_insert" ON public.record_observations;
@@ -19,7 +19,7 @@ CREATE POLICY "record_observations_insert" ON public.record_observations
       SELECT 1 FROM public.medical_records mr
       WHERE mr.id = record_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );
 
 DROP POLICY IF EXISTS "record_observations_update" ON public.record_observations;
@@ -30,14 +30,14 @@ CREATE POLICY "record_observations_update" ON public.record_observations
       SELECT 1 FROM public.medical_records mr
       WHERE mr.id = record_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   )
   WITH CHECK (
     EXISTS (
       SELECT 1 FROM public.medical_records mr
       WHERE mr.id = record_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );
 
 DROP POLICY IF EXISTS "record_observations_delete" ON public.record_observations;
@@ -48,5 +48,5 @@ CREATE POLICY "record_observations_delete" ON public.record_observations
       SELECT 1 FROM public.medical_records mr
       WHERE mr.id = record_id
     )
-    AND public.is_allowed_user()
+    AND (select public.is_allowed_user())
   );
