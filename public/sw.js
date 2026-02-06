@@ -212,8 +212,13 @@ var NOTIFICATION_TYPE_HANDLERS = {
     onActionClick: function (event, data, action) {
       var doseEventIds = data.dose_event_ids;
       if (!Array.isArray(doseEventIds) || doseEventIds.length === 0) return null;
-      if (action !== "confirm" && action !== "skip") return null;
-      var apiAction = action === "confirm" ? "taken" : "skipped";
+      // Normalize: some mobile browsers report button title (e.g. "Confirm", "Подтвердить") instead of action id ("confirm")
+      var raw = String(action || "").trim();
+      var normalized = raw.toLowerCase();
+      var isConfirm = normalized === "confirm" || normalized === "подтвердить";
+      var isSkip = normalized === "skip" || normalized === "пропустить";
+      if (!isConfirm && !isSkip) return null;
+      var apiAction = isConfirm ? "taken" : "skipped";
       return fetch(self.location.origin + "/api/notifications/medication-action", {
         method: "POST",
         credentials: "include",
