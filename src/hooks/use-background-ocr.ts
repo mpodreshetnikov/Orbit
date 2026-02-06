@@ -21,6 +21,28 @@ interface RetryOCRInput {
   personName: string;
 }
 
+const OCR_FETCH_TIMEOUT_MS = 120_000; // 120s so client does not wait indefinitely
+const OCR_FAILED_UPDATE_RETRIES = 3;
+const OCR_FAILED_UPDATE_DELAY_MS = 1500;
+
+async function updateRecordToOcrFailed(
+  supabase: ReturnType<typeof createClient>,
+  recordId: string,
+  errorMessage: string
+): Promise<boolean> {
+  for (let attempt = 0; attempt < OCR_FAILED_UPDATE_RETRIES; attempt++) {
+    const { error } = await supabase
+      .from("medical_records")
+      .update({ status: "ocr_failed", ocr_error: errorMessage })
+      .eq("id", recordId);
+    if (!error) return true;
+    if (attempt < OCR_FAILED_UPDATE_RETRIES - 1) {
+      await new Promise((r) => setTimeout(r, OCR_FAILED_UPDATE_DELAY_MS));
+    }
+  }
+  return false;
+}
+
 export function useBackgroundOCR() {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -100,20 +122,28 @@ export function useBackgroundOCR() {
         // Update status: processing (OCR)
         updateJob(jobId, { stage: "processing", progress: 40 });
 
-        // Call health-ocr edge function
+        // Call health-ocr edge function with timeout
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
         if (!supabaseUrl) {
           throw new Error("Supabase URL not configured");
         }
 
-        const response = await fetch(`${supabaseUrl}/functions/v1/health-ocr`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ record_id: recordId }),
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), OCR_FETCH_TIMEOUT_MS);
+        let response: Response;
+        try {
+          response = await fetch(`${supabaseUrl}/functions/v1/health-ocr`, {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ record_id: recordId }),
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         updateJob(jobId, { progress: 80 });
 
@@ -198,25 +228,34 @@ export function useBackgroundOCR() {
         return { success: true, ocr_text: data.ocr_text };
       } catch (error) {
         const errorMessage =
-          error instanceof Error ? error.message : "Processing failed";
+          (error as Error)?.name === "AbortError"
+            ? t("processing.timeout")
+            : error instanceof Error
+              ? error.message
+              : "Processing failed";
 
         updateJob(jobId, { stage: "failed", error: errorMessage });
         addNotification({
           jobId,
           recordId,
-          title: t("processing.failed"),
+          title: (error as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
           personName,
           type: "error",
           message: errorMessage,
         });
-        toast.error(t("processing.failed"), { description: errorMessage });
+        toast.error(
+          (error as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
+          { description: (error as Error)?.name === "AbortError" ? t("processing.timeoutDescription") : errorMessage }
+        );
 
-        // Persist OCR failure so UI can show error and Retry
-        const supabase = createClient();
-        await supabase
-          .from("medical_records")
-          .update({ status: "ocr_failed", ocr_error: errorMessage })
-          .eq("id", recordId);
+        // Persist OCR failure so UI can show error and Retry (retry update on transient network failure)
+        const supabaseClient = createClient();
+        const updated = await updateRecordToOcrFailed(supabaseClient, recordId, errorMessage);
+        if (!updated) {
+          toast.error(t("processing.failed"), {
+            description: "Open the record and use Retry OCR if it still shows processing.",
+          });
+        }
 
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
         queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
@@ -267,14 +306,44 @@ export function useBackgroundOCR() {
         return { success: false, error: err };
       }
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/health-ocr`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ record_id: recordId }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), OCR_FETCH_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(`${supabaseUrl}/functions/v1/health-ocr`, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ record_id: recordId }),
+        });
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        const errorMessage = (fetchError as Error)?.name === "AbortError" ? t("processing.timeout") : (fetchError instanceof Error ? fetchError.message : "Processing failed");
+        updateJob(jobId, { stage: "failed", error: errorMessage });
+        await supabase
+          .from("medical_records")
+          .update({ status: "ocr_failed", ocr_error: errorMessage })
+          .eq("id", recordId);
+        queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+        queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+        addNotification({
+          jobId,
+          recordId,
+          title: (fetchError as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
+          personName,
+          type: "error",
+          message: errorMessage,
+        });
+        toast.error(
+          (fetchError as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
+          { description: (fetchError as Error)?.name === "AbortError" ? t("processing.timeoutDescription") : errorMessage }
+        );
+        return { success: false, error: errorMessage };
+      }
+      clearTimeout(timeoutId);
 
       updateJob(jobId, { progress: 80 });
 

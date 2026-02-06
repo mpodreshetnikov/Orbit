@@ -336,7 +336,10 @@
     "reviewStructure": "Please review the extracted information.",
     "structureFailed": "Structure Extraction Failed",
     "ocrFailed": "OCR failed",
-    "retryOcr": "Retry OCR"
+    "retryOcr": "Retry OCR",
+    "timeout": "Processing timed out",
+    "timeoutDescription": "Check your connection and use Retry OCR from the record.",
+    "failedTapToRetry": "Failed – tap to retry"
   },
   "catalogs": {
     "title": "Catalogs",

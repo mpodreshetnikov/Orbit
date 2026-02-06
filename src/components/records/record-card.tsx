@@ -50,14 +50,18 @@ export function RecordCard({
 
   const isRemoved = record.status === "removed";
   const isDraft = record.status === "draft";
-  const isProcessing = record.status === "processing";
+  const isProcessing =
+    record.status === "ocr_processing" ||
+    record.status === "structuring" ||
+    record.status === "processing";
+  const isOcrFailed = record.status === "ocr_failed";
 
   return (
     <Card
       className={cn(
         "group tap-target cursor-pointer select-none transition-all hover:shadow-md min-w-0 w-full overflow-hidden",
         isRemoved && "opacity-60",
-        isProcessing && "border-primary/50"
+        (isProcessing || isOcrFailed) && "border-primary/50"
       )}
       onClick={() => onView(record)}
     >
@@ -76,6 +80,11 @@ export function RecordCard({
                 <Badge variant="outline" className="text-xs gap-1 border-primary/50 text-primary">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   {t("records.status.processing")}
+                </Badge>
+              )}
+              {isOcrFailed && (
+                <Badge variant="outline" className="text-xs border-destructive/50 text-destructive">
+                  {t("processing.failedTapToRetry")}
                 </Badge>
               )}
               {isDraft && (

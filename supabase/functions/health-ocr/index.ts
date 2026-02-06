@@ -20,6 +20,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const BUCKET_NAME = "medical-attachments";
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10MB per file
 const MAX_OCR_ERROR_LENGTH = 500;
+const OPENROUTER_TIMEOUT_MS = 55_000; // 55s per image so we stay under Edge limit
 
 interface OcrRequest {
   record_id: string;
@@ -106,38 +107,44 @@ async function callVisionOcrSingle(
     { type: "image_url", image_url: { url: imageDataUrl.url } },
   ];
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": SUPABASE_URL || "http://localhost:3000",
-    },
-    body: JSON.stringify({
-      model: "openai/gpt-4o",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content },
-      ],
-      temperature: 0.1,
-      max_tokens: 12000,
-      response_format: { type: "json_object" },
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`OpenRouter API error: ${error}`);
-  }
-
-  const data = await response.json();
-  const responseContent = data.choices[0]?.message?.content;
-
-  if (!responseContent) {
-    throw new Error("No response from OpenRouter");
-  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
 
   try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": SUPABASE_URL || "http://localhost:3000",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content },
+        ],
+        temperature: 0.1,
+        max_tokens: 12000,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenRouter API error: ${error}`);
+    }
+
+    const data = await response.json();
+    const responseContent = data.choices[0]?.message?.content;
+
+    if (!responseContent) {
+      throw new Error("No response from OpenRouter");
+    }
+
     const parsed = JSON.parse(responseContent);
     const suggestedTitle = typeof parsed.suggested_title === "string"
       ? parsed.suggested_title.trim()
@@ -146,8 +153,12 @@ async function callVisionOcrSingle(
       ocr_text: parsed.ocr_text || "",
       suggested_title: suggestedTitle || "Медицинский документ",
     };
-  } catch {
-    throw new Error("Failed to parse OpenRouter response as JSON");
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e?.name === "AbortError") {
+      throw new Error("OpenRouter request timed out");
+    }
+    throw e;
   }
 }
 
@@ -157,6 +168,7 @@ Deno.serve(async (req) => {
   }
 
   let recordId: string | null = null;
+  const startMs = Date.now();
 
   try {
     if (!OPENROUTER_API_KEY) {
@@ -213,6 +225,7 @@ Deno.serve(async (req) => {
 
     const body: OcrRequest = await req.json();
     recordId = body.record_id ?? null;
+    console.log("[health-ocr] record_id:", recordId);
 
     if (!recordId) {
       throw new Error("Missing required field: record_id");
@@ -287,6 +300,9 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to update record: ${updateError.message}`);
     }
 
+    const durationMs = Date.now() - startMs;
+    console.log("[health-ocr] success record_id:", recordId, "duration_ms:", durationMs);
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -300,7 +316,8 @@ Deno.serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error("OCR error:", error);
+    const durationMs = Date.now() - startMs;
+    console.error("[health-ocr] error record_id:", recordId, "duration_ms:", durationMs, "error:", error);
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     const truncatedMessage = errorMessage.slice(0, MAX_OCR_ERROR_LENGTH);
 
