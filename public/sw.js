@@ -232,14 +232,7 @@ var NOTIFICATION_TYPE_HANDLERS = {
         return "api_fail";
       });
 
-      // Always open the app with action params so the frontend can handle it
-      // (reliable fallback — the app has an authenticated Supabase client)
-      var actionUrl = (data.url || "/health/medications")
-        + "?notification_action=" + encodeURIComponent(apiAction)
-        + "&dose_event_ids=" + encodeURIComponent(doseEventIds.join(","));
-      var openPromise = openNotificationUrl(actionUrl, data.actionBaseUrl);
-
-      return Promise.all([fetchPromise, openPromise]);
+      return Promise.all([fetchPromise]);
     },
   },
 };
