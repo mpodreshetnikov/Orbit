@@ -3,7 +3,7 @@
 import { useRef, useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { List, Plus, Pill, Search, X, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,34 +46,41 @@ export default function MedicationsPage() {
   const [overdueIntervalMinutes, setOverdueIntervalMinutes] = useState<number>(30);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const searchParams = useSearchParams();
   const { data: regimens, isLoading } = useRegimens(selectedPersonId ?? null);
   const { data: preferences } = useUserPreferences();
   const updatePreferences = useUpdateUserPreferences();
   const markTaken = useMarkDoseTaken();
   const markSkipped = useMarkDoseSkipped();
+  const notificationHandledRef = useRef(false);
 
-  // Handle notification action params (from service worker opening the app)
+  // Handle notification action params (from service worker opening the app).
+  // Runs once on mount; reads URL params directly from window.location to avoid
+  // useSearchParams() which can cause infinite RSC refetches in Next.js App Router.
   useEffect(() => {
-    const action = searchParams.get("notification_action");
-    const idsParam = searchParams.get("dose_event_ids");
+    if (notificationHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get("notification_action");
+    const idsParam = params.get("dose_event_ids");
     if (!action || !idsParam) return;
 
     const doseEventIds = idsParam.split(",").filter(Boolean);
     if (doseEventIds.length === 0) return;
 
-    // Clear URL params immediately to prevent re-processing
+    notificationHandledRef.current = true;
+
+    // Clear URL params to keep the address bar clean
     const url = new URL(window.location.href);
     url.searchParams.delete("notification_action");
     url.searchParams.delete("dose_event_ids");
-    router.replace(url.pathname + url.search, { scroll: false });
+    window.history.replaceState(null, "", url.pathname + url.search);
 
     // Execute the action
     const mutation = action === "taken" ? markTaken : markSkipped;
     for (const id of doseEventIds) {
       mutation.mutate({ doseEventId: id });
     }
-  }, [searchParams, router, markTaken, markSkipped]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (preferences?.overdue_reminder_interval_minutes != null) {
