@@ -160,6 +160,13 @@ function getMedicationData(n) {
   return { dose_event_ids: doseEventIds };
 }
 
+function getNotificationInstanceId(n) {
+  if (n && n.id != null) return String(n.id);
+  if (n && n.dose_event_id != null) return String(n.dose_event_id);
+  if (n && Array.isArray(n.dose_event_ids) && n.dose_event_ids.length) return n.dose_event_ids.join("-");
+  return String(Date.now());
+}
+
 /** Resolves a type handler for a given notification type. Multiple types can share one handler. */
 function getTypeHandler(type) {
   if (type === "medication" || type === "medication_snoozed") {
@@ -173,9 +180,9 @@ var NOTIFICATION_TYPE_HANDLERS = {
     icon: "/icons/icon-512x512.png",
     badge: "/icons/pills-128x128.png",
     tag: function (n) {
-      if (n && n.tag) return n.tag;
       var personId = n.person_id || n.personId || "";
-      return "medication-" + (personId ? personId : "no-person");
+      var groupKey = "medication-" + (personId ? personId : "no-person");
+      return groupKey + "-" + getNotificationInstanceId(n); // unique tag per instance
     },
     renotify: true,
     getActions: function (lang) {
@@ -207,7 +214,13 @@ var NOTIFICATION_TYPE_HANDLERS = {
     },
     getData: function (n, baseData) {
       var extra = getMedicationData(n);
-      return Object.assign({}, baseData, extra);
+      var personId = baseData.person_id || null;
+      var groupKey = "medication-" + (personId ? personId : "no-person");
+      var instanceId = getNotificationInstanceId(n);
+      return Object.assign({}, baseData, extra, {
+        groupKey: groupKey,
+        instanceId: instanceId,
+      });
     },
     onActionClick: function (event, data, action) {
       var doseEventIds = data.dose_event_ids;
@@ -298,8 +311,30 @@ function buildNotificationOptions(n, lang) {
   var prefix = resolveTitlePrefix(n);
   title = applyTitlePrefix(title, prefix);
   if (image != null) options.image = image;
-  if (actions != null && actions.length > 0) options.actions = actions;
+  if (actions && actions.length > 0) {
+    var max = (self.Notification && typeof Notification.maxActions === "number")
+      ? Notification.maxActions
+      : actions.length;
+    options.actions = actions.slice(0, Math.max(0, max));
+  }
   return { title: title, options: options };
+}
+
+// ---------------------------------------------------------------------------
+// Close older notifications from the same group, then show the new one
+// ---------------------------------------------------------------------------
+function closeSameGroupThenShow(built) {
+  var groupKey = built.options && built.options.data && built.options.data.groupKey;
+
+  return self.registration.getNotifications().then(function (list) {
+    if (!groupKey) return;
+    list.forEach(function (notif) {
+      var d = notif.data || {};
+      if (d.groupKey === groupKey) notif.close();
+    });
+  }).then(function () {
+    return self.registration.showNotification(built.title, built.options);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +343,7 @@ function buildNotificationOptions(n, lang) {
 function openNotificationUrl(url, actionBaseUrl) {
   var base = actionBaseUrl || self.location.origin;
   var resolved = (url || "/").startsWith("http") ? url : base + (url.startsWith("/") ? url : "/" + url);
-  return self.clients.matchAll({ type: "window" }).then(function (clientList) {
+  return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (clientList) {
     for (var i = 0; i < clientList.length; i++) {
       var client = clientList[i];
       if (client.url.indexOf(self.registration.scope) !== -1 && "focus" in client) {
@@ -374,24 +409,25 @@ self.addEventListener("push", function (event) {
   if (data.notifications && Array.isArray(data.notifications)) {
     var promise = getAppLang().then(function (lang) {
       if (!self.registration.showNotification) return;
-      return Promise.all(
-        data.notifications.map(function (n) {
+      // Show notifications sequentially (not in parallel) to avoid Android quirks
+      var chain = Promise.resolve();
+      data.notifications.forEach(function (n) {
+        chain = chain.then(function () {
           var built = buildNotificationOptions(n, lang);
-          return self.registration
-            .showNotification(built.title, built.options)
-            .then(function () {
-              var ids = n.ids && Array.isArray(n.ids) ? n.ids : (n.id ? [n.id] : null);
-              if (ids && ids.length > 0) {
-                return fetch(self.location.origin + "/api/notifications/mark-shown", {
-                  method: "POST",
-                  credentials: "include",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(ids.length === 1 ? { id: ids[0] } : { ids: ids }),
-                });
-              }
-            });
-        })
-      );
+          return closeSameGroupThenShow(built).then(function () {
+            var ids = n.ids && Array.isArray(n.ids) ? n.ids : (n.id ? [n.id] : null);
+            if (ids && ids.length > 0) {
+              return fetch(self.location.origin + "/api/notifications/mark-shown", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(ids.length === 1 ? { id: ids[0] } : { ids: ids }),
+              });
+            }
+          });
+        });
+      });
+      return chain;
     });
     event.waitUntil(promise);
     return;
@@ -443,7 +479,7 @@ self.addEventListener("message", function (event) {
     .then(function (lang) {
       if (!self.registration.showNotification) return;
       var built = buildNotificationOptions(notification, lang);
-      return self.registration.showNotification(built.title, built.options).then(function () {
+      return closeSameGroupThenShow(built).then(function () {
         var ids = notification.ids && Array.isArray(notification.ids)
           ? notification.ids
           : (notification.id ? [notification.id] : null);
