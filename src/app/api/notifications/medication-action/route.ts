@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { dose_event_ids?: string[]; action?: string };
+  let body: { dose_event_ids?: string[]; action?: string; raw_event_action?: string };
   try {
     body = await request.json();
   } catch {
@@ -23,6 +23,8 @@ export async function POST(request: Request) {
   const doseEventIds = body.dose_event_ids;
   const action = body.action;
 
+  // Short diagnostic log (won't be truncated by Vercel)
+  console.log("[med-act]", action, "raw:", body.raw_event_action);
   console.log("[medication-action] user:", user.id, "action:", JSON.stringify(action), "dose_event_ids:", JSON.stringify(doseEventIds));
 
   if (!Array.isArray(doseEventIds) || doseEventIds.length === 0) {

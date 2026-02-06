@@ -222,7 +222,7 @@ var NOTIFICATION_TYPE_HANDLERS = {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dose_event_ids: doseEventIds, action: apiAction }),
+        body: JSON.stringify({ dose_event_ids: doseEventIds, action: apiAction, raw_event_action: action }),
       }).then(function (resp) {
         console.log("[SW] medication-action API response:", resp.status, resp.ok);
         if (resp.ok) return "api_ok";
