@@ -3,7 +3,7 @@
 import { useRef, useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { List, Plus, Pill, Search, X, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,7 +30,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RegimenCard, MedicationDashboard } from "@/components/medications";
-import { useRegimens, useUserPreferences, useUpdateUserPreferences } from "@/hooks";
+import { useRegimens, useUserPreferences, useUpdateUserPreferences, useMarkDoseTaken, useMarkDoseSkipped } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { MedRegimenStatus } from "@/types";
 
@@ -46,9 +46,34 @@ export default function MedicationsPage() {
   const [overdueIntervalMinutes, setOverdueIntervalMinutes] = useState<number>(30);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  const searchParams = useSearchParams();
   const { data: regimens, isLoading } = useRegimens(selectedPersonId ?? null);
   const { data: preferences } = useUserPreferences();
   const updatePreferences = useUpdateUserPreferences();
+  const markTaken = useMarkDoseTaken();
+  const markSkipped = useMarkDoseSkipped();
+
+  // Handle notification action params (from service worker opening the app)
+  useEffect(() => {
+    const action = searchParams.get("notification_action");
+    const idsParam = searchParams.get("dose_event_ids");
+    if (!action || !idsParam) return;
+
+    const doseEventIds = idsParam.split(",").filter(Boolean);
+    if (doseEventIds.length === 0) return;
+
+    // Clear URL params immediately to prevent re-processing
+    const url = new URL(window.location.href);
+    url.searchParams.delete("notification_action");
+    url.searchParams.delete("dose_event_ids");
+    router.replace(url.pathname + url.search, { scroll: false });
+
+    // Execute the action
+    const mutation = action === "taken" ? markTaken : markSkipped;
+    for (const id of doseEventIds) {
+      mutation.mutate({ doseEventId: id });
+    }
+  }, [searchParams, router, markTaken, markSkipped]);
 
   useEffect(() => {
     if (preferences?.overdue_reminder_interval_minutes != null) {

@@ -9,6 +9,7 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
 
   if (authError || !user) {
+    console.warn("[medication-action] Unauthorized:", authError?.message ?? "no user");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -21,6 +22,8 @@ export async function POST(request: Request) {
 
   const doseEventIds = body.dose_event_ids;
   const action = body.action;
+
+  console.log("[medication-action] user:", user.id, "action:", JSON.stringify(action), "dose_event_ids:", JSON.stringify(doseEventIds));
 
   if (!Array.isArray(doseEventIds) || doseEventIds.length === 0) {
     return NextResponse.json(
@@ -36,9 +39,13 @@ export async function POST(request: Request) {
   }
 
   const rpcName = action === "taken" ? "mark_dose_taken" : "mark_dose_skipped";
+  console.log("[medication-action] calling RPC:", rpcName, "for", doseEventIds.length, "dose(s)");
   for (const id of doseEventIds) {
     if (typeof id !== "string" || !id) continue;
-    await supabase.rpc(rpcName, { p_dose_event_id: id });
+    const { error: rpcError } = await supabase.rpc(rpcName, { p_dose_event_id: id });
+    if (rpcError) {
+      console.error("[medication-action] RPC error for", id, ":", rpcError.message);
+    }
   }
 
   return new NextResponse(null, { status: 204 });

@@ -211,20 +211,35 @@ var NOTIFICATION_TYPE_HANDLERS = {
     },
     onActionClick: function (event, data, action) {
       var doseEventIds = data.dose_event_ids;
+      console.log("[SW] medication onActionClick: action =", JSON.stringify(action), "dose_event_ids =", JSON.stringify(doseEventIds));
       if (!Array.isArray(doseEventIds) || doseEventIds.length === 0) return null;
-      // Normalize: some mobile browsers report button title (e.g. "Confirm", "Подтвердить") instead of action id ("confirm")
-      var raw = String(action || "").trim();
-      var normalized = raw.toLowerCase();
-      var isConfirm = normalized === "confirm" || normalized === "подтвердить";
-      var isSkip = normalized === "skip" || normalized === "пропустить";
-      if (!isConfirm && !isSkip) return null;
-      var apiAction = isConfirm ? "taken" : "skipped";
-      return fetch(self.location.origin + "/api/notifications/medication-action", {
+      if (action !== "confirm" && action !== "skip") return null;
+      var apiAction = action === "confirm" ? "taken" : "skipped";
+      console.log("[SW] medication onActionClick: apiAction =", apiAction);
+
+      // Best-effort: try API route (may fail if auth cookies expired on mobile)
+      var fetchPromise = fetch(self.location.origin + "/api/notifications/medication-action", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dose_event_ids: doseEventIds, action: apiAction }),
+      }).then(function (resp) {
+        console.log("[SW] medication-action API response:", resp.status, resp.ok);
+        if (resp.ok) return "api_ok";
+        return "api_fail_" + resp.status;
+      }).catch(function (err) {
+        console.log("[SW] medication-action API error:", err);
+        return "api_fail";
       });
+
+      // Always open the app with action params so the frontend can handle it
+      // (reliable fallback — the app has an authenticated Supabase client)
+      var actionUrl = (data.url || "/health/medications")
+        + "?notification_action=" + encodeURIComponent(apiAction)
+        + "&dose_event_ids=" + encodeURIComponent(doseEventIds.join(","));
+      var openPromise = openNotificationUrl(actionUrl, data.actionBaseUrl);
+
+      return Promise.all([fetchPromise, openPromise]);
     },
   },
 };
@@ -244,6 +259,7 @@ function buildNotificationOptions(n, lang) {
   var baseData = {
     url: resolveUrl(n),
     type: type,
+    person_id: n.person_id || n.personId || null,
   };
   var title = n.title || "Notification";
   var body = n.body;
@@ -327,7 +343,20 @@ function handleNotificationClick(event, data, action) {
     return openNotificationUrl(settingsUrl, data.actionBaseUrl);
   }
 
-  return openNotificationUrl(data.url || "/", data.actionBaseUrl);
+  var personId = data.person_id || data.personId;
+  var urlToOpen = data.url || "/";
+  if (personId) {
+    var base = data.actionBaseUrl || self.location.origin;
+    var fullUrl = (urlToOpen.startsWith("http") ? urlToOpen : base + (urlToOpen.startsWith("/") ? urlToOpen : "/" + urlToOpen));
+    try {
+      var u = new URL(fullUrl);
+      u.searchParams.set("personId", personId);
+      urlToOpen = u.href;
+    } catch (e) {
+      urlToOpen = fullUrl + (fullUrl.indexOf("?") !== -1 ? "&" : "?") + "personId=" + encodeURIComponent(personId);
+    }
+  }
+  return openNotificationUrl(urlToOpen, data.actionBaseUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +425,8 @@ self.addEventListener("push", function (event) {
 // Notification click: dispatch to type handler or default (open URL)
 // ---------------------------------------------------------------------------
 self.addEventListener("notificationclick", function (event) {
-  console.log("Notification click received.", event.action);
+  var rawAction = event.action;
+  console.log("[SW] notificationclick: event.action =", JSON.stringify(rawAction), "type =", JSON.stringify((event.notification.data || {}).type));
   event.notification.close();
 
   var data = event.notification.data || {};
