@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase";
 import type {
   MoneyTransaction,
   MoneyTransactionDetail,
+  MoneyTransactionCard,
   MoneyLineItem,
   CreateMoneyTransactionInput,
   UpdateMoneyTransactionInput,
@@ -19,19 +20,23 @@ function mapDetailRow(row: Record<string, unknown>): MoneyTransactionDetail {
   const lineItemsRaw = (row.money_line_items as MoneyLineItem[] | null) ?? [];
   const { money_line_items: _ignore, ...tx } = row as Record<string, unknown>;
   return {
-    ...(tx as MoneyTransaction),
+    ...(tx as unknown as MoneyTransaction),
     line_items: lineItemsRaw,
   };
 }
 
+export type MoneyTransactionWithCard = MoneyTransaction & {
+  money_cards: MoneyTransactionCard | null;
+};
+
 async function fetchMoneyTransactions(
   payerPersonId: string,
   filters: MoneyTransactionsFilters = {}
-): Promise<MoneyTransaction[]> {
+): Promise<MoneyTransactionWithCard[]> {
   const supabase = createClient();
   let query = supabase
     .from("money_transactions")
-    .select("*")
+    .select("*, money_cards(id, last4, card_label)")
     .eq("payer_person_id", payerPersonId)
     .order("posted_at", { ascending: false })
     .order("created_at", { ascending: false });
@@ -42,7 +47,7 @@ async function fetchMoneyTransactions(
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return (data || []) as MoneyTransaction[];
+  return (data || []) as MoneyTransactionWithCard[];
 }
 
 export function useMoneyTransactions(
@@ -58,11 +63,11 @@ export function useMoneyTransactions(
 
 async function fetchMoneyTransactionDetail(
   id: string
-): Promise<MoneyTransactionDetail | null> {
+): Promise<(MoneyTransactionDetail & { money_cards: MoneyTransactionCard | null }) | null> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("money_transactions")
-    .select("*, money_line_items(*)")
+    .select("*, money_cards(id, last4, card_label), money_line_items(*)")
     .eq("id", id)
     .single();
 
@@ -71,7 +76,7 @@ async function fetchMoneyTransactionDetail(
     throw new Error(error.message);
   }
 
-  return data ? mapDetailRow(data as Record<string, unknown>) : null;
+  return data ? mapDetailRow(data as Record<string, unknown>) as (MoneyTransactionDetail & { money_cards: MoneyTransactionCard | null }) : null;
 }
 
 export function useMoneyTransaction(id: string | null) {

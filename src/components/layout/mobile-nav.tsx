@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Sparkles, Pill, ArrowRightLeft, CreditCard, Tags } from "lucide-react";
+import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Sparkles, Pill, ArrowRightLeft, CreditCard, Tags, Upload } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -71,6 +71,11 @@ const moneyLinks = [
     href: "/money/transactions",
     icon: ArrowRightLeft,
     labelKey: "money.transactions",
+  },
+  {
+    href: "/money/import",
+    icon: Upload,
+    labelKey: "money.import",
   },
   {
     href: "/money/accounts",

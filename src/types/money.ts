@@ -56,6 +56,10 @@ export const MONEY_ASSIGNMENT_METHODS: MoneyAssignmentMethod[] = [
 export const MONEY_CURRENCIES = ["RUB", "USD"] as const;
 export type MoneyCurrency = (typeof MONEY_CURRENCIES)[number];
 
+/** Known account sources for import/display. Use "manual" for hand-entered accounts. */
+export const MONEY_ACCOUNT_SOURCES = ["manual", "tbank"] as const;
+export type MoneyAccountSource = (typeof MONEY_ACCOUNT_SOURCES)[number];
+
 // ============================================================================
 // money_accounts
 // ============================================================================
@@ -90,6 +94,30 @@ export interface UpdateMoneyAccountInput {
   currency?: MoneyCurrency | string;
   external_account_id?: string | null;
   is_active?: boolean;
+}
+
+// ============================================================================
+// money_cards (card last4 linked to account for import mapping)
+// ============================================================================
+
+export interface MoneyCard {
+  id: string;
+  account_id: string;
+  last4: string;
+  card_label: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMoneyCardInput {
+  account_id: string;
+  last4: string;
+  card_label?: string | null;
+}
+
+export interface UpdateMoneyCardInput {
+  last4?: string;
+  card_label?: string | null;
 }
 
 // ============================================================================
@@ -133,6 +161,7 @@ export interface MoneyTransaction {
   id: string;
   payer_person_id: string;
   account_id: string;
+  card_id: string | null;
   source: string;
   external_id: string | null;
   posted_at: string;
@@ -151,9 +180,17 @@ export interface MoneyTransaction {
   updated_at: string;
 }
 
+/** Card embedded when selecting transactions (e.g. via FK card_id) */
+export interface MoneyTransactionCard {
+  id: string;
+  last4: string;
+  card_label: string | null;
+}
+
 export interface CreateMoneyTransactionInput {
   payer_person_id: string;
   account_id: string;
+  card_id?: string | null;
   source?: string;
   external_id?: string | null;
   posted_at: string;
@@ -172,6 +209,7 @@ export interface CreateMoneyTransactionInput {
 
 export interface UpdateMoneyTransactionInput {
   account_id?: string;
+  card_id?: string | null;
   posted_at?: string;
   amount?: number;
   currency?: MoneyCurrency | string;

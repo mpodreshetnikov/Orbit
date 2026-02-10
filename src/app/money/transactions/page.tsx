@@ -137,6 +137,9 @@ export default function MoneyTransactionsPage() {
                   {t("money.account")}
                 </th>
                 <th className="text-left font-medium px-4 py-3">
+                  {t("money.card")}
+                </th>
+                <th className="text-left font-medium px-4 py-3">
                   {t("money.type")}
                 </th>
                 <th className="text-right font-medium px-4 py-3">
@@ -174,6 +177,11 @@ export default function MoneyTransactionsPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground truncate max-w-[140px]">
                       {accountLabel}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground tabular-nums">
+                      {tx.money_cards
+                        ? `*${tx.money_cards.last4}${tx.money_cards.card_label ? ` (${tx.money_cards.card_label})` : ""}`
+                        : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant="secondary" className="text-xs">

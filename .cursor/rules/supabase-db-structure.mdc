@@ -43,3 +43,13 @@ When adding a new feature that needs tables and related objects:
 5. Add **policies** in `supabase/db/policies/`.
 
 Apply schema from the db folder via your project’s deploy/run process (e.g. `deploy.sql`, `run-deploy.js`), not via migrations.
+
+## Applying db folder changes (local)
+
+After changing files in `supabase/db/` (types, functions, triggers, policies), the agent **must** run:
+
+```bash
+npm run db:deploy:local
+```
+
+This applies the db folder schema to the local Supabase instance. Do not use migrations to apply db folder content.

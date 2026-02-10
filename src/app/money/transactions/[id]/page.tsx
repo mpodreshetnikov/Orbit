@@ -135,6 +135,15 @@ export default function MoneyTransactionDetailPage({
         </Button>
       </div>
 
+      {"money_cards" in transaction && transaction.money_cards && (
+        <p className="text-sm text-muted-foreground">
+          {t("money.card")}: *{transaction.money_cards.last4}
+          {transaction.money_cards.card_label
+            ? ` (${transaction.money_cards.card_label})`
+            : ""}
+        </p>
+      )}
+
       <MoneyTransactionForm
         mode="edit"
         accounts={accounts ?? []}

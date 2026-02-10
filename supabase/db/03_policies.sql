@@ -45,9 +45,11 @@ BEGIN;
 -- Money
 -- ============================================================================
 \i policies/money_accounts.sql
+\i policies/money_cards.sql
 \i policies/money_categories.sql
 \i policies/money_transactions.sql
 \i policies/money_line_items.sql
+\i policies/money_import_batches.sql
 
 -- ============================================================================
 -- Checkups

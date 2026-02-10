@@ -83,6 +83,7 @@ BEGIN;
 
 -- Money functions
 \i functions/get_money_merchant_default_categories.sql
+\i functions/money_upsert_transactions_batch.sql
 
 -- Cron entry point functions
 \i functions/run_med_event_generation_for_all_users.sql
