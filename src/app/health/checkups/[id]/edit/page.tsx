@@ -1,6 +1,7 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { use } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { ArrowLeft, Pencil } from "lucide-react";
@@ -14,11 +15,14 @@ import {
 } from "@/hooks";
 import type { UpdateCheckupItemInput } from "@/types";
 
-export default function EditCheckupPage() {
-  const params = useParams();
+export default function EditCheckupPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();
-  const id = params.id as string;
 
   const { data: item, isLoading, error } = useCheckupItem(id);
   const updateMutation = useUpdateCheckupItem();

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Sparkles, Pill } from "lucide-react";
+import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Sparkles, Pill, ArrowRightLeft, CreditCard, Tags } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -21,8 +21,9 @@ import {
 } from "@/components/ui/dialog";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
 import { useUIStore } from "@/stores/ui-store";
+import { getAppSection } from "@/lib/app-section";
 
-const navLinks = [
+const healthLinks = [
   {
     href: "/health",
     icon: FileText,
@@ -65,10 +66,31 @@ const navLinks = [
   },
 ];
 
+const moneyLinks = [
+  {
+    href: "/money/transactions",
+    icon: ArrowRightLeft,
+    labelKey: "money.transactions",
+  },
+  {
+    href: "/money/accounts",
+    icon: CreditCard,
+    labelKey: "money.accounts",
+  },
+  {
+    href: "/money/categories",
+    icon: Tags,
+    labelKey: "money.categories",
+  },
+];
+
 export function MobileNav() {
   const t = useTranslations();
   const pathname = usePathname();
   const router = useRouter();
+  const section = getAppSection(pathname);
+  const isMoney = section === "money";
+  const navLinks = isMoney ? moneyLinks : healthLinks;
   const [measurementDialogOpen, setMeasurementDialogOpen] = useState(false);
   const [medicationTypeDialogOpen, setMedicationTypeDialogOpen] = useState(false);
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
@@ -155,32 +177,63 @@ export function MobileNav() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="top" className="mb-2 min-w-[200px]">
-                <DropdownMenuItem asChild>
-                  <Link href="/health/records/new" className="flex items-center gap-3 py-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
-                      <FileText className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                    </div>
-                    <span className="font-medium">{t("nav.medicalRecord")}</span>
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={() => setMeasurementDialogOpen(true)}
-                  className="flex items-center gap-3 py-2"
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
-                    <Ruler className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                  </div>
-                  <span className="font-medium">{t("nav.measurement")}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setMedicationTypeDialogOpen(true)}
-                  className="flex items-center gap-3 py-2"
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
-                    <Pill className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                  </div>
-                  <span className="font-medium">{t("nav.medication")}</span>
-                </DropdownMenuItem>
+                {isMoney ? (
+                  <>
+                    <DropdownMenuItem asChild>
+                      <Link href="/money/transactions/new" className="flex items-center gap-3 py-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                          <ArrowRightLeft className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <span className="font-medium">{t("money.addTransaction")}</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/money/accounts?new=1" className="flex items-center gap-3 py-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                          <CreditCard className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <span className="font-medium">{t("money.addAccount")}</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/money/categories?new=1" className="flex items-center gap-3 py-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                          <Tags className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <span className="font-medium">{t("money.addCategory")}</span>
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <>
+                    <DropdownMenuItem asChild>
+                      <Link href="/health/records/new" className="flex items-center gap-3 py-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
+                          <FileText className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                        </div>
+                        <span className="font-medium">{t("nav.medicalRecord")}</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => setMeasurementDialogOpen(true)}
+                      className="flex items-center gap-3 py-2"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
+                        <Ruler className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                      </div>
+                      <span className="font-medium">{t("nav.measurement")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setMedicationTypeDialogOpen(true)}
+                      className="flex items-center gap-3 py-2"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30">
+                        <Pill className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                      </div>
+                      <span className="font-medium">{t("nav.medication")}</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -188,38 +241,42 @@ export function MobileNav() {
       </nav>
 
       {/* Measurement dialog */}
-      <AddMeasurementDialog
-        open={measurementDialogOpen}
-        onOpenChange={setMeasurementDialogOpen}
-        personId={selectedPersonId}
-      />
+      {!isMoney && (
+        <AddMeasurementDialog
+          open={measurementDialogOpen}
+          onOpenChange={setMeasurementDialogOpen}
+          personId={selectedPersonId}
+        />
+      )}
 
       {/* Medication type choice (mobile: popup instead of submenu) */}
-      <Dialog open={medicationTypeDialogOpen} onOpenChange={setMedicationTypeDialogOpen}>
-        <DialogContent className="max-w-[min(320px,calc(100vw-32px))] gap-0">
-          <DialogHeader>
-            <DialogTitle>{t("nav.medication")}</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 pt-4">
-            <Button
-              variant="outline"
-              className="justify-start h-12 text-base"
-              onClick={() => openNewMedication("regular")}
-            >
-              <Pill className="h-4 w-4 mr-3 text-violet-600 dark:text-violet-400" />
-              {t("nav.regularMedication")}
-            </Button>
-            <Button
-              variant="outline"
-              className="justify-start h-12 text-base"
-              onClick={() => openNewMedication("one_time")}
-            >
-              <Pill className="h-4 w-4 mr-3 text-violet-600 dark:text-violet-400" />
-              {t("nav.oneTimeMedication")}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {!isMoney && (
+        <Dialog open={medicationTypeDialogOpen} onOpenChange={setMedicationTypeDialogOpen}>
+          <DialogContent className="max-w-[min(320px,calc(100vw-32px))] gap-0">
+            <DialogHeader>
+              <DialogTitle>{t("nav.medication")}</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-2 pt-4">
+              <Button
+                variant="outline"
+                className="justify-start h-12 text-base"
+                onClick={() => openNewMedication("regular")}
+              >
+                <Pill className="h-4 w-4 mr-3 text-violet-600 dark:text-violet-400" />
+                {t("nav.regularMedication")}
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start h-12 text-base"
+                onClick={() => openNewMedication("one_time")}
+              >
+                <Pill className="h-4 w-4 mr-3 text-violet-600 dark:text-violet-400" />
+                {t("nav.oneTimeMedication")}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }
