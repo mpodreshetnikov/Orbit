@@ -6,10 +6,11 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MedicationForm } from "@/components/medications";
-import { useCreateRegimen } from "@/hooks";
+import { useCreateRegimen, useAddOneTimeDoseToRegimen } from "@/hooks";
 import { regenerateMedicationEvents, getClientTimezone } from "@/lib/medication-events";
 import { useUIStore } from "@/stores/ui-store";
-import type { CreateMedRegimenInput } from "@/types/regimen";
+import type { CreateMedRegimenInput, AddOneTimeToExistingPayload } from "@/types/regimen";
+import { isAddOneTimeToExistingPayload } from "@/types/regimen";
 import type { MedicationKind } from "@/types";
 
 export default function NewMedicationPage() {
@@ -18,6 +19,7 @@ export default function NewMedicationPage() {
   const searchParams = useSearchParams();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
   const createMutation = useCreateRegimen();
+  const addOneTimeDoseMutation = useAddOneTimeDoseToRegimen();
   const kindParam = searchParams.get("kind");
   const defaultKind: MedicationKind =
     kindParam === "one_time" || kindParam === "regular" ? kindParam : "regular";
@@ -30,7 +32,19 @@ export default function NewMedicationPage() {
     );
   }
 
-  const handleSubmit = async (data: CreateMedRegimenInput) => {
+  const handleSubmit = async (data: CreateMedRegimenInput | AddOneTimeToExistingPayload) => {
+    if (isAddOneTimeToExistingPayload(data)) {
+      await addOneTimeDoseMutation.mutateAsync({
+        person_id: selectedPersonId,
+        regimen_id: data.addToRegimenId,
+        scheduled_at: data.scheduled_at,
+        amount: data.amount,
+        unit: data.unit,
+        notes: data.notes ?? null,
+      });
+      router.push(`/health/medications/${data.addToRegimenId}`);
+      return;
+    }
     const regimen = await createMutation.mutateAsync(data);
     await regenerateMedicationEvents(getClientTimezone(), regimen.person_id);
     router.push(`/health/medications/${regimen.id}`);
@@ -53,7 +67,7 @@ export default function NewMedicationPage() {
           personId={selectedPersonId}
           defaultKind={defaultKind}
           onSubmit={handleSubmit}
-          isPending={createMutation.isPending as boolean}
+          isPending={createMutation.isPending || addOneTimeDoseMutation.isPending}
           onCancel={() => router.push("/health/medications")}
         />
       </div>

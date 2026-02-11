@@ -424,6 +424,56 @@ export function useCreateRegimen() {
   });
 }
 
+export interface AddOneTimeDoseToRegimenInput {
+  person_id: string;
+  regimen_id: string;
+  scheduled_at: string;
+  amount: number;
+  unit: string;
+  notes?: string | null;
+}
+
+async function addOneTimeDoseToRegimen(input: AddOneTimeDoseToRegimenInput): Promise<void> {
+  const supabase = createClient();
+  const plannedIntake: PlannedIntake = {
+    intake: { amount: input.amount, unit: input.unit },
+    active: [],
+  };
+  const { data: event, error: insertError } = await supabase
+    .from("med_dose_events")
+    .insert({
+      person_id: input.person_id,
+      regimen_id: input.regimen_id,
+      scheduled_at: input.scheduled_at,
+      actual_at: input.scheduled_at,
+      planned_intake: plannedIntake,
+      status: "scheduled",
+    })
+    .select("id")
+    .single();
+  if (insertError) throw new Error(insertError.message);
+  if (!event?.id) throw new Error("Failed to create dose event");
+  const { error: markError } = await supabase.rpc("mark_dose_taken", {
+    p_dose_event_id: event.id,
+    p_note: input.notes ?? null,
+  });
+  if (markError) throw new Error(markError.message);
+}
+
+export function useAddOneTimeDoseToRegimen() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: addOneTimeDoseToRegimen,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
+      queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
+      queryClient.invalidateQueries({ queryKey: ["regimens"] });
+      queryClient.invalidateQueries({ queryKey: ["regimen"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory-transactions"] });
+    },
+  });
+}
+
 async function updateRegimen({
   id,
   updates,
