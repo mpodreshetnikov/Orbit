@@ -143,7 +143,7 @@ export function MedicationForm({
 }: MedicationFormProps) {
   const t = useTranslations();
   const [name, setName] = useState(() => initial?.custom_name ?? "");
-  const [kind, setKind] = useState<MedicationKind>(() => {
+  const [kind] = useState<MedicationKind>(() => {
     if (initial?.schedule?.mode === "one_off") return "one_time";
     return defaultKind ?? "regular";
   });
@@ -665,7 +665,7 @@ export function MedicationForm({
               <Input
                 type="date"
                 value={duration.end_date ?? ""}
-                onChange={(e) => setDuration({ type: "until_date", end_date: e.target.value })}
+                onChange={(e) => setDuration({ type: "until_date", end_date: e.target.value, start_date: startDate })}
               />
             </div>
           )}
