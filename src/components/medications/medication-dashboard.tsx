@@ -182,6 +182,8 @@ export function MedicationDashboard() {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [editIntakeEvent, setEditIntakeEvent] = useState<MedDoseEventWithRegimen | null>(null);
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<Set<string>>(() => new Set());
+  const [pendingTakenIds, setPendingTakenIds] = useState<Set<string>>(() => new Set());
+  const [pendingSkippedIds, setPendingSkippedIds] = useState<Set<string>>(() => new Set());
   const inactivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: events, isLoading } = useDoseEventsForPerson(
@@ -271,17 +273,47 @@ export function MedicationDashboard() {
     [selectedDateStr]
   );
 
-  const handleTaken = async (e: MedDoseEventWithRegimen) => {
-    setRecentlyCompletedIds((prev) => new Set(prev).add(e.id));
-    scheduleMoveToCompleted();
-    await markTaken.mutateAsync({ doseEventId: e.id });
-  };
+  const markEventTaken = useCallback(
+    (e: MedDoseEventWithRegimen) => {
+      setPendingTakenIds((prev) => new Set(prev).add(e.id));
+      setRecentlyCompletedIds((prev) => new Set(prev).add(e.id));
+      scheduleMoveToCompleted();
+      markTaken.mutate(
+        { doseEventId: e.id },
+        {
+          onSettled: () => {
+            setPendingTakenIds((prev) => {
+              const next = new Set(prev);
+              next.delete(e.id);
+              return next;
+            });
+          },
+        }
+      );
+    },
+    [markTaken, scheduleMoveToCompleted]
+  );
 
-  const handleSkipped = async (e: MedDoseEventWithRegimen) => {
-    setRecentlyCompletedIds((prev) => new Set(prev).add(e.id));
-    scheduleMoveToCompleted();
-    await markSkipped.mutateAsync({ doseEventId: e.id });
-  };
+  const markEventSkipped = useCallback(
+    (e: MedDoseEventWithRegimen) => {
+      setPendingSkippedIds((prev) => new Set(prev).add(e.id));
+      setRecentlyCompletedIds((prev) => new Set(prev).add(e.id));
+      scheduleMoveToCompleted();
+      markSkipped.mutate(
+        { doseEventId: e.id },
+        {
+          onSettled: () => {
+            setPendingSkippedIds((prev) => {
+              const next = new Set(prev);
+              next.delete(e.id);
+              return next;
+            });
+          },
+        }
+      );
+    },
+    [markSkipped, scheduleMoveToCompleted]
+  );
 
   if (!selectedPersonId) {
     return (
@@ -405,13 +437,12 @@ export function MedicationDashboard() {
                     size="sm"
                     variant="secondary"
                     className="h-6 text-xs gap-1"
-                    disabled={markTaken.isPending}
-                    onClick={async () => {
-                      for (const e of slotEvents) await handleTaken(e);
-                      scheduleMoveToCompleted();
+                    disabled={slotEvents.some((ev) => pendingTakenIds.has(ev.id))}
+                    onClick={() => {
+                      for (const e of slotEvents) markEventTaken(e);
                     }}
                   >
-                    {markTaken.isPending ? (
+                    {slotEvents.some((ev) => pendingTakenIds.has(ev.id)) ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
                       <Check className="h-3 w-3" />
@@ -477,8 +508,8 @@ export function MedicationDashboard() {
                             size="sm"
                             variant="ghost"
                             className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                            disabled={markSkipped.isPending}
-                            onClick={() => handleSkipped(e)}
+                            disabled={pendingSkippedIds.has(e.id)}
+                            onClick={() => markEventSkipped(e)}
                             title={t("medications.skipped")}
                           >
                             <X className="h-3.5 w-3.5" />
@@ -486,10 +517,10 @@ export function MedicationDashboard() {
                           <Button
                             size="sm"
                             className="h-7 gap-1 px-2"
-                            disabled={markTaken.isPending}
-                            onClick={() => handleTaken(e)}
+                            disabled={pendingTakenIds.has(e.id)}
+                            onClick={() => markEventTaken(e)}
                           >
-                            {markTaken.isPending ? (
+                            {pendingTakenIds.has(e.id) ? (
                               <Loader2 className="h-3 w-3 animate-spin" />
                             ) : (
                               <Check className="h-3 w-3" />
@@ -535,7 +566,7 @@ export function MedicationDashboard() {
                                   : t("medications.unspecified");
                             const intakeAdvice = getIntakeAdviceLabel(e.regimen, t);
                             const pending =
-                              undoIntake.isPending || markTaken.isPending || markSkipped.isPending || updateResolutionDetails.isPending || deleteRegimen.isPending;
+                              undoIntake.isPending || updateResolutionDetails.isPending || deleteRegimen.isPending || pendingTakenIds.has(e.id) || pendingSkippedIds.has(e.id);
                             const unit = (e.regimen?.intake_unit ?? getPlannedIntakeUnit(e.planned_intake)) as MedicationUnit;
                             const UnitIcon = getUnitIcon(unit);
                             const { Icon: StatusIcon, className: statusIconClass } = getStatusIcon(e.status);
@@ -599,13 +630,13 @@ export function MedicationDashboard() {
                                               {t("medications.editIntake")}
                                             </DropdownMenuItem>
                                             {e.status === "skipped" && (
-                                              <DropdownMenuItem onClick={() => markTaken.mutate({ doseEventId: e.id })}>
+                                              <DropdownMenuItem onClick={() => markEventTaken(e)}>
                                                 <Check className="h-4 w-4 mr-2" />
                                                 {t("medications.markAsTaken")}
                                               </DropdownMenuItem>
                                             )}
                                             {e.status === "taken" && (
-                                              <DropdownMenuItem onClick={() => markSkipped.mutate({ doseEventId: e.id })}>
+                                              <DropdownMenuItem onClick={() => markEventSkipped(e)}>
                                                 <Minus className="h-4 w-4 mr-2" />
                                                 {t("medications.markAsSkipped")}
                                               </DropdownMenuItem>
@@ -614,11 +645,11 @@ export function MedicationDashboard() {
                                         )}
                                         {isUnspecified && (
                                           <>
-                                            <DropdownMenuItem onClick={() => markTaken.mutate({ doseEventId: e.id })}>
+                                            <DropdownMenuItem onClick={() => markEventTaken(e)}>
                                               <Check className="h-4 w-4 mr-2" />
                                               {t("medications.markAsTaken")}
                                             </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => markSkipped.mutate({ doseEventId: e.id })}>
+                                            <DropdownMenuItem onClick={() => markEventSkipped(e)}>
                                               <Minus className="h-4 w-4 mr-2" />
                                               {t("medications.markAsSkipped")}
                                             </DropdownMenuItem>
@@ -674,7 +705,7 @@ export function MedicationDashboard() {
                                 : t("medications.unspecified");
                           const intakeAdvice = getIntakeAdviceLabel(e.regimen, t);
                           const pending =
-                            undoIntake.isPending || markTaken.isPending || markSkipped.isPending || updateResolutionDetails.isPending || deleteRegimen.isPending;
+                            undoIntake.isPending || updateResolutionDetails.isPending || deleteRegimen.isPending || pendingTakenIds.has(e.id) || pendingSkippedIds.has(e.id);
                           const unit = (e.regimen?.intake_unit ?? getPlannedIntakeUnit(e.planned_intake)) as MedicationUnit;
                           const UnitIcon = getUnitIcon(unit);
                           const { Icon: StatusIcon, className: statusIconClass } = getStatusIcon(e.status);
@@ -738,13 +769,13 @@ export function MedicationDashboard() {
                                             {t("medications.editIntake")}
                                           </DropdownMenuItem>
                                           {e.status === "skipped" && (
-                                            <DropdownMenuItem onClick={() => markTaken.mutate({ doseEventId: e.id })}>
+                                            <DropdownMenuItem onClick={() => markEventTaken(e)}>
                                               <Check className="h-4 w-4 mr-2" />
                                               {t("medications.markAsTaken")}
                                             </DropdownMenuItem>
                                           )}
                                           {e.status === "taken" && (
-                                            <DropdownMenuItem onClick={() => markSkipped.mutate({ doseEventId: e.id })}>
+                                            <DropdownMenuItem onClick={() => markEventSkipped(e)}>
                                               <Minus className="h-4 w-4 mr-2" />
                                               {t("medications.markAsSkipped")}
                                             </DropdownMenuItem>
@@ -753,11 +784,11 @@ export function MedicationDashboard() {
                                       )}
                                       {isUnspecified && (
                                         <>
-                                          <DropdownMenuItem onClick={() => markTaken.mutate({ doseEventId: e.id })}>
+                                          <DropdownMenuItem onClick={() => markEventTaken(e)}>
                                             <Check className="h-4 w-4 mr-2" />
                                             {t("medications.markAsTaken")}
                                           </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => markSkipped.mutate({ doseEventId: e.id })}>
+                                          <DropdownMenuItem onClick={() => markEventSkipped(e)}>
                                             <Minus className="h-4 w-4 mr-2" />
                                             {t("medications.markAsSkipped")}
                                           </DropdownMenuItem>
