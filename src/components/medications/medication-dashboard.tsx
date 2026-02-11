@@ -69,6 +69,19 @@ function getEventTimeIso(e: MedDoseEventWithRegimen): string {
   return e.taken_at || e.actual_at;
 }
 
+function sortEventsInTimeGroup(list: MedDoseEventWithRegimen[]): void {
+  list.sort((a, b) => {
+    const timeCompare = getEventTimeIso(a).localeCompare(getEventTimeIso(b));
+    if (timeCompare !== 0) return timeCompare;
+    // Stable order within same time: by regimen name then id so order is consistent day-to-day
+    const nameA = a.regimen?.custom_name ?? a.regimen_id;
+    const nameB = b.regimen?.custom_name ?? b.regimen_id;
+    const nameCompare = nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+    if (nameCompare !== 0) return nameCompare;
+    return a.regimen_id.localeCompare(b.regimen_id);
+  });
+}
+
 function groupEventsByTime(events: MedDoseEventWithRegimen[]): Map<string, MedDoseEventWithRegimen[]> {
   const byTime = new Map<string, MedDoseEventWithRegimen[]>();
   for (const e of events) {
@@ -78,7 +91,7 @@ function groupEventsByTime(events: MedDoseEventWithRegimen[]): Map<string, MedDo
     byTime.set(time, list);
   }
   for (const list of byTime.values()) {
-    list.sort((a, b) => getEventTimeIso(a).localeCompare(getEventTimeIso(b)));
+    sortEventsInTimeGroup(list);
   }
   return byTime;
 }
