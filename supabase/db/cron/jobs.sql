@@ -16,7 +16,7 @@ WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'med-event-generation-hourl
 SELECT cron.schedule(
   'med-event-generation-hourly',
   '0 * * * *',
-  $$SELECT * FROM public.run_med_event_generation_for_all_users(7)$$
+  $$SELECT * FROM public.run_med_event_generation_for_all_users(28)$$
 );
 
 -- ============================================================================

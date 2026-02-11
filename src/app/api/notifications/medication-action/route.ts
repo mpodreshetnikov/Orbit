@@ -42,9 +42,14 @@ export async function POST(request: Request) {
 
   const rpcName = action === "taken" ? "mark_dose_taken" : "mark_dose_skipped";
   console.log("[medication-action] calling RPC:", rpcName, "for", doseEventIds.length, "dose(s)");
+  const nowIso = new Date().toISOString();
   for (const id of doseEventIds) {
     if (typeof id !== "string" || !id) continue;
-    const { error: rpcError } = await supabase.rpc(rpcName, { p_dose_event_id: id });
+    const rpcPayload =
+      action === "taken"
+        ? { p_dose_event_id: id, p_note: null, p_taken_at: nowIso }
+        : { p_dose_event_id: id };
+    const { error: rpcError } = await supabase.rpc(rpcName, rpcPayload);
     if (rpcError) {
       console.error("[medication-action] RPC error for", id, ":", rpcError.message);
     }

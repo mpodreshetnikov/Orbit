@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, ChevronDown, Check } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-media-query";
+import { useRegimens } from "@/hooks/use-regimens";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
 import type { MedicationKind, MedicationUnit } from "@/types";
@@ -29,6 +39,7 @@ import type {
   UpdateMedRegimenInput,
   PlannedIntake,
   RegimenInventory,
+  AddOneTimeToExistingPayload,
 } from "@/types/regimen";
 
 interface MedicationFormPropsBase {
@@ -42,7 +53,7 @@ interface MedicationFormPropsBase {
 
 interface MedicationFormPropsCreate extends MedicationFormPropsBase {
   mode: "create";
-  onSubmit: (data: CreateMedRegimenInput) => void | Promise<void>;
+  onSubmit: (data: CreateMedRegimenInput | AddOneTimeToExistingPayload) => void | Promise<void>;
 }
 
 interface MedicationFormPropsEdit extends MedicationFormPropsBase {
@@ -76,6 +87,11 @@ const PRESET_INTAKE_TIMES: string[] = [
 
 /** Order for 1–5 intakes: 1=morning, 2=morning+evening, 3=morning+late afternoon+evening, 4=+midday, 5=+night */
 const INTAKES_1_TO_5_TIMES: string[] = ["09:00", "20:00", "15:00", "12:00", "23:00"];
+
+/** Format a Date as YYYY-MM-DDTHH:mm for datetime-local input */
+function toDatetimeLocalString(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 function getReminderSlotsForIntakesPerDay(n: number): { time: string; amount: number }[] {
   if (n < 1 || n > 10) return [{ time: "09:00", amount: 1 }];
@@ -143,7 +159,8 @@ export function MedicationForm({
 }: MedicationFormProps) {
   const t = useTranslations();
   const [name, setName] = useState(() => initial?.custom_name ?? "");
-  const [kind, setKind] = useState<MedicationKind>(() => {
+  const [selectedRegimenId, setSelectedRegimenId] = useState<string | null>(null);
+  const [kind] = useState<MedicationKind>(() => {
     if (initial?.schedule?.mode === "one_off") return "one_time";
     return defaultKind ?? "regular";
   });
@@ -179,15 +196,24 @@ export function MedicationForm({
   );
   const [scheduledAt, setScheduledAt] = useState(() => {
     const due = (initial?.schedule as { mode?: string; due_at?: string })?.due_at;
-    if (due) {
-      const d = new Date(due);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    }
+    if (due) return toDatetimeLocalString(new Date(due));
+    if (mode === "create" && defaultKind === "one_time") return toDatetimeLocalString(new Date());
     return "";
   });
   const isMobile = useIsMobile();
+  const { data: regimensList } = useRegimens(personId);
   const totalWizardSteps = kind === "one_time" ? 2 : 4;
   const [wizardStep, setWizardStep] = useState(0);
+  const [nameComboboxOpen, setNameComboboxOpen] = useState(false);
+
+  const filteredRegimensForName: MedRegimen[] =
+    kind === "one_time" && mode === "create" && regimensList
+      ? name.trim()
+        ? regimensList.filter((r) =>
+            r.custom_name.trim().toLowerCase().includes(name.trim().toLowerCase())
+          )
+        : regimensList
+      : [];
 
   useEffect(() => {
     setWizardStep((s) => Math.min(s, totalWizardSteps - 1));
@@ -228,21 +254,51 @@ export function MedicationForm({
         setBasicErrorType("scheduled_at");
         return;
       }
-      const payload = {
-        ...(mode === "create" ? { person_id: personId } : {}),
-        custom_name: name.trim(),
-        intake_unit: unit,
-        dose_definition: buildDoseDefinition(Math.max(1, oneTimeAmount)),
-        intake_advice_type: "none" as const,
-        intake_advice_text: null as string | null,
-        schedule: { mode: "one_off" as const, due_at: scheduledAtISO },
-        duration: { type: "endless" as const },
-        inventory: null,
-        notes: notes.trim() || null,
-      };
       if (mode === "create") {
-        (onSubmit as (d: CreateMedRegimenInput) => void)(payload as CreateMedRegimenInput);
+        const trimmedName = name.trim();
+        const nameLower = trimmedName.toLowerCase();
+        let addToRegimenId: string | null = selectedRegimenId;
+        if (!addToRegimenId && regimensList?.length) {
+          const matched = regimensList.find(
+            (r) => r.custom_name.trim().toLowerCase() === nameLower
+          );
+          if (matched) addToRegimenId = matched.id;
+        }
+        if (addToRegimenId) {
+          (onSubmit as (d: CreateMedRegimenInput | AddOneTimeToExistingPayload) => void)({
+            addToRegimenId,
+            scheduled_at: scheduledAtISO,
+            amount: Math.max(1, oneTimeAmount),
+            unit,
+            notes: notes.trim() || null,
+          } as AddOneTimeToExistingPayload);
+          return;
+        }
+        const payload: CreateMedRegimenInput = {
+          person_id: personId,
+          custom_name: trimmedName,
+          intake_unit: unit,
+          dose_definition: buildDoseDefinition(Math.max(1, oneTimeAmount)),
+          intake_advice_type: "none",
+          intake_advice_text: null,
+          schedule: { mode: "one_off", due_at: scheduledAtISO },
+          duration: { type: "endless" },
+          inventory: null,
+          notes: notes.trim() || null,
+        };
+        (onSubmit as (d: CreateMedRegimenInput) => void)(payload);
       } else {
+        const payload = {
+          custom_name: name.trim(),
+          intake_unit: unit,
+          dose_definition: buildDoseDefinition(Math.max(1, oneTimeAmount)),
+          intake_advice_type: "none" as const,
+          intake_advice_text: null as string | null,
+          schedule: { mode: "one_off" as const, due_at: scheduledAtISO },
+          duration: { type: "endless" as const },
+          inventory: null,
+          notes: notes.trim() || null,
+        };
         (onSubmit as (d: UpdateMedRegimenInput) => void)(payload as UpdateMedRegimenInput);
       }
       return;
@@ -421,19 +477,89 @@ export function MedicationForm({
         )}
         <div className="space-y-2">
           <Label htmlFor="name">{t("medications.name")}</Label>
-          <Input
-            id="name"
-            value={name}
-            onChange={(e) => {
-              setBasicErrorType("");
-              setName(e.target.value);
-            }}
-            placeholder={t("medications.namePlaceholder")}
-            required
-            aria-invalid={basicErrorType === "name"}
-            aria-describedby={basicErrorType === "name" ? "name-error" : undefined}
-            className={cn(basicErrorType === "name" && "border-destructive focus-visible:ring-destructive")}
-          />
+          {kind === "one_time" && mode === "create" ? (
+            <Popover open={nameComboboxOpen} onOpenChange={setNameComboboxOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={nameComboboxOpen}
+                  aria-invalid={basicErrorType === "name"}
+                  className={cn(
+                    "w-full justify-between font-normal h-10",
+                    !name && "text-muted-foreground",
+                    basicErrorType === "name" && "border-destructive focus-visible:ring-destructive"
+                  )}
+                >
+                  <span className="truncate">{name || t("medications.namePlaceholder")}</span>
+                  <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-[var(--radix-popover-trigger-width)] p-0"
+                align="start"
+              >
+                <Command shouldFilter={false}>
+                  <CommandInput
+                    placeholder={t("medications.namePlaceholder")}
+                    value={name}
+                    onValueChange={(v) => {
+                      setBasicErrorType("");
+                      setName(v);
+                      setSelectedRegimenId(null);
+                    }}
+                  />
+                  <CommandList className="max-h-60">
+                    <CommandEmpty>{t("common.noResults")}</CommandEmpty>
+                    <CommandGroup>
+                      {filteredRegimensForName.map((r) => {
+                        const isOneOff = r.schedule?.mode === "one_off";
+                        const isArchived = r.status === "archived";
+                        return (
+                          <CommandItem
+                            key={r.id}
+                            value={`${r.id}:${r.custom_name}`}
+                            onSelect={() => {
+                              setBasicErrorType("");
+                              setName(r.custom_name);
+                              setSelectedRegimenId(r.id);
+                              setNameComboboxOpen(false);
+                            }}
+                            className={cn(selectedRegimenId === r.id && "bg-accent")}
+                          >
+                            <Check className={cn("mr-2 h-4 w-4", selectedRegimenId === r.id ? "opacity-100" : "opacity-0")} />
+                            <span className="truncate flex-1">{r.custom_name}</span>
+                            {(isArchived || isOneOff) && (
+                              <span className="text-xs text-muted-foreground shrink-0 ml-1">
+                                {isArchived && t("medications.statusArchived")}
+                                {isArchived && isOneOff ? " · " : ""}
+                                {isOneOff && t("medications.oneTime")}
+                              </span>
+                            )}
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Input
+              id="name"
+              value={name}
+              onChange={(e) => {
+                setBasicErrorType("");
+                setName(e.target.value);
+              }}
+              placeholder={t("medications.namePlaceholder")}
+              required
+              aria-invalid={basicErrorType === "name"}
+              aria-describedby={basicErrorType === "name" ? "name-error" : undefined}
+              className={cn(basicErrorType === "name" && "border-destructive focus-visible:ring-destructive")}
+            />
+          )}
           {basicErrorType === "name" && (
             <p id="name-error" className="text-sm text-destructive" role="alert">
               {basicErrorMessage}
@@ -665,7 +791,7 @@ export function MedicationForm({
               <Input
                 type="date"
                 value={duration.end_date ?? ""}
-                onChange={(e) => setDuration({ type: "until_date", end_date: e.target.value })}
+                onChange={(e) => setDuration({ type: "until_date", end_date: e.target.value, start_date: startDate })}
               />
             </div>
           )}

@@ -147,6 +147,21 @@ export interface UpdateMedRegimenInput {
   notes?: string | null;
 }
 
+/** Payload when adding a one-time intake to an existing regimen (instead of creating a new one). */
+export interface AddOneTimeToExistingPayload {
+  addToRegimenId: string;
+  scheduled_at: string;
+  amount: number;
+  unit: string;
+  notes?: string | null;
+}
+
+export function isAddOneTimeToExistingPayload(
+  data: CreateMedRegimenInput | AddOneTimeToExistingPayload
+): data is AddOneTimeToExistingPayload {
+  return "addToRegimenId" in data && typeof (data as AddOneTimeToExistingPayload).addToRegimenId === "string";
+}
+
 // ============================================================================
 // med_dose_events
 // ============================================================================

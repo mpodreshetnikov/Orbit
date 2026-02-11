@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { notifySwMedicationIntakeResolved } from "@/lib/sw-messages";
 import type {
   MedRegimen,
   MedDoseEvent,
@@ -238,26 +239,40 @@ export function useInventoryTransactions(regimenId: string | null) {
 // MUTATIONS: mark taken / skip / snooze
 // ============================================================================
 
-async function markDoseTaken(doseEventId: string, note?: string | null): Promise<void> {
+async function markDoseTaken(
+  doseEventId: string,
+  note?: string | null,
+  takenAt?: string | null
+): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.rpc("mark_dose_taken", {
+  const payload: { p_dose_event_id: string; p_note: string | null; p_taken_at?: string } = {
     p_dose_event_id: doseEventId,
     p_note: note ?? null,
-  });
+  };
+  if (takenAt != null && takenAt !== "") payload.p_taken_at = takenAt;
+  const { error } = await supabase.rpc("mark_dose_taken", payload);
   if (error) throw new Error(error.message);
 }
 
 export function useMarkDoseTaken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ doseEventId, note }: { doseEventId: string; note?: string | null }) =>
-      markDoseTaken(doseEventId, note),
-    onSuccess: () => {
+    mutationFn: ({
+      doseEventId,
+      note,
+      takenAt,
+    }: {
+      doseEventId: string;
+      note?: string | null;
+      takenAt?: string | null;
+    }) => markDoseTaken(doseEventId, note, takenAt),
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
       queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimens"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-transactions"] });
+      notifySwMedicationIntakeResolved([variables.doseEventId]);
     },
   });
 }
@@ -276,12 +291,13 @@ export function useMarkDoseSkipped() {
   return useMutation({
     mutationFn: ({ doseEventId, note }: { doseEventId: string; note?: string | null }) =>
       markDoseSkipped(doseEventId, note),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
       queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimens"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-transactions"] });
+      notifySwMedicationIntakeResolved([variables.doseEventId]);
     },
   });
 }
@@ -417,6 +433,56 @@ export function useCreateRegimen() {
       queryClient.invalidateQueries({ queryKey: ["regimen", data.id] });
       queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
       queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
+    },
+  });
+}
+
+export interface AddOneTimeDoseToRegimenInput {
+  person_id: string;
+  regimen_id: string;
+  scheduled_at: string;
+  amount: number;
+  unit: string;
+  notes?: string | null;
+}
+
+async function addOneTimeDoseToRegimen(input: AddOneTimeDoseToRegimenInput): Promise<void> {
+  const supabase = createClient();
+  const plannedIntake: PlannedIntake = {
+    intake: { amount: input.amount, unit: input.unit },
+    active: [],
+  };
+  const { data: event, error: insertError } = await supabase
+    .from("med_dose_events")
+    .insert({
+      person_id: input.person_id,
+      regimen_id: input.regimen_id,
+      scheduled_at: input.scheduled_at,
+      actual_at: input.scheduled_at,
+      planned_intake: plannedIntake,
+      status: "scheduled",
+    })
+    .select("id")
+    .single();
+  if (insertError) throw new Error(insertError.message);
+  if (!event?.id) throw new Error("Failed to create dose event");
+  const { error: markError } = await supabase.rpc("mark_dose_taken", {
+    p_dose_event_id: event.id,
+    p_note: input.notes ?? null,
+  });
+  if (markError) throw new Error(markError.message);
+}
+
+export function useAddOneTimeDoseToRegimen() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: addOneTimeDoseToRegimen,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
+      queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
+      queryClient.invalidateQueries({ queryKey: ["regimens"] });
+      queryClient.invalidateQueries({ queryKey: ["regimen"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory-transactions"] });
     },
   });
 }

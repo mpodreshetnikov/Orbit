@@ -77,7 +77,11 @@ export default function MedicationsPage() {
     // Execute the action
     const mutation = action === "taken" ? markTaken : markSkipped;
     for (const id of doseEventIds) {
-      mutation.mutate({ doseEventId: id });
+      mutation.mutate(
+        action === "taken"
+          ? { doseEventId: id, takenAt: new Date().toISOString() }
+          : { doseEventId: id }
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -96,17 +100,25 @@ export default function MedicationsPage() {
 
   const filteredItems = useMemo(() => {
     if (!regimens) return [];
-    let list = regimens.filter(
-      (r) => (r.schedule as { mode?: string })?.mode !== "one_off"
-    );
+    let list = regimens;
     if (statusFilter !== "all") {
-      list = list.filter((r) => r.status === statusFilter);
+      list = list.filter((r) => {
+        const isOneOff = (r.schedule as { mode?: string })?.mode === "one_off";
+        if (isOneOff) return statusFilter === "completed";
+        return r.status === statusFilter;
+      });
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((r) => r.custom_name.toLowerCase().includes(q));
     }
-    return list;
+    const isCompletedOrOneOff = (r: (typeof list)[number]) =>
+      r.status === "completed" || (r.schedule as { mode?: string })?.mode === "one_off";
+    return [...list].sort((a, b) => {
+      const aEnd = isCompletedOrOneOff(a) ? 1 : 0;
+      const bEnd = isCompletedOrOneOff(b) ? 1 : 0;
+      return aEnd - bEnd;
+    });
   }, [regimens, statusFilter, searchQuery]);
 
   const hasActiveFilters = searchQuery || statusFilter !== "all";

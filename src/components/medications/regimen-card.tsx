@@ -91,6 +91,8 @@ export function RegimenCard({ regimen }: RegimenCardProps) {
     inv.current_amount <= inv.refill_threshold_amount;
 
   const scheduleSummary = formatRegimenScheduleSummary(regimen, t, intlLocale);
+  const isOneOff = (regimen.schedule as { mode?: string })?.mode === "one_off";
+  const displayStatus = isOneOff ? "completed" : regimen.status;
 
   return (
     <Link href={`/health/medications/${regimen.id}`}>
@@ -106,7 +108,7 @@ export function RegimenCard({ regimen }: RegimenCardProps) {
               <div className="min-w-0 flex-1">
                 <h3 className="font-medium truncate">{regimen.custom_name}</h3>
                 <div className="flex items-center gap-2 flex-wrap mt-1">
-                  <StatusBadge status={regimen.status} />
+                  <StatusBadge status={displayStatus} />
                   {isLowInventory && (
                     <Badge variant="outline" className="text-xs border-amber-500/50 text-amber-700 dark:text-amber-400 gap-1">
                       <AlertTriangle className="h-3 w-3" />

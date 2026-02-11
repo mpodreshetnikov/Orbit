@@ -55,9 +55,20 @@ import {
 import { formatAmountWithUnit, getUnitIcon } from "@/components/medications/medication-units";
 import { formatRegimenScheduleSummary } from "@/components/medications/regimen-card";
 import { useIntlLocale } from "@/lib/date-locale";
-import type { MedDoseEvent, MedDoseEventStatus } from "@/types/regimen";
+import type { MedDoseEvent, MedDoseEventStatus, MedDuration } from "@/types/regimen";
 import { getPlannedIntakeAmount, getPlannedIntakeUnit } from "@/types/regimen";
 import type { MedicationUnit } from "@/types";
+
+function getDurationDates(duration: MedDuration): { start: string | null; end: string | null } {
+  const start = duration?.start_date ?? null;
+  if (duration?.type === "until_date" && duration.end_date) return { start, end: duration.end_date };
+  if (duration?.type === "for_days" && start && duration.days != null) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + duration.days);
+    return { start, end: d.toISOString().slice(0, 10) };
+  }
+  return { start, end: null };
+}
 
 function getStatusIcon(status: MedDoseEventStatus): { Icon: typeof Check; className?: string } {
   switch (status) {
@@ -202,6 +213,26 @@ export default function MedicationDetailPage({
               {scheduleSummary}
             </div>
           )}
+          {(() => {
+            const { start, end } = getDurationDates(regimen.duration);
+            if (!start && !end) return null;
+            return (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                {start && (
+                  <span>
+                    {t("medications.startDate")}: {format(new Date(start), "PP", { locale: dateLocale })}
+                  </span>
+                )}
+                {end != null ? (
+                  <span>
+                    {t("medications.endDate")}: {format(new Date(end), "PP", { locale: dateLocale })}
+                  </span>
+                ) : regimen.duration?.type === "endless" && (
+                  <span>{t("medications.endTypeEndless")}</span>
+                )}
+              </div>
+            );
+          })()}
           {inv?.enabled && (
             <div className="text-sm text-muted-foreground">
               {t("medications.inventoryCurrent")}:{" "}
@@ -317,7 +348,7 @@ export default function MedicationDetailPage({
                             <DropdownMenuItem
                               onClick={() => {
                                 markTaken.mutate(
-                                  { doseEventId: ev.id },
+                                  { doseEventId: ev.id, takenAt: new Date().toISOString() },
                                   { onSettled: () => setEditingEventId(null) }
                                 );
                               }}
@@ -342,12 +373,12 @@ export default function MedicationDetailPage({
                           {isUnspecified && (
                             <>
                               <DropdownMenuItem
-                                onClick={() => {
-                                  markTaken.mutate(
-                                    { doseEventId: ev.id },
-                                    { onSettled: () => setEditingEventId(null) }
-                                  );
-                                }}
+                              onClick={() => {
+                                markTaken.mutate(
+                                  { doseEventId: ev.id, takenAt: new Date().toISOString() },
+                                  { onSettled: () => setEditingEventId(null) }
+                                );
+                              }}
                               >
                                 <Check className="h-4 w-4 mr-2" />
                                 {t("medications.markAsTaken")}
