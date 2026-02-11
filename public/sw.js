@@ -185,12 +185,10 @@ var NOTIFICATION_TYPE_HANDLERS = {
       return groupKey + "-" + getNotificationInstanceId(n); // unique tag per instance
     },
     renotify: true,
+    // Single action (taken) to avoid Android bug where only the last action works when multiple are shown
     getActions: function (lang) {
       var labels = getMedicationActionLabels(lang);
-      return [
-        { action: "confirm", title: labels.confirm },
-        { action: "skip", title: labels.skip },
-      ];
+      return [{ action: "confirm", title: labels.confirm }];
     },
     getTitle: function (n, lang) {
       return (n.medicationName != null && n.amount != null) ? getMedicationTitle(n, lang) : (n.title || "Notification");
