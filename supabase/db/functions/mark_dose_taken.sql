@@ -1,9 +1,12 @@
 -- Function: mark_dose_taken()
 -- Mark a dose event as taken and update inventory
 
+DROP FUNCTION IF EXISTS public.mark_dose_taken(uuid, text);
+
 CREATE OR REPLACE FUNCTION public.mark_dose_taken(
   p_dose_event_id uuid,
-  p_note text DEFAULT NULL
+  p_note text DEFAULT NULL,
+  p_taken_at timestamptz DEFAULT NULL
 )
 RETURNS void
 LANGUAGE plpgsql
@@ -36,7 +39,7 @@ BEGIN
   IF v_amount IS NULL THEN v_amount := 1; END IF;
 
   UPDATE public.med_dose_events
-  SET status = 'taken', taken_at = COALESCE(now(), actual_at), note = NULLIF(trim(p_note), ''), updated_at = now()
+  SET status = 'taken', taken_at = COALESCE(p_taken_at, actual_at, now()), note = NULLIF(trim(p_note), ''), updated_at = now()
   WHERE id = p_dose_event_id;
 
   INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
@@ -51,8 +54,8 @@ END;
 $$;
 
 -- Security: restrict execution
-REVOKE ALL ON FUNCTION public.mark_dose_taken(uuid, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.mark_dose_taken(uuid, text) TO authenticated;
+REVOKE ALL ON FUNCTION public.mark_dose_taken(uuid, text, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.mark_dose_taken(uuid, text, timestamptz) TO authenticated;
 
-COMMENT ON FUNCTION public.mark_dose_taken(uuid, text) IS
-  'Mark dose event as taken; allow from scheduled/sent/snoozed/skipped. Decrements inventory if enabled.';
+COMMENT ON FUNCTION public.mark_dose_taken(uuid, text, timestamptz) IS
+  'Mark dose event as taken; allow from scheduled/sent/snoozed/skipped. Optional p_taken_at sets completion time; else actual_at, else now(). Decrements inventory if enabled.';

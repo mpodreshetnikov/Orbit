@@ -345,7 +345,7 @@ export default function MedicationDetailPage() {
                             <DropdownMenuItem
                               onClick={() => {
                                 markTaken.mutate(
-                                  { doseEventId: ev.id },
+                                  { doseEventId: ev.id, takenAt: new Date().toISOString() },
                                   { onSettled: () => setEditingEventId(null) }
                                 );
                               }}
@@ -370,12 +370,12 @@ export default function MedicationDetailPage() {
                           {isUnspecified && (
                             <>
                               <DropdownMenuItem
-                                onClick={() => {
-                                  markTaken.mutate(
-                                    { doseEventId: ev.id },
-                                    { onSettled: () => setEditingEventId(null) }
-                                  );
-                                }}
+                              onClick={() => {
+                                markTaken.mutate(
+                                  { doseEventId: ev.id, takenAt: new Date().toISOString() },
+                                  { onSettled: () => setEditingEventId(null) }
+                                );
+                              }}
                               >
                                 <Check className="h-4 w-4 mr-2" />
                                 {t("medications.markAsTaken")}

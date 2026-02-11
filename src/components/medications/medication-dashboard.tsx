@@ -279,7 +279,7 @@ export function MedicationDashboard() {
       setRecentlyCompletedIds((prev) => new Set(prev).add(e.id));
       scheduleMoveToCompleted();
       markTaken.mutate(
-        { doseEventId: e.id },
+        { doseEventId: e.id, takenAt: new Date().toISOString() },
         {
           onSettled: () => {
             setPendingTakenIds((prev) => {

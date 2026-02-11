@@ -73,8 +73,7 @@ BEGIN
 
     IF v_mode = 'one_off' THEN
       v_due_at := (v_schedule->>'due_at')::timestamptz;
-      IF v_due_at IS NOT NULL AND v_due_at >= (v_today::text || ' 00:00:00')::timestamp AT TIME ZONE v_tz
-         AND v_due_at < (v_today::text || ' 00:00:00')::timestamp AT TIME ZONE v_tz + (p_horizon_days || ' days')::interval THEN
+      IF v_due_at IS NOT NULL THEN
         INSERT INTO public.med_dose_events (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status, taken_at)
         SELECT v_reg.person_id, v_reg.id, v_due_at, v_due_at, v_planned_intake, 'taken', v_due_at
         WHERE NOT EXISTS (

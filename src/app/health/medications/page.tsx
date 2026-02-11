@@ -77,7 +77,11 @@ export default function MedicationsPage() {
     // Execute the action
     const mutation = action === "taken" ? markTaken : markSkipped;
     for (const id of doseEventIds) {
-      mutation.mutate({ doseEventId: id });
+      mutation.mutate(
+        action === "taken"
+          ? { doseEventId: id, takenAt: new Date().toISOString() }
+          : { doseEventId: id }
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

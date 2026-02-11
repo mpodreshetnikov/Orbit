@@ -239,20 +239,33 @@ export function useInventoryTransactions(regimenId: string | null) {
 // MUTATIONS: mark taken / skip / snooze
 // ============================================================================
 
-async function markDoseTaken(doseEventId: string, note?: string | null): Promise<void> {
+async function markDoseTaken(
+  doseEventId: string,
+  note?: string | null,
+  takenAt?: string | null
+): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.rpc("mark_dose_taken", {
+  const payload: { p_dose_event_id: string; p_note: string | null; p_taken_at?: string } = {
     p_dose_event_id: doseEventId,
     p_note: note ?? null,
-  });
+  };
+  if (takenAt != null && takenAt !== "") payload.p_taken_at = takenAt;
+  const { error } = await supabase.rpc("mark_dose_taken", payload);
   if (error) throw new Error(error.message);
 }
 
 export function useMarkDoseTaken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ doseEventId, note }: { doseEventId: string; note?: string | null }) =>
-      markDoseTaken(doseEventId, note),
+    mutationFn: ({
+      doseEventId,
+      note,
+      takenAt,
+    }: {
+      doseEventId: string;
+      note?: string | null;
+      takenAt?: string | null;
+    }) => markDoseTaken(doseEventId, note, takenAt),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
       queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
