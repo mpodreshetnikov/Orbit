@@ -69,6 +69,10 @@ function getEventTimeIso(e: MedDoseEventWithRegimen): string {
   return e.taken_at || e.actual_at;
 }
 
+function getScheduledTimeIso(e: MedDoseEventWithRegimen): string {
+  return e.actual_at;
+}
+
 function sortEventsInTimeGroup(list: MedDoseEventWithRegimen[]): void {
   list.sort((a, b) => {
     const timeCompare = getEventTimeIso(a).localeCompare(getEventTimeIso(b));
@@ -92,6 +96,32 @@ function groupEventsByTime(events: MedDoseEventWithRegimen[]): Map<string, MedDo
   }
   for (const list of byTime.values()) {
     sortEventsInTimeGroup(list);
+  }
+  return byTime;
+}
+
+function sortEventsInTimeGroupByScheduled(list: MedDoseEventWithRegimen[]): void {
+  list.sort((a, b) => {
+    const timeCompare = getScheduledTimeIso(a).localeCompare(getScheduledTimeIso(b));
+    if (timeCompare !== 0) return timeCompare;
+    const nameA = a.regimen?.custom_name ?? a.regimen_id;
+    const nameB = b.regimen?.custom_name ?? b.regimen_id;
+    const nameCompare = nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+    if (nameCompare !== 0) return nameCompare;
+    return a.regimen_id.localeCompare(b.regimen_id);
+  });
+}
+
+function groupEventsByScheduledTime(events: MedDoseEventWithRegimen[]): Map<string, MedDoseEventWithRegimen[]> {
+  const byTime = new Map<string, MedDoseEventWithRegimen[]>();
+  for (const e of events) {
+    const time = formatTime(getScheduledTimeIso(e));
+    const list = byTime.get(time) ?? [];
+    list.push(e);
+    byTime.set(time, list);
+  }
+  for (const list of byTime.values()) {
+    sortEventsInTimeGroupByScheduled(list);
   }
   return byTime;
 }
@@ -216,7 +246,9 @@ export function MedicationDashboard() {
       (e) => recentlyCompletedIds.has(e.id) && !pendingIds.has(e.id)
     );
     const intakeListEvents = [...pending, ...recentlyCompletedOnly];
-    const pendingByTime = groupEventsByTime(intakeListEvents);
+    const pendingByTime = isTodayView
+      ? groupEventsByScheduledTime(intakeListEvents)
+      : groupEventsByTime(intakeListEvents);
     const slots = Array.from(pendingByTime.entries())
       .map(([time, evs]) => ({ time, events: evs }))
       .sort((a, b) => a.time.localeCompare(b.time));
