@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { notifySwMedicationIntakeResolved } from "@/lib/sw-messages";
 import type {
   MedRegimen,
   MedDoseEvent,
@@ -252,12 +253,13 @@ export function useMarkDoseTaken() {
   return useMutation({
     mutationFn: ({ doseEventId, note }: { doseEventId: string; note?: string | null }) =>
       markDoseTaken(doseEventId, note),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
       queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimens"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-transactions"] });
+      notifySwMedicationIntakeResolved([variables.doseEventId]);
     },
   });
 }
@@ -276,12 +278,13 @@ export function useMarkDoseSkipped() {
   return useMutation({
     mutationFn: ({ doseEventId, note }: { doseEventId: string; note?: string | null }) =>
       markDoseSkipped(doseEventId, note),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
       queryClient.invalidateQueries({ queryKey: ["dose-events-regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimen"] });
       queryClient.invalidateQueries({ queryKey: ["regimens"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-transactions"] });
+      notifySwMedicationIntakeResolved([variables.doseEventId]);
     },
   });
 }

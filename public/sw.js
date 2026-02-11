@@ -215,10 +215,17 @@ var NOTIFICATION_TYPE_HANDLERS = {
       var personId = baseData.person_id || null;
       var groupKey = "medication-" + (personId ? personId : "no-person");
       var instanceId = getNotificationInstanceId(n);
-      return Object.assign({}, baseData, extra, {
+      var medItems = n.medItems || (n.med_items && Array.isArray(n.med_items) ? n.med_items : null);
+      var payload = Object.assign({}, baseData, extra, {
         groupKey: groupKey,
         instanceId: instanceId,
       });
+      if (Array.isArray(medItems) && medItems.length > 0) payload.med_items = medItems;
+      if (n.title_prefix != null) payload.title_prefix = n.title_prefix;
+      if (n.titlePrefix != null) payload.titlePrefix = n.titlePrefix;
+      if (n.person_name != null) payload.person_name = n.person_name;
+      if (n.personName != null) payload.personName = n.personName;
+      return payload;
     },
     onActionClick: function (event, data, action) {
       var doseEventIds = data.dose_event_ids;
@@ -466,11 +473,70 @@ self.addEventListener("notificationclick", function (event) {
 });
 
 // ---------------------------------------------------------------------------
+// Message: medicationIntakeResolved (update or close notifications)
+// ---------------------------------------------------------------------------
+function handleMedicationIntakeResolved(resolvedIds) {
+  var resolvedSet = new Set(resolvedIds);
+  return self.registration.getNotifications().then(function (list) {
+    var chain = Promise.resolve();
+    list.forEach(function (notif) {
+      var d = notif.data || {};
+      var type = d.type;
+      if ((type !== "medication" && type !== "medication_snoozed") || !Array.isArray(d.dose_event_ids)) return;
+      var doseEventIds = d.dose_event_ids;
+      var hasAny = doseEventIds.some(function (id) { return resolvedSet.has(id); });
+      if (!hasAny) return;
+      var keptIndices = [];
+      for (var i = 0; i < doseEventIds.length; i++) {
+        if (!resolvedSet.has(doseEventIds[i])) keptIndices.push(i);
+      }
+      var newDoseEventIds = keptIndices.map(function (i) { return doseEventIds[i]; });
+      var medItems = d.med_items && Array.isArray(d.med_items) ? d.med_items : null;
+      var newMedItems = medItems && medItems.length >= doseEventIds.length
+        ? keptIndices.map(function (i) { return medItems[i]; })
+        : null;
+      if (newDoseEventIds.length === 0) {
+        chain = chain.then(function () { notif.close(); });
+        return;
+      }
+      if (!newMedItems) {
+        chain = chain.then(function () { notif.close(); });
+        return;
+      }
+      var minimalN = {
+        type: type,
+        url: d.url || "/",
+        person_id: d.person_id || null,
+        personId: d.personId || null,
+        title_prefix: d.title_prefix != null ? d.title_prefix : (d.titlePrefix != null ? d.titlePrefix : null),
+        person_name: d.person_name != null ? d.person_name : (d.personName != null ? d.personName : null),
+        med_items: newMedItems,
+        dose_event_ids: newDoseEventIds,
+      };
+      chain = chain.then(function () {
+        return getAppLang().then(function (lang) {
+          if (!self.registration.showNotification) return notif.close();
+          var built = buildNotificationOptions(minimalN, lang);
+          notif.close();
+          return closeSameGroupThenShow(built);
+        });
+      });
+    });
+    return chain;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Message: show notification (poll path — same logic as push)
 // ---------------------------------------------------------------------------
 self.addEventListener("message", function (event) {
   var data = event.data;
-  if (!data || data.type !== "showNotification" || !data.notification) return;
+  if (!data) return;
+  if (data.type === "medicationIntakeResolved" && Array.isArray(data.dose_event_ids) && data.dose_event_ids.length > 0) {
+    event.waitUntil(handleMedicationIntakeResolved(data.dose_event_ids));
+    return;
+  }
+  if (data.type !== "showNotification" || !data.notification) return;
   var notification = data.notification;
   var client = event.source;
   getAppLang()
