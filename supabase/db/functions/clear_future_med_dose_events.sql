@@ -14,8 +14,12 @@ DECLARE
   v_person_ids uuid[];
   v_deleted int;
 BEGIN
-  -- Validate caller
-  IF auth.uid() IS NULL THEN
+  -- Validate caller: authenticated users may only clear their own; cron (no session) allowed only for trusted roles
+  IF auth.uid() IS NOT NULL THEN
+    IF p_auth_user_id IS DISTINCT FROM auth.uid() THEN
+      RAISE EXCEPTION 'Not authorized to clear events for another user';
+    END IF;
+  ELSIF current_user IS NULL OR current_user NOT IN ('postgres', 'supabase_admin') THEN
     RAISE EXCEPTION 'Not authenticated';
   END IF;
 
