@@ -50,6 +50,8 @@ BEGIN;
 \i policies/money_transactions.sql
 \i policies/money_line_items.sql
 \i policies/money_import_batches.sql
+\i policies/money_import_sessions.sql
+\i policies/money_import_batch_rows.sql
 
 -- ============================================================================
 -- Checkups

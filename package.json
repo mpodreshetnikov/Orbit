@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
+    "web": "next dev",
+    "web:build": "next build",
+    "ext": "tsx scripts/extension/build.ts --mode=development --watch",
+    "ext:build": "tsx scripts/extension/build.ts --mode=production",
     "db:deploy": "node supabase/db/run-deploy.js",
-    "db:deploy:local": "node supabase/db/run-deploy.js local"
+    "db:deploy:local": "node supabase/db/run-deploy.js local",
+    "db": "npx supabase migrations up && npm run db:deploy:local && npx supabase functions serve",
+    "db:hard": "npx supabase db reset && npm run db:deploy:local && npx supabase functions serve"
   },
   "dependencies": {
     "@eslint/eslintrc": "^3.3.3",
@@ -50,14 +52,18 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@types/chrome": "^0.1.36",
     "@types/node": "^22.10.10",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.19.0",
     "eslint-config-next": "^15.1.6",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3"
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.11"
   }
 }

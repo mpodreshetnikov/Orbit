@@ -173,11 +173,13 @@ async function parse(file: File): Promise<ImportParseResult> {
       is_transfer: transfer,
       raw_payload: rawPayload,
       dedupe_hash,
-      line_item: {
-        title: merchantName || "T-Bank",
-        amount,
-        raw_payload: rawPayload,
-      },
+      line_items: [
+        {
+          title: merchantName || "T-Bank",
+          amount,
+          raw_payload: rawPayload,
+        },
+      ],
     });
   }
 
@@ -187,6 +189,12 @@ async function parse(file: File): Promise<ImportParseResult> {
 const tbankConnector = {
   sourceId: SOURCE_ID,
   displayName: "T-Bank (CSV)",
+  kind: "file" as const,
+  fileAccept: {
+    "text/csv": [".csv"],
+    "text/plain": [".csv"],
+    "application/vnd.ms-excel": [".csv"],
+  },
   parse,
 };
 

@@ -1,21 +1,2 @@
-{"location":"transaction-form.tsx:merchant-pointerDown","message":"merchant input pointerDown","data":{"targetTagName":"INPUT"},"timestamp":1770705493521,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-pointerDown","message":"merchant input pointerDown","data":{"targetTagName":"INPUT"},"timestamp":1770705494773,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-onFocus","message":"merchant input focus","data":{},"timestamp":1770705494776,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:onOpenChange","message":"merchant popover onOpenChange","data":{"next":false,"current":true},"timestamp":1770705495733,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-pointerDown","message":"merchant input pointerDown","data":{"targetTagName":"INPUT"},"timestamp":1770705496190,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-onFocus","message":"merchant input focus","data":{},"timestamp":1770705496193,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:onOpenChange","message":"merchant popover onOpenChange","data":{"next":false,"current":true},"timestamp":1770705496745,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-effect","message":"merchant effect run","data":{"merchantName":"","prev":"","willUpdate":false},"timestamp":1770705499405,"hypothesisId":"C"}
-{"location":"transaction-form.tsx:merchant-effect","message":"merchant effect run","data":{"merchantName":"","prev":"","willUpdate":false},"timestamp":1770705499416,"hypothesisId":"C"}
-{"location":"transaction-form.tsx:merchant-effect","message":"merchant effect run","data":{"merchantName":"","prev":"","willUpdate":false},"timestamp":1770705500102,"hypothesisId":"C"}
-{"location":"transaction-form.tsx:merchant-effect","message":"merchant effect run","data":{"merchantName":"","prev":"","willUpdate":false},"timestamp":1770705500229,"hypothesisId":"C"}
-{"location":"transaction-form.tsx:merchant-onFocus","message":"merchant input focus","data":{},"timestamp":1770705501085,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-pointerDown","message":"merchant input pointerDown","data":{"targetTagName":"INPUT"},"timestamp":1770705501082,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:onOpenChange","message":"merchant popover onOpenChange","data":{"next":false,"current":true},"timestamp":1770705501831,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-onFocus","message":"merchant input focus","data":{},"timestamp":1770705502372,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-pointerDown","message":"merchant input pointerDown","data":{"targetTagName":"INPUT"},"timestamp":1770705502370,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:onOpenChange","message":"merchant popover onOpenChange","data":{"next":false,"current":true},"timestamp":1770705503045,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-pointerDown","message":"merchant input pointerDown","data":{"targetTagName":"INPUT"},"timestamp":1770705520137,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-onFocus","message":"merchant input focus","data":{},"timestamp":1770705520139,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:merchant-pointerDown","message":"merchant input pointerDown","data":{"targetTagName":"INPUT"},"timestamp":1770705520745,"hypothesisId":"A"}
-{"location":"transaction-form.tsx:onOpenChange","message":"merchant popover onOpenChange","data":{"next":false,"current":true},"timestamp":1770705521817,"hypothesisId":"A"}
+{"location":"tbank-web.ts:parse","message":"after navigate to operations","data":{"url":"https://www.tbank.ru/mybank/operations/","isOperations":true},"timestamp":1771303789262,"hypothesisId":"auth"}
+{"location":"tbank-web.ts:parse","message":"parse start","data":{"windowFrom":"2026-02-15T04:49:00.000Z","last_imported_at":"2026-02-17T02:54:38.000Z","normalizedWindowFrom":"2026-02-15T04:49:00.000Z","tabUrl":"https://www.tbank.ru/mybank/"},"timestamp":1771303789262,"hypothesisId":"date"}
