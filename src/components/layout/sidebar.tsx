@@ -1,12 +1,13 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Pill } from "lucide-react";
+import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Pill, CreditCard, Tags, ArrowRightLeft, Upload } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { getAppSection } from "@/lib/app-section";
 
-const sidebarLinks = [
+const healthLinks = [
   {
     href: "/health",
     icon: FileText,
@@ -49,9 +50,34 @@ const sidebarLinks = [
   },
 ];
 
+const moneyLinks = [
+  {
+    href: "/money/transactions",
+    icon: ArrowRightLeft,
+    labelKey: "money.transactions",
+  },
+  {
+    href: "/money/import",
+    icon: Upload,
+    labelKey: "money.import",
+  },
+  {
+    href: "/money/accounts",
+    icon: CreditCard,
+    labelKey: "money.accounts",
+  },
+  {
+    href: "/money/categories",
+    icon: Tags,
+    labelKey: "money.categories",
+  },
+];
+
 export function Sidebar() {
   const t = useTranslations();
   const pathname = usePathname();
+  const section = getAppSection(pathname);
+  const sidebarLinks = section === "money" ? moneyLinks : healthLinks;
 
   return (
     <nav className="flex-1 space-y-1 bg-background border-r px-3 py-4">

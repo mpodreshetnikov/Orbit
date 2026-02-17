@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { use, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
@@ -57,12 +57,10 @@ function StatusIcon({ status, className }: { status: ConditionStatus; className?
   return icons[status] || null;
 }
 
-function ConditionDetailContent() {
-  const params = useParams();
+function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const router = useRouter();
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
-  const conditionId = params.id as string;
 
   const { data: condition, isLoading, error, refetch } = useConditionDetail(conditionId);
   const updateConditionMutation = useUpdateCondition();
@@ -583,6 +581,11 @@ function ConditionDetailContent() {
   );
 }
 
-export default function ConditionDetailPage() {
-  return <ConditionDetailContent />;
+export default function ConditionDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id: conditionId } = use(params);
+  return <ConditionDetailContent conditionId={conditionId} />;
 }

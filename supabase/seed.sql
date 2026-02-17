@@ -660,6 +660,257 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- MONEY: CATEGORIES (global taxonomy)
+-- ============================================================================
+DO $$
+DECLARE
+  v_cat_food uuid := '40000001-0000-4000-8000-000000000001';
+  v_cat_groceries uuid := '40000001-0000-4000-8000-000000000002';
+  v_cat_restaurants uuid := '40000001-0000-4000-8000-000000000003';
+  v_cat_transport uuid := '40000001-0000-4000-8000-000000000004';
+  v_cat_taxi uuid := '40000001-0000-4000-8000-000000000005';
+  v_cat_public_transport uuid := '40000001-0000-4000-8000-000000000006';
+  v_cat_shopping uuid := '40000001-0000-4000-8000-000000000007';
+  v_cat_entertainment uuid := '40000001-0000-4000-8000-000000000008';
+  v_cat_housing uuid := '40000001-0000-4000-8000-000000000009';
+  v_cat_rent uuid := '40000001-0000-4000-8000-00000000000a';
+  v_cat_utilities uuid := '40000001-0000-4000-8000-00000000000b';
+  v_cat_income uuid := '40000001-0000-4000-8000-00000000000c';
+  v_cat_salary uuid := '40000001-0000-4000-8000-00000000000d';
+  v_cat_freelance uuid := '40000001-0000-4000-8000-00000000000e';
+  v_cat_health uuid := '40000001-0000-4000-8000-00000000000f';
+  v_cat_pharmacy uuid := '40000001-0000-4000-8000-000000000010';
+BEGIN
+  -- Top-level categories (depth 1)
+  INSERT INTO public.money_categories (id, parent_id, depth, name_ru, name_en, slug) VALUES
+    (v_cat_food,          NULL, 1, 'Еда и напитки',  'Food & Dining',   'food-dining'),
+    (v_cat_transport,     NULL, 1, 'Транспорт',       'Transport',       'transport'),
+    (v_cat_shopping,      NULL, 1, 'Покупки',         'Shopping',        'shopping'),
+    (v_cat_entertainment, NULL, 1, 'Развлечения',     'Entertainment',   'entertainment'),
+    (v_cat_housing,       NULL, 1, 'Жильё',           'Housing',         'housing'),
+    (v_cat_income,        NULL, 1, 'Доход',           'Income',          'income'),
+    (v_cat_health,        NULL, 1, 'Здоровье',        'Health',          'health')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- Sub-categories (depth 2)
+  INSERT INTO public.money_categories (id, parent_id, depth, name_ru, name_en, slug) VALUES
+    (v_cat_groceries,        v_cat_food,      2, 'Продукты',               'Groceries',         'groceries'),
+    (v_cat_restaurants,      v_cat_food,      2, 'Рестораны и кафе',       'Restaurants',       'restaurants'),
+    (v_cat_taxi,             v_cat_transport, 2, 'Такси',                  'Taxi',              'taxi'),
+    (v_cat_public_transport, v_cat_transport, 2, 'Общественный транспорт', 'Public Transport',  'public-transport'),
+    (v_cat_rent,             v_cat_housing,   2, 'Аренда',                 'Rent',              'rent'),
+    (v_cat_utilities,        v_cat_housing,   2, 'Коммунальные услуги',    'Utilities',         'utilities'),
+    (v_cat_salary,           v_cat_income,    2, 'Зарплата',               'Salary',            'salary'),
+    (v_cat_freelance,        v_cat_income,    2, 'Фриланс',               'Freelance',         'freelance'),
+    (v_cat_pharmacy,         v_cat_health,    2, 'Аптека',                 'Pharmacy',          'pharmacy')
+  ON CONFLICT (id) DO NOTHING;
+END $$;
+
+-- ============================================================================
+-- MONEY: ACCOUNTS
+-- ============================================================================
+DO $$
+DECLARE
+  v_max_person_id uuid;
+  v_kate_person_id uuid;
+  v_acc_tinkoff uuid := '41000001-0000-4000-8000-000000000001';
+  v_acc_cash uuid := '41000001-0000-4000-8000-000000000002';
+  v_acc_sber uuid := '41000001-0000-4000-8000-000000000003';
+BEGIN
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+  SELECT id INTO v_kate_person_id FROM public.persons WHERE name = 'Kate' LIMIT 1;
+
+  IF v_max_person_id IS NOT NULL THEN
+    INSERT INTO public.money_accounts (id, owner_person_id, source, account_kind, account_label, currency) VALUES
+      (v_acc_tinkoff, v_max_person_id, 'manual', 'debit',  'Tinkoff Black', 'RUB'),
+      (v_acc_cash,    v_max_person_id, 'manual', 'cash',   'Cash',          'RUB')
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  IF v_kate_person_id IS NOT NULL THEN
+    INSERT INTO public.money_accounts (id, owner_person_id, source, account_kind, account_label, currency) VALUES
+      (v_acc_sber, v_kate_person_id, 'manual', 'debit', 'Sberbank Green', 'RUB')
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- MONEY: TRANSACTIONS + LINE ITEMS
+-- ============================================================================
+DO $$
+DECLARE
+  v_max_person_id uuid;
+  v_kate_person_id uuid;
+  v_acc_tinkoff uuid := '41000001-0000-4000-8000-000000000001';
+  v_acc_cash uuid := '41000001-0000-4000-8000-000000000002';
+  v_acc_sber uuid := '41000001-0000-4000-8000-000000000003';
+  -- category refs
+  v_cat_groceries uuid := '40000001-0000-4000-8000-000000000002';
+  v_cat_restaurants uuid := '40000001-0000-4000-8000-000000000003';
+  v_cat_taxi uuid := '40000001-0000-4000-8000-000000000005';
+  v_cat_rent uuid := '40000001-0000-4000-8000-00000000000a';
+  v_cat_utilities uuid := '40000001-0000-4000-8000-00000000000b';
+  v_cat_salary uuid := '40000001-0000-4000-8000-00000000000d';
+  v_cat_freelance uuid := '40000001-0000-4000-8000-00000000000e';
+  v_cat_shopping uuid := '40000001-0000-4000-8000-000000000007';
+  v_cat_entertainment uuid := '40000001-0000-4000-8000-000000000008';
+  v_cat_pharmacy uuid := '40000001-0000-4000-8000-000000000010';
+  -- transaction IDs
+  v_tx1 uuid := '42000001-0000-4000-8000-000000000001';
+  v_tx2 uuid := '42000001-0000-4000-8000-000000000002';
+  v_tx3 uuid := '42000001-0000-4000-8000-000000000003';
+  v_tx4 uuid := '42000001-0000-4000-8000-000000000004';
+  v_tx5 uuid := '42000001-0000-4000-8000-000000000005';
+  v_tx6 uuid := '42000001-0000-4000-8000-000000000006';
+  v_tx7 uuid := '42000001-0000-4000-8000-000000000007';
+  v_tx8 uuid := '42000001-0000-4000-8000-000000000008';
+  v_tx9 uuid := '42000001-0000-4000-8000-000000000009';
+  v_tx10 uuid := '42000001-0000-4000-8000-00000000000a';
+  v_tx11 uuid := '42000001-0000-4000-8000-00000000000b';
+  v_tx12 uuid := '42000001-0000-4000-8000-00000000000c';
+  -- line item IDs
+  v_li1 uuid := '43000001-0000-4000-8000-000000000001';
+  v_li2 uuid := '43000001-0000-4000-8000-000000000002';
+  v_li3 uuid := '43000001-0000-4000-8000-000000000003';
+  v_li4 uuid := '43000001-0000-4000-8000-000000000004';
+  v_li5 uuid := '43000001-0000-4000-8000-000000000005';
+  v_li6 uuid := '43000001-0000-4000-8000-000000000006';
+  v_li7 uuid := '43000001-0000-4000-8000-000000000007';
+  v_li8 uuid := '43000001-0000-4000-8000-000000000008';
+  v_li9 uuid := '43000001-0000-4000-8000-000000000009';
+  v_li10 uuid := '43000001-0000-4000-8000-00000000000a';
+  v_li11 uuid := '43000001-0000-4000-8000-00000000000b';
+  v_li12 uuid := '43000001-0000-4000-8000-00000000000c';
+  v_li13 uuid := '43000001-0000-4000-8000-00000000000d';
+  v_li14 uuid := '43000001-0000-4000-8000-00000000000e';
+  v_li15 uuid := '43000001-0000-4000-8000-00000000000f';
+BEGIN
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+  SELECT id INTO v_kate_person_id FROM public.persons WHERE name = 'Kate' LIMIT 1;
+
+  IF v_max_person_id IS NULL THEN RETURN; END IF;
+
+  -- ── Max's transactions on Tinkoff Black ──────────────────────────────
+
+  -- 1. Salary (income)
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, comment) VALUES
+    (v_tx1, v_max_person_id, v_acc_tinkoff, '2026-01-10 12:00:00+03', 180000, 'RUB', 'income', 'posted', 'Employer LLC', 'January salary')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, beneficiary_person_id, assignment_method) VALUES
+    (v_li1, v_tx1, 'Salary Jan 2026', 180000, v_cat_salary, v_max_person_id, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 2. Rent payment
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, comment) VALUES
+    (v_tx2, v_max_person_id, v_acc_tinkoff, '2026-01-15 10:00:00+03', -45000, 'RUB', 'expense', 'posted', 'Rent for January')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
+    (v_li2, v_tx2, 'Rent Jan 2026', 45000, v_cat_rent, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 3. Grocery run at Pyatyorochka (multi-item receipt)
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, mcc) VALUES
+    (v_tx3, v_max_person_id, v_acc_tinkoff, '2026-01-18 19:32:00+03', -2874, 'RUB', 'expense', 'posted', 'Pyatyorochka', '5411')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, quantity, unit, category_id, beneficiary_person_id, assignment_method) VALUES
+    (v_li3, v_tx3, 'Milk 3.2%',      89,  2, 'pcs', v_cat_groceries, v_max_person_id, 'manual'),
+    (v_li4, v_tx3, 'Bread',          65,  1, 'pcs', v_cat_groceries, v_max_person_id, 'manual'),
+    (v_li5, v_tx3, 'Chicken breast', 420, 1, 'kg',  v_cat_groceries, v_max_person_id, 'manual'),
+    (v_li6, v_tx3, 'Other groceries', 2300, NULL, NULL, v_cat_groceries, NULL, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 4. Yandex Go taxi
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, mcc) VALUES
+    (v_tx4, v_max_person_id, v_acc_tinkoff, '2026-01-20 08:15:00+03', -650, 'RUB', 'expense', 'posted', 'Yandex Go', '4121')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
+    (v_li7, v_tx4, 'Taxi to office', 650, v_cat_taxi, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 5. Restaurant dinner
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, mcc) VALUES
+    (v_tx5, v_max_person_id, v_acc_tinkoff, '2026-01-22 20:45:00+03', -3200, 'RUB', 'expense', 'posted', 'Yakitoriya', '5812')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, beneficiary_person_id, assignment_method) VALUES
+    (v_li8, v_tx5, 'Dinner for two', 3200, v_cat_restaurants, v_max_person_id, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 6. Utilities
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, comment) VALUES
+    (v_tx6, v_max_person_id, v_acc_tinkoff, '2026-01-25 11:00:00+03', -4800, 'RUB', 'expense', 'posted', 'Utilities Jan')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
+    (v_li9, v_tx6, 'Utilities Jan 2026', 4800, v_cat_utilities, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 7. Pharmacy
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, mcc) VALUES
+    (v_tx7, v_max_person_id, v_acc_tinkoff, '2026-01-27 14:20:00+03', -1350, 'RUB', 'expense', 'posted', 'Apteka.ru', '5912')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, beneficiary_person_id, assignment_method) VALUES
+    (v_li10, v_tx7, 'Vitamins & supplements', 1350, v_cat_pharmacy, v_max_person_id, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 8. Pending transaction (Steam purchase)
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, mcc) VALUES
+    (v_tx8, v_max_person_id, v_acc_tinkoff, '2026-02-01 22:10:00+03', -1999, 'RUB', 'expense', 'pending', 'Steam', '5816')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
+    (v_li11, v_tx8, 'Game purchase', 1999, v_cat_entertainment, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- ── Max's cash transactions ──────────────────────────────────────────
+
+  -- 9. Coffee cash
+  INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name) VALUES
+    (v_tx9, v_max_person_id, v_acc_cash, '2026-01-19 09:00:00+03', -350, 'RUB', 'expense', 'posted', 'Coffee shop')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
+    (v_li12, v_tx9, 'Latte', 350, v_cat_restaurants, 'manual')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- ── Kate's transactions on Sberbank ──────────────────────────────────
+
+  IF v_kate_person_id IS NOT NULL THEN
+    -- 10. Kate salary
+    INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, comment) VALUES
+      (v_tx10, v_kate_person_id, v_acc_sber, '2026-01-10 12:00:00+03', 120000, 'RUB', 'income', 'posted', 'Design Studio', 'Salary Jan')
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, beneficiary_person_id, assignment_method) VALUES
+      (v_li13, v_tx10, 'Salary Jan 2026', 120000, v_cat_salary, v_kate_person_id, 'manual')
+    ON CONFLICT (id) DO NOTHING;
+
+    -- 11. Kate grocery shopping
+    INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, merchant_name, mcc) VALUES
+      (v_tx11, v_kate_person_id, v_acc_sber, '2026-01-21 18:10:00+03', -3150, 'RUB', 'expense', 'posted', 'VkusVill', '5411')
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, assignment_method) VALUES
+      (v_li14, v_tx11, 'Weekly groceries', 3150, v_cat_groceries, 'manual')
+    ON CONFLICT (id) DO NOTHING;
+
+    -- 12. Kate freelance income
+    INSERT INTO public.money_transactions (id, payer_person_id, account_id, posted_at, amount, currency, transaction_type, status, comment) VALUES
+      (v_tx12, v_kate_person_id, v_acc_sber, '2026-01-28 16:00:00+03', 25000, 'RUB', 'income', 'posted', 'Logo design project')
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO public.money_line_items (id, transaction_id, title, amount, category_id, beneficiary_person_id, assignment_method) VALUES
+      (v_li15, v_tx12, 'Freelance logo design', 25000, v_cat_freelance, v_kate_person_id, 'manual')
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+END $$;
+
+-- ============================================================================
 -- NOTES
 -- ============================================================================
 -- 1. Auth users are created directly in the seed file, allowing us to reference
@@ -708,7 +959,17 @@ END $$;
 --     (08:00 group) debugging. Dose events are generated by run-cron or event generator.
 --     Fixed UUIDs, ON CONFLICT (id) DO NOTHING.
 --
--- 13. Notifications cron: base URL for Edge Functions (local only; seed runs on db reset).
+-- 13. Money module seed data:
+--     - 7 top-level categories + 9 subcategories (food, transport, shopping, etc.)
+--     - 3 accounts: Tinkoff Black (Max), Cash (Max), Sberbank Green (Kate)
+--     - 12 transactions: salary, rent, groceries, taxi, restaurant, utilities,
+--       pharmacy, Steam (pending), coffee (cash), Kate salary, Kate groceries,
+--       Kate freelance income. Multi-item receipt on Pyatyorochka (4 line items).
+--     - 15 line items total, linked to categories and beneficiaries.
+--     Fixed UUIDs (40xxx categories, 41xxx accounts, 42xxx transactions, 43xxx line items).
+--     ON CONFLICT (id) DO NOTHING for safe re-runs.
+--
+-- 14. Notifications cron: base URL for Edge Functions (local only; seed runs on db reset).
 --     Sets vault secret project_url to http://kong:8000 so pg_cron + pg_net can call
 --     the notifications-cron Edge Function from inside Docker. Idempotent: only creates
 --     if no secret with name project_url exists (avoids duplicates on re-seed).

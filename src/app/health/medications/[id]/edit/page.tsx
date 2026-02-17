@@ -1,6 +1,7 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { use } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -11,11 +12,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { regenerateMedicationEvents, getClientTimezone } from "@/lib/medication-events";
 import type { UpdateMedRegimenInput } from "@/types/regimen";
 
-export default function EditMedicationPage() {
-  const params = useParams();
+export default function EditMedicationPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();
-  const id = params.id as string;
 
   const { data: regimen, isLoading, error } = useRegimen(id);
   const updateMutation = useUpdateRegimen();

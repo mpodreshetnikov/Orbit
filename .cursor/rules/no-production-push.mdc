@@ -1,0 +1,24 @@
+---
+description: Do not run commands that push or deploy to production
+alwaysApply: true
+---
+
+# No Production Push
+
+**Do not run** any command that pushes or deploys changes to production. The user must run these manually.
+
+## Forbidden commands
+
+- **Supabase DB**: `supabase db push`, `supabase db push --linked`, or any variant that applies migrations to a linked/remote database
+- **Supabase Functions**: `supabase functions deploy`, `supabase functions deploy --project-ref ...`, or deploying individual functions to production
+- **Vercel/other**: `vercel --prod`, `vercel deploy --prod`, or any deploy that targets production
+
+## Allowed
+
+- Local-only: `supabase db reset`, `supabase start`, `supabase functions serve`
+- Generating/migrating locally: creating migration files, running migrations against local Supabase
+- Suggesting the exact command for the user to run themselves (e.g. "Run `supabase db push` when you're ready to apply to production")
+
+## If the user asks to push/deploy
+
+Reply that you cannot run production-push commands and that they should run the command themselves in their terminal (e.g. `supabase db push` or `supabase functions deploy`).

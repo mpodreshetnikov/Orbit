@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { use, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import type { Locale } from "date-fns";
@@ -84,12 +84,15 @@ function ScheduleSummary({ schedule, dateLocale }: { schedule: CheckupSchedule; 
   return null;
 }
 
-export default function CheckupDetailPage() {
-  const params = useParams();
+export default function CheckupDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
-  const id = params.id as string;
 
   const { data: item, isLoading, error, refetch } = useCheckupItem(id);
   const { data: completions } = useCheckupCompletions(id);

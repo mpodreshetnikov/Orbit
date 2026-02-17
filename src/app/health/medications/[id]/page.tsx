@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { use, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
@@ -85,13 +85,16 @@ function getStatusIcon(status: MedDoseEventStatus): { Icon: typeof Check; classN
   }
 }
 
-export default function MedicationDetailPage() {
-  const params = useParams();
+export default function MedicationDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
   const intlLocale = useIntlLocale();
-  const id = params.id as string;
 
   const { data: regimen, isLoading, error } = useRegimen(id);
   const { data: doseEvents } = useDoseEventsForRegimen(id);

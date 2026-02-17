@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Heart, ChevronDown, Settings, Plus, FileText, Ruler, Pill, Smartphone } from "lucide-react";
+import { Heart, ChevronDown, Settings, Plus, FileText, Ruler, Pill, Smartphone, Wallet, CreditCard, Tags } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,11 +22,15 @@ import { PersonSelector } from "./person-selector";
 import { UserMenu } from "@/components/auth/user-menu";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
 import { useUIStore } from "@/stores/ui-store";
+import { getAppSection } from "@/lib/app-section";
 
 export function TopNav() {
   const t = useTranslations();
   const [measurementDialogOpen, setMeasurementDialogOpen] = useState(false);
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
+  const pathname = usePathname();
+  const section = getAppSection(pathname);
+  const isMoney = section === "money";
 
   return (
     <>
@@ -42,7 +47,9 @@ export function TopNav() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="gap-1 px-2 sm:px-3">
-                  <span className="text-sm">{t("nav.health")}</span>
+                  <span className="text-sm">
+                    {isMoney ? t("nav.money") : t("nav.health")}
+                  </span>
                   <ChevronDown className="h-3 w-3" />
                 </Button>
               </DropdownMenuTrigger>
@@ -51,6 +58,12 @@ export function TopNav() {
                   <Link href="/health" className="flex items-center gap-2">
                     <Heart className="h-4 w-4" />
                     {t("nav.health")}
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/money" className="flex items-center gap-2">
+                    <Wallet className="h-4 w-4" />
+                    {t("nav.money")}
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -69,37 +82,62 @@ export function TopNav() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" sideOffset={8}>
-                  <DropdownMenuItem asChild>
-                    <Link href="/health/records/new" className="flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      {t("nav.medicalRecord")}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => setMeasurementDialogOpen(true)}
-                    className="flex items-center gap-2"
-                  >
-                    <Ruler className="h-4 w-4" />
-                    {t("nav.measurement")}
-                  </DropdownMenuItem>
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className="gap-2">
-                      <Pill className="h-4 w-4" />
-                      {t("nav.medication")}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
+                  {isMoney ? (
+                    <>
                       <DropdownMenuItem asChild>
-                        <Link href="/health/medications/new?kind=regular" className="flex items-center gap-2">
-                          {t("nav.regularMedication")}
+                        <Link href="/money/transactions/new" className="flex items-center gap-2">
+                          <Wallet className="h-4 w-4" />
+                          {t("money.addTransaction")}
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuItem asChild>
-                        <Link href="/health/medications/new?kind=one_time" className="flex items-center gap-2">
-                          {t("nav.oneTimeMedication")}
+                        <Link href="/money/accounts?new=1" className="flex items-center gap-2">
+                          <CreditCard className="h-4 w-4" />
+                          {t("money.addAccount")}
                         </Link>
                       </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                      <DropdownMenuItem asChild>
+                        <Link href="/money/categories?new=1" className="flex items-center gap-2">
+                          <Tags className="h-4 w-4" />
+                          {t("money.addCategory")}
+                        </Link>
+                      </DropdownMenuItem>
+                    </>
+                  ) : (
+                    <>
+                      <DropdownMenuItem asChild>
+                        <Link href="/health/records/new" className="flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          {t("nav.medicalRecord")}
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => setMeasurementDialogOpen(true)}
+                        className="flex items-center gap-2"
+                      >
+                        <Ruler className="h-4 w-4" />
+                        {t("nav.measurement")}
+                      </DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="gap-2">
+                          <Pill className="h-4 w-4" />
+                          {t("nav.medication")}
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          <DropdownMenuItem asChild>
+                            <Link href="/health/medications/new?kind=regular" className="flex items-center gap-2">
+                              {t("nav.regularMedication")}
+                            </Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem asChild>
+                            <Link href="/health/medications/new?kind=one_time" className="flex items-center gap-2">
+                              {t("nav.oneTimeMedication")}
+                            </Link>
+                          </DropdownMenuItem>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

@@ -15,6 +15,10 @@ BEGIN;
 \i types/med_dose_event_status.sql
 \i types/med_inventory_transaction_type.sql
 \i types/med_intake_advice_type.sql
+\i types/money_transaction_type.sql
+\i types/money_transaction_status.sql
+\i types/money_line_status.sql
+\i types/money_assignment_method.sql
 
 \echo '=== Phase 1: Functions ==='
 
@@ -77,10 +81,14 @@ BEGIN;
 \i functions/update_dose_event_resolution_details.sql
 \i functions/update_regimen_inventory.sql
 
+-- Money functions
+\i functions/get_money_merchant_default_categories.sql
+\i functions/money_upsert_transactions_batch.sql
+
 -- Cron entry point functions
 \i functions/run_med_event_generation_for_all_users.sql
 \i functions/run_notifications_cron_http.sql
 
-\echo '=== Phase 1 Complete: 9 types, 39 functions ==='
+\echo '=== Phase 1 Complete: 9 types, 40 functions ==='
 
 COMMIT;
