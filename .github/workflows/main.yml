@@ -1,18 +1,45 @@
-name: Deploy Supabase
+name: Deploy
 on:
   push:
     branches:
-      - main
-env:
-  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASEACCESSTOKEN }}
-  SUPABASE_PROJECT_REF: vvriurabgusbdysfrcem
-  DATABASE_URL: postgresql://postgres.vvriurabgusbdysfrcem:${{ secrets.SUPABASEDBPASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  deploy:
+  deploy-vercel-production:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Deploy Vercel Production
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+      - name: Pull Vercel Project Settings
+        run: vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
+      - name: Build Production Artifacts
+        run: vercel build --prod --token="${VERCEL_TOKEN}"
+      - name: Deploy Production
+        run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
+
+  deploy-supabase:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Deploy Supabase
     environment: Production - Supabase
     runs-on: ubuntu-latest
-    
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASEACCESSTOKEN }}
+      SUPABASE_PROJECT_REF: vvriurabgusbdysfrcem
+      DATABASE_URL: postgresql://postgres.vvriurabgusbdysfrcem:${{ secrets.SUPABASEDBPASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
