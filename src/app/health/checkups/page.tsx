@@ -19,10 +19,9 @@ import { CheckupCard, MarkCompleteDialog, PlanDialog } from "@/components/checku
 import { useCheckupItems, useMedicalRecords } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import { cn } from "@/lib/utils";
-import type { CheckupItem, CheckupCategory, CHECKUP_CATEGORIES } from "@/types";
+import type { CheckupItem, CheckupCategory } from "@/types";
 
 type StatusTab = "all" | "overdue" | "upcoming" | "inactive";
-const TAB_VALUES: StatusTab[] = ["all", "overdue", "upcoming", "inactive"];
 const CATEGORIES: CheckupCategory[] = ["lab", "imaging", "visit", "vaccination", "dental", "other"];
 
 export default function CheckupsPage() {
@@ -92,7 +91,7 @@ export default function CheckupsPage() {
   };
 
   // Filter and group items (overdue / upcoming / later / inactive for "All" tab)
-  const { filteredItems, overdueItems, upcomingItems, laterItems, restItems, overdueCount, upcomingCount, laterCount, inactiveCount } = useMemo(() => {
+  const { filteredItems, overdueItems, upcomingItems, laterItems, restItems, overdueCount, upcomingCount, inactiveCount } = useMemo(() => {
     if (!items) {
       return {
         filteredItems: [],
@@ -102,7 +101,6 @@ export default function CheckupsPage() {
         restItems: [],
         overdueCount: 0,
         upcomingCount: 0,
-        laterCount: 0,
         inactiveCount: 0,
       };
     }
@@ -169,7 +167,6 @@ export default function CheckupsPage() {
       restItems: rest,
       overdueCount: overdue.length,
       upcomingCount: upcoming.length,
-      laterCount: later.length,
       inactiveCount: rest.length,
     };
   }, [items, debouncedSearch, categoryFilter, statusTab]);

@@ -6,7 +6,7 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
  * Run medication event generator + refill digests for all users (same as pg_cron),
  * then invoke notifications-cron.
  */
-export async function POST(request: Request) {
+export async function POST() {
   try {
     const supabase = await createServerSupabaseClient();
     const {

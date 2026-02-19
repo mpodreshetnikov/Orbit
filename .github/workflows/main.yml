@@ -5,7 +5,7 @@ on:
       - main
 env:
   SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASEACCESSTOKEN }}
-  PROJECT_ID: vvriurabgusbdysfrcem
+  SUPABASE_PROJECT_REF: vvriurabgusbdysfrcem
   DATABASE_URL: postgresql://postgres.vvriurabgusbdysfrcem:${{ secrets.SUPABASEDBPASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
 
 jobs:
@@ -18,7 +18,5 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-      - run: supabase link --project-ref $PROJECT_ID
-      - run: supabase functions deploy 
-      - run: supabase db push --yes
-      - run: npm run db:deploy
+      - uses: taiki-e/install-action@just
+      - run: just ci-deploy-supabase

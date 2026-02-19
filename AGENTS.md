@@ -6,11 +6,25 @@ This file is a map, not a bible. Canonical project knowledge lives in `docs/`.
 
 Use these command IDs in plans, PRs, and handoffs:
 
-- `dev`: `npm run web`
-- `test`: `npm run web:build` (current smoke/integration gate; no dedicated unit test runner yet)
-- `lint`: `npx eslint src browserExtension/src browserExtension/popup-src scripts/extension supabase/functions --ext .ts,.tsx --max-warnings=0`
-- `db-reset`: `npx supabase db reset && npm run db:deploy:local`
-- `types`: `npx tsc --noEmit`
+- Source of truth for all available commands and descriptions: `just --list --unsorted`
+- `commands-list`: `just commands-list`
+- `install`: `just install-dependencies`
+- `dev-ready`: `just dev-ready-local`
+- `dev-stop`: `just dev-local-stop`
+- `test`: `just quality-smoke-build` (current smoke/integration gate; no dedicated unit test runner yet)
+- `lint`: `just quality-lint`
+- `types`: `just quality-typecheck`
+- `db-run`: `just supabase-local-migrate-and-deploy` (non-destructive; use for normal day-to-day local sync)
+- `db-reset`: `just supabase-local-reset-and-deploy` (destructive; use when schema/seed drift needs a clean rebuild)
+- `build-local`: `just build-local-all`
+- `ci`: `just ci-verify-local`
+
+For less common and environment-specific commands (deploy, targeted DB ops, single-service dev flows), use `commands-list` and pick from `just --list --unsorted`.
+
+### DB Command Guidance
+
+- Prefer `db-run` when you want latest migrations + deploy SQL without wiping local data.
+- Use `db-reset` after migration/seed refactors, when local DB state looks inconsistent, or when you need deterministic from-scratch validation.
 
 ## Where Rules Live
 

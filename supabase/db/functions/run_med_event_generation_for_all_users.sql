@@ -59,5 +59,5 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.run_med_event_generation_for_all_users() IS
+COMMENT ON FUNCTION public.run_med_event_generation_for_all_users(int) IS
   'Cron function: generate dose events for all users with persons, using their timezone preferences.';

@@ -53,16 +53,6 @@ function originToPattern(origin: string): string {
   return `${parsed.protocol}//${parsed.host}/*`;
 }
 
-function normalizePattern(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.includes("*")) return trimmed;
-  if (/^https?:\/\//.test(trimmed)) {
-    return originToPattern(trimmed);
-  }
-  return `${trimmed.replace(/\/+$/, "")}/*`;
-}
-
 async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);
@@ -109,13 +99,11 @@ async function resolveBuildEnv(mode: string): Promise<Record<string, string | un
 function resolveAppOrigins(env: Record<string, string | undefined>, mode: string): string[] {
   const raw = env.NEXT_PUBLIC_APP_ORIGINS || env.NEXT_PUBLIC_APP_ORIGIN;
 
-  if (!raw && mode === "development") {
-    return defaultDevAppOrigins;
-  }
   if (!raw) {
-    throw new Error(
-      "NEXT_PUBLIC_APP_ORIGIN is required for production extension build"
+    console.warn(
+      `[extension:${mode}] NEXT_PUBLIC_APP_ORIGIN(S) not set. Using localhost defaults.`
     );
+    return defaultDevAppOrigins;
   }
 
   const parsed = toCsvList(raw).map(normalizeOrigin).filter(Boolean);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { Plus, Pencil, Trash2, CreditCard } from "lucide-react";
@@ -89,26 +89,26 @@ export default function MoneyAccountsPage() {
   const [externalId, setExternalId] = useState("");
   const [isActive, setIsActive] = useState(true);
 
-  useEffect(() => {
-    if (searchParams?.get("new") === "1") {
-      openNew();
-    }
-  }, [searchParams]);
-
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setLabel("");
     setAccountKind("card");
     setCurrency("RUB");
     setSource("manual");
     setExternalId("");
     setIsActive(true);
-  };
+  }, []);
 
-  const openNew = () => {
+  const openNew = useCallback(() => {
     setEditing(null);
     resetForm();
     setDialogOpen(true);
-  };
+  }, [resetForm]);
+
+  useEffect(() => {
+    if (searchParams?.get("new") === "1") {
+      openNew();
+    }
+  }, [searchParams, openNew]);
 
   const openEdit = (account: MoneyAccount) => {
     setEditing(account);

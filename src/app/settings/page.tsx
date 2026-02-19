@@ -186,7 +186,7 @@ export default function SettingsPage() {
   const { data: routingState } = useNotificationRouting();
   const updateRouting = useUpdateNotificationRouting();
   const [prefixByPerson, setPrefixByPerson] = useState<Record<string, string>>({});
-  const routingRows = routingState?.rows ?? [];
+  const routingRows = useMemo(() => routingState?.rows ?? [], [routingState?.rows]);
   const currentUserId = routingState?.userId ?? null;
   const routingByPersonId = useMemo(
     () => new Map(routingRows.map((row) => [row.person_id, row] as const)),

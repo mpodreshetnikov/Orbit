@@ -89,8 +89,9 @@ export function useIcdSearch(query: string, lang: "en" | "ru" = "en") {
  */
 export function getLocalizedIcdName(
   result: IcdLookupResult | null | undefined,
-  _locale?: string
+  locale?: string
 ): string | null {
+  void locale;
   if (!result?.found) return null;
   return result.name_en;
 }
@@ -100,8 +101,10 @@ export function getLocalizedIcdName(
  */
 export function getConditionIcdName(
   icdNameEn: string | null | undefined,
-  _icdNameRu?: string | null,
-  _locale?: string
+  icdNameRu?: string | null,
+  locale?: string
 ): string | null {
+  void icdNameRu;
+  void locale;
   return icdNameEn ?? null;
 }

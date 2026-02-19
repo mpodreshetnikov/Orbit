@@ -1,2 +1,0 @@
-{"location":"tbank-web.ts:parse","message":"after navigate to operations","data":{"url":"https://www.tbank.ru/mybank/operations/","isOperations":true},"timestamp":1771303789262,"hypothesisId":"auth"}
-{"location":"tbank-web.ts:parse","message":"parse start","data":{"windowFrom":"2026-02-15T04:49:00.000Z","last_imported_at":"2026-02-17T02:54:38.000Z","normalizedWindowFrom":"2026-02-15T04:49:00.000Z","tabUrl":"https://www.tbank.ru/mybank/"},"timestamp":1771303789262,"hypothesisId":"date"}

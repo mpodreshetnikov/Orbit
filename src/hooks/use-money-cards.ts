@@ -86,7 +86,6 @@ export function useCreateMoneyCard() {
 
 async function updateMoneyCard({
   id,
-  accountId,
   updates,
 }: {
   id: string;
@@ -126,7 +125,6 @@ export function useUpdateMoneyCard() {
 
 async function deleteMoneyCard({
   id,
-  accountId,
 }: {
   id: string;
   accountId: string;

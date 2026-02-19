@@ -170,7 +170,6 @@ export function useUpdateRecordFinding() {
 // ============================================================================
 async function deleteFinding({
   id,
-  recordId: _recordId,
 }: {
   id: string;
   recordId: string;

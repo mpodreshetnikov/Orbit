@@ -2,7 +2,8 @@
 
 ## Canonical Commands
 
-Use command IDs and exact command strings from `AGENTS.md`.
+Use command IDs and exact command strings from `AGENTS.md`.  
+Source of truth for all commands and descriptions: `just --list --unsorted`.
 
 ## PR Definition Of Done
 
@@ -18,7 +19,7 @@ Every PR should satisfy all relevant items:
 ## Documentation Rules
 
 - Keep policy text canonical in one place; link from other docs instead of duplicating.
-- `AGENTS.md` owns command strings and IDs.
+- `AGENTS.md` owns command IDs and their mapped `just` invocations.
 
 ## Database Change Rules
 

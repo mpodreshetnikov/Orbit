@@ -346,7 +346,6 @@ export function useUpdateMedication() {
 
 async function deleteMedication({
   id,
-  personId: _personId,
 }: {
   id: string;
   personId: string;
@@ -431,7 +430,6 @@ export function useCreateMedicationIntake() {
 
 async function updateMedicationIntake({
   id,
-  medicationId: _medicationId,
   updates,
 }: {
   id: string;
@@ -475,7 +473,6 @@ export function useUpdateMedicationIntake() {
 
 async function deleteMedicationIntake({
   id,
-  medicationId: _medicationId,
 }: {
   id: string;
   medicationId: string;

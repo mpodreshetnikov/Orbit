@@ -424,7 +424,6 @@ export function useUpdateCheckupCompletion() {
 
 async function deleteCheckupCompletion({
   id,
-  checkupItemId,
 }: {
   id: string;
   checkupItemId: string;
@@ -465,7 +464,6 @@ export function useDeleteCheckupCompletion() {
 
 async function deleteCheckupItem({
   id,
-  personId: _personId,
 }: {
   id: string;
   personId: string;

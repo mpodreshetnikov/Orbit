@@ -18,7 +18,8 @@ export interface MoneyTransactionsFilters {
 
 function mapDetailRow(row: Record<string, unknown>): MoneyTransactionDetail {
   const lineItemsRaw = (row.money_line_items as MoneyLineItem[] | null) ?? [];
-  const { money_line_items: _ignore, ...tx } = row as Record<string, unknown>;
+  const tx = { ...(row as Record<string, unknown>) };
+  delete tx.money_line_items;
   return {
     ...(tx as unknown as MoneyTransaction),
     line_items: lineItemsRaw,
@@ -259,7 +260,6 @@ export function useUpdateMoneyTransaction() {
 
 async function deleteMoneyTransaction({
   id,
-  payerPersonId,
 }: {
   id: string;
   payerPersonId: string;

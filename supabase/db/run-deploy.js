@@ -3,23 +3,40 @@
  * Cross-platform DB deploy runner.
  * Sets GIT_SHA correctly on Windows (PowerShell/cmd) and Unix.
  *
- * Usage: node run-deploy.js [local]
- *   local = use local Supabase URL; otherwise use DATABASE_URL from env
+ * Usage:
+ *   node run-deploy.js [local] [--database-url <url>]
+ *
+ * Modes:
+ *   local = use local Supabase URL
+ *   remote = use --database-url or DATABASE_URL from env
  */
 
 const { execSync } = require('child_process');
 const path = require('path');
 
-const isLocal = process.argv[2] === 'local';
+const args = process.argv.slice(2);
+const isLocal = args.includes('local');
 const dbDir = path.resolve(__dirname);
+
+function getDatabaseUrlFromArgs(argv) {
+  const directIndex = argv.indexOf('--database-url');
+  if (directIndex !== -1) {
+    return argv[directIndex + 1] || '';
+  }
+  const equalsArg = argv.find((arg) => arg.startsWith('--database-url='));
+  if (equalsArg) {
+    return equalsArg.slice('--database-url='.length);
+  }
+  return '';
+}
 
 let connectionString;
 if (isLocal) {
   connectionString = 'postgresql://postgres:postgres@localhost:54322/postgres';
 } else {
-  connectionString = process.env.DATABASE_URL;
+  connectionString = getDatabaseUrlFromArgs(args) || process.env.DATABASE_URL;
   if (!connectionString) {
-    console.error('DATABASE_URL is not set. Use "npm run db:deploy:local" for local.');
+    console.error('DATABASE_URL is not set. Use --database-url for remote deploy or "just supabase-local-deploy-sql" for local.');
     process.exit(1);
   }
 }

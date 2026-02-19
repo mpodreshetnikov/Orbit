@@ -61,12 +61,6 @@ export default function MoneyCategoriesPage() {
   const [slug, setSlug] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (searchParams?.get("new") === "1") {
-      openNew();
-    }
-  }, [searchParams]);
-
   const tree = useMemo(() => buildMoneyCategoryTree(categories || []), [categories]);
   const flattened = useMemo(() => flattenMoneyCategoryTree(tree), [tree]);
 
@@ -96,6 +90,12 @@ export default function MoneyCategoriesPage() {
     setParentId(null);
     setDialogOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (searchParams?.get("new") === "1") {
+      openNew();
+    }
+  }, [searchParams, openNew]);
 
   const openEdit = useCallback((category: MoneyCategory) => {
     setEditing(category);

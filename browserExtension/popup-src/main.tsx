@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import "./popup.css";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,7 +34,6 @@ function sendMessage(message: Record<string, unknown>): Promise<unknown> {
 }
 
 function App() {
-  const [session, setSession] = React.useState<Record<string, unknown> | null>(null);
   const [sessionJson, setSessionJson] = React.useState("");
   const [status, setStatus] = React.useState("");
   const [windowMode, setWindowMode] = React.useState<"auto" | "manual">("auto");
@@ -46,7 +45,6 @@ function App() {
       session?: Record<string, unknown>;
     };
     const s = response?.session ?? null;
-    setSession(s);
     setSessionJson(formatSession(s));
     return s;
   }, []);

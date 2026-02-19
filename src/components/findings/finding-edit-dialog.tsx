@@ -138,7 +138,7 @@ export function FindingEditDialog({
       setIsFindingTypeOpen(false);
       setIsBodySiteOpen(false);
     }
-  }, [open, finding, isNew]);
+  }, [open, finding, isNew, recordDate]);
 
   // Get current catalog entries
   const currentFindingType = selectedFindingCode 

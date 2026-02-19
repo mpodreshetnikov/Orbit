@@ -180,10 +180,6 @@ const TreeItem = React.forwardRef<HTMLDivElement, TreeItemProps>(
             draggedItem,
             renderItem,
             level,
-            onSelectChange,
-            expandAll,
-            initialSelectedItemId,
-            onDocumentDrag,
             ...props
         },
         ref

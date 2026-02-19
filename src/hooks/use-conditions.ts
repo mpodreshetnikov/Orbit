@@ -275,7 +275,6 @@ export function useUpdateCondition() {
 // Soft delete a condition
 async function deleteCondition({
   id,
-  personId: _personId,
 }: {
   id: string;
   personId: string;
@@ -409,7 +408,6 @@ export function useCreateConditionRecord() {
 async function updateConditionRecord({
   id,
   updates,
-  recordId,
   conditionId,
   code,
   icd_name_en,
@@ -520,7 +518,6 @@ async function recomputeConditionCurrentStatus(
 // Delete a condition record; recomputes condition's current_status from remaining history
 async function deleteConditionRecord({
   id,
-  recordId: _recordId,
 }: {
   id: string;
   recordId: string;

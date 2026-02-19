@@ -2,9 +2,11 @@
 
 ## Environments
 
-- Local web: run `dev` from `AGENTS.md`.
+- Command source of truth: `just --list --unsorted`.
+- Local all-in-one runtime: run `dev-ready` from `AGENTS.md`.
+- Stop local runtime/services: run `dev-stop` from `AGENTS.md`.
 - Local DB reset + deploy: run `db-reset` from `AGENTS.md`.
-- Local Supabase stack: `supabase start`
+- Local CI-style gate: run `ci` from `AGENTS.md`.
 - Production deploy path: GitHub Actions workflow `.github/workflows/main.yml` on push to `main`
 
 Notes:

@@ -2,16 +2,6 @@
   "name": "orbit",
   "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "web": "next dev",
-    "web:build": "next build",
-    "ext": "tsx scripts/extension/build.ts --mode=development --watch",
-    "ext:build": "tsx scripts/extension/build.ts --mode=production",
-    "db:deploy": "node supabase/db/run-deploy.js",
-    "db:deploy:local": "node supabase/db/run-deploy.js local",
-    "db": "npx supabase migrations up && npm run db:deploy:local && npx supabase functions serve",
-    "db:hard": "npx supabase db reset && npm run db:deploy:local && npx supabase functions serve"
-  },
   "dependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@radix-ui/react-accordion": "^1.2.12",
@@ -58,6 +48,7 @@
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
     "eslint": "^9.19.0",
     "eslint-config-next": "^15.1.6",
     "postcss": "^8.5.1",

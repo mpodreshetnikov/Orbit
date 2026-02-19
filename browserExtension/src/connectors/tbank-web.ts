@@ -7,7 +7,7 @@ function isTbankUrl(url: unknown): url is string {
   return typeof url === "string" && /^https:\/\/(?:www\.)?tbank\.ru\//i.test(url);
 }
 
-function isOperationsPageUrl(url) {
+function isOperationsPageUrl(url: unknown) {
   if (!isTbankUrl(url)) return false;
   try {
     const path = new URL(url).pathname;
@@ -581,7 +581,10 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     return matches[0];
   }
 
-  async function enrichRowsWithDetails(rows, rowElementMap) {
+  async function enrichRowsWithDetails(
+    rows: Record<string, unknown>[],
+    rowElementMap: Map<string, Element>
+  ) {
     const sortedRows = [...rows].sort((a, b) => {
       const aMs = toMs(a.posted_at) ?? 0;
       const bMs = toMs(b.posted_at) ?? 0;
@@ -594,7 +597,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
     for (let index = 0; index < maxRowsToEnrich; index++) {
       const row = sortedRows[index];
-      const element = rowElementMap.get(row.feed_row_key);
+      const element = rowElementMap.get(String(row.feed_row_key ?? ""));
       if (!(element instanceof HTMLElement)) continue;
 
       element.scrollIntoView({ block: "center" });

@@ -1,12 +1,14 @@
 # Setup Guide
 
-Use command IDs from `AGENTS.md` as the source of truth. This file explains setup flow and checks.
+Use command IDs from `AGENTS.md` as the source of truth.  
+Source of truth for available commands and descriptions: `just --list --unsorted`.
 
 ## Prerequisites
 
-1. Supabase CLI installed.
-2. Node.js and npm installed.
-3. Environment variables configured.
+1. `just` installed.
+2. Supabase CLI installed.
+3. Node.js and npm installed.
+4. Environment variables configured.
 
 ## Environment Variables
 
@@ -17,26 +19,17 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 ```
 
-Get anon key from `supabase status` after local stack is up.
+Get anon key from local Supabase status output after stack is up (for one-off commands, use `commands-list` from `AGENTS.md`).
 
 ## Local Database Setup
 
-1. Start local services:
-```bash
-supabase start
-```
-2. Run `db-reset` (from `AGENTS.md`).
+1. For normal local sync, run `db-run` from `AGENTS.md` (non-destructive).
+2. If you need a clean rebuild, run `db-reset` from `AGENTS.md` (destructive).
 
 Why `db-reset`:
 - Runs migrations from `supabase/migrations/`.
 - Runs idempotent DB deploy from `supabase/db/deploy.sql`.
 - Ensures local state matches the two-track DB delivery model.
-
-If you only need pending migration files without full reset, use:
-```bash
-supabase migration up
-```
-Then run `npm run db:deploy:local` so SQL objects from `supabase/db/` are still applied.
 
 ## Notifications Cron
 
@@ -69,11 +62,9 @@ email_optional = false
 ```env
 SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET=your-google-client-secret
 ```
-4. Restart Supabase:
-```bash
-supabase stop
-supabase start
-```
+4. Restart local stack:
+- Run `dev-stop` from `AGENTS.md`.
+- Run `dev-ready` from `AGENTS.md`.
 
 ### Getting Google OAuth Credentials
 
@@ -106,7 +97,7 @@ Verify in Table Editor `allowed_users`. `auth_user_id` stays null until first si
 
 ## Test Setup
 
-1. Run `dev` (from `AGENTS.md`).
+1. Start all local services in one terminal: run `dev-ready` from `AGENTS.md` (recommended).
 2. Open `http://127.0.0.1:3000`.
 3. Confirm redirect to `/login`.
 4. Sign in with Google.

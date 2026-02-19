@@ -95,7 +95,6 @@ export function useUpdateMoneyAccount() {
 
 async function deleteMoneyAccount({
   id,
-  ownerPersonId,
 }: {
   id: string;
   ownerPersonId: string;
