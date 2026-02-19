@@ -4,6 +4,14 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 commands-list:
   @{{ just_executable() }} --list --unsorted
 
+# Configure Git to use repository hooks from .githooks.
+git-hooks-install:
+  git config --local core.hooksPath .githooks
+
+# Show current Git hooks path for this repository.
+git-hooks-status:
+  git config --local --get core.hooksPath
+
 # Install locked Node dependencies.
 install-dependencies:
   npm ci

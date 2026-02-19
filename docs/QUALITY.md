@@ -27,6 +27,7 @@ Every PR should satisfy all relevant items:
 
 ## Secret Leak Prevention
 
+- Install repo hooks once with `hooks-install` from `AGENTS.md` (adds pre-push secrets preflight).
 - Run `secrets-preflight` before pushing to scan the likely push range.
 - CI runs `secrets-preflight-range` and blocks deploy jobs on secret findings.
 

@@ -8,6 +8,8 @@ Use these command IDs in plans, PRs, and handoffs:
 
 - Source of truth for all available commands and descriptions: `just --list --unsorted`
 - `commands-list`: `just commands-list`
+- `hooks-install`: `just git-hooks-install` (enable repository git hooks, including pre-push secrets preflight)
+- `hooks-status`: `just git-hooks-status`
 - `install`: `just install-dependencies`
 - `dev-ready`: `just dev-ready-local`
 - `dev-stop`: `just dev-local-stop`
