@@ -7,10 +7,16 @@
 - Stop local runtime/services: run `dev-stop` from `AGENTS.md`.
 - Local DB reset + deploy: run `db-reset` from `AGENTS.md`.
 - Local CI-style gate: run `ci` from `AGENTS.md`.
-- Production deploy path: GitHub Actions workflow `.github/workflows/main.yml` on push to `main` (Vercel production + Supabase deploy).
+- Production deploy path: GitHub Actions workflow `.github/workflows/main.yml` on push to `main` (Vercel production + Supabase production deploy).
 
 Notes:
-- Configure required GitHub Actions secrets for Vercel (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`).
+- GitHub Actions jobs run in environment `production`.
+- Configure GitHub Actions Vercel values:
+  - Secrets: `VERCEL_TOKEN`
+  - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
+- Configure GitHub Actions Supabase values:
+  - Secrets: `SUPABASE_ACCESS_TOKEN`, `SUPABASEDBPASS`
+  - Variables: `SUPABASE_PROJECT_REF`
 - Disable Vercel's automatic Git deploy integration if you want GitHub Actions to be the only deployment trigger.
 
 ## Triage Checklist

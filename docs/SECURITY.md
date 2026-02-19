@@ -30,6 +30,9 @@ Common variables used by this repo:
   - `VAPID_PUBLIC_KEY`
   - `VAPID_PRIVATE_KEY`
   - `SUPABASE_SERVICE_ROLE_KEY`
+- GitHub Actions deploy pipeline (`.github/workflows/main.yml`):
+  - Secrets: `VERCEL_TOKEN`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASS`
+  - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `SUPABASE_PROJECT_REF`
 
 ## Service Role Boundaries
 
