@@ -18,6 +18,9 @@ Use these command IDs in plans, PRs, and handoffs:
 - `db-reset`: `just supabase-local-reset-and-deploy` (destructive; use when schema/seed drift needs a clean rebuild)
 - `build-local`: `just build-local-all`
 - `ci`: `just ci-verify-local`
+- `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
+- `secrets-preflight`: `just secrets-preflight` (scan likely push range for accidentally committed secrets)
+- `secrets-preflight-range`: `just secrets-preflight-range <from> <to>` (scan an explicit commit range; used by CI)
 
 For less common and environment-specific commands (deploy, targeted DB ops, single-service dev flows), use `commands-list` and pick from `just --list --unsorted`.
 

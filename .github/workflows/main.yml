@@ -9,7 +9,22 @@ permissions:
   contents: read
 
 jobs:
+  secrets-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@just
+      - name: Run secret preflight
+        run: just secrets-preflight-range "${{ github.event.before }}" "${{ github.sha }}"
+
   deploy-vercel-production:
+    needs: secrets-scan
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -33,6 +48,7 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
+    needs: secrets-scan
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production

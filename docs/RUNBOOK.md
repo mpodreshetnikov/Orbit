@@ -18,6 +18,8 @@ Notes:
   - Secrets: `SUPABASE_ACCESS_TOKEN`, `SUPABASEDBPASS`
   - Variables: `SUPABASE_PROJECT_REF`
 - Disable Vercel's automatic Git deploy integration if you want GitHub Actions to be the only deployment trigger.
+- Command execution policy (including avoiding `npm run` for project workflows) is canonical in `docs/QUALITY.md`.
+- MCP setup instructions are in `mcp/README.md`.
 
 ## Triage Checklist
 

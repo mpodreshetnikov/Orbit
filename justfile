@@ -83,6 +83,18 @@ build-local-all:
 # CI-style local confidence gate before PR push.
 ci-verify-local: build-local-all
 
+# Regenerate per-client MCP configs from canonical source.
+mcp-sync:
+  npx tsx scripts/sync-mcp-configs.ts
+
+# Scan likely push range for accidentally committed secrets.
+secrets-preflight:
+  node scripts/just/secrets-preflight.cjs
+
+# Scan a specific commit range for accidentally committed secrets.
+secrets-preflight-range from to:
+  node scripts/just/secrets-preflight.cjs --range "{{from}}" "{{to}}"
+
 # Deploy functions, migrations, and idempotent SQL using CI environment variables.
 ci-deploy-supabase:
   node scripts/just/deploy-supabase.cjs --target ci --project-ref "{{env_var('SUPABASE_PROJECT_REF')}}" --database-url "{{env_var('DATABASE_URL')}}"

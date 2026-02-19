@@ -33,7 +33,14 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!mcp/.env.example
 browserExtension/env.js
+
+# MCP generated local configs and env
+/.mcp.json
+/.cursor/mcp.json
+/.codex/config.toml
+mcp/.env
 
 # vercel
 .vercel

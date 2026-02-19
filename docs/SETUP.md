@@ -2,6 +2,8 @@
 
 Use command IDs from `AGENTS.md` as the source of truth.  
 Source of truth for available commands and descriptions: `just --list --unsorted`.
+Command execution policy is canonical in `docs/QUALITY.md` (use `just` for project workflows).
+MCP setup and sync instructions are canonical in `mcp/README.md`.
 
 ## Prerequisites
 

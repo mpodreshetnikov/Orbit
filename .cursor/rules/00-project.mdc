@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+Use instructions from `/AGENTS.md`:
+- Command IDs and build/test/lint commands
+- Documentation routing and style rules
+- Security boundaries (including secret handling)

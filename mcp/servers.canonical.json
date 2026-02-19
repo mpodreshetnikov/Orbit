@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "github": {
+      "transport": "http",
+      "url": "https://api.githubcopilot.com/mcp/readonly",
+      "auth_kind": "bearer",
+      "auth_mode_env": "MCP_GITHUB_AUTH_MODE",
+      "default_auth_mode": "pat",
+      "token_env": "MCP_GITHUB_PAT_TOKEN",
+      "oauth_supported": true
+    }
+  }
+}
