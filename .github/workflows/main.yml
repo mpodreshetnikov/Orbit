@@ -12,11 +12,12 @@ jobs:
   deploy-vercel-production:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
+    environment: production
     runs-on: ubuntu-latest
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,13 +34,13 @@ jobs:
 
   deploy-supabase:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    name: Deploy Supabase
-    environment: Production - Supabase
+    name: Deploy Supabase Production
+    environment: production
     runs-on: ubuntu-latest
     env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASEACCESSTOKEN }}
-      SUPABASE_PROJECT_REF: vvriurabgusbdysfrcem
-      DATABASE_URL: postgresql://postgres.vvriurabgusbdysfrcem:${{ secrets.SUPABASEDBPASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      DATABASE_URL: postgresql://postgres.${{ vars.SUPABASE_PROJECT_REF }}:${{ secrets.SUPABASEDBPASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
