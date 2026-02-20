@@ -37,10 +37,14 @@ For less common and environment-specific commands (deploy, targeted DB ops, sing
 - Debugging and operations: `docs/RUNBOOK.md`
 - Quality gates and PR checks: `docs/QUALITY.md`
 - Security and RLS expectations: `docs/SECURITY.md`
-- Multi-hour execution plans: `docs/PLANS/`
+- Multi-hour execution plans index: `docs/PLANS.md/`
 
 ## Documentation DRY Rules
 
 - `AGENTS.md` is a routing map and command registry, not a second source of policy text.
 - Canonical policy must live in exactly one doc under `docs/`; other docs should link to it.
 - Use command IDs (for example `db-reset`, `lint`) in docs and plans; avoid copying full command strings outside `AGENTS.md` unless a command variant is genuinely different.
+
+## ExecPlans
+
+When writing complex features or significant refactors, use an ExecPlan (as described in `docs/PLANS.md`) from design to implementation. Track any know and resolved debt in `docs/exec-plans/tech-debt-tracker.md`.
