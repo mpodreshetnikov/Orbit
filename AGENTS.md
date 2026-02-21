@@ -15,7 +15,15 @@ Use these command IDs in plans, PRs, and handoffs:
 - `dev-stop`: `just dev-local-stop`
 - `format-check`: `just quality-format-check`
 - `format-write`: `just quality-format-write`
-- `test`: `just quality-smoke-build` (current smoke/integration gate; no dedicated unit test runner yet)
+- `test`: `just quality-smoke-build` (smoke/integration build gate)
+- `test-unit-web`: `just test-unit-web`
+- `test-unit-ext`: `just test-unit-ext`
+- `test-unit-node`: `just test-unit-node`
+- `test-unit-functions`: `just test-unit-functions`
+- `test-unit`: `just test-unit` (all fast runtime-split unit lanes)
+- `test-unit-coverage`: `just test-unit-coverage`
+- `coverage-report`: `just coverage-report`
+- `coverage-check`: `just coverage-check`
 - `lint`: `just quality-lint`
 - `lint-fix`: `just quality-lint-fix`
 - `lint-web`: `just quality-lint-web`
@@ -24,12 +32,15 @@ Use these command IDs in plans, PRs, and handoffs:
 - `lint-supabase`: `just quality-lint-supabase-functions`
 - `types`: `just quality-typecheck`
 - `db-lint`: `just quality-db-lint` (local DB lint scoped to `public` schema, warnings fail)
+- `db-test`: `just quality-db-test` (pgTAP tests under `supabase/tests`)
+- `db-coverage-report`: `just db-coverage-report` (DB object to pgTAP mapping coverage report)
 - `db-run`: `just supabase-local-migrate-and-deploy` (non-destructive; use for normal day-to-day local sync)
 - `db-reset`: `just supabase-local-reset-and-deploy` (destructive; use when schema/seed drift needs a clean rebuild)
 - `db-artifacts-refresh`: `just supabase-local-artifacts-refresh` (regenerate generated DB schema snapshot and TS DB types from reset local DB)
 - `db-artifacts-verify`: `just supabase-local-artifacts-verify` (regenerate generated DB artifacts and fail on drift)
 - `build-local`: `just build-local-all`
 - `ci`: `just ci-verify-local`
+- `check`: `just check` (full local quality gate)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
 - `secrets-preflight`: `just secrets-preflight` (scan likely push range for accidentally committed secrets)
 - `secrets-preflight-range`: `just secrets-preflight-range <from> <to>` (scan an explicit commit range; used by CI)
@@ -41,6 +52,7 @@ For less common and environment-specific commands (deploy, targeted DB ops, sing
 - Prefer `db-run` when you want latest migrations + deploy SQL without wiping local data.
 - Use `db-reset` after migration/seed refactors, when local DB state looks inconsistent, or when you need deterministic from-scratch validation.
 - Run `db-lint` to validate DB quality before merge (`--schema public --fail-on warning`).
+- Run `db-test` to validate DB functions/policies with pgTAP before merge.
 
 ## Where Rules Live
 

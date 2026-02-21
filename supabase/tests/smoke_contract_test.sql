@@ -1,7 +1,7 @@
 BEGIN;
 SELECT plan(1);
 
--- Examples: https://pgtap.org/documentation.html
+SELECT has_function('public', 'is_allowed_user', ARRAY[]::text[]);
 
 SELECT * FROM finish();
 ROLLBACK;

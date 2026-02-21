@@ -19,6 +19,14 @@ Command source of truth remains `AGENTS.md` and `just --list --unsorted`.
 Use command IDs from `AGENTS.md`.
 
 - `test` -> `just quality-smoke-build`
+- `test-unit-web` -> `just test-unit-web`
+- `test-unit-ext` -> `just test-unit-ext`
+- `test-unit-node` -> `just test-unit-node`
+- `test-unit-functions` -> `just test-unit-functions`
+- `test-unit` -> `just test-unit`
+- `test-unit-coverage` -> `just test-unit-coverage`
+- `coverage-report` -> `just coverage-report`
+- `coverage-check` -> `just coverage-check`
 - `format-check` -> `just quality-format-check`
 - `format-write` -> `just quality-format-write`
 - `lint` -> `just quality-lint`
@@ -29,7 +37,10 @@ Use command IDs from `AGENTS.md`.
 - `lint-supabase` -> `just quality-lint-supabase-functions`
 - `types` -> `just quality-typecheck`
 - `db-lint` -> `just quality-db-lint`
+- `db-test` -> `just quality-db-test`
+- `db-coverage-report` -> `just db-coverage-report`
 - `ci` -> `just ci-verify-local`
+- `check` -> `just check`
 - `db-run` -> `just supabase-local-migrate-and-deploy`
 - `db-reset` -> `just supabase-local-reset-and-deploy`
 - `db-artifacts-refresh` -> `just supabase-local-artifacts-refresh`
@@ -39,17 +50,27 @@ Use command IDs from `AGENTS.md`.
 
 Do not replace these with ad-hoc alternatives when equivalent command IDs already exist.
 
+## Test Impact Policy
+
+Every behavior change must update tests in the same change set.
+
+- If app/extension/script/edge behavior changes, add or update unit tests in the corresponding runtime lane (`test-unit-web`, `test-unit-ext`, `test-unit-node`, `test-unit-functions`).
+- If SQL function/policy behavior changes under `supabase/migrations/` or `supabase/db/`, add or update pgTAP tests under `supabase/tests/`.
+- Keep `supabase/tests/coverage-map.json` current when DB object naming does not map cleanly to pgTAP test file names.
+- If no automated test change is required, include an explicit rationale in PR evidence (`why-no-test-change` note).
+
 ## Change-Type Check Matrix
 
-| Change Type                            | Mandatory Checks                                                     | Additional Checks                                      | Evidence Required                              |
-| -------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
-| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check            | none                                                   | list of changed docs and cross-links validated |
-| UI/routes/components                   | `lint`, `types`, `test`                                              | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
-| Hooks/client orchestration             | `lint`, `types`, `test`                                              | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
-| Edge/API workflow                      | `lint`, `types`, `test`                                              | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
-| DB schema/policy/function/trigger/cron | `lint`, `types`, `test`, `db-lint`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
-| Extension/service worker/import flow   | `lint`, `types`, `test`                                              | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
-| CI/deploy/security config              | `lint`, `types`, `test`, `secrets-preflight`                         | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
+| Change Type                            | Mandatory Checks                                                        | Additional Checks                                      | Evidence Required                              |
+| -------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
+| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check               | none                                                   | list of changed docs and cross-links validated |
+| UI/routes/components                   | `lint`, `types`, `test-unit-web`, `test`                                | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
+| Hooks/client orchestration             | `lint`, `types`, `test-unit-web`                                        | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `lint`, `types`, `test-unit-functions`, `test`                          | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
+| DB schema/policy/function/trigger/cron | `lint`, `types`, `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
+| Extension/service worker/import flow   | `lint`, `types`, `test-unit-ext`, `test`                                | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
+| Scripts/tooling                        | `lint`, `types`, `test-unit-node`                                       | verify CLI behavior and error handling                 | command outcomes + command transcript          |
+| CI/deploy/security config              | `lint`, `types`, `test-unit`, `test`, `secrets-preflight`               | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 
@@ -58,6 +79,9 @@ Do not replace these with ad-hoc alternatives when equivalent command IDs alread
 Run from repository root:
 
 - `format-check`
+- `test-unit`
+- `test-unit-coverage`
+- `coverage-check`
 - `test`
 - `lint`
 - `types`
@@ -69,6 +93,9 @@ Pass criteria:
 - `lint`: includes web, extension, scripts, and Supabase function (`deno lint`) surfaces.
 - `types`: no TypeScript diagnostics.
 - `types`: includes Deno type checks for Supabase functions (`deno check`).
+- `test-unit`: runtime-split unit suites pass (Vitest + Deno tests).
+- `test-unit-coverage`: runtime coverage artifacts generated (`coverage/combined-summary.json`, `coverage/combined-report.md`).
+- `coverage-check`: ratchet metrics are non-regressing and changed DB objects are mapped to pgTAP tests.
 - `test` (smoke gate): successful production build and static generation.
 
 ### 2. Secret safety gate
@@ -93,6 +120,7 @@ When DB behavior changes:
 - ensure migration exists in `supabase/migrations/`.
 - ensure relevant SQL objects updated in `supabase/db/`.
 - run `db-lint` to validate local DB SQL quality (`supabase db lint --local --schema public --fail-on warning`).
+- run `db-test` to validate DB behavior contracts (`supabase test db --local supabase/tests`).
 - run `db-run` for non-destructive validation.
 - run `db-reset` when drift/refactor demands deterministic rebuild.
 - regenerate DB artifacts via `db-artifacts-refresh`.
@@ -111,6 +139,7 @@ Pass criteria:
 - migrations apply cleanly,
 - deploy SQL applies cleanly,
 - DB lint passes (public schema) with zero warnings/errors,
+- pgTAP suite passes for changed DB functions/policies,
 - generated DB artifacts are current and unchanged after regeneration,
 - runtime behavior reflects updated RLS/functions/triggers/cron.
 

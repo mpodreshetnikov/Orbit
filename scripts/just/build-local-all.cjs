@@ -82,11 +82,13 @@ try {
     "quality-format-check",
     "quality-lint",
     "quality-typecheck",
+    "test-unit",
     "web-build-production",
     "extension-build-production",
     "supabase-local-start",
     "supabase-local-reset-and-deploy",
     "quality-db-lint",
+    "quality-db-test",
   ];
 
   for (const recipe of recipes) {

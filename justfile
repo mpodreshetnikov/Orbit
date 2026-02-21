@@ -77,9 +77,54 @@ quality-typecheck: quality-typecheck-web quality-typecheck-supabase-functions
 # Run current smoke gate (web production build).
 quality-smoke-build: web-build-production
 
+# Run web unit tests across client and server runtime projects.
+test-unit-web:
+  npx vitest run --project web --project web-server
+
+# Run extension unit tests (core + popup UI).
+test-unit-ext:
+  npx vitest run --project extension-core --project extension-ui
+
+# Run node/runtime-agnostic unit tests.
+test-unit-node:
+  npx vitest run --project node
+
+# Run Supabase Edge Function unit tests under Deno.
+test-unit-functions:
+  deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
+
+# Run fast unit tests across all non-DB surfaces.
+test-unit:
+  npx vitest run
+  deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
+
+# Run unit tests with coverage reports.
+test-unit-coverage:
+  npx vitest run --coverage
+  deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
+  deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions/_shared/cors_test.ts supabase/functions/health-ocr/title_test.ts supabase/functions/health-structure/catalog_test.ts supabase/functions/icd-lookup/query-utils_test.ts supabase/functions/money-import/progress_test.ts supabase/functions/notifications-cron/window_test.ts
+  node scripts/just/coverage-report.cjs
+
+# Generate combined runtime + DB coverage report artifacts.
+coverage-report:
+  node scripts/just/coverage-report.cjs
+
+# Validate coverage ratchet and changed DB object coverage mapping.
+coverage-check:
+  node scripts/just/coverage-ratchet.cjs
+  node scripts/just/db-coverage-report.cjs --strict-changed
+
+# Report DB object to pgTAP test mapping coverage.
+db-coverage-report:
+  node scripts/just/db-coverage-report.cjs
+
 # Run local Supabase DB lint (public schema only), failing on warnings.
 quality-db-lint:
   npx supabase db lint --local --schema public --fail-on warning
+
+# Run pgTAP tests for database functions and policies.
+quality-db-test:
+  npx supabase test db --local supabase/tests
 
 # Start local Supabase stack.
 supabase-local-start:
@@ -135,7 +180,10 @@ build-local-all:
   node scripts/just/build-local-all.cjs
 
 # CI-style local confidence gate before PR push.
-ci-verify-local: build-local-all
+ci-verify-local: build-local-all test-unit-coverage coverage-check
+
+# Full local quality gate.
+check: build-local-all test-unit-coverage coverage-check
 
 # Regenerate per-client MCP configs from canonical source.
 mcp-sync:

@@ -7,17 +7,7 @@ import { Label } from "@shared/ui/label";
 import { Input } from "@shared/ui/input";
 import { Textarea } from "@shared/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
-
-function formatSession(session: Record<string, unknown> | null): string {
-  if (!session) return "No active session";
-  return JSON.stringify(session, null, 2);
-}
-
-function toIsoFromInput(value: string): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
-}
+import { formatSession, toIsoFromInput } from "./helpers";
 
 function sendMessage(message: Record<string, unknown>): Promise<unknown> {
   return new Promise((resolve) => {

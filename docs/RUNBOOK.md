@@ -31,7 +31,26 @@ Notes:
 4. Check recent DB migrations and `supabase/db` changes.
 5. If DB schema/types drift is suspected, run `db-artifacts-verify` from `AGENTS.md`.
 6. If DB lint failures occur, run `db-lint` from `AGENTS.md` (public schema warnings fail).
-7. Decide whether the fix is app code, function code, SQL, or config/secrets.
+7. If DB function/policy behavior changed, run `db-test` from `AGENTS.md` (pgTAP suite under `supabase/tests`).
+8. Decide whether the fix is app code, function code, SQL, or config/secrets.
+
+## Runtime-Split Test Triage
+
+Use the smallest failing lane first:
+
+- Web app unit tests: `test-unit-web`
+- Extension unit tests: `test-unit-ext`
+- Node/scripts unit tests: `test-unit-node`
+- Supabase Edge Functions (Deno): `test-unit-functions`
+- DB functions/policies (pgTAP): `db-test`
+
+For full local verification before merge:
+
+- `test-unit`
+- `test-unit-coverage`
+- `coverage-check`
+- `test`
+- `check`
 
 ## Auth And Access Issues
 
@@ -57,7 +76,8 @@ Useful locations:
 
 - UI debug page: `/settings/notifications-debug`
 - API routes: `src/app/api/notifications/run-cron/route.ts`, `src/app/api/medications/run-cron/route.ts`
-- Edge Function: `supabase/functions/notifications-cron/index.ts`
+- Edge Function entrypoint: `supabase/functions/notifications-cron/index.ts`
+- Edge Function handler logic: `supabase/functions/notifications-cron/handler.ts`
 
 DB checks:
 
@@ -106,8 +126,8 @@ Checks:
 
 Functions:
 
-- `supabase/functions/health-ocr/index.ts`
-- `supabase/functions/health-structure/index.ts`
+- `supabase/functions/health-ocr/handler.ts`
+- `supabase/functions/health-structure/handler.ts`
 
 Checks:
 
@@ -133,7 +153,7 @@ Supabase function-specific checks:
 
 Function:
 
-- `supabase/functions/money-import/index.ts`
+- `supabase/functions/money-import/handler.ts`
 
 Checks:
 

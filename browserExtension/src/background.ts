@@ -1,17 +1,8 @@
 import "./connectors/tbank-web.js";
 import { getConnector } from "./connectors/registry.js";
 import { APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
-
-const SESSION_STORAGE_KEY = "extension_import_session";
-
-async function getStoredSession(): Promise<Record<string, unknown> | null> {
-  const data = await chrome.storage.local.get([SESSION_STORAGE_KEY]);
-  return (data[SESSION_STORAGE_KEY] as Record<string, unknown> | undefined) ?? null;
-}
-
-async function setStoredSession(session: Record<string, unknown> | null): Promise<void> {
-  await chrome.storage.local.set({ [SESSION_STORAGE_KEY]: session });
-}
+import { routeBackgroundMessage, type BackgroundMessage } from "./core/background-router.js";
+import { createSessionStore } from "./core/session-store.js";
 
 async function broadcastToAppTabs(message: Record<string, unknown>): Promise<void> {
   if (!Array.isArray(APP_ORIGIN_PATTERNS) || APP_ORIGIN_PATTERNS.length === 0) {
@@ -84,114 +75,30 @@ async function callEdge(
   return data;
 }
 
-chrome.runtime.onMessage.addListener(
-  (
-    message: { type: string; session?: Record<string, unknown>; windowFrom?: string },
-    _sender,
-    sendResponse,
-  ) => {
-    void (async () => {
-      try {
-        if (message.type === "MONEY_IMPORT_PING") {
-          sendResponse({ ok: true });
-          return;
-        }
+const sessionStore = createSessionStore(chrome.storage.local);
 
-        if (message.type === "MONEY_IMPORT_START_SESSION") {
-          await setStoredSession(message.session ?? null);
-          sendResponse({ ok: true });
-          return;
-        }
+chrome.runtime.onMessage.addListener((message: BackgroundMessage, _sender, sendResponse) => {
+  void (async () => {
+    try {
+      const response = await routeBackgroundMessage(message, {
+        sessionStore,
+        importRunnerDeps: {
+          getConnector,
+          callEdge,
+          broadcastToAppTabs,
+          nowIso: () => new Date().toISOString(),
+        },
+      });
+      sendResponse(response);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "Unknown extension error";
+      await broadcastToAppTabs({
+        type: "MONEY_IMPORT_ERROR",
+        error: messageText,
+      });
+      sendResponse({ ok: false, error: messageText });
+    }
+  })();
 
-        if (message.type === "MONEY_IMPORT_GET_SESSION") {
-          const session = await getStoredSession();
-          sendResponse({ ok: true, session });
-          return;
-        }
-
-        if (message.type === "MONEY_IMPORT_RUN") {
-          const session = await getStoredSession();
-          if (!session) {
-            throw new Error("No active import session");
-          }
-
-          try {
-            const connector = getConnector((session.source as string) ?? "");
-            if (!connector) {
-              throw new Error(`No connector for source: ${session.source}`);
-            }
-
-            const windowFrom =
-              message.windowFrom ||
-              (session.last_imported_at as string) ||
-              new Date().toISOString();
-            const parseOutput = await connector.parse({
-              source: session.source as string,
-              windowFrom,
-              session,
-            });
-
-            await broadcastToAppTabs({
-              type: "MONEY_IMPORT_PROGRESS",
-              parsed_transactions_count: parseOutput.parsedTransactionsCount,
-              parsed_through_at: parseOutput.parsedThroughAt,
-            });
-
-            const applyResult = (await callEdge(
-              session.function_url as string,
-              session.session_token as string,
-              {
-                action: "apply_rows",
-                session_id: session.session_id,
-                batch_id: session.batch_id,
-                window_from: windowFrom,
-                window_to: parseOutput.windowTo,
-                parsed_through_at: parseOutput.parsedThroughAt,
-                parsed_transactions_count: parseOutput.parsedTransactionsCount,
-                rows: parseOutput.rows,
-              },
-            )) as { batch_id?: string };
-
-            await callEdge(session.function_url as string, session.session_token as string, {
-              action: "complete_session",
-              session_id: session.session_id,
-              batch_id: session.batch_id,
-              status: "completed",
-            });
-
-            await broadcastToAppTabs({
-              type: "MONEY_IMPORT_DONE",
-              batch_id: applyResult.batch_id ?? session.batch_id,
-            });
-
-            sendResponse({ ok: true, result: applyResult });
-            return;
-          } catch (runError) {
-            try {
-              await callEdge(session.function_url as string, session.session_token as string, {
-                action: "complete_session",
-                session_id: session.session_id,
-                batch_id: session.batch_id,
-                status: "failed",
-              });
-            } catch {
-              // Ignore completion failures; original error is still reported to UI.
-            }
-            throw runError;
-          }
-        }
-
-        sendResponse({ ok: false, error: "Unsupported message type" });
-      } catch (error) {
-        const messageText = error instanceof Error ? error.message : "Unknown extension error";
-        await broadcastToAppTabs({
-          type: "MONEY_IMPORT_ERROR",
-          error: messageText,
-        });
-        sendResponse({ ok: false, error: messageText });
-      }
-    })();
-
-    return true;
-  },
-);
+  return true;
+});

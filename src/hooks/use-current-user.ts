@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase";
+import { createClient } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
 async function fetchCurrentUser(): Promise<User | null> {

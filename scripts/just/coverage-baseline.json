@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-02-21T10:38:40.971Z",
+  "metrics": {
+    "vitest.lines_pct": 3.15,
+    "vitest.branches_pct": 1.9,
+    "deno.lines_pct": 8.19,
+    "deno.branches_pct": 16.67,
+    "surfaces.web.instrumented_ratio_pct": 100,
+    "surfaces.supabase_functions.instrumented_ratio_pct": 100,
+    "db.totals.function_mapping_ratio_pct": 9.76,
+    "db.totals.policy_mapping_ratio_pct": 6.45
+  }
+}
