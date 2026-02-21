@@ -13,6 +13,10 @@ import type {
   CheckupSchedule,
   CheckupWhyLink,
 } from "@/types";
+import type { Database, Json } from "@/types/database";
+
+type CheckupItemInsert = Database["public"]["Tables"]["checkup_items"]["Insert"];
+type CheckupItemUpdate = Database["public"]["Tables"]["checkup_items"]["Update"];
 
 // Normalize a single why_link from DB (may have missing label or different shape)
 function normalizeWhyLink(link: unknown): CheckupWhyLink | null {
@@ -226,19 +230,20 @@ async function createCheckupItem(
   input: CreateCheckupItemInput
 ): Promise<CheckupItem> {
   const supabase = createClient();
+  const payload: CheckupItemInsert = {
+    person_id: input.person_id,
+    title: input.title,
+    category: input.category,
+    schedule: input.schedule as unknown as Json,
+    reminder_days_before: input.reminder_days_before ?? [7],
+    why_text: input.why_text ?? null,
+    why_links: (input.why_links ?? []) as unknown as Json,
+    notes: input.notes ?? null,
+  };
 
   const { data, error } = await supabase
     .from("checkup_items")
-    .insert({
-      person_id: input.person_id,
-      title: input.title,
-      category: input.category,
-      schedule: input.schedule as unknown as Record<string, unknown>,
-      reminder_days_before: input.reminder_days_before ?? [7],
-      why_text: input.why_text ?? null,
-      why_links: (input.why_links ?? []) as unknown as Record<string, unknown>[],
-      notes: input.notes ?? null,
-    })
+    .insert(payload)
     .select()
     .single();
 
@@ -274,13 +279,18 @@ async function updateCheckupItem({
 }): Promise<CheckupItem> {
   const supabase = createClient();
 
-  const payload: Record<string, unknown> = { ...updates };
-  if (updates.schedule !== undefined) {
-    payload.schedule = updates.schedule as unknown as Record<string, unknown>;
+  const payload: CheckupItemUpdate = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.category !== undefined) payload.category = updates.category;
+  if (updates.schedule !== undefined) payload.schedule = updates.schedule as unknown as Json;
+  if (updates.status !== undefined) payload.status = updates.status;
+  if (updates.reminder_days_before !== undefined) {
+    payload.reminder_days_before = updates.reminder_days_before;
   }
-  if (updates.why_links !== undefined) {
-    payload.why_links = updates.why_links as unknown as Record<string, unknown>[];
-  }
+  if (updates.planned_on !== undefined) payload.planned_on = updates.planned_on;
+  if (updates.why_text !== undefined) payload.why_text = updates.why_text;
+  if (updates.why_links !== undefined) payload.why_links = updates.why_links as unknown as Json;
+  if (updates.notes !== undefined) payload.notes = updates.notes;
 
   const { data, error } = await supabase
     .from("checkup_items")

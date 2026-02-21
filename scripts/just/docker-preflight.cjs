@@ -13,6 +13,19 @@ function dockerEngineReachable() {
   return result.status === 0;
 }
 
+function dockerContainerApiReachable() {
+  const result = spawnSync("docker", ["ps", "--format", "{{.ID}}"], {
+    stdio: "ignore",
+    windowsHide: true,
+    timeout: 10000,
+  });
+  return result.status === 0;
+}
+
+function dockerFullyReachable() {
+  return dockerEngineReachable() && dockerContainerApiReachable();
+}
+
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -59,6 +72,7 @@ function startDockerDesktop(executablePath) {
 function ensureDockerReady(options = {}) {
   const waitMs = options.waitMs ?? 120000;
   const pollMs = options.pollMs ?? 2000;
+  const stableWaitMs = options.stableWaitMs ?? 15000;
   const out = options.out ?? console;
 
   if (process.platform !== "win32") {
@@ -69,7 +83,7 @@ function ensureDockerReady(options = {}) {
     return 0;
   }
 
-  if (dockerEngineReachable()) {
+  if (dockerFullyReachable()) {
     return 0;
   }
 
@@ -91,14 +105,24 @@ function ensureDockerReady(options = {}) {
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     sleep(pollMs);
-    if (dockerEngineReachable()) {
-      out.log("Docker Desktop is ready.");
-      return 0;
+    if (dockerFullyReachable()) {
+      const stabilizeDeadline = Date.now() + stableWaitMs;
+      while (Date.now() < stabilizeDeadline) {
+        sleep(pollMs);
+        if (!dockerFullyReachable()) {
+          break;
+        }
+      }
+
+      if (dockerFullyReachable()) {
+        out.log("Docker Desktop is ready.");
+        return 0;
+      }
     }
   }
 
   out.error(
-    `Docker Desktop did not become ready within ${Math.round(waitMs / 1000)}s.`,
+    `Docker Desktop did not become ready within ${Math.round(waitMs / 1000)}s (including ${Math.round(stableWaitMs / 1000)}s stability wait).`,
   );
   return 1;
 }

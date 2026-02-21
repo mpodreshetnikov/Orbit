@@ -11,9 +11,21 @@ import type {
   UpdateMoneyTransactionInput,
   CreateMoneyLineItemInput,
 } from "@/types";
+import type { Database, Json } from "@/types/database";
+
+type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
+type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Insert"];
 
 export interface MoneyTransactionsFilters {
   accountId?: string | null;
+}
+
+function toJsonOrNull(
+  value: Record<string, unknown> | null | undefined
+): Json | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return value as unknown as Json;
 }
 
 function mapDetailRow(row: Record<string, unknown>): MoneyTransactionDetail {
@@ -106,27 +118,28 @@ async function createMoneyTransactionWithLines({
   lineItems: CreateMoneyLineItemInput[];
 }): Promise<MoneyTransactionDetail> {
   const supabase = createClient();
+  const txPayload: MoneyTransactionInsert = {
+    payer_person_id: transaction.payer_person_id,
+    account_id: transaction.account_id,
+    source: transaction.source ?? "manual",
+    external_id: transaction.external_id ?? null,
+    posted_at: transaction.posted_at,
+    amount: transaction.amount,
+    currency: transaction.currency,
+    transaction_type: transaction.transaction_type,
+    status: transaction.status ?? "posted",
+    merchant_name: transaction.merchant_name ?? null,
+    mcc: transaction.mcc ?? null,
+    comment: transaction.comment ?? null,
+    is_transfer: transaction.is_transfer ?? false,
+    transfer_group_id: transaction.transfer_group_id ?? null,
+    raw_payload: toJsonOrNull(transaction.raw_payload) ?? null,
+    dedupe_hash: transaction.dedupe_hash ?? null,
+  };
 
   const { data: tx, error } = await supabase
     .from("money_transactions")
-    .insert({
-      payer_person_id: transaction.payer_person_id,
-      account_id: transaction.account_id,
-      source: transaction.source ?? "manual",
-      external_id: transaction.external_id ?? null,
-      posted_at: transaction.posted_at,
-      amount: transaction.amount,
-      currency: transaction.currency,
-      transaction_type: transaction.transaction_type,
-      status: transaction.status ?? "posted",
-      merchant_name: transaction.merchant_name ?? null,
-      mcc: transaction.mcc ?? null,
-      comment: transaction.comment ?? null,
-      is_transfer: transaction.is_transfer ?? false,
-      transfer_group_id: transaction.transfer_group_id ?? null,
-      raw_payload: transaction.raw_payload ?? null,
-      dedupe_hash: transaction.dedupe_hash ?? null,
-    })
+    .insert(txPayload)
     .select()
     .single();
 
@@ -139,7 +152,7 @@ async function createMoneyTransactionWithLines({
     assignment_method: "manual",
   };
 
-  const items = ensureLineItems(lineItems, fallbackItem).map((item) => ({
+  const items: MoneyLineItemInsert[] = ensureLineItems(lineItems, fallbackItem).map((item) => ({
     transaction_id: tx.id,
     title: item.title,
     amount: item.amount,
@@ -152,7 +165,7 @@ async function createMoneyTransactionWithLines({
     assignment_method: item.assignment_method ?? "manual",
     assignment_rule_id: item.assignment_rule_id ?? null,
     assignment_confidence: item.assignment_confidence ?? null,
-    raw_payload: item.raw_payload ?? null,
+    raw_payload: toJsonOrNull(item.raw_payload) ?? null,
   }));
 
   const { data: lines, error: lineError } = await supabase
@@ -207,7 +220,7 @@ async function updateMoneyTransactionWithLines({
     assignment_method: "manual",
   };
 
-  const items = ensureLineItems(lineItems, fallbackItem).map((item) => ({
+  const items: MoneyLineItemInsert[] = ensureLineItems(lineItems, fallbackItem).map((item) => ({
     transaction_id: id,
     title: item.title,
     amount: item.amount,
@@ -220,7 +233,7 @@ async function updateMoneyTransactionWithLines({
     assignment_method: item.assignment_method ?? "manual",
     assignment_rule_id: item.assignment_rule_id ?? null,
     assignment_confidence: item.assignment_confidence ?? null,
-    raw_payload: item.raw_payload ?? null,
+    raw_payload: toJsonOrNull(item.raw_payload) ?? null,
   }));
 
   const { error: deleteError } = await supabase

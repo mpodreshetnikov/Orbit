@@ -1,5 +1,6 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
+import type { Database } from "../_shared/database.types.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -132,7 +133,7 @@ function createAdminClient() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("Supabase environment not configured");
   }
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -144,7 +145,7 @@ function createUserAuthClient(token: string) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new Error("Supabase anon environment not configured");
   }
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  return createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: {
       headers: { Authorization: `Bearer ${token}` },
     },
@@ -442,7 +443,7 @@ async function insertOrResolveTransaction(
   const payload = buildTransactionInsertPayload(row, payerPersonId);
   const { data, error } = await admin
     .from("money_transactions")
-    .insert(payload)
+    .insert(payload as Database["public"]["Tables"]["money_transactions"]["Insert"])
     .select("id")
     .single();
 
@@ -500,14 +501,14 @@ async function insertLineItemIfNew(
     quantity: toNumberOrNull(lineItem.quantity),
     unit: normalizeText(lineItem.unit),
     line_status: "final",
-    assignment_method: "import",
+    assignment_method: "import" as const,
     raw_payload: lineItem.raw_payload ?? null,
     import_hash: importHash,
   };
 
   const { data, error } = await admin
     .from("money_line_items")
-    .insert(payload)
+    .insert(payload as Database["public"]["Tables"]["money_line_items"]["Insert"])
     .select("id")
     .single();
 
@@ -542,7 +543,7 @@ async function createBatchRow(
 ): Promise<string> {
   const { data, error } = await admin
     .from("money_import_batches")
-    .insert(payload)
+    .insert(payload as Database["public"]["Tables"]["money_import_batches"]["Insert"])
     .select("id")
     .single();
 
@@ -559,7 +560,7 @@ async function insertReportRow(
 ): Promise<string> {
   const { data, error } = await admin
     .from("money_import_batch_rows")
-    .insert(payload)
+    .insert(payload as Database["public"]["Tables"]["money_import_batch_rows"]["Insert"])
     .select("id")
     .single();
 
@@ -600,7 +601,7 @@ async function createSessionAction(
       window_from: windowFrom,
       window_to: windowTo,
       expires_at: expiresAt,
-      meta: body.meta ?? null,
+      meta: (body.meta ?? null) as Database["public"]["Tables"]["money_import_sessions"]["Insert"]["meta"],
     })
     .select("id")
     .single();
@@ -750,7 +751,7 @@ async function applyRowsAction(
     sessionId = normalizeText(session.id) ?? sessionId;
     importType = "web_export";
 
-    if (sessionStatus === "created") {
+    if (sessionStatus === "created" && sessionId) {
       await admin
         .from("money_import_sessions")
         .update({ status: "running", updated_at: new Date().toISOString() })

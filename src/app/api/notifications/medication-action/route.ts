@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     if (typeof id !== "string" || !id) continue;
     const rpcPayload =
       action === "taken"
-        ? { p_dose_event_id: id, p_note: null, p_taken_at: nowIso }
+        ? { p_dose_event_id: id, p_taken_at: nowIso }
         : { p_dose_event_id: id };
     const { error: rpcError } = await supabase.rpc(rpcName, rpcPayload);
     if (rpcError) {

@@ -27,7 +27,8 @@ Notes:
 2. Confirm environment and commit SHA first.
 3. Reproduce locally if possible.
 4. Check recent DB migrations and `supabase/db` changes.
-5. Decide whether the fix is app code, function code, SQL, or config/secrets.
+5. If DB schema/types drift is suspected, run `db-artifacts-verify` from `AGENTS.md`.
+6. Decide whether the fix is app code, function code, SQL, or config/secrets.
 
 ## Auth And Access Issues
 
@@ -123,3 +124,5 @@ Checks:
 - Prefer forward fixes over manual hot edits in DB.
 - For DB incidents, ship a migration and matching `supabase/db` updates when needed.
 - Do not rely on dashboard-only schema edits; capture diff in repo immediately.
+- Do not hand-edit generated DB artifacts (`supabase/db/schema.snapshot.sql`, `supabase/db/database.types.ts`); regenerate via `db-artifacts-refresh`.
+- `supabase/db/schema.snapshot.sql` is intentionally table-focused; functions/policies/triggers/RLS definitions are sourced from `supabase/db/` SQL files.

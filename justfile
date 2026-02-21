@@ -39,6 +39,7 @@ quality-lint:
 # Run TypeScript type checks.
 quality-typecheck:
   npx tsc --noEmit
+  npx tsc --noEmit -p supabase/functions/tsconfig.json
 
 # Run current smoke gate (web production build).
 quality-smoke-build: web-build-production
@@ -72,6 +73,14 @@ supabase-local-migrate-and-deploy: supabase-local-migrate-only supabase-local-de
 
 # Rebuild local DB from scratch and re-apply idempotent SQL.
 supabase-local-reset-and-deploy: supabase-local-reset-only supabase-local-deploy-sql
+
+# Regenerate DB schema snapshot and TS DB types from a reset local DB.
+supabase-local-artifacts-refresh:
+  node scripts/just/db-artifacts.cjs
+
+# Regenerate DB artifacts and fail if tracked generated files drift.
+supabase-local-artifacts-verify:
+  node scripts/just/db-artifacts.cjs --verify
 
 # Serve local Supabase Edge Functions.
 supabase-local-functions-serve:

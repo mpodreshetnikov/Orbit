@@ -29,9 +29,16 @@ interface RawMeasurementRow {
     name_en: string;
     unit_ru: string;
     unit_en: string;
-    category: MeasurementCategory;
+    category: string;
     sort_order: number;
   };
+}
+
+function normalizeMeasurementCategory(value: string): MeasurementCategory {
+  if (value === "basic" || value === "body" || value === "limbs" || value === "vital") {
+    return value;
+  }
+  return "basic";
 }
 
 async function fetchPersonMeasurements(
@@ -99,7 +106,7 @@ async function fetchPersonMeasurements(
         name_en: catalog.name_en,
         unit_ru: catalog.unit_ru,
         unit_en: catalog.unit_en,
-        category: catalog.category,
+        category: normalizeMeasurementCategory(catalog.category),
         latest_value: row.value,
         latest_date: row.measured_at,
         measurement_count: 1,
@@ -197,7 +204,7 @@ async function fetchSingleMeasurementHistory(
       name_en: catalogData.name_en,
       unit_ru: catalogData.unit_ru,
       unit_en: catalogData.unit_en,
-      category: catalogData.category,
+      category: normalizeMeasurementCategory(catalogData.category),
       latest_value: 0,
       latest_date: "",
       measurement_count: 0,
@@ -228,7 +235,7 @@ async function fetchSingleMeasurementHistory(
     name_en: catalogData.name_en,
     unit_ru: catalogData.unit_ru,
     unit_en: catalogData.unit_en,
-    category: catalogData.category,
+    category: normalizeMeasurementCategory(catalogData.category),
     latest_value: latest.value,
     latest_date: latest.measured_at,
     measurement_count: data.length,

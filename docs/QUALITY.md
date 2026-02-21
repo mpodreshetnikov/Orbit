@@ -24,6 +24,8 @@ Use command IDs from `AGENTS.md`.
 - `ci` -> `just ci-verify-local`
 - `db-run` -> `just supabase-local-migrate-and-deploy`
 - `db-reset` -> `just supabase-local-reset-and-deploy`
+- `db-artifacts-refresh` -> `just supabase-local-artifacts-refresh`
+- `db-artifacts-verify` -> `just supabase-local-artifacts-verify`
 - `secrets-preflight` -> `just secrets-preflight`
 - `secrets-preflight-range` -> `just secrets-preflight-range <from> <to>`
 
@@ -80,11 +82,21 @@ When DB behavior changes:
 - ensure relevant SQL objects updated in `supabase/db/`.
 - run `db-run` for non-destructive validation.
 - run `db-reset` when drift/refactor demands deterministic rebuild.
+- regenerate DB artifacts via `db-artifacts-refresh`.
+
+Generated DB artifacts policy:
+- `supabase/db/schema.snapshot.sql` and `supabase/db/database.types.ts` are generated artifacts.
+- Never edit these files by hand.
+- Regenerate only via `db-artifacts-refresh`.
+- `supabase/db/schema.snapshot.sql` is table-focused by design (tables/sequences/defaults + constraints/indexes only).
+- `supabase/db/schema.snapshot.sql` intentionally excludes functions/triggers/policies/RLS/grants; those remain sourced from `supabase/db/` SQL files.
+- CI enforces zero drift in clean environment via `db-artifacts-verify`.
 
 Pass criteria:
 
 - migrations apply cleanly,
 - deploy SQL applies cleanly,
+- generated DB artifacts are current and unchanged after regeneration,
 - runtime behavior reflects updated RLS/functions/triggers/cron.
 
 ### 4. Runtime behavior verification

@@ -1,5 +1,6 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
+import type { Database, Json } from "../_shared/database.types.ts";
 
 /**
  * health-structure: Text LLM function for structured data extraction
@@ -183,7 +184,7 @@ interface StructuredDataWithObservationsAndFindings extends StructuredData {
 }
 
 // Fetch observation catalog from database
-async function fetchObservationCatalog(supabase: ReturnType<typeof createClient>): Promise<ObservationCatalogItem[]> {
+async function fetchObservationCatalog(supabase: SupabaseClient<Database>): Promise<ObservationCatalogItem[]> {
   const { data, error } = await supabase
     .from("observation_catalog")
     .select("id, obs_code, name_ru, name_en, canonical_unit, synonyms_ru, synonyms_en, accepted_units")
@@ -194,11 +195,11 @@ async function fetchObservationCatalog(supabase: ReturnType<typeof createClient>
     return [];
   }
 
-  return data || [];
+  return (data || []) as ObservationCatalogItem[];
 }
 
 // Fetch finding type catalog from database
-async function fetchFindingTypeCatalog(supabase: ReturnType<typeof createClient>): Promise<FindingTypeCatalogItem[]> {
+async function fetchFindingTypeCatalog(supabase: SupabaseClient<Database>): Promise<FindingTypeCatalogItem[]> {
   const { data, error } = await supabase
     .from("finding_type_catalog")
     .select("id, finding_code, name_ru, name_en, synonyms_ru, synonyms_en")
@@ -213,7 +214,7 @@ async function fetchFindingTypeCatalog(supabase: ReturnType<typeof createClient>
 }
 
 // Fetch body site catalog from database
-async function fetchBodySiteCatalog(supabase: ReturnType<typeof createClient>): Promise<BodySiteCatalogItem[]> {
+async function fetchBodySiteCatalog(supabase: SupabaseClient<Database>): Promise<BodySiteCatalogItem[]> {
   const { data, error } = await supabase
     .from("body_site_catalog")
     .select("id, site_code, name_ru, name_en, parent_site_code, synonyms_ru, synonyms_en")
@@ -229,7 +230,7 @@ async function fetchBodySiteCatalog(supabase: ReturnType<typeof createClient>): 
 
 // Fetch existing conditions for a person (to provide context to LLM)
 async function fetchPersonConditions(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<Database>,
   personId: string
 ): Promise<ExistingCondition[]> {
   const { data, error } = await supabase
@@ -255,7 +256,7 @@ function isResolved(size: number | null, count: number | null): boolean {
 // Fetch existing active findings for a person (aggregated by finding_code + site_code)
 // Returns only findings that are NOT resolved (latest entry has size_mm > 0 or count > 0)
 async function fetchPersonActiveFindings(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<Database>,
   personId: string
 ): Promise<ExistingFinding[]> {
   // Fetch all findings from active records for this person
@@ -381,7 +382,7 @@ async function fetchPersonActiveFindings(
 
 // Fetch upcoming/overdue checkup items for a person (active, with next_due_at)
 async function fetchUpcomingOverdueCheckupItems(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<Database>,
   personId: string
 ): Promise<CheckupItemForContext[]> {
   const { data, error } = await supabase
@@ -1090,7 +1091,7 @@ Deno.serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
 
     // Create Supabase client with anon key and user's token for RLS
-    const supabaseClient = createClient(
+    const supabaseClient = createClient<Database>(
       SUPABASE_URL,
       SUPABASE_ANON_KEY || SUPABASE_SERVICE_ROLE_KEY,
       {
@@ -1113,7 +1114,7 @@ Deno.serve(async (req) => {
     }
 
     // Check allowlist using service role (bypasses RLS)
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    const supabaseAdmin = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
@@ -1208,16 +1209,17 @@ Deno.serve(async (req) => {
     console.log("Conditions to resolve:", JSON.stringify(structuredData.conditions_to_resolve, null, 2));
 
     // Update the medical record with structured data (including LLM-suggested checkup completions)
+    type RecordType = Database["public"]["Tables"]["medical_records"]["Row"]["record_type"];
     const { error: updateError } = await supabaseAdmin
       .from("medical_records")
       .update({
         title: structuredData.title,
-        record_type: structuredData.record_type,
+        record_type: structuredData.record_type as RecordType,
         record_date: structuredData.record_date,
         notes: structuredData.summary,
         llm_summary: structuredData.summary,
         llm_keywords: structuredData.keywords,
-        llm_suggested_checkup_completions: llmSuggestedCheckupCompletions,
+        llm_suggested_checkup_completions: llmSuggestedCheckupCompletions as unknown as Json,
         status: "structure_review", // Ready for user to review structured data
       })
       .eq("id", record_id);

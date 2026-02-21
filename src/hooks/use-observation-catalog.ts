@@ -7,6 +7,10 @@ import type {
   CreateObservationInput,
   UpdateObservationInput,
 } from "@/types";
+import type { Database, Json } from "@/types/database";
+
+type ObservationInsert = Database["public"]["Tables"]["observation_catalog"]["Insert"];
+type ObservationUpdate = Database["public"]["Tables"]["observation_catalog"]["Update"];
 
 // ============================================================================
 // FETCH ALL OBSERVATIONS
@@ -84,19 +88,22 @@ async function createObservation(
   input: CreateObservationInput
 ): Promise<ObservationCatalog> {
   const supabase = createClient();
+  const payload: ObservationInsert = {
+    obs_code: input.obs_code,
+    name_ru: input.name_ru,
+    name_en: input.name_en,
+    canonical_unit: input.canonical_unit,
+    synonyms_ru: input.synonyms_ru || [],
+    synonyms_en: input.synonyms_en || [],
+    accepted_units: (input.accepted_units || {}) as unknown as Json,
+    notes: input.notes || null,
+    default_ref_low: input.default_ref_low ?? null,
+    default_ref_high: input.default_ref_high ?? null,
+  };
 
   const { data, error } = await supabase
     .from("observation_catalog")
-    .insert({
-      obs_code: input.obs_code,
-      name_ru: input.name_ru,
-      name_en: input.name_en,
-      canonical_unit: input.canonical_unit,
-      synonyms_ru: input.synonyms_ru || [],
-      synonyms_en: input.synonyms_en || [],
-      accepted_units: input.accepted_units || {},
-      notes: input.notes || null,
-    })
+    .insert(payload)
     .select()
     .single();
 
@@ -131,10 +138,18 @@ async function updateObservation({
   updates: UpdateObservationInput;
 }): Promise<ObservationCatalog> {
   const supabase = createClient();
+  const { accepted_units, ...rest } = updates;
+  const payload: ObservationUpdate = {
+    ...rest,
+    accepted_units:
+      accepted_units === undefined
+        ? undefined
+        : (accepted_units as unknown as Json),
+  };
 
   const { data, error } = await supabase
     .from("observation_catalog")
-    .update(updates)
+    .update(payload)
     .eq("id", id)
     .select()
     .single();

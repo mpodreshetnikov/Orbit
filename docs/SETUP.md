@@ -27,11 +27,18 @@ Get anon key from local Supabase status output after stack is up (for one-off co
 
 1. For normal local sync, run `db-run` from `AGENTS.md` (non-destructive).
 2. If you need a clean rebuild, run `db-reset` from `AGENTS.md` (destructive).
+3. Regenerate generated DB artifacts with `db-artifacts-refresh` from `AGENTS.md`.
 
 Why `db-reset`:
 - Runs migrations from `supabase/migrations/`.
 - Runs idempotent DB deploy from `supabase/db/deploy.sql`.
 - Ensures local state matches the two-track DB delivery model.
+
+DB artifact note:
+- `supabase/db/schema.snapshot.sql` and `supabase/db/database.types.ts` are generated files.
+- `supabase/db/schema.snapshot.sql` is a table-only snapshot (table structure + constraints/indexes), not a full logical object dump.
+- Do not edit them by hand; use `db-artifacts-refresh`.
+- Canonical policy for generated DB artifacts is in `docs/QUALITY.md`.
 
 ## Notifications Cron
 

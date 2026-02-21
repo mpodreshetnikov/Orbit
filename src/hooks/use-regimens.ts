@@ -16,6 +16,43 @@ import type {
   RegimenInventory,
 } from "@/types/regimen";
 import type { MedicationUnit } from "@/types/medication";
+import type { Database, Json } from "@/types/database";
+
+type MedRegimenInsert = Database["public"]["Tables"]["med_regimens"]["Insert"];
+type MedRegimenUpdate = Database["public"]["Tables"]["med_regimens"]["Update"];
+type MedDoseEventInsert = Database["public"]["Tables"]["med_dose_events"]["Insert"];
+type MedRegimenStatus = Database["public"]["Enums"]["medication_status"];
+type MedIntakeAdviceType = Database["public"]["Enums"]["med_intake_advice_type"];
+
+const MED_INTAKE_ADVICE_TYPES: readonly MedIntakeAdviceType[] = [
+  "before_meal",
+  "with_meal",
+  "after_meal",
+  "before_bed",
+  "morning_fasting",
+  "custom",
+  "none",
+];
+
+function toJsonOrNull(value: unknown): Json | null {
+  return value == null ? null : (value as Json);
+}
+
+function toRpcOptionalString(value?: string | null): string | undefined {
+  if (value == null) return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeIntakeAdviceType(
+  value?: string | null
+): MedIntakeAdviceType | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return MED_INTAKE_ADVICE_TYPES.includes(value as MedIntakeAdviceType)
+    ? (value as MedIntakeAdviceType)
+    : null;
+}
 
 function rowToRegimen(row: Record<string, unknown>): MedRegimen {
   return {
@@ -70,7 +107,10 @@ function rowToInventoryTransaction(row: Record<string, unknown>): MedInventoryTr
 // REGIMENS
 // ============================================================================
 
-async function fetchRegimens(personId: string, status?: string | null): Promise<MedRegimen[]> {
+async function fetchRegimens(
+  personId: string,
+  status?: MedRegimenStatus | null
+): Promise<MedRegimen[]> {
   const supabase = createClient();
   let query = supabase
     .from("med_regimens")
@@ -86,7 +126,10 @@ async function fetchRegimens(personId: string, status?: string | null): Promise<
   return (data ?? []).map((row) => rowToRegimen(row));
 }
 
-export function useRegimens(personId: string | null, options?: { status?: string | null }) {
+export function useRegimens(
+  personId: string | null,
+  options?: { status?: MedRegimenStatus | null }
+) {
   return useQuery({
     queryKey: ["regimens", personId, options?.status],
     queryFn: () => fetchRegimens(personId!, options?.status ?? undefined),
@@ -245,10 +288,11 @@ async function markDoseTaken(
   takenAt?: string | null
 ): Promise<void> {
   const supabase = createClient();
-  const payload: { p_dose_event_id: string; p_note: string | null; p_taken_at?: string } = {
+  const payload: { p_dose_event_id: string; p_note?: string; p_taken_at?: string } = {
     p_dose_event_id: doseEventId,
-    p_note: note ?? null,
   };
+  const normalizedNote = toRpcOptionalString(note);
+  if (normalizedNote !== undefined) payload.p_note = normalizedNote;
   if (takenAt != null && takenAt !== "") payload.p_taken_at = takenAt;
   const { error } = await supabase.rpc("mark_dose_taken", payload);
   if (error) throw new Error(error.message);
@@ -279,10 +323,12 @@ export function useMarkDoseTaken() {
 
 async function markDoseSkipped(doseEventId: string, note?: string | null): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.rpc("mark_dose_skipped", {
+  const payload: { p_dose_event_id: string; p_note?: string } = {
     p_dose_event_id: doseEventId,
-    p_note: note ?? null,
-  });
+  };
+  const normalizedNote = toRpcOptionalString(note);
+  if (normalizedNote !== undefined) payload.p_note = normalizedNote;
+  const { error } = await supabase.rpc("mark_dose_skipped", payload);
   if (error) throw new Error(error.message);
 }
 
@@ -331,9 +377,9 @@ async function updateDoseEventResolutionDetails(
   const supabase = createClient();
   const { error } = await supabase.rpc("update_dose_event_resolution_details", {
     p_dose_event_id: doseEventId,
-    p_taken_at: params.takenAt ?? null,
-    p_amount_taken: params.amountTaken ?? null,
-    p_note: params.note ?? null,
+    p_taken_at: toRpcOptionalString(params.takenAt),
+    p_amount_taken: params.amountTaken ?? undefined,
+    p_note: toRpcOptionalString(params.note),
   });
   if (error) throw new Error(error.message);
 }
@@ -402,22 +448,23 @@ export function useSnoozeDose() {
 
 async function createRegimen(input: CreateMedRegimenInput): Promise<MedRegimen> {
   const supabase = createClient();
+  const payload: MedRegimenInsert = {
+    person_id: input.person_id,
+    custom_name: input.custom_name,
+    status: input.status ?? "active",
+    intake_unit: input.intake_unit ?? "pill",
+    dose_definition: toJsonOrNull(input.dose_definition),
+    intake_advice_type: normalizeIntakeAdviceType(input.intake_advice_type) ?? null,
+    intake_advice_text: input.intake_advice_text ?? null,
+    schedule: input.schedule as unknown as Json,
+    duration: input.duration as unknown as Json,
+    reminder_prefs: toJsonOrNull(input.reminder_prefs),
+    inventory: toJsonOrNull(input.inventory),
+    notes: input.notes ?? null,
+  };
   const { data, error } = await supabase
     .from("med_regimens")
-    .insert({
-      person_id: input.person_id,
-      custom_name: input.custom_name,
-      status: input.status ?? "active",
-      intake_unit: input.intake_unit ?? "pill",
-      dose_definition: input.dose_definition ?? null,
-      intake_advice_type: input.intake_advice_type ?? null,
-      intake_advice_text: input.intake_advice_text ?? null,
-      schedule: input.schedule,
-      duration: input.duration,
-      reminder_prefs: input.reminder_prefs ?? null,
-      inventory: input.inventory ?? null,
-      notes: input.notes ?? null,
-    })
+    .insert(payload)
     .select()
     .single();
   if (error) throw new Error(error.message);
@@ -452,24 +499,27 @@ async function addOneTimeDoseToRegimen(input: AddOneTimeDoseToRegimenInput): Pro
     intake: { amount: input.amount, unit: input.unit },
     active: [],
   };
+  const eventPayload: MedDoseEventInsert = {
+    person_id: input.person_id,
+    regimen_id: input.regimen_id,
+    scheduled_at: input.scheduled_at,
+    actual_at: input.scheduled_at,
+    planned_intake: plannedIntake as unknown as Json,
+    status: "scheduled",
+  };
   const { data: event, error: insertError } = await supabase
     .from("med_dose_events")
-    .insert({
-      person_id: input.person_id,
-      regimen_id: input.regimen_id,
-      scheduled_at: input.scheduled_at,
-      actual_at: input.scheduled_at,
-      planned_intake: plannedIntake,
-      status: "scheduled",
-    })
+    .insert(eventPayload)
     .select("id")
     .single();
   if (insertError) throw new Error(insertError.message);
   if (!event?.id) throw new Error("Failed to create dose event");
-  const { error: markError } = await supabase.rpc("mark_dose_taken", {
+  const markPayload: { p_dose_event_id: string; p_note?: string } = {
     p_dose_event_id: event.id,
-    p_note: input.notes ?? null,
-  });
+  };
+  const normalizedNote = toRpcOptionalString(input.notes);
+  if (normalizedNote !== undefined) markPayload.p_note = normalizedNote;
+  const { error: markError } = await supabase.rpc("mark_dose_taken", markPayload);
   if (markError) throw new Error(markError.message);
 }
 
@@ -495,9 +545,36 @@ async function updateRegimen({
   updates: UpdateMedRegimenInput;
 }): Promise<MedRegimen> {
   const supabase = createClient();
+  const {
+    dose_definition,
+    schedule,
+    duration,
+    reminder_prefs,
+    inventory,
+    intake_advice_type,
+    ...rest
+  } = updates;
+  const payload: MedRegimenUpdate = {
+    ...rest,
+    intake_advice_type: normalizeIntakeAdviceType(intake_advice_type),
+    dose_definition:
+      dose_definition === undefined
+        ? undefined
+        : toJsonOrNull(dose_definition),
+    schedule: schedule === undefined ? undefined : (schedule as unknown as Json),
+    duration: duration === undefined ? undefined : (duration as unknown as Json),
+    reminder_prefs:
+      reminder_prefs === undefined
+        ? undefined
+        : toJsonOrNull(reminder_prefs),
+    inventory:
+      inventory === undefined
+        ? undefined
+        : toJsonOrNull(inventory),
+  };
   const { data, error } = await supabase
     .from("med_regimens")
-    .update(updates)
+    .update(payload)
     .eq("id", id)
     .select()
     .single();
@@ -591,7 +668,7 @@ async function updateRegimenInventory(
     p_regimen_id: regimenId,
     p_type: type,
     p_amount: amount,
-    p_note: note ?? null,
+    p_note: toRpcOptionalString(note),
   });
   if (error) throw new Error(error.message);
 }

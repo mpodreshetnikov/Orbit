@@ -24,6 +24,7 @@ browserExtension/dist
 # misc
 .DS_Store
 *.pem
+.temp
 
 # debug
 npm-debug.log*

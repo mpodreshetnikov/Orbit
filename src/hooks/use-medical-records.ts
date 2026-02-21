@@ -12,6 +12,9 @@ import type {
   RecordAttachment,
   RecordStatus,
 } from "@/types";
+import type { Database, Json } from "@/types/database";
+
+type MedicalRecordUpdate = Database["public"]["Tables"]["medical_records"]["Update"];
 
 // ============================================================================
 // FETCH RECORDS LIST (using RPC for full-text search)
@@ -35,16 +38,15 @@ async function fetchMedicalRecords(
   const supabase = createClient();
 
   // Map the status filter to actual database statuses
-  const statuses = filters.status 
+  const statuses = filters.status
     ? STATUS_GROUP_MAP[filters.status] || [filters.status]
-    : null;
+    : undefined;
 
   // Use the search_medical_records RPC function for proper FTS with ranking
   const { data, error } = await supabase.rpc("search_medical_records", {
-    search_query: filters.search?.trim() || null,
-    p_person_id: filters.person_id || null,
-    p_record_type: filters.record_type || null,
-    p_status: null, // Use p_statuses instead for multi-status support
+    search_query: filters.search?.trim() || undefined,
+    p_person_id: filters.person_id || undefined,
+    p_record_type: filters.record_type || undefined,
     p_limit: 50,
     p_offset: 0,
     p_statuses: statuses,
@@ -166,10 +168,21 @@ async function updateMedicalRecord({
   updates: UpdateMedicalRecordInput;
 }): Promise<MedicalRecord> {
   const supabase = createClient();
+  const {
+    llm_suggested_checkup_completions,
+    ...rest
+  } = updates;
+  const payload: MedicalRecordUpdate = {
+    ...rest,
+    llm_suggested_checkup_completions:
+      llm_suggested_checkup_completions === undefined
+        ? undefined
+        : (llm_suggested_checkup_completions as unknown as Json),
+  };
 
   const { data, error } = await supabase
     .from("medical_records")
-    .update(updates)
+    .update(payload)
     .eq("id", id)
     .select()
     .single();

@@ -1,6 +1,7 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
-import { encodeBase64 } from "https://deno.land/std@0.220.0/encoding/base64.ts";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { encodeBase64 } from "std/encoding/base64";
 import { corsHeaders } from "../_shared/cors.ts";
+import type { Database } from "../_shared/database.types.ts";
 
 /**
  * health-ocr: Vision LLM function for OCR text extraction only
@@ -40,7 +41,7 @@ interface OcrResult {
 
 // Download one attachment and convert to base64 data URL (single image in memory)
 async function downloadOneDataUrl(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<Database>,
   attachment: Attachment
 ): Promise<{ url: string; mimeType: string } | null> {
   const { data, error } = await supabase.storage
@@ -155,7 +156,7 @@ async function callVisionOcrSingle(
     };
   } catch (e) {
     clearTimeout(timeoutId);
-    if (e?.name === "AbortError") {
+    if ((e as { name?: string })?.name === "AbortError") {
       throw new Error("OpenRouter request timed out");
     }
     throw e;
@@ -185,7 +186,7 @@ Deno.serve(async (req) => {
 
     const token = authHeader.replace("Bearer ", "");
 
-    const supabaseClient = createClient(
+    const supabaseClient = createClient<Database>(
       SUPABASE_URL,
       SUPABASE_ANON_KEY || SUPABASE_SERVICE_ROLE_KEY,
       {
@@ -206,7 +207,7 @@ Deno.serve(async (req) => {
       throw new Error("Unauthorized - invalid token");
     }
 
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    const supabaseAdmin = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
@@ -323,7 +324,7 @@ Deno.serve(async (req) => {
 
     if (recordId) {
       try {
-        const supabaseAdmin = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
+        const supabaseAdmin = createClient<Database>(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
           auth: { autoRefreshToken: false, persistSession: false },
         });
         await supabaseAdmin

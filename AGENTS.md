@@ -18,6 +18,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `types`: `just quality-typecheck`
 - `db-run`: `just supabase-local-migrate-and-deploy` (non-destructive; use for normal day-to-day local sync)
 - `db-reset`: `just supabase-local-reset-and-deploy` (destructive; use when schema/seed drift needs a clean rebuild)
+- `db-artifacts-refresh`: `just supabase-local-artifacts-refresh` (regenerate generated DB schema snapshot and TS DB types from reset local DB)
+- `db-artifacts-verify`: `just supabase-local-artifacts-verify` (regenerate generated DB artifacts and fail on drift)
 - `build-local`: `just build-local-all`
 - `ci`: `just ci-verify-local`
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)

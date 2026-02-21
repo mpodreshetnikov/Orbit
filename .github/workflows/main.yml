@@ -23,8 +23,22 @@ jobs:
       - name: Run secret preflight
         run: just secrets-preflight-range "${{ github.event.before }}" "${{ github.sha }}"
 
+  db-artifacts-clean-check:
+    name: DB Artifacts Clean Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@just
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify generated DB artifacts
+        run: just supabase-local-artifacts-verify
+
   deploy-vercel-production:
-    needs: secrets-scan
+    needs: [secrets-scan, db-artifacts-clean-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -48,7 +62,7 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
-    needs: secrets-scan
+    needs: [secrets-scan, db-artifacts-clean-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production

@@ -1,6 +1,7 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
-import webpush from "https://esm.sh/web-push@3.6.7";
+import { createClient } from "@supabase/supabase-js";
+import webpush from "web-push";
 import { corsHeaders } from "../_shared/cors.ts";
+import type { Database } from "../_shared/database.types.ts";
 
 /**
  * notifications-cron: Shared hourly cron for all notification types.
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const now = new Date();
 
   const { data: subs } = await supabase.from("push_subscriptions").select("auth_user_id");
@@ -417,7 +418,7 @@ Deno.serve(async (req) => {
     };
 
     for (const provider of NOTIFICATION_PROVIDERS_EVERY_TICK) {
-      const { data: payloadRows } = await supabase.rpc(provider.rpc, {
+      const { data: payloadRows } = await supabase.rpc(provider.rpc as keyof Database["public"]["Functions"], {
         p_auth_user_id: authUserId,
         p_now_timestamptz: now.toISOString(),
         p_timezone: tz ?? null,
@@ -431,7 +432,7 @@ Deno.serve(async (req) => {
         : now.toISOString().slice(0, 10);
       for (const provider of NOTIFICATION_PROVIDERS_IN_WINDOW) {
         for (const person of routedPersonRows) {
-          const { data: payloadRows } = await supabase.rpc(provider.rpc, {
+          const { data: payloadRows } = await supabase.rpc(provider.rpc as keyof Database["public"]["Functions"], {
             p_person_id: person.person_id,
             p_date: dateStr,
             p_notification_time: timeStr,

@@ -17,7 +17,6 @@ export * from "./use-record-findings";
 export * from "./use-finding-history";
 export * from "./use-conditions";
 export * from "./use-checkups";
-export * from "./use-medications";
 export * from "./use-regimens";
 export * from "./use-user-preferences";
 export * from "./use-push-subscribe";
