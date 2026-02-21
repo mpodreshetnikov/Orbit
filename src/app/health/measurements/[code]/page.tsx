@@ -46,13 +46,13 @@ import { AddMeasurementDialog } from "@/components/measurements/add-measurement-
 import { EditMeasurementDialog } from "@/components/measurements/edit-measurement-dialog";
 
 // Custom tooltip for chart
-function CustomTooltip({ 
-  active, 
-  payload, 
+function CustomTooltip({
+  active,
+  payload,
   label,
   unit,
-}: { 
-  active?: boolean; 
+}: {
+  active?: boolean;
   payload?: { value: number }[];
   label?: string;
   unit?: string;
@@ -73,18 +73,18 @@ function CustomTooltip({
 }
 
 // Main chart component
-function MeasurementChart({ 
-  history, 
+function MeasurementChart({
+  history,
   unit,
   dateLocale,
-}: { 
+}: {
   history: MeasurementHistoryPoint[];
   unit?: string;
   dateLocale: Locale;
 }) {
   const chartData = history
-    .filter(h => h.value !== null)
-    .map(h => ({
+    .filter((h) => h.value !== null)
+    .map((h) => ({
       date: format(new Date(h.measured_at), "dd.MM.yy", { locale: dateLocale }),
       value: h.value,
     }));
@@ -98,7 +98,7 @@ function MeasurementChart({
   }
 
   // Calculate Y axis domain
-  const values = chartData.map(d => d.value);
+  const values = chartData.map((d) => d.value);
   const minVal = Math.min(...values);
   const maxVal = Math.max(...values);
   const padding = (maxVal - minVal) * 0.1 || 1;
@@ -113,13 +113,8 @@ function MeasurementChart({
       <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={208}>
         <LineChart data={chartData} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis 
-            dataKey="date" 
-            tick={{ fontSize: 11 }}
-            tickLine={false}
-            axisLine={false}
-          />
-          <YAxis 
+          <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+          <YAxis
             domain={[yMin, yMax]}
             tick={{ fontSize: 11 }}
             tickLine={false}
@@ -128,9 +123,9 @@ function MeasurementChart({
             tickFormatter={(v) => v.toFixed(v % 1 === 0 ? 0 : 1)}
           />
           <Tooltip content={<CustomTooltip unit={unit} />} />
-          <Line 
-            type="monotone" 
-            dataKey="value" 
+          <Line
+            type="monotone"
+            dataKey="value"
             stroke="hsl(var(--primary))"
             strokeWidth={2}
             dot={{ fill: "hsl(var(--primary))", strokeWidth: 2, r: 4 }}
@@ -143,13 +138,13 @@ function MeasurementChart({
 }
 
 // History table
-function HistoryTable({ 
-  history, 
+function HistoryTable({
+  history,
   unit,
   dateLocale,
   onEdit,
   onDelete,
-}: { 
+}: {
   history: MeasurementHistoryPoint[];
   unit?: string;
   dateLocale: Locale;
@@ -180,16 +175,16 @@ function HistoryTable({
               <td className="p-2 sm:p-3 whitespace-nowrap">
                 <div className="flex items-center gap-1.5 sm:gap-2">
                   <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                  {format(new Date(point.measured_at), "dd MMM yyyy, HH:mm", { locale: dateLocale })}
+                  {format(new Date(point.measured_at), "dd MMM yyyy, HH:mm", {
+                    locale: dateLocale,
+                  })}
                 </div>
               </td>
               <td className="p-2 sm:p-3 text-right whitespace-nowrap">
                 <span className="font-mono font-semibold">
                   {point.value.toFixed(point.value % 1 === 0 ? 0 : 2)}
                 </span>
-                {unit && (
-                  <span className="text-muted-foreground ml-1">{unit}</span>
-                )}
+                {unit && <span className="text-muted-foreground ml-1">{unit}</span>}
               </td>
               <td className="p-2 sm:p-3 text-muted-foreground max-w-xs truncate">
                 {point.notes || "—"}
@@ -222,11 +217,7 @@ function HistoryTable({
   );
 }
 
-export default function MeasurementDetailPage({ 
-  params 
-}: { 
-  params: Promise<{ code: string }> 
-}) {
+export default function MeasurementDetailPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
   const decodedCode = decodeURIComponent(code);
   const t = useTranslations();
@@ -246,33 +237,30 @@ export default function MeasurementDetailPage({
     setLocale(htmlLang);
   }, []);
 
-  const { data: measurement, isLoading, error } = useSingleMeasurementHistory(
-    selectedPersonId,
-    decodedCode
-  );
+  const {
+    data: measurement,
+    isLoading,
+    error,
+  } = useSingleMeasurementHistory(selectedPersonId, decodedCode);
 
   const deleteMutation = useDeleteMeasurement();
 
-  const displayName = locale === "ru" 
-    ? measurement?.name_ru 
-    : measurement?.name_en;
-  const displayUnit = locale === "ru" 
-    ? measurement?.unit_ru 
-    : measurement?.unit_en;
+  const displayName = locale === "ru" ? measurement?.name_ru : measurement?.name_en;
+  const displayUnit = locale === "ru" ? measurement?.unit_ru : measurement?.unit_en;
 
   // Calculate trend
   const trend = useMemo(() => {
     if (!measurement || measurement.history.length < 2) return null;
-    
-    const values = measurement.history.map(h => h.value);
+
+    const values = measurement.history.map((h) => h.value);
     const latest = values[values.length - 1];
     const previous = values[values.length - 2];
     const diff = ((latest - previous) / previous) * 100;
-    
+
     if (Math.abs(diff) < 1) return { direction: "stable" as const, percent: 0 };
-    return { 
-      direction: diff > 0 ? "up" as const : "down" as const, 
-      percent: Math.abs(diff) 
+    return {
+      direction: diff > 0 ? ("up" as const) : ("down" as const),
+      percent: Math.abs(diff),
     };
   }, [measurement]);
 
@@ -288,7 +276,7 @@ export default function MeasurementDetailPage({
 
   const handleDeleteConfirm = async () => {
     if (!deletingPoint || !selectedPersonId) return;
-    
+
     try {
       await deleteMutation.mutateAsync({
         id: deletingPoint.id,
@@ -306,17 +294,30 @@ export default function MeasurementDetailPage({
       <div className="space-y-3 sm:space-y-6">
         {/* Header */}
         <div className="flex items-start gap-2 sm:gap-4">
-          <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-10 sm:w-10 shrink-0" onClick={() => router.back()}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
+            onClick={() => router.back()}
+          >
             <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-0.5">
               <Ruler className="h-4 w-4 sm:h-5 sm:w-5 text-primary shrink-0" />
-              <Badge variant="outline" className="text-xs">{decodedCode}</Badge>
+              <Badge variant="outline" className="text-xs">
+                {decodedCode}
+              </Badge>
             </div>
-            <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">{displayName || decodedCode}</h1>
+            <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">
+              {displayName || decodedCode}
+            </h1>
           </div>
-          <Button onClick={() => setAddDialogOpen(true)} size="sm" className="gap-1 shrink-0 h-8 sm:h-9 text-xs sm:text-sm">
+          <Button
+            onClick={() => setAddDialogOpen(true)}
+            size="sm"
+            className="gap-1 shrink-0 h-8 sm:h-9 text-xs sm:text-sm"
+          >
             <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             <span className="hidden sm:inline">{t("measurements.addMeasurement")}</span>
           </Button>
@@ -343,7 +344,9 @@ export default function MeasurementDetailPage({
           <Card>
             <CardContent className="py-6 sm:py-12 text-center">
               <Ruler className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 text-muted-foreground opacity-50" />
-              <p className="text-sm sm:text-base text-muted-foreground">{t("measurements.noData")}</p>
+              <p className="text-sm sm:text-base text-muted-foreground">
+                {t("measurements.noData")}
+              </p>
             </CardContent>
           </Card>
         )}
@@ -363,17 +366,19 @@ export default function MeasurementDetailPage({
                 <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                   <div className="flex items-baseline gap-1 sm:gap-2 flex-wrap">
                     <span className="text-xl sm:text-3xl font-bold">
-                      {measurement.latest_value.toFixed(
-                        measurement.latest_value % 1 === 0 ? 0 : 1
-                      )}
+                      {measurement.latest_value.toFixed(measurement.latest_value % 1 === 0 ? 0 : 1)}
                     </span>
                     {displayUnit && (
-                      <span className="text-muted-foreground text-sm sm:text-base">{displayUnit}</span>
+                      <span className="text-muted-foreground text-sm sm:text-base">
+                        {displayUnit}
+                      </span>
                     )}
                   </div>
                   {measurement.latest_date && (
                     <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                      {format(new Date(measurement.latest_date), "dd MMM yyyy", { locale: dateLocale })}
+                      {format(new Date(measurement.latest_date), "dd MMM yyyy", {
+                        locale: dateLocale,
+                      })}
                     </p>
                   )}
                 </CardContent>
@@ -406,7 +411,9 @@ export default function MeasurementDetailPage({
                         </>
                       )}
                       {trend.direction === "stable" && (
-                        <span className="text-muted-foreground text-sm sm:text-base">{t("measurements.stable")}</span>
+                        <span className="text-muted-foreground text-sm sm:text-base">
+                          {t("measurements.stable")}
+                        </span>
                       )}
                     </div>
                   ) : (
@@ -448,10 +455,12 @@ export default function MeasurementDetailPage({
             {measurement.history.length > 0 && (
               <Card>
                 <CardHeader className="p-3 sm:p-6">
-                  <CardTitle className="text-sm sm:text-base">{t("measurements.chartTitle")}</CardTitle>
+                  <CardTitle className="text-sm sm:text-base">
+                    {t("measurements.chartTitle")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="p-3 sm:p-6 pt-0">
-                  <MeasurementChart 
+                  <MeasurementChart
                     history={measurement.history}
                     unit={displayUnit}
                     dateLocale={dateLocale}
@@ -464,12 +473,14 @@ export default function MeasurementDetailPage({
             {measurement.history.length > 0 && (
               <Card>
                 <CardHeader className="p-3 sm:p-6">
-                  <CardTitle className="text-sm sm:text-base">{t("measurements.historyTitle")}</CardTitle>
+                  <CardTitle className="text-sm sm:text-base">
+                    {t("measurements.historyTitle")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 sm:p-6 pt-0">
                   <div className="overflow-x-auto">
-                    <HistoryTable 
-                      history={measurement.history} 
+                    <HistoryTable
+                      history={measurement.history}
                       unit={displayUnit}
                       dateLocale={dateLocale}
                       onEdit={handleEdit}
@@ -485,8 +496,15 @@ export default function MeasurementDetailPage({
               <Card>
                 <CardContent className="py-6 sm:py-12 text-center">
                   <Ruler className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 text-muted-foreground opacity-50" />
-                  <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">{t("measurements.noData")}</p>
-                  <Button onClick={() => setAddDialogOpen(true)} variant="outline" size="sm" className="gap-1.5">
+                  <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">
+                    {t("measurements.noData")}
+                  </p>
+                  <Button
+                    onClick={() => setAddDialogOpen(true)}
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                  >
                     <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     {t("measurements.addFirst")}
                   </Button>
@@ -498,8 +516,8 @@ export default function MeasurementDetailPage({
       </div>
 
       {/* Add Measurement Dialog */}
-      <AddMeasurementDialog 
-        open={addDialogOpen} 
+      <AddMeasurementDialog
+        open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
         personId={selectedPersonId}
         preselectedCode={decodedCode}
@@ -519,9 +537,7 @@ export default function MeasurementDetailPage({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("measurements.deleteTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("measurements.deleteMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("measurements.deleteMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

@@ -2,11 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import type {
-  MoneyCategory,
-  CreateMoneyCategoryInput,
-  UpdateMoneyCategoryInput,
-} from "@/types";
+import type { MoneyCategory, CreateMoneyCategoryInput, UpdateMoneyCategoryInput } from "@/types";
 
 export interface MoneyCategoryTreeNode extends MoneyCategory {
   children: MoneyCategoryTreeNode[];
@@ -19,9 +15,7 @@ export function sortMoneyCategories(categories: MoneyCategory[]): MoneyCategory[
   });
 }
 
-export function buildMoneyCategoryTree(
-  categories: MoneyCategory[]
-): MoneyCategoryTreeNode[] {
+export function buildMoneyCategoryTree(categories: MoneyCategory[]): MoneyCategoryTreeNode[] {
   const nodes = new Map<string, MoneyCategoryTreeNode>();
   categories.forEach((c) => nodes.set(c.id, { ...c, children: [] }));
 
@@ -46,9 +40,7 @@ export function buildMoneyCategoryTree(
   return roots;
 }
 
-export function flattenMoneyCategoryTree(
-  nodes: MoneyCategoryTreeNode[]
-): MoneyCategoryTreeNode[] {
+export function flattenMoneyCategoryTree(nodes: MoneyCategoryTreeNode[]): MoneyCategoryTreeNode[] {
   const result: MoneyCategoryTreeNode[] = [];
   const walk = (list: MoneyCategoryTreeNode[]) => {
     list.forEach((node) => {
@@ -79,9 +71,7 @@ export function useMoneyCategories() {
   });
 }
 
-async function createMoneyCategory(
-  input: CreateMoneyCategoryInput
-): Promise<MoneyCategory> {
+async function createMoneyCategory(input: CreateMoneyCategoryInput): Promise<MoneyCategory> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("money_categories")
@@ -140,10 +130,7 @@ export function useUpdateMoneyCategory() {
 
 async function deleteMoneyCategory(id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase
-    .from("money_categories")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("money_categories").delete().eq("id", id);
 
   if (error) throw new Error(error.message);
 }

@@ -4,14 +4,7 @@ import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import Link from "next/link";
 import { useDateFnsLocale } from "@/lib/date-locale";
-import { 
-  AlertCircle, 
-  CheckCircle2, 
-  HelpCircle, 
-  History, 
-  Calendar, 
-  FileText,
-} from "lucide-react";
+import { AlertCircle, CheckCircle2, HelpCircle, History, Calendar, FileText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -36,10 +29,12 @@ function StatusIcon({ status }: { status: ConditionStatus }) {
 // Status badge
 function StatusBadge({ status }: { status: ConditionStatus }) {
   const t = useTranslations();
-  
+
   const config: Record<ConditionStatus, { color: string }> = {
     active: { color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20" },
-    suspected: { color: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20" },
+    suspected: {
+      color: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20",
+    },
     resolved: { color: "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20" },
     history: { color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20" },
   };
@@ -63,14 +58,14 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
   const isHistory = condition.current_status === "history";
 
   const cardContent = (
-    <Card 
+    <Card
       className={cn(
         "hover:shadow-md transition-shadow h-full min-w-0 w-full overflow-hidden",
         (onClick || true) && "tap-target cursor-pointer select-none",
         isActive && "border-orange-300 dark:border-orange-700",
         isSuspected && "border-yellow-300 dark:border-yellow-700",
         isResolved && "border-green-300 dark:border-green-700",
-        isHistory && "opacity-70"
+        isHistory && "opacity-70",
       )}
       onClick={onClick}
     >
@@ -109,7 +104,8 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <Calendar className="h-3 w-3 shrink-0" />
               <span>
-                {t("conditions.onset")}: {format(new Date(condition.onset_date), "dd.MM.yyyy", { locale: dateLocale })}
+                {t("conditions.onset")}:{" "}
+                {format(new Date(condition.onset_date), "dd.MM.yyyy", { locale: dateLocale })}
               </span>
             </div>
           )}
@@ -117,7 +113,8 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <CheckCircle2 className="h-3 w-3 shrink-0 text-green-500" />
               <span>
-                {t("conditions.resolvedOn")}: {format(new Date(condition.resolved_date), "dd.MM.yyyy", { locale: dateLocale })}
+                {t("conditions.resolvedOn")}:{" "}
+                {format(new Date(condition.resolved_date), "dd.MM.yyyy", { locale: dateLocale })}
               </span>
             </div>
           )}
@@ -125,9 +122,7 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
 
         {/* Notes preview */}
         {condition.notes && (
-          <p className="mt-2 text-sm text-muted-foreground line-clamp-2">
-            {condition.notes}
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground line-clamp-2">{condition.notes}</p>
         )}
 
         {/* Footer: mention count and dates */}
@@ -138,14 +133,22 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
               {condition.mention_count} {t("conditions.mentions")}
             </span>
           </div>
-          
+
           {condition.first_mentioned_date && (
             <div className="flex items-center gap-1">
               <span>
-                {format(new Date(condition.first_mentioned_date), "MM.yyyy", { locale: dateLocale })}
-                {condition.last_mentioned_date && 
+                {format(new Date(condition.first_mentioned_date), "MM.yyyy", {
+                  locale: dateLocale,
+                })}
+                {condition.last_mentioned_date &&
                   condition.first_mentioned_date !== condition.last_mentioned_date && (
-                    <> — {format(new Date(condition.last_mentioned_date), "MM.yyyy", { locale: dateLocale })}</>
+                    <>
+                      {" "}
+                      —{" "}
+                      {format(new Date(condition.last_mentioned_date), "MM.yyyy", {
+                        locale: dateLocale,
+                      })}
+                    </>
                   )}
               </span>
             </div>
@@ -156,9 +159,5 @@ export function ConditionCard({ condition, onClick }: ConditionCardProps) {
   );
 
   // Wrap in Link to condition detail page
-  return (
-    <Link href={`/health/conditions/${condition.id}`}>
-      {cardContent}
-    </Link>
-  );
+  return <Link href={`/health/conditions/${condition.id}`}>{cardContent}</Link>;
 }

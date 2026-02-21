@@ -12,9 +12,7 @@ import type {
 // ============================================================================
 // FETCH FINDINGS FOR A RECORD (with catalog details)
 // ============================================================================
-async function fetchRecordFindings(
-  recordId: string
-): Promise<RecordFindingWithCatalog[]> {
+async function fetchRecordFindings(recordId: string): Promise<RecordFindingWithCatalog[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase.rpc("get_record_findings", {
@@ -39,16 +37,10 @@ export function useRecordFindings(recordId: string | null) {
 // ============================================================================
 // CREATE FINDING
 // ============================================================================
-async function createFinding(
-  input: CreateRecordFindingInput
-): Promise<RecordFinding> {
+async function createFinding(input: CreateRecordFindingInput): Promise<RecordFinding> {
   const supabase = createClient();
 
-  const { data, error } = await supabase
-    .from("record_findings")
-    .insert(input)
-    .select()
-    .single();
+  const { data, error } = await supabase.from("record_findings").insert(input).select().single();
 
   if (error) {
     throw new Error(error.message);
@@ -76,17 +68,12 @@ export function useCreateRecordFinding() {
 // ============================================================================
 // CREATE MULTIPLE FINDINGS (batch insert)
 // ============================================================================
-async function createFindings(
-  inputs: CreateRecordFindingInput[]
-): Promise<RecordFinding[]> {
+async function createFindings(inputs: CreateRecordFindingInput[]): Promise<RecordFinding[]> {
   if (inputs.length === 0) return [];
 
   const supabase = createClient();
 
-  const { data, error } = await supabase
-    .from("record_findings")
-    .insert(inputs)
-    .select();
+  const { data, error } = await supabase.from("record_findings").insert(inputs).select();
 
   if (error) {
     throw new Error(error.message);
@@ -168,18 +155,10 @@ export function useUpdateRecordFinding() {
 // ============================================================================
 // DELETE FINDING
 // ============================================================================
-async function deleteFinding({
-  id,
-}: {
-  id: string;
-  recordId: string;
-}): Promise<void> {
+async function deleteFinding({ id }: { id: string; recordId: string }): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("record_findings")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("record_findings").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);
@@ -208,10 +187,7 @@ export function useDeleteRecordFinding() {
 async function deleteAllFindings(recordId: string): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("record_findings")
-    .delete()
-    .eq("record_id", recordId);
+  const { error } = await supabase.from("record_findings").delete().eq("record_id", recordId);
 
   if (error) {
     throw new Error(error.message);

@@ -41,7 +41,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useConditionDetail, useUpdateCondition, useDeleteCondition, useIcdLookup, useMedicalRecords, useCheckupsForCondition } from "@/hooks";
+import {
+  useConditionDetail,
+  useUpdateCondition,
+  useDeleteCondition,
+  useIcdLookup,
+  useMedicalRecords,
+  useCheckupsForCondition,
+} from "@/hooks";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
@@ -67,9 +74,9 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const deleteConditionMutation = useDeleteCondition();
   const { data: linkedCheckups } = useCheckupsForCondition(conditionId);
   const { data: personRecords } = useMedicalRecords(
-    condition?.person_id ? { person_id: condition.person_id } : {}
+    condition?.person_id ? { person_id: condition.person_id } : {},
   );
-  
+
   // Edit dialog state (base info only; use Add to history for status)
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState("");
@@ -77,12 +84,12 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const [editNotes, setEditNotes] = useState("");
   const [addHistoryOpen, setAddHistoryOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  
+
   // ICD validation (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
-    editCode.length >= 2 ? editCode : null
+    editCode.length >= 2 ? editCode : null,
   );
-  
+
   const openEditDialog = () => {
     if (condition) {
       setEditName(condition.name);
@@ -91,10 +98,10 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
       setIsEditing(true);
     }
   };
-  
+
   const handleSaveEdit = async () => {
     if (!condition) return;
-    
+
     await updateConditionMutation.mutateAsync({
       id: condition.id,
       updates: {
@@ -104,10 +111,10 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
         notes: editNotes.trim() || null,
       },
     });
-    
+
     setIsEditing(false);
   };
-  
+
   // Generate Google search URL for ICD code lookup
   const getGoogleSearchUrl = (conditionName: string) => {
     const searchQuery = encodeURIComponent(`${conditionName} ICD-10 code`);
@@ -145,13 +152,20 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   if (error || !condition) {
     return (
       <div className="space-y-3 sm:space-y-6">
-        <Button variant="ghost" size="sm" className="h-8 sm:h-9 gap-1.5" onClick={() => router.back()}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 sm:h-9 gap-1.5"
+          onClick={() => router.back()}
+        >
           <ArrowLeft className="h-4 w-4 shrink-0" />
           <span className="hidden sm:inline">{t("common.back")}</span>
         </Button>
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 sm:p-8 text-center">
           <HeartPulse className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 text-destructive opacity-50" />
-          <p className="text-destructive font-medium text-sm sm:text-base">{t("conditions.conditionNotFound")}</p>
+          <p className="text-destructive font-medium text-sm sm:text-base">
+            {t("conditions.conditionNotFound")}
+          </p>
         </div>
       </div>
     );
@@ -162,23 +176,43 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-2 sm:gap-3 min-w-0 flex-1">
-          <Button variant="ghost" size="icon" className="h-9 w-9 sm:h-10 sm:w-10 shrink-0" onClick={() => router.back()}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
+            onClick={() => router.back()}
+          >
             <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap mb-0.5">
-              <StatusIcon status={condition.current_status} className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
+              <StatusIcon
+                status={condition.current_status}
+                className="h-4 w-4 sm:h-5 sm:w-5 shrink-0"
+              />
               <ConditionStatusBadge status={condition.current_status} />
             </div>
-            <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">{condition.name}</h1>
+            <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">
+              {condition.name}
+            </h1>
           </div>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0">
-          <Button variant="outline" size="sm" className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5" onClick={() => setAddHistoryOpen(true)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5"
+            onClick={() => setAddHistoryOpen(true)}
+          >
             <History className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
             <span className="hidden sm:inline">{t("conditions.addToHistory")}</span>
           </Button>
-          <Button variant="outline" size="sm" className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5" onClick={openEditDialog}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5"
+            onClick={openEditDialog}
+          >
             <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
             <span className="hidden sm:inline">{t("common.edit")}</span>
           </Button>
@@ -221,8 +255,12 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
             )}
             {condition.icd_name_en && (
               <div>
-                <span className="text-xs sm:text-sm text-muted-foreground">{t("conditions.icdOfficialName")}:</span>
-                <p className="mt-0.5 sm:mt-1 font-medium text-sm sm:text-base">{condition.icd_name_en}</p>
+                <span className="text-xs sm:text-sm text-muted-foreground">
+                  {t("conditions.icdOfficialName")}:
+                </span>
+                <p className="mt-0.5 sm:mt-1 font-medium text-sm sm:text-base">
+                  {condition.icd_name_en}
+                </p>
               </div>
             )}
           </CardContent>
@@ -237,10 +275,12 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
         <CardContent className="p-3 sm:p-6 pt-0 space-y-3 sm:space-y-4">
           {/* Status */}
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs sm:text-sm text-muted-foreground">{t("conditions.currentStatus")}</span>
+            <span className="text-xs sm:text-sm text-muted-foreground">
+              {t("conditions.currentStatus")}
+            </span>
             <ConditionStatusBadge status={condition.current_status} />
           </div>
-          
+
           <Separator />
 
           {/* Timeline dates - only show if at least one date is set */}
@@ -249,19 +289,31 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
               <div className="grid gap-2 sm:gap-3 sm:grid-cols-2">
                 {condition.onset_date && (
                   <div>
-                    <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.onsetDate")}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground block">
+                      {t("conditions.onsetDate")}
+                    </span>
                     <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1 text-sm">
                       <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                      <span>{format(new Date(condition.onset_date), "dd MMM yyyy", { locale: dateLocale })}</span>
+                      <span>
+                        {format(new Date(condition.onset_date), "dd MMM yyyy", {
+                          locale: dateLocale,
+                        })}
+                      </span>
                     </div>
                   </div>
                 )}
                 {condition.resolved_date && (
                   <div>
-                    <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.resolvedDate")}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground block">
+                      {t("conditions.resolvedDate")}
+                    </span>
                     <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1 text-sm">
                       <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                      <span>{format(new Date(condition.resolved_date), "dd MMM yyyy", { locale: dateLocale })}</span>
+                      <span>
+                        {format(new Date(condition.resolved_date), "dd MMM yyyy", {
+                          locale: dateLocale,
+                        })}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -273,28 +325,41 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
           {/* Mention stats */}
           <div className="flex flex-wrap gap-3 sm:gap-4">
             <div>
-              <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.mentions")}</span>
+              <span className="text-xs sm:text-sm text-muted-foreground block">
+                {t("conditions.mentions")}
+              </span>
               <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1">
                 <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-                <span className="font-semibold text-sm sm:text-base">{condition.mention_count}</span>
+                <span className="font-semibold text-sm sm:text-base">
+                  {condition.mention_count}
+                </span>
               </div>
             </div>
             {condition.first_mentioned_date && (
               <div>
-                <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.firstMentioned")}</span>
+                <span className="text-xs sm:text-sm text-muted-foreground block">
+                  {t("conditions.firstMentioned")}
+                </span>
                 <span className="text-xs sm:text-sm">
-                  {format(new Date(condition.first_mentioned_date), "dd.MM.yyyy", { locale: dateLocale })}
+                  {format(new Date(condition.first_mentioned_date), "dd.MM.yyyy", {
+                    locale: dateLocale,
+                  })}
                 </span>
               </div>
             )}
-            {condition.last_mentioned_date && condition.last_mentioned_date !== condition.first_mentioned_date && (
-              <div>
-                <span className="text-xs sm:text-sm text-muted-foreground block">{t("conditions.lastMentioned")}</span>
-                <span className="text-xs sm:text-sm">
-                  {format(new Date(condition.last_mentioned_date), "dd.MM.yyyy", { locale: dateLocale })}
-                </span>
-              </div>
-            )}
+            {condition.last_mentioned_date &&
+              condition.last_mentioned_date !== condition.first_mentioned_date && (
+                <div>
+                  <span className="text-xs sm:text-sm text-muted-foreground block">
+                    {t("conditions.lastMentioned")}
+                  </span>
+                  <span className="text-xs sm:text-sm">
+                    {format(new Date(condition.last_mentioned_date), "dd.MM.yyyy", {
+                      locale: dateLocale,
+                    })}
+                  </span>
+                </div>
+              )}
           </div>
 
           {/* Notes */}
@@ -302,7 +367,9 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
             <>
               <Separator />
               <div>
-                <span className="text-xs sm:text-sm text-muted-foreground block mb-0.5 sm:mb-1">{t("conditions.notes")}</span>
+                <span className="text-xs sm:text-sm text-muted-foreground block mb-0.5 sm:mb-1">
+                  {t("conditions.notes")}
+                </span>
                 <p className="text-xs sm:text-sm whitespace-pre-wrap">{condition.notes}</p>
               </div>
             </>
@@ -314,14 +381,18 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
             <div className="flex items-center gap-1">
               <Clock className="h-3 w-3 shrink-0" />
               <span>
-                {t("records.detail.createdAt")}: {format(new Date(condition.created_at), "dd.MM.yyyy HH:mm", { locale: dateLocale })}
+                {t("records.detail.createdAt")}:{" "}
+                {format(new Date(condition.created_at), "dd.MM.yyyy HH:mm", { locale: dateLocale })}
               </span>
             </div>
             {condition.updated_at !== condition.created_at && (
               <div className="flex items-center gap-1">
                 <Pencil className="h-3 w-3 shrink-0" />
                 <span>
-                  {t("records.detail.updatedAt")}: {format(new Date(condition.updated_at), "dd.MM.yyyy HH:mm", { locale: dateLocale })}
+                  {t("records.detail.updatedAt")}:{" "}
+                  {format(new Date(condition.updated_at), "dd.MM.yyyy HH:mm", {
+                    locale: dateLocale,
+                  })}
                 </span>
               </div>
             )}
@@ -342,25 +413,27 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
             <div className="relative">
               {/* Timeline line */}
               <div className="absolute left-3 sm:left-4 top-0 bottom-0 w-px bg-border" />
-              
+
               <div className="space-y-3 sm:space-y-4">
                 {condition.history.map((record) => (
                   <div key={record.id} className="relative pl-8 sm:pl-10">
                     {/* Timeline dot */}
-                    <div className={cn(
-                      "absolute left-1.5 sm:left-2 top-2 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 bg-background",
-                      record.status_in_record === "active" && "border-orange-500",
-                      record.status_in_record === "suspected" && "border-yellow-500",
-                      record.status_in_record === "resolved" && "border-green-500",
-                      record.status_in_record === "history" && "border-gray-500",
-                    )} />
-                    
+                    <div
+                      className={cn(
+                        "absolute left-1.5 sm:left-2 top-2 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 bg-background",
+                        record.status_in_record === "active" && "border-orange-500",
+                        record.status_in_record === "suspected" && "border-yellow-500",
+                        record.status_in_record === "resolved" && "border-green-500",
+                        record.status_in_record === "history" && "border-gray-500",
+                      )}
+                    />
+
                     <div className="rounded-lg border p-2.5 sm:p-3 hover:bg-muted/50 transition-colors">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           {/* Record title */}
                           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                            <Link 
+                            <Link
                               href={`/health/records/${record.record_id}`}
                               className="font-medium hover:underline truncate text-sm sm:text-base"
                             >
@@ -372,16 +445,20 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                               </Badge>
                             )}
                           </div>
-                          
+
                           {/* Date and status */}
                           <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-xs sm:text-sm text-muted-foreground flex-wrap">
                             {record.record_date && (
                               <div className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3 shrink-0" />
-                                {format(new Date(record.record_date), "dd.MM.yyyy", { locale: dateLocale })}
+                                {format(new Date(record.record_date), "dd.MM.yyyy", {
+                                  locale: dateLocale,
+                                })}
                               </div>
                             )}
-                            <ConditionStatusBadge status={record.status_in_record as ConditionStatus} />
+                            <ConditionStatusBadge
+                              status={record.status_in_record as ConditionStatus}
+                            />
                           </div>
 
                           {/* Source anchor */}
@@ -394,16 +471,12 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                         </div>
 
                         {/* Link to record */}
-                        <Link 
-                          href={`/health/records/${record.record_id}`}
-                          className="shrink-0"
-                        >
+                        <Link href={`/health/records/${record.record_id}`} className="shrink-0">
                           <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
                             <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                           </Button>
                         </Link>
                       </div>
-
                     </div>
                   </div>
                 ))}
@@ -437,13 +510,17 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                 >
                   <span className="font-medium text-sm sm:text-base truncate">{item.title}</span>
                   <span className="text-xs text-muted-foreground shrink-0">
-                    {item.next_due_at ? format(new Date(item.next_due_at), "dd.MM.yyyy", { locale: dateLocale }) : "—"}
+                    {item.next_due_at
+                      ? format(new Date(item.next_due_at), "dd.MM.yyyy", { locale: dateLocale })
+                      : "—"}
                   </span>
                 </Link>
               ))}
             </div>
           ) : (
-            <p className="text-xs sm:text-sm text-muted-foreground py-2">{t("conditions.linkedCheckupsEmpty")}</p>
+            <p className="text-xs sm:text-sm text-muted-foreground py-2">
+              {t("conditions.linkedCheckupsEmpty")}
+            </p>
           )}
         </CardContent>
       </Card>
@@ -455,18 +532,14 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
             <DialogTitle>{t("conditions.edit")}</DialogTitle>
             <DialogDescription>{t("conditions.editDescription")}</DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             {/* Name */}
             <div className="space-y-2">
               <Label htmlFor="editName">{t("conditions.name")}</Label>
-              <Input
-                id="editName"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-              />
+              <Input id="editName" value={editName} onChange={(e) => setEditName(e.target.value)} />
             </div>
-            
+
             {/* ICD Code */}
             <div className="space-y-2">
               <Label htmlFor="editCode">{t("conditions.icdCode")}</Label>
@@ -478,9 +551,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                   placeholder="H52.1"
                   className="font-mono w-28"
                 />
-                {icdLoading && (
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                )}
+                {icdLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
                 {icdLookup?.found && (
                   <div className="flex items-center gap-1 text-green-600 flex-1 min-w-0">
                     <Check className="h-4 w-4 shrink-0" />
@@ -494,7 +565,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                   </div>
                 )}
               </div>
-              
+
               {/* Google search link to find ICD code */}
               {editName.trim() && (
                 <a
@@ -508,7 +579,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                 </a>
               )}
             </div>
-            
+
             {/* Notes */}
             <div className="space-y-2">
               <Label htmlFor="editNotes">{t("conditions.notes")}</Label>
@@ -520,13 +591,13 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
               />
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditing(false)}>
               {t("common.cancel")}
             </Button>
-            <Button 
-              onClick={handleSaveEdit} 
+            <Button
+              onClick={handleSaveEdit}
               disabled={!editName.trim() || updateConditionMutation.isPending}
             >
               {updateConditionMutation.isPending && (
@@ -556,9 +627,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{t("conditions.deleteCondition")}</DialogTitle>
-            <DialogDescription>
-              {t("conditions.deleteConditionConfirm")}
-            </DialogDescription>
+            <DialogDescription>{t("conditions.deleteConditionConfirm")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
@@ -581,11 +650,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   );
 }
 
-export default function ConditionDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function ConditionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: conditionId } = use(params);
   return <ConditionDetailContent conditionId={conditionId} />;
 }

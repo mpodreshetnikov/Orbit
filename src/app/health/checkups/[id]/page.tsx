@@ -49,7 +49,11 @@ import { isCheckupScheduleInterval, isCheckupScheduleOneOff } from "@/types";
 
 function StatusBadge({ status }: { status: CheckupItemStatus }) {
   const t = useTranslations();
-  const key = `checkups.status${status.charAt(0).toUpperCase() + status.slice(1)}` as "checkups.statusActive" | "checkups.statusPaused" | "checkups.statusCompleted" | "checkups.statusArchived";
+  const key = `checkups.status${status.charAt(0).toUpperCase() + status.slice(1)}` as
+    | "checkups.statusActive"
+    | "checkups.statusPaused"
+    | "checkups.statusCompleted"
+    | "checkups.statusArchived";
   const config: Record<CheckupItemStatus, string> = {
     active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
     paused: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20",
@@ -63,32 +67,37 @@ function StatusBadge({ status }: { status: CheckupItemStatus }) {
   );
 }
 
-function ScheduleSummary({ schedule, dateLocale }: { schedule: CheckupSchedule; dateLocale: Locale }) {
+function ScheduleSummary({
+  schedule,
+  dateLocale,
+}: {
+  schedule: CheckupSchedule;
+  dateLocale: Locale;
+}) {
   const t = useTranslations();
   if (isCheckupScheduleOneOff(schedule)) {
     return (
       <span>
-        {t("checkups.oneOff")}: {format(new Date(schedule.due_at), "dd MMM yyyy", { locale: dateLocale })}
+        {t("checkups.oneOff")}:{" "}
+        {format(new Date(schedule.due_at), "dd MMM yyyy", { locale: dateLocale })}
       </span>
     );
   }
   if (isCheckupScheduleInterval(schedule)) {
-    const unitKey = schedule.unit === "week" ? "unitWeek" : schedule.unit === "month" ? "unitMonth" : "unitYear";
+    const unitKey =
+      schedule.unit === "week" ? "unitWeek" : schedule.unit === "month" ? "unitMonth" : "unitYear";
     const count = schedule.every;
     return (
       <span>
-        {t("checkups.everyWithCount", { count })} {t(`checkups.${unitKey}` as "checkups.unitMonth", { count })}
+        {t("checkups.everyWithCount", { count })}{" "}
+        {t(`checkups.${unitKey}` as "checkups.unitMonth", { count })}
       </span>
     );
   }
   return null;
 }
 
-export default function CheckupDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function CheckupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();
@@ -104,13 +113,14 @@ export default function CheckupDetailPage({
   const [editCompletionOpen, setEditCompletionOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  const { data: records } = useMedicalRecords(
-    item?.person_id ? { person_id: item.person_id } : {}
-  );
+  const { data: records } = useMedicalRecords(item?.person_id ? { person_id: item.person_id } : {});
 
   const canMarkComplete = item?.status === "active";
   const canPlan = item?.status === "active" && item?.next_due_at;
-  const isOverdue = item?.next_due_at && item.status === "active" && item.next_due_at < new Date().toISOString().slice(0, 10);
+  const isOverdue =
+    item?.next_due_at &&
+    item.status === "active" &&
+    item.next_due_at < new Date().toISOString().slice(0, 10);
 
   const handlePause = async () => {
     if (!item) return;
@@ -177,14 +187,19 @@ export default function CheckupDetailPage({
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <StatusBadge status={item.status} />
               {isOverdue && (
-                <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                <Badge
+                  variant="outline"
+                  className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                >
                   {t("checkups.overdue")}
                 </Badge>
               )}
             </div>
             <h1 className="text-xl font-bold tracking-tight truncate">{item.title}</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {t(`checkups.category${item.category.charAt(0).toUpperCase() + item.category.slice(1)}`)}
+              {t(
+                `checkups.category${item.category.charAt(0).toUpperCase() + item.category.slice(1)}`,
+              )}
             </p>
           </div>
         </div>
@@ -196,25 +211,45 @@ export default function CheckupDetailPage({
             </Button>
           )}
           {canPlan && (
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setPlanOpen(true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => setPlanOpen(true)}
+            >
               <CalendarPlus className="h-4 w-4" />
               {t("checkups.plan")}
             </Button>
           )}
           {item.status === "paused" && (
-            <Button size="sm" variant="outline" onClick={handleResume} disabled={updateMutation.isPending}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleResume}
+              disabled={updateMutation.isPending}
+            >
               <Play className="h-4 w-4 mr-1" />
               {t("checkups.resume")}
             </Button>
           )}
           {item.status === "active" && (
-            <Button size="sm" variant="outline" onClick={handlePause} disabled={updateMutation.isPending}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePause}
+              disabled={updateMutation.isPending}
+            >
               <Pause className="h-4 w-4 mr-1" />
               {t("checkups.pause")}
             </Button>
           )}
           {(item.status === "active" || item.status === "paused") && (
-            <Button size="sm" variant="outline" onClick={handleArchive} disabled={updateMutation.isPending}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleArchive}
+              disabled={updateMutation.isPending}
+            >
               <Archive className="h-4 w-4 mr-1" />
               {t("checkups.archive")}
             </Button>
@@ -225,7 +260,12 @@ export default function CheckupDetailPage({
               {t("common.edit")}
             </Link>
           </Button>
-          <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)} disabled={deleteMutation.isPending}>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => setDeleteConfirmOpen(true)}
+            disabled={deleteMutation.isPending}
+          >
             {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {t("checkups.deleteCheckup")}
           </Button>
@@ -243,13 +283,15 @@ export default function CheckupDetailPage({
           </div>
           {item.next_due_at && (
             <div className="text-sm text-muted-foreground">
-              {t("checkups.nextDue")}: {format(new Date(item.next_due_at), "dd MMM yyyy", { locale: dateLocale })}
+              {t("checkups.nextDue")}:{" "}
+              {format(new Date(item.next_due_at), "dd MMM yyyy", { locale: dateLocale })}
             </div>
           )}
           {item.planned_on && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>
-                {t("checkups.plannedOn")}: {format(new Date(item.planned_on), "dd MMM yyyy", { locale: dateLocale })}
+                {t("checkups.plannedOn")}:{" "}
+                {format(new Date(item.planned_on), "dd MMM yyyy", { locale: dateLocale })}
               </span>
               <Button
                 type="button"
@@ -289,7 +331,9 @@ export default function CheckupDetailPage({
             <>
               <Separator />
               <div>
-                <span className="text-xs text-muted-foreground block mb-1">{t("checkups.why")}</span>
+                <span className="text-xs text-muted-foreground block mb-1">
+                  {t("checkups.why")}
+                </span>
                 <p className="text-sm whitespace-pre-wrap">{item.why_text}</p>
               </div>
             </>
@@ -298,7 +342,9 @@ export default function CheckupDetailPage({
             <>
               <Separator />
               <div>
-                <span className="text-xs text-muted-foreground block mb-1">{t("checkups.linkedConditions")}</span>
+                <span className="text-xs text-muted-foreground block mb-1">
+                  {t("checkups.linkedConditions")}
+                </span>
                 <div className="flex flex-wrap gap-1">
                   {item.why_links.map((l) => (
                     <Link key={l.id} href={`/health/conditions/${l.id}`}>
@@ -315,7 +361,9 @@ export default function CheckupDetailPage({
             <>
               <Separator />
               <div>
-                <span className="text-xs text-muted-foreground block mb-1">{t("checkups.notes")}</span>
+                <span className="text-xs text-muted-foreground block mb-1">
+                  {t("checkups.notes")}
+                </span>
                 <p className="text-sm whitespace-pre-wrap">{item.notes}</p>
               </div>
             </>
@@ -343,7 +391,9 @@ export default function CheckupDetailPage({
                       {format(new Date(c.done_at), "dd MMM yyyy", { locale: dateLocale })}
                     </div>
                     {c.note && (
-                      <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap">{c.note}</p>
+                      <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap">
+                        {c.note}
+                      </p>
                     )}
                     {c.evidence_record_id && (
                       <Link
@@ -372,7 +422,9 @@ export default function CheckupDetailPage({
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground text-center py-6">{t("checkups.noCompletions")}</p>
+            <p className="text-sm text-muted-foreground text-center py-6">
+              {t("checkups.noCompletions")}
+            </p>
           )}
         </CardContent>
       </Card>
@@ -413,7 +465,11 @@ export default function CheckupDetailPage({
             <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
               {t("common.cancel")}
             </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleteMutation.isPending}>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
               {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {t("checkups.deleteCheckup")}
             </Button>

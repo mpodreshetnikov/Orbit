@@ -15,11 +15,7 @@ export type MedDoseEventStatus =
   | "missed"
   | "cancelled";
 
-export type MedInventoryTransactionType =
-  | "decrement"
-  | "refill"
-  | "set_absolute"
-  | "correction";
+export type MedInventoryTransactionType = "decrement" | "refill" | "set_absolute" | "correction";
 
 // Schedule modes (no cyclic, no stacking)
 export type MedScheduleMode =
@@ -77,10 +73,7 @@ export type MedDurationEndless = { type: "endless"; start_date?: string };
 export type MedDurationUntilDate = { type: "until_date"; end_date: string; start_date?: string };
 export type MedDurationForDays = { type: "for_days"; days: number; start_date?: string };
 
-export type MedDuration =
-  | MedDurationEndless
-  | MedDurationUntilDate
-  | MedDurationForDays;
+export type MedDuration = MedDurationEndless | MedDurationUntilDate | MedDurationForDays;
 
 export type PlannedIntake = {
   intake?: { amount: number; unit: string };
@@ -157,9 +150,12 @@ export interface AddOneTimeToExistingPayload {
 }
 
 export function isAddOneTimeToExistingPayload(
-  data: CreateMedRegimenInput | AddOneTimeToExistingPayload
+  data: CreateMedRegimenInput | AddOneTimeToExistingPayload,
 ): data is AddOneTimeToExistingPayload {
-  return "addToRegimenId" in data && typeof (data as AddOneTimeToExistingPayload).addToRegimenId === "string";
+  return (
+    "addToRegimenId" in data &&
+    typeof (data as AddOneTimeToExistingPayload).addToRegimenId === "string"
+  );
 }
 
 // ============================================================================

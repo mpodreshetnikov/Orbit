@@ -94,11 +94,12 @@ export interface UpdateMeasurementCatalogInput {
 }
 
 // Category labels for UI
-export const MEASUREMENT_CATEGORY_LABELS: Record<MeasurementCategory, { en: string; ru: string }> = {
-  basic: { en: "Basic", ru: "Основные" },
-  body: { en: "Body", ru: "Тело" },
-  limbs: { en: "Limbs", ru: "Конечности" },
-  vital: { en: "Vital", ru: "Состав тела" },
-};
+export const MEASUREMENT_CATEGORY_LABELS: Record<MeasurementCategory, { en: string; ru: string }> =
+  {
+    basic: { en: "Basic", ru: "Основные" },
+    body: { en: "Body", ru: "Тело" },
+    limbs: { en: "Limbs", ru: "Конечности" },
+    vital: { en: "Vital", ru: "Состав тела" },
+  };
 
 export const MEASUREMENT_CATEGORIES: MeasurementCategory[] = ["basic", "body", "limbs", "vital"];

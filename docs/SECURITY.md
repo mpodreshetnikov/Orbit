@@ -7,6 +7,7 @@
 - Database access is RLS-first; policy files live in `supabase/db/policies/`.
 
 Current expectation:
+
 - If a table stores app data, it must have explicit RLS policies and should rely on `public.is_allowed_user()` and/or ownership checks.
 
 ## Secrets

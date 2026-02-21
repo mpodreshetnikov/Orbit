@@ -8,13 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,24 +48,25 @@ export function MeasurementCatalogList() {
 
   // Dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [selectedMeasurement, setSelectedMeasurement] =
-    useState<MeasurementCatalog | null>(null);
+  const [selectedMeasurement, setSelectedMeasurement] = useState<MeasurementCatalog | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [measurementToDelete, setMeasurementToDelete] =
-    useState<MeasurementCatalog | null>(null);
+  const [measurementToDelete, setMeasurementToDelete] = useState<MeasurementCatalog | null>(null);
 
   // Data
   const { data: measurements, isLoading, error } = useMeasurementCatalog(debouncedSearch);
   const deleteMutation = useDeleteMeasurementCatalogItem();
 
   // Group by category
-  const groupedMeasurements = measurements?.reduce((acc, item) => {
-    if (!acc[item.category]) {
-      acc[item.category] = [];
-    }
-    acc[item.category].push(item);
-    return acc;
-  }, {} as Record<MeasurementCategory, MeasurementCatalog[]>);
+  const groupedMeasurements = measurements?.reduce(
+    (acc, item) => {
+      if (!acc[item.category]) {
+        acc[item.category] = [];
+      }
+      acc[item.category].push(item);
+      return acc;
+    },
+    {} as Record<MeasurementCategory, MeasurementCatalog[]>,
+  );
 
   // Handlers
   const handleAdd = () => {
@@ -108,12 +103,8 @@ export function MeasurementCatalogList() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {t("catalogs.measurements")}
-            </h1>
-            <p className="text-muted-foreground">
-              {t("catalogs.measurementsDescription")}
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight">{t("catalogs.measurements")}</h1>
+            <p className="text-muted-foreground">{t("catalogs.measurementsDescription")}</p>
           </div>
         </div>
         <Button onClick={handleAdd}>
@@ -162,65 +153,68 @@ export function MeasurementCatalogList() {
       )}
 
       {/* Measurements grouped by category */}
-      {!isLoading && !error && groupedMeasurements && Object.keys(groupedMeasurements).length > 0 && (
-        <div className="space-y-8">
-          {Object.entries(groupedMeasurements).map(([category, items]) => {
-            if (!items || items.length === 0) return null;
-            const categoryLabel = MEASUREMENT_CATEGORY_LABELS[category as MeasurementCategory];
-            return (
-              <div key={category}>
-                <h2 className="text-lg font-semibold mb-4">
-                  {locale === "ru" ? categoryLabel.ru : categoryLabel.en}
-                </h2>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {items.map((m) => (
-                    <Card key={m.id} className="group relative">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-2">
-                            <Ruler className="h-5 w-5 text-primary" />
-                            <code className="text-sm font-mono bg-muted px-1.5 py-0.5 rounded">
-                              {m.code}
-                            </code>
+      {!isLoading &&
+        !error &&
+        groupedMeasurements &&
+        Object.keys(groupedMeasurements).length > 0 && (
+          <div className="space-y-8">
+            {Object.entries(groupedMeasurements).map(([category, items]) => {
+              if (!items || items.length === 0) return null;
+              const categoryLabel = MEASUREMENT_CATEGORY_LABELS[category as MeasurementCategory];
+              return (
+                <div key={category}>
+                  <h2 className="text-lg font-semibold mb-4">
+                    {locale === "ru" ? categoryLabel.ru : categoryLabel.en}
+                  </h2>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {items.map((m) => (
+                      <Card key={m.id} className="group relative">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-2">
+                              <Ruler className="h-5 w-5 text-primary" />
+                              <code className="text-sm font-mono bg-muted px-1.5 py-0.5 rounded">
+                                {m.code}
+                              </code>
+                            </div>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleEdit(m)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => handleDelete(m)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleEdit(m)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleDelete(m)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                          <CardTitle className="text-base">{m.name_en}</CardTitle>
+                          <CardDescription>{m.name_ru}</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-muted-foreground">{t("catalogs.unit")}:</span>
+                            <Badge variant="outline">
+                              {locale === "ru" ? m.unit_ru : m.unit_en}
+                            </Badge>
                           </div>
-                        </div>
-                        <CardTitle className="text-base">{m.name_en}</CardTitle>
-                        <CardDescription>{m.name_ru}</CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="text-muted-foreground">{t("catalogs.unit")}:</span>
-                          <Badge variant="outline">
-                            {locale === "ru" ? m.unit_ru : m.unit_en}
-                          </Badge>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
 
       {/* Empty state */}
       {!isLoading && !error && measurements && measurements.length === 0 && (
@@ -230,9 +224,7 @@ export function MeasurementCatalogList() {
             {searchQuery ? t("common.noResults") : t("catalogs.noMeasurements")}
           </h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            {searchQuery
-              ? t("catalogs.noSearchResults")
-              : t("catalogs.noMeasurementsDescription")}
+            {searchQuery ? t("catalogs.noSearchResults") : t("catalogs.noMeasurementsDescription")}
           </p>
           {!searchQuery && (
             <Button className="mt-4" onClick={handleAdd}>

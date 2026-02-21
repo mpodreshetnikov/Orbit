@@ -56,10 +56,10 @@ export default function MoneyTransactionDetailPage({
         ...new Set(
           (transactions ?? [])
             .map((tx) => tx.merchant_name)
-            .filter((name): name is string => !!name?.trim())
+            .filter((name): name is string => !!name?.trim()),
         ),
       ].sort(),
-    [transactions]
+    [transactions],
   );
 
   if (!selectedPersonId) {
@@ -124,12 +124,7 @@ export default function MoneyTransactionDetailPage({
           </Button>
           <h1 className="text-xl font-semibold">{t("money.editTransaction")}</h1>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => setDeleteOpen(true)}
-        >
+        <Button variant="outline" size="sm" className="gap-2" onClick={() => setDeleteOpen(true)}>
           <Trash2 className="h-4 w-4" />
           {t("money.deleteTransaction")}
         </Button>
@@ -138,9 +133,7 @@ export default function MoneyTransactionDetailPage({
       {"money_cards" in transaction && transaction.money_cards && (
         <p className="text-sm text-muted-foreground">
           {t("money.card")}: *{transaction.money_cards.last4}
-          {transaction.money_cards.card_label
-            ? ` (${transaction.money_cards.card_label})`
-            : ""}
+          {transaction.money_cards.card_label ? ` (${transaction.money_cards.card_label})` : ""}
         </p>
       )}
 
@@ -163,9 +156,7 @@ export default function MoneyTransactionDetailPage({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("money.deleteTransaction")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("money.deleteTransactionConfirm")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("money.deleteTransactionConfirm")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

@@ -7,12 +7,7 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,8 +70,7 @@ export default function MoneyCategoriesPage() {
       return {
         id: node.id,
         name: node.name_en,
-        children:
-          node.children.length > 0 ? node.children.map(mapNode) : undefined,
+        children: node.children.length > 0 ? node.children.map(mapNode) : undefined,
       };
     }
     return tree.map(mapNode);
@@ -106,18 +100,21 @@ export default function MoneyCategoriesPage() {
     setDialogOpen(true);
   }, []);
 
-  const openNewWithParent = useCallback((parentCategory: MoneyCategory) => {
-    if (parentCategory.depth >= 4) {
-      toast.error(t("money.categoryDepthLimit"));
-      return;
-    }
-    setEditing(null);
-    setNameEn("");
-    setNameRu("");
-    setSlug("");
-    setParentId(parentCategory.id);
-    setDialogOpen(true);
-  }, [t]);
+  const openNewWithParent = useCallback(
+    (parentCategory: MoneyCategory) => {
+      if (parentCategory.depth >= 4) {
+        toast.error(t("money.categoryDepthLimit"));
+        return;
+      }
+      setEditing(null);
+      setNameEn("");
+      setNameRu("");
+      setSlug("");
+      setParentId(parentCategory.id);
+      setDialogOpen(true);
+    },
+    [t],
+  );
 
   const renderTreeItem = useCallback(
     (params: TreeRenderItemParams) => {
@@ -128,9 +125,13 @@ export default function MoneyCategoriesPage() {
         <div className="flex flex-1 items-center min-w-0 w-full relative pr-[7.5rem]">
           <div className="min-w-0 flex-1">
             <span className="text-sm font-medium truncate block text-left">{category.name_en}</span>
-            <span className="text-xs text-muted-foreground truncate block text-left">{category.name_ru}</span>
+            <span className="text-xs text-muted-foreground truncate block text-left">
+              {category.name_ru}
+            </span>
           </div>
-          <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">{category.slug}</span>
+          <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+            {category.slug}
+          </span>
           <div
             className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1"
             onClick={(e) => e.stopPropagation()}
@@ -139,7 +140,10 @@ export default function MoneyCategoriesPage() {
               <span
                 role="button"
                 tabIndex={0}
-                className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 cursor-pointer")}
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "icon" }),
+                  "h-8 w-8 cursor-pointer",
+                )}
                 onClick={() => openNewWithParent(category)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -155,7 +159,10 @@ export default function MoneyCategoriesPage() {
             <span
               role="button"
               tabIndex={0}
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 cursor-pointer")}
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "icon" }),
+                "h-8 w-8 cursor-pointer",
+              )}
               onClick={() => openEdit(category)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -170,7 +177,10 @@ export default function MoneyCategoriesPage() {
             <span
               role="button"
               tabIndex={0}
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 cursor-pointer text-destructive hover:bg-destructive/15 hover:text-destructive")}
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "icon" }),
+                "h-8 w-8 cursor-pointer text-destructive hover:bg-destructive/15 hover:text-destructive",
+              )}
               onClick={() => setDeleteTarget(category)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -186,7 +196,7 @@ export default function MoneyCategoriesPage() {
         </div>
       );
     },
-    [categoryById, t, openEdit, openNewWithParent, setDeleteTarget]
+    [categoryById, t, openEdit, openNewWithParent, setDeleteTarget],
   );
 
   const handleSave = async () => {
@@ -229,9 +239,7 @@ export default function MoneyCategoriesPage() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    const hasChildren = (categories || []).some(
-      (cat) => cat.parent_id === deleteTarget.id
-    );
+    const hasChildren = (categories || []).some((cat) => cat.parent_id === deleteTarget.id);
     if (hasChildren) {
       toast.error(t("money.cannotDeleteCategory"));
       setDeleteTarget(null);
@@ -241,9 +249,7 @@ export default function MoneyCategoriesPage() {
     setDeleteTarget(null);
   };
 
-  const parentOptions = flattened.filter(
-    (cat) => cat.depth < 4 && cat.id !== editing?.id
-  );
+  const parentOptions = flattened.filter((cat) => cat.depth < 4 && cat.id !== editing?.id);
 
   return (
     <div className="space-y-4">
@@ -271,20 +277,14 @@ export default function MoneyCategoriesPage() {
         </div>
       ) : (
         <div className="rounded-lg border bg-card">
-          <TreeView
-            data={treeData}
-            renderItem={renderTreeItem}
-            className="p-2"
-          />
+          <TreeView data={treeData} renderItem={renderTreeItem} className="p-2" />
         </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {editing ? t("money.editCategory") : t("money.addCategory")}
-            </DialogTitle>
+            <DialogTitle>{editing ? t("money.editCategory") : t("money.addCategory")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
@@ -322,7 +322,10 @@ export default function MoneyCategoriesPage() {
               <Button variant="ghost" onClick={() => setDialogOpen(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
+              <Button
+                onClick={handleSave}
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
                 {t("common.save")}
               </Button>
             </div>

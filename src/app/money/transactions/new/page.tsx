@@ -36,10 +36,10 @@ export default function NewMoneyTransactionPage() {
         ...new Set(
           (transactions ?? [])
             .map((tx) => tx.merchant_name)
-            .filter((name): name is string => !!name?.trim())
+            .filter((name): name is string => !!name?.trim()),
         ),
       ].sort(),
-    [transactions]
+    [transactions],
   );
 
   if (!selectedPersonId) {

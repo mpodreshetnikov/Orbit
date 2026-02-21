@@ -82,7 +82,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
   // Processing queue state - subscribe to jobs directly to get re-renders on changes
   const jobs = useProcessingQueueStore((state) => state.jobs);
   const activeJobs = Object.values(jobs).filter(
-    (job) => job.stage === "uploading" || job.stage === "processing"
+    (job) => job.stage === "uploading" || job.stage === "processing",
   );
 
   // Handle files selected
@@ -166,9 +166,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
       router.push(`/health/records/${record.id}`);
     } catch (error) {
       console.error("Submit pasted text error:", error);
-      setStartError(
-        error instanceof Error ? error.message : "Failed to create record"
-      );
+      setStartError(error instanceof Error ? error.message : "Failed to create record");
     } finally {
       setIsSubmittingPaste(false);
     }
@@ -205,19 +203,10 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
       setCurrentStep(3);
     } catch (error) {
       console.error("Start processing error:", error);
-      setStartError(
-        error instanceof Error ? error.message : "Failed to start processing"
-      );
+      setStartError(error instanceof Error ? error.message : "Failed to start processing");
       setCurrentStep(1);
     }
-  }, [
-    selectedFiles,
-    personId,
-    personName,
-    t,
-    createMutation,
-    startBackgroundOCR,
-  ]);
+  }, [selectedFiles, personId, personName, t, createMutation, startBackgroundOCR]);
 
   // Add another record (reset wizard)
   const handleAddAnother = useCallback(() => {
@@ -252,9 +241,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
-            {t("records.add.title")}
-          </h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">{t("records.add.title")}</h1>
           <p className="text-sm text-muted-foreground truncate">
             {personName} — {t(`records.wizard.step${currentStep}`)}
           </p>
@@ -263,7 +250,9 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
         {activeJobs.length > 0 && (
           <Badge variant="secondary" className="gap-1 shrink-0">
             <Loader2 className="h-3 w-3 animate-spin" />
-            <span className="hidden sm:inline">{activeJobs.length} {t("processing.inProgress")}</span>
+            <span className="hidden sm:inline">
+              {activeJobs.length} {t("processing.inProgress")}
+            </span>
             <span className="sm:hidden">{activeJobs.length}</span>
           </Badge>
         )}
@@ -279,8 +268,8 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
               step === currentStep
                 ? "bg-primary text-primary-foreground"
                 : step < currentStep
-                ? "bg-primary/20 text-primary"
-                : "bg-muted text-muted-foreground"
+                  ? "bg-primary/20 text-primary"
+                  : "bg-muted text-muted-foreground",
             )}
           >
             {step < currentStep ? <Check className="h-3 w-3 sm:h-4 sm:w-4" /> : step}
@@ -342,10 +331,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
                     </p>
                   )}
                   <div className="flex-1" />
-                  <Button
-                    onClick={startProcessing}
-                    disabled={selectedFiles.length === 0}
-                  >
+                  <Button onClick={startProcessing} disabled={selectedFiles.length === 0}>
                     {t("records.wizard.startProcessing")}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
@@ -382,9 +368,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
                     onClick={submitPastedText}
                     disabled={pastedText.trim().length === 0 || isSubmittingPaste}
                   >
-                    {isSubmittingPaste ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : null}
+                    {isSubmittingPaste ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     {t("records.wizard.proceedToReview")}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
@@ -414,12 +398,8 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
               <FileStack className="h-10 w-10 text-primary" />
             </div>
             <div className="text-center max-w-md">
-              <h3 className="text-xl font-semibold">
-                {t("records.wizard.recordQueued")}
-              </h3>
-              <p className="mt-2 text-muted-foreground">
-                {t("records.wizard.queuedDescription")}
-              </p>
+              <h3 className="text-xl font-semibold">{t("records.wizard.recordQueued")}</h3>
+              <p className="mt-2 text-muted-foreground">{t("records.wizard.queuedDescription")}</p>
               <p className="mt-4 text-sm text-muted-foreground">
                 {t("records.wizard.notificationHint")}
               </p>
@@ -468,9 +448,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("records.confirm.discardTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("records.confirm.discardMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("records.confirm.discardMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

@@ -98,7 +98,6 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
   const hardDeleteMutation = useHardDeleteRecord();
   const updateMutation = useUpdateMedicalRecord();
 
-
   // Build filters for the query (use debounced search)
   const filters = useMemo(
     () => ({
@@ -107,7 +106,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
       status: statusFilter as RecordStatus,
       search: debouncedSearch.trim() || undefined,
     }),
-    [personId, typeFilter, statusFilter, debouncedSearch]
+    [personId, typeFilter, statusFilter, debouncedSearch],
   );
 
   const { data: records, isLoading, error } = useMedicalRecords(filters);
@@ -118,10 +117,10 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
       person_id: personId,
       status: "draft" as RecordStatus,
     }),
-    [personId]
+    [personId],
   );
   const { data: drafts } = useMedicalRecords(
-    statusFilter !== "draft" ? draftsFilters : { person_id: "" }
+    statusFilter !== "draft" ? draftsFilters : { person_id: "" },
   );
 
   // Also fetch processing count for badge
@@ -130,10 +129,10 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
       person_id: personId,
       status: "processing" as RecordStatus,
     }),
-    [personId]
+    [personId],
   );
   const { data: processingRecords } = useMedicalRecords(
-    statusFilter !== "processing" ? processingFilters : { person_id: "" }
+    statusFilter !== "processing" ? processingFilters : { person_id: "" },
   );
 
   const draftsCount = drafts?.length || 0;
@@ -220,7 +219,10 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           variant={statusFilter === "draft" ? "secondary" : "ghost"}
           size="sm"
           onClick={() => setTabInUrl("draft")}
-          className={cn("shrink-0 gap-1", draftsCount > 0 && statusFilter !== "draft" && "text-primary")}
+          className={cn(
+            "shrink-0 gap-1",
+            draftsCount > 0 && statusFilter !== "draft" && "text-primary",
+          )}
         >
           <FileStack className="h-4 w-4" />
           {t("records.statusFilter.drafts")}
@@ -234,7 +236,10 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
           variant={statusFilter === "processing" ? "secondary" : "ghost"}
           size="sm"
           onClick={() => setTabInUrl("processing")}
-          className={cn("shrink-0 gap-1", processingCount > 0 && statusFilter !== "processing" && "text-primary")}
+          className={cn(
+            "shrink-0 gap-1",
+            processingCount > 0 && statusFilter !== "processing" && "text-primary",
+          )}
         >
           <Loader2 className={cn("h-4 w-4", processingCount > 0 && "animate-spin")} />
           {t("records.statusFilter.processing")}
@@ -369,15 +374,15 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
           {records.map((record) => (
             <div key={record.id} className="min-w-0">
-            <RecordCard
-              key={record.id}
-              record={record}
-              onView={handleView}
-              onRemove={handleRemove}
-              onRestore={statusFilter === "removed" ? handleRestore : undefined}
-              onDelete={statusFilter === "removed" ? handleDelete : undefined}
-              onActivate={statusFilter === "draft" ? handleActivate : undefined}
-            />
+              <RecordCard
+                key={record.id}
+                record={record}
+                onView={handleView}
+                onRemove={handleRemove}
+                onRestore={statusFilter === "removed" ? handleRestore : undefined}
+                onDelete={statusFilter === "removed" ? handleDelete : undefined}
+                onActivate={statusFilter === "draft" ? handleActivate : undefined}
+              />
             </div>
           ))}
         </div>
@@ -394,9 +399,9 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
             <FileText className="h-12 w-12 text-muted-foreground/50" />
           )}
           <h3 className="mt-4 text-lg font-semibold">
-            {hasActiveFilters 
-              ? statusFilter === "draft" 
-                ? t("records.noDrafts") 
+            {hasActiveFilters
+              ? statusFilter === "draft"
+                ? t("records.noDrafts")
                 : statusFilter === "processing"
                   ? t("records.noProcessing")
                   : t("common.noResults")
@@ -412,19 +417,13 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
               : t("health.noRecordsDescription")}
           </p>
           {!hasActiveFilters && (
-            <Button
-              className="mt-4"
-              onClick={() => router.push("/health/records/new")}
-            >
+            <Button className="mt-4" onClick={() => router.push("/health/records/new")}>
               <Plus className="mr-2 h-4 w-4" />
               {t("health.addRecord")}
             </Button>
           )}
           {statusFilter === "draft" && (
-            <Button
-              className="mt-4"
-              onClick={() => router.push("/health/records/new")}
-            >
+            <Button className="mt-4" onClick={() => router.push("/health/records/new")}>
               <Plus className="mr-2 h-4 w-4" />
               {t("health.addRecord")}
             </Button>
@@ -440,9 +439,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("records.confirm.removeTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("records.confirm.removeMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("records.confirm.removeMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
@@ -464,9 +461,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("records.confirm.deleteTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("records.confirm.deleteMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("records.confirm.deleteMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
@@ -488,9 +483,7 @@ export function RecordsList({ personId, personName }: RecordsListProps) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("records.confirm.activateTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("records.confirm.activateMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("records.confirm.activateMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

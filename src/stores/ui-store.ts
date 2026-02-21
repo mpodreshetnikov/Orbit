@@ -28,6 +28,6 @@ export const useUIStore = create<UIState>()(
         language: state.language,
         selectedPersonId: state.selectedPersonId,
       }),
-    }
-  )
+    },
+  ),
 );

@@ -2,13 +2,7 @@
 // CHECKUP TYPES (checkup_items + checkup_completions, no checkup_plans)
 // ============================================================================
 
-export type CheckupCategory =
-  | "lab"
-  | "imaging"
-  | "visit"
-  | "vaccination"
-  | "dental"
-  | "other";
+export type CheckupCategory = "lab" | "imaging" | "visit" | "vaccination" | "dental" | "other";
 
 export type CheckupItemStatus = "active" | "paused" | "completed" | "archived";
 
@@ -48,15 +42,11 @@ export type CheckupScheduleOneOff = {
 
 export type CheckupSchedule = CheckupScheduleInterval | CheckupScheduleOneOff;
 
-export function isCheckupScheduleInterval(
-  s: CheckupSchedule
-): s is CheckupScheduleInterval {
+export function isCheckupScheduleInterval(s: CheckupSchedule): s is CheckupScheduleInterval {
   return s.type === "interval";
 }
 
-export function isCheckupScheduleOneOff(
-  s: CheckupSchedule
-): s is CheckupScheduleOneOff {
+export function isCheckupScheduleOneOff(s: CheckupSchedule): s is CheckupScheduleOneOff {
   return s.type === "one_off";
 }
 

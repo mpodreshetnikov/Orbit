@@ -1,7 +1,20 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Pill, CreditCard, Tags, ArrowRightLeft, Upload } from "lucide-react";
+import {
+  FileText,
+  Library,
+  FlaskConical,
+  Ruler,
+  Stethoscope,
+  HeartPulse,
+  CalendarCheck,
+  Pill,
+  CreditCard,
+  Tags,
+  ArrowRightLeft,
+  Upload,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -91,7 +104,7 @@ export function Sidebar() {
               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               isActive
                 ? "bg-secondary text-secondary-foreground"
-                : "text-muted-foreground hover:bg-secondary hover:text-secondary-foreground"
+                : "text-muted-foreground hover:bg-secondary hover:text-secondary-foreground",
             )}
           >
             <link.icon className="h-4 w-4" />

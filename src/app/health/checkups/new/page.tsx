@@ -24,7 +24,9 @@ export default function NewCheckupPage() {
     );
   }
 
-  const handleSubmit = async (data: import("@/types").CreateCheckupItemInput | import("@/types").UpdateCheckupItemInput) => {
+  const handleSubmit = async (
+    data: import("@/types").CreateCheckupItemInput | import("@/types").UpdateCheckupItemInput,
+  ) => {
     const item = await createMutation.mutateAsync(data as import("@/types").CreateCheckupItemInput);
     router.push(`/health/checkups/${item.id}`);
   };

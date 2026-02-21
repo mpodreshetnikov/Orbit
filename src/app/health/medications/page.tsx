@@ -30,7 +30,13 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RegimenCard, MedicationDashboard } from "@/components/medications";
-import { useRegimens, useUserPreferences, useUpdateUserPreferences, useMarkDoseTaken, useMarkDoseSkipped } from "@/hooks";
+import {
+  useRegimens,
+  useUserPreferences,
+  useUpdateUserPreferences,
+  useMarkDoseTaken,
+  useMarkDoseSkipped,
+} from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { MedRegimenStatus } from "@/types";
 
@@ -80,7 +86,7 @@ export default function MedicationsPage() {
       mutation.mutate(
         action === "taken"
           ? { doseEventId: id, takenAt: new Date().toISOString() }
-          : { doseEventId: id }
+          : { doseEventId: id },
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,17 +145,13 @@ export default function MedicationsPage() {
   return (
     <div className="space-y-6 min-w-0 overflow-x-hidden">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold truncate min-w-0">
-          {t("medications.navTitle")}
-        </h1>
+        <h1 className="text-xl font-semibold truncate min-w-0">{t("medications.navTitle")}</h1>
         <div className="flex items-center gap-2 shrink-0">
           <Button
             size="sm"
             variant="outline"
             className="gap-1.5"
-            onClick={() =>
-              allMedsRef.current?.scrollIntoView({ behavior: "smooth" })
-            }
+            onClick={() => allMedsRef.current?.scrollIntoView({ behavior: "smooth" })}
           >
             <List className="h-4 w-4" />
             {t("medications.allMedications")}
@@ -175,9 +177,7 @@ export default function MedicationsPage() {
               >
                 {t("medications.oneTime")}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => router.push("/health/medications/new?kind=regular")}
-              >
+              <DropdownMenuItem onClick={() => router.push("/health/medications/new?kind=regular")}>
                 {t("medications.regular")}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -214,7 +214,9 @@ export default function MedicationsPage() {
                   onBlur={handleSaveOverdueInterval}
                   className="w-24"
                 />
-                <span className="text-sm text-muted-foreground">{t("medications.overdueReminderIntervalMinutes")}</span>
+                <span className="text-sm text-muted-foreground">
+                  {t("medications.overdueReminderIntervalMinutes")}
+                </span>
               </div>
             </div>
             <Button
@@ -239,101 +241,82 @@ export default function MedicationsPage() {
         </h2>
 
         <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder={t("common.search")}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-          {searchQuery && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setSearchQuery("")}
-              className="tap-target absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as StatusFilter)}
-        >
-          <SelectTrigger className="w-full sm:w-[140px]">
-            <SelectValue placeholder={t("medications.statusActive")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t("medications.all")}</SelectItem>
-            <SelectItem value="active">{t("medications.statusActive")}</SelectItem>
-            <SelectItem value="paused">{t("medications.statusPaused")}</SelectItem>
-            <SelectItem value="completed">
-              {t("medications.statusCompleted")}
-            </SelectItem>
-            <SelectItem value="archived">
-              {t("medications.statusArchived")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={t("common.search")}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+            {searchQuery && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setSearchQuery("")}
+                className="tap-target absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+            <SelectTrigger className="w-full sm:w-[140px]">
+              <SelectValue placeholder={t("medications.statusActive")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("medications.all")}</SelectItem>
+              <SelectItem value="active">{t("medications.statusActive")}</SelectItem>
+              <SelectItem value="paused">{t("medications.statusPaused")}</SelectItem>
+              <SelectItem value="completed">{t("medications.statusCompleted")}</SelectItem>
+              <SelectItem value="archived">{t("medications.statusArchived")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {hasActiveFilters && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-muted-foreground">
-            {t("common.filter")}:
-          </span>
-          {searchQuery && (
-            <span className="text-sm text-muted-foreground">&quot;{searchQuery}&quot;</span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearFilters}
-            className="h-6 px-2 text-xs"
-          >
-            {t("common.clear")}
-          </Button>
-        </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-muted-foreground">{t("common.filter")}:</span>
+            {searchQuery && (
+              <span className="text-sm text-muted-foreground">&quot;{searchQuery}&quot;</span>
+            )}
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-6 px-2 text-xs">
+              {t("common.clear")}
+            </Button>
+          </div>
         )}
 
         {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-24 rounded-lg" />
-          ))}
-        </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-24 rounded-lg" />
+            ))}
+          </div>
         ) : !regimens || regimens.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-          <Pill className="h-10 w-10 mx-auto mb-2 opacity-40" />
-          <p className="font-medium">{t("medications.noItems")}</p>
-          <p className="text-sm mt-1">{t("medications.noItemsHint")}</p>
-          <Link href="/health/medications/new">
-            <Button size="sm" className="mt-3">
-              {t("medications.add")}
-            </Button>
-          </Link>
-        </div>
+          <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
+            <Pill className="h-10 w-10 mx-auto mb-2 opacity-40" />
+            <p className="font-medium">{t("medications.noItems")}</p>
+            <p className="text-sm mt-1">{t("medications.noItemsHint")}</p>
+            <Link href="/health/medications/new">
+              <Button size="sm" className="mt-3">
+                {t("medications.add")}
+              </Button>
+            </Link>
+          </div>
         ) : filteredItems.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-          <p>{t("common.noResults")}</p>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearFilters}
-            className="mt-2"
-          >
-            {t("common.clear")}
-          </Button>
-        </div>
+          <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
+            <p>{t("common.noResults")}</p>
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="mt-2">
+              {t("common.clear")}
+            </Button>
+          </div>
         ) : (
-        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(280px,360px))]">
-          {filteredItems.map((r) => (
-            <RegimenCard key={r.id} regimen={r} />
-          ))}
-        </div>
+          <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(280px,360px))]">
+            {filteredItems.map((r) => (
+              <RegimenCard key={r.id} regimen={r} />
+            ))}
+          </div>
         )}
       </div>
     </div>

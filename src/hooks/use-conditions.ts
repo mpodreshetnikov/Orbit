@@ -19,9 +19,7 @@ import type {
 // ============================================================================
 
 // Fetch all conditions for a person
-async function fetchPersonConditions(
-  personId: string
-): Promise<Condition[]> {
+async function fetchPersonConditions(personId: string): Promise<Condition[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -47,9 +45,7 @@ export function usePersonConditions(personId: string | null) {
 }
 
 // Fetch all conditions for a person with history (using helper function)
-async function fetchPersonConditionsWithHistory(
-  personId: string
-): Promise<ConditionWithHistory[]> {
+async function fetchPersonConditionsWithHistory(personId: string): Promise<ConditionWithHistory[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase.rpc("get_person_conditions_with_history", {
@@ -111,7 +107,8 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
   // Fetch condition records with medical record info
   const { data: records, error: recError } = await supabase
     .from("condition_records")
-    .select(`
+    .select(
+      `
       id,
       record_id,
       status_in_record,
@@ -125,7 +122,8 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
         record_date,
         record_type
       )
-    `)
+    `,
+    )
     .eq("condition_id", conditionId)
     .order("created_at", { ascending: false });
 
@@ -135,7 +133,11 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
 
   // Transform the records to include record info
   const mapped: ConditionHistoryRecord[] = (records || []).map((r) => {
-    const medRec = r.medical_records as { title?: string; record_date?: string; record_type?: string } | null;
+    const medRec = r.medical_records as {
+      title?: string;
+      record_date?: string;
+      record_type?: string;
+    } | null;
     return {
       id: r.id as string,
       record_id: r.record_id as string,
@@ -163,7 +165,7 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
 
   // Calculate stats
   const dates = history
-    .map(h => h.record_date)
+    .map((h) => h.record_date)
     .filter((d): d is string => d !== null)
     .sort();
 
@@ -185,16 +187,10 @@ export function useConditionDetail(conditionId: string | null) {
 }
 
 // Create a new condition
-async function createCondition(
-  input: CreateConditionInput
-): Promise<Condition> {
+async function createCondition(input: CreateConditionInput): Promise<Condition> {
   const supabase = createClient();
 
-  const { data, error } = await supabase
-    .from("conditions")
-    .insert(input)
-    .select()
-    .single();
+  const { data, error } = await supabase.from("conditions").insert(input).select().single();
 
   if (error) {
     throw new Error(error.message);
@@ -227,10 +223,7 @@ async function updateCondition({
   const supabase = createClient();
 
   // Perform update first
-  const { error: updateError } = await supabase
-    .from("conditions")
-    .update(updates)
-    .eq("id", id);
+  const { error: updateError } = await supabase.from("conditions").update(updates).eq("id", id);
 
   if (updateError) {
     throw new Error(updateError.message);
@@ -273,12 +266,7 @@ export function useUpdateCondition() {
 }
 
 // Soft delete a condition
-async function deleteCondition({
-  id,
-}: {
-  id: string;
-  personId: string;
-}): Promise<void> {
+async function deleteCondition({ id }: { id: string; personId: string }): Promise<void> {
   const supabase = createClient();
 
   const { error } = await supabase
@@ -310,7 +298,7 @@ export function useDeleteCondition() {
 
 /** Map condition_id -> record_ids from active medical records (for comparison: exclude current record to get previous count) */
 export async function fetchPersonConditionRecordHistory(
-  personId: string
+  personId: string,
 ): Promise<Record<string, string[]>> {
   const supabase = createClient();
 
@@ -346,9 +334,7 @@ export function usePersonConditionRecordHistory(personId: string | null) {
 // ============================================================================
 
 // Fetch condition records for a specific medical record
-async function fetchRecordConditions(
-  recordId: string
-): Promise<ConditionRecordWithDetails[]> {
+async function fetchRecordConditions(recordId: string): Promise<ConditionRecordWithDetails[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase.rpc("get_record_conditions", {
@@ -371,16 +357,10 @@ export function useRecordConditions(recordId: string | null) {
 }
 
 // Create a condition record
-async function createConditionRecord(
-  input: CreateConditionRecordInput
-): Promise<ConditionRecord> {
+async function createConditionRecord(input: CreateConditionRecordInput): Promise<ConditionRecord> {
   const supabase = createClient();
 
-  const { data, error } = await supabase
-    .from("condition_records")
-    .insert(input)
-    .select()
-    .single();
+  const { data, error } = await supabase.from("condition_records").insert(input).select().single();
 
   if (error) {
     throw new Error(error.message);
@@ -456,10 +436,7 @@ async function updateConditionRecord({
       conditionUpdates.icd_name_en = icd_name_en ?? null;
     }
     if (Object.keys(conditionUpdates).length > 0) {
-      await supabase
-        .from("conditions")
-        .update(conditionUpdates)
-        .eq("id", conditionId);
+      await supabase.from("conditions").update(conditionUpdates).eq("id", conditionId);
     }
   }
 
@@ -496,7 +473,7 @@ export function useUpdateConditionRecord() {
 // Recompute condition's current_status from the most recent condition_record by record_date
 async function recomputeConditionCurrentStatus(
   supabase: ReturnType<typeof createClient>,
-  conditionId: string
+  conditionId: string,
 ): Promise<void> {
   const { data: latestMention } = await supabase
     .from("condition_records")
@@ -538,10 +515,7 @@ async function deleteConditionRecord({
 
   const conditionId = row.condition_id as string;
 
-  const { error } = await supabase
-    .from("condition_records")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("condition_records").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);
@@ -612,16 +586,14 @@ export function useCreateConditionWithRecord() {
       }
 
       // 2. Create condition_record
-      const { error: crError } = await supabase
-        .from("condition_records")
-        .insert({
-          condition_id: condition.id,
-          record_id: input.record_id,
-          status_in_record: input.status,
-          source_anchor: input.source_anchor || null,
-          is_llm_extracted: false,
-          is_user_verified: true,
-        });
+      const { error: crError } = await supabase.from("condition_records").insert({
+        condition_id: condition.id,
+        record_id: input.record_id,
+        status_in_record: input.status,
+        source_anchor: input.source_anchor || null,
+        is_llm_extracted: false,
+        is_user_verified: true,
+      });
 
       if (crError) {
         throw new Error(crError.message);
@@ -693,12 +665,15 @@ export function useLinkConditionToRecord() {
         .single();
 
       const thisRecordDate = thisRecord?.record_date ?? null;
-      const linkMedicalRecords = mostRecentMention?.medical_records as { record_date?: string } | null;
+      const linkMedicalRecords = mostRecentMention?.medical_records as {
+        record_date?: string;
+      } | null;
       const mostRecentDate = linkMedicalRecords?.record_date ?? null;
 
       // Only update condition current_status when this record is the most recent by date.
       // If this record has no date, or its date is before the latest mention, leave condition status unchanged.
-      const shouldUpdateStatus = thisRecordDate != null && (!mostRecentDate || thisRecordDate >= mostRecentDate);
+      const shouldUpdateStatus =
+        thisRecordDate != null && (!mostRecentDate || thisRecordDate >= mostRecentDate);
 
       // Build update object for condition
       const conditionUpdates: Record<string, string | null> = {};
@@ -713,10 +688,7 @@ export function useLinkConditionToRecord() {
 
       // Update condition if there are changes
       if (Object.keys(conditionUpdates).length > 0) {
-        await supabase
-          .from("conditions")
-          .update(conditionUpdates)
-          .eq("id", input.condition_id);
+        await supabase.from("conditions").update(conditionUpdates).eq("id", input.condition_id);
       }
 
       return conditionRecord as ConditionRecord;

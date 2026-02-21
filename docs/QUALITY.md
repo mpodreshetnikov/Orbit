@@ -33,15 +33,15 @@ Do not replace these with ad-hoc alternatives when equivalent command IDs alread
 
 ## Change-Type Check Matrix
 
-| Change Type | Mandatory Checks | Additional Checks | Evidence Required |
-| --- | --- | --- | --- |
-| Docs only | `lint` (if touched TS/JS snippets only), docs links check | none | list of changed docs and cross-links validated |
-| UI/routes/components | `lint`, `types`, `test` | manual happy-path walkthrough on affected routes | command outcomes + screenshots/recording |
-| Hooks/client orchestration | `lint`, `types`, `test` | walkthrough for stale cache/mutation behavior | command outcomes + brief behavior notes |
-| Edge/API workflow | `lint`, `types`, `test` | verify auth behavior and error path handling | command outcomes + endpoint behavior notes |
-| DB schema/policy/function/trigger/cron | `lint`, `types`, `test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity | command outcomes + SQL diff rationale |
-| Extension/service worker/import flow | `lint`, `types`, `test` | extension bridge/manual import scenario | command outcomes + scenario transcript |
-| CI/deploy/security config | `lint`, `types`, `test`, `secrets-preflight` | check workflow/job behavior and required env contracts | command outcomes + config review notes |
+| Change Type                            | Mandatory Checks                                          | Additional Checks                                      | Evidence Required                              |
+| -------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
+| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check | none                                                   | list of changed docs and cross-links validated |
+| UI/routes/components                   | `lint`, `types`, `test`                                   | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
+| Hooks/client orchestration             | `lint`, `types`, `test`                                   | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `lint`, `types`, `test`                                   | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
+| DB schema/policy/function/trigger/cron | `lint`, `types`, `test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
+| Extension/service worker/import flow   | `lint`, `types`, `test`                                   | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
+| CI/deploy/security config              | `lint`, `types`, `test`, `secrets-preflight`              | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 
@@ -85,6 +85,7 @@ When DB behavior changes:
 - regenerate DB artifacts via `db-artifacts-refresh`.
 
 Generated DB artifacts policy:
+
 - `supabase/db/schema.snapshot.sql` and `supabase/db/database.types.ts` are generated artifacts.
 - Never edit these files by hand.
 - Regenerate only via `db-artifacts-refresh`.
@@ -148,14 +149,14 @@ Use this schema for each scored snapshot:
 
 ### Category weights
 
-| Category | Weight |
-| --- | ---: |
-| Build and static gates | 30 |
-| Data/security integrity | 20 |
-| Reliability/lifecycle validation | 20 |
-| Maintainability/architecture hygiene | 20 |
-| Delivery governance/evidence quality | 10 |
-| **Total** | **100** |
+| Category                             |  Weight |
+| ------------------------------------ | ------: |
+| Build and static gates               |      30 |
+| Data/security integrity              |      20 |
+| Reliability/lifecycle validation     |      20 |
+| Maintainability/architecture hygiene |      20 |
+| Delivery governance/evidence quality |      10 |
+| **Total**                            | **100** |
 
 ### Category check items
 
@@ -194,12 +195,12 @@ Use this schema for each scored snapshot:
 
 ## Mandatory Cap Rules And Fail-Fast Rules
 
-| Rule ID | Condition | Max Score |
-| --- | --- | ---: |
-| `CAP-01` | `lint` OR `types` OR `test` fails | 49 |
-| `CAP-02` | `secrets-preflight` fails | 0 |
-| `CAP-03` | DB changes skip migration and/or required `supabase/db` updates | 39 |
-| `CAP-04` | Security-sensitive changes lack explicit auth/RLS review evidence | 69 |
+| Rule ID  | Condition                                                         | Max Score |
+| -------- | ----------------------------------------------------------------- | --------: |
+| `CAP-01` | `lint` OR `types` OR `test` fails                                 |        49 |
+| `CAP-02` | `secrets-preflight` fails                                         |         0 |
+| `CAP-03` | DB changes skip migration and/or required `supabase/db` updates   |        39 |
+| `CAP-04` | Security-sensitive changes lack explicit auth/RLS review evidence |        69 |
 
 Cap application rule:
 
@@ -209,14 +210,14 @@ Cap application rule:
 
 ### Baseline category breakdown
 
-| Category | Points |
-| --- | ---: |
-| Build/static gates | 30 / 30 |
-| Data/security integrity | 11 / 20 |
-| Reliability/lifecycle | 6 / 20 |
-| Maintainability/architecture hygiene | 7 / 20 |
-| Delivery governance/evidence quality | 5 / 10 |
-| **Total** | **59 / 100** |
+| Category                             |       Points |
+| ------------------------------------ | -----------: |
+| Build/static gates                   |      30 / 30 |
+| Data/security integrity              |      11 / 20 |
+| Reliability/lifecycle                |       6 / 20 |
+| Maintainability/architecture hygiene |       7 / 20 |
+| Delivery governance/evidence quality |       5 / 10 |
+| **Total**                            | **59 / 100** |
 
 ### Baseline evidence snapshot
 
@@ -235,12 +236,12 @@ Cap application rule:
 
 ## PR Acceptance Thresholds
 
-| Final Score | Quality Decision | Merge Expectation |
-| --- | --- | --- |
-| `0-49` | Fail | Do not merge |
-| `50-69` | Risky | Merge blocked unless explicit maintainer exception + debt plan |
-| `70-84` | Acceptable | Merge allowed when required evidence is complete |
-| `85-100` | Strong | Preferred target for high-impact changes |
+| Final Score | Quality Decision | Merge Expectation                                              |
+| ----------- | ---------------- | -------------------------------------------------------------- |
+| `0-49`      | Fail             | Do not merge                                                   |
+| `50-69`     | Risky            | Merge blocked unless explicit maintainer exception + debt plan |
+| `70-84`     | Acceptable       | Merge allowed when required evidence is complete               |
+| `85-100`    | Strong           | Preferred target for high-impact changes                       |
 
 Additional merge blockers regardless of score:
 
@@ -257,6 +258,6 @@ Additional merge blockers regardless of score:
 
 ### Reassessment Log
 
-| Date | Score | Notes |
-| --- | ---: | --- |
-| `2026-02-20` | 59 | Initial strict baseline |
+| Date         | Score | Notes                   |
+| ------------ | ----: | ----------------------- |
+| `2026-02-20` |    59 | Initial strict baseline |

@@ -197,10 +197,10 @@ Heuristics:
 
 Detection order:
 
-1) Source-provided type
-2) Rules (patterns)
-3) Name-based heuristics: some banks include counterparty/person names in the transaction title/description; use that as a strong transfer signal (configurable alias list per person)
-4) Pair matching: opposite sign, same abs amount, within window, between known accounts; set `transfer_group_id`
+1. Source-provided type
+2. Rules (patterns)
+3. Name-based heuristics: some banks include counterparty/person names in the transaction title/description; use that as a strong transfer signal (configurable alias list per person)
+4. Pair matching: opposite sign, same abs amount, within window, between known accounts; set `transfer_group_id`
 
 Transfers excluded from expenses by default.
 
@@ -210,10 +210,10 @@ Transfers excluded from expenses by default.
 
 Pipeline:
 
-1) Import hints (MCC/store metadata)
-2) Rule engine
-3) Manual edits (lock)
-4) LLM suggestions (optional; preview required)
+1. Import hints (MCC/store metadata)
+2. Rule engine
+3. Manual edits (lock)
+4. LLM suggestions (optional; preview required)
 
 Line items store `beneficiary_person_id` to support reports (Dog/Wife/Max/Shared).
 
@@ -279,22 +279,22 @@ Constraints:
 
 ## 9) Implementation plan (Cursor tasks)
 
-1) Schema + RLS + indexes + unique constraints
-2) Basic UI + manual entry (transactions + line items + beneficiary)
-3) Import framework + first connectors (T-Bank file + WB web export)
-4) Rule engine + rules UI
-5) Monthly aggregates + dashboard
-6) Dog settlement calculator
-7) Salary forecasting
-8) Add more connectors (Alfa/Bakai + other stores)
-9) Optional LLM classification
+1. Schema + RLS + indexes + unique constraints
+2. Basic UI + manual entry (transactions + line items + beneficiary)
+3. Import framework + first connectors (T-Bank file + WB web export)
+4. Rule engine + rules UI
+5. Monthly aggregates + dashboard
+6. Dog settlement calculator
+7. Salary forecasting
+8. Add more connectors (Alfa/Bakai + other stores)
+9. Optional LLM classification
 
 ---
 
 ## 10) Remaining critical decisions (resolved)
 
-1) Default reporting currency: **RUB**.
-2) FX conversion policy: **transaction-date**.
-3) FX provider: **fxratesapi.com**.
-4) Shared beneficiary: **skip for now** (use NULL `beneficiary_person_id` to mean “unassigned/shared”).
-5) Dog calculator: use a **separate manual entries table** (`money_dog_manual_entries`) not linked to `money_transactions`.
+1. Default reporting currency: **RUB**.
+2. FX conversion policy: **transaction-date**.
+3. FX provider: **fxratesapi.com**.
+4. Shared beneficiary: **skip for now** (use NULL `beneficiary_person_id` to mean “unassigned/shared”).
+5. Dog calculator: use a **separate manual entries table** (`money_dog_manual_entries`) not linked to `money_transactions`.

@@ -30,11 +30,13 @@ Get anon key from local Supabase status output after stack is up (for one-off co
 3. Regenerate generated DB artifacts with `db-artifacts-refresh` from `AGENTS.md`.
 
 Why `db-reset`:
+
 - Runs migrations from `supabase/migrations/`.
 - Runs idempotent DB deploy from `supabase/db/deploy.sql`.
 - Ensures local state matches the two-track DB delivery model.
 
 DB artifact note:
+
 - `supabase/db/schema.snapshot.sql` and `supabase/db/database.types.ts` are generated files.
 - `supabase/db/schema.snapshot.sql` is a table-only snapshot (table structure + constraints/indexes), not a full logical object dump.
 - Do not edit them by hand; use `db-artifacts-refresh`.
@@ -46,9 +48,11 @@ The notifications `pg_cron` job calls `notifications-cron` via `pg_net`. URL com
 
 - Local: after `db-reset`, seed sets `project_url` to `http://kong:8000`.
 - Hosted: run once:
+
 ```sql
 select vault.create_secret('https://<your-project-ref>.supabase.co', 'project_url');
 ```
+
 Remove any manually created duplicate notifications cron job.
 
 ## Google OAuth (Local)
@@ -68,10 +72,13 @@ email_optional = false
 ```
 
 3. Provide the secret via environment, for example in `supabase/.env`:
+
 ```env
 SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET=your-google-client-secret
 ```
+
 4. Restart local stack:
+
 - Run `dev-stop` from `AGENTS.md`.
 - Run `dev-ready` from `AGENTS.md`.
 
@@ -111,6 +118,7 @@ Verify in Table Editor `allowed_users`. `auth_user_id` stays null until first si
 3. Confirm redirect to `/login`.
 4. Sign in with Google.
 5. Confirm:
+
 - Not allowlisted -> `/access-denied`.
 - Allowlisted -> `/health`.
 

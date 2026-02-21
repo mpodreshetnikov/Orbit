@@ -9,12 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -238,14 +233,14 @@ export default function MoneyAccountsPage() {
                       )}
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      {t(`money.accountKind${account.account_kind.charAt(0).toUpperCase() + account.account_kind.slice(1)}`)}
+                      {t(
+                        `money.accountKind${account.account_kind.charAt(0).toUpperCase() + account.account_kind.slice(1)}`,
+                      )}
                     </p>
                   </div>
                   <span className="text-sm font-medium shrink-0">{account.currency}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {account.source}
-                </p>
+                <p className="text-xs text-muted-foreground">{account.source}</p>
                 <div className="border-t pt-2 mt-2 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
@@ -265,10 +260,7 @@ export default function MoneyAccountsPage() {
                   {cardsByAccount[account.id]?.length ? (
                     <ul className="space-y-1">
                       {cardsByAccount[account.id].map((c) => (
-                        <li
-                          key={c.id}
-                          className="flex items-center justify-between gap-2 text-sm"
-                        >
+                        <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
                           <span>
                             *{c.last4}
                             {c.card_label ? ` — ${c.card_label}` : ""}
@@ -295,9 +287,7 @@ export default function MoneyAccountsPage() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {t("money.noCards")}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{t("money.noCards")}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 pt-2">
@@ -329,9 +319,7 @@ export default function MoneyAccountsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {editing ? t("money.editAccount") : t("money.addAccount")}
-            </DialogTitle>
+            <DialogTitle>{editing ? t("money.editAccount") : t("money.addAccount")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
@@ -358,10 +346,7 @@ export default function MoneyAccountsPage() {
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.accountCurrency")}</label>
-              <Select
-                value={currency}
-                onValueChange={(value) => setCurrency(value)}
-              >
+              <Select value={currency} onValueChange={(value) => setCurrency(value)}>
                 <SelectTrigger>
                   <SelectValue placeholder={t("money.currency")} />
                 </SelectTrigger>
@@ -377,7 +362,9 @@ export default function MoneyAccountsPage() {
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.accountSource")}</label>
               <Select
-                value={MONEY_ACCOUNT_SOURCES.includes(source as "manual" | "tbank") ? source : "manual"}
+                value={
+                  MONEY_ACCOUNT_SOURCES.includes(source as "manual" | "tbank") ? source : "manual"
+                }
                 onValueChange={setSource}
               >
                 <SelectTrigger>
@@ -410,7 +397,10 @@ export default function MoneyAccountsPage() {
               <Button variant="ghost" onClick={() => setDialogOpen(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
+              <Button
+                onClick={handleSave}
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
                 {t("common.save")}
               </Button>
             </div>
@@ -421,9 +411,7 @@ export default function MoneyAccountsPage() {
       <Dialog open={cardDialogOpen} onOpenChange={setCardDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>
-              {cardEditing ? t("money.editCard") : t("money.addCard")}
-            </DialogTitle>
+            <DialogTitle>{cardEditing ? t("money.editCard") : t("money.addCard")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
@@ -492,9 +480,7 @@ export default function MoneyAccountsPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("common.delete")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete card *{cardDeleteTarget?.last4}?
-            </AlertDialogDescription>
+            <AlertDialogDescription>Delete card *{cardDeleteTarget?.last4}?</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

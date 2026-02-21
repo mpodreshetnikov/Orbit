@@ -58,9 +58,7 @@ export function EditMeasurementDialog({
   const { data: catalogItem } = useMeasurementCatalogItem(catalogId || null);
   const updateMutation = useUpdateMeasurement();
 
-  const displayUnit = locale === "ru" 
-    ? catalogItem?.unit_ru 
-    : catalogItem?.unit_en;
+  const displayUnit = locale === "ru" ? catalogItem?.unit_ru : catalogItem?.unit_en;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,9 +91,7 @@ export function EditMeasurementDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t("measurements.editMeasurement")}</DialogTitle>
-          <DialogDescription>
-            {t("measurements.editDescription")}
-          </DialogDescription>
+          <DialogDescription>{t("measurements.editDescription")}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -149,13 +145,8 @@ export function EditMeasurementDialog({
             <Button type="button" variant="outline" onClick={handleClose}>
               {t("common.cancel")}
             </Button>
-            <Button 
-              type="submit" 
-              disabled={!value || updateMutation.isPending}
-            >
-              {updateMutation.isPending && (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              )}
+            <Button type="submit" disabled={!value || updateMutation.isPending}>
+              {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {t("common.save")}
             </Button>
           </DialogFooter>

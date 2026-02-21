@@ -39,10 +39,7 @@ export function useStructureExtraction() {
         }
 
         // Update record status to "structuring"
-        await supabase
-          .from("medical_records")
-          .update({ status: "structuring" })
-          .eq("id", recordId);
+        await supabase.from("medical_records").update({ status: "structuring" }).eq("id", recordId);
 
         // Call health-structure edge function
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -105,8 +102,7 @@ export function useStructureExtraction() {
 
         return { success: true, structured_data: data.structured_data };
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Structure extraction failed";
+        const errorMessage = error instanceof Error ? error.message : "Structure extraction failed";
 
         // Show error toast
         toast.error(t("processing.structureFailed"), {
@@ -115,10 +111,7 @@ export function useStructureExtraction() {
 
         // Update record status back to ocr_review (so user can try again)
         const supabase = createClient();
-        await supabase
-          .from("medical_records")
-          .update({ status: "ocr_review" })
-          .eq("id", recordId);
+        await supabase.from("medical_records").update({ status: "ocr_review" }).eq("id", recordId);
 
         // Invalidate queries
         queryClient.invalidateQueries({
@@ -130,7 +123,7 @@ export function useStructureExtraction() {
         setIsExtracting(false);
       }
     },
-    [t, queryClient]
+    [t, queryClient],
   );
 
   return { extractStructure, isExtracting };

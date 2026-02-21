@@ -10,6 +10,7 @@
 - Production deploy path: GitHub Actions workflow `.github/workflows/main.yml` on push to `main` (Vercel production + Supabase production deploy).
 
 Notes:
+
 - GitHub Actions jobs run in environment `production`.
 - Configure GitHub Actions Vercel values:
   - Secrets: `VERCEL_TOKEN`
@@ -33,6 +34,7 @@ Notes:
 ## Auth And Access Issues
 
 Symptoms:
+
 - Redirect loops to `/login`
 - Access denied for expected users
 
@@ -50,6 +52,7 @@ where email = '<user-email>';
 ## Notifications And Cron Issues
 
 Useful locations:
+
 - UI debug page: `/settings/notifications-debug`
 - API routes: `src/app/api/notifications/run-cron/route.ts`, `src/app/api/medications/run-cron/route.ts`
 - Edge Function: `supabase/functions/notifications-cron/index.ts`
@@ -88,9 +91,11 @@ where name = 'project_url';
 ## Medication Event Generation Issues
 
 Key endpoint:
+
 - `POST /api/medications/regenerate-events` in `src/app/api/medications/regenerate-events/route.ts`
 
 Checks:
+
 - Run regenerate endpoint for the affected user/person.
 - Verify rows exist in `med_dose_events` for the next 7 days.
 - Confirm timezone source (request body -> user preferences -> UTC fallback).
@@ -98,10 +103,12 @@ Checks:
 ## OCR/LLM Pipeline Issues
 
 Functions:
+
 - `supabase/functions/health-ocr/index.ts`
 - `supabase/functions/health-structure/index.ts`
 
 Checks:
+
 - Confirm required secrets are set (`OPENROUTER_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
 - Confirm attachment exists in `medical-attachments` bucket.
 - Check function logs for auth failures, timeout, or model/provider errors.
@@ -109,9 +116,11 @@ Checks:
 ## Money Import Issues
 
 Function:
+
 - `supabase/functions/money-import/index.ts`
 
 Checks:
+
 - Verify auth mode (user bearer token or import session token).
 - Inspect import session/batch tables for status and errors:
   - `money_import_sessions`

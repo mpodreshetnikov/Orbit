@@ -11,9 +11,7 @@ import type {
 // ============================================================================
 // FETCH ALL MEASUREMENT CATALOG ITEMS
 // ============================================================================
-async function fetchMeasurementCatalog(
-  search?: string
-): Promise<MeasurementCatalog[]> {
+async function fetchMeasurementCatalog(search?: string): Promise<MeasurementCatalog[]> {
   const supabase = createClient();
 
   let query = supabase
@@ -26,7 +24,7 @@ async function fetchMeasurementCatalog(
   if (search && search.trim()) {
     const searchTerm = `%${search.trim().toLowerCase()}%`;
     query = query.or(
-      `code.ilike.${searchTerm},name_ru.ilike.${searchTerm},name_en.ilike.${searchTerm}`
+      `code.ilike.${searchTerm},name_ru.ilike.${searchTerm},name_en.ilike.${searchTerm}`,
     );
   }
 
@@ -49,9 +47,7 @@ export function useMeasurementCatalog(search?: string) {
 // ============================================================================
 // FETCH SINGLE MEASUREMENT CATALOG ITEM
 // ============================================================================
-async function fetchMeasurementCatalogItem(
-  id: string
-): Promise<MeasurementCatalog | null> {
+async function fetchMeasurementCatalogItem(id: string): Promise<MeasurementCatalog | null> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -81,9 +77,7 @@ export function useMeasurementCatalogItem(id: string | null) {
 // ============================================================================
 // FETCH BY CODE
 // ============================================================================
-async function fetchMeasurementCatalogByCode(
-  code: string
-): Promise<MeasurementCatalog | null> {
+async function fetchMeasurementCatalogByCode(code: string): Promise<MeasurementCatalog | null> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -114,7 +108,7 @@ export function useMeasurementCatalogByCode(code: string | null) {
 // CREATE MEASUREMENT CATALOG ITEM
 // ============================================================================
 async function createMeasurementCatalogItem(
-  input: CreateMeasurementCatalogInput
+  input: CreateMeasurementCatalogInput,
 ): Promise<MeasurementCatalog> {
   const supabase = createClient();
 
@@ -203,10 +197,7 @@ export function useUpdateMeasurementCatalogItem() {
 async function deleteMeasurementCatalogItem(id: string): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("measurement_catalog")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("measurement_catalog").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);

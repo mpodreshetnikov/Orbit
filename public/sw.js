@@ -8,7 +8,8 @@ var SW_LOCALE_CACHE_KEY = "/app-locale";
 
 function getDeviceLangSync() {
   try {
-    var lang = (self.navigator && self.navigator.language) ? self.navigator.language.split("-")[0] : "en";
+    var lang =
+      self.navigator && self.navigator.language ? self.navigator.language.split("-")[0] : "en";
     return lang === "ru" ? "ru" : "en";
   } catch (_) {
     return "en";
@@ -18,17 +19,22 @@ function getDeviceLangSync() {
 function getAppLang() {
   try {
     if (!self.caches || !self.caches.open) return Promise.resolve(getDeviceLangSync());
-    return self.caches.open(SW_LOCALE_CACHE_NAME).then(function (cache) {
-      return cache.match(SW_LOCALE_CACHE_KEY);
-    }).then(function (response) {
-      if (response) return response.text();
-      return null;
-    }).then(function (lang) {
-      if (lang === "ru" || lang === "en") return lang;
-      return getDeviceLangSync();
-    }).catch(function () {
-      return getDeviceLangSync();
-    });
+    return self.caches
+      .open(SW_LOCALE_CACHE_NAME)
+      .then(function (cache) {
+        return cache.match(SW_LOCALE_CACHE_KEY);
+      })
+      .then(function (response) {
+        if (response) return response.text();
+        return null;
+      })
+      .then(function (lang) {
+        if (lang === "ru" || lang === "en") return lang;
+        return getDeviceLangSync();
+      })
+      .catch(function () {
+        return getDeviceLangSync();
+      });
   } catch (_) {
     return Promise.resolve(getDeviceLangSync());
   }
@@ -58,7 +64,7 @@ function applyTitlePrefix(title, prefix) {
   var prefixLabel = String(prefix).trim();
   if (!prefixLabel) return title;
   var prefixText = "(" + prefixLabel + ") ";
-  return title.startsWith(prefixText) ? title : (prefixText + title);
+  return title.startsWith(prefixText) ? title : prefixText + title;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +77,8 @@ function applyTitlePrefix(title, prefix) {
 function getPluralCategory(lang, count) {
   var n = Math.abs(parseInt(count, 10)) || 0;
   if (lang === "ru") {
-    var mod10 = n % 10, mod100 = n % 100;
+    var mod10 = n % 10,
+      mod100 = n % 100;
     if (mod10 === 1 && mod100 !== 11) return "one";
     if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "few";
     if (mod10 === 0 || (mod10 >= 5 && mod10 <= 9) || (mod100 >= 11 && mod100 <= 14)) return "many";
@@ -115,7 +122,12 @@ var UNIT_LABELS = {
     inhalation: { one: "ингаляция", few: "ингаляции", many: "ингаляций", other: "ингаляций" },
     patch: { one: "пластырь", few: "пластыря", many: "пластырей", other: "пластырей" },
     application: { one: "нанесение", few: "нанесения", many: "нанесений", other: "нанесений" },
-    spray: { one: "впрыскивание", few: "впрыскивания", many: "впрыскиваний", other: "впрыскиваний" },
+    spray: {
+      one: "впрыскивание",
+      few: "впрыскивания",
+      many: "впрыскиваний",
+      other: "впрыскиваний",
+    },
     portion: { one: "порция", few: "порции", many: "порций", other: "порций" },
     tablespoon: { one: "ст. ложка", few: "ст. ложки", many: "ст. ложек", other: "ст. ложек" },
     teaspoon: { one: "ч. ложка", few: "ч. ложки", many: "ч. ложек", other: "ч. ложек" },
@@ -136,7 +148,10 @@ function translateUnit(unitKey, lang, count) {
 }
 
 var MEDICATION_TITLES = { en: "Medications", ru: "Лекарства" };
-var MEDICATION_ACTION_LABELS = { en: { confirm: "Confirm", skip: "Skip" }, ru: { confirm: "Подтвердить", skip: "Пропустить" } };
+var MEDICATION_ACTION_LABELS = {
+  en: { confirm: "Confirm", skip: "Skip" },
+  ru: { confirm: "Подтвердить", skip: "Пропустить" },
+};
 
 function getMedicationTitle(n, lang) {
   return MEDICATION_TITLES[lang] || MEDICATION_TITLES.en;
@@ -156,14 +171,17 @@ function getMedicationBody(n, lang) {
 function getMedicationData(n) {
   var doseEventIds = Array.isArray(n.dose_event_ids)
     ? n.dose_event_ids
-    : n.dose_event_id != null ? [n.dose_event_id] : [];
+    : n.dose_event_id != null
+      ? [n.dose_event_id]
+      : [];
   return { dose_event_ids: doseEventIds };
 }
 
 function getNotificationInstanceId(n) {
   if (n && n.id != null) return String(n.id);
   if (n && n.dose_event_id != null) return String(n.dose_event_id);
-  if (n && Array.isArray(n.dose_event_ids) && n.dose_event_ids.length) return n.dose_event_ids.join("-");
+  if (n && Array.isArray(n.dose_event_ids) && n.dose_event_ids.length)
+    return n.dose_event_ids.join("-");
   return String(Date.now());
 }
 
@@ -191,24 +209,30 @@ var NOTIFICATION_TYPE_HANDLERS = {
       return [{ action: "confirm", title: labels.confirm }];
     },
     getTitle: function (n, lang) {
-      return (n.medicationName != null && n.amount != null) ? getMedicationTitle(n, lang) : (n.title || "Notification");
+      return n.medicationName != null && n.amount != null
+        ? getMedicationTitle(n, lang)
+        : n.title || "Notification";
     },
     getBody: function (n, lang) {
       var items = n.medItems || (n.med_items && Array.isArray(n.med_items) ? n.med_items : null);
       if (Array.isArray(items) && items.length > 0) {
-        return items.map(function (item) {
-          return getMedicationBody(
-            {
-              medicationName: item.medicationName,
-              amount: item.amount,
-              unit: item.unit,
-              body: item.body,
-            },
-            lang
-          );
-        }).join("\n");
+        return items
+          .map(function (item) {
+            return getMedicationBody(
+              {
+                medicationName: item.medicationName,
+                amount: item.amount,
+                unit: item.unit,
+                body: item.body,
+              },
+              lang,
+            );
+          })
+          .join("\n");
       }
-      return (n.medicationName != null && n.amount != null) ? getMedicationBody(n, lang) : (n.body || "");
+      return n.medicationName != null && n.amount != null
+        ? getMedicationBody(n, lang)
+        : n.body || "";
     },
     getData: function (n, baseData) {
       var extra = getMedicationData(n);
@@ -229,7 +253,12 @@ var NOTIFICATION_TYPE_HANDLERS = {
     },
     onActionClick: function (event, data, action) {
       var doseEventIds = data.dose_event_ids;
-      console.log("[SW] medication onActionClick: action =", JSON.stringify(action), "dose_event_ids =", JSON.stringify(doseEventIds));
+      console.log(
+        "[SW] medication onActionClick: action =",
+        JSON.stringify(action),
+        "dose_event_ids =",
+        JSON.stringify(doseEventIds),
+      );
       if (!Array.isArray(doseEventIds) || doseEventIds.length === 0) return null;
       if (action !== "confirm" && action !== "skip") return null;
       var apiAction = action === "confirm" ? "taken" : "skipped";
@@ -240,15 +269,21 @@ var NOTIFICATION_TYPE_HANDLERS = {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dose_event_ids: doseEventIds, action: apiAction, raw_event_action: action }),
-      }).then(function (resp) {
-        console.log("[SW] medication-action API response:", resp.status, resp.ok);
-        if (resp.ok) return "api_ok";
-        return "api_fail_" + resp.status;
-      }).catch(function (err) {
-        console.log("[SW] medication-action API error:", err);
-        return "api_fail";
-      });
+        body: JSON.stringify({
+          dose_event_ids: doseEventIds,
+          action: apiAction,
+          raw_event_action: action,
+        }),
+      })
+        .then(function (resp) {
+          console.log("[SW] medication-action API response:", resp.status, resp.ok);
+          if (resp.ok) return "api_ok";
+          return "api_fail_" + resp.status;
+        })
+        .catch(function (err) {
+          console.log("[SW] medication-action API error:", err);
+          return "api_fail";
+        });
 
       return Promise.all([fetchPromise]);
     },
@@ -292,17 +327,17 @@ function buildNotificationOptions(n, lang) {
 
   var tag = n && n.tag ? n.tag : null;
   if (!tag && handler && handler.tag != null) {
-    tag = (typeof handler.tag === "function" ? handler.tag(n) : handler.tag);
+    tag = typeof handler.tag === "function" ? handler.tag(n) : handler.tag;
   }
   if (!tag) {
-    var fallbackPersonId = n && (n.person_id || n.personId) ? (n.person_id || n.personId) : "";
+    var fallbackPersonId = n && (n.person_id || n.personId) ? n.person_id || n.personId : "";
     if (n && n.id) {
       tag = "notification-" + (fallbackPersonId ? fallbackPersonId + "-" : "") + n.id;
     } else {
       tag = "notification-" + Date.now();
     }
   }
-  var renotify = (handler && handler.renotify != null) ? handler.renotify : false;
+  var renotify = handler && handler.renotify != null ? handler.renotify : false;
   var options = {
     body: body,
     icon: icon,
@@ -317,9 +352,10 @@ function buildNotificationOptions(n, lang) {
   title = applyTitlePrefix(title, prefix);
   if (image != null) options.image = image;
   if (actions && actions.length > 0) {
-    var max = (self.Notification && typeof Notification.maxActions === "number")
-      ? Notification.maxActions
-      : actions.length;
+    var max =
+      self.Notification && typeof Notification.maxActions === "number"
+        ? Notification.maxActions
+        : actions.length;
     options.actions = actions.slice(0, Math.max(0, max));
   }
   return { title: title, options: options };
@@ -331,15 +367,18 @@ function buildNotificationOptions(n, lang) {
 function closeSameGroupThenShow(built) {
   var groupKey = built.options && built.options.data && built.options.data.groupKey;
 
-  return self.registration.getNotifications().then(function (list) {
-    if (!groupKey) return;
-    list.forEach(function (notif) {
-      var d = notif.data || {};
-      if (d.groupKey === groupKey) notif.close();
+  return self.registration
+    .getNotifications()
+    .then(function (list) {
+      if (!groupKey) return;
+      list.forEach(function (notif) {
+        var d = notif.data || {};
+        if (d.groupKey === groupKey) notif.close();
+      });
+    })
+    .then(function () {
+      return self.registration.showNotification(built.title, built.options);
     });
-  }).then(function () {
-    return self.registration.showNotification(built.title, built.options);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -347,17 +386,21 @@ function closeSameGroupThenShow(built) {
 // ---------------------------------------------------------------------------
 function openNotificationUrl(url, actionBaseUrl) {
   var base = actionBaseUrl || self.location.origin;
-  var resolved = (url || "/").startsWith("http") ? url : base + (url.startsWith("/") ? url : "/" + url);
-  return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (clientList) {
-    for (var i = 0; i < clientList.length; i++) {
-      var client = clientList[i];
-      if (client.url.indexOf(self.registration.scope) !== -1 && "focus" in client) {
-        client.navigate(resolved);
-        return client.focus();
+  var resolved = (url || "/").startsWith("http")
+    ? url
+    : base + (url.startsWith("/") ? url : "/" + url);
+  return self.clients
+    .matchAll({ type: "window", includeUncontrolled: true })
+    .then(function (clientList) {
+      for (var i = 0; i < clientList.length; i++) {
+        var client = clientList[i];
+        if (client.url.indexOf(self.registration.scope) !== -1 && "focus" in client) {
+          client.navigate(resolved);
+          return client.focus();
+        }
       }
-    }
-    if (self.clients.openWindow) return self.clients.openWindow(resolved);
-  });
+      if (self.clients.openWindow) return self.clients.openWindow(resolved);
+    });
 }
 
 function handleNotificationClick(event, data, action) {
@@ -372,7 +415,9 @@ function handleNotificationClick(event, data, action) {
   if (action === "dismiss") return null;
   if (action === "settings") {
     var url = data.url || "/";
-    var settingsUrl = url.startsWith("http") ? new URL("/settings", url).href : (data.actionBaseUrl || self.location.origin) + "/settings";
+    var settingsUrl = url.startsWith("http")
+      ? new URL("/settings", url).href
+      : (data.actionBaseUrl || self.location.origin) + "/settings";
     return openNotificationUrl(settingsUrl, data.actionBaseUrl);
   }
 
@@ -380,13 +425,19 @@ function handleNotificationClick(event, data, action) {
   var urlToOpen = data.url || "/";
   if (personId) {
     var base = data.actionBaseUrl || self.location.origin;
-    var fullUrl = (urlToOpen.startsWith("http") ? urlToOpen : base + (urlToOpen.startsWith("/") ? urlToOpen : "/" + urlToOpen));
+    var fullUrl = urlToOpen.startsWith("http")
+      ? urlToOpen
+      : base + (urlToOpen.startsWith("/") ? urlToOpen : "/" + urlToOpen);
     try {
       var u = new URL(fullUrl);
       u.searchParams.set("personId", personId);
       urlToOpen = u.href;
     } catch (e) {
-      urlToOpen = fullUrl + (fullUrl.indexOf("?") !== -1 ? "&" : "?") + "personId=" + encodeURIComponent(personId);
+      urlToOpen =
+        fullUrl +
+        (fullUrl.indexOf("?") !== -1 ? "&" : "?") +
+        "personId=" +
+        encodeURIComponent(personId);
     }
   }
   return openNotificationUrl(urlToOpen, data.actionBaseUrl);
@@ -420,7 +471,7 @@ self.addEventListener("push", function (event) {
         chain = chain.then(function () {
           var built = buildNotificationOptions(n, lang);
           return closeSameGroupThenShow(built).then(function () {
-            var ids = n.ids && Array.isArray(n.ids) ? n.ids : (n.id ? [n.id] : null);
+            var ids = n.ids && Array.isArray(n.ids) ? n.ids : n.id ? [n.id] : null;
             if (ids && ids.length > 0) {
               return fetch(self.location.origin + "/api/notifications/mark-shown", {
                 method: "POST",
@@ -460,7 +511,12 @@ self.addEventListener("push", function (event) {
 // ---------------------------------------------------------------------------
 self.addEventListener("notificationclick", function (event) {
   var rawAction = event.action;
-  console.log("[SW] notificationclick: event.action =", JSON.stringify(rawAction), "type =", JSON.stringify((event.notification.data || {}).type));
+  console.log(
+    "[SW] notificationclick: event.action =",
+    JSON.stringify(rawAction),
+    "type =",
+    JSON.stringify((event.notification.data || {}).type),
+  );
   event.notification.close();
 
   var data = event.notification.data || {};
@@ -482,25 +538,40 @@ function handleMedicationIntakeResolved(resolvedIds) {
     list.forEach(function (notif) {
       var d = notif.data || {};
       var type = d.type;
-      if ((type !== "medication" && type !== "medication_snoozed") || !Array.isArray(d.dose_event_ids)) return;
+      if (
+        (type !== "medication" && type !== "medication_snoozed") ||
+        !Array.isArray(d.dose_event_ids)
+      )
+        return;
       var doseEventIds = d.dose_event_ids;
-      var hasAny = doseEventIds.some(function (id) { return resolvedSet.has(id); });
+      var hasAny = doseEventIds.some(function (id) {
+        return resolvedSet.has(id);
+      });
       if (!hasAny) return;
       var keptIndices = [];
       for (var i = 0; i < doseEventIds.length; i++) {
         if (!resolvedSet.has(doseEventIds[i])) keptIndices.push(i);
       }
-      var newDoseEventIds = keptIndices.map(function (i) { return doseEventIds[i]; });
+      var newDoseEventIds = keptIndices.map(function (i) {
+        return doseEventIds[i];
+      });
       var medItems = d.med_items && Array.isArray(d.med_items) ? d.med_items : null;
-      var newMedItems = medItems && medItems.length >= doseEventIds.length
-        ? keptIndices.map(function (i) { return medItems[i]; })
-        : null;
+      var newMedItems =
+        medItems && medItems.length >= doseEventIds.length
+          ? keptIndices.map(function (i) {
+              return medItems[i];
+            })
+          : null;
       if (newDoseEventIds.length === 0) {
-        chain = chain.then(function () { notif.close(); });
+        chain = chain.then(function () {
+          notif.close();
+        });
         return;
       }
       if (!newMedItems) {
-        chain = chain.then(function () { notif.close(); });
+        chain = chain.then(function () {
+          notif.close();
+        });
         return;
       }
       var minimalN = {
@@ -508,8 +579,10 @@ function handleMedicationIntakeResolved(resolvedIds) {
         url: d.url || "/",
         person_id: d.person_id || null,
         personId: d.personId || null,
-        title_prefix: d.title_prefix != null ? d.title_prefix : (d.titlePrefix != null ? d.titlePrefix : null),
-        person_name: d.person_name != null ? d.person_name : (d.personName != null ? d.personName : null),
+        title_prefix:
+          d.title_prefix != null ? d.title_prefix : d.titlePrefix != null ? d.titlePrefix : null,
+        person_name:
+          d.person_name != null ? d.person_name : d.personName != null ? d.personName : null,
         med_items: newMedItems,
         dose_event_ids: newDoseEventIds,
       };
@@ -532,7 +605,11 @@ function handleMedicationIntakeResolved(resolvedIds) {
 self.addEventListener("message", function (event) {
   var data = event.data;
   if (!data) return;
-  if (data.type === "medicationIntakeResolved" && Array.isArray(data.dose_event_ids) && data.dose_event_ids.length > 0) {
+  if (
+    data.type === "medicationIntakeResolved" &&
+    Array.isArray(data.dose_event_ids) &&
+    data.dose_event_ids.length > 0
+  ) {
     event.waitUntil(handleMedicationIntakeResolved(data.dose_event_ids));
     return;
   }
@@ -544,9 +621,12 @@ self.addEventListener("message", function (event) {
       if (!self.registration.showNotification) return;
       var built = buildNotificationOptions(notification, lang);
       return closeSameGroupThenShow(built).then(function () {
-        var ids = notification.ids && Array.isArray(notification.ids)
-          ? notification.ids
-          : (notification.id ? [notification.id] : null);
+        var ids =
+          notification.ids && Array.isArray(notification.ids)
+            ? notification.ids
+            : notification.id
+              ? [notification.id]
+              : null;
         if (ids && ids.length > 0) {
           return fetch(self.location.origin + "/api/notifications/mark-shown", {
             method: "POST",
@@ -559,17 +639,23 @@ self.addEventListener("message", function (event) {
     })
     .then(function () {
       if (client && client.postMessage) {
-        var idsToNotify = notification.ids && Array.isArray(notification.ids)
-          ? notification.ids
-          : (notification.id ? [notification.id] : []);
+        var idsToNotify =
+          notification.ids && Array.isArray(notification.ids)
+            ? notification.ids
+            : notification.id
+              ? [notification.id]
+              : [];
         client.postMessage({ type: "notificationShown", ids: idsToNotify });
       }
     })
     .catch(function () {
       if (client && client.postMessage) {
-        var idsToNotify = notification.ids && Array.isArray(notification.ids)
-          ? notification.ids
-          : (notification.id ? [notification.id] : []);
+        var idsToNotify =
+          notification.ids && Array.isArray(notification.ids)
+            ? notification.ids
+            : notification.id
+              ? [notification.id]
+              : [];
         client.postMessage({ type: "notificationShown", ids: idsToNotify });
       }
     });

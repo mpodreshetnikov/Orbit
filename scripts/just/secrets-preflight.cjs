@@ -4,8 +4,7 @@ const { spawnSync } = require("child_process");
 const path = require("path");
 
 const ZERO_SHA = "0000000000000000000000000000000000000000";
-const GITLEAKS_IMAGE =
-  process.env.GITLEAKS_DOCKER_IMAGE || "zricethezav/gitleaks:v8.18.4";
+const GITLEAKS_IMAGE = process.env.GITLEAKS_DOCKER_IMAGE || "zricethezav/gitleaks:v8.18.4";
 const repoRoot = path.resolve(__dirname, "..", "..");
 
 function run(command, args, options = {}) {
@@ -32,12 +31,7 @@ function gitStdout(args) {
 }
 
 function resolveLocalRange() {
-  const upstream = gitStdout([
-    "rev-parse",
-    "--abbrev-ref",
-    "--symbolic-full-name",
-    "@{upstream}",
-  ]);
+  const upstream = gitStdout(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
 
   if (upstream) {
     const mergeBase = gitStdout(["merge-base", "HEAD", upstream]);

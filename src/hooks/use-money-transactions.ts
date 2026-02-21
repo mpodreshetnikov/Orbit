@@ -20,9 +20,7 @@ export interface MoneyTransactionsFilters {
   accountId?: string | null;
 }
 
-function toJsonOrNull(
-  value: Record<string, unknown> | null | undefined
-): Json | null | undefined {
+function toJsonOrNull(value: Record<string, unknown> | null | undefined): Json | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   return value as unknown as Json;
@@ -44,7 +42,7 @@ export type MoneyTransactionWithCard = MoneyTransaction & {
 
 async function fetchMoneyTransactions(
   payerPersonId: string,
-  filters: MoneyTransactionsFilters = {}
+  filters: MoneyTransactionsFilters = {},
 ): Promise<MoneyTransactionWithCard[]> {
   const supabase = createClient();
   let query = supabase
@@ -65,7 +63,7 @@ async function fetchMoneyTransactions(
 
 export function useMoneyTransactions(
   payerPersonId: string | null,
-  filters: MoneyTransactionsFilters = {}
+  filters: MoneyTransactionsFilters = {},
 ) {
   return useQuery({
     queryKey: ["money-transactions", payerPersonId, filters],
@@ -75,7 +73,7 @@ export function useMoneyTransactions(
 }
 
 async function fetchMoneyTransactionDetail(
-  id: string
+  id: string,
 ): Promise<(MoneyTransactionDetail & { money_cards: MoneyTransactionCard | null }) | null> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -89,7 +87,11 @@ async function fetchMoneyTransactionDetail(
     throw new Error(error.message);
   }
 
-  return data ? mapDetailRow(data as Record<string, unknown>) as (MoneyTransactionDetail & { money_cards: MoneyTransactionCard | null }) : null;
+  return data
+    ? (mapDetailRow(data as Record<string, unknown>) as MoneyTransactionDetail & {
+        money_cards: MoneyTransactionCard | null;
+      })
+    : null;
 }
 
 export function useMoneyTransaction(id: string | null) {
@@ -102,7 +104,7 @@ export function useMoneyTransaction(id: string | null) {
 
 function ensureLineItems(
   lineItems: CreateMoneyLineItemInput[],
-  fallback: CreateMoneyLineItemInput
+  fallback: CreateMoneyLineItemInput,
 ): CreateMoneyLineItemInput[] {
   if (!lineItems || lineItems.length === 0) {
     return [fallback];
@@ -278,10 +280,7 @@ async function deleteMoneyTransaction({
   payerPersonId: string;
 }): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase
-    .from("money_transactions")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("money_transactions").delete().eq("id", id);
 
   if (error) throw new Error(error.message);
 }

@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     p_recipient_user_id: user.id,
   });
   const allowedPersonIds = new Set(
-    (routedPersons ?? []).map((p: { person_id: string }) => p.person_id)
+    (routedPersons ?? []).map((p: { person_id: string }) => p.person_id),
   );
 
   const notifications: NotificationForDevice[] = (rows ?? [])
@@ -60,28 +60,28 @@ export async function GET(request: Request) {
       return allowedPersonIds.has(personId);
     })
     .map((r) => {
-    const payload = r.payload_json as {
-      title?: string;
-      body?: string;
-      url?: string;
-      person_id?: string | null;
-      person_name?: string | null;
-      title_prefix?: string | null;
-      tag?: string | null;
-    };
-    return {
-      id: r.id,
-      type: r.type,
-      title: payload?.title ?? "",
-      body: payload?.body ?? "",
-      url: payload?.url ?? "/",
-      scheduledAt: r.scheduled_at,
-      person_id: (r.person_id as string | null) ?? payload?.person_id ?? null,
-      person_name: payload?.person_name ?? null,
-      title_prefix: payload?.title_prefix ?? null,
-      tag: payload?.tag ?? null,
-    };
-  });
+      const payload = r.payload_json as {
+        title?: string;
+        body?: string;
+        url?: string;
+        person_id?: string | null;
+        person_name?: string | null;
+        title_prefix?: string | null;
+        tag?: string | null;
+      };
+      return {
+        id: r.id,
+        type: r.type,
+        title: payload?.title ?? "",
+        body: payload?.body ?? "",
+        url: payload?.url ?? "/",
+        scheduledAt: r.scheduled_at,
+        person_id: (r.person_id as string | null) ?? payload?.person_id ?? null,
+        person_name: payload?.person_name ?? null,
+        title_prefix: payload?.title_prefix ?? null,
+        tag: payload?.tag ?? null,
+      };
+    });
 
   const response: NotificationsResponse = { notifications };
   return NextResponse.json(response);

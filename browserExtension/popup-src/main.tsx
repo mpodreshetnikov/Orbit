@@ -93,8 +93,7 @@ function App() {
         if (!windowFrom) throw new Error("Manual start timestamp is invalid.");
       } else {
         windowFrom =
-          (s.last_imported_at as string) ||
-          new Date(Date.now() - 30 * 86400000).toISOString();
+          (s.last_imported_at as string) || new Date(Date.now() - 30 * 86400000).toISOString();
       }
       const response = (await sendMessage({
         type: "MONEY_IMPORT_RUN",
@@ -104,7 +103,7 @@ function App() {
         throw new Error(response?.error || "Import run failed");
       }
       setStatus(
-        `Done. Batch: ${response.result?.batch_id ?? (s as { batch_id?: string }).batch_id}`
+        `Done. Batch: ${response.result?.batch_id ?? (s as { batch_id?: string }).batch_id}`,
       );
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Unknown error");
@@ -144,10 +143,7 @@ function App() {
         <CardContent className="p-4 pt-0 space-y-3">
           <div className="space-y-2">
             <Label htmlFor="windowMode">Start date mode</Label>
-            <Select
-              value={windowMode}
-              onValueChange={(v) => setWindowMode(v as "auto" | "manual")}
-            >
+            <Select value={windowMode} onValueChange={(v) => setWindowMode(v as "auto" | "manual")}>
               <SelectTrigger id="windowMode">
                 <SelectValue />
               </SelectTrigger>
@@ -185,6 +181,6 @@ if (root) {
   createRoot(root).render(
     <React.StrictMode>
       <App />
-    </React.StrictMode>
+    </React.StrictMode>,
   );
 }

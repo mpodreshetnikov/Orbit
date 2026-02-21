@@ -19,10 +19,7 @@ const stableExtensionKey =
 
 const defaultDevAppOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"];
 
-const EXTENSION_ALLOWED_HOST_PATTERNS = [
-  "https://www.tbank.ru/*",
-  "https://*.tbank.ru/*",
-];
+const EXTENSION_ALLOWED_HOST_PATTERNS = ["https://www.tbank.ru/*", "https://*.tbank.ru/*"];
 
 function parseArgs(argv: string[]): { mode: string; watch: boolean } {
   const args = new Set(argv.slice(2));
@@ -101,7 +98,7 @@ function resolveAppOrigins(env: Record<string, string | undefined>, mode: string
 
   if (!raw) {
     console.warn(
-      `[extension:${mode}] NEXT_PUBLIC_APP_ORIGIN(S) not set. Using localhost defaults.`
+      `[extension:${mode}] NEXT_PUBLIC_APP_ORIGIN(S) not set. Using localhost defaults.`,
     );
     return defaultDevAppOrigins;
   }
@@ -133,10 +130,14 @@ async function copyStaticToDist(): Promise<void> {
 function runTscExtension(): Promise<void> {
   return new Promise((resolve, reject) => {
     const tscPath = path.join(rootDir, "node_modules", "typescript", "bin", "tsc");
-    const child = spawn(process.execPath, [tscPath, "-p", path.join(extensionDir, "tsconfig.json")], {
-      cwd: rootDir,
-      stdio: "inherit",
-    });
+    const child = spawn(
+      process.execPath,
+      [tscPath, "-p", path.join(extensionDir, "tsconfig.json")],
+      {
+        cwd: rootDir,
+        stdio: "inherit",
+      },
+    );
     child.on("close", (code) => {
       if (code === 0) resolve();
       else reject(new Error(`tsc exited with code ${code}`));
@@ -151,7 +152,7 @@ function runViteBuild(): Promise<void> {
     const child = spawn(
       process.execPath,
       [viteBin, "build", "--config", "vite.config.extension.ts"],
-      { cwd: rootDir, stdio: "inherit" }
+      { cwd: rootDir, stdio: "inherit" },
     );
     child.on("close", (code) => {
       if (code === 0) resolve();
@@ -166,18 +167,15 @@ async function build(mode: string): Promise<void> {
   const appOrigins = resolveAppOrigins(env, mode);
   const appPatterns = appOrigins.map(originToPattern);
 
-  const manifest: Record<string, unknown> = JSON.parse(
-    await fs.readFile(manifestPath, "utf8")
-  );
+  const manifest: Record<string, unknown> = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   manifest.key = (env.EXTENSION_KEY || stableExtensionKey).trim();
-  manifest.host_permissions = unique([
-    ...appPatterns,
-    ...EXTENSION_ALLOWED_HOST_PATTERNS,
-  ]);
-  manifest.content_scripts = (manifest.content_scripts as unknown[] || []).map((entry: unknown) => ({
-    ...(entry as Record<string, unknown>),
-    matches: appPatterns,
-  }));
+  manifest.host_permissions = unique([...appPatterns, ...EXTENSION_ALLOWED_HOST_PATTERNS]);
+  manifest.content_scripts = ((manifest.content_scripts as unknown[]) || []).map(
+    (entry: unknown) => ({
+      ...(entry as Record<string, unknown>),
+      matches: appPatterns,
+    }),
+  );
 
   if (env.EXTENSION_NAME) {
     manifest.name = env.EXTENSION_NAME;
@@ -201,17 +199,17 @@ async function build(mode: string): Promise<void> {
   await fs.writeFile(
     path.join(distDir, "manifest.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
-    "utf8"
+    "utf8",
   );
   await fs.writeFile(path.join(distDir, "env.js"), envJs, "utf8");
   await fs.writeFile(
     path.join(distDir, "reload-trigger.json"),
     `${JSON.stringify({ buildId: new Date().toISOString(), mode }, null, 2)}\n`,
-    "utf8"
+    "utf8",
   );
 
   console.log(
-    `[extension:${mode}] built -> browserExtension/dist (origins: ${appOrigins.join(", ")})`
+    `[extension:${mode}] built -> browserExtension/dist (origins: ${appOrigins.join(", ")})`,
   );
 }
 
@@ -243,7 +241,7 @@ async function startWatch(mode: string): Promise<never> {
       } catch (error) {
         console.error(
           `[extension:${mode}] rebuild failed:`,
-          error instanceof Error ? error.message : error
+          error instanceof Error ? error.message : error,
         );
       } finally {
         building = false;
@@ -251,14 +249,10 @@ async function startWatch(mode: string): Promise<never> {
     }, 120);
   };
 
-  const extensionWatcher = fsWatch(
-    extensionDir,
-    { recursive: true },
-    (_event, filename) => {
-      if (shouldIgnoreWatchEvent(filename ?? null)) return;
-      scheduleBuild();
-    }
-  );
+  const extensionWatcher = fsWatch(extensionDir, { recursive: true }, (_event, filename) => {
+    if (shouldIgnoreWatchEvent(filename ?? null)) return;
+    scheduleBuild();
+  });
 
   let envWatcher: ReturnType<typeof fsWatch> | null = null;
   if (mode === "development" && (await fileExists(localEnvPath))) {
@@ -299,9 +293,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(
-    "[extension] build failed:",
-    error instanceof Error ? error.message : error
-  );
+  console.error("[extension] build failed:", error instanceof Error ? error.message : error);
   process.exit(1);
 });

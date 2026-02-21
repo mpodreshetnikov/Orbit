@@ -32,17 +32,16 @@ export async function POST(request: Request) {
     }
 
     const prefsTz =
-      (await supabase
-        .from("user_preferences")
-        .select("checkup_notification_timezone")
-        .eq("auth_user_id", user.id)
-        .maybeSingle())
-        .data?.checkup_notification_timezone ?? null;
+      (
+        await supabase
+          .from("user_preferences")
+          .select("checkup_notification_timezone")
+          .eq("auth_user_id", user.id)
+          .maybeSingle()
+      ).data?.checkup_notification_timezone ?? null;
 
     const clientTz =
-      typeof body.timezone === "string" && body.timezone.trim()
-        ? body.timezone.trim()
-        : null;
+      typeof body.timezone === "string" && body.timezone.trim() ? body.timezone.trim() : null;
 
     const tz = clientTz ?? prefsTz ?? "UTC";
 
@@ -54,7 +53,7 @@ export async function POST(request: Request) {
         .from("user_preferences")
         .upsert(
           { auth_user_id: user.id, checkup_notification_timezone: clientTz },
-          { onConflict: "auth_user_id" }
+          { onConflict: "auth_user_id" },
         );
     }
 
@@ -68,24 +67,21 @@ export async function POST(request: Request) {
         .eq("id", personId)
         .maybeSingle();
       if (personError || !person) {
-        return NextResponse.json(
-          { error: "Person not found or access denied" },
-          { status: 404 }
-        );
+        return NextResponse.json({ error: "Person not found or access denied" }, { status: 404 });
       }
       const { data: cleared, error: clearError } = await supabase.rpc(
         "clear_future_med_dose_events_for_person",
-        { p_person_id: personId, p_horizon_days: horizonDays }
+        { p_person_id: personId, p_horizon_days: horizonDays },
       );
       const eventsCleared = !clearError && typeof cleared === "number" ? cleared : 0;
       const { data: genData, error: genError } = await supabase.rpc(
         "generate_med_dose_events_for_horizon_for_person",
-        { p_person_id: personId, p_timezone: tz, p_horizon_days: horizonDays }
+        { p_person_id: personId, p_timezone: tz, p_horizon_days: horizonDays },
       );
       if (genError) {
         return NextResponse.json(
           { error: "Event generator failed", details: genError.message },
-          { status: 500 }
+          { status: 500 },
         );
       }
       const eventsGenerated = typeof genData === "number" ? genData : 0;
@@ -100,18 +96,18 @@ export async function POST(request: Request) {
 
     const { data: cleared, error: clearError } = await supabase.rpc(
       "clear_future_med_dose_events",
-      { p_auth_user_id: user.id, p_horizon_days: horizonDays }
+      { p_auth_user_id: user.id, p_horizon_days: horizonDays },
     );
     const eventsCleared = !clearError && typeof cleared === "number" ? cleared : 0;
 
     const { data: genData, error: genError } = await supabase.rpc(
       "generate_med_dose_events_for_horizon",
-      { p_auth_user_id: user.id, p_timezone: tz, p_horizon_days: horizonDays }
+      { p_auth_user_id: user.id, p_timezone: tz, p_horizon_days: horizonDays },
     );
     if (genError) {
       return NextResponse.json(
         { error: "Event generator failed", details: genError.message },
-        { status: 500 }
+        { status: 500 },
       );
     }
     const eventsGenerated = typeof genData === "number" ? genData : 0;
@@ -126,7 +122,7 @@ export async function POST(request: Request) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
       { error: "Regenerate events failed", details: message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

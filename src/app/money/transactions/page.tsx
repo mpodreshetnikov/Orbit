@@ -30,12 +30,9 @@ export default function MoneyTransactionsPage() {
   const [accountFilter, setAccountFilter] = useState<string>("all");
 
   const { data: accounts } = useMoneyAccounts(selectedPersonId);
-  const { data: transactions, isLoading } = useMoneyTransactions(
-    selectedPersonId,
-    {
-      accountId: accountFilter === "all" ? null : accountFilter,
-    }
-  );
+  const { data: transactions, isLoading } = useMoneyTransactions(selectedPersonId, {
+    accountId: accountFilter === "all" ? null : accountFilter,
+  });
 
   const accountMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -127,24 +124,12 @@ export default function MoneyTransactionsPage() {
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
-                <th className="text-left font-medium px-4 py-3">
-                  {t("money.postedAt")}
-                </th>
-                <th className="text-left font-medium px-4 py-3">
-                  {t("money.merchant")}
-                </th>
-                <th className="text-left font-medium px-4 py-3">
-                  {t("money.account")}
-                </th>
-                <th className="text-left font-medium px-4 py-3">
-                  {t("money.card")}
-                </th>
-                <th className="text-left font-medium px-4 py-3">
-                  {t("money.type")}
-                </th>
-                <th className="text-right font-medium px-4 py-3">
-                  {t("money.amount")}
-                </th>
+                <th className="text-left font-medium px-4 py-3">{t("money.postedAt")}</th>
+                <th className="text-left font-medium px-4 py-3">{t("money.merchant")}</th>
+                <th className="text-left font-medium px-4 py-3">{t("money.account")}</th>
+                <th className="text-left font-medium px-4 py-3">{t("money.card")}</th>
+                <th className="text-left font-medium px-4 py-3">{t("money.type")}</th>
+                <th className="text-right font-medium px-4 py-3">{t("money.amount")}</th>
                 <th className="w-8 px-2 py-3" aria-hidden />
               </tr>
             </thead>
@@ -189,13 +174,11 @@ export default function MoneyTransactionsPage() {
                           `money.transactionType${
                             tx.transaction_type.charAt(0).toUpperCase() +
                             tx.transaction_type.slice(1)
-                          }`
+                          }`,
                         )}
                       </Badge>
                     </td>
-                    <td
-                      className={`px-4 py-3 text-right font-medium tabular-nums ${amountColor}`}
-                    >
+                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${amountColor}`}>
                       {formatMoney(tx.amount, tx.currency, intlLocale)}
                     </td>
                     <td className="px-2 py-3">

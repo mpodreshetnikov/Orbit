@@ -23,7 +23,7 @@ export async function POST() {
     if (!url || !serviceRoleKey) {
       return NextResponse.json(
         { error: "Server configuration error: missing Supabase URL or service role key" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -33,19 +33,23 @@ export async function POST() {
 
     const { data: genRows, error: genError } = await supabase.rpc(
       "run_med_event_generation_for_all_users",
-      { p_horizon_days: 7 }
+      { p_horizon_days: 7 },
     );
     if (genError) {
       return NextResponse.json(
         { error: "Event generator failed", details: genError.message },
-        { status: 500 }
+        { status: 500 },
       );
     }
     if (Array.isArray(genRows)) {
       usersProcessed = genRows.length;
-      for (const row of genRows as { events_generated?: number; refill_digests_created?: number }[]) {
+      for (const row of genRows as {
+        events_generated?: number;
+        refill_digests_created?: number;
+      }[]) {
         eventsGenerated += typeof row.events_generated === "number" ? row.events_generated : 0;
-        refillDigestsCreated += typeof row.refill_digests_created === "number" ? row.refill_digests_created : 0;
+        refillDigestsCreated +=
+          typeof row.refill_digests_created === "number" ? row.refill_digests_created : 0;
       }
     }
 
@@ -73,7 +77,7 @@ export async function POST() {
               eventsGenerated,
               refillDigestsCreated,
             },
-            { status: res.status }
+            { status: res.status },
           );
         }
       }
@@ -85,7 +89,7 @@ export async function POST() {
             eventsGenerated,
             refillDigestsCreated,
           },
-          { status: res.status }
+          { status: res.status },
         );
       }
       return NextResponse.json({
@@ -98,15 +102,25 @@ export async function POST() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       return NextResponse.json(
-        { error: "Failed to invoke notifications-cron", details: message, eventsGenerated, refillDigestsCreated },
-        { status: 500 }
+        {
+          error: "Failed to invoke notifications-cron",
+          details: message,
+          eventsGenerated,
+          refillDigestsCreated,
+        },
+        { status: 500 },
       );
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
-      { error: "Medication cron failed", details: message, eventsGenerated: 0, refillDigestsCreated: 0 },
-      { status: 500 }
+      {
+        error: "Medication cron failed",
+        details: message,
+        eventsGenerated: 0,
+        refillDigestsCreated: 0,
+      },
+      { status: 500 },
     );
   }
 }

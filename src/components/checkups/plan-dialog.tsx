@@ -25,12 +25,7 @@ interface PlanDialogProps {
   onSaved?: () => void;
 }
 
-export function PlanDialog({
-  open,
-  onOpenChange,
-  items,
-  onSaved,
-}: PlanDialogProps) {
+export function PlanDialog({ open, onOpenChange, items, onSaved }: PlanDialogProps) {
   const t = useTranslations();
   const [plannedOn, setPlannedOn] = useState(() => new Date().toISOString().slice(0, 10));
   const updateMutation = useUpdateCheckupItem();
@@ -76,9 +71,7 @@ export function PlanDialog({
         <DialogHeader>
           <DialogTitle>{t("checkups.planFor")}</DialogTitle>
           <DialogDescription>
-            {isBatch
-              ? t("checkups.planSelectedHint")
-              : t("checkups.planForHint")}
+            {isBatch ? t("checkups.planSelectedHint") : t("checkups.planForHint")}
             {!isBatch && items[0] && (
               <span className="block mt-1 font-medium text-foreground">{items[0].title}</span>
             )}
@@ -111,9 +104,7 @@ export function PlanDialog({
               onClick={handleRemovePlan}
               disabled={updateMutation.isPending}
             >
-              {updateMutation.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : null}
+              {updateMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
               {t("checkups.removePlannedDate")}
             </Button>
           )}
@@ -121,10 +112,11 @@ export function PlanDialog({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={handleSubmit} disabled={updateMutation.isPending || !plannedOn?.trim()}>
-              {updateMutation.isPending && (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              )}
+            <Button
+              onClick={handleSubmit}
+              disabled={updateMutation.isPending || !plannedOn?.trim()}
+            >
+              {updateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {t("common.save")}
             </Button>
           </div>

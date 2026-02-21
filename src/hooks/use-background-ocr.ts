@@ -28,7 +28,7 @@ const OCR_FAILED_UPDATE_DELAY_MS = 1500;
 async function updateRecordToOcrFailed(
   supabase: ReturnType<typeof createClient>,
   recordId: string,
-  errorMessage: string
+  errorMessage: string,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < OCR_FAILED_UPDATE_RETRIES; attempt++) {
     const { error } = await supabase
@@ -94,16 +94,14 @@ export function useBackgroundOCR() {
           }
 
           // Create attachment record
-          const { error: attachError } = await supabase
-            .from("record_attachments")
-            .insert({
-              record_id: recordId,
-              storage_path: storagePath,
-              mime_type: file.type,
-              original_filename: file.name,
-              file_size: file.size,
-              sort_order: index,
-            });
+          const { error: attachError } = await supabase.from("record_attachments").insert({
+            record_id: recordId,
+            storage_path: storagePath,
+            mime_type: file.type,
+            original_filename: file.name,
+            file_size: file.size,
+            sort_order: index,
+          });
 
           if (attachError) {
             throw new Error(`Failed to create attachment: ${attachError.message}`);
@@ -238,14 +236,24 @@ export function useBackgroundOCR() {
         addNotification({
           jobId,
           recordId,
-          title: (error as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
+          title:
+            (error as Error)?.name === "AbortError"
+              ? t("processing.timeout")
+              : t("processing.failed"),
           personName,
           type: "error",
           message: errorMessage,
         });
         toast.error(
-          (error as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
-          { description: (error as Error)?.name === "AbortError" ? t("processing.timeoutDescription") : errorMessage }
+          (error as Error)?.name === "AbortError"
+            ? t("processing.timeout")
+            : t("processing.failed"),
+          {
+            description:
+              (error as Error)?.name === "AbortError"
+                ? t("processing.timeoutDescription")
+                : errorMessage,
+          },
         );
 
         // Persist OCR failure so UI can show error and Retry (retry update on transient network failure)
@@ -263,7 +271,7 @@ export function useBackgroundOCR() {
         return { success: false, error: errorMessage };
       }
     },
-    [t, queryClient, addJob, updateJob, addNotification]
+    [t, queryClient, addJob, updateJob, addNotification],
   );
 
   const retryOcr = useCallback(
@@ -321,7 +329,12 @@ export function useBackgroundOCR() {
         });
       } catch (fetchError) {
         clearTimeout(timeoutId);
-        const errorMessage = (fetchError as Error)?.name === "AbortError" ? t("processing.timeout") : (fetchError instanceof Error ? fetchError.message : "Processing failed");
+        const errorMessage =
+          (fetchError as Error)?.name === "AbortError"
+            ? t("processing.timeout")
+            : fetchError instanceof Error
+              ? fetchError.message
+              : "Processing failed";
         updateJob(jobId, { stage: "failed", error: errorMessage });
         await supabase
           .from("medical_records")
@@ -332,14 +345,24 @@ export function useBackgroundOCR() {
         addNotification({
           jobId,
           recordId,
-          title: (fetchError as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
+          title:
+            (fetchError as Error)?.name === "AbortError"
+              ? t("processing.timeout")
+              : t("processing.failed"),
           personName,
           type: "error",
           message: errorMessage,
         });
         toast.error(
-          (fetchError as Error)?.name === "AbortError" ? t("processing.timeout") : t("processing.failed"),
-          { description: (fetchError as Error)?.name === "AbortError" ? t("processing.timeoutDescription") : errorMessage }
+          (fetchError as Error)?.name === "AbortError"
+            ? t("processing.timeout")
+            : t("processing.failed"),
+          {
+            description:
+              (fetchError as Error)?.name === "AbortError"
+                ? t("processing.timeoutDescription")
+                : errorMessage,
+          },
         );
         return { success: false, error: errorMessage };
       }
@@ -416,7 +439,7 @@ export function useBackgroundOCR() {
       queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
       return { success: true, ocr_text: data.ocr_text };
     },
-    [t, queryClient, addJob, updateJob, addNotification]
+    [t, queryClient, addJob, updateJob, addNotification],
   );
 
   return { startBackgroundOCR, retryOcr };

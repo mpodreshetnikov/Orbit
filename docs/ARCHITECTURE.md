@@ -13,13 +13,13 @@ Related docs:
 
 ## Runtime Surface Map
 
-| Surface | Primary Entry Points | Responsibilities | Core Dependencies |
-| --- | --- | --- | --- |
-| Web app (Next.js) | `src/app/layout.tsx`, `src/app/health/*`, `src/app/money/*`, `src/app/api/*` | User-facing UI, route orchestration, authenticated API routes | React, Next.js App Router, React Query, Supabase client/server SDK |
-| Database runtime (Supabase Postgres) | `supabase/migrations/*`, `supabase/db/deploy.sql`, `supabase/db/functions/*`, `supabase/db/policies/*`, `supabase/db/cron/jobs.sql` | Durable schema, RLS, RPC functions, triggers, cron scheduling | Postgres, pg_cron, pg_net, RLS helpers |
-| Edge Functions | `supabase/functions/health-ocr/index.ts`, `supabase/functions/health-structure/index.ts`, `supabase/functions/money-import/index.ts`, `supabase/functions/notifications-cron/index.ts`, `supabase/functions/icd-lookup/index.ts` | External integration and workflow execution (OCR/LLM/import/push) | Supabase service role, external APIs, DB RPCs |
-| Browser extension | `browserExtension/src/background.ts`, `browserExtension/src/content-script.ts`, `browserExtension/src/connectors/*`, `browserExtension/popup-src/main.tsx` | Web-export ingestion bridge (currently T-Bank web), session-driven import runs | Chrome APIs, money-import function, web app message bridge |
-| PWA service worker | `public/sw.js` | Push notification rendering, action handling, message bridge with app | Notifications API, app API routes, stored locale cache |
+| Surface                              | Primary Entry Points                                                                                                                                                                                                             | Responsibilities                                                               | Core Dependencies                                                  |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Web app (Next.js)                    | `src/app/layout.tsx`, `src/app/health/*`, `src/app/money/*`, `src/app/api/*`                                                                                                                                                     | User-facing UI, route orchestration, authenticated API routes                  | React, Next.js App Router, React Query, Supabase client/server SDK |
+| Database runtime (Supabase Postgres) | `supabase/migrations/*`, `supabase/db/deploy.sql`, `supabase/db/functions/*`, `supabase/db/policies/*`, `supabase/db/cron/jobs.sql`                                                                                              | Durable schema, RLS, RPC functions, triggers, cron scheduling                  | Postgres, pg_cron, pg_net, RLS helpers                             |
+| Edge Functions                       | `supabase/functions/health-ocr/index.ts`, `supabase/functions/health-structure/index.ts`, `supabase/functions/money-import/index.ts`, `supabase/functions/notifications-cron/index.ts`, `supabase/functions/icd-lookup/index.ts` | External integration and workflow execution (OCR/LLM/import/push)              | Supabase service role, external APIs, DB RPCs                      |
+| Browser extension                    | `browserExtension/src/background.ts`, `browserExtension/src/content-script.ts`, `browserExtension/src/connectors/*`, `browserExtension/popup-src/main.tsx`                                                                       | Web-export ingestion bridge (currently T-Bank web), session-driven import runs | Chrome APIs, money-import function, web app message bridge         |
+| PWA service worker                   | `public/sw.js`                                                                                                                                                                                                                   | Push notification rendering, action handling, message bridge with app          | Notifications API, app API routes, stored locale cache             |
 
 ## Domain Map
 
@@ -160,31 +160,31 @@ Use this schema for each domain/layer row when updating history:
 
 ## Product-Domain Maturity Scorecard (Baseline `2026-02-20`)
 
-| Domain | Functional | Integrity | Reliability | Maintainability | Testability | Weighted Score | Delta | Evidence | Gap IDs |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| `health` | 75 | 71 | 66 | 62 | 64 | 68 | `0` | `src/app/health/*`, `src/hooks/use-regimens.ts`, `supabase/functions/health-structure/index.ts` | `ARCH-G01`, `ARCH-G02`, `ARCH-G03`, `ARCH-G04`, `ARCH-G05` |
-| `money` | 63 | 58 | 53 | 51 | 54 | 56 | `0` | `src/app/money/*`, `src/app/money/import/page.tsx`, `supabase/functions/money-import/index.ts` | `ARCH-G01`, `ARCH-G03`, `ARCH-G04`, `ARCH-G05` |
+| Domain   | Functional | Integrity | Reliability | Maintainability | Testability | Weighted Score | Delta | Evidence                                                                                        | Gap IDs                                                    |
+| -------- | ---------: | --------: | ----------: | --------------: | ----------: | -------------: | ----: | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `health` |         75 |        71 |          66 |              62 |          64 |             68 |   `0` | `src/app/health/*`, `src/hooks/use-regimens.ts`, `supabase/functions/health-structure/index.ts` | `ARCH-G01`, `ARCH-G02`, `ARCH-G03`, `ARCH-G04`, `ARCH-G05` |
+| `money`  |         63 |        58 |          53 |              51 |          54 |             56 |   `0` | `src/app/money/*`, `src/app/money/import/page.tsx`, `supabase/functions/money-import/index.ts`  | `ARCH-G01`, `ARCH-G03`, `ARCH-G04`, `ARCH-G05`             |
 
 ## Architectural-Layer Maturity Scorecard (Baseline `2026-02-20`)
 
-| Layer | Functional | Integrity | Reliability | Maintainability | Testability | Weighted Score | Delta | Evidence | Gap IDs |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| Presentation/navigation | 68 | 60 | 60 | 60 | 57 | 61 | `0` | `src/components/layout/app-shell.tsx`, `src/components/layout/top-nav.tsx`, `src/components/layout/mobile-nav.tsx` | `ARCH-G01`, `ARCH-G06` |
-| Application orchestration | 61 | 53 | 54 | 51 | 53 | 54 | `0` | `src/hooks/*`, `src/stores/*`, `src/components/providers/query-provider.tsx` | `ARCH-G01`, `ARCH-G02` |
-| Domain workflow logic | 63 | 59 | 55 | 52 | 53 | 57 | `0` | `supabase/functions/*`, `supabase/db/functions/*`, `supabase/db/cron/jobs.sql` | `ARCH-G01`, `ARCH-G05` |
-| Data governance | 66 | 68 | 63 | 59 | 58 | 63 | `0` | `supabase/migrations/*`, `supabase/db/policies/*`, `supabase/db/deploy.sql` | `ARCH-G05` |
-| Delivery/operations | 55 | 46 | 44 | 45 | 43 | 47 | `0` | `.github/workflows/main.yml`, `justfile`, `scripts/just/build-local-all.cjs` | `ARCH-G03`, `ARCH-G04`, `ARCH-G06` |
+| Layer                     | Functional | Integrity | Reliability | Maintainability | Testability | Weighted Score | Delta | Evidence                                                                                                           | Gap IDs                            |
+| ------------------------- | ---------: | --------: | ----------: | --------------: | ----------: | -------------: | ----: | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| Presentation/navigation   |         68 |        60 |          60 |              60 |          57 |             61 |   `0` | `src/components/layout/app-shell.tsx`, `src/components/layout/top-nav.tsx`, `src/components/layout/mobile-nav.tsx` | `ARCH-G01`, `ARCH-G06`             |
+| Application orchestration |         61 |        53 |          54 |              51 |          53 |             54 |   `0` | `src/hooks/*`, `src/stores/*`, `src/components/providers/query-provider.tsx`                                       | `ARCH-G01`, `ARCH-G02`             |
+| Domain workflow logic     |         63 |        59 |          55 |              52 |          53 |             57 |   `0` | `supabase/functions/*`, `supabase/db/functions/*`, `supabase/db/cron/jobs.sql`                                     | `ARCH-G01`, `ARCH-G05`             |
+| Data governance           |         66 |        68 |          63 |              59 |          58 |             63 |   `0` | `supabase/migrations/*`, `supabase/db/policies/*`, `supabase/db/deploy.sql`                                        | `ARCH-G05`                         |
+| Delivery/operations       |         55 |        46 |          44 |              45 |          43 |             47 |   `0` | `.github/workflows/main.yml`, `justfile`, `scripts/just/build-local-all.cjs`                                       | `ARCH-G03`, `ARCH-G04`, `ARCH-G06` |
 
 ## Gap Ledger
 
-| Gap ID | Gap | Why It Matters | Evidence |
-| --- | --- | --- | --- |
-| `ARCH-G01` | Monolithic hotspots in UI and function layers | Large files increase regression risk and slow refactors/reviews | `src/components/records/record-detail.tsx`, `src/components/records/structure-review-step.tsx`, `src/components/medications/medication-form.tsx`, `supabase/functions/health-structure/index.ts`, `supabase/functions/money-import/index.ts` |
-| `ARCH-G02` | Legacy/dead-path logic is still exported | Increases cognitive load and risk of accidental reuse of stale behavior | `src/hooks/use-medications.ts`, `src/hooks/index.ts`, `src/hooks/use-medical-records.ts` (`useIngestRecord`) and missing `supabase/functions/ingest-record` |
-| `ARCH-G03` | CI does not enforce lint/type/smoke gates before deploy | Quality regressions can merge if local gates are skipped | `.github/workflows/main.yml` currently runs secret scan + deploy jobs only |
-| `ARCH-G04` | Automated testing depth is limited to smoke build | Weak confidence for behavior changes in hooks/SQL/edge workflows | command map in `justfile` (`test` -> `quality-smoke-build`), no dedicated unit/integration suite |
-| `ARCH-G05` | RLS granularity is mostly allowlist-first, not always owner-scoped | Works for trusted shared-family model but weakens strict least-privilege partitioning | `supabase/db/policies/money_transactions.sql`, `supabase/db/policies/medical_records.sql`, widespread `public.is_allowed_user()` usage |
-| `ARCH-G06` | Documentation map drift in rules/plans locations | Slows onboarding and creates ambiguity on canonical planning paths | `AGENTS.md` references `docs/PLANS.md/` while planning content is split across `docs/PLANS.md` and `docs/exec-plans/` |
+| Gap ID     | Gap                                                                | Why It Matters                                                                        | Evidence                                                                                                                                                                                                                                     |
+| ---------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARCH-G01` | Monolithic hotspots in UI and function layers                      | Large files increase regression risk and slow refactors/reviews                       | `src/components/records/record-detail.tsx`, `src/components/records/structure-review-step.tsx`, `src/components/medications/medication-form.tsx`, `supabase/functions/health-structure/index.ts`, `supabase/functions/money-import/index.ts` |
+| `ARCH-G02` | Legacy/dead-path logic is still exported                           | Increases cognitive load and risk of accidental reuse of stale behavior               | `src/hooks/use-medications.ts`, `src/hooks/index.ts`, `src/hooks/use-medical-records.ts` (`useIngestRecord`) and missing `supabase/functions/ingest-record`                                                                                  |
+| `ARCH-G03` | CI does not enforce lint/type/smoke gates before deploy            | Quality regressions can merge if local gates are skipped                              | `.github/workflows/main.yml` currently runs secret scan + deploy jobs only                                                                                                                                                                   |
+| `ARCH-G04` | Automated testing depth is limited to smoke build                  | Weak confidence for behavior changes in hooks/SQL/edge workflows                      | command map in `justfile` (`test` -> `quality-smoke-build`), no dedicated unit/integration suite                                                                                                                                             |
+| `ARCH-G05` | RLS granularity is mostly allowlist-first, not always owner-scoped | Works for trusted shared-family model but weakens strict least-privilege partitioning | `supabase/db/policies/money_transactions.sql`, `supabase/db/policies/medical_records.sql`, widespread `public.is_allowed_user()` usage                                                                                                       |
+| `ARCH-G06` | Documentation map drift in rules/plans locations                   | Slows onboarding and creates ambiguity on canonical planning paths                    | `AGENTS.md` references `docs/PLANS.md/` while planning content is split across `docs/PLANS.md` and `docs/exec-plans/`                                                                                                                        |
 
 ## Score History Log And Update Cadence
 
@@ -200,12 +200,12 @@ Use this schema for each domain/layer row when updating history:
 
 ### History Log
 
-| Date | Scope | Score | Delta | Notes |
-| --- | --- | ---: | ---: | --- |
-| `2026-02-20` | Domain: `health` | 68 | `0` | Baseline strict snapshot |
-| `2026-02-20` | Domain: `money` | 56 | `0` | Baseline strict snapshot |
-| `2026-02-20` | Layer: Presentation/navigation | 61 | `0` | Baseline strict snapshot |
-| `2026-02-20` | Layer: Application orchestration | 54 | `0` | Baseline strict snapshot |
-| `2026-02-20` | Layer: Domain workflow logic | 57 | `0` | Baseline strict snapshot |
-| `2026-02-20` | Layer: Data governance | 63 | `0` | Baseline strict snapshot |
-| `2026-02-20` | Layer: Delivery/operations | 47 | `0` | Baseline strict snapshot |
+| Date         | Scope                            | Score | Delta | Notes                    |
+| ------------ | -------------------------------- | ----: | ----: | ------------------------ |
+| `2026-02-20` | Domain: `health`                 |    68 |   `0` | Baseline strict snapshot |
+| `2026-02-20` | Domain: `money`                  |    56 |   `0` | Baseline strict snapshot |
+| `2026-02-20` | Layer: Presentation/navigation   |    61 |   `0` | Baseline strict snapshot |
+| `2026-02-20` | Layer: Application orchestration |    54 |   `0` | Baseline strict snapshot |
+| `2026-02-20` | Layer: Domain workflow logic     |    57 |   `0` | Baseline strict snapshot |
+| `2026-02-20` | Layer: Data governance           |    63 |   `0` | Baseline strict snapshot |
+| `2026-02-20` | Layer: Delivery/operations       |    47 |   `0` | Baseline strict snapshot |

@@ -8,18 +8,10 @@ import { ArrowLeft, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckupForm } from "@/components/checkups";
-import {
-  useCheckupItem,
-  useUpdateCheckupItem,
-  usePersonConditions,
-} from "@/hooks";
+import { useCheckupItem, useUpdateCheckupItem, usePersonConditions } from "@/hooks";
 import type { UpdateCheckupItemInput } from "@/types";
 
-export default function EditCheckupPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function EditCheckupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();

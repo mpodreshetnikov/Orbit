@@ -22,10 +22,7 @@ export async function POST(request: Request) {
 
   const { endpoint, keys } = body;
   if (!endpoint || !keys?.p256dh || !keys?.auth) {
-    return NextResponse.json(
-      { error: "Missing endpoint or keys" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Missing endpoint or keys" }, { status: 400 });
   }
 
   const { error } = await supabase.from("push_subscriptions").upsert(
@@ -35,7 +32,7 @@ export async function POST(request: Request) {
       p256dh: keys.p256dh,
       auth: keys.auth,
     },
-    { onConflict: "endpoint" }
+    { onConflict: "endpoint" },
   );
 
   if (error) {

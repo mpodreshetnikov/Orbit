@@ -39,7 +39,11 @@ interface EditIntakeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   event: MedDoseEvent | MedDoseEventWithRegimen | null;
-  onSubmit: (params: { takenAt: string; amountTaken?: number; note?: string | null }) => Promise<void>;
+  onSubmit: (params: {
+    takenAt: string;
+    amountTaken?: number;
+    note?: string | null;
+  }) => Promise<void>;
   isPending?: boolean;
 }
 
@@ -70,7 +74,8 @@ export function EditIntakeDialog({
     if (!event) return;
     const at = fromDatetimeLocal(takenAt);
     if (!at) return;
-    const amount = event.status === "taken" ? Math.max(1, Math.floor(Number(amountTaken)) || 1) : undefined;
+    const amount =
+      event.status === "taken" ? Math.max(1, Math.floor(Number(amountTaken)) || 1) : undefined;
     await onSubmit({
       takenAt: at,
       amountTaken: amount,
@@ -80,7 +85,8 @@ export function EditIntakeDialog({
   };
 
   const unit = event ? getPlannedIntakeUnit(event.planned_intake) : "pill";
-  const regimenName = event && "regimen" in event && event.regimen?.custom_name ? event.regimen.custom_name : null;
+  const regimenName =
+    event && "regimen" in event && event.regimen?.custom_name ? event.regimen.custom_name : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

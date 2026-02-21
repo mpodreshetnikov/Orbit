@@ -89,7 +89,7 @@ export function BodySiteEditDialog({
   }, [open, bodySite]);
 
   // Get available parent sites (exclude self and descendants to prevent circular references)
-  const availableParents = allSites.filter(s => {
+  const availableParents = allSites.filter((s) => {
     if (!bodySite) return true;
     // Exclude self
     if (s.id === bodySite.id) return false;
@@ -97,7 +97,7 @@ export function BodySiteEditDialog({
     let current = s;
     while (current.parent_site_code) {
       if (current.parent_site_code === bodySite.site_code) return false;
-      const parent = allSites.find(p => p.site_code === current.parent_site_code);
+      const parent = allSites.find((p) => p.site_code === current.parent_site_code);
       if (!parent) break;
       current = parent;
     }
@@ -105,22 +105,22 @@ export function BodySiteEditDialog({
   });
 
   // Filter available parents based on search
-  const filteredParents = availableParents.filter(site => {
+  const filteredParents = availableParents.filter((site) => {
     if (!parentSearch.trim()) return true;
     const search = parentSearch.toLowerCase();
     return (
       site.site_code.toLowerCase().includes(search) ||
       site.name_ru.toLowerCase().includes(search) ||
       site.name_en.toLowerCase().includes(search) ||
-      site.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
-      site.synonyms_en?.some(s => s.toLowerCase().includes(search))
+      site.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
+      site.synonyms_en?.some((s) => s.toLowerCase().includes(search))
     );
   });
 
   // Display value for parent site combobox
   const parentDisplayValue = parentSiteCode
     ? (() => {
-        const parent = allSites.find(s => s.site_code === parentSiteCode);
+        const parent = allSites.find((s) => s.site_code === parentSiteCode);
         return parent ? `${parent.name_ru} (${parent.site_code})` : "";
       })()
     : "";
@@ -148,11 +148,11 @@ export function BodySiteEditDialog({
   };
 
   const removeSynonymRu = (syn: string) => {
-    setSynonymsRu(synonymsRu.filter(s => s !== syn));
+    setSynonymsRu(synonymsRu.filter((s) => s !== syn));
   };
 
   const removeSynonymEn = (syn: string) => {
-    setSynonymsEn(synonymsEn.filter(s => s !== syn));
+    setSynonymsEn(synonymsEn.filter((s) => s !== syn));
   };
 
   const handleSave = async () => {
@@ -187,9 +187,7 @@ export function BodySiteEditDialog({
           <DialogTitle>
             {isNew ? t("catalogs.addBodySite") : t("catalogs.editBodySite")}
           </DialogTitle>
-          <DialogDescription>
-            {t("catalogs.bodySiteDialogDescription")}
-          </DialogDescription>
+          <DialogDescription>{t("catalogs.bodySiteDialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -270,7 +268,9 @@ export function BodySiteEditDialog({
                           onSelect={() => handleParentSelect(null)}
                           className={parentSiteCode === null ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 ${parentSiteCode === null ? "opacity-100" : "opacity-0"}`} />
+                          <Check
+                            className={`h-4 w-4 ${parentSiteCode === null ? "opacity-100" : "opacity-0"}`}
+                          />
                           <span className="text-muted-foreground italic">
                             {t("catalogs.noParent")}
                           </span>
@@ -282,7 +282,9 @@ export function BodySiteEditDialog({
                             onSelect={() => handleParentSelect(site.site_code)}
                             className={parentSiteCode === site.site_code ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 shrink-0 ${parentSiteCode === site.site_code ? "opacity-100" : "opacity-0"}`} />
+                            <Check
+                              className={`h-4 w-4 shrink-0 ${parentSiteCode === site.site_code ? "opacity-100" : "opacity-0"}`}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="truncate">{site.name_ru}</div>
                               <div className="text-xs text-muted-foreground truncate">

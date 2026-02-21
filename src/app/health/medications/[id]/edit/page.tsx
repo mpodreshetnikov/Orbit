@@ -12,11 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { regenerateMedicationEvents, getClientTimezone } from "@/lib/medication-events";
 import type { UpdateMedRegimenInput } from "@/types/regimen";
 
-export default function EditMedicationPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function EditMedicationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();

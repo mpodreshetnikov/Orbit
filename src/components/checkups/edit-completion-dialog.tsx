@@ -84,7 +84,10 @@ export function EditCompletionDialog({
 
   const handleSubmit = async () => {
     if (!completion) return;
-    const dateValue = doneAt?.trim().slice(0, 10) || toDateOnly(completion.done_at) || new Date().toISOString().slice(0, 10);
+    const dateValue =
+      doneAt?.trim().slice(0, 10) ||
+      toDateOnly(completion.done_at) ||
+      new Date().toISOString().slice(0, 10);
     await updateMutation.mutateAsync({
       id: completion.id,
       updates: {
@@ -204,13 +207,8 @@ export function EditCompletionDialog({
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={!doneAt || updateMutation.isPending}
-              >
-                {updateMutation.isPending && (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                )}
+              <Button onClick={handleSubmit} disabled={!doneAt || updateMutation.isPending}>
+                {updateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {t("common.save")}
               </Button>
             </div>
@@ -222,9 +220,7 @@ export function EditCompletionDialog({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("common.delete")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("checkups.deleteCompletionConfirm")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("checkups.deleteCompletionConfirm")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
@@ -233,9 +229,7 @@ export function EditCompletionDialog({
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending && (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              )}
+              {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {t("common.delete")}
             </Button>
           </AlertDialogFooter>

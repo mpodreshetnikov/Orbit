@@ -32,24 +32,9 @@ function sleep(ms) {
 
 function findDockerDesktopExecutable() {
   const candidates = [
-    path.join(
-      process.env.ProgramFiles || "",
-      "Docker",
-      "Docker",
-      "Docker Desktop.exe",
-    ),
-    path.join(
-      process.env["ProgramFiles(x86)"] || "",
-      "Docker",
-      "Docker",
-      "Docker Desktop.exe",
-    ),
-    path.join(
-      process.env.LOCALAPPDATA || "",
-      "Programs",
-      "Docker",
-      "Docker Desktop.exe",
-    ),
+    path.join(process.env.ProgramFiles || "", "Docker", "Docker", "Docker Desktop.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "", "Docker", "Docker", "Docker Desktop.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Docker", "Docker Desktop.exe"),
   ];
 
   return candidates.find((candidate) => candidate && fs.existsSync(candidate));

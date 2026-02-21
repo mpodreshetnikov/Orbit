@@ -32,20 +32,22 @@ export interface ProcessingNotification {
 interface ProcessingQueueState {
   // Active processing jobs
   jobs: Record<string, ProcessingJob>;
-  
+
   // Notifications for completed jobs
   notifications: ProcessingNotification[];
-  
+
   // Actions
   addJob: (job: Omit<ProcessingJob, "createdAt">) => void;
   updateJob: (id: string, updates: Partial<ProcessingJob>) => void;
   removeJob: (id: string) => void;
-  
+
   // Notification actions
-  addNotification: (notification: Omit<ProcessingNotification, "id" | "timestamp" | "read">) => void;
+  addNotification: (
+    notification: Omit<ProcessingNotification, "id" | "timestamp" | "read">,
+  ) => void;
   markNotificationRead: (id: string) => void;
   clearNotifications: () => void;
-  
+
   // Selectors
   getActiveJobs: () => ProcessingJob[];
   getJobByRecordId: (recordId: string) => ProcessingJob | undefined;
@@ -55,7 +57,7 @@ interface ProcessingQueueState {
 export const useProcessingQueueStore = create<ProcessingQueueState>((set, get) => ({
   jobs: {},
   notifications: [],
-  
+
   addJob: (job) => {
     const newJob: ProcessingJob = {
       ...job,
@@ -68,12 +70,12 @@ export const useProcessingQueueStore = create<ProcessingQueueState>((set, get) =
       },
     }));
   },
-  
+
   updateJob: (id, updates) => {
     set((state) => {
       const existingJob = state.jobs[id];
       if (!existingJob) return state;
-      
+
       return {
         jobs: {
           ...state.jobs,
@@ -85,7 +87,7 @@ export const useProcessingQueueStore = create<ProcessingQueueState>((set, get) =
       };
     });
   },
-  
+
   removeJob: (id) => {
     set((state) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -93,7 +95,7 @@ export const useProcessingQueueStore = create<ProcessingQueueState>((set, get) =
       return { jobs: rest };
     });
   },
-  
+
   addNotification: (notification) => {
     const newNotification: ProcessingNotification = {
       ...notification,
@@ -105,29 +107,27 @@ export const useProcessingQueueStore = create<ProcessingQueueState>((set, get) =
       notifications: [newNotification, ...state.notifications].slice(0, 50), // Keep last 50
     }));
   },
-  
+
   markNotificationRead: (id) => {
     set((state) => ({
-      notifications: state.notifications.map((n) =>
-        n.id === id ? { ...n, read: true } : n
-      ),
+      notifications: state.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
     }));
   },
-  
+
   clearNotifications: () => {
     set({ notifications: [] });
   },
-  
+
   getActiveJobs: () => {
     return Object.values(get().jobs).filter(
-      (job) => job.stage === "uploading" || job.stage === "processing"
+      (job) => job.stage === "uploading" || job.stage === "processing",
     );
   },
-  
+
   getJobByRecordId: (recordId) => {
     return Object.values(get().jobs).find((job) => job.recordId === recordId);
   },
-  
+
   getUnreadNotificationCount: () => {
     return get().notifications.filter((n) => !n.read).length;
   },

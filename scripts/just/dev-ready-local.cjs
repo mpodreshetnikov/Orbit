@@ -151,7 +151,9 @@ function updateLinkedProjectServices() {
     args.push("--password", process.env.SUPABASE_DB_PASSWORD);
   }
 
-  logInfo(`Detected Supabase version drift. Relinking local config to project '${projectRef}' to sync service versions.`);
+  logInfo(
+    `Detected Supabase version drift. Relinking local config to project '${projectRef}' to sync service versions.`,
+  );
   logInfo(`Running command: npx ${formatArgsForLogs(args)}`);
   const result = runNpxSync(args, { stdio: "inherit" });
 
@@ -180,7 +182,9 @@ function startSupabaseWithVersionSync() {
     return firstStart.status;
   }
 
-  logInfo("Version drift detected after initial start. Stopping local stack before syncing versions.");
+  logInfo(
+    "Version drift detected after initial start. Stopping local stack before syncing versions.",
+  );
   const stopCode = runStep("supabase-local-stop");
   if (stopCode !== 0) {
     return stopCode;

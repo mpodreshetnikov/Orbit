@@ -2,7 +2,19 @@
 
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Pencil, Trash2, AlertTriangle, MapPin, Ruler, TrendingUp, TrendingDown, Minus, CircleDot, History, ExternalLink } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  AlertTriangle,
+  MapPin,
+  Ruler,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  CircleDot,
+  History,
+  ExternalLink,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -29,12 +41,24 @@ interface FindingRowProps {
 // Severity badge component
 function SeverityBadge({ severity }: { severity: FindingSeverity }) {
   const t = useTranslations();
-  
+
   const config: Record<FindingSeverity, { color: string; label: string }> = {
-    mild: { color: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20", label: t("findings.severityOptions.mild") },
-    moderate: { color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20", label: t("findings.severityOptions.moderate") },
-    severe: { color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20", label: t("findings.severityOptions.severe") },
-    unknown: { color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20", label: t("findings.severityOptions.unknown") },
+    mild: {
+      color: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20",
+      label: t("findings.severityOptions.mild"),
+    },
+    moderate: {
+      color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20",
+      label: t("findings.severityOptions.moderate"),
+    },
+    severe: {
+      color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20",
+      label: t("findings.severityOptions.severe"),
+    },
+    unknown: {
+      color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20",
+      label: t("findings.severityOptions.unknown"),
+    },
   };
 
   const { color, label } = config[severity] || config.unknown;
@@ -49,7 +73,7 @@ function SeverityBadge({ severity }: { severity: FindingSeverity }) {
 // Laterality badge component
 function LateralityBadge({ laterality }: { laterality: FindingLaterality }) {
   const t = useTranslations();
-  
+
   if (laterality === "none") return null;
 
   const labels: Record<FindingLaterality, string> = {
@@ -67,20 +91,20 @@ function LateralityBadge({ laterality }: { laterality: FindingLaterality }) {
 }
 
 // Size change indicator component
-function SizeChangeIndicator({ 
-  currentSize, 
-  previousSize 
-}: { 
-  currentSize: number | null; 
+function SizeChangeIndicator({
+  currentSize,
+  previousSize,
+}: {
+  currentSize: number | null;
   previousSize: number | null;
 }) {
   const t = useTranslations();
-  
+
   if (currentSize === null || previousSize === null) return null;
-  
+
   // Round to 1 decimal place to avoid floating point precision issues (e.g., 3.8 - 3.7 = 0.09999...)
   const change = Math.round((currentSize - previousSize) * 10) / 10;
-  
+
   if (change === 0) {
     return (
       <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
@@ -89,20 +113,18 @@ function SizeChangeIndicator({
       </span>
     );
   }
-  
+
   const isIncrease = change > 0;
   const changeText = isIncrease ? `+${change}` : `${change}`;
-  
+
   return (
-    <span className={cn(
-      "flex items-center gap-0.5 text-xs font-medium",
-      isIncrease ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
-    )}>
-      {isIncrease ? (
-        <TrendingUp className="h-3 w-3" />
-      ) : (
-        <TrendingDown className="h-3 w-3" />
+    <span
+      className={cn(
+        "flex items-center gap-0.5 text-xs font-medium",
+        isIncrease ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400",
       )}
+    >
+      {isIncrease ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
       <span>{t("findings.comparison.sizeChange", { change: changeText })}</span>
     </span>
   );
@@ -111,11 +133,11 @@ function SizeChangeIndicator({
 // New/Known badge component
 function ComparisonBadge({ comparison }: { comparison: FindingComparison }) {
   const t = useTranslations();
-  
+
   if (comparison.isNew) {
     return (
-      <Badge 
-        variant="outline" 
+      <Badge
+        variant="outline"
         className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
       >
         <CircleDot className="h-3 w-3" />
@@ -123,10 +145,10 @@ function ComparisonBadge({ comparison }: { comparison: FindingComparison }) {
       </Badge>
     );
   }
-  
+
   return (
-    <Badge 
-      variant="outline" 
+    <Badge
+      variant="outline"
       className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1"
       title={`${comparison.previousOccurrences} ${t("findings.occurrences")}`}
     >
@@ -136,11 +158,11 @@ function ComparisonBadge({ comparison }: { comparison: FindingComparison }) {
   );
 }
 
-export function FindingRow({ 
-  finding, 
+export function FindingRow({
+  finding,
   comparison,
-  onEdit, 
-  onDelete, 
+  onEdit,
+  onDelete,
   isProcessing = false,
   showActions = true,
 }: FindingRowProps) {
@@ -158,32 +180,30 @@ export function FindingRow({
   const isSevere = finding.severity === "severe" || finding.severity === "moderate";
 
   return (
-    <div className={cn(
-      "rounded-lg border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
-      isSevere && "border-orange-500/30 bg-orange-500/5",
-      comparison?.isNew && "border-amber-500/30 bg-amber-500/5"
-    )}>
+    <div
+      className={cn(
+        "rounded-lg border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
+        isSevere && "border-orange-500/30 bg-orange-500/5",
+        comparison?.isNew && "border-amber-500/30 bg-amber-500/5",
+      )}
+    >
       <div className="min-w-0 flex-1">
         {/* Finding type and code */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium">{findingName}</span>
           {finding.finding_code && (
-            <code className="text-xs bg-muted px-1 py-0.5 rounded">
-              {finding.finding_code}
-            </code>
+            <code className="text-xs bg-muted px-1 py-0.5 rounded">{finding.finding_code}</code>
           )}
           {isSevere && <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />}
         </div>
-        
+
         {/* Body site */}
         {siteName && (
           <div className="flex items-center gap-1 mt-1 text-sm text-muted-foreground">
             <MapPin className="h-3 w-3 shrink-0" />
             <span>{siteName}</span>
             {finding.site_code && (
-              <code className="text-xs bg-muted px-1 py-0.5 rounded">
-                {finding.site_code}
-              </code>
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">{finding.site_code}</code>
             )}
           </div>
         )}
@@ -194,7 +214,9 @@ export function FindingRow({
             <div className="flex items-center gap-1.5">
               <div className="flex items-center gap-1 text-muted-foreground">
                 <Ruler className="h-3 w-3" />
-                <span>{finding.size_mm} {t("findings.mm")}</span>
+                <span>
+                  {finding.size_mm} {t("findings.mm")}
+                </span>
               </div>
               {/* Show previous size and change if available */}
               {comparison && !comparison.isNew && comparison.previousSize !== null && (
@@ -203,18 +225,16 @@ export function FindingRow({
                   <span className="text-xs text-muted-foreground">
                     {t("findings.comparison.previousSize", { size: comparison.previousSize })}
                   </span>
-                  <SizeChangeIndicator 
-                    currentSize={finding.size_mm} 
-                    previousSize={comparison.previousSize} 
+                  <SizeChangeIndicator
+                    currentSize={finding.size_mm}
+                    previousSize={comparison.previousSize}
                   />
                 </>
               )}
             </div>
           )}
           {finding.count !== null && finding.count > 1 && (
-            <span className="text-muted-foreground">
-              x{finding.count}
-            </span>
+            <span className="text-muted-foreground">x{finding.count}</span>
           )}
         </div>
       </div>
@@ -223,10 +243,10 @@ export function FindingRow({
       <div className="flex flex-wrap items-center gap-2 shrink-0 sm:flex-nowrap">
         {/* Show new/known badge if comparison data is available */}
         {comparison && <ComparisonBadge comparison={comparison} />}
-        
+
         <SeverityBadge severity={finding.severity} />
         <LateralityBadge laterality={finding.laterality} />
-        
+
         {/* Confidence indicator */}
         {finding.confidence !== null && finding.confidence < 0.8 && (
           <span title={t("findings.lowConfidence")}>

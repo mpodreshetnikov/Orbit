@@ -21,10 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  useCreateMeasurementCatalogItem,
-  useUpdateMeasurementCatalogItem,
-} from "@/hooks";
+import { useCreateMeasurementCatalogItem, useUpdateMeasurementCatalogItem } from "@/hooks";
 import type { MeasurementCatalog, MeasurementCategory } from "@/types";
 import { MEASUREMENT_CATEGORY_LABELS, MEASUREMENT_CATEGORIES } from "@/types";
 
@@ -118,9 +115,7 @@ export function MeasurementCatalogEditDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {isEditing
-              ? t("catalogs.editMeasurement")
-              : t("catalogs.addMeasurement")}
+            {isEditing ? t("catalogs.editMeasurement") : t("catalogs.addMeasurement")}
           </DialogTitle>
           <DialogDescription>
             {isEditing
@@ -223,11 +218,7 @@ export function MeasurementCatalogEditDialog({
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={isPending}>

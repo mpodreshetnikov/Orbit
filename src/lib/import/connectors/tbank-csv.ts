@@ -121,7 +121,8 @@ async function parse(file: File): Promise<ImportParseResult> {
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
-    const get = (index: number) => (index >= 0 && row[index] !== undefined ? String(row[index]).trim() : "");
+    const get = (index: number) =>
+      index >= 0 && row[index] !== undefined ? String(row[index]).trim() : "";
 
     const dateOp = get(idx.dateOp);
     const datePay = get(idx.datePay);
@@ -155,7 +156,7 @@ async function parse(file: File): Promise<ImportParseResult> {
       amount,
       currency,
       merchantName,
-      accountHint || null
+      accountHint || null,
     );
 
     transactions.push({

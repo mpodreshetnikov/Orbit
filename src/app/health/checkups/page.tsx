@@ -3,7 +3,16 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Plus, CalendarCheck, Search, X, AlertCircle, Clock, CalendarPlus, CheckSquare } from "lucide-react";
+import {
+  Plus,
+  CalendarCheck,
+  Search,
+  X,
+  AlertCircle,
+  Clock,
+  CalendarPlus,
+  CheckSquare,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -27,13 +36,13 @@ const CATEGORIES: CheckupCategory[] = ["lab", "imaging", "visit", "vaccination",
 export default function CheckupsPage() {
   const t = useTranslations();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
-  
+
   // Filters
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CheckupCategory | "all">("all");
-  
+
   // Mark complete dialog
   const [markCompleteItem, setMarkCompleteItem] = useState<CheckupItem | null>(null);
   const [markCompleteOpen, setMarkCompleteOpen] = useState(false);
@@ -56,7 +65,7 @@ export default function CheckupsPage() {
 
   const { data: items, isLoading } = useCheckupItems(selectedPersonId ?? null, {});
   const { data: records } = useMedicalRecords(
-    selectedPersonId ? { person_id: selectedPersonId } : {}
+    selectedPersonId ? { person_id: selectedPersonId } : {},
   );
 
   const handleMarkComplete = (item: CheckupItem) => {
@@ -91,7 +100,16 @@ export default function CheckupsPage() {
   };
 
   // Filter and group items (overdue / upcoming / later / inactive for "All" tab)
-  const { filteredItems, overdueItems, upcomingItems, laterItems, restItems, overdueCount, upcomingCount, inactiveCount } = useMemo(() => {
+  const {
+    filteredItems,
+    overdueItems,
+    upcomingItems,
+    laterItems,
+    restItems,
+    overdueCount,
+    upcomingCount,
+    inactiveCount,
+  } = useMemo(() => {
     if (!items) {
       return {
         filteredItems: [],
@@ -119,17 +137,14 @@ export default function CheckupsPage() {
     // Search filter
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase();
-      filtered = filtered.filter((i) =>
-        i.title.toLowerCase().includes(q)
-      );
+      filtered = filtered.filter((i) => i.title.toLowerCase().includes(q));
     }
 
     // Groups for "All" tab: overdue, upcoming (within 7 days), later (due after 7 days), inactive
     const overdue = filtered.filter(
       (i) =>
         i.status === "active" &&
-        ((i.next_due_at && i.next_due_at < today) ||
-          (i.planned_on && i.planned_on < today))
+        ((i.next_due_at && i.next_due_at < today) || (i.planned_on && i.planned_on < today)),
     );
     const overdueIds = new Set(overdue.map((i) => i.id));
     const upcoming = filtered.filter(
@@ -138,19 +153,17 @@ export default function CheckupsPage() {
         i.status === "active" &&
         i.next_due_at &&
         i.next_due_at >= today &&
-        i.next_due_at <= weekFromTodayStr
+        i.next_due_at <= weekFromTodayStr,
     );
     const later = filtered.filter(
       (i) =>
         !overdueIds.has(i.id) &&
         i.status === "active" &&
         i.next_due_at &&
-        i.next_due_at > weekFromTodayStr
+        i.next_due_at > weekFromTodayStr,
     );
     const rest = filtered.filter(
-      (i) =>
-        i.status !== "active" ||
-        (!i.next_due_at && !(i.planned_on && i.planned_on < today))
+      (i) => i.status !== "active" || (!i.next_due_at && !(i.planned_on && i.planned_on < today)),
     );
 
     // Apply status tab filter (single list when a tab is selected)
@@ -203,7 +216,8 @@ export default function CheckupsPage() {
                 disabled={selectedIds.size === 0}
               >
                 <CalendarPlus className="h-4 w-4" />
-                {t("checkups.planSelected")}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+                {t("checkups.planSelected")}
+                {selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
               </Button>
               <Button size="sm" variant="ghost" onClick={exitSelectionMode}>
                 {t("common.cancel")}
@@ -245,7 +259,10 @@ export default function CheckupsPage() {
           variant={statusTab === "overdue" ? "secondary" : "ghost"}
           size="sm"
           onClick={() => setStatusTab("overdue")}
-          className={cn("shrink-0 gap-1", overdueCount > 0 && statusTab !== "overdue" && "text-amber-600 dark:text-amber-400")}
+          className={cn(
+            "shrink-0 gap-1",
+            overdueCount > 0 && statusTab !== "overdue" && "text-amber-600 dark:text-amber-400",
+          )}
         >
           <AlertCircle className="h-4 w-4" />
           {t("checkups.overdue")}
@@ -345,7 +362,9 @@ export default function CheckupsPage() {
           )}
           {categoryFilter !== "all" && (
             <Badge variant="secondary" className="gap-1">
-              {t(`checkups.category${categoryFilter.charAt(0).toUpperCase() + categoryFilter.slice(1)}`)}
+              {t(
+                `checkups.category${categoryFilter.charAt(0).toUpperCase() + categoryFilter.slice(1)}`,
+              )}
               <Button
                 type="button"
                 variant="ghost"
@@ -390,7 +409,9 @@ export default function CheckupsPage() {
           <p className="font-medium">{t("checkups.noItems")}</p>
           <p className="text-sm mt-1">{t("checkups.noItemsHint")}</p>
           <Link href="/health/checkups/new">
-            <Button size="sm" className="mt-3">{t("checkups.add")}</Button>
+            <Button size="sm" className="mt-3">
+              {t("checkups.add")}
+            </Button>
           </Link>
         </div>
       ) : filteredItems.length === 0 ? (
@@ -431,7 +452,10 @@ export default function CheckupsPage() {
               <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-3">
                 <Clock className="h-4 w-4 shrink-0" />
                 {t("checkups.upcoming")}
-                <Badge variant="secondary" className="h-5 px-1.5 text-xs ml-1 text-muted-foreground">
+                <Badge
+                  variant="secondary"
+                  className="h-5 px-1.5 text-xs ml-1 text-muted-foreground"
+                >
                   {upcomingItems.length}
                 </Badge>
               </h2>
@@ -455,7 +479,10 @@ export default function CheckupsPage() {
               <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-3">
                 <CalendarCheck className="h-4 w-4 shrink-0" />
                 {t("checkups.later")}
-                <Badge variant="secondary" className="h-5 px-1.5 text-xs ml-1 text-muted-foreground">
+                <Badge
+                  variant="secondary"
+                  className="h-5 px-1.5 text-xs ml-1 text-muted-foreground"
+                >
                   {laterItems.length}
                 </Badge>
               </h2>
@@ -478,7 +505,10 @@ export default function CheckupsPage() {
             <section>
               <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-3">
                 {t("checkups.inactive")}
-                <Badge variant="secondary" className="h-5 px-1.5 text-xs ml-1 text-muted-foreground">
+                <Badge
+                  variant="secondary"
+                  className="h-5 px-1.5 text-xs ml-1 text-muted-foreground"
+                >
                   {restItems.length}
                 </Badge>
               </h2>

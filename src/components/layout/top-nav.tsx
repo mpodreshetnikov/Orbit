@@ -2,7 +2,19 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Heart, ChevronDown, Settings, Plus, FileText, Ruler, Pill, Smartphone, Wallet, CreditCard, Tags } from "lucide-react";
+import {
+  Heart,
+  ChevronDown,
+  Settings,
+  Plus,
+  FileText,
+  Ruler,
+  Pill,
+  Smartphone,
+  Wallet,
+  CreditCard,
+  Tags,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -47,9 +59,7 @@ export function TopNav() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="gap-1 px-2 sm:px-3">
-                  <span className="text-sm">
-                    {isMoney ? t("nav.money") : t("nav.health")}
-                  </span>
+                  <span className="text-sm">{isMoney ? t("nav.money") : t("nav.health")}</span>
                   <ChevronDown className="h-3 w-3" />
                 </Button>
               </DropdownMenuTrigger>
@@ -111,7 +121,7 @@ export function TopNav() {
                           {t("nav.medicalRecord")}
                         </Link>
                       </DropdownMenuItem>
-                      <DropdownMenuItem 
+                      <DropdownMenuItem
                         onClick={() => setMeasurementDialogOpen(true)}
                         className="flex items-center gap-2"
                       >
@@ -125,12 +135,18 @@ export function TopNav() {
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
                           <DropdownMenuItem asChild>
-                            <Link href="/health/medications/new?kind=regular" className="flex items-center gap-2">
+                            <Link
+                              href="/health/medications/new?kind=regular"
+                              className="flex items-center gap-2"
+                            >
                               {t("nav.regularMedication")}
                             </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem asChild>
-                            <Link href="/health/medications/new?kind=one_time" className="flex items-center gap-2">
+                            <Link
+                              href="/health/medications/new?kind=one_time"
+                              className="flex items-center gap-2"
+                            >
                               {t("nav.oneTimeMedication")}
                             </Link>
                           </DropdownMenuItem>
@@ -145,53 +161,51 @@ export function TopNav() {
             {/* Person selector - shows name on all screen sizes */}
             <PersonSelector />
 
-          {/* Settings dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Settings className="h-4 w-4" />
-                <span className="sr-only">{t("nav.settings")}</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={8} className="w-48">
-              <div className="px-2 py-1.5 text-sm font-semibold">
-                {t("settings.title")}
-              </div>
-              <DropdownMenuSeparator />
-              <div className="px-2 py-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">{t("settings.theme")}</span>
-                  <ThemeToggle />
+            {/* Settings dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Settings className="h-4 w-4" />
+                  <span className="sr-only">{t("nav.settings")}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={8} className="w-48">
+                <div className="px-2 py-1.5 text-sm font-semibold">{t("settings.title")}</div>
+                <DropdownMenuSeparator />
+                <div className="px-2 py-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">{t("settings.theme")}</span>
+                    <ThemeToggle />
+                  </div>
                 </div>
-              </div>
-              <div className="px-2 py-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">{t("settings.language")}</span>
-                  <LanguageToggle />
+                <div className="px-2 py-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">{t("settings.language")}</span>
+                    <LanguageToggle />
+                  </div>
                 </div>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/settings" className="flex items-center gap-2">
-                  <Smartphone className="h-4 w-4" />
-                  {t("settings.appSettings")}
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/settings" className="flex items-center gap-2">
+                    <Smartphone className="h-4 w-4" />
+                    {t("settings.appSettings")}
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          {/* Profile */}
-          <UserMenu />
+            {/* Profile */}
+            <UserMenu />
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
 
-    {/* Measurement dialog */}
-    <AddMeasurementDialog
-      open={measurementDialogOpen}
-      onOpenChange={setMeasurementDialogOpen}
-      personId={selectedPersonId}
-    />
-  </>
+      {/* Measurement dialog */}
+      <AddMeasurementDialog
+        open={measurementDialogOpen}
+        onOpenChange={setMeasurementDialogOpen}
+        personId={selectedPersonId}
+      />
+    </>
   );
 }

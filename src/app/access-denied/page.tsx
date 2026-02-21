@@ -19,12 +19,8 @@ export default async function AccessDeniedPage() {
           <AlertCircle className="h-8 w-8 text-destructive" />
         </div>
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight">
-            {t("auth.accessDenied.title")}
-          </h1>
-          <p className="text-muted-foreground">
-            {t("auth.accessDenied.message")}
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight">{t("auth.accessDenied.title")}</h1>
+          <p className="text-muted-foreground">{t("auth.accessDenied.message")}</p>
           {user && (
             <p className="mt-4 text-sm text-muted-foreground">
               {t("auth.accessDenied.loggedInAs")}: {user.email}

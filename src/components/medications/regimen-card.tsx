@@ -16,34 +16,41 @@ const DAY_SUFFIX = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 export function formatRegimenScheduleSummary(
   regimen: MedRegimen,
   t: (key: string, values?: { count?: number }) => string,
-  intlLocale: string
+  intlLocale: string,
 ): string | null {
   const schedule = regimen.schedule as MedSchedule | null;
   if (!schedule) return null;
   const mode = schedule.mode;
   if (mode === "one_off") {
     const due = (schedule as { due_at?: string }).due_at;
-    if (due) return new Date(due).toLocaleString(intlLocale, { dateStyle: "medium", timeStyle: "short" });
+    if (due)
+      return new Date(due).toLocaleString(intlLocale, { dateStyle: "medium", timeStyle: "short" });
     return null;
   }
   if (mode === "daily_times") {
     const times = (schedule as { times?: string[] }).times;
-    if (times?.length) return `${t("medications.frequencyDaily")} ${t("medications.scheduleAt")} ${times.join(", ")}`;
+    if (times?.length)
+      return `${t("medications.frequencyDaily")} ${t("medications.scheduleAt")} ${times.join(", ")}`;
   }
   if (mode === "interval_hours") {
     const every = (schedule as { interval?: { every?: number }; amount?: number }).interval?.every;
     const amount = (schedule as { amount?: number }).amount;
     if (every != null) {
       const base = `${t("medications.every")} ${every} ${t("medications.hours")}`;
-      return amount != null && amount > 1 ? `${base} · ${amount} ${t(medicationUnitKey(regimen.intake_unit), { count: amount })}` : base;
+      return amount != null && amount > 1
+        ? `${base} · ${amount} ${t(medicationUnitKey(regimen.intake_unit), { count: amount })}`
+        : base;
     }
   }
   if (mode === "interval_days") {
-    const every = (schedule as { interval?: { every?: number }; times?: string[]; time_of_day?: string }).interval?.every;
+    const every = (
+      schedule as { interval?: { every?: number }; times?: string[]; time_of_day?: string }
+    ).interval?.every;
     const times = (schedule as { times?: string[] }).times;
     const timeOfDay = (schedule as { time_of_day?: string }).time_of_day;
     const timeStr = times?.length ? times.join(", ") : (timeOfDay ?? "09:00");
-    if (every != null) return `${t("medications.every")} ${every} ${t("medications.days")} ${t("medications.scheduleAt")} ${timeStr}`;
+    if (every != null)
+      return `${t("medications.every")} ${every} ${t("medications.days")} ${t("medications.scheduleAt")} ${timeStr}`;
   }
   if (mode === "days_of_week") {
     const days = (schedule as { days_of_week?: number[] }).days_of_week;
@@ -99,7 +106,7 @@ export function RegimenCard({ regimen }: RegimenCardProps) {
       <Card
         className={cn(
           "hover:shadow-md transition-shadow min-w-0 overflow-hidden w-full tap-target cursor-pointer",
-          isLowInventory && "border-amber-400 dark:border-amber-600"
+          isLowInventory && "border-amber-400 dark:border-amber-600",
         )}
       >
         <CardContent className="p-3 sm:p-4 w-full">
@@ -110,7 +117,10 @@ export function RegimenCard({ regimen }: RegimenCardProps) {
                 <div className="flex items-center gap-2 flex-wrap mt-1">
                   <StatusBadge status={displayStatus} />
                   {isLowInventory && (
-                    <Badge variant="outline" className="text-xs border-amber-500/50 text-amber-700 dark:text-amber-400 gap-1">
+                    <Badge
+                      variant="outline"
+                      className="text-xs border-amber-500/50 text-amber-700 dark:text-amber-400 gap-1"
+                    >
                       <AlertTriangle className="h-3 w-3" />
                       {t("medications.lowInventory")}
                     </Badge>
@@ -123,14 +133,13 @@ export function RegimenCard({ regimen }: RegimenCardProps) {
               })()}
             </div>
             {scheduleSummary && (
-              <div className="text-xs text-muted-foreground line-clamp-2">
-                {scheduleSummary}
-              </div>
+              <div className="text-xs text-muted-foreground line-clamp-2">{scheduleSummary}</div>
             )}
             <div className="min-h-5 text-xs text-muted-foreground">
               {inv?.enabled && inv.current_amount != null ? (
                 <>
-                  {formatAmountWithUnit(inv.current_amount, regimen.intake_unit, t)} {t("medications.stockLeft")}
+                  {formatAmountWithUnit(inv.current_amount, regimen.intake_unit, t)}{" "}
+                  {t("medications.stockLeft")}
                 </>
               ) : (
                 "\u00A0"

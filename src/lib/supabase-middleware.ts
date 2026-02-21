@@ -16,18 +16,16 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({
             request,
           });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, options),
           );
         },
       },
-    }
+    },
   );
 
   // Refresh session if expired
@@ -39,9 +37,7 @@ export async function updateSession(request: NextRequest) {
 
   // Public routes that don't require auth
   const publicRoutes = ["/login", "/auth/callback", "/access-denied"];
-  const isPublicRoute = publicRoutes.some((route) =>
-    pathname.startsWith(route)
-  );
+  const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
 
   // If accessing a protected route
   if (!isPublicRoute) {

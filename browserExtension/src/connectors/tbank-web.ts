@@ -32,13 +32,16 @@ function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<void> {
       reject(new Error("Page load timeout."));
     }, timeoutMs);
     chrome.tabs.onUpdated.addListener(listener);
-    chrome.tabs.get(tabId).then((tab) => {
-      if (tab.status === "complete") {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    }).catch(() => {});
+    chrome.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (tab.status === "complete") {
+          clearTimeout(timeout);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      })
+      .catch(() => {});
   });
 }
 
@@ -47,7 +50,8 @@ const connector: Connector = {
   displayName: "T-Bank Web",
   async parse({ windowFrom, session }: ConnectorParseInput): Promise<ConnectorParseOutput> {
     const fallbackFrom = new Date(Date.now() - 30 * 86400000).toISOString();
-    const normalizedWindowFrom = toIsoString(windowFrom) || toIsoString(session?.last_imported_at) || fallbackFrom;
+    const normalizedWindowFrom =
+      toIsoString(windowFrom) || toIsoString(session?.last_imported_at) || fallbackFrom;
 
     const [activeTab] = await chrome.tabs.query({
       active: true,
@@ -110,7 +114,10 @@ function toIsoString(value: unknown): string | null {
   return date.toISOString();
 }
 
-function normalizeExtractedRow(row: unknown, defaultAccountId: string | null): Record<string, unknown> | null {
+function normalizeExtractedRow(
+  row: unknown,
+  defaultAccountId: string | null,
+): Record<string, unknown> | null {
   if (!row || typeof row !== "object") return null;
   const r = row as Record<string, unknown>;
   const amount = toFiniteNumber(r.amount);
@@ -151,7 +158,11 @@ function normalizeExtractedRow(row: unknown, defaultAccountId: string | null): R
   };
 }
 
-function normalizeLineItems(lineItems: unknown, fallbackAmount: number, fallbackTitle: string): Record<string, unknown>[] {
+function normalizeLineItems(
+  lineItems: unknown,
+  fallbackAmount: number,
+  fallbackTitle: string,
+): Record<string, unknown>[] {
   if (!Array.isArray(lineItems) || lineItems.length === 0) {
     return [
       {
@@ -245,7 +256,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
   const selectedOperationId = new URLSearchParams(window.location.search).get("operationId");
   const selectedOperationTimeMs = toMs(
-    new URLSearchParams(window.location.search).get("operationTime")
+    new URLSearchParams(window.location.search).get("operationTime"),
   );
 
   return run();
@@ -311,7 +322,8 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     const parsedThroughAt = Number.isFinite(oldestSeenMs)
       ? new Date(oldestSeenMs).toISOString()
       : new Date(windowFromMs).toISOString();
-    const windowTo = newestSeenMs > 0 ? new Date(newestSeenMs).toISOString() : new Date().toISOString();
+    const windowTo =
+      newestSeenMs > 0 ? new Date(newestSeenMs).toISOString() : new Date().toISOString();
 
     return {
       rows: filteredRows,
@@ -324,8 +336,8 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
   function parseFeedRows() {
     const nodes = Array.from(
       document.querySelectorAll(
-        '[data-qa-type="atom-operations-feed-header"], [data-qa-type="atom-operations-feed-operation-root"]'
-      )
+        '[data-qa-type="atom-operations-feed-header"], [data-qa-type="atom-operations-feed-operation-root"]',
+      ),
     );
 
     // Virtualized list: items are position:absolute with top:Npx; sort by vertical position
@@ -374,8 +386,14 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     return rect.top + (window.scrollY || window.pageYOffset);
   }
 
-  function parseOperationNode(node: Element, currentDate: Date | null, headerLabel: string | null): Record<string, unknown> | null {
-    const title = clean(node.querySelector('[data-qa-type="atom-operations-feed-operation-title"]')?.textContent);
+  function parseOperationNode(
+    node: Element,
+    currentDate: Date | null,
+    headerLabel: string | null,
+  ): Record<string, unknown> | null {
+    const title = clean(
+      node.querySelector('[data-qa-type="atom-operations-feed-operation-title"]')?.textContent,
+    );
     const amountEl = node.querySelector('[data-qa-type="atom-operations-feed-operation-amount"]');
     let amountText = clean(amountEl?.textContent);
     if (!amountText && amountEl) {
@@ -386,12 +404,15 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
     if (!title || !amountInfo) return null;
 
-    const subtitle = clean(node.querySelector('[data-qa-type="atom-operations-feed-operation-subtitle"]')?.textContent);
+    const subtitle = clean(
+      node.querySelector('[data-qa-type="atom-operations-feed-operation-subtitle"]')?.textContent,
+    );
     const description = clean(
-      node.querySelector('[data-qa-type="atom-operations-feed-operation-description"]')?.textContent
+      node.querySelector('[data-qa-type="atom-operations-feed-operation-description"]')
+        ?.textContent,
     );
     const message = clean(
-      node.querySelector('[data-qa-type="atom-operations-feed-operation-message"]')?.textContent
+      node.querySelector('[data-qa-type="atom-operations-feed-operation-message"]')?.textContent,
     );
 
     const postedAt = buildPostedAt(node, currentDate);
@@ -454,9 +475,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
   function parseHeaderDate(node: Element): { label: string; date: Date } | null {
     const typography = node.querySelector('[data-qa-type="tui/typography"]');
-    const labelCandidate =
-      clean(typography?.textContent) ||
-      clean(node.textContent);
+    const labelCandidate = clean(typography?.textContent) || clean(node.textContent);
     if (!labelCandidate) return null;
 
     const label = labelCandidate.replace(/[+\-−]?\d[\d\s]*(?:[.,]\d+)?\s*[₽р].*$/i, "").trim();
@@ -524,9 +543,10 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
   }
 
   function buildPostedAt(node: Element, currentDate: Date | null): string | null {
-    const baseDate = currentDate instanceof Date && Number.isFinite(currentDate.getTime())
-      ? currentDate
-      : new Date();
+    const baseDate =
+      currentDate instanceof Date && Number.isFinite(currentDate.getTime())
+        ? currentDate
+        : new Date();
 
     const text = clean(node.textContent) || "";
     const timeMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
@@ -536,7 +556,8 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
       return date.toISOString();
     }
 
-    const seedSource = clean(node.textContent) || clean(node.getAttribute("aria-label")) || "fallback";
+    const seedSource =
+      clean(node.textContent) || clean(node.getAttribute("aria-label")) || "fallback";
     const seed = parseInt(hashString(seedSource), 16);
     const hours = 12 + (seed % 12);
     const minutes = Math.floor(seed / 12) % 60;
@@ -555,8 +576,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
     if (numeric.includes(",") && !numeric.includes(".")) {
       const lastComma = numeric.lastIndexOf(",");
-      numeric =
-        numeric.slice(0, lastComma).replace(/,/g, "") + "." + numeric.slice(lastComma + 1);
+      numeric = numeric.slice(0, lastComma).replace(/,/g, "") + "." + numeric.slice(lastComma + 1);
     }
     numeric = numeric.replace(/,/g, "");
 
@@ -583,7 +603,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
   async function enrichRowsWithDetails(
     rows: Record<string, unknown>[],
-    rowElementMap: Map<string, Element>
+    rowElementMap: Map<string, Element>,
   ) {
     const sortedRows = [...rows].sort((a, b) => {
       const aMs = toMs(a.posted_at) ?? 0;
@@ -610,7 +630,9 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
       let openedPopup: Element | null = null;
       for (let attempt = 0; attempt < 12; attempt++) {
         await wait(200);
-        const detailRoot = document.querySelector('[data-qa-type="desktop-pumba-detail-operation"]');
+        const detailRoot = document.querySelector(
+          '[data-qa-type="desktop-pumba-detail-operation"]',
+        );
         const urlChanged = window.location.search !== initialSearch;
         if (detailRoot || urlChanged) {
           let hasLineItemsBlock = hasLineItemsSectionInDetail();
@@ -643,7 +665,11 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     }
   }
 
-  function mergeSelectedOperationDetail(rows: Record<string, unknown>[], operationId: string | null, operationTimeMs: number | null): void {
+  function mergeSelectedOperationDetail(
+    rows: Record<string, unknown>[],
+    operationId: string | null,
+    operationTimeMs: number | null,
+  ): void {
     const detail = readCurrentDetailSnapshot(operationId, operationTimeMs);
     if (!detail) return;
     const targetRow = findTargetRowForDetail(rows, detail);
@@ -651,7 +677,10 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     applyDetailSnapshotToRow(targetRow, detail);
   }
 
-  function readCurrentDetailSnapshot(fallbackOperationId: string | null, fallbackOperationTimeMs: number | null): {
+  function readCurrentDetailSnapshot(
+    fallbackOperationId: string | null,
+    fallbackOperationTimeMs: number | null,
+  ): {
     signature: string;
     external_id: string | null;
     posted_at: string | null;
@@ -672,24 +701,23 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
     const detailTitle =
       clean(
-        detailRoot.querySelector('[data-qa-type="atom-avatar-avatarImage"]')?.getAttribute("alt")
-      ) || clean(detailRoot.querySelector('[data-qa-type="tui/avatar"] img')?.getAttribute("alt")) ||
+        detailRoot.querySelector('[data-qa-type="atom-avatar-avatarImage"]')?.getAttribute("alt"),
+      ) ||
+      clean(detailRoot.querySelector('[data-qa-type="tui/avatar"] img')?.getAttribute("alt")) ||
       clean(detailRoot.textContent);
     const detailAmount = parseAmount(
       clean(detailRoot.querySelector('[data-qa-type="atom-sensitive"]')?.textContent) ||
-      clean(detailRoot.textContent)
+        clean(detailRoot.textContent),
     );
     const detailText = clean(detailRoot.textContent) || "";
-    const mccMatch = detailText.match(/MCC\s*[:\s]*(\d{3,4})/i) || detailText.match(/\b(\d{4})\s*[–—-]\s*[Mm]erchant/i);
+    const mccMatch =
+      detailText.match(/MCC\s*[:\s]*(\d{3,4})/i) ||
+      detailText.match(/\b(\d{4})\s*[–—-]\s*[Mm]erchant/i);
     const accountHint = extractCardLast4FromDetail(detailRoot);
 
-    const lineItems = [
-      ...parseShoppingListLineItems(),
-      ...parseCashbackLineItems(),
-    ];
+    const lineItems = [...parseShoppingListLineItems(), ...parseCashbackLineItems()];
 
-    const postedAt =
-      operationTimeMs !== null ? new Date(operationTimeMs).toISOString() : null;
+    const postedAt = operationTimeMs !== null ? new Date(operationTimeMs).toISOString() : null;
     const amountValue = detailAmount ? detailAmount.value : null;
     const signature = [
       operationId || "",
@@ -716,15 +744,17 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     const badges = rowElement.querySelectorAll('[data-qa-type="tui/badge"]');
     const firstBadge = badges[0];
     if (!firstBadge) return false;
-    const pathEl = firstBadge.querySelector('svg path');
-    const d = pathEl?.getAttribute('d') ?? '';
+    const pathEl = firstBadge.querySelector("svg path");
+    const d = pathEl?.getAttribute("d") ?? "";
     return /4\.625A2\.618|h7\.876v9\.84/.test(d);
   }
 
   function hasLineItemsSectionInDetail(): boolean {
     const detailRoot = document.querySelector('[data-qa-type="desktop-pumba-detail-operation"]');
     if (!detailRoot) return false;
-    const shoppingSection = detailRoot.querySelector('[data-qa-type="desktop-pumba-shoppings-operation"]');
+    const shoppingSection = detailRoot.querySelector(
+      '[data-qa-type="desktop-pumba-shoppings-operation"]',
+    );
     if (shoppingSection) return true;
     const allBtn = detailRoot.querySelector('[data-qa-type="molecule-shopping-list-allButton"]');
     return Boolean(allBtn);
@@ -733,14 +763,20 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
   async function clickAllLineItemsButtonAndWaitForPopup(): Promise<Element | null> {
     const allBtn =
       document.querySelector('[data-qa-type="molecule-shopping-list-allButton"] button') ||
-      document.querySelector('[data-qa-type="molecule-shopping-list-allButton"] [data-qa-type="uikit/link"]');
+      document.querySelector(
+        '[data-qa-type="molecule-shopping-list-allButton"] [data-qa-type="uikit/link"]',
+      );
     if (allBtn && typeof (allBtn as HTMLElement).click === "function") {
       (allBtn as HTMLElement).click();
       return waitForDetailPopup(2000);
     }
-    const shoppingSection = document.querySelector('[data-qa-type="desktop-pumba-shoppings-operation"]');
+    const shoppingSection = document.querySelector(
+      '[data-qa-type="desktop-pumba-shoppings-operation"]',
+    );
     if (!shoppingSection) return null;
-    const links = shoppingSection.querySelectorAll('button, [role="button"], a, [data-qa-type="uikit/link"]');
+    const links = shoppingSection.querySelectorAll(
+      'button, [role="button"], a, [data-qa-type="uikit/link"]',
+    );
     for (const el of Array.from(links)) {
       if (clean(el.textContent) === "Все") {
         if (typeof (el as HTMLElement).click === "function") (el as HTMLElement).click();
@@ -755,7 +791,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     if (modal) return Promise.resolve(modal);
     return waitForElement(
       '[role="dialog"], [data-qa-type*="modal"], [data-qa-type*="dialog"], .tui-dialog, [class*="Modal"]',
-      timeoutMs
+      timeoutMs,
     );
   }
 
@@ -833,20 +869,26 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
   }
 
   function extractCardLast4FromDetail(detailRoot: Element): string | null {
-    const accountSection = document.querySelector('[data-qa-type="desktop-pumba-account-operation"]');
+    const accountSection = document.querySelector(
+      '[data-qa-type="desktop-pumba-account-operation"]',
+    );
     const text = accountSection ? clean(accountSection.textContent) : "";
     if (text) {
       const four = extractLast4(text);
       if (four) return four;
     }
     const fullText = clean(detailRoot.textContent) || "";
-    const cardLike = fullText.match(/(?:карт[аыуе]?|card|••••)\s*[*•·\s]*(\d{4})\b/i) ||
+    const cardLike =
+      fullText.match(/(?:карт[аыуе]?|card|••••)\s*[*•·\s]*(\d{4})\b/i) ||
       fullText.match(/\b(\d{4})\s*[₽р]|\b(\d{4})\s*$/m);
     if (cardLike) return cardLike[1] || cardLike[2] || null;
     return extractLast4(fullText);
   }
 
-  function findTargetRowForDetail(rows: Record<string, unknown>[], detail: NonNullable<ReturnType<typeof readCurrentDetailSnapshot>>): Record<string, unknown> | undefined {
+  function findTargetRowForDetail(
+    rows: Record<string, unknown>[],
+    detail: NonNullable<ReturnType<typeof readCurrentDetailSnapshot>>,
+  ): Record<string, unknown> | undefined {
     const normalizedDetailTitle = normalizeKey(detail.title || "");
     const detailAmountValue = detail.amount;
 
@@ -864,7 +906,10 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     return rows.length > 0 ? rows[0] : undefined;
   }
 
-  function detailMatchesRow(row: Record<string, unknown>, detail: NonNullable<ReturnType<typeof readCurrentDetailSnapshot>>): boolean {
+  function detailMatchesRow(
+    row: Record<string, unknown>,
+    detail: NonNullable<ReturnType<typeof readCurrentDetailSnapshot>>,
+  ): boolean {
     if (detail.amount !== null && Math.abs(Number(row.amount || 0) - detail.amount) >= 0.01) {
       return false;
     }
@@ -876,7 +921,10 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     return true;
   }
 
-  function applyDetailSnapshotToRow(row: Record<string, unknown>, detail: NonNullable<ReturnType<typeof readCurrentDetailSnapshot>>): void {
+  function applyDetailSnapshotToRow(
+    row: Record<string, unknown>,
+    detail: NonNullable<ReturnType<typeof readCurrentDetailSnapshot>>,
+  ): void {
     if (detail.external_id) {
       row.external_id = detail.external_id;
     }
@@ -938,7 +986,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
       if (!title || /список покупок|все\s*$|итого\s*$/i.test(title)) continue;
 
       const qtyMatch = cellText.match(
-        /(\d+(?:[.,]\d+)?)\s*[xх×]\s*([+\-−]?\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]/i
+        /(\d+(?:[.,]\d+)?)\s*[xх×]\s*([+\-−]?\d[\d\s]*(?:[.,]\d+)?)\s*[₽р]/i,
       );
       const quantity =
         qtyMatch && Number.isFinite(Number(qtyMatch[1].replace(",", ".")))
@@ -963,10 +1011,12 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
   function findSectionByHeading(regex: RegExp): Element | null {
     const detailRoot = document.querySelector('[data-qa-type="desktop-pumba-detail-operation"]');
     if (!detailRoot) return null;
-    const all = detailRoot.querySelectorAll('[data-qa-type="tui/typography"], h2, h3, [class*="heading"]');
+    const all = detailRoot.querySelectorAll(
+      '[data-qa-type="tui/typography"], h2, h3, [class*="heading"]',
+    );
     for (const el of Array.from(all)) {
       if (regex.test(clean(el.textContent) || "")) {
-        let container = el.closest('[data-qa-type]') || el.parentElement;
+        let container = el.closest("[data-qa-type]") || el.parentElement;
         for (let i = 0; i < 3 && container; i++) {
           if (container.querySelectorAll('[data-qa-type="tui/cell"]').length > 0) return container;
           container = container.parentElement;
@@ -986,7 +1036,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
       const hasAmount = text && /[+\-−]?\d[\d\s]*(?:[.,]\d+)?\s*[₽р]/.test(text);
       if (hasAmount && text.length < 400) {
         const childrenWithAmount = Array.from(node.children).filter((c: Element) =>
-          /[+\-−]?\d[\d\s]*(?:[.,]\d+)?\s*[₽р]/.test(clean(c.textContent) || "")
+          /[+\-−]?\d[\d\s]*(?:[.,]\d+)?\s*[₽р]/.test(clean(c.textContent) || ""),
         );
         if (childrenWithAmount.length === 0) {
           withAmount.push(node);
@@ -1010,7 +1060,8 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     const result: Record<string, unknown>[] = [];
 
     for (const cell of cells) {
-      const title = clean(cell.querySelector('[data-qa-type="cashback-title"]')?.textContent) ||
+      const title =
+        clean(cell.querySelector('[data-qa-type="cashback-title"]')?.textContent) ||
         clean(cell.querySelector('[data-qa-type="tui/typography"]')?.textContent);
       const sumEl = cell.querySelector('[data-qa-type="sum"]') || cell;
       const sumText = clean(sumEl.textContent) ?? "";
@@ -1044,7 +1095,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
         parts.description || "",
         parts.message || "",
         parts.headerLabel || "",
-      ].join("|")
+      ].join("|"),
     );
   }
 
@@ -1055,11 +1106,11 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
         row.merchant_name || "",
         String(row.amount ?? ""),
         row.posted_at || "",
-        (row.raw_payload as Record<string, unknown> | undefined || {}).feed_subtitle || "",
-        (row.raw_payload as Record<string, unknown> | undefined || {}).feed_description || "",
-        (row.raw_payload as Record<string, unknown> | undefined || {}).feed_message || "",
+        ((row.raw_payload as Record<string, unknown> | undefined) || {}).feed_subtitle || "",
+        ((row.raw_payload as Record<string, unknown> | undefined) || {}).feed_description || "",
+        ((row.raw_payload as Record<string, unknown> | undefined) || {}).feed_message || "",
         row.account_hint || "",
-      ].join("|")
+      ].join("|"),
     )}`;
   }
 
@@ -1080,7 +1131,10 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
 
   function clean(value: unknown): string | null {
     if (typeof value !== "string") return null;
-    const normalized = value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+    const normalized = value
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     return normalized || null;
   }
 
@@ -1088,12 +1142,7 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     let hash = 2166136261;
     for (let i = 0; i < input.length; i++) {
       hash ^= input.charCodeAt(i);
-      hash +=
-        (hash << 1) +
-        (hash << 4) +
-        (hash << 7) +
-        (hash << 8) +
-        (hash << 24);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
     }
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
@@ -1126,7 +1175,10 @@ function extractOperationsInPage(input: ExtractInput): Promise<{
     while (p) {
       const style = window.getComputedStyle(p);
       const overflowY = style.overflowY || style.overflow;
-      if ((overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") && p.scrollHeight > p.clientHeight) {
+      if (
+        (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") &&
+        p.scrollHeight > p.clientHeight
+      ) {
         return p;
       }
       p = p.parentElement;

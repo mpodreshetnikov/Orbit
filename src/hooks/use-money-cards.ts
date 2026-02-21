@@ -2,11 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import type {
-  MoneyCard,
-  CreateMoneyCardInput,
-  UpdateMoneyCardInput,
-} from "@/types";
+import type { MoneyCard, CreateMoneyCardInput, UpdateMoneyCardInput } from "@/types";
 
 async function fetchCardsByAccountId(accountId: string): Promise<MoneyCard[]> {
   const supabase = createClient();
@@ -59,11 +55,7 @@ async function createMoneyCard(input: CreateMoneyCardInput): Promise<MoneyCard> 
     last4: last4 || input.last4,
     card_label: input.card_label?.trim() || null,
   };
-  const { data, error } = await supabase
-    .from("money_cards")
-    .insert(payload)
-    .select()
-    .single();
+  const { data, error } = await supabase.from("money_cards").insert(payload).select().single();
 
   if (error) throw new Error(error.message);
   return data as MoneyCard;
@@ -123,12 +115,7 @@ export function useUpdateMoneyCard() {
   });
 }
 
-async function deleteMoneyCard({
-  id,
-}: {
-  id: string;
-  accountId: string;
-}): Promise<void> {
+async function deleteMoneyCard({ id }: { id: string; accountId: string }): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("money_cards").delete().eq("id", id);
 

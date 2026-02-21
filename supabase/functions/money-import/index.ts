@@ -98,7 +98,7 @@ function clamp(value: number, min: number, max: number): number {
 function computeProgressPercent(
   windowFrom: string | null,
   windowTo: string | null,
-  parsedThrough: string | null
+  parsedThrough: string | null,
 ): number | null {
   if (!windowFrom || !windowTo || !parsedThrough) return null;
   const fromMs = new Date(windowFrom).getTime();
@@ -188,7 +188,7 @@ async function authenticateAllowedUser(token: string): Promise<UserAuthContext |
 
 async function getSessionByToken(
   admin: ReturnType<typeof createAdminClient>,
-  token: string
+  token: string,
 ): Promise<Record<string, unknown> | null> {
   const tokenHash = await sha256Hex(token);
   const { data, error } = await admin
@@ -215,7 +215,7 @@ function isSessionUsable(session: Record<string, unknown>): boolean {
 async function resolveAuth(
   req: Request,
   admin: ReturnType<typeof createAdminClient>,
-  options: { allowUser: boolean; allowSession: boolean }
+  options: { allowUser: boolean; allowSession: boolean },
 ): Promise<AuthContext> {
   const token = getBearerToken(req);
   if (!token) throw new Error("Missing Authorization header");
@@ -242,7 +242,7 @@ async function resolveAuth(
 async function findLastImportedAt(
   admin: ReturnType<typeof createAdminClient>,
   source: string,
-  payerPersonId: string
+  payerPersonId: string,
 ): Promise<string | null> {
   const { data, error } = await admin
     .from("money_transactions")
@@ -278,13 +278,13 @@ async function resolveAccountIdForRow(
   admin: ReturnType<typeof createAdminClient>,
   payerPersonId: string,
   row: CanonicalTransactionRowInput,
-  fallbackSource: string
+  fallbackSource: string,
 ): Promise<string> {
   const explicitAccountId = normalizeText(row.account_id);
   if (explicitAccountId) return explicitAccountId;
 
   const sourceForAccounts = normalizeSourceForTransactions(
-    normalizeText(row.source) ?? fallbackSource
+    normalizeText(row.source) ?? fallbackSource,
   );
 
   const { data: accounts, error: accountsError } = await admin
@@ -321,8 +321,8 @@ async function resolveAccountIdForRow(
       new Set(
         (cards ?? [])
           .map((item) => normalizeText((item as Record<string, unknown>).account_id))
-          .filter((value): value is string => Boolean(value))
-      )
+          .filter((value): value is string => Boolean(value)),
+      ),
     );
 
     if (matchedAccountIds.length === 1) {
@@ -352,7 +352,7 @@ function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLineItemIn
 
 function normalizeTransactionRow(
   row: CanonicalTransactionRowInput,
-  fallbackSource: string
+  fallbackSource: string,
 ): CanonicalTransactionRowInput {
   const source = normalizeText(row.source) ?? fallbackSource;
   const currency = normalizeText(row.currency) ?? "RUB";
@@ -389,7 +389,7 @@ function normalizeTransactionRow(
 
 function buildTransactionInsertPayload(
   row: CanonicalTransactionRowInput,
-  payerPersonId: string
+  payerPersonId: string,
 ): Record<string, unknown> {
   return {
     payer_person_id: payerPersonId,
@@ -414,7 +414,7 @@ function buildTransactionInsertPayload(
 
 async function findExistingTransactionId(
   admin: ReturnType<typeof createAdminClient>,
-  row: CanonicalTransactionRowInput
+  row: CanonicalTransactionRowInput,
 ): Promise<string | null> {
   let query = admin.from("money_transactions").select("id").limit(1);
   if (row.external_id) {
@@ -438,7 +438,7 @@ function isUniqueViolation(error: unknown): boolean {
 async function insertOrResolveTransaction(
   admin: ReturnType<typeof createAdminClient>,
   row: CanonicalTransactionRowInput,
-  payerPersonId: string
+  payerPersonId: string,
 ): Promise<{ transactionId: string; inserted: boolean }> {
   const payload = buildTransactionInsertPayload(row, payerPersonId);
   const { data, error } = await admin
@@ -472,7 +472,7 @@ async function insertOrResolveTransaction(
 async function buildLineItemImportHash(
   txIdentity: string,
   lineItem: ImportLineItemInput,
-  lineIndex: number
+  lineIndex: number,
 ): Promise<string> {
   const payload = {
     txIdentity,
@@ -492,7 +492,7 @@ async function insertLineItemIfNew(
   transactionId: string,
   lineItem: ImportLineItemInput,
   importHash: string,
-  fallbackAmount: number
+  fallbackAmount: number,
 ): Promise<{ lineItemId: string | null; inserted: boolean }> {
   const payload = {
     transaction_id: transactionId,
@@ -539,7 +539,7 @@ async function insertLineItemIfNew(
 
 async function createBatchRow(
   admin: ReturnType<typeof createAdminClient>,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Promise<string> {
   const { data, error } = await admin
     .from("money_import_batches")
@@ -556,7 +556,7 @@ async function createBatchRow(
 
 async function insertReportRow(
   admin: ReturnType<typeof createAdminClient>,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Promise<string> {
   const { data, error } = await admin
     .from("money_import_batch_rows")
@@ -574,7 +574,7 @@ async function insertReportRow(
 async function createSessionAction(
   body: Record<string, unknown>,
   auth: UserAuthContext,
-  admin: ReturnType<typeof createAdminClient>
+  admin: ReturnType<typeof createAdminClient>,
 ): Promise<Response> {
   const source = normalizeText(body.source);
   const payerPersonId = normalizeText(body.payer_person_id);
@@ -601,7 +601,8 @@ async function createSessionAction(
       window_from: windowFrom,
       window_to: windowTo,
       expires_at: expiresAt,
-      meta: (body.meta ?? null) as Database["public"]["Tables"]["money_import_sessions"]["Insert"]["meta"],
+      meta: (body.meta ??
+        null) as Database["public"]["Tables"]["money_import_sessions"]["Insert"]["meta"],
     })
     .select("id")
     .single();
@@ -638,7 +639,7 @@ async function createSessionAction(
   const lastImportedAt = await findLastImportedAt(
     admin,
     normalizeSourceForTransactions(source),
-    payerPersonId
+    payerPersonId,
   );
 
   return jsonResponse({
@@ -656,7 +657,7 @@ async function createSessionAction(
 async function sessionStatusAction(
   body: Record<string, unknown>,
   auth: UserAuthContext,
-  admin: ReturnType<typeof createAdminClient>
+  admin: ReturnType<typeof createAdminClient>,
 ): Promise<Response> {
   const sessionId = normalizeText(body.session_id);
   if (!sessionId) {
@@ -725,7 +726,7 @@ async function sessionStatusAction(
 async function applyRowsAction(
   body: Record<string, unknown>,
   auth: AuthContext,
-  admin: ReturnType<typeof createAdminClient>
+  admin: ReturnType<typeof createAdminClient>,
 ): Promise<Response> {
   const rowsRaw = body.rows;
   if (!Array.isArray(rowsRaw)) {
@@ -809,7 +810,7 @@ async function applyRowsAction(
       const explicitAccountId = normalizeText(raw.account_id);
       const accountHint = extractAccountHintFromRow(raw);
       const rowSource = normalizeSourceForTransactions(
-        normalizeText(raw.source) ?? transactionSourceFallback
+        normalizeText(raw.source) ?? transactionSourceFallback,
       );
       const accountCacheKey = explicitAccountId
         ? `explicit:${explicitAccountId}`
@@ -821,7 +822,7 @@ async function applyRowsAction(
           admin,
           payerPersonId,
           raw,
-          transactionSourceFallback
+          transactionSourceFallback,
         );
         accountResolutionCache.set(accountCacheKey, resolvedAccountId);
       }
@@ -831,7 +832,7 @@ async function applyRowsAction(
           ...raw,
           account_id: resolvedAccountId,
         },
-        transactionSourceFallback
+        transactionSourceFallback,
       );
       const tx = await insertOrResolveTransaction(admin, normalized, payerPersonId);
 
@@ -866,7 +867,7 @@ async function applyRowsAction(
             tx.transactionId,
             lineItem,
             importHash,
-            normalized.amount
+            normalized.amount,
           );
 
           const lineStatus: RowStatus = lineRes.inserted ? "inserted" : "skipped";
@@ -895,7 +896,8 @@ async function applyRowsAction(
             line_item_id: lineRes.lineItemId,
           });
         } catch (lineError) {
-          const lineMessage = lineError instanceof Error ? lineError.message : "Line item import failed";
+          const lineMessage =
+            lineError instanceof Error ? lineError.message : "Line item import failed";
           errorCount++;
           await insertReportRow(admin, {
             batch_id: batchId,
@@ -957,25 +959,30 @@ async function applyRowsAction(
   const windowFromInput = toIsoOrNull(body.window_from);
   const windowToInput = toIsoOrNull(body.window_to);
 
-  const previousParsedCount = toNumberOrNull((batchBefore as Record<string, unknown>).parsed_transactions_count) ?? 0;
-  const parsedTransactionsCount = parsedCountInput !== null
-    ? Math.max(previousParsedCount, parsedCountInput)
-    : previousParsedCount + rowsRaw.length;
+  const previousParsedCount =
+    toNumberOrNull((batchBefore as Record<string, unknown>).parsed_transactions_count) ?? 0;
+  const parsedTransactionsCount =
+    parsedCountInput !== null
+      ? Math.max(previousParsedCount, parsedCountInput)
+      : previousParsedCount + rowsRaw.length;
 
-  const existingInserted = toNumberOrNull((batchBefore as Record<string, unknown>).inserted_count) ?? 0;
-  const existingSkipped = toNumberOrNull((batchBefore as Record<string, unknown>).skipped_count) ?? 0;
+  const existingInserted =
+    toNumberOrNull((batchBefore as Record<string, unknown>).inserted_count) ?? 0;
+  const existingSkipped =
+    toNumberOrNull((batchBefore as Record<string, unknown>).skipped_count) ?? 0;
   const existingError = toNumberOrNull((batchBefore as Record<string, unknown>).error_count) ?? 0;
 
   const nextInserted = existingInserted + insertedCount;
   const nextSkipped = existingSkipped + skippedCount;
   const nextError = existingError + errorCount;
 
-  const parsedThrough = parsedThroughInput
-    ?? (rowsRaw.length > 0
-      ? rowsRaw
+  const parsedThrough =
+    parsedThroughInput ??
+    (rowsRaw.length > 0
+      ? (rowsRaw
           .map((r) => toIsoOrNull((r as CanonicalTransactionRowInput).posted_at))
           .filter((v): v is string => Boolean(v))
-          .sort()[0] ?? null
+          .sort()[0] ?? null)
       : null);
 
   const patch: Record<string, unknown> = {
@@ -1013,10 +1020,7 @@ async function applyRowsAction(
     if (windowFromInput) sessionPatch.window_from = windowFromInput;
     if (windowToInput) sessionPatch.window_to = windowToInput;
 
-    await admin
-      .from("money_import_sessions")
-      .update(sessionPatch)
-      .eq("id", sessionId);
+    await admin.from("money_import_sessions").update(sessionPatch).eq("id", sessionId);
   }
 
   return jsonResponse({
@@ -1031,7 +1035,7 @@ async function applyRowsAction(
 async function completeSessionAction(
   body: Record<string, unknown>,
   auth: AuthContext,
-  admin: ReturnType<typeof createAdminClient>
+  admin: ReturnType<typeof createAdminClient>,
 ): Promise<Response> {
   let sessionId = normalizeText(body.session_id);
   let batchId = normalizeText(body.batch_id);
@@ -1049,11 +1053,14 @@ async function completeSessionAction(
   const finalStatus = desiredStatus === "failed" ? "failed" : "completed";
   const batchStatus = finalStatus === "failed" ? "failed" : "completed";
 
-  const sessionWhere = admin.from("money_import_sessions").update({
-    status: finalStatus,
-    revoked_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("id", sessionId);
+  const sessionWhere = admin
+    .from("money_import_sessions")
+    .update({
+      status: finalStatus,
+      revoked_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", sessionId);
 
   if (auth.mode === "user") {
     sessionWhere.eq("created_by_auth_user_id", auth.userId);

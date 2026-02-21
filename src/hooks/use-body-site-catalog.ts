@@ -2,11 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import type {
-  BodySiteCatalog,
-  CreateBodySiteInput,
-  UpdateBodySiteInput,
-} from "@/types";
+import type { BodySiteCatalog, CreateBodySiteInput, UpdateBodySiteInput } from "@/types";
 
 // ============================================================================
 // FETCH ALL BODY SITES
@@ -14,10 +10,7 @@ import type {
 async function fetchBodySiteCatalog(): Promise<BodySiteCatalog[]> {
   const supabase = createClient();
 
-  const { data, error } = await supabase
-    .from("body_site_catalog")
-    .select("*")
-    .order("site_code");
+  const { data, error } = await supabase.from("body_site_catalog").select("*").order("site_code");
 
   if (error) {
     throw new Error(error.message);
@@ -37,9 +30,7 @@ export function useBodySiteCatalog() {
 // ============================================================================
 // CREATE BODY SITE
 // ============================================================================
-async function createBodySite(
-  input: CreateBodySiteInput
-): Promise<BodySiteCatalog> {
+async function createBodySite(input: CreateBodySiteInput): Promise<BodySiteCatalog> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -117,10 +108,7 @@ export function useUpdateBodySite() {
 async function deleteBodySite(id: string): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("body_site_catalog")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("body_site_catalog").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);

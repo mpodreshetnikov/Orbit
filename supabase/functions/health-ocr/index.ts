@@ -42,7 +42,7 @@ interface OcrResult {
 // Download one attachment and convert to base64 data URL (single image in memory)
 async function downloadOneDataUrl(
   supabase: SupabaseClient<Database>,
-  attachment: Attachment
+  attachment: Attachment,
 ): Promise<{ url: string; mimeType: string } | null> {
   const { data, error } = await supabase.storage
     .from(BUCKET_NAME)
@@ -55,7 +55,9 @@ async function downloadOneDataUrl(
 
   const size = data.size;
   if (size > MAX_ATTACHMENT_BYTES) {
-    console.error(`Skipping ${attachment.storage_path}: size ${size} exceeds ${MAX_ATTACHMENT_BYTES}`);
+    console.error(
+      `Skipping ${attachment.storage_path}: size ${size} exceeds ${MAX_ATTACHMENT_BYTES}`,
+    );
     return null;
   }
 
@@ -68,7 +70,7 @@ async function downloadOneDataUrl(
 // Call GPT-4o Vision for a single image (OCR only). When requestTitle is true, also ask for suggested_title.
 async function callVisionOcrSingle(
   imageDataUrl: { url: string; mimeType: string },
-  options: { requestTitle: boolean }
+  options: { requestTitle: boolean },
 ): Promise<OcrResult> {
   const requestTitle = options.requestTitle ?? true;
 
@@ -104,7 +106,12 @@ async function callVisionOcrSingle(
 - suggested_title: "" (оставь пустым)`;
 
   const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-    { type: "text", text: requestTitle ? "Извлеки весь текст из этого изображения и предложи короткое название документа:" : "Извлеки весь текст из этого изображения:" },
+    {
+      type: "text",
+      text: requestTitle
+        ? "Извлеки весь текст из этого изображения и предложи короткое название документа:"
+        : "Извлеки весь текст из этого изображения:",
+    },
     { type: "image_url", image_url: { url: imageDataUrl.url } },
   ];
 
@@ -116,7 +123,7 @@ async function callVisionOcrSingle(
       method: "POST",
       signal: controller.signal,
       headers: {
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
         "HTTP-Referer": SUPABASE_URL || "http://localhost:3000",
       },
@@ -147,9 +154,8 @@ async function callVisionOcrSingle(
     }
 
     const parsed = JSON.parse(responseContent);
-    const suggestedTitle = typeof parsed.suggested_title === "string"
-      ? parsed.suggested_title.trim()
-      : "";
+    const suggestedTitle =
+      typeof parsed.suggested_title === "string" ? parsed.suggested_title.trim() : "";
     return {
       ocr_text: parsed.ocr_text || "",
       suggested_title: suggestedTitle || "Медицинский документ",
@@ -197,10 +203,13 @@ Deno.serve(async (req) => {
           autoRefreshToken: false,
           persistSession: false,
         },
-      }
+      },
     );
 
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseClient.auth.getUser(token);
 
     if (authError || !user) {
       console.error("Auth error:", authError);
@@ -280,7 +289,11 @@ Deno.serve(async (req) => {
     }
 
     const fullOcrText = pageTexts
-      .map((text, idx) => (text ? `--- Страница ${idx + 1} ---\n\n${text}` : `--- Страница ${idx + 1} ---\n\n[Не удалось извлечь текст]`))
+      .map((text, idx) =>
+        text
+          ? `--- Страница ${idx + 1} ---\n\n${text}`
+          : `--- Страница ${idx + 1} ---\n\n[Не удалось извлечь текст]`,
+      )
       .join("\n\n");
 
     if (pageTexts.every((t) => !t.trim())) {
@@ -314,11 +327,18 @@ Deno.serve(async (req) => {
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
-      }
+      },
     );
   } catch (error) {
     const durationMs = Date.now() - startMs;
-    console.error("[health-ocr] error record_id:", recordId, "duration_ms:", durationMs, "error:", error);
+    console.error(
+      "[health-ocr] error record_id:",
+      recordId,
+      "duration_ms:",
+      durationMs,
+      "error:",
+      error,
+    );
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     const truncatedMessage = errorMessage.slice(0, MAX_OCR_ERROR_LENGTH);
 
@@ -347,7 +367,7 @@ Deno.serve(async (req) => {
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,
-      }
+      },
     );
   }
 });

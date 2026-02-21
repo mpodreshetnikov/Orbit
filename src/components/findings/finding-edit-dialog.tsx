@@ -32,11 +32,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useFindingTypeCatalog, useBodySiteCatalog } from "@/hooks";
-import type {
-  RecordFindingWithCatalog,
-  FindingSeverity,
-  FindingLaterality,
-} from "@/types";
+import type { RecordFindingWithCatalog, FindingSeverity, FindingLaterality } from "@/types";
 
 interface FindingEditDialogProps {
   open: boolean;
@@ -98,7 +94,6 @@ export function FindingEditDialog({
   const [bodySiteSearch, setBodySiteSearch] = useState("");
   const [isFindingTypeOpen, setIsFindingTypeOpen] = useState(false);
   const [isBodySiteOpen, setIsBodySiteOpen] = useState(false);
-  
 
   // Initialize form when dialog opens
   useEffect(() => {
@@ -141,37 +136,39 @@ export function FindingEditDialog({
   }, [open, finding, isNew, recordDate]);
 
   // Get current catalog entries
-  const currentFindingType = selectedFindingCode 
-    ? findingTypeCatalog?.find(c => c.finding_code === selectedFindingCode) 
+  const currentFindingType = selectedFindingCode
+    ? findingTypeCatalog?.find((c) => c.finding_code === selectedFindingCode)
     : null;
-  const currentBodySite = selectedSiteCode 
-    ? bodySiteCatalog?.find(c => c.site_code === selectedSiteCode) 
+  const currentBodySite = selectedSiteCode
+    ? bodySiteCatalog?.find((c) => c.site_code === selectedSiteCode)
     : null;
 
   // Filter catalogs based on search
-  const filteredFindingTypes = findingTypeCatalog?.filter(item => {
-    if (!findingTypeSearch.trim()) return true;
-    const search = findingTypeSearch.toLowerCase();
-    return (
-      item.finding_code.toLowerCase().includes(search) ||
-      item.name_ru.toLowerCase().includes(search) ||
-      item.name_en.toLowerCase().includes(search) ||
-      item.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
-      item.synonyms_en?.some(s => s.toLowerCase().includes(search))
-    );
-  }) || [];
+  const filteredFindingTypes =
+    findingTypeCatalog?.filter((item) => {
+      if (!findingTypeSearch.trim()) return true;
+      const search = findingTypeSearch.toLowerCase();
+      return (
+        item.finding_code.toLowerCase().includes(search) ||
+        item.name_ru.toLowerCase().includes(search) ||
+        item.name_en.toLowerCase().includes(search) ||
+        item.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
+        item.synonyms_en?.some((s) => s.toLowerCase().includes(search))
+      );
+    }) || [];
 
-  const filteredBodySites = bodySiteCatalog?.filter(item => {
-    if (!bodySiteSearch.trim()) return true;
-    const search = bodySiteSearch.toLowerCase();
-    return (
-      item.site_code.toLowerCase().includes(search) ||
-      item.name_ru.toLowerCase().includes(search) ||
-      item.name_en.toLowerCase().includes(search) ||
-      item.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
-      item.synonyms_en?.some(s => s.toLowerCase().includes(search))
-    );
-  }) || [];
+  const filteredBodySites =
+    bodySiteCatalog?.filter((item) => {
+      if (!bodySiteSearch.trim()) return true;
+      const search = bodySiteSearch.toLowerCase();
+      return (
+        item.site_code.toLowerCase().includes(search) ||
+        item.name_ru.toLowerCase().includes(search) ||
+        item.name_en.toLowerCase().includes(search) ||
+        item.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
+        item.synonyms_en?.some((s) => s.toLowerCase().includes(search))
+      );
+    }) || [];
 
   // Handle finding type selection
   const handleFindingTypeSelect = (code: string | null) => {
@@ -181,7 +178,7 @@ export function FindingEditDialog({
       setIsFindingTypeOpen(false);
       return;
     }
-    const entry = findingTypeCatalog?.find(c => c.finding_code === code);
+    const entry = findingTypeCatalog?.find((c) => c.finding_code === code);
     if (entry) {
       setSelectedFindingCode(code);
       setFindingTypeText(entry.name_ru);
@@ -198,7 +195,7 @@ export function FindingEditDialog({
       setIsBodySiteOpen(false);
       return;
     }
-    const entry = bodySiteCatalog?.find(c => c.site_code === code);
+    const entry = bodySiteCatalog?.find((c) => c.site_code === code);
     if (entry) {
       setSelectedSiteCode(code);
       setBodySiteText(entry.name_ru);
@@ -232,10 +229,10 @@ export function FindingEditDialog({
   };
 
   // Display values for comboboxes
-  const findingTypeDisplayValue = currentFindingType 
+  const findingTypeDisplayValue = currentFindingType
     ? `${currentFindingType.name_ru} (${currentFindingType.finding_code})`
     : "";
-  const bodySiteDisplayValue = currentBodySite 
+  const bodySiteDisplayValue = currentBodySite
     ? `${currentBodySite.name_ru} (${currentBodySite.site_code})`
     : "";
 
@@ -243,12 +240,8 @@ export function FindingEditDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {isNew ? t("findings.add") : t("findings.edit")}
-          </DialogTitle>
-          <DialogDescription>
-            {t("findings.editDescription")}
-          </DialogDescription>
+          <DialogTitle>{isNew ? t("findings.add") : t("findings.edit")}</DialogTitle>
+          <DialogDescription>{t("findings.editDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -292,8 +285,12 @@ export function FindingEditDialog({
                           onSelect={() => handleFindingTypeSelect(null)}
                           className={selectedFindingCode === null ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 ${selectedFindingCode === null ? "opacity-100" : "opacity-0"}`} />
-                          <span className="text-muted-foreground italic">{t("findings.customFinding")}</span>
+                          <Check
+                            className={`h-4 w-4 ${selectedFindingCode === null ? "opacity-100" : "opacity-0"}`}
+                          />
+                          <span className="text-muted-foreground italic">
+                            {t("findings.customFinding")}
+                          </span>
                         </CommandItem>
                         {filteredFindingTypes.map((item) => (
                           <CommandItem
@@ -302,7 +299,9 @@ export function FindingEditDialog({
                             onSelect={() => handleFindingTypeSelect(item.finding_code)}
                             className={selectedFindingCode === item.finding_code ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 shrink-0 ${selectedFindingCode === item.finding_code ? "opacity-100" : "opacity-0"}`} />
+                            <Check
+                              className={`h-4 w-4 shrink-0 ${selectedFindingCode === item.finding_code ? "opacity-100" : "opacity-0"}`}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="truncate">{item.name_ru}</div>
                               <div className="text-xs text-muted-foreground truncate">
@@ -375,8 +374,12 @@ export function FindingEditDialog({
                           onSelect={() => handleBodySiteSelect(null)}
                           className={selectedSiteCode === null ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 ${selectedSiteCode === null ? "opacity-100" : "opacity-0"}`} />
-                          <span className="text-muted-foreground italic">{t("findings.customSite")}</span>
+                          <Check
+                            className={`h-4 w-4 ${selectedSiteCode === null ? "opacity-100" : "opacity-0"}`}
+                          />
+                          <span className="text-muted-foreground italic">
+                            {t("findings.customSite")}
+                          </span>
                         </CommandItem>
                         {filteredBodySites.map((item) => (
                           <CommandItem
@@ -385,7 +388,9 @@ export function FindingEditDialog({
                             onSelect={() => handleBodySiteSelect(item.site_code)}
                             className={selectedSiteCode === item.site_code ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 shrink-0 ${selectedSiteCode === item.site_code ? "opacity-100" : "opacity-0"}`} />
+                            <Check
+                              className={`h-4 w-4 shrink-0 ${selectedSiteCode === item.site_code ? "opacity-100" : "opacity-0"}`}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="truncate">{item.name_ru}</div>
                               <div className="text-xs text-muted-foreground truncate">
@@ -464,7 +469,10 @@ export function FindingEditDialog({
             </div>
             <div className="space-y-2">
               <Label>{t("findings.laterality")}</Label>
-              <Select value={laterality} onValueChange={(v) => setLaterality(v as FindingLaterality)}>
+              <Select
+                value={laterality}
+                onValueChange={(v) => setLaterality(v as FindingLaterality)}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -472,7 +480,9 @@ export function FindingEditDialog({
                   <SelectItem value="none">{t("findings.lateralityOptions.none")}</SelectItem>
                   <SelectItem value="left">{t("findings.lateralityOptions.left")}</SelectItem>
                   <SelectItem value="right">{t("findings.lateralityOptions.right")}</SelectItem>
-                  <SelectItem value="bilateral">{t("findings.lateralityOptions.bilateral")}</SelectItem>
+                  <SelectItem value="bilateral">
+                    {t("findings.lateralityOptions.bilateral")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -541,8 +551,8 @@ export function FindingEditDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t("common.cancel")}
           </Button>
-          <Button 
-            onClick={handleSave} 
+          <Button
+            onClick={handleSave}
             disabled={!findingTypeText.trim() || !sourceAnchor.trim() || isSaving}
           >
             {isSaving ? (

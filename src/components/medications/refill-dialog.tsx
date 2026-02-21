@@ -25,12 +25,7 @@ interface RefillDialogProps {
   onSubmit: (amount: number) => Promise<void>;
 }
 
-export function RefillDialog({
-  open,
-  onOpenChange,
-  regimen,
-  onSubmit,
-}: RefillDialogProps) {
+export function RefillDialog({ open, onOpenChange, regimen, onSubmit }: RefillDialogProps) {
   const t = useTranslations();
   const [amount, setAmount] = useState("1");
   const [isPending, setIsPending] = useState(false);
@@ -86,16 +81,10 @@ export function RefillDialog({
                 </span>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {t("medications.refillAmountHelp")}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("medications.refillAmountHelp")}</p>
           </div>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => handleOpenChange(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={isPending}>

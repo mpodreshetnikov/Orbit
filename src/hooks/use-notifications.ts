@@ -43,7 +43,7 @@ function markShownToday(id: string): void {
     shown.add(id);
     localStorage.setItem(
       NOTIFICATIONS_STORAGE_KEY,
-      JSON.stringify({ date: today, ids: Array.from(shown) })
+      JSON.stringify({ date: today, ids: Array.from(shown) }),
     );
   } catch {
     // ignore
@@ -57,9 +57,7 @@ async function fetchNotifications(): Promise<NotificationForDevice[]> {
   start.setHours(0, 0, 0, 0);
   const end = new Date(now);
   end.setDate(end.getDate() + 2);
-  const res = await fetch(
-    `/api/notifications?from=${start.toISOString()}&to=${end.toISOString()}`
-  );
+  const res = await fetch(`/api/notifications?from=${start.toISOString()}&to=${end.toISOString()}`);
   if (!res.ok) return [];
   const data = await res.json();
   return data.notifications ?? [];
@@ -91,7 +89,7 @@ async function showNotificationFallback(notification: NotificationForDevice): Pr
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const url = notification.url?.startsWith("/")
     ? `${origin}${notification.url}`
-    : notification.url ?? `${origin}/`;
+    : (notification.url ?? `${origin}/`);
   const baseTitle = notification.title || "Notification";
   const prefix = resolveTitlePrefix(notification);
   const title = applyTitlePrefix(baseTitle, prefix);

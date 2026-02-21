@@ -4,12 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Camera, X, RotateCcw, Check, SwitchCamera } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface CameraCaptureProps {
   open: boolean;
@@ -17,11 +12,7 @@ interface CameraCaptureProps {
   onCapture: (file: File) => void;
 }
 
-export function CameraCapture({
-  open,
-  onOpenChange,
-  onCapture,
-}: CameraCaptureProps) {
+export function CameraCapture({ open, onOpenChange, onCapture }: CameraCaptureProps) {
   const t = useTranslations();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,9 +20,7 @@ export function CameraCapture({
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [facingMode, setFacingMode] = useState<"user" | "environment">(
-    "environment"
-  );
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("environment");
   const [error, setError] = useState<string | null>(null);
 
   const startCamera = useCallback(async () => {
@@ -60,11 +49,7 @@ export function CameraCapture({
       }
     } catch (err) {
       console.error("Camera error:", err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : t("records.camera.errorAccessing")
-      );
+      setError(err instanceof Error ? err.message : t("records.camera.errorAccessing"));
       setIsStreaming(false);
     }
   }, [facingMode, t]);
@@ -128,7 +113,7 @@ export function CameraCapture({
         }
       },
       "image/jpeg",
-      0.9
+      0.9,
     );
   }, [capturedImage, onCapture, handleClose]);
 
@@ -167,9 +152,7 @@ export function CameraCapture({
           {/* Video preview */}
           <video
             ref={videoRef}
-            className={`w-full h-full object-cover ${
-              capturedImage ? "hidden" : ""
-            }`}
+            className={`w-full h-full object-cover ${capturedImage ? "hidden" : ""}`}
             autoPlay
             playsInline
             muted
@@ -178,11 +161,7 @@ export function CameraCapture({
           {/* Captured image preview */}
           {capturedImage && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={capturedImage}
-              alt="Captured"
-              className="w-full h-full object-cover"
-            />
+            <img src={capturedImage} alt="Captured" className="w-full h-full object-cover" />
           )}
 
           {/* Error state */}
@@ -191,12 +170,7 @@ export function CameraCapture({
               <div className="text-center text-white p-4">
                 <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
                 <p className="text-sm">{error}</p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="mt-4"
-                  onClick={startCamera}
-                >
+                <Button variant="secondary" size="sm" className="mt-4" onClick={startCamera}>
                   {t("common.retry")}
                 </Button>
               </div>

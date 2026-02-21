@@ -39,9 +39,7 @@ export function useUserPreferences() {
   });
 }
 
-async function updateUserPreferences(
-  input: UpdateUserPreferencesInput
-): Promise<UserPreferences> {
+async function updateUserPreferences(input: UpdateUserPreferencesInput): Promise<UserPreferences> {
   const supabase = createClient();
   const {
     data: { user },
@@ -58,10 +56,7 @@ async function updateUserPreferences(
 
   const { data, error } = await supabase
     .from("user_preferences")
-    .upsert(
-      { auth_user_id: user.id, ...payload },
-      { onConflict: "auth_user_id" }
-    )
+    .upsert({ auth_user_id: user.id, ...payload }, { onConflict: "auth_user_id" })
     .select()
     .single();
 

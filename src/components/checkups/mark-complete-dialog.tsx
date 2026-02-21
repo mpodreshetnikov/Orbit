@@ -62,9 +62,10 @@ export function MarkCompleteDialog({
       (r.record_date && r.record_date.toLowerCase().includes(q))
     );
   });
-  const selectedRecord = evidenceRecordId && evidenceRecordId !== "none"
-    ? recordList.find((r) => r.id === evidenceRecordId)
-    : null;
+  const selectedRecord =
+    evidenceRecordId && evidenceRecordId !== "none"
+      ? recordList.find((r) => r.id === evidenceRecordId)
+      : null;
 
   const handleSubmit = async () => {
     if (!item) return;
@@ -164,9 +165,7 @@ export function MarkCompleteDialog({
             {t("common.cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={completeMutation.isPending}>
-            {completeMutation.isPending && (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            )}
+            {completeMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {t("checkups.markComplete")}
           </Button>
         </DialogFooter>

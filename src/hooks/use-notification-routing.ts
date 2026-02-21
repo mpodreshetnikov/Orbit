@@ -40,7 +40,7 @@ export function useNotificationRouting() {
 }
 
 async function upsertNotificationRouting(
-  input: NotificationRoutingUpsertInput
+  input: NotificationRoutingUpsertInput,
 ): Promise<NotificationRoutingRow> {
   const supabase = createClient();
   const {
@@ -76,4 +76,3 @@ export function useUpdateNotificationRouting() {
     },
   });
 }
-

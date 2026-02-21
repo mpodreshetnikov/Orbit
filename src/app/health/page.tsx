@@ -19,14 +19,10 @@ export default function HealthPage() {
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
         <UserX className="h-12 w-12 text-muted-foreground/50" />
         <h3 className="mt-4 text-lg font-semibold">{t("person.noPerson")}</h3>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {t("person.selectPrompt")}
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{t("person.selectPrompt")}</p>
       </div>
     );
   }
 
-  return (
-    <RecordsList personId={selectedPerson.id} personName={selectedPerson.name} />
-  );
+  return <RecordsList personId={selectedPerson.id} personName={selectedPerson.name} />;
 }

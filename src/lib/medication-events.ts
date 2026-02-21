@@ -7,7 +7,7 @@
  */
 export async function regenerateMedicationEvents(
   timezone?: string,
-  personId?: string
+  personId?: string,
 ): Promise<void> {
   const body: { timezone?: string; person_id?: string } = {};
   if (timezone) body.timezone = timezone;

@@ -5,14 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useDropzone } from "react-dropzone";
-import {
-  CheckCircle2,
-  FileSpreadsheet,
-  HelpCircle,
-  LinkIcon,
-  Plus,
-  Upload,
-} from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
 import {
   useMoneyAccounts,
@@ -70,7 +63,7 @@ async function getAccessToken(): Promise<string> {
 
 async function callMoneyImportAction<T>(
   action: Record<string, unknown>,
-  accessToken: string
+  accessToken: string,
 ): Promise<T> {
   const response = await fetch(getFunctionUrl("money-import"), {
     method: "POST",
@@ -94,12 +87,8 @@ function computeProgressPercent(status: MoneyImportSessionStatus | null): number
     return Math.max(0, Math.min(100, status.batch.progress_percent));
   }
 
-  const from = status.batch.window_from
-    ? new Date(status.batch.window_from).getTime()
-    : Number.NaN;
-  const to = status.batch.window_to
-    ? new Date(status.batch.window_to).getTime()
-    : Number.NaN;
+  const from = status.batch.window_from ? new Date(status.batch.window_from).getTime() : Number.NaN;
+  const to = status.batch.window_to ? new Date(status.batch.window_to).getTime() : Number.NaN;
   const parsed = status.batch.parsed_through_at
     ? new Date(status.batch.parsed_through_at).getTime()
     : Number.NaN;
@@ -148,7 +137,7 @@ export default function MoneyImportPage() {
 
   const selectedConnector = useMemo(
     () => connectors.find((c) => c.sourceId === selectedSourceId),
-    [connectors, selectedSourceId]
+    [connectors, selectedSourceId],
   );
 
   const isFileConnector = selectedConnector?.kind === "file";
@@ -156,7 +145,8 @@ export default function MoneyImportPage() {
 
   const sourceAccounts = useMemo(() => {
     if (!accounts || !selectedConnector) return [];
-    const source = selectedConnector.sourceId === "tbank_web" ? "tbank" : selectedConnector.sourceId;
+    const source =
+      selectedConnector.sourceId === "tbank_web" ? "tbank" : selectedConnector.sourceId;
     return accounts.filter((a) => a.source === source);
   }, [accounts, selectedConnector]);
 
@@ -177,7 +167,12 @@ export default function MoneyImportPage() {
     if (sourceAccounts.length === 1 && !defaultAccountId) {
       setDefaultAccountId(sourceAccounts[0].id);
     }
-  }, [parseResult?.transactions.length, hintToAccountIdFromCards, sourceAccounts, defaultAccountId]);
+  }, [
+    parseResult?.transactions.length,
+    hintToAccountIdFromCards,
+    sourceAccounts,
+    defaultAccountId,
+  ]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -190,7 +185,7 @@ export default function MoneyImportPage() {
             action: "session_status",
             session_id: activeSessionId,
           },
-          accessToken
+          accessToken,
         );
 
         setSessionStatus(status);
@@ -206,7 +201,9 @@ export default function MoneyImportPage() {
           router.push(`/money/import/reports/${status.batch.id}`);
         }
       } catch (error) {
-        setExtensionStatusMessage(error instanceof Error ? error.message : "Failed to poll session status");
+        setExtensionStatusMessage(
+          error instanceof Error ? error.message : "Failed to poll session status",
+        );
       }
     };
 
@@ -226,7 +223,10 @@ export default function MoneyImportPage() {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
 
-      if (data.type === "MONEY_IMPORT_PROGRESS" && typeof data.parsed_transactions_count === "number") {
+      if (
+        data.type === "MONEY_IMPORT_PROGRESS" &&
+        typeof data.parsed_transactions_count === "number"
+      ) {
         setSessionStatus((prev) => {
           if (!prev?.batch) return prev;
           return {
@@ -249,7 +249,7 @@ export default function MoneyImportPage() {
 
       if (data.type === "MONEY_IMPORT_ERROR") {
         setExtensionStatusMessage(
-          typeof data.error === "string" ? data.error : "Extension import failed"
+          typeof data.error === "string" ? data.error : "Extension import failed",
         );
       }
     };
@@ -274,7 +274,7 @@ export default function MoneyImportPage() {
       if (hint && accountMapping[hint]) return accountMapping[hint];
       return defaultAccountId || null;
     },
-    [accountMapping, defaultAccountId]
+    [accountMapping, defaultAccountId],
   );
 
   const allRowsResolved = useMemo(() => {
@@ -305,14 +305,14 @@ export default function MoneyImportPage() {
         setIsParsing(false);
       }
     },
-    [selectedConnector, t]
+    [selectedConnector, t],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: isFileConnector
-      ? selectedConnector?.fileAccept ?? {
+      ? (selectedConnector?.fileAccept ?? {
           "text/csv": [".csv"],
-        }
+        })
       : undefined,
     maxFiles: 1,
     disabled: !isFileConnector || isParsing,
@@ -351,7 +351,7 @@ export default function MoneyImportPage() {
 
       return cardIdByKey;
     },
-    [cardsForImport, createCardMutation, normalizeLast4]
+    [cardsForImport, createCardMutation, normalizeLast4],
   );
 
   const buildBatchRows = useCallback((): BatchTransactionRow[] => {
@@ -405,7 +405,7 @@ export default function MoneyImportPage() {
           file_path: file?.name ?? null,
           rows,
         },
-        accessToken
+        accessToken,
       );
 
       router.push(`/money/import/reports/${result.batch_id}`);
@@ -452,7 +452,7 @@ export default function MoneyImportPage() {
           type: "MONEY_IMPORT_PING",
           ts: Date.now(),
         },
-        "*"
+        "*",
       );
     });
   }, []);
@@ -503,11 +503,11 @@ export default function MoneyImportPage() {
               function_url: getFunctionUrl("money-import"),
             },
           },
-          "*"
+          "*",
         );
       });
     },
-    []
+    [],
   );
 
   const launchExtensionFallback = useCallback(
@@ -527,7 +527,7 @@ export default function MoneyImportPage() {
       window.open(launchUrl, "_blank", "noopener,noreferrer");
       return true;
     },
-    []
+    [],
   );
 
   const handleStartExtensionImport = useCallback(async () => {
@@ -548,7 +548,7 @@ export default function MoneyImportPage() {
           source: selectedConnector.sourceId,
           payer_person_id: selectedPersonId,
         },
-        accessToken
+        accessToken,
       );
 
       setActiveSessionId(session.session_id);
@@ -567,17 +567,13 @@ export default function MoneyImportPage() {
         setExtensionStatusMessage(t("money.importExtensionOpenPopupManual"));
       }
     } catch (error) {
-      setExtensionStatusMessage(error instanceof Error ? error.message : "Failed to start extension import");
+      setExtensionStatusMessage(
+        error instanceof Error ? error.message : "Failed to start extension import",
+      );
     } finally {
       setIsStartingExtension(false);
     }
-  }, [
-    launchExtensionFallback,
-    selectedPersonId,
-    selectedConnector,
-    sendSessionToExtension,
-    t,
-  ]);
+  }, [launchExtensionFallback, selectedPersonId, selectedConnector, sendSessionToExtension, t]);
 
   if (!selectedPersonId) {
     return (
@@ -663,9 +659,7 @@ export default function MoneyImportPage() {
                       : t("money.importUploadFile")}
                 </p>
               </div>
-              {isParsing && (
-                <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
-              )}
+              {isParsing && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
             </CardContent>
           </Card>
 
@@ -691,9 +685,9 @@ export default function MoneyImportPage() {
                     {" - "}
                     {format(
                       new Date(
-                        parseResult.transactions[parseResult.transactions.length - 1].posted_at
+                        parseResult.transactions[parseResult.transactions.length - 1].posted_at,
                       ),
-                      "dd.MM.yyyy HH:mm"
+                      "dd.MM.yyyy HH:mm",
                     )}
                   </span>
                 </div>
@@ -803,7 +797,9 @@ export default function MoneyImportPage() {
                                 {formatMoney(row.amount, row.currency, "ru-RU")}
                               </td>
                               <td className="p-2">{row.merchant_name ?? "-"}</td>
-                              <td className="p-2">{row.account_hint ? `*${row.account_hint}` : "-"}</td>
+                              <td className="p-2">
+                                {row.account_hint ? `*${row.account_hint}` : "-"}
+                              </td>
                               <td className="p-2">{row.transaction_type}</td>
                             </tr>
                           ))}
@@ -860,9 +856,7 @@ export default function MoneyImportPage() {
                   onClick={handleStartExtensionImport}
                   disabled={isStartingExtension}
                 >
-                  {isStartingExtension
-                    ? t("common.loading")
-                    : t("money.importStartImport")}
+                  {isStartingExtension ? t("common.loading") : t("money.importStartImport")}
                 </Button>
               </div>
             )}
@@ -885,9 +879,7 @@ export default function MoneyImportPage() {
             )}
 
             {extensionActive === false && (
-              <Badge variant="destructive">
-                {t("money.importExtensionInactive")}
-              </Badge>
+              <Badge variant="destructive">{t("money.importExtensionInactive")}</Badge>
             )}
 
             {extensionStatusMessage && extensionActive === true && (

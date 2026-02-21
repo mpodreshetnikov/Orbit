@@ -21,7 +21,7 @@ export async function POST() {
   if (!url || !serviceRoleKey) {
     return NextResponse.json(
       { error: "Server configuration error: missing Supabase URL or service role key" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
@@ -38,7 +38,7 @@ export async function POST() {
     if (!res.ok) {
       return NextResponse.json(
         { error: data.error ?? "Cron function failed", details: data },
-        { status: res.status }
+        { status: res.status },
       );
     }
     return NextResponse.json(data);
@@ -46,7 +46,7 @@ export async function POST() {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
       { error: "Failed to invoke notifications-cron", details: message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

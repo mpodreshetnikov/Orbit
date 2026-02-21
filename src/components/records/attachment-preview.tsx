@@ -19,10 +19,7 @@ interface AttachmentPreviewProps {
   showActions?: boolean;
 }
 
-export function AttachmentPreview({
-  attachment,
-  showActions = true,
-}: AttachmentPreviewProps) {
+export function AttachmentPreview({ attachment, showActions = true }: AttachmentPreviewProps) {
   const t = useTranslations();
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const { data: url, isLoading } = useAttachmentUrl(attachment.storage_path);
@@ -36,9 +33,8 @@ export function AttachmentPreview({
     }
   };
 
-  const slides = url && isImage
-    ? [{ src: url, alt: attachment.original_filename, download: url }]
-    : [];
+  const slides =
+    url && isImage ? [{ src: url, alt: attachment.original_filename, download: url }] : [];
 
   if (isLoading) {
     return <Skeleton className="aspect-[4/3] w-full rounded-lg" />;
@@ -49,7 +45,7 @@ export function AttachmentPreview({
       <div
         className={cn(
           "tap-target group relative overflow-hidden rounded-lg border bg-muted/50",
-          isImage && "cursor-pointer"
+          isImage && "cursor-pointer",
         )}
         onClick={() => isImage && setIsLightboxOpen(true)}
       >
@@ -69,9 +65,7 @@ export function AttachmentPreview({
             <p className="mt-2 text-sm font-medium text-center truncate max-w-full px-2">
               {attachment.original_filename}
             </p>
-            {isPdf && (
-              <p className="text-xs text-muted-foreground">PDF Document</p>
-            )}
+            {isPdf && <p className="text-xs text-muted-foreground">PDF Document</p>}
           </div>
         )}
 
@@ -107,9 +101,7 @@ export function AttachmentPreview({
 
         {/* Filename badge */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-          <p className="text-xs text-white truncate">
-            {attachment.original_filename}
-          </p>
+          <p className="text-xs text-white truncate">{attachment.original_filename}</p>
         </div>
       </div>
 
@@ -147,9 +139,7 @@ export function AttachmentGrid({ attachments, isLoading }: AttachmentGridProps) 
     return (
       <div className="rounded-lg border border-dashed p-8 text-center">
         <FileText className="mx-auto h-8 w-8 text-muted-foreground/50" />
-        <p className="mt-2 text-sm text-muted-foreground">
-          {t("records.detail.noAttachments")}
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{t("records.detail.noAttachments")}</p>
       </div>
     );
   }

@@ -24,7 +24,7 @@ export function UserMenu() {
 
   useEffect(() => {
     const supabase = createClient();
-    
+
     // Get initial user
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user);

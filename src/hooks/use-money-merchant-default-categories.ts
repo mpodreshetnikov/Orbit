@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 
 async function fetchMerchantDefaultCategories(
-  payerPersonId: string
+  payerPersonId: string,
 ): Promise<Record<string, string>> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("get_money_merchant_default_categories", {

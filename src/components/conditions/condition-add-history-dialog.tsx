@@ -2,7 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { AlertCircle, HelpCircle, CheckCircle2, History, Loader2, ChevronsUpDown, Check } from "lucide-react";
+import {
+  AlertCircle,
+  HelpCircle,
+  CheckCircle2,
+  History,
+  Loader2,
+  ChevronsUpDown,
+  Check,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,7 +87,8 @@ export function ConditionAddHistoryDialog({
     }
   }, [open, preselectedRecordId]);
 
-  const selectedRecord = recordId && recordId !== "none" ? records.find((r) => r.id === recordId) : null;
+  const selectedRecord =
+    recordId && recordId !== "none" ? records.find((r) => r.id === recordId) : null;
   const recordDisplayValue = selectedRecord
     ? `${selectedRecord.title}${selectedRecord.record_date ? ` (${selectedRecord.record_date})` : ""}`
     : t("conditions.noLinkToRecord");
@@ -130,9 +139,7 @@ export function ConditionAddHistoryDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{t("conditions.addToHistory")}</DialogTitle>
-          <DialogDescription>
-            {t("conditions.addToHistoryDescription")}
-          </DialogDescription>
+          <DialogDescription>{t("conditions.addToHistoryDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -239,7 +246,9 @@ export function ConditionAddHistoryDialog({
                           }}
                           className={recordId === "none" ? "bg-accent" : ""}
                         >
-                          <Check className={`h-4 w-4 shrink-0 ${recordId === "none" ? "opacity-100" : "opacity-0"}`} />
+                          <Check
+                            className={`h-4 w-4 shrink-0 ${recordId === "none" ? "opacity-100" : "opacity-0"}`}
+                          />
                           {t("conditions.noLinkToRecord")}
                         </CommandItem>
                         {filteredRecords.map((r) => (
@@ -253,7 +262,9 @@ export function ConditionAddHistoryDialog({
                             }}
                             className={recordId === r.id ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 shrink-0 ${recordId === r.id ? "opacity-100" : "opacity-0"}`} />
+                            <Check
+                              className={`h-4 w-4 shrink-0 ${recordId === r.id ? "opacity-100" : "opacity-0"}`}
+                            />
                             <div className="flex-1 min-w-0 text-left">
                               <div className="truncate">{r.title}</div>
                               {r.record_date && (
@@ -271,9 +282,7 @@ export function ConditionAddHistoryDialog({
                 </PopoverContent>
               </Popover>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {t("conditions.linkToRecordHint")}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("conditions.linkToRecordHint")}</p>
           </div>
         </div>
 

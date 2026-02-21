@@ -11,9 +11,21 @@ export default function NotificationsDebugPage() {
   const t = useTranslations("settings.notificationsDebug");
   const tCommon = useTranslations("common");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ ok?: boolean; processed?: number; error?: string; details?: unknown } | null>(null);
+  const [result, setResult] = useState<{
+    ok?: boolean;
+    processed?: number;
+    error?: string;
+    details?: unknown;
+  } | null>(null);
   const [medLoading, setMedLoading] = useState(false);
-  const [medResult, setMedResult] = useState<{ ok?: boolean; usersProcessed?: number; eventsGenerated?: number; refillDigestsCreated?: number; error?: string; details?: unknown } | null>(null);
+  const [medResult, setMedResult] = useState<{
+    ok?: boolean;
+    usersProcessed?: number;
+    eventsGenerated?: number;
+    refillDigestsCreated?: number;
+    error?: string;
+    details?: unknown;
+  } | null>(null);
 
   const runCron = async () => {
     setLoading(true);
@@ -89,10 +101,7 @@ export default function NotificationsDebugPage() {
             <CardDescription>{t("runCronDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button
-              onClick={runCron}
-              disabled={loading}
-            >
+            <Button onClick={runCron} disabled={loading}>
               {loading ? (
                 tCommon("loading")
               ) : (
@@ -106,10 +115,13 @@ export default function NotificationsDebugPage() {
               <div className="rounded-lg border p-3 text-sm font-mono bg-muted/50">
                 {result.ok !== false ? (
                   <p className="text-green-600 dark:text-green-400">
-                    {t("runCronSuccess")} {result.processed != null && `(${result.processed} users processed)`}
+                    {t("runCronSuccess")}{" "}
+                    {result.processed != null && `(${result.processed} users processed)`}
                   </p>
                 ) : (
-                  <p className="text-destructive">{t("runCronError")}: {result.error}</p>
+                  <p className="text-destructive">
+                    {t("runCronError")}: {result.error}
+                  </p>
                 )}
                 {result.details != null && (
                   <pre className="mt-2 text-xs overflow-auto max-h-40">
@@ -130,10 +142,7 @@ export default function NotificationsDebugPage() {
             <CardDescription>{t("runMedicationCronDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button
-              onClick={runMedicationCron}
-              disabled={medLoading}
-            >
+            <Button onClick={runMedicationCron} disabled={medLoading}>
               {medLoading ? (
                 tCommon("loading")
               ) : (
@@ -148,16 +157,23 @@ export default function NotificationsDebugPage() {
                 {medResult.ok !== false ? (
                   <p className="text-green-600 dark:text-green-400">
                     {t("runMedicationCronSuccess")}
-                    {(medResult.usersProcessed != null || medResult.eventsGenerated != null || medResult.refillDigestsCreated != null) && (
+                    {(medResult.usersProcessed != null ||
+                      medResult.eventsGenerated != null ||
+                      medResult.refillDigestsCreated != null) && (
                       <span className="block mt-1 text-muted-foreground">
-                        {medResult.usersProcessed != null && `Users processed: ${medResult.usersProcessed}. `}
-                        {medResult.eventsGenerated != null && `Events generated: ${medResult.eventsGenerated}. `}
-                        {medResult.refillDigestsCreated != null && `Refill digests: ${medResult.refillDigestsCreated}.`}
+                        {medResult.usersProcessed != null &&
+                          `Users processed: ${medResult.usersProcessed}. `}
+                        {medResult.eventsGenerated != null &&
+                          `Events generated: ${medResult.eventsGenerated}. `}
+                        {medResult.refillDigestsCreated != null &&
+                          `Refill digests: ${medResult.refillDigestsCreated}.`}
                       </span>
                     )}
                   </p>
                 ) : (
-                  <p className="text-destructive">{t("runMedicationCronError")}: {medResult.error}</p>
+                  <p className="text-destructive">
+                    {t("runMedicationCronError")}: {medResult.error}
+                  </p>
                 )}
                 {medResult.details != null && (
                   <pre className="mt-2 text-xs overflow-auto max-h-40">

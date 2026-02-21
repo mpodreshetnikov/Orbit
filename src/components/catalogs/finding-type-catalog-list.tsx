@@ -8,13 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,15 +49,15 @@ export function FindingTypeCatalogList() {
   const deleteMutation = useDeleteFindingType();
 
   // Filter by search
-  const filteredItems = findingTypes?.filter(item => {
+  const filteredItems = findingTypes?.filter((item) => {
     if (!debouncedSearch.trim()) return true;
     const search = debouncedSearch.toLowerCase();
     return (
       item.finding_code.toLowerCase().includes(search) ||
       item.name_ru.toLowerCase().includes(search) ||
       item.name_en.toLowerCase().includes(search) ||
-      item.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
-      item.synonyms_en?.some(s => s.toLowerCase().includes(search))
+      item.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
+      item.synonyms_en?.some((s) => s.toLowerCase().includes(search))
     );
   });
 
@@ -102,12 +96,8 @@ export function FindingTypeCatalogList() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {t("catalogs.findingTypes")}
-            </h1>
-            <p className="text-muted-foreground">
-              {t("catalogs.findingTypesDescription")}
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight">{t("catalogs.findingTypes")}</h1>
+            <p className="text-muted-foreground">{t("catalogs.findingTypesDescription")}</p>
           </div>
         </div>
         <Button onClick={handleAdd}>

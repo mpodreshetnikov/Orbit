@@ -8,13 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,11 +40,9 @@ export function ObservationCatalogList() {
 
   // Dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [selectedObservation, setSelectedObservation] =
-    useState<ObservationCatalog | null>(null);
+  const [selectedObservation, setSelectedObservation] = useState<ObservationCatalog | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [observationToDelete, setObservationToDelete] =
-    useState<ObservationCatalog | null>(null);
+  const [observationToDelete, setObservationToDelete] = useState<ObservationCatalog | null>(null);
 
   // Data
   const { data: observations, isLoading, error } = useObservationCatalog(debouncedSearch);
@@ -91,12 +83,8 @@ export function ObservationCatalogList() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {t("catalogs.observations")}
-            </h1>
-            <p className="text-muted-foreground">
-              {t("catalogs.observationsDescription")}
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight">{t("catalogs.observations")}</h1>
+            <p className="text-muted-foreground">{t("catalogs.observationsDescription")}</p>
           </div>
         </div>
         <Button onClick={handleAdd}>
@@ -233,9 +221,7 @@ export function ObservationCatalogList() {
             {searchQuery ? t("common.noResults") : t("catalogs.noObservations")}
           </h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            {searchQuery
-              ? t("catalogs.noSearchResults")
-              : t("catalogs.noObservationsDescription")}
+            {searchQuery ? t("catalogs.noSearchResults") : t("catalogs.noObservationsDescription")}
           </p>
           {!searchQuery && (
             <Button className="mt-4" onClick={handleAdd}>

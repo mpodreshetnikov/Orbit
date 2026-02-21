@@ -23,7 +23,11 @@ interface CheckupCardProps {
 
 function StatusBadge({ status }: { status: CheckupItemStatus }) {
   const t = useTranslations();
-  const key = `checkups.status${status.charAt(0).toUpperCase() + status.slice(1)}` as "checkups.statusActive" | "checkups.statusPaused" | "checkups.statusCompleted" | "checkups.statusArchived";
+  const key = `checkups.status${status.charAt(0).toUpperCase() + status.slice(1)}` as
+    | "checkups.statusActive"
+    | "checkups.statusPaused"
+    | "checkups.statusCompleted"
+    | "checkups.statusArchived";
   const config: Record<CheckupItemStatus, string> = {
     active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
     paused: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20",
@@ -39,7 +43,13 @@ function StatusBadge({ status }: { status: CheckupItemStatus }) {
 
 function CategoryLabel({ category }: { category: CheckupCategory }) {
   const t = useTranslations();
-  const key = `checkups.category${category.charAt(0).toUpperCase() + category.slice(1)}` as "checkups.categoryLab" | "checkups.categoryImaging" | "checkups.categoryVisit" | "checkups.categoryVaccination" | "checkups.categoryDental" | "checkups.categoryOther";
+  const key = `checkups.category${category.charAt(0).toUpperCase() + category.slice(1)}` as
+    | "checkups.categoryLab"
+    | "checkups.categoryImaging"
+    | "checkups.categoryVisit"
+    | "checkups.categoryVaccination"
+    | "checkups.categoryDental"
+    | "checkups.categoryOther";
   return <span className="text-xs text-muted-foreground">{t(key)}</span>;
 }
 
@@ -54,10 +64,7 @@ export function CheckupCard({
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
   const today = new Date().toISOString().slice(0, 10);
-  const isOverdueByDue =
-    item.status === "active" &&
-    item.next_due_at &&
-    item.next_due_at < today;
+  const isOverdueByDue = item.status === "active" && item.next_due_at && item.next_due_at < today;
   const isOverdueByPlan =
     item.status === "active" &&
     item.planned_on &&
@@ -71,7 +78,7 @@ export function CheckupCard({
     <Card
       className={cn(
         "hover:shadow-md transition-shadow min-w-0 overflow-hidden w-full tap-target cursor-pointer",
-        isOverdue && "border-amber-400 dark:border-amber-600"
+        isOverdue && "border-amber-400 dark:border-amber-600",
       )}
     >
       <CardContent className="p-3 sm:p-4 w-full">
@@ -99,25 +106,30 @@ export function CheckupCard({
                 <CategoryLabel category={item.category} />
                 <StatusBadge status={item.status} />
                 {isOverdueByDue && (
-                  <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20">
+                  <Badge
+                    variant="outline"
+                    className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
+                  >
                     {t("checkups.overdue")}
                   </Badge>
                 )}
                 {isOverdueByPlan && (
-                  <Badge variant="outline" className="text-xs bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20">
+                  <Badge
+                    variant="outline"
+                    className="text-xs bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20"
+                  >
                     {t("checkups.plannedOverdue")}
                   </Badge>
                 )}
               </div>
-              <span className="font-medium text-sm sm:text-base block truncate">
-                {item.title}
-              </span>
+              <span className="font-medium text-sm sm:text-base block truncate">{item.title}</span>
               {/* Fixed-height slot for 2 date lines so cards with/without planned_on match height */}
               <div className="mt-0.5 min-h-[2rem] sm:min-h-[2.5rem] flex flex-col gap-0.5">
                 {item.next_due_at ? (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Calendar className="h-3.5 w-3.5 shrink-0" />
-                    {t("checkups.nextDue")}: {format(new Date(item.next_due_at), "dd MMM yyyy", { locale: dateLocale })}
+                    {t("checkups.nextDue")}:{" "}
+                    {format(new Date(item.next_due_at), "dd MMM yyyy", { locale: dateLocale })}
                   </div>
                 ) : (
                   <div className="h-4" aria-hidden />
@@ -125,7 +137,8 @@ export function CheckupCard({
                 {item.planned_on ? (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <CalendarPlus className="h-3.5 w-3.5 shrink-0" />
-                    {t("checkups.plannedOn")}: {format(new Date(item.planned_on), "dd MMM yyyy", { locale: dateLocale })}
+                    {t("checkups.plannedOn")}:{" "}
+                    {format(new Date(item.planned_on), "dd MMM yyyy", { locale: dateLocale })}
                   </div>
                 ) : (
                   <div className="h-4" aria-hidden />

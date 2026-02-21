@@ -22,25 +22,18 @@ async function broadcastToAppTabs(message: Record<string, unknown>): Promise<voi
     url: APP_ORIGIN_PATTERNS,
   });
 
-  await Promise.all(
-    tabs.map((tab) =>
-      chrome.tabs.sendMessage(tab.id!, message).catch(() => null)
-    )
-  );
+  await Promise.all(tabs.map((tab) => chrome.tabs.sendMessage(tab.id!, message).catch(() => null)));
 }
 
 let devBuildId: string | null = null;
 
 async function checkDevHotReload(): Promise<void> {
   try {
-    const response = await fetch(
-      `${chrome.runtime.getURL("reload-trigger.json")}?_=${Date.now()}`
-    );
+    const response = await fetch(`${chrome.runtime.getURL("reload-trigger.json")}?_=${Date.now()}`);
     if (!response.ok) return;
 
     const payload = (await response.json()) as { buildId?: string };
-    const nextBuildId =
-      payload && typeof payload.buildId === "string" ? payload.buildId : null;
+    const nextBuildId = payload && typeof payload.buildId === "string" ? payload.buildId : null;
     if (!nextBuildId) return;
 
     if (devBuildId === null) {
@@ -71,7 +64,7 @@ if (DEV_HOT_RELOAD) {
 async function callEdge(
   functionUrl: string,
   token: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const response = await fetch(functionUrl, {
     method: "POST",
@@ -82,7 +75,9 @@ async function callEdge(
     body: JSON.stringify(payload),
   });
 
-  const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & {
+    error?: string;
+  };
   if (!response.ok) {
     throw new Error((data.error as string) || "Money import edge request failed");
   }
@@ -93,7 +88,7 @@ chrome.runtime.onMessage.addListener(
   (
     message: { type: string; session?: Record<string, unknown>; windowFrom?: string },
     _sender,
-    sendResponse
+    sendResponse,
   ) => {
     (async () => {
       try {
@@ -154,19 +149,15 @@ chrome.runtime.onMessage.addListener(
                 parsed_through_at: parseOutput.parsedThroughAt,
                 parsed_transactions_count: parseOutput.parsedTransactionsCount,
                 rows: parseOutput.rows,
-              }
+              },
             )) as { batch_id?: string };
 
-            await callEdge(
-              session.function_url as string,
-              session.session_token as string,
-              {
-                action: "complete_session",
-                session_id: session.session_id,
-                batch_id: session.batch_id,
-                status: "completed",
-              }
-            );
+            await callEdge(session.function_url as string, session.session_token as string, {
+              action: "complete_session",
+              session_id: session.session_id,
+              batch_id: session.batch_id,
+              status: "completed",
+            });
 
             await broadcastToAppTabs({
               type: "MONEY_IMPORT_DONE",
@@ -177,16 +168,12 @@ chrome.runtime.onMessage.addListener(
             return;
           } catch (runError) {
             try {
-              await callEdge(
-                session.function_url as string,
-                session.session_token as string,
-                {
-                  action: "complete_session",
-                  session_id: session.session_id,
-                  batch_id: session.batch_id,
-                  status: "failed",
-                }
-              );
+              await callEdge(session.function_url as string, session.session_token as string, {
+                action: "complete_session",
+                session_id: session.session_id,
+                batch_id: session.batch_id,
+                status: "failed",
+              });
             } catch {
               // Ignore completion failures; original error is still reported to UI.
             }
@@ -196,8 +183,7 @@ chrome.runtime.onMessage.addListener(
 
         sendResponse({ ok: false, error: "Unsupported message type" });
       } catch (error) {
-        const messageText =
-          error instanceof Error ? error.message : "Unknown extension error";
+        const messageText = error instanceof Error ? error.message : "Unknown extension error";
         await broadcastToAppTabs({
           type: "MONEY_IMPORT_ERROR",
           error: messageText,
@@ -207,5 +193,5 @@ chrome.runtime.onMessage.addListener(
     })();
 
     return true;
-  }
+  },
 );

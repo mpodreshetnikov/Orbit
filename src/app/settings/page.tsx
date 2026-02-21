@@ -2,7 +2,18 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { Bell, BellOff, Bug, CheckCircle, XCircle, RefreshCw, Smartphone, Download, ArrowLeft, CalendarClock } from "lucide-react";
+import {
+  Bell,
+  BellOff,
+  Bug,
+  CheckCircle,
+  XCircle,
+  RefreshCw,
+  Smartphone,
+  Download,
+  ArrowLeft,
+  CalendarClock,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +21,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useIntlLocale } from "@/lib/date-locale";
-import { useUserPreferences, useUpdateUserPreferences, usePushSubscribe, usePersons, useNotificationRouting, useUpdateNotificationRouting } from "@/hooks";
+import {
+  useUserPreferences,
+  useUpdateUserPreferences,
+  usePushSubscribe,
+  usePersons,
+  useNotificationRouting,
+  useUpdateNotificationRouting,
+} from "@/hooks";
 
 type PermissionStatus = "default" | "granted" | "denied" | "unsupported";
 type ServiceWorkerStatus = "checking" | "registered" | "not-registered" | "unsupported";
@@ -27,12 +45,12 @@ export default function SettingsPage() {
 
   const checkNotificationSupport = useCallback(() => {
     if (typeof window === "undefined") return;
-    
+
     if (!("Notification" in window)) {
       setPermissionStatus("unsupported");
       return;
     }
-    
+
     setPermissionStatus(Notification.permission as PermissionStatus);
   }, []);
 
@@ -55,7 +73,7 @@ export default function SettingsPage() {
 
   const checkServiceWorker = useCallback(async () => {
     if (typeof window === "undefined") return;
-    
+
     if (!("serviceWorker" in navigator)) {
       setSwStatus("unsupported");
       return;
@@ -117,7 +135,10 @@ export default function SettingsPage() {
       image: "/icons/icon-512x512.png",
       tag: "test-notification",
       requireInteraction: true,
-      data: { url: "/", actionBaseUrl: typeof window !== "undefined" ? window.location.origin : "" },
+      data: {
+        url: "/",
+        actionBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
+      },
       actions: [
         { action: "open", title: t("pwa.notificationActionOpen") },
         { action: "settings", title: t("pwa.notificationActionSettings") },
@@ -146,9 +167,19 @@ export default function SettingsPage() {
   const getPermissionBadge = () => {
     switch (permissionStatus) {
       case "granted":
-        return <Badge variant="default" className="bg-green-600"><CheckCircle className="w-3 h-3 mr-1" />{t("pwa.permissionGranted")}</Badge>;
+        return (
+          <Badge variant="default" className="bg-green-600">
+            <CheckCircle className="w-3 h-3 mr-1" />
+            {t("pwa.permissionGranted")}
+          </Badge>
+        );
       case "denied":
-        return <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1" />{t("pwa.permissionDenied")}</Badge>;
+        return (
+          <Badge variant="destructive">
+            <XCircle className="w-3 h-3 mr-1" />
+            {t("pwa.permissionDenied")}
+          </Badge>
+        );
       case "unsupported":
         return <Badge variant="secondary">{t("pwa.permissionUnsupported")}</Badge>;
       default:
@@ -159,13 +190,28 @@ export default function SettingsPage() {
   const getSwStatusBadge = () => {
     switch (swStatus) {
       case "registered":
-        return <Badge variant="default" className="bg-green-600"><CheckCircle className="w-3 h-3 mr-1" />{t("pwa.swRegistered")}</Badge>;
+        return (
+          <Badge variant="default" className="bg-green-600">
+            <CheckCircle className="w-3 h-3 mr-1" />
+            {t("pwa.swRegistered")}
+          </Badge>
+        );
       case "not-registered":
-        return <Badge variant="outline"><XCircle className="w-3 h-3 mr-1" />{t("pwa.swNotRegistered")}</Badge>;
+        return (
+          <Badge variant="outline">
+            <XCircle className="w-3 h-3 mr-1" />
+            {t("pwa.swNotRegistered")}
+          </Badge>
+        );
       case "unsupported":
         return <Badge variant="secondary">{t("pwa.swUnsupported")}</Badge>;
       default:
-        return <Badge variant="outline"><RefreshCw className="w-3 h-3 mr-1 animate-spin" />{t("pwa.swChecking")}</Badge>;
+        return (
+          <Badge variant="outline">
+            <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+            {t("pwa.swChecking")}
+          </Badge>
+        );
     }
   };
 
@@ -190,7 +236,7 @@ export default function SettingsPage() {
   const currentUserId = routingState?.userId ?? null;
   const routingByPersonId = useMemo(
     () => new Map(routingRows.map((row) => [row.person_id, row] as const)),
-    [routingRows]
+    [routingRows],
   );
 
   useEffect(() => {
@@ -210,7 +256,11 @@ export default function SettingsPage() {
   }, [preferences]);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && !preferences?.checkup_notification_timezone && notificationTimezone === "") {
+    if (
+      typeof window !== "undefined" &&
+      !preferences?.checkup_notification_timezone &&
+      notificationTimezone === ""
+    ) {
       try {
         setNotificationTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
       } catch {
@@ -230,7 +280,12 @@ export default function SettingsPage() {
   };
 
   const handleEnableCheckupReminders = async () => {
-    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    if (
+      !("Notification" in window) ||
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window)
+    )
+      return;
     setIsEnablingReminders(true);
     try {
       if (Notification.permission !== "granted") {
@@ -269,14 +324,17 @@ export default function SettingsPage() {
     return currentUserId != null && personOwnerId === currentUserId;
   };
 
-  const handleToggleRouting = async (personId: string, personOwnerId: string | null | undefined) => {
+  const handleToggleRouting = async (
+    personId: string,
+    personOwnerId: string | null | undefined,
+  ) => {
     const enabled = !isPersonEnabled(personId, personOwnerId);
     const isOwnPerson = currentUserId != null && personOwnerId === currentUserId;
     const customPrefix = prefixByPerson[personId] ?? "";
     await updateRouting.mutateAsync({
       person_id: personId,
       enabled,
-      custom_prefix: isOwnPerson ? null : (customPrefix.trim() ? customPrefix.trim() : null),
+      custom_prefix: isOwnPerson ? null : customPrefix.trim() ? customPrefix.trim() : null,
     });
   };
 
@@ -287,7 +345,7 @@ export default function SettingsPage() {
     await updateRouting.mutateAsync({
       person_id: personId,
       enabled,
-      custom_prefix: isOwnPerson ? null : (customPrefix.trim() ? customPrefix.trim() : null),
+      custom_prefix: isOwnPerson ? null : customPrefix.trim() ? customPrefix.trim() : null,
     });
   };
 
@@ -390,9 +448,7 @@ export default function SettingsPage() {
             </div>
 
             {permissionStatus === "denied" && (
-              <p className="text-xs text-muted-foreground">
-                {t("pwa.deniedInstructions")}
-              </p>
+              <p className="text-xs text-muted-foreground">{t("pwa.deniedInstructions")}</p>
             )}
 
             {lastNotificationTime && (
@@ -435,10 +491,7 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground">{t("pwa.notificationTimezoneHint")}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={handleSaveCheckupReminders}
-                disabled={updatePreferences.isPending}
-              >
+              <Button onClick={handleSaveCheckupReminders} disabled={updatePreferences.isPending}>
                 {updatePreferences.isPending ? tCommon("loading") : t("pwa.saveCheckupReminders")}
               </Button>
               <Button
@@ -449,7 +502,9 @@ export default function SettingsPage() {
                 {isEnablingReminders ? tCommon("loading") : t("pwa.enableCheckupReminders")}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">{t("pwa.enableCheckupRemindersDescription")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("pwa.enableCheckupRemindersDescription")}
+            </p>
             <Button variant="outline" size="sm" className="mt-2" asChild>
               <Link href="/settings/notifications-debug">
                 <Bug className="w-4 h-4 mr-2" />
@@ -495,7 +550,9 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor={`routing-prefix-${person.id}`}>{t("pwa.routingPrefixLabel")}</Label>
+                    <Label htmlFor={`routing-prefix-${person.id}`}>
+                      {t("pwa.routingPrefixLabel")}
+                    </Label>
                     <Input
                       id={`routing-prefix-${person.id}`}
                       type="text"
@@ -525,9 +582,15 @@ export default function SettingsPage() {
             <CardDescription>{t("pwa.installDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground space-y-2">
-            <p><strong>iOS Safari:</strong> {t("pwa.iosInstructions")}</p>
-            <p><strong>Android Chrome:</strong> {t("pwa.androidInstructions")}</p>
-            <p><strong>Desktop Chrome/Edge:</strong> {t("pwa.desktopInstructions")}</p>
+            <p>
+              <strong>iOS Safari:</strong> {t("pwa.iosInstructions")}
+            </p>
+            <p>
+              <strong>Android Chrome:</strong> {t("pwa.androidInstructions")}
+            </p>
+            <p>
+              <strong>Desktop Chrome/Edge:</strong> {t("pwa.desktopInstructions")}
+            </p>
           </CardContent>
         </Card>
       </div>

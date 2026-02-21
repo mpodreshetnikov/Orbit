@@ -48,9 +48,8 @@ export function PersonSelector() {
   const selectedPerson = persons?.find((p) => p.id === selectedPersonId);
 
   // Group persons: user's own person first, then other humans, then pets
-  const otherHumans = persons?.filter(
-    (p) => p.kind === "human" && p.auth_user_id !== currentUser?.id
-  ) ?? [];
+  const otherHumans =
+    persons?.filter((p) => p.kind === "human" && p.auth_user_id !== currentUser?.id) ?? [];
   const pets = persons?.filter((p) => p.kind === "pet") ?? [];
 
   if (personsLoading) {
@@ -67,9 +66,7 @@ export function PersonSelector() {
     return (
       <Button variant="ghost" size="sm" className="gap-1 px-2 sm:px-3 cursor-default" disabled>
         <User className="h-4 w-4" />
-        <span className="text-sm max-w-[100px] sm:max-w-[120px] truncate">
-          {myPerson.name}
-        </span>
+        <span className="text-sm max-w-[100px] sm:max-w-[120px] truncate">{myPerson.name}</span>
       </Button>
     );
   }
@@ -96,9 +93,7 @@ export function PersonSelector() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={8} className="w-56">
         {persons && persons.length === 0 ? (
-          <DropdownMenuItem disabled>
-            {t("person.noPersons")}
-          </DropdownMenuItem>
+          <DropdownMenuItem disabled>{t("person.noPersons")}</DropdownMenuItem>
         ) : (
           <>
             {/* User's own person first */}
@@ -110,13 +105,9 @@ export function PersonSelector() {
                 >
                   <User className="mr-2 h-4 w-4" />
                   <span className="flex-1">{myPerson.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {t("person.you")}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{t("person.you")}</span>
                 </DropdownMenuItem>
-                {(otherHumans.length > 0 || pets.length > 0) && (
-                  <DropdownMenuSeparator />
-                )}
+                {(otherHumans.length > 0 || pets.length > 0) && <DropdownMenuSeparator />}
               </>
             )}
 
@@ -128,9 +119,7 @@ export function PersonSelector() {
                   <DropdownMenuItem
                     key={person.id}
                     onClick={() => setSelectedPersonId(person.id)}
-                    className={
-                      person.id === selectedPersonId ? "bg-accent" : ""
-                    }
+                    className={person.id === selectedPersonId ? "bg-accent" : ""}
                   >
                     <User className="mr-2 h-4 w-4" />
                     {person.name}
@@ -140,9 +129,7 @@ export function PersonSelector() {
             )}
 
             {/* Separator if both sections exist */}
-            {otherHumans.length > 0 && pets.length > 0 && (
-              <DropdownMenuSeparator />
-            )}
+            {otherHumans.length > 0 && pets.length > 0 && <DropdownMenuSeparator />}
 
             {/* Pets section */}
             {pets.length > 0 && (
@@ -152,16 +139,12 @@ export function PersonSelector() {
                   <DropdownMenuItem
                     key={person.id}
                     onClick={() => setSelectedPersonId(person.id)}
-                    className={
-                      person.id === selectedPersonId ? "bg-accent" : ""
-                    }
+                    className={person.id === selectedPersonId ? "bg-accent" : ""}
                   >
                     <PawPrint className="mr-2 h-4 w-4" />
                     <span className="flex-1">{person.name}</span>
                     {person.species && (
-                      <span className="text-xs text-muted-foreground">
-                        {person.species}
-                      </span>
+                      <span className="text-xs text-muted-foreground">{person.species}</span>
                     )}
                   </DropdownMenuItem>
                 ))}

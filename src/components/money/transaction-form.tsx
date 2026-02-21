@@ -15,11 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
   CommandEmpty,
@@ -94,7 +90,7 @@ function toLocalDateTimeInput(iso: string): string {
   const date = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate()
+    date.getDate(),
   )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
@@ -137,28 +133,22 @@ export function MoneyTransactionForm({
   const amountTypeSyncedOnce = useRef(false);
   const lineItemDefaultsApplied = useRef(false);
 
-  const [accountId, setAccountId] = useState(
-    initialTransaction?.account_id ?? ""
-  );
+  const [accountId, setAccountId] = useState(initialTransaction?.account_id ?? "");
   const [postedAt, setPostedAt] = useState(() => {
     const value = initialTransaction?.posted_at ?? new Date().toISOString();
     return toLocalDateTimeInput(value);
   });
-  const [amount, setAmount] = useState(
-    initialTransaction ? String(initialTransaction.amount) : ""
-  );
+  const [amount, setAmount] = useState(initialTransaction ? String(initialTransaction.amount) : "");
   const [currency, setCurrency] = useState<MoneyCurrency | string>(
-    initialTransaction?.currency ?? "RUB"
+    initialTransaction?.currency ?? "RUB",
   );
   const [transactionType, setTransactionType] = useState<MoneyTransactionType>(
-    initialTransaction?.transaction_type ?? "expense"
+    initialTransaction?.transaction_type ?? "expense",
   );
   const [status, setStatus] = useState<MoneyTransactionStatus>(
-    initialTransaction?.status ?? "posted"
+    initialTransaction?.status ?? "posted",
   );
-  const [merchantName, setMerchantName] = useState(
-    initialTransaction?.merchant_name ?? ""
-  );
+  const [merchantName, setMerchantName] = useState(initialTransaction?.merchant_name ?? "");
   const [comment, setComment] = useState(initialTransaction?.comment ?? "");
 
   const [lineItems, setLineItems] = useState<LineItemState[]>(() => {
@@ -172,7 +162,7 @@ export function MoneyTransactionForm({
           line_status: item.line_status,
           category_id: item.category_id,
           beneficiary_person_id: item.beneficiary_person_id,
-        })
+        }),
       );
     }
     return [defaultLineItem()];
@@ -183,11 +173,11 @@ export function MoneyTransactionForm({
 
   const selectedAccount = useMemo(
     () => accounts.find((a) => a.id === accountId),
-    [accounts, accountId]
+    [accounts, accountId],
   );
   const uniqueMerchants = useMemo(
     () => [...new Set(existingMerchantNames.filter(Boolean))].sort(),
-    [existingMerchantNames]
+    [existingMerchantNames],
   );
   const defaultUnit = t("money.unitPcs");
 
@@ -202,7 +192,6 @@ export function MoneyTransactionForm({
     prevAccountIdRef.current = accountId;
   }, [accountId, selectedAccount]);
 
-
   const totalLineItems = useMemo(() => {
     return lineItems.reduce((sum, item) => {
       const value = parseFloat(item.amount);
@@ -210,9 +199,7 @@ export function MoneyTransactionForm({
     }, 0);
   }, [lineItems]);
 
-  const amountNumber = Number.isFinite(parseFloat(amount))
-    ? parseFloat(amount)
-    : 0;
+  const amountNumber = Number.isFinite(parseFloat(amount)) ? parseFloat(amount) : 0;
   // Compare in cents to avoid floating-point false positives
   const totalCents = Math.round(totalLineItems * 100);
   const amountCents = Math.round(amountNumber * 100);
@@ -220,15 +207,12 @@ export function MoneyTransactionForm({
 
   const categoryOptions = useMemo(
     () => [...categories].sort((a, b) => a.depth - b.depth),
-    [categories]
+    [categories],
   );
 
-  const handleLineItemChange = (
-    key: string,
-    updates: Partial<LineItemState>
-  ) => {
+  const handleLineItemChange = (key: string, updates: Partial<LineItemState>) => {
     setLineItems((items) =>
-      items.map((item) => (item.key === key ? { ...item, ...updates } : item))
+      items.map((item) => (item.key === key ? { ...item, ...updates } : item)),
     );
   };
 
@@ -236,12 +220,12 @@ export function MoneyTransactionForm({
     () => ({
       quantity: "1",
       unit: defaultUnit,
-      category_id: (merchantName.trim()
-        ? merchantDefaultCategoryId[merchantName.trim()]
-        : null) as string | null,
+      category_id: (merchantName.trim() ? merchantDefaultCategoryId[merchantName.trim()] : null) as
+        | string
+        | null,
       beneficiary_person_id: selectedPersonId ?? null,
     }),
-    [defaultUnit, merchantName, merchantDefaultCategoryId, selectedPersonId]
+    [defaultUnit, merchantName, merchantDefaultCategoryId, selectedPersonId],
   );
 
   const handleAddLineItem = () => {
@@ -258,12 +242,7 @@ export function MoneyTransactionForm({
 
   // Apply defaults to first line item once in create mode (no initial line items)
   useEffect(() => {
-    if (
-      mode !== "create" ||
-      lineItems.length !== 1 ||
-      lineItemDefaultsApplied.current
-    )
-      return;
+    if (mode !== "create" || lineItems.length !== 1 || lineItemDefaultsApplied.current) return;
     const item = lineItems[0];
     if (!item || (item.quantity !== "" && item.unit !== "")) return;
     lineItemDefaultsApplied.current = true;
@@ -285,9 +264,7 @@ export function MoneyTransactionForm({
     prevMerchantRef.current = merchantName;
     const trimmed = merchantName.trim();
     const defaultCat = trimmed ? (merchantDefaultCategoryId[trimmed] ?? null) : null;
-    setLineItems((items) =>
-      items.map((item) => ({ ...item, category_id: defaultCat }))
-    );
+    setLineItems((items) => items.map((item) => ({ ...item, category_id: defaultCat })));
   }, [merchantName, merchantDefaultCategoryId]);
 
   const handleRemoveLineItem = (key: string) => {
@@ -313,12 +290,8 @@ export function MoneyTransactionForm({
       .filter((item) => item.title.trim() || item.amount.trim())
       .map<CreateMoneyLineItemInput>((item) => ({
         title: item.title.trim() || merchantName.trim() || "Manual item",
-        amount: Number.isFinite(parseFloat(item.amount))
-          ? parseFloat(item.amount)
-          : 0,
-        quantity: Number.isFinite(parseFloat(item.quantity))
-          ? parseFloat(item.quantity)
-          : null,
+        amount: Number.isFinite(parseFloat(item.amount)) ? parseFloat(item.amount) : 0,
+        quantity: Number.isFinite(parseFloat(item.quantity)) ? parseFloat(item.quantity) : null,
         unit: item.unit.trim() || null,
         line_status: item.line_status,
         category_id: item.category_id ?? null,
@@ -393,17 +366,12 @@ export function MoneyTransactionForm({
             }}
             placeholder="-1200"
           />
-          <p className="text-xs text-muted-foreground">
-            {t("money.amountHint")}
-          </p>
+          <p className="text-xs text-muted-foreground">{t("money.amountHint")}</p>
         </div>
 
         <div className="space-y-2">
           <label className="text-sm font-medium">{t("money.currency")}</label>
-          <Select
-            value={currency}
-            onValueChange={(value) => setCurrency(value)}
-          >
+          <Select value={currency} onValueChange={(value) => setCurrency(value)}>
             <SelectTrigger>
               <SelectValue placeholder={t("money.currency")} />
             </SelectTrigger>
@@ -421,9 +389,7 @@ export function MoneyTransactionForm({
           <label className="text-sm font-medium">{t("money.type")}</label>
           <Select
             value={transactionType}
-            onValueChange={(value) =>
-              setTransactionType(value as MoneyTransactionType)
-            }
+            onValueChange={(value) => setTransactionType(value as MoneyTransactionType)}
           >
             <SelectTrigger>
               <SelectValue placeholder={t("money.type")} />
@@ -442,9 +408,7 @@ export function MoneyTransactionForm({
           <label className="text-sm font-medium">{t("money.status")}</label>
           <Select
             value={status}
-            onValueChange={(value) =>
-              setStatus(value as MoneyTransactionStatus)
-            }
+            onValueChange={(value) => setStatus(value as MoneyTransactionStatus)}
           >
             <SelectTrigger>
               <SelectValue placeholder={t("money.status")} />
@@ -461,10 +425,7 @@ export function MoneyTransactionForm({
 
         <div className="space-y-2">
           <label className="text-sm font-medium">{t("money.merchant")}</label>
-          <Popover
-            open={openMerchantDropdown}
-            onOpenChange={setOpenMerchantDropdown}
-          >
+          <Popover open={openMerchantDropdown} onOpenChange={setOpenMerchantDropdown}>
             <PopoverTrigger asChild>
               <div className="relative">
                 <Input
@@ -495,31 +456,30 @@ export function MoneyTransactionForm({
                   <CommandEmpty>{t("common.noResults")}</CommandEmpty>
                   <CommandGroup>
                     {uniqueMerchants.slice(0, 100).map((m) => (
-                        <CommandItem
-                          key={m}
-                          value={m}
-                          onSelect={() => {
-                            setMerchantName(m);
-                            setOpenMerchantDropdown(false);
-                            const defaultCat =
-                              merchantDefaultCategoryId[m];
-                            if (defaultCat) {
-                              setLineItems((items) =>
-                                items.map((item) =>
-                                  item.category_id
-                                    ? item
-                                    : {
-                                        ...item,
-                                        category_id: defaultCat,
-                                      }
-                                )
-                              );
-                            }
-                          }}
-                        >
-                          {m}
-                        </CommandItem>
-                      ))}
+                      <CommandItem
+                        key={m}
+                        value={m}
+                        onSelect={() => {
+                          setMerchantName(m);
+                          setOpenMerchantDropdown(false);
+                          const defaultCat = merchantDefaultCategoryId[m];
+                          if (defaultCat) {
+                            setLineItems((items) =>
+                              items.map((item) =>
+                                item.category_id
+                                  ? item
+                                  : {
+                                      ...item,
+                                      category_id: defaultCat,
+                                    },
+                              ),
+                            );
+                          }
+                        }}
+                      >
+                        {m}
+                      </CommandItem>
+                    ))}
                   </CommandGroup>
                 </CommandList>
               </Command>
@@ -560,9 +520,7 @@ export function MoneyTransactionForm({
                   <Input
                     placeholder={t("money.lineItemTitle")}
                     value={item.title}
-                    onChange={(e) =>
-                      handleLineItemChange(item.key, { title: e.target.value })
-                    }
+                    onChange={(e) => handleLineItemChange(item.key, { title: e.target.value })}
                   />
                   <Button
                     type="button"
@@ -612,9 +570,7 @@ export function MoneyTransactionForm({
                     </label>
                     <Input
                       value={item.unit}
-                      onChange={(e) =>
-                        handleLineItemChange(item.key, { unit: e.target.value })
-                      }
+                      onChange={(e) => handleLineItemChange(item.key, { unit: e.target.value })}
                     />
                   </div>
                   <div className="space-y-1">
@@ -637,9 +593,8 @@ export function MoneyTransactionForm({
                           <SelectItem key={statusItem} value={statusItem}>
                             {t(
                               `money.lineStatus${
-                                statusItem.charAt(0).toUpperCase() +
-                                statusItem.slice(1)
-                              }`
+                                statusItem.charAt(0).toUpperCase() + statusItem.slice(1)
+                              }`,
                             )}
                           </SelectItem>
                         ))}
@@ -655,9 +610,7 @@ export function MoneyTransactionForm({
                     </label>
                     <Popover
                       open={openCategoryKey === item.key}
-                      onOpenChange={(open) =>
-                        setOpenCategoryKey(open ? item.key : null)
-                      }
+                      onOpenChange={(open) => setOpenCategoryKey(open ? item.key : null)}
                     >
                       <PopoverTrigger asChild>
                         <Button
@@ -667,14 +620,14 @@ export function MoneyTransactionForm({
                           aria-expanded={openCategoryKey === item.key}
                           className={cn(
                             "h-9 w-full justify-between font-normal text-sm",
-                            !item.category_id && "text-muted-foreground"
+                            !item.category_id && "text-muted-foreground",
                           )}
                         >
                           <span className="truncate">
                             {item.category_id
                               ? (() => {
                                   const cat = categoryOptions.find(
-                                    (c) => c.id === item.category_id
+                                    (c) => c.id === item.category_id,
                                   );
                                   return cat
                                     ? `${cat.name_en} / ${cat.name_ru}`
@@ -690,14 +643,9 @@ export function MoneyTransactionForm({
                         align="start"
                       >
                         <Command>
-                          <CommandInput
-                            placeholder={t("money.searchCategory")}
-                            className="h-9"
-                          />
+                          <CommandInput placeholder={t("money.searchCategory")} className="h-9" />
                           <CommandList>
-                            <CommandEmpty>
-                              {t("common.noResults")}
-                            </CommandEmpty>
+                            <CommandEmpty>{t("common.noResults")}</CommandEmpty>
                             <CommandGroup>
                               <CommandItem
                                 value={t("money.categoryUnassigned")}
@@ -739,15 +687,12 @@ export function MoneyTransactionForm({
                       value={item.beneficiary_person_id ?? "unassigned"}
                       onValueChange={(value) =>
                         handleLineItemChange(item.key, {
-                          beneficiary_person_id:
-                            value === "unassigned" ? null : value,
+                          beneficiary_person_id: value === "unassigned" ? null : value,
                         })
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue
-                          placeholder={t("money.beneficiaryUnassigned")}
-                        />
+                        <SelectValue placeholder={t("money.beneficiaryUnassigned")} />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unassigned">
@@ -768,12 +713,8 @@ export function MoneyTransactionForm({
         </div>
 
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            {t("money.lineItemsTotal")}
-          </span>
-          <span
-            className={showMismatch ? "text-amber-600 dark:text-amber-400" : ""}
-          >
+          <span className="text-muted-foreground">{t("money.lineItemsTotal")}</span>
+          <span className={showMismatch ? "text-amber-600 dark:text-amber-400" : ""}>
             {new Intl.NumberFormat(intlLocale, {
               style: "currency",
               currency: currency || "RUB",
@@ -794,9 +735,7 @@ export function MoneyTransactionForm({
         </Button>
         <Button onClick={handleSubmit} disabled={isPending}>
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {mode === "create"
-            ? t("money.saveTransaction")
-            : t("money.updateTransaction")}
+          {mode === "create" ? t("money.saveTransaction") : t("money.updateTransaction")}
         </Button>
       </div>
     </div>

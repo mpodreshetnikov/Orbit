@@ -4,8 +4,4 @@ export { MedicationDashboard } from "./medication-dashboard";
 export { LogIntakeDialog } from "./log-intake-dialog";
 export { RefillDialog } from "./refill-dialog";
 export { EditIntakeDialog } from "./edit-intake-dialog";
-export {
-  getUnitIcon,
-  formatAmountWithUnit,
-  getUnitLabel,
-} from "./medication-units";
+export { getUnitIcon, formatAmountWithUnit, getUnitLabel } from "./medication-units";

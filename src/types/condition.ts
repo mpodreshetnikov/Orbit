@@ -13,9 +13,9 @@ export interface Condition {
   id: string;
   person_id: string;
   name: string;
-  icd_name_en: string | null;  // Official ICD name in English
-  icd_name_ru: string | null;  // Official ICD name in Russian
-  code: string | null;         // ICD-10 code (e.g., "D50.9")
+  icd_name_en: string | null; // Official ICD name in English
+  icd_name_ru: string | null; // Official ICD name in Russian
+  code: string | null; // ICD-10 code (e.g., "D50.9")
   current_status: ConditionStatus;
   onset_date: string | null;
   resolved_date: string | null;
@@ -67,9 +67,9 @@ export interface ConditionRecord {
 // Extended type with condition details (from get_record_conditions function)
 export interface ConditionRecordWithDetails extends ConditionRecord {
   condition_name: string;
-  condition_icd_name_en: string | null;  // Official ICD name in English
-  condition_icd_name_ru: string | null;  // Official ICD name in Russian
-  condition_code: string | null;         // ICD-10 code
+  condition_icd_name_en: string | null; // Official ICD name in English
+  condition_icd_name_ru: string | null; // Official ICD name in Russian
+  condition_code: string | null; // ICD-10 code
   condition_current_status: ConditionStatus;
   condition_onset_date: string | null;
   condition_resolved_date: string | null;
@@ -97,10 +97,10 @@ export interface UpdateConditionRecordInput {
 // ============================================================================
 
 export interface ExtractedCondition {
-  existing_condition_id: string | null;  // ID if matching existing condition
-  name: string;                           // Required for new, optional for existing
-  icd_code: string | null;                // ICD-10 code extracted by LLM
-  status: ConditionStatus;                // Status as stated in THIS document
+  existing_condition_id: string | null; // ID if matching existing condition
+  name: string; // Required for new, optional for existing
+  icd_code: string | null; // ICD-10 code extracted by LLM
+  status: ConditionStatus; // Status as stated in THIS document
   confidence: number;
   source_anchor: string | null;
 }
@@ -109,7 +109,7 @@ export interface ExtractedCondition {
 export interface ExistingConditionContext {
   id: string;
   name: string;
-  code: string | null;  // ICD-10 code
+  code: string | null; // ICD-10 code
   current_status: ConditionStatus;
   onset_date: string | null;
   resolved_date: string | null;
@@ -138,10 +138,10 @@ export interface IcdSearchResult {
 // ============================================================================
 
 export interface ConditionHistoryPoint {
-  id: string;                    // condition_record id
+  id: string; // condition_record id
   record_id: string;
-  record_date: string | null;    // From medical_records join
-  record_title: string | null;   // From medical_records join
+  record_date: string | null; // From medical_records join
+  record_title: string | null; // From medical_records join
   status_in_record: ConditionStatus;
   source_anchor: string | null;
   created_at: string;

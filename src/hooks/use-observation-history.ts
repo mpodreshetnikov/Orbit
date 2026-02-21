@@ -2,18 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import type {
-  ObservationSummary,
-  ObservationHistoryPoint,
-  ObservationStatus,
-} from "@/types";
+import type { ObservationSummary, ObservationHistoryPoint, ObservationStatus } from "@/types";
 
 // ============================================================================
 // FETCH ALL OBSERVATIONS FOR A PERSON (aggregated by obs_code/obs_name)
 // ============================================================================
 async function fetchPersonObservationHistory(
   personId: string,
-  search?: string
+  search?: string,
 ): Promise<ObservationSummary[]> {
   const supabase = createClient();
 
@@ -21,7 +17,8 @@ async function fetchPersonObservationHistory(
   // Join with medical_records to get record_date and filter by person_id
   const query = supabase
     .from("record_observations")
-    .select(`
+    .select(
+      `
       id,
       record_id,
       obs_code,
@@ -52,7 +49,8 @@ async function fetchPersonObservationHistory(
         default_ref_low,
         default_ref_high
       )
-    `)
+    `,
+    )
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
     .eq("is_applied", true) // Only show applied observations in history
@@ -107,7 +105,7 @@ async function fetchPersonObservationHistory(
 
     // Use obs_code as key if available, otherwise use normalized obs_name
     const key = r.obs_code || r.obs_name.toLowerCase().trim();
-    
+
     const historyPoint: ObservationHistoryPoint = {
       id: r.id,
       record_id: r.record_id,
@@ -155,7 +153,7 @@ async function fetchPersonObservationHistory(
   }
 
   // Convert map to array and sort history by date (oldest first for charts)
-  let summaries = Array.from(observationMap.values()).map(summary => ({
+  let summaries = Array.from(observationMap.values()).map((summary) => ({
     ...summary,
     history: summary.history.sort((a, b) => {
       const dateA = a.record_date || a.created_at;
@@ -167,7 +165,7 @@ async function fetchPersonObservationHistory(
   // Apply search filter if provided
   if (search && search.trim()) {
     const searchLower = search.toLowerCase().trim();
-    summaries = summaries.filter(s => {
+    summaries = summaries.filter((s) => {
       // Search in obs_name
       if (s.obs_name.toLowerCase().includes(searchLower)) return true;
       // Search in obs_code
@@ -183,15 +181,15 @@ async function fetchPersonObservationHistory(
   summaries.sort((a, b) => {
     const aIsBad = a.latest_status && a.latest_status !== "normal" && a.latest_status !== "unknown";
     const bIsBad = b.latest_status && b.latest_status !== "normal" && b.latest_status !== "unknown";
-    
+
     if (aIsBad && !bIsBad) return -1;
     if (!aIsBad && bIsBad) return 1;
-    
+
     const dateA = a.latest_date ? new Date(a.latest_date).getTime() : 0;
     const dateB = b.latest_date ? new Date(b.latest_date).getTime() : 0;
     const byDate = dateB - dateA;
     if (byDate !== 0) return byDate;
-    
+
     return a.obs_name.localeCompare(b.obs_name);
   });
 
@@ -211,14 +209,15 @@ export function usePersonObservationHistory(personId: string | null, search?: st
 // ============================================================================
 async function fetchSingleObservationHistory(
   personId: string,
-  obsCode: string
+  obsCode: string,
 ): Promise<ObservationSummary | null> {
   const supabase = createClient();
 
   // Fetch all instances of this observation
   const { data, error } = await supabase
     .from("record_observations")
-    .select(`
+    .select(
+      `
       id,
       record_id,
       obs_code,
@@ -247,7 +246,8 @@ async function fetchSingleObservationHistory(
         default_ref_low,
         default_ref_high
       )
-    `)
+    `,
+    )
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
     .eq("is_applied", true) // Only show applied observations in history

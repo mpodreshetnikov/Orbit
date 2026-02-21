@@ -32,6 +32,14 @@ extension-dev-watch:
 extension-build-production:
   npx tsx scripts/extension/build.ts --mode=production
 
+# Check formatting with Prettier.
+quality-format-check:
+  npx prettier --check .
+
+# Write formatting with Prettier.
+quality-format-write:
+  npx prettier --write .
+
 # Run ESLint with zero warnings allowed.
 quality-lint:
   npx eslint src browserExtension/src browserExtension/popup-src scripts/extension supabase/functions --ext .ts,.tsx --max-warnings=0

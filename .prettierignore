@@ -1,0 +1,9 @@
+node_modules/
+.next/
+build/
+coverage/
+browserExtension/dist/
+browserExtension/*.zip
+supabase/.temp/
+supabase/db/database.types.ts
+supabase/db/schema.snapshot.sql

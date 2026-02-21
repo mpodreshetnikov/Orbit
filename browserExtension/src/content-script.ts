@@ -14,7 +14,7 @@ window.addEventListener("message", async (event: MessageEvent) => {
           type: "MONEY_IMPORT_PONG",
           ts: Date.now(),
         },
-        "*"
+        "*",
       );
     });
     return;
@@ -33,9 +33,9 @@ window.addEventListener("message", async (event: MessageEvent) => {
             type: "MONEY_IMPORT_SESSION_ACK",
             ok: Boolean(response?.ok),
           },
-          "*"
+          "*",
         );
-      }
+      },
     );
   }
 });
@@ -44,7 +44,7 @@ chrome.runtime.onMessage.addListener((message: { type?: string } | null) => {
   if (!message || typeof message !== "object") return;
   if (
     !["MONEY_IMPORT_PROGRESS", "MONEY_IMPORT_DONE", "MONEY_IMPORT_ERROR"].includes(
-      message.type ?? ""
+      message.type ?? "",
     )
   ) {
     return;
@@ -55,6 +55,6 @@ chrome.runtime.onMessage.addListener((message: { type?: string } | null) => {
       source: BRIDGE_SOURCE,
       ...message,
     },
-    "*"
+    "*",
   );
 });

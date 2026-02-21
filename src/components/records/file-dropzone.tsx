@@ -19,13 +19,7 @@ interface FileDropzoneProps {
   showCamera?: boolean;
 }
 
-const ACCEPTED_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/heic",
-  "application/pdf",
-];
+const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/heic", "application/pdf"];
 
 export function FileDropzone({
   onFilesSelected,
@@ -76,7 +70,7 @@ export function FileDropzone({
 
       return validFiles;
     },
-    [maxSizeMB, maxFiles, selectedFiles.length, t]
+    [maxSizeMB, maxFiles, selectedFiles.length, t],
   );
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -114,7 +108,7 @@ export function FileDropzone({
         onFilesSelected(validFiles);
       }
     },
-    [onFilesSelected, validateFiles, canAddMore, maxFiles, t]
+    [onFilesSelected, validateFiles, canAddMore, maxFiles, t],
   );
 
   const handleFileInput = useCallback(
@@ -128,7 +122,7 @@ export function FileDropzone({
       // Reset input so same file can be selected again
       e.target.value = "";
     },
-    [onFilesSelected, validateFiles]
+    [onFilesSelected, validateFiles],
   );
 
   const handleCameraCapture = useCallback(
@@ -140,7 +134,7 @@ export function FileDropzone({
       }
       onFilesSelected([file]);
     },
-    [onFilesSelected, canAddMore, maxFiles, t]
+    [onFilesSelected, canAddMore, maxFiles, t],
   );
 
   const formatFileSize = (bytes: number): string => {
@@ -169,7 +163,7 @@ export function FileDropzone({
           isDragging
             ? "border-primary bg-primary/5"
             : "border-muted-foreground/25 hover:border-primary/50",
-          (isUploading || !canAddMore) && "pointer-events-none opacity-50"
+          (isUploading || !canAddMore) && "pointer-events-none opacity-50",
         )}
       >
         <input
@@ -238,9 +232,7 @@ export function FileDropzone({
                 {getFileIcon(file.type)}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatFileSize(file.size)}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
                 </div>
                 <Button
                   type="button"

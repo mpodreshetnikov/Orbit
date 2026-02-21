@@ -2,10 +2,10 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 /**
  * icd-lookup: WHO ICD API edge function
- * 
+ *
  * Looks up ICD-10 codes via the official WHO ICD API.
  * Returns official names in both English and Russian.
- * 
+ *
  * Requires environment variables:
  * - WHO_ICD_CLIENT_ID
  * - WHO_ICD_CLIENT_SECRET
@@ -38,7 +38,9 @@ async function getAccessToken(): Promise<string> {
   }
 
   if (!WHO_ICD_CLIENT_ID || !WHO_ICD_CLIENT_SECRET) {
-    throw new Error("WHO ICD API credentials not configured. Set WHO_ICD_CLIENT_ID and WHO_ICD_CLIENT_SECRET.");
+    throw new Error(
+      "WHO ICD API credentials not configured. Set WHO_ICD_CLIENT_ID and WHO_ICD_CLIENT_SECRET.",
+    );
   }
 
   const res = await fetch("https://icdaccessmanagement.who.int/connect/token", {
@@ -59,13 +61,13 @@ async function getAccessToken(): Promise<string> {
   }
 
   const data = await res.json();
-  
+
   // Cache token with 60s buffer before expiry
   cachedToken = {
     token: data.access_token,
     expires: Date.now() + (data.expires_in - 60) * 1000,
   };
-  
+
   return cachedToken.token;
 }
 
@@ -74,14 +76,14 @@ async function getAccessToken(): Promise<string> {
  */
 async function lookupIcdCode(code: string, lang: "en" | "ru"): Promise<string | null> {
   const token = await getAccessToken();
-  
+
   // Normalize code format: ICD-10 codes like "D50.9", "E11", "J06.9"
   // WHO API expects codes without dots for the URL path
   const normalizedCode = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  
+
   // ICD-10 2019 release (latest stable)
   const url = `https://id.who.int/icd/release/10/2019/${normalizedCode}`;
-  
+
   try {
     const res = await fetch(url, {
       headers: {
@@ -98,7 +100,7 @@ async function lookupIcdCode(code: string, lang: "en" | "ru"): Promise<string | 
         // Some codes are stored with dots (e.g., D50.9)
         const codeWithDot = code.toUpperCase();
         const urlWithDot = `https://id.who.int/icd/release/10/2019/${encodeURIComponent(codeWithDot)}`;
-        
+
         const retryRes = await fetch(urlWithDot, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -107,19 +109,19 @@ async function lookupIcdCode(code: string, lang: "en" | "ru"): Promise<string | 
             Accept: "application/json",
           },
         });
-        
+
         if (!retryRes.ok) {
           console.log(`ICD code ${code} not found in ${lang}`);
           return null;
         }
-        
+
         const retryData = await retryRes.json();
         return retryData.title?.["@value"] || null;
       }
       console.error(`WHO ICD API error for ${code} (${lang}):`, res.status);
       return null;
     }
-    
+
     const data = await res.json();
     return data.title?.["@value"] || null;
   } catch (error) {
@@ -130,7 +132,7 @@ async function lookupIcdCode(code: string, lang: "en" | "ru"): Promise<string | 
 
 /**
  * Search ICD-10 codes by name/term
- * 
+ *
  * Note: WHO ICD-10 API doesn't have a robust text search like ICD-11.
  * We use a multi-strategy approach:
  * 1. If query looks like a code (starts with letter+digit), do code lookup
@@ -138,20 +140,20 @@ async function lookupIcdCode(code: string, lang: "en" | "ru"): Promise<string | 
  * 3. Fall back to code range suggestions
  */
 async function searchIcdCodes(
-  query: string, 
-  lang: "en" | "ru", 
-  maxResults = 10
+  query: string,
+  lang: "en" | "ru",
+  maxResults = 10,
 ): Promise<Array<{ code: string; name: string }>> {
   const token = await getAccessToken();
   const trimmedQuery = query.trim();
-  
+
   // Strategy 1: If query looks like a code, try direct lookup
   const codePattern = /^[A-Z][0-9]/i;
   if (codePattern.test(trimmedQuery)) {
     console.log("Query looks like a code, using code lookup strategy");
     return await searchIcd10Release(trimmedQuery, lang, token, maxResults);
   }
-  
+
   // Strategy 2: Try ICD-11 entity search (English only, better results)
   // This sometimes returns ICD-10 codes in the mappings
   const url = new URL("https://id.who.int/icd/entity/search");
@@ -159,9 +161,9 @@ async function searchIcdCodes(
   url.searchParams.set("useFlexisearch", "true");
   url.searchParams.set("flatResults", "true");
   url.searchParams.set("highlightingEnabled", "false");
-  
+
   console.log("ICD search URL:", url.toString());
-  
+
   try {
     const res = await fetch(url.toString(), {
       headers: {
@@ -176,14 +178,14 @@ async function searchIcdCodes(
       console.error(`WHO ICD search error: ${res.status}`);
       return [];
     }
-    
+
     const data = await res.json();
     console.log("WHO ICD search guessType:", data.guessType);
-    
+
     const results: Array<{ code: string; name: string }> = [];
     const entities = data.destinationEntities || [];
     console.log("Found entities:", entities.length);
-    
+
     if (entities.length > 0 && entities[0]) {
       console.log("First entity sample:", JSON.stringify(entities[0]).slice(0, 800));
     }
@@ -191,19 +193,19 @@ async function searchIcdCodes(
     for (const entity of entities.slice(0, maxResults * 3)) {
       let code: string = "";
       let name: string = "";
-      
+
       // theCode contains the ICD code (could be ICD-11 or ICD-10)
       if (entity.theCode) {
         code = entity.theCode;
       }
-      
+
       // Extract name from title
       if (typeof entity.title === "string") {
         name = entity.title;
       } else if (entity.title?.["@value"]) {
         name = entity.title["@value"];
       }
-      
+
       // Check matchingPVs for title and potential ICD-10 references
       if (entity.matchingPVs && Array.isArray(entity.matchingPVs)) {
         for (const pv of entity.matchingPVs) {
@@ -219,35 +221,35 @@ async function searchIcdCodes(
           }
         }
       }
-      
+
       // ICD-11 codes look like "9D00", "8A00.1" etc (digit first after letter)
       // ICD-10 codes look like "H52.1", "D50.9" etc (letter + 2 digits)
       const isIcd10Format = code && code.match(/^[A-Z][0-9]{2}(\.[0-9]+)?$/i);
-      
+
       // If it's an ICD-11 code but we have a name, try to look up a similar ICD-10 code
       // For now, skip non-ICD-10 codes
       if (!isIcd10Format) {
         continue;
       }
-      
+
       if (!name) {
         name = code;
       }
 
       // Avoid duplicates
-      if (!results.find(r => r.code === code)) {
+      if (!results.find((r) => r.code === code)) {
         console.log(`Found ICD-10 code: ${code} - ${name.slice(0, 50)}`);
         results.push({ code: code.toUpperCase(), name });
       }
-      
+
       if (results.length >= maxResults) break;
     }
-    
+
     // If we found results from entity search, return them
     if (results.length > 0) {
       return results;
     }
-    
+
     console.log("No ICD-10 codes found in entity search");
     return [];
   } catch (error) {
@@ -264,26 +266,26 @@ async function searchIcd10Release(
   query: string,
   lang: "en" | "ru",
   token: string,
-  maxResults: number
+  maxResults: number,
 ): Promise<Array<{ code: string; name: string }>> {
   const results: Array<{ code: string; name: string }> = [];
   const upperQuery = query.toUpperCase().trim();
-  
+
   // Parse the query to understand what kind of code lookup to do
   // Examples: "H", "H5", "H52", "H52.", "H52.1"
   const codeMatch = upperQuery.match(/^([A-Z])([0-9]{0,2})\.?([0-9]?)$/);
-  
+
   if (!codeMatch) {
     console.log(`Query "${query}" doesn't look like an ICD-10 code`);
     return results;
   }
-  
+
   const letter = codeMatch[1];
   const num1 = codeMatch[2] || "";
   const num2 = codeMatch[3] || "";
-  
+
   const codesToTry: string[] = [];
-  
+
   if (num1.length === 2 && num2) {
     // Specific code like H52.1 - just try this one and nearby
     const baseNum = parseInt(num2);
@@ -309,9 +311,9 @@ async function searchIcd10Release(
       if (i <= 5) codesToTry.push(`${letter}${i}0`);
     }
   }
-  
+
   console.log(`Trying ${codesToTry.length} codes for query "${query}"`);
-  
+
   // Fetch codes in parallel (batch of up to 15)
   const fetchPromises = codesToTry.slice(0, 15).map(async (code) => {
     try {
@@ -324,14 +326,14 @@ async function searchIcd10Release(
     }
     return null;
   });
-  
+
   const fetched = await Promise.all(fetchPromises);
   for (const result of fetched) {
     if (result && results.length < maxResults) {
       results.push(result);
     }
   }
-  
+
   console.log(`Code lookup found ${results.length} results for "${query}"`);
   return results;
 }
@@ -344,25 +346,22 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    
+
     // Check for search request (ICD-10: English only)
     if (body.search) {
       const query = body.search as string;
       const maxResults = body.maxResults || 10;
-      
+
       const results = await searchIcdCodes(query, "en", maxResults);
-      
-      return new Response(
-        JSON.stringify({ results }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+
+      return new Response(JSON.stringify({ results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
-    
+
     // Code lookup request
     const { code }: IcdLookupRequest = body;
-    
+
     if (!code) {
       throw new Error("Missing code parameter");
     }
@@ -387,14 +386,14 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("ICD lookup error:", error);
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         error: error instanceof Error ? error.message : "Unknown error",
         found: false,
       }),
-      { 
-        headers: { ...corsHeaders, "Content-Type": "application/json" }, 
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,
-      }
+      },
     );
   }
 });

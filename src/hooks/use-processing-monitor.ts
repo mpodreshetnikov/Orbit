@@ -19,7 +19,7 @@ interface MedicalRecordPayload {
  * This hook monitors for records that were in "processing" status
  * and have now been completed (moved to "draft").
  * Uses Supabase Realtime subscriptions instead of polling for instant updates.
- * 
+ *
  * Should be mounted at the AppShell level to stay active across all health pages.
  */
 export function useProcessingMonitor(personId: string | null) {
@@ -44,24 +44,23 @@ export function useProcessingMonitor(personId: string | null) {
           .eq("person_id", personId)
           .in("status", ["ocr_processing", "structuring", "processing"]);
 
-        processingRecordsRef.current = new Set(
-          (processingRecords || []).map((r) => r.id)
-        );
+        processingRecordsRef.current = new Set((processingRecords || []).map((r) => r.id));
         isInitializedRef.current = true;
-        
+
         console.log("[Realtime] Initialized processing monitor for person:", personId);
-        console.log("[Realtime] Tracking processing records:", Array.from(processingRecordsRef.current));
+        console.log(
+          "[Realtime] Tracking processing records:",
+          Array.from(processingRecordsRef.current),
+        );
       } catch (error) {
         console.error("[Realtime] Error initializing processing records:", error);
       }
     };
 
     // Handle realtime updates
-    const handleRecordChange = (
-      payload: RealtimePostgresChangesPayload<MedicalRecordPayload>
-    ) => {
+    const handleRecordChange = (payload: RealtimePostgresChangesPayload<MedicalRecordPayload>) => {
       const { eventType, new: newRecord, old: oldRecord } = payload;
-      
+
       // Debug logging - log all fields explicitly
       console.log("[Realtime] Received change:", eventType);
       console.log("[Realtime] Old record:", oldRecord);
@@ -71,16 +70,22 @@ export function useProcessingMonitor(personId: string | null) {
       if (eventType === "UPDATE" && newRecord && oldRecord) {
         const oldStatus = oldRecord.status;
         const newStatus = newRecord.status;
-        
+
         // Check if a record completed a processing stage
         // OCR processing: ocr_processing -> ocr_review
         // Structure processing: structuring -> structure_review
         const isOcrComplete = oldStatus === "ocr_processing" && newStatus === "ocr_review";
         const isStructureComplete = oldStatus === "structuring" && newStatus === "structure_review";
-        
+
         if (isOcrComplete || isStructureComplete) {
-          console.log("[Realtime] Record completed processing stage:", newRecord.id, oldStatus, "->", newStatus);
-          
+          console.log(
+            "[Realtime] Record completed processing stage:",
+            newRecord.id,
+            oldStatus,
+            "->",
+            newStatus,
+          );
+
           // Remove from tracking
           processingRecordsRef.current.delete(newRecord.id);
 
@@ -93,10 +98,10 @@ export function useProcessingMonitor(personId: string | null) {
           });
 
           // Show notification
-          const notificationMessage = isOcrComplete 
-            ? t("processing.ocrComplete") 
+          const notificationMessage = isOcrComplete
+            ? t("processing.ocrComplete")
             : t("processing.completed");
-          
+
           toast.success(notificationMessage, {
             description: newRecord.title,
             action: {
@@ -178,7 +183,7 @@ export function useProcessingMonitor(personId: string | null) {
           table: "medical_records",
           filter: `person_id=eq.${personId}`,
         },
-        handleRecordChange
+        handleRecordChange,
       )
       .subscribe((status, err) => {
         console.log("[Realtime] Subscription status:", status);

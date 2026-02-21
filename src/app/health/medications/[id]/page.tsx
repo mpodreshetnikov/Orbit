@@ -61,7 +61,8 @@ import type { MedicationUnit } from "@/types";
 
 function getDurationDates(duration: MedDuration): { start: string | null; end: string | null } {
   const start = duration?.start_date ?? null;
-  if (duration?.type === "until_date" && duration.end_date) return { start, end: duration.end_date };
+  if (duration?.type === "until_date" && duration.end_date)
+    return { start, end: duration.end_date };
   if (duration?.type === "for_days" && start && duration.days != null) {
     const d = new Date(start);
     d.setDate(d.getDate() + duration.days);
@@ -85,11 +86,7 @@ function getStatusIcon(status: MedDoseEventStatus): { Icon: typeof Check; classN
   }
 }
 
-export default function MedicationDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function MedicationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const t = useTranslations();
@@ -180,11 +177,7 @@ export default function MedicationDetailPage({
             </Link>
           </Button>
           {inv?.enabled && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRefillOpen(true)}
-            >
+            <Button variant="outline" size="sm" onClick={() => setRefillOpen(true)}>
               <PackagePlus className="h-4 w-4 mr-1" />
               {t("medications.refillButton")}
             </Button>
@@ -196,10 +189,15 @@ export default function MedicationDetailPage({
         <CardHeader>
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="outline">
-              {t(`medications.status${regimen.status.charAt(0).toUpperCase() + regimen.status.slice(1)}`)}
+              {t(
+                `medications.status${regimen.status.charAt(0).toUpperCase() + regimen.status.slice(1)}`,
+              )}
             </Badge>
             {isLowInventory && (
-              <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400 gap-1">
+              <Badge
+                variant="outline"
+                className="border-amber-500/50 text-amber-700 dark:text-amber-400 gap-1"
+              >
                 <AlertTriangle className="h-3 w-3" />
                 {t("medications.refillWarning")}
               </Badge>
@@ -220,15 +218,19 @@ export default function MedicationDetailPage({
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
                 {start && (
                   <span>
-                    {t("medications.startDate")}: {format(new Date(start), "PP", { locale: dateLocale })}
+                    {t("medications.startDate")}:{" "}
+                    {format(new Date(start), "PP", { locale: dateLocale })}
                   </span>
                 )}
                 {end != null ? (
                   <span>
-                    {t("medications.endDate")}: {format(new Date(end), "PP", { locale: dateLocale })}
+                    {t("medications.endDate")}:{" "}
+                    {format(new Date(end), "PP", { locale: dateLocale })}
                   </span>
-                ) : regimen.duration?.type === "endless" && (
-                  <span>{t("medications.endTypeEndless")}</span>
+                ) : (
+                  regimen.duration?.type === "endless" && (
+                    <span>{t("medications.endTypeEndless")}</span>
+                  )
                 )}
               </div>
             );
@@ -243,9 +245,7 @@ export default function MedicationDetailPage({
                 ` (${t("medications.refillWarning")} ≤ ${formatAmountWithUnit(inv.refill_threshold_amount, regimen.intake_unit, t)})`}
             </div>
           )}
-          {regimen.notes && (
-            <p className="text-sm text-muted-foreground">{regimen.notes}</p>
-          )}
+          {regimen.notes && <p className="text-sm text-muted-foreground">{regimen.notes}</p>}
         </CardContent>
       </Card>
 
@@ -268,8 +268,12 @@ export default function MedicationDetailPage({
                 const isEditing = editingEventId === ev.id;
                 const pending =
                   isEditing &&
-                  (undoIntake.isPending || markTaken.isPending || markSkipped.isPending || updateResolutionDetails.isPending);
-                const unit = (regimen?.intake_unit ?? getPlannedIntakeUnit(ev.planned_intake)) as MedicationUnit;
+                  (undoIntake.isPending ||
+                    markTaken.isPending ||
+                    markSkipped.isPending ||
+                    updateResolutionDetails.isPending);
+                const unit = (regimen?.intake_unit ??
+                  getPlannedIntakeUnit(ev.planned_intake)) as MedicationUnit;
                 const UnitIcon = getUnitIcon(unit);
                 const { Icon: StatusIcon, className: statusIconClass } = getStatusIcon(ev.status);
                 return (
@@ -295,10 +299,26 @@ export default function MedicationDetailPage({
                           <Badge variant="outline" className="ml-2 text-xs text-muted-foreground">
                             {t("medications.unspecified")}
                           </Badge>
-                          <> — {formatAmountWithUnit(getPlannedIntakeAmount(ev.planned_intake), getPlannedIntakeUnit(ev.planned_intake) as MedicationUnit, t)}</>
+                          <>
+                            {" "}
+                            —{" "}
+                            {formatAmountWithUnit(
+                              getPlannedIntakeAmount(ev.planned_intake),
+                              getPlannedIntakeUnit(ev.planned_intake) as MedicationUnit,
+                              t,
+                            )}
+                          </>
                         </>
                       ) : (
-                        <> — {formatAmountWithUnit(getPlannedIntakeAmount(ev.planned_intake), getPlannedIntakeUnit(ev.planned_intake) as MedicationUnit, t)}</>
+                        <>
+                          {" "}
+                          —{" "}
+                          {formatAmountWithUnit(
+                            getPlannedIntakeAmount(ev.planned_intake),
+                            getPlannedIntakeUnit(ev.planned_intake) as MedicationUnit,
+                            t,
+                          )}
+                        </>
                       )}
                       {ev.note && (
                         <span className="text-muted-foreground block truncate max-w-[200px] mt-0.5">
@@ -333,14 +353,19 @@ export default function MedicationDetailPage({
                             onClick={() => {
                               undoIntake.mutate(
                                 { doseEventId: ev.id },
-                                { onSettled: () => setEditingEventId(null) }
+                                { onSettled: () => setEditingEventId(null) },
                               );
                             }}
                           >
                             <RotateCcw className="h-4 w-4 mr-2" />
                             {t("medications.undoIntake")}
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => { setEditIntakeEvent(ev); setEditingEventId(null); }}>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditIntakeEvent(ev);
+                              setEditingEventId(null);
+                            }}
+                          >
                             <Pencil className="h-4 w-4 mr-2" />
                             {t("medications.editIntake")}
                           </DropdownMenuItem>
@@ -349,7 +374,7 @@ export default function MedicationDetailPage({
                               onClick={() => {
                                 markTaken.mutate(
                                   { doseEventId: ev.id, takenAt: new Date().toISOString() },
-                                  { onSettled: () => setEditingEventId(null) }
+                                  { onSettled: () => setEditingEventId(null) },
                                 );
                               }}
                             >
@@ -362,7 +387,7 @@ export default function MedicationDetailPage({
                               onClick={() => {
                                 markSkipped.mutate(
                                   { doseEventId: ev.id },
-                                  { onSettled: () => setEditingEventId(null) }
+                                  { onSettled: () => setEditingEventId(null) },
                                 );
                               }}
                             >
@@ -373,12 +398,12 @@ export default function MedicationDetailPage({
                           {isUnspecified && (
                             <>
                               <DropdownMenuItem
-                              onClick={() => {
-                                markTaken.mutate(
-                                  { doseEventId: ev.id, takenAt: new Date().toISOString() },
-                                  { onSettled: () => setEditingEventId(null) }
-                                );
-                              }}
+                                onClick={() => {
+                                  markTaken.mutate(
+                                    { doseEventId: ev.id, takenAt: new Date().toISOString() },
+                                    { onSettled: () => setEditingEventId(null) },
+                                  );
+                                }}
                               >
                                 <Check className="h-4 w-4 mr-2" />
                                 {t("medications.markAsTaken")}
@@ -387,7 +412,7 @@ export default function MedicationDetailPage({
                                 onClick={() => {
                                   markSkipped.mutate(
                                     { doseEventId: ev.id },
-                                    { onSettled: () => setEditingEventId(null) }
+                                    { onSettled: () => setEditingEventId(null) },
                                   );
                                 }}
                               >
@@ -437,7 +462,16 @@ export default function MedicationDetailPage({
       <EditIntakeDialog
         open={!!editIntakeEvent}
         onOpenChange={(open) => !open && setEditIntakeEvent(null)}
-        event={editIntakeEvent ? { ...editIntakeEvent, regimen: regimen ? { custom_name: regimen.custom_name, intake_unit: regimen.intake_unit } : null } : null}
+        event={
+          editIntakeEvent
+            ? {
+                ...editIntakeEvent,
+                regimen: regimen
+                  ? { custom_name: regimen.custom_name, intake_unit: regimen.intake_unit }
+                  : null,
+              }
+            : null
+        }
         isPending={updateResolutionDetails.isPending}
         onSubmit={async (params) => {
           if (!editIntakeEvent) return;
@@ -483,10 +517,7 @@ export default function MedicationDetailPage({
             <Button variant="outline" onClick={() => setArchiveConfirmOpen(false)}>
               {t("common.cancel")}
             </Button>
-            <Button
-              onClick={handleArchive}
-              disabled={archiveMutation.isPending}
-            >
+            <Button onClick={handleArchive} disabled={archiveMutation.isPending}>
               {archiveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {t("medications.archiveMedication")}
             </Button>

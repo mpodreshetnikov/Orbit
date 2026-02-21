@@ -3,7 +3,16 @@
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
-import { Calendar, Paperclip, MoreVertical, Eye, Trash2, RotateCcw, Loader2, FileCheck } from "lucide-react";
+import {
+  Calendar,
+  Paperclip,
+  MoreVertical,
+  Eye,
+  Trash2,
+  RotateCcw,
+  Loader2,
+  FileCheck,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,7 +70,7 @@ export function RecordCard({
       className={cn(
         "group tap-target cursor-pointer select-none transition-all hover:shadow-md min-w-0 w-full overflow-hidden",
         isRemoved && "opacity-60",
-        (isProcessing || isOcrFailed) && "border-primary/50"
+        (isProcessing || isOcrFailed) && "border-primary/50",
       )}
       onClick={() => onView(record)}
     >
@@ -122,9 +131,7 @@ export function RecordCard({
 
             {/* Notes preview */}
             {record.notes && (
-              <p className="mt-2 text-sm text-muted-foreground line-clamp-2">
-                {record.notes}
-              </p>
+              <p className="mt-2 text-sm text-muted-foreground line-clamp-2">{record.notes}</p>
             )}
           </div>
 
@@ -145,7 +152,7 @@ export function RecordCard({
                 <Eye className="mr-2 h-4 w-4" />
                 {isDraft ? t("records.actions.viewEdit") : t("records.actions.view")}
               </DropdownMenuItem>
-              
+
               {/* Activate draft */}
               {isDraft && onActivate && (
                 <DropdownMenuItem onClick={() => onActivate(record)}>
@@ -153,7 +160,7 @@ export function RecordCard({
                   {t("records.actions.activate")}
                 </DropdownMenuItem>
               )}
-              
+
               {!isRemoved && !isProcessing && (
                 <DropdownMenuItem
                   onClick={() => onRemove(record)}
@@ -163,7 +170,7 @@ export function RecordCard({
                   {t("records.actions.remove")}
                 </DropdownMenuItem>
               )}
-              
+
               {isRemoved && onRestore && (
                 <>
                   <DropdownMenuItem onClick={() => onRestore(record)}>

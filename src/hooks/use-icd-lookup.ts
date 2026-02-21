@@ -13,29 +13,28 @@ export function useIcdLookup(code: string | null) {
     queryKey: ["icd-lookup", code],
     queryFn: async (): Promise<IcdLookupResult> => {
       const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
       if (!session?.access_token) {
         throw new Error("Not authenticated");
       }
-      
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ code }),
-        }
-      );
-      
+
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code }),
+      });
+
       if (!res.ok) {
         const error = await res.text();
         throw new Error(`ICD lookup failed: ${error}`);
       }
-      
+
       return await res.json();
     },
     enabled: !!code && code.length >= 2,
@@ -53,29 +52,28 @@ export function useIcdSearch(query: string, lang: "en" | "ru" = "en") {
     queryKey: ["icd-search", query, lang],
     queryFn: async (): Promise<IcdSearchResult[]> => {
       const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
       if (!session?.access_token) {
         throw new Error("Not authenticated");
       }
-      
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ search: query, lang, maxResults: 15 }),
-        }
-      );
-      
+
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ search: query, lang, maxResults: 15 }),
+      });
+
       if (!res.ok) {
         const error = await res.text();
         throw new Error(`ICD search failed: ${error}`);
       }
-      
+
       const data = await res.json();
       return data.results || [];
     },
@@ -89,7 +87,7 @@ export function useIcdSearch(query: string, lang: "en" | "ru" = "en") {
  */
 export function getLocalizedIcdName(
   result: IcdLookupResult | null | undefined,
-  locale?: string
+  locale?: string,
 ): string | null {
   void locale;
   if (!result?.found) return null;
@@ -102,7 +100,7 @@ export function getLocalizedIcdName(
 export function getConditionIcdName(
   icdNameEn: string | null | undefined,
   icdNameRu?: string | null,
-  locale?: string
+  locale?: string,
 ): string | null {
   void icdNameRu;
   void locale;

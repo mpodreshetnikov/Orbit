@@ -183,7 +183,9 @@ export default function MoneyImportReportPage() {
                       <RowStatusBadge status={tx.status} t={t} />
                     </div>
                   </div>
-                  {tx.message && <div className="text-xs mt-1 text-muted-foreground">{tx.message}</div>}
+                  {tx.message && (
+                    <div className="text-xs mt-1 text-muted-foreground">{tx.message}</div>
+                  )}
                 </summary>
 
                 <div className="mt-3 space-y-2">
@@ -193,7 +195,8 @@ export default function MoneyImportReportPage() {
 
                   {lines.map((line) => {
                     const payload = (line.payload ?? {}) as Record<string, unknown>;
-                    const lineTitle = typeof payload.title === "string" ? payload.title : "Line item";
+                    const lineTitle =
+                      typeof payload.title === "string" ? payload.title : "Line item";
                     const lineAmount = typeof payload.amount === "number" ? payload.amount : amount;
 
                     return (

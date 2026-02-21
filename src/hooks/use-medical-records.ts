@@ -33,7 +33,7 @@ const STATUS_GROUP_MAP: Record<string, string[]> = {
 };
 
 async function fetchMedicalRecords(
-  filters: MedicalRecordFilters
+  filters: MedicalRecordFilters,
 ): Promise<MedicalRecordListItem[]> {
   const supabase = createClient();
 
@@ -70,9 +70,7 @@ export function useMedicalRecords(filters: MedicalRecordFilters = {}) {
 // ============================================================================
 // FETCH SINGLE RECORD WITH ATTACHMENTS
 // ============================================================================
-async function fetchMedicalRecord(
-  recordId: string
-): Promise<MedicalRecordWithAttachments | null> {
+async function fetchMedicalRecord(recordId: string): Promise<MedicalRecordWithAttachments | null> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -81,7 +79,7 @@ async function fetchMedicalRecord(
       `
       *,
       attachments:record_attachments(*)
-    `
+    `,
     )
     .eq("id", recordId)
     .single();
@@ -94,9 +92,9 @@ async function fetchMedicalRecord(
   }
 
   // Sort attachments by sort_order
-  const attachments = (
-    (data.attachments as RecordAttachment[]) || []
-  ).sort((a, b) => a.sort_order - b.sort_order);
+  const attachments = ((data.attachments as RecordAttachment[]) || []).sort(
+    (a, b) => a.sort_order - b.sort_order,
+  );
 
   return {
     ...data,
@@ -115,9 +113,7 @@ export function useMedicalRecord(recordId: string | null) {
 // ============================================================================
 // CREATE MEDICAL RECORD (DRAFT)
 // ============================================================================
-async function createMedicalRecord(
-  input: CreateMedicalRecordInput
-): Promise<MedicalRecord> {
+async function createMedicalRecord(input: CreateMedicalRecordInput): Promise<MedicalRecord> {
   const supabase = createClient();
 
   // Get current user
@@ -168,10 +164,7 @@ async function updateMedicalRecord({
   updates: UpdateMedicalRecordInput;
 }): Promise<MedicalRecord> {
   const supabase = createClient();
-  const {
-    llm_suggested_checkup_completions,
-    ...rest
-  } = updates;
+  const { llm_suggested_checkup_completions, ...rest } = updates;
   const payload: MedicalRecordUpdate = {
     ...rest,
     llm_suggested_checkup_completions:
@@ -209,8 +202,7 @@ export function useUpdateMedicalRecord() {
         queryKey: ["medical-records"],
         predicate: (query) =>
           query.queryKey[0] === "medical-records" &&
-          (query.queryKey[1] as MedicalRecordFilters)?.person_id ===
-            data.person_id,
+          (query.queryKey[1] as MedicalRecordFilters)?.person_id === data.person_id,
       });
       // Invalidate condition-related queries (record info like title/date may have changed)
       queryClient.invalidateQueries({
@@ -322,9 +314,7 @@ async function hardDeleteRecord(id: string): Promise<void> {
   if (record) {
     // Delete all files in the record's storage folder
     const folderPath = `${record.person_id}/${id}`;
-    const { data: files } = await supabase.storage
-      .from("medical-attachments")
-      .list(folderPath);
+    const { data: files } = await supabase.storage.from("medical-attachments").list(folderPath);
 
     if (files && files.length > 0) {
       const filePaths = files.map((f) => `${folderPath}/${f.name}`);
@@ -333,10 +323,7 @@ async function hardDeleteRecord(id: string): Promise<void> {
   }
 
   // Then delete the record (attachments cascade delete)
-  const { error } = await supabase
-    .from("medical_records")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("medical_records").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);
@@ -376,9 +363,7 @@ interface IngestRecordResponse {
   error?: string;
 }
 
-async function ingestRecord({
-  recordId,
-}: IngestRecordInput): Promise<IngestRecordResponse> {
+async function ingestRecord({ recordId }: IngestRecordInput): Promise<IngestRecordResponse> {
   const supabase = createClient();
 
   // Get current session for auth header
@@ -411,7 +396,7 @@ async function ingestRecord({
   } catch {
     // Network error - Edge Functions might not be running
     throw new Error(
-      "Cannot connect to Edge Functions. Make sure 'supabase functions serve' is running."
+      "Cannot connect to Edge Functions. Make sure 'supabase functions serve' is running.",
     );
   }
 
@@ -419,7 +404,7 @@ async function ingestRecord({
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `Edge Function error (${response.status}): ${errorText || response.statusText}`
+      `Edge Function error (${response.status}): ${errorText || response.statusText}`,
     );
   }
 

@@ -34,12 +34,7 @@ interface LogIntakeDialogProps {
   onSubmit: (input: LogIntakeDialogSubmitInput) => Promise<void>;
 }
 
-export function LogIntakeDialog({
-  open,
-  onOpenChange,
-  regimen,
-  onSubmit,
-}: LogIntakeDialogProps) {
+export function LogIntakeDialog({ open, onOpenChange, regimen, onSubmit }: LogIntakeDialogProps) {
   const t = useTranslations();
   const defaultAmount = regimen ? Math.max(1, getPlannedIntakeAmount(regimen.dose_definition)) : 1;
   const [amount, setAmount] = useState(() => defaultAmount);
@@ -86,9 +81,7 @@ export function LogIntakeDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t("medications.logIntake")}</DialogTitle>
-          <DialogDescription>
-            {regimen?.custom_name}
-          </DialogDescription>
+          <DialogDescription>{regimen?.custom_name}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="flex items-center gap-2">
@@ -138,11 +131,7 @@ export function LogIntakeDialog({
             />
           </div>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => handleOpenChange(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={isPending}>

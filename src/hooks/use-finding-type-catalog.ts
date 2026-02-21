@@ -2,11 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import type {
-  FindingTypeCatalog,
-  CreateFindingTypeInput,
-  UpdateFindingTypeInput,
-} from "@/types";
+import type { FindingTypeCatalog, CreateFindingTypeInput, UpdateFindingTypeInput } from "@/types";
 
 // ============================================================================
 // FETCH ALL FINDING TYPES
@@ -37,9 +33,7 @@ export function useFindingTypeCatalog() {
 // ============================================================================
 // CREATE FINDING TYPE
 // ============================================================================
-async function createFindingType(
-  input: CreateFindingTypeInput
-): Promise<FindingTypeCatalog> {
+async function createFindingType(input: CreateFindingTypeInput): Promise<FindingTypeCatalog> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -116,10 +110,7 @@ export function useUpdateFindingType() {
 async function deleteFindingType(id: string): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("finding_type_catalog")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("finding_type_catalog").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);

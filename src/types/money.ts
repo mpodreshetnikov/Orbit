@@ -18,12 +18,7 @@ export type MoneyLineStatus = "final" | "returned" | "cancelled";
 
 export type MoneyAssignmentMethod = "import" | "rule" | "llm" | "manual";
 
-export const MONEY_ACCOUNT_KINDS: MoneyAccountKind[] = [
-  "card",
-  "debit",
-  "credit",
-  "cash",
-];
+export const MONEY_ACCOUNT_KINDS: MoneyAccountKind[] = ["card", "debit", "credit", "cash"];
 
 export const MONEY_TRANSACTION_TYPES: MoneyTransactionType[] = [
   "expense",
@@ -40,11 +35,7 @@ export const MONEY_TRANSACTION_STATUSES: MoneyTransactionStatus[] = [
   "cancelled",
 ];
 
-export const MONEY_LINE_STATUSES: MoneyLineStatus[] = [
-  "final",
-  "returned",
-  "cancelled",
-];
+export const MONEY_LINE_STATUSES: MoneyLineStatus[] = ["final", "returned", "cancelled"];
 
 export const MONEY_ASSIGNMENT_METHODS: MoneyAssignmentMethod[] = [
   "import",

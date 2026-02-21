@@ -59,7 +59,8 @@ export function useEnsurePushSubscription(): void {
       const permission = await ensureNotificationPermission();
       if (cancelled || permission !== "granted") return;
 
-      let reg: ServiceWorkerRegistration | null | undefined = await navigator.serviceWorker.getRegistration();
+      let reg: ServiceWorkerRegistration | null | undefined =
+        await navigator.serviceWorker.getRegistration();
       if (!reg) reg = await registerServiceWorker();
       if (!reg || cancelled) return;
 

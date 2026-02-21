@@ -24,8 +24,8 @@ function FindingsContent() {
   const { activeFindings, resolvedFindings } = useMemo(() => {
     if (!findings) return { activeFindings: [], resolvedFindings: [] };
     return {
-      activeFindings: findings.filter(f => !f.is_resolved),
-      resolvedFindings: findings.filter(f => f.is_resolved),
+      activeFindings: findings.filter((f) => !f.is_resolved),
+      resolvedFindings: findings.filter((f) => f.is_resolved),
     };
   }, [findings]);
 
@@ -38,7 +38,9 @@ function FindingsContent() {
   }
 
   const renderFindingsGrid = (items: FindingSummary[], isResolved = false) => (
-    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0 ${isResolved ? "opacity-60" : ""}`}>
+    <div
+      className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0 ${isResolved ? "opacity-60" : ""}`}
+    >
       {items.map((finding, index) => {
         const key = `${finding.finding_code || finding.finding_type_text}-${finding.site_code || finding.body_site_text || "none"}-${index}`;
         return (
@@ -68,16 +70,14 @@ function FindingsContent() {
             const key = `${finding.finding_code || finding.finding_type_text}-${finding.site_code || finding.body_site_text || "none"}-${index}`;
             const findingName = finding.catalog_finding_name_ru || finding.finding_type_text;
             const siteName = finding.catalog_site_name_ru || finding.body_site_text || "-";
-            
+
             return (
               <tr key={key} className="border-b hover:bg-muted/30">
                 <td className="p-3">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{findingName}</span>
                     {finding.finding_code && (
-                      <code className="text-xs text-muted-foreground">
-                        {finding.finding_code}
-                      </code>
+                      <code className="text-xs text-muted-foreground">{finding.finding_code}</code>
                     )}
                     {isResolved && (
                       <Badge variant="secondary" className="text-xs">
@@ -89,14 +89,15 @@ function FindingsContent() {
                 </td>
                 <td className="p-3">{siteName}</td>
                 <td className="p-3">
-                  {finding.latest_size_mm !== null ? `${finding.latest_size_mm} ${t("findings.mm")}` : "-"}
+                  {finding.latest_size_mm !== null
+                    ? `${finding.latest_size_mm} ${t("findings.mm")}`
+                    : "-"}
                 </td>
                 <td className="p-3">{t(`findings.severityOptions.${finding.latest_severity}`)}</td>
                 <td className="p-3">
-                  {finding.latest_laterality !== "none" 
+                  {finding.latest_laterality !== "none"
                     ? t(`findings.lateralityOptions.${finding.latest_laterality}`)
-                    : "-"
-                  }
+                    : "-"}
                 </td>
                 <td className="p-3">{finding.occurrence_count}</td>
               </tr>
@@ -158,11 +159,12 @@ function FindingsContent() {
           {/* Active Findings */}
           {activeFindings.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold">{t("findings.activeSection")} ({activeFindings.length})</h2>
-              {viewMode === "cards" 
+              <h2 className="text-lg font-semibold">
+                {t("findings.activeSection")} ({activeFindings.length})
+              </h2>
+              {viewMode === "cards"
                 ? renderFindingsGrid(activeFindings)
-                : renderFindingsTable(activeFindings)
-              }
+                : renderFindingsTable(activeFindings)}
             </div>
           )}
 
@@ -173,10 +175,9 @@ function FindingsContent() {
                 <CheckCircle2 className="h-5 w-5 text-green-500" />
                 {t("findings.resolvedSection")} ({resolvedFindings.length})
               </h2>
-              {viewMode === "cards" 
+              {viewMode === "cards"
                 ? renderFindingsGrid(resolvedFindings, true)
-                : renderFindingsTable(resolvedFindings, true)
-              }
+                : renderFindingsTable(resolvedFindings, true)}
             </div>
           )}
 

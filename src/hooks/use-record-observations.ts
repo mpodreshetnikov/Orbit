@@ -12,9 +12,7 @@ import type {
 // ============================================================================
 // FETCH OBSERVATIONS FOR A RECORD (with catalog details)
 // ============================================================================
-async function fetchRecordObservations(
-  recordId: string
-): Promise<RecordObservationWithCatalog[]> {
+async function fetchRecordObservations(recordId: string): Promise<RecordObservationWithCatalog[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase.rpc("get_record_observations", {
@@ -39,9 +37,7 @@ export function useRecordObservations(recordId: string | null) {
 // ============================================================================
 // CREATE OBSERVATION
 // ============================================================================
-async function createObservation(
-  input: CreateRecordObservationInput
-): Promise<RecordObservation> {
+async function createObservation(input: CreateRecordObservationInput): Promise<RecordObservation> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -74,16 +70,13 @@ export function useCreateRecordObservation() {
 // CREATE MULTIPLE OBSERVATIONS (batch insert)
 // ============================================================================
 async function createObservations(
-  inputs: CreateRecordObservationInput[]
+  inputs: CreateRecordObservationInput[],
 ): Promise<RecordObservation[]> {
   if (inputs.length === 0) return [];
 
   const supabase = createClient();
 
-  const { data, error } = await supabase
-    .from("record_observations")
-    .insert(inputs)
-    .select();
+  const { data, error } = await supabase.from("record_observations").insert(inputs).select();
 
   if (error) {
     throw new Error(error.message);
@@ -149,18 +142,10 @@ export function useUpdateRecordObservation() {
 // ============================================================================
 // DELETE OBSERVATION
 // ============================================================================
-async function deleteObservation({
-  id,
-}: {
-  id: string;
-  recordId: string;
-}): Promise<void> {
+async function deleteObservation({ id }: { id: string; recordId: string }): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("record_observations")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("record_observations").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);
@@ -186,10 +171,7 @@ export function useDeleteRecordObservation() {
 async function deleteAllObservations(recordId: string): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("record_observations")
-    .delete()
-    .eq("record_id", recordId);
+  const { error } = await supabase.from("record_observations").delete().eq("record_id", recordId);
 
   if (error) {
     throw new Error(error.message);

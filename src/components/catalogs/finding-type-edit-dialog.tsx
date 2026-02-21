@@ -87,11 +87,11 @@ export function FindingTypeEditDialog({
   };
 
   const removeSynonymRu = (syn: string) => {
-    setSynonymsRu(synonymsRu.filter(s => s !== syn));
+    setSynonymsRu(synonymsRu.filter((s) => s !== syn));
   };
 
   const removeSynonymEn = (syn: string) => {
-    setSynonymsEn(synonymsEn.filter(s => s !== syn));
+    setSynonymsEn(synonymsEn.filter((s) => s !== syn));
   };
 
   const handleSave = async () => {
@@ -125,9 +125,7 @@ export function FindingTypeEditDialog({
           <DialogTitle>
             {isNew ? t("catalogs.addFindingType") : t("catalogs.editFindingType")}
           </DialogTitle>
-          <DialogDescription>
-            {t("catalogs.findingTypeDialogDescription")}
-          </DialogDescription>
+          <DialogDescription>{t("catalogs.findingTypeDialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">

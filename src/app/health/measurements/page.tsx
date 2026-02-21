@@ -16,11 +16,7 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-} from "recharts";
+import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,24 +32,22 @@ import { AddMeasurementDialog } from "@/components/measurements/add-measurement-
 const MINI_CHART_WIDTH = 64;
 const MINI_CHART_HEIGHT = 32;
 
-function MiniChart({ 
-  data,
-}: { 
-  data: { value: number; date: string }[];
-}) {
-  const chartData = data.map(d => ({ value: d.value }));
+function MiniChart({ data }: { data: { value: number; date: string }[] }) {
+  const chartData = data.map((d) => ({ value: d.value }));
 
   if (chartData.length < 2) {
-    return <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }} />;
+    return (
+      <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }} />
+    );
   }
 
   return (
     <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }}>
       <ResponsiveContainer width={MINI_CHART_WIDTH} height={MINI_CHART_HEIGHT}>
         <LineChart data={chartData}>
-          <Line 
-            type="monotone" 
-            dataKey="value" 
+          <Line
+            type="monotone"
+            dataKey="value"
             stroke="hsl(var(--primary))"
             strokeWidth={1.5}
             dot={false}
@@ -86,19 +80,28 @@ function TrendIndicator({ history }: { history: { value: number }[] }) {
 }
 
 // Measurement card component
-function MeasurementCard({ measurement, locale }: { measurement: MeasurementSummary; locale: string }) {
+function MeasurementCard({
+  measurement,
+  locale,
+}: {
+  measurement: MeasurementSummary;
+  locale: string;
+}) {
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
   const displayName = locale === "ru" ? measurement.name_ru : measurement.name_en;
   const displayUnit = locale === "ru" ? measurement.unit_ru : measurement.unit_en;
-  
-  const chartData = measurement.history.map(h => ({
+
+  const chartData = measurement.history.map((h) => ({
     value: h.value,
     date: h.measured_at,
   }));
 
   return (
-    <Link href={`/health/measurements/${encodeURIComponent(measurement.code)}`} className="tap-target block">
+    <Link
+      href={`/health/measurements/${encodeURIComponent(measurement.code)}`}
+      className="tap-target block"
+    >
       <Card className="hover:shadow-md transition-shadow cursor-pointer">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
@@ -115,9 +118,7 @@ function MeasurementCard({ measurement, locale }: { measurement: MeasurementSumm
             <div>
               <div className="flex items-baseline gap-1">
                 <span className="text-xl sm:text-2xl font-bold">
-                  {measurement.latest_value.toFixed(
-                    measurement.latest_value % 1 === 0 ? 0 : 1
-                  )}
+                  {measurement.latest_value.toFixed(measurement.latest_value % 1 === 0 ? 0 : 1)}
                 </span>
                 {displayUnit && (
                   <span className="text-xs sm:text-sm text-muted-foreground">{displayUnit}</span>
@@ -141,7 +142,13 @@ function MeasurementCard({ measurement, locale }: { measurement: MeasurementSumm
 }
 
 // Table view component
-function MeasurementsTable({ measurements, locale }: { measurements: MeasurementSummary[]; locale: string }) {
+function MeasurementsTable({
+  measurements,
+  locale,
+}: {
+  measurements: MeasurementSummary[];
+  locale: string;
+}) {
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
 
@@ -182,11 +189,7 @@ function MeasurementsTable({ measurements, locale }: { measurements: Measurement
   }, [measurements, locale]);
 
   if (tableData.length === 0) {
-    return (
-      <div className="text-center py-8 text-muted-foreground">
-        {t("measurements.noData")}
-      </div>
-    );
+    return <div className="text-center py-8 text-muted-foreground">{t("measurements.noData")}</div>;
   }
 
   return (
@@ -209,7 +212,7 @@ function MeasurementsTable({ measurements, locale }: { measurements: Measurement
                   {format(new Date(row.date), "dd.MM.yyyy HH:mm", { locale: dateLocale })}
                 </td>
                 <td className="p-3">
-                  <Link 
+                  <Link
                     href={`/health/measurements/${encodeURIComponent(row.code)}`}
                     className="hover:underline"
                   >
@@ -219,9 +222,7 @@ function MeasurementsTable({ measurements, locale }: { measurements: Measurement
                 <td className="p-3 text-right font-mono">
                   {row.value.toFixed(row.value % 1 === 0 ? 0 : 1)}
                 </td>
-                <td className="p-3 text-muted-foreground">
-                  {row.unit || "—"}
-                </td>
+                <td className="p-3 text-muted-foreground">{row.unit || "—"}</td>
                 <td className="p-3">
                   <Badge variant="outline" className="text-xs">
                     {t(`measurements.categories.${row.category}`)}
@@ -259,10 +260,11 @@ export default function MeasurementsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data: measurements, isLoading, error } = usePersonMeasurements(
-    selectedPersonId,
-    debouncedSearch
-  );
+  const {
+    data: measurements,
+    isLoading,
+    error,
+  } = usePersonMeasurements(selectedPersonId, debouncedSearch);
 
   // Group measurements by category for card view
   const groupedMeasurements = useMemo((): Record<MeasurementCategory, MeasurementSummary[]> => {
@@ -272,7 +274,7 @@ export default function MeasurementsPage() {
       limbs: [],
       vital: [],
     };
-    
+
     if (!measurements) return groups;
 
     for (const m of measurements) {
@@ -370,14 +372,12 @@ export default function MeasurementsPage() {
                 <CardContent className="py-12 text-center">
                   <Ruler className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                   <p className="text-muted-foreground">
-                    {search 
-                      ? t("measurements.noSearchResults")
-                      : t("measurements.noData")}
+                    {search ? t("measurements.noSearchResults") : t("measurements.noData")}
                   </p>
                   {!search && (
-                    <Button 
-                      onClick={() => setAddDialogOpen(true)} 
-                      variant="outline" 
+                    <Button
+                      onClick={() => setAddDialogOpen(true)}
+                      variant="outline"
                       className="mt-4"
                     >
                       <Plus className="h-4 w-4 mr-2" />
@@ -390,7 +390,8 @@ export default function MeasurementsPage() {
               <div className="space-y-8">
                 {Object.entries(groupedMeasurements).map(([category, items]) => {
                   if (items.length === 0) return null;
-                  const categoryLabel = MEASUREMENT_CATEGORY_LABELS[category as MeasurementCategory];
+                  const categoryLabel =
+                    MEASUREMENT_CATEGORY_LABELS[category as MeasurementCategory];
                   return (
                     <div key={category}>
                       <h2 className="text-lg font-semibold mb-4">
@@ -413,8 +414,8 @@ export default function MeasurementsPage() {
       </div>
 
       {/* Add Measurement Dialog */}
-      <AddMeasurementDialog 
-        open={addDialogOpen} 
+      <AddMeasurementDialog
+        open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
         personId={selectedPersonId}
       />

@@ -19,11 +19,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const idsToMark = Array.isArray(body.ids) && body.ids.length > 0
-    ? body.ids.filter((id): id is string => typeof id === "string" && id.length > 0)
-    : typeof body.id === "string" && body.id
-      ? [body.id]
-      : null;
+  const idsToMark =
+    Array.isArray(body.ids) && body.ids.length > 0
+      ? body.ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : typeof body.id === "string" && body.id
+        ? [body.id]
+        : null;
 
   if (!idsToMark || idsToMark.length === 0) {
     return NextResponse.json({ error: "Missing id or ids" }, { status: 400 });

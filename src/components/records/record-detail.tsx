@@ -109,10 +109,14 @@ import {
   usePersons,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
-import { ConditionRecordRow, ConditionEditDialog, type ConditionComparison } from "@/components/conditions";
-import type { 
-  RecordType, 
-  ObservationStatus, 
+import {
+  ConditionRecordRow,
+  ConditionEditDialog,
+  type ConditionComparison,
+} from "@/components/conditions";
+import type {
+  RecordType,
+  ObservationStatus,
   RecordObservationWithCatalog,
   RecordFindingWithCatalog,
   FindingSeverity,
@@ -149,7 +153,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const { data: conditionRecords } = useRecordConditions(recordId);
   const { data: personConditions } = usePersonConditions(record?.person_id ?? null);
   const { data: personFindingHistory } = usePersonFindingHistory(record?.person_id ?? null);
-  const { data: personConditionRecordHistory } = usePersonConditionRecordHistory(record?.person_id ?? null);
+  const { data: personConditionRecordHistory } = usePersonConditionRecordHistory(
+    record?.person_id ?? null,
+  );
   const { data: personObservationHistory } = usePersonObservationHistory(record?.person_id ?? null);
   const { retryOcr } = useBackgroundOCR();
   const { data: persons } = usePersons();
@@ -158,19 +164,21 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showOcrText, setShowOcrText] = useState(false);
-  
+
   // Observation editing state
-  const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(null);
+  const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(
+    null,
+  );
   const [isAddingObservation, setIsAddingObservation] = useState(false);
-  
+
   // Finding editing state
   const [editingFinding, setEditingFinding] = useState<RecordFindingWithCatalog | null>(null);
   const [isAddingFinding, setIsAddingFinding] = useState(false);
-  
+
   // Condition editing state
   const [editingCondition, setEditingCondition] = useState<ConditionRecordWithDetails | null>(null);
   const [isAddingCondition, setIsAddingCondition] = useState(false);
-  
+
   // Edit form state
   const [editForm, setEditForm] = useState({
     title: "",
@@ -180,7 +188,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     ocr_text: "",
     llm_keywords: [] as string[],
   });
-  
+
   // Tag input state
   const [newTag, setNewTag] = useState("");
 
@@ -198,30 +206,37 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const deleteConditionRecordMutation = useDeleteConditionRecord();
   const createConditionWithRecordMutation = useCreateConditionWithRecord();
   const linkConditionToRecordMutation = useLinkConditionToRecord();
-  
-  const isObsProcessing = updateObsMutation.isPending || deleteObsMutation.isPending || createObsMutation.isPending;
-  const isFindingProcessing = updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending;
-  const isConditionProcessing = updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
-    createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending;
-  
+
+  const isObsProcessing =
+    updateObsMutation.isPending || deleteObsMutation.isPending || createObsMutation.isPending;
+  const isFindingProcessing =
+    updateFindingMutation.isPending ||
+    deleteFindingMutation.isPending ||
+    createFindingMutation.isPending;
+  const isConditionProcessing =
+    updateConditionRecordMutation.isPending ||
+    deleteConditionRecordMutation.isPending ||
+    createConditionWithRecordMutation.isPending ||
+    linkConditionToRecordMutation.isPending;
+
   // Helper function to compute comparison data for a finding
   // Compares the current finding with previous occurrences from the person's history
   const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null => {
     // Wait for record to load, but proceed even if history is empty (means everything is new)
     if (!record) return null;
     if (personFindingHistory === undefined) return null; // Still loading
-    
+
     // Build the key for matching - same logic as in use-finding-history.ts
     const findingKey = finding.finding_code || finding.finding_type_text.toLowerCase().trim();
-    const siteKey = finding.site_code || (finding.body_site_text?.toLowerCase().trim() || "unknown");
-    
+    const siteKey = finding.site_code || finding.body_site_text?.toLowerCase().trim() || "unknown";
+
     // Find matching history entry
-    const historyMatch = personFindingHistory.find(h => {
+    const historyMatch = personFindingHistory.find((h) => {
       const historyFindingKey = h.finding_code || h.finding_type_text.toLowerCase().trim();
-      const historySiteKey = h.site_code || (h.body_site_text?.toLowerCase().trim() || "unknown");
+      const historySiteKey = h.site_code || h.body_site_text?.toLowerCase().trim() || "unknown";
       return historyFindingKey === findingKey && historySiteKey === siteKey;
     });
-    
+
     if (!historyMatch) {
       // This is a completely new finding type+site combination
       return {
@@ -232,13 +247,11 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         previousDate: null,
       };
     }
-    
+
     // Filter out the current finding from history to find truly previous occurrences
     // An occurrence is "previous" if it's from a different record (not the current one)
-    const previousOccurrences = historyMatch.history.filter(
-      h => h.record_id !== recordId
-    );
-    
+    const previousOccurrences = historyMatch.history.filter((h) => h.record_id !== recordId);
+
     if (previousOccurrences.length === 0) {
       // This is the first occurrence of this finding (only this record has it)
       return {
@@ -249,11 +262,11 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         previousDate: null,
       };
     }
-    
+
     // Sort by date to get the most recent previous occurrence
     // History is already sorted newest first, so the first item after filtering is the most recent previous
     const mostRecentPrevious = previousOccurrences[0];
-    
+
     return {
       isNew: false,
       previousOccurrences: previousOccurrences.length,
@@ -263,7 +276,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     };
   };
 
-  const getComparisonForCondition = (cr: ConditionRecordWithDetails): ConditionComparison | null => {
+  const getComparisonForCondition = (
+    cr: ConditionRecordWithDetails,
+  ): ConditionComparison | null => {
     if (!record || personConditionRecordHistory === undefined) return null;
     const recordIds = personConditionRecordHistory[cr.condition_id] ?? [];
     const previousOccurrences = recordIds.filter((id) => id !== recordId).length;
@@ -273,15 +288,17 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     };
   };
 
-  const getComparisonForObservation = (obs: RecordObservationWithCatalog): { 
-    isNew: boolean; 
-    previousOccurrences: number; 
+  const getComparisonForObservation = (
+    obs: RecordObservationWithCatalog,
+  ): {
+    isNew: boolean;
+    previousOccurrences: number;
     previousValue: number | null;
     previousUnit: string | null;
   } | null => {
     if (!record || personObservationHistory === undefined) return null;
     const obsKey = obs.obs_code || obs.obs_name.toLowerCase().trim();
-    const historySummary = personObservationHistory.find(h => {
+    const historySummary = personObservationHistory.find((h) => {
       const historyKey = h.obs_code || h.obs_name.toLowerCase().trim();
       return historyKey === obsKey;
     });
@@ -290,7 +307,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     }
     // Filter out current record and sort by date descending to get most recent previous
     const previousHistory = historySummary.history
-      .filter(h => h.record_id !== recordId)
+      .filter((h) => h.record_id !== recordId)
       .sort((a, b) => {
         const dateA = new Date(a.record_date || a.created_at).getTime();
         const dateB = new Date(b.record_date || b.created_at).getTime();
@@ -544,7 +561,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         onSuccess: () => {
           setIsEditing(false);
         },
-      }
+      },
     );
   };
 
@@ -610,7 +627,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         onSuccess: () => {
           router.push("/health");
         },
-      }
+      },
     );
   };
 
@@ -665,9 +682,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           <p className="text-sm text-muted-foreground">
             {record.ocr_error || t("processing.failed")}
           </p>
-          <Button onClick={handleRetryOcr}>
-            {t("processing.retryOcr")}
-          </Button>
+          <Button onClick={handleRetryOcr}>{t("processing.retryOcr")}</Button>
         </div>
       </div>
     );
@@ -686,22 +701,16 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
               {record.title || t("processing.processing")}
             </h1>
             <p className="text-muted-foreground">
-              {record.status === "ocr_processing" 
-                ? t("processing.ocrInProgress") 
+              {record.status === "ocr_processing"
+                ? t("processing.ocrInProgress")
                 : t("processing.structureInProgress")}
             </p>
           </div>
         </div>
         <div className="flex flex-col items-center justify-center py-16">
           <Loader2 className="h-16 w-16 animate-spin text-primary" />
-          <p className="mt-4 text-sm text-muted-foreground">
-            {t("processing.pleaseWait")}
-          </p>
-          <Button 
-            variant="outline" 
-            className="mt-6"
-            onClick={() => refetch()}
-          >
+          <p className="mt-4 text-sm text-muted-foreground">{t("processing.pleaseWait")}</p>
+          <Button variant="outline" className="mt-6" onClick={() => refetch()}>
             {t("common.refresh")}
           </Button>
         </div>
@@ -734,7 +743,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     const handleBackToOcr = () => {
       updateMutation.mutate(
         { id: recordId, updates: { status: "ocr_review" } },
-        { onSuccess: () => refetch() }
+        { onSuccess: () => refetch() },
       );
     };
 
@@ -745,8 +754,12 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <Badge variant="secondary" className="mb-1">{t("records.status.structureReview")}</Badge>
-            <h1 className="text-2xl font-bold tracking-tight">{t("records.structure.reviewTitle")}</h1>
+            <Badge variant="secondary" className="mb-1">
+              {t("records.status.structureReview")}
+            </Badge>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {t("records.structure.reviewTitle")}
+            </h1>
           </div>
         </div>
         <StructureReviewStep
@@ -795,12 +808,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                   {t(`records.types.${record.record_type}`)}
                 </Badge>
               )}
-              {isDraft && (
-                <Badge variant="secondary">{t("records.status.draft")}</Badge>
-              )}
-              {isRemoved && (
-                <Badge variant="destructive">{t("records.status.removed")}</Badge>
-              )}
+              {isDraft && <Badge variant="secondary">{t("records.status.draft")}</Badge>}
+              {isRemoved && <Badge variant="destructive">{t("records.status.removed")}</Badge>}
             </div>
             {isEditing ? (
               <Input
@@ -908,7 +917,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             <Clock className="h-4 w-4" />
             <span>
               {t("records.detail.updatedAt")}:{" "}
-              {format(new Date(record.updated_at), "MMM d, yyyy 'at' HH:mm", { locale: dateLocale })}
+              {format(new Date(record.updated_at), "MMM d, yyyy 'at' HH:mm", {
+                locale: dateLocale,
+              })}
             </span>
           </div>
         )}
@@ -986,9 +997,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                   {t("records.detail.observations")} ({observations?.length || 0})
                 </h2>
                 {!isRemoved && (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleAddObservation}
                     disabled={isObsProcessing}
                     className="w-full sm:w-auto shrink-0"
@@ -1003,8 +1014,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
               {observations && observations.length > 0 ? (
                 <div className="space-y-2">
                   {observations.map((obs) => (
-                    <ObservationRowEditable 
-                      key={obs.id} 
+                    <ObservationRowEditable
+                      key={obs.id}
                       observation={obs}
                       comparison={getComparisonForObservation(obs)}
                       onEdit={() => handleEditObservation(obs)}
@@ -1023,7 +1034,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             </CardContent>
           </Card>
           <Separator />
-          
+
           {/* Edit/Add Observation Dialog */}
           <ObservationEditDialog
             open={!!editingObservation || isAddingObservation}
@@ -1047,9 +1058,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                   {t("findings.title")} ({findings?.length || 0})
                 </h2>
                 {!isRemoved && (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleAddFinding}
                     disabled={isFindingProcessing}
                     className="w-full sm:w-auto shrink-0"
@@ -1085,7 +1096,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             </CardContent>
           </Card>
           <Separator />
-          
+
           {/* Edit/Add Finding Dialog */}
           <FindingEditDialog
             open={!!editingFinding || isAddingFinding}
@@ -1110,9 +1121,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                   {t("conditions.title")} ({conditionRecords?.length || 0})
                 </h2>
                 {!isRemoved && (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleAddCondition}
                     disabled={isConditionProcessing}
                     className="w-full sm:w-auto shrink-0"
@@ -1148,7 +1159,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
             </CardContent>
           </Card>
           <Separator />
-          
+
           {/* Edit/Add Condition Dialog */}
           <ConditionEditDialog
             open={!!editingCondition || isAddingCondition}
@@ -1198,7 +1209,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <FileText className="h-4 w-4" />
                 <span>
-                  {t("records.detail.ocrText")} 
+                  {t("records.detail.ocrText")}
                   {record.ocr_text && ` (${record.ocr_text.length} ${t("records.wizard.chars")})`}
                 </span>
               </div>
@@ -1208,8 +1219,8 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               )}
             </Button>
-            {showOcrText && (
-              isEditing ? (
+            {showOcrText &&
+              (isEditing ? (
                 <Textarea
                   value={editForm.ocr_text}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, ocr_text: e.target.value }))}
@@ -1220,8 +1231,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                 <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-black/5 p-3 text-xs text-muted-foreground dark:bg-white/5">
                   {record.ocr_text || t("records.detail.noOcrText")}
                 </pre>
-              )
-            )}
+              ))}
           </div>
           <Separator />
         </>
@@ -1240,9 +1250,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("records.confirm.removeTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("records.confirm.removeMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("records.confirm.removeMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
@@ -1261,9 +1269,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("records.confirm.deleteTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("records.confirm.deleteMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("records.confirm.deleteMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
@@ -1285,12 +1291,30 @@ function ObservationStatusBadge({ status }: { status: ObservationStatus | null }
   if (!status || status === "unknown") return null;
 
   const config: Record<ObservationStatus, { color: string; icon: React.ReactNode }> = {
-    normal: { color: "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20", icon: null },
-    low: { color: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20", icon: <ArrowDown className="h-3 w-3" /> },
-    high: { color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20", icon: <ArrowUp className="h-3 w-3" /> },
-    critical_low: { color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20", icon: <AlertTriangle className="h-3 w-3" /> },
-    critical_high: { color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20", icon: <AlertTriangle className="h-3 w-3" /> },
-    unknown: { color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20", icon: null },
+    normal: {
+      color: "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20",
+      icon: null,
+    },
+    low: {
+      color: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20",
+      icon: <ArrowDown className="h-3 w-3" />,
+    },
+    high: {
+      color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20",
+      icon: <ArrowUp className="h-3 w-3" />,
+    },
+    critical_low: {
+      color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20",
+      icon: <AlertTriangle className="h-3 w-3" />,
+    },
+    critical_high: {
+      color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20",
+      icon: <AlertTriangle className="h-3 w-3" />,
+    },
+    unknown: {
+      color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20",
+      icon: null,
+    },
   };
 
   const { color, icon } = config[status] || config.unknown;
@@ -1304,8 +1328,8 @@ function ObservationStatusBadge({ status }: { status: ObservationStatus | null }
 }
 
 // Type for observation comparison
-type ObservationComparisonData = { 
-  isNew: boolean; 
+type ObservationComparisonData = {
+  isNew: boolean;
   previousOccurrences: number;
   previousValue: number | null;
   previousUnit: string | null;
@@ -1313,16 +1337,16 @@ type ObservationComparisonData = {
 
 // Observation value change indicator
 // Uses "closer to middle of reference range is better" logic
-function ObservationValueChangeIndicator({ 
-  currentValue, 
+function ObservationValueChangeIndicator({
+  currentValue,
   previousValue,
   unit,
   refLow,
   refHigh,
   defaultRefLow,
   defaultRefHigh,
-}: { 
-  currentValue: number | null; 
+}: {
+  currentValue: number | null;
   previousValue: number | null;
   unit?: string | null;
   refLow?: number | null;
@@ -1331,27 +1355,30 @@ function ObservationValueChangeIndicator({
   defaultRefHigh?: number | null;
 }) {
   const t = useTranslations();
-  
+
   if (currentValue === null || previousValue === null) return null;
-  
+
   // Round to 2 decimal places to avoid floating point issues
   const change = Math.round((currentValue - previousValue) * 100) / 100;
-  
+
   if (change === 0) {
     return (
       <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-        <span>= {previousValue}{unit ? ` ${unit}` : ""}</span>
+        <span>
+          = {previousValue}
+          {unit ? ` ${unit}` : ""}
+        </span>
       </span>
     );
   }
-  
+
   const isIncrease = change > 0;
   const changeText = isIncrease ? `+${change}` : `${change}`;
-  
+
   // Use specific ref range if available, otherwise use defaults
   const effectiveRefLow = refLow ?? defaultRefLow;
   const effectiveRefHigh = refHigh ?? defaultRefHigh;
-  
+
   // Determine if change is an improvement based on distance from reference range middle
   let isImprovement: boolean | null = null;
   if (effectiveRefLow != null && effectiveRefHigh != null) {
@@ -1360,7 +1387,7 @@ function ObservationValueChangeIndicator({
     const currDistance = Math.abs(currentValue - middle);
     isImprovement = currDistance < prevDistance;
   }
-  
+
   // Determine color: green = improvement, red = worsening, gray = unknown
   let colorClass = "text-muted-foreground"; // fallback if no ref range
   if (isImprovement === true) {
@@ -1368,16 +1395,14 @@ function ObservationValueChangeIndicator({
   } else if (isImprovement === false) {
     colorClass = "text-red-600 dark:text-red-400";
   }
-  
+
   return (
     <span className={cn("flex items-center gap-0.5 text-xs", colorClass)}>
-      {isIncrease ? (
-        <TrendingUp className="h-3 w-3" />
-      ) : (
-        <TrendingDown className="h-3 w-3" />
-      )}
+      {isIncrease ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
       <span>{changeText}</span>
-      <span className="text-muted-foreground/70">({t("observations.comparison.was")} {previousValue})</span>
+      <span className="text-muted-foreground/70">
+        ({t("observations.comparison.was")} {previousValue})
+      </span>
     </span>
   );
 }
@@ -1387,14 +1412,21 @@ function ObservationComparisonBadge({ comparison }: { comparison: ObservationCom
   const t = useTranslations();
   if (comparison.isNew) {
     return (
-      <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1">
+      <Badge
+        variant="outline"
+        className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+      >
         <CircleDot className="h-3 w-3" />
         {t("observations.comparison.new")}
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1" title={t("observations.comparison.knownTitle", { count: comparison.previousOccurrences })}>
+    <Badge
+      variant="outline"
+      className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1"
+      title={t("observations.comparison.knownTitle", { count: comparison.previousOccurrences })}
+    >
       <History className="h-3 w-3" />
       {t("observations.comparison.known", { count: comparison.previousOccurrences })}
     </Badge>
@@ -1402,13 +1434,13 @@ function ObservationComparisonBadge({ comparison }: { comparison: ObservationCom
 }
 
 // Observation row component with edit/delete buttons
-function ObservationRowEditable({ 
-  observation, 
+function ObservationRowEditable({
+  observation,
   comparison,
   onEdit,
   onDelete,
-  isProcessing, 
-}: { 
+  isProcessing,
+}: {
   observation: RecordObservationWithCatalog;
   comparison?: ObservationComparisonData | null;
   onEdit: () => void;
@@ -1416,12 +1448,16 @@ function ObservationRowEditable({
   isProcessing: boolean;
 }) {
   const t = useTranslations();
-  const displayValue = observation.value_numeric !== null 
-    ? observation.value_numeric.toString() 
-    : observation.value_text || "—";
+  const displayValue =
+    observation.value_numeric !== null
+      ? observation.value_numeric.toString()
+      : observation.value_text || "—";
 
-  const isBad = observation.status === "low" || observation.status === "high" || 
-                observation.status === "critical_low" || observation.status === "critical_high";
+  const isBad =
+    observation.status === "low" ||
+    observation.status === "high" ||
+    observation.status === "critical_low" ||
+    observation.status === "critical_high";
   const isCustom = !observation.obs_code;
 
   // Format reference range display
@@ -1430,22 +1466,22 @@ function ObservationRowEditable({
   const refRangeHigh = observation.ref_range_high !== null ? observation.ref_range_high : "—";
 
   return (
-    <div className={cn(
-      "rounded-lg border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
-      isBad && "border-orange-500/30 bg-orange-500/5",
-      isCustom && !isBad && "border-dashed border-muted-foreground/40",
-      comparison?.isNew && !isBad && !isCustom && "border-amber-500/30 bg-amber-500/5"
-    )}>
+    <div
+      className={cn(
+        "rounded-lg border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
+        isBad && "border-orange-500/30 bg-orange-500/5",
+        isCustom && !isBad && "border-dashed border-muted-foreground/40",
+        comparison?.isNew && !isBad && !isCustom && "border-amber-500/30 bg-amber-500/5",
+      )}
+    >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium truncate">{observation.obs_name}</span>
           {observation.obs_code ? (
-            <span className="text-xs text-muted-foreground shrink-0">
-              ({observation.obs_code})
-            </span>
+            <span className="text-xs text-muted-foreground shrink-0">({observation.obs_code})</span>
           ) : (
-            <Badge 
-              variant="outline" 
+            <Badge
+              variant="outline"
               className="text-xs border-dashed text-muted-foreground"
               title={t("observations.addToCatalogHint")}
             >
@@ -1466,7 +1502,9 @@ function ObservationRowEditable({
         {/* Reference range */}
         {hasRefRange && (
           <div className="text-xs text-muted-foreground">
-            <span className="text-[10px] text-muted-foreground/70">({refRangeLow}–{refRangeHigh})</span>
+            <span className="text-[10px] text-muted-foreground/70">
+              ({refRangeLow}–{refRangeHigh})
+            </span>
           </div>
         )}
         {/* Value with change indicator */}
@@ -1504,18 +1542,18 @@ function ObservationRowEditable({
               </Link>
             </Button>
           )}
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Button
+            variant="ghost"
+            size="icon"
             className="h-8 w-8"
             onClick={onEdit}
             disabled={isProcessing}
           >
             <Pencil className="h-4 w-4" />
           </Button>
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Button
+            variant="ghost"
+            size="icon"
             className="h-8 w-8 text-destructive hover:text-destructive"
             onClick={onDelete}
             disabled={isProcessing}
@@ -1578,7 +1616,7 @@ function ObservationEditDialog({
       setRefRange(observation.ref_range_text || "");
       setRefRangeLow(observation.ref_range_low?.toString() || "");
       setRefRangeHigh(observation.ref_range_high?.toString() || "");
-      setStatus(observation.status as ObservationStatus || null);
+      setStatus((observation.status as ObservationStatus) || null);
       setObsCode(observation.obs_code || null);
       setCatalogSearch("");
       setIsComboboxOpen(false);
@@ -1600,14 +1638,14 @@ function ObservationEditDialog({
   const convertToCanonical = (value: number | null, unitStr: string): number | null => {
     if (value === null) return null;
     if (!currentCatalogEntry?.accepted_units) return value;
-    
+
     // Find unit config (case-insensitive)
     const unitConfig = Object.entries(currentCatalogEntry.accepted_units).find(
-      ([u]) => u.toLowerCase() === unitStr.toLowerCase()
+      ([u]) => u.toLowerCase() === unitStr.toLowerCase(),
     )?.[1] as { factor_to_canonical?: number; formula_to_canonical?: string } | undefined;
-    
+
     if (!unitConfig) return value;
-    
+
     // Apply formula if exists
     if (unitConfig.formula_to_canonical) {
       try {
@@ -1618,12 +1656,12 @@ function ObservationEditDialog({
         return value;
       }
     }
-    
+
     // Apply factor if exists
     if (unitConfig.factor_to_canonical) {
       return value * unitConfig.factor_to_canonical;
     }
-    
+
     return value;
   };
 
@@ -1635,15 +1673,15 @@ function ObservationEditDialog({
     const refLowVal = !isNaN(refLow) ? refLow : null;
     const refHighVal = !isNaN(refHigh) ? refHigh : null;
     const unitTrimmed = unit.trim();
-    
+
     // Convert values to canonical
     const valueCanonical = convertToCanonical(valueNumeric, unitTrimmed);
     const refLowCanonical = convertToCanonical(refLowVal, unitTrimmed);
     const refHighCanonical = convertToCanonical(refHighVal, unitTrimmed);
-    
+
     // Get canonical unit from catalog
     const unitCanonical = currentCatalogEntry?.canonical_unit || null;
-    
+
     onSave({
       obs_name: obsName.trim(),
       value_text: valueText.trim(),
@@ -1669,7 +1707,7 @@ function ObservationEditDialog({
       setIsComboboxOpen(false);
       return;
     }
-    const entry = catalog?.find(c => c.obs_code === code);
+    const entry = catalog?.find((c) => c.obs_code === code);
     if (entry) {
       setObsCode(code);
       setObsName(entry.name_ru);
@@ -1679,24 +1717,25 @@ function ObservationEditDialog({
     }
   };
 
-  const currentCatalogEntry = obsCode ? catalog?.find(c => c.obs_code === obsCode) : null;
-  const acceptedUnits = currentCatalogEntry?.accepted_units 
-    ? Object.keys(currentCatalogEntry.accepted_units) 
+  const currentCatalogEntry = obsCode ? catalog?.find((c) => c.obs_code === obsCode) : null;
+  const acceptedUnits = currentCatalogEntry?.accepted_units
+    ? Object.keys(currentCatalogEntry.accepted_units)
     : null;
 
-  const filteredCatalog = catalog?.filter(item => {
-    if (!catalogSearch.trim()) return true;
-    const search = catalogSearch.toLowerCase();
-    return (
-      item.obs_code.toLowerCase().includes(search) ||
-      item.name_ru.toLowerCase().includes(search) ||
-      item.name_en.toLowerCase().includes(search) ||
-      item.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
-      item.synonyms_en?.some(s => s.toLowerCase().includes(search))
-    );
-  }) || [];
+  const filteredCatalog =
+    catalog?.filter((item) => {
+      if (!catalogSearch.trim()) return true;
+      const search = catalogSearch.toLowerCase();
+      return (
+        item.obs_code.toLowerCase().includes(search) ||
+        item.name_ru.toLowerCase().includes(search) ||
+        item.name_en.toLowerCase().includes(search) ||
+        item.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
+        item.synonyms_en?.some((s) => s.toLowerCase().includes(search))
+      );
+    }) || [];
 
-  const displayValue = currentCatalogEntry 
+  const displayValue = currentCatalogEntry
     ? `${currentCatalogEntry.name_ru} (${currentCatalogEntry.obs_code})`
     : "";
 
@@ -1707,9 +1746,7 @@ function ObservationEditDialog({
           <DialogTitle>
             {isNew ? t("observations.addObservation") : t("observations.editObservation")}
           </DialogTitle>
-          <DialogDescription>
-            {t("observations.editDescription")}
-          </DialogDescription>
+          <DialogDescription>{t("observations.editDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -1754,7 +1791,9 @@ function ObservationEditDialog({
                             onSelect={() => handleCatalogSelect(null)}
                             className={obsCode === null ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`} />
+                            <Check
+                              className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`}
+                            />
                             <span className="text-muted-foreground italic">
                               {t("observations.customObservation")}
                             </span>
@@ -1766,7 +1805,9 @@ function ObservationEditDialog({
                               onSelect={() => handleCatalogSelect(item.obs_code)}
                               className={obsCode === item.obs_code ? "bg-accent" : ""}
                             >
-                              <Check className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`} />
+                              <Check
+                                className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`}
+                              />
                               <div className="flex-1 min-w-0">
                                 <div className="truncate">{item.name_ru}</div>
                                 <div className="text-xs text-muted-foreground truncate">
@@ -1813,7 +1854,10 @@ function ObservationEditDialog({
             <div className="space-y-2">
               <Label>{t("observations.unit")}</Label>
               {acceptedUnits && acceptedUnits.length > 0 ? (
-                <Select value={unit || "_none"} onValueChange={(v) => setUnit(v === "_none" ? "" : v)}>
+                <Select
+                  value={unit || "_none"}
+                  onValueChange={(v) => setUnit(v === "_none" ? "" : v)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={t("observations.selectUnit")} />
                   </SelectTrigger>
@@ -1827,11 +1871,7 @@ function ObservationEditDialog({
                   </SelectContent>
                 </Select>
               ) : (
-                <Input
-                  value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
-                  placeholder="g/L"
-                />
+                <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="g/L" />
               )}
             </div>
           </div>
@@ -1878,9 +1918,9 @@ function ObservationEditDialog({
           {/* Status */}
           <div className="space-y-2">
             <Label>{t("observations.statusLabel")}</Label>
-            <Select 
-              value={status || "_unknown"} 
-              onValueChange={(v) => setStatus(v === "_unknown" ? null : v as ObservationStatus)}
+            <Select
+              value={status || "_unknown"}
+              onValueChange={(v) => setStatus(v === "_unknown" ? null : (v as ObservationStatus))}
             >
               <SelectTrigger>
                 <SelectValue placeholder={t("observations.selectStatus")} />
@@ -1890,8 +1930,12 @@ function ObservationEditDialog({
                 <SelectItem value="normal">{t("observations.status.normal")}</SelectItem>
                 <SelectItem value="low">{t("observations.status.low")}</SelectItem>
                 <SelectItem value="high">{t("observations.status.high")}</SelectItem>
-                <SelectItem value="critical_low">{t("observations.status.critical_low")}</SelectItem>
-                <SelectItem value="critical_high">{t("observations.status.critical_high")}</SelectItem>
+                <SelectItem value="critical_low">
+                  {t("observations.status.critical_low")}
+                </SelectItem>
+                <SelectItem value="critical_high">
+                  {t("observations.status.critical_high")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

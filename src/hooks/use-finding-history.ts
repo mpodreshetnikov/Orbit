@@ -54,14 +54,15 @@ interface RawFindingRow {
 
 async function fetchPersonFindingHistory(
   personId: string,
-  search?: string
+  search?: string,
 ): Promise<FindingSummary[]> {
   const supabase = createClient();
 
   // Fetch all findings for active records of this person (history baseline)
   const { data, error } = await supabase
     .from("record_findings")
-    .select(`
+    .select(
+      `
       id,
       record_id,
       finding_type_id,
@@ -92,7 +93,8 @@ async function fetchPersonFindingHistory(
         name_ru,
         name_en
       )
-    `)
+    `,
+    )
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
     .order("created_at", { ascending: false });
@@ -106,17 +108,20 @@ async function fetchPersonFindingHistory(
   }
 
   // Group by finding_code + site_code (or finding_type_text + body_site_text for unrecognized)
-  const findingMap = new Map<string, {
-    rows: RawFindingRow[];
-    history: FindingHistoryPoint[];
-  }>();
+  const findingMap = new Map<
+    string,
+    {
+      rows: RawFindingRow[];
+      history: FindingHistoryPoint[];
+    }
+  >();
 
   for (const row of data as unknown[]) {
     const r = row as RawFindingRow;
-    
+
     // Create a unique key for grouping
     const findingKey = r.finding_code || r.finding_type_text.toLowerCase().trim();
-    const siteKey = r.site_code || (r.body_site_text?.toLowerCase().trim() || "unknown");
+    const siteKey = r.site_code || r.body_site_text?.toLowerCase().trim() || "unknown";
     const key = `${findingKey}::${siteKey}`;
 
     const historyPoint: FindingHistoryPoint = {
@@ -161,8 +166,8 @@ async function fetchPersonFindingHistory(
 
     // For size and count, fall back to earlier occurrences if latest has no data
     // This ensures we show the most recent known value, not just the latest occurrence
-    const latestWithSize = history.find(h => h.size_mm !== null);
-    const latestWithCount = history.find(h => h.count !== null);
+    const latestWithSize = history.find((h) => h.size_mm !== null);
+    const latestWithCount = history.find((h) => h.count !== null);
 
     return {
       finding_code: firstRow.finding_code,
@@ -189,7 +194,7 @@ async function fetchPersonFindingHistory(
   // Apply search filter if provided
   if (search && search.trim()) {
     const searchLower = search.toLowerCase().trim();
-    summaries = summaries.filter(s => {
+    summaries = summaries.filter((s) => {
       if (s.finding_type_text.toLowerCase().includes(searchLower)) return true;
       if (s.body_site_text?.toLowerCase().includes(searchLower)) return true;
       if (s.finding_code?.toLowerCase().includes(searchLower)) return true;
@@ -211,10 +216,10 @@ async function fetchPersonFindingHistory(
       unknown: 2,
       mild: 3,
     };
-    
+
     const severityDiff = severityOrder[a.latest_severity] - severityOrder[b.latest_severity];
     if (severityDiff !== 0) return severityDiff;
-    
+
     // Then by date (most recent first)
     const dateA = a.latest_date ? new Date(a.latest_date).getTime() : 0;
     const dateB = b.latest_date ? new Date(b.latest_date).getTime() : 0;
@@ -238,14 +243,15 @@ export function usePersonFindingHistory(personId: string | null, search?: string
 async function fetchSingleFindingHistory(
   personId: string,
   findingCode: string,
-  siteCode?: string
+  siteCode?: string,
 ): Promise<FindingSummary | null> {
   const supabase = createClient();
 
   // Build query
   let query = supabase
     .from("record_findings")
-    .select(`
+    .select(
+      `
       id,
       record_id,
       finding_type_id,
@@ -276,7 +282,8 @@ async function fetchSingleFindingHistory(
         name_ru,
         name_en
       )
-    `)
+    `,
+    )
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
     .or(`finding_code.eq.${findingCode},finding_type_text.ilike.${findingCode}`);
@@ -324,12 +331,12 @@ async function fetchSingleFindingHistory(
 
   // Find the most recent entry (first in sorted history)
   const latestHistory = history[0];
-  
+
   // For size and count, fall back to earlier occurrences if latest has no data
   // This ensures we show the most recent known value, not just the latest occurrence
-  const latestWithSize = history.find(h => h.size_mm !== null);
-  const latestWithCount = history.find(h => h.count !== null);
-  
+  const latestWithSize = history.find((h) => h.size_mm !== null);
+  const latestWithCount = history.find((h) => h.count !== null);
+
   // Get catalog info from first data row (all rows have the same catalog info)
   const firstRow = data[0] as unknown as RawFindingRow;
 
@@ -356,9 +363,9 @@ async function fetchSingleFindingHistory(
 }
 
 export function useSingleFindingHistory(
-  personId: string | null, 
+  personId: string | null,
   findingCode: string | null,
-  siteCode?: string
+  siteCode?: string,
 ) {
   return useQuery({
     queryKey: ["single-finding-history", personId, findingCode, siteCode],
@@ -399,9 +406,7 @@ async function markFindingResolved(input: MarkResolvedInput): Promise<void> {
     is_user_verified: true,
   };
 
-  const { error } = await supabase
-    .from("record_findings")
-    .insert(newFinding);
+  const { error } = await supabase.from("record_findings").insert(newFinding);
 
   if (error) {
     throw new Error(error.message);

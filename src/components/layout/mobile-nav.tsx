@@ -2,7 +2,21 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { FileText, Library, FlaskConical, Ruler, Stethoscope, HeartPulse, CalendarCheck, Sparkles, Pill, ArrowRightLeft, CreditCard, Tags, Upload } from "lucide-react";
+import {
+  FileText,
+  Library,
+  FlaskConical,
+  Ruler,
+  Stethoscope,
+  HeartPulse,
+  CalendarCheck,
+  Sparkles,
+  Pill,
+  ArrowRightLeft,
+  CreditCard,
+  Tags,
+  Upload,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -13,12 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
 import { useUIStore } from "@/stores/ui-store";
 import { getAppSection } from "@/lib/app-section";
@@ -141,24 +150,24 @@ export function MobileNav() {
               className="flex h-full items-center overflow-x-auto scrollbar-hide"
             >
               {navLinks.map((link) => {
-              const isActive = pathname === link.href;
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-0.5 py-1 text-[10px] font-medium transition-colors shrink-0",
-                    "w-[calc((100vw-4rem-var(--safe-area-inset-left)-var(--safe-area-inset-right))/5)]",
-                    isActive
-                      ? "text-primary"
-                      : "text-muted-foreground hover:text-primary"
-                  )}
-                >
-                  <link.icon className="h-5 w-5" />
-                  <span className="whitespace-nowrap text-center truncate max-w-full px-1">{t(link.labelKey)}</span>
-                </Link>
-              );
-            })}
+                const isActive = pathname === link.href;
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-0.5 py-1 text-[10px] font-medium transition-colors shrink-0",
+                      "w-[calc((100vw-4rem-var(--safe-area-inset-left)-var(--safe-area-inset-right))/5)]",
+                      isActive ? "text-primary" : "text-muted-foreground hover:text-primary",
+                    )}
+                  >
+                    <link.icon className="h-5 w-5" />
+                    <span className="whitespace-nowrap text-center truncate max-w-full px-1">
+                      {t(link.labelKey)}
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
             {/* Right-edge shadow when scrollable and not at end */}
             {showRightShadow && (
@@ -219,7 +228,7 @@ export function MobileNav() {
                         <span className="font-medium">{t("nav.medicalRecord")}</span>
                       </Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem 
+                    <DropdownMenuItem
                       onClick={() => setMeasurementDialogOpen(true)}
                       className="flex items-center gap-3 py-2"
                     >

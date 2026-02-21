@@ -56,10 +56,7 @@ export function medicationUnitKey(unit: MedicationUnit): string {
 }
 
 /** Format amount with unit for display: "1 ml", "2 pills". */
-export function formatMedicationAmount(
-  amount: number,
-  unitLabel: string
-): string {
+export function formatMedicationAmount(amount: number, unitLabel: string): string {
   return `${amount} ${unitLabel}`;
 }
 
@@ -127,19 +124,19 @@ export type MedicationSchedule = {
 };
 
 export function isMedicationScheduleDaily(
-  f: MedicationScheduleFrequency
+  f: MedicationScheduleFrequency,
 ): f is MedicationScheduleFrequencyDaily {
   return f.type === "daily";
 }
 
 export function isMedicationScheduleInterval(
-  f: MedicationScheduleFrequency
+  f: MedicationScheduleFrequency,
 ): f is MedicationScheduleFrequencyInterval {
   return f.type === "interval";
 }
 
 export function isMedicationScheduleDaysOfWeek(
-  f: MedicationScheduleFrequency
+  f: MedicationScheduleFrequency,
 ): f is MedicationScheduleFrequencyDaysOfWeek {
   return f.type === "days_of_week";
 }

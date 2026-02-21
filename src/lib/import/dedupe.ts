@@ -11,7 +11,7 @@ export function buildDedupeHashPayload(
   amount: number,
   currency: string,
   merchantName: string | null,
-  accountHint: string | null
+  accountHint: string | null,
 ): string {
   return [
     source,
@@ -33,7 +33,7 @@ export async function buildDedupeHash(
   amount: number,
   currency: string,
   merchantName: string | null,
-  accountHint: string | null
+  accountHint: string | null,
 ): Promise<string> {
   const payload = buildDedupeHashPayload(
     source,
@@ -41,13 +41,10 @@ export async function buildDedupeHash(
     amount,
     currency,
     merchantName,
-    accountHint
+    accountHint,
   );
   if (typeof crypto !== "undefined" && "subtle" in crypto) {
-    const buf = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(payload)
-    );
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
     return Array.from(new Uint8Array(buf))
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");

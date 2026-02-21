@@ -43,13 +43,14 @@ function normalizeMeasurementCategory(value: string): MeasurementCategory {
 
 async function fetchPersonMeasurements(
   personId: string,
-  search?: string
+  search?: string,
 ): Promise<MeasurementSummary[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase
     .from("measurements")
-    .select(`
+    .select(
+      `
       id,
       person_id,
       catalog_id,
@@ -67,7 +68,8 @@ async function fetchPersonMeasurements(
         category,
         sort_order
       )
-    `)
+    `,
+    )
     .eq("person_id", personId)
     .order("measured_at", { ascending: false });
 
@@ -119,8 +121,7 @@ async function fetchPersonMeasurements(
   let summaries = Array.from(measurementMap.values()).map((summary) => ({
     ...summary,
     history: summary.history.sort(
-      (a, b) =>
-        new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime()
+      (a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime(),
     ),
   }));
 
@@ -166,7 +167,7 @@ export function usePersonMeasurements(personId: string | null, search?: string) 
 // ============================================================================
 async function fetchSingleMeasurementHistory(
   personId: string,
-  code: string
+  code: string,
 ): Promise<MeasurementSummary | null> {
   const supabase = createClient();
 
@@ -221,10 +222,7 @@ async function fetchSingleMeasurementHistory(
   }));
 
   // Sort history by date (oldest first for charts)
-  history.sort(
-    (a, b) =>
-      new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime()
-  );
+  history.sort((a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime());
 
   const latest = data[0]; // Already sorted descending, so first is latest
 
@@ -243,10 +241,7 @@ async function fetchSingleMeasurementHistory(
   };
 }
 
-export function useSingleMeasurementHistory(
-  personId: string | null,
-  code: string | null
-) {
+export function useSingleMeasurementHistory(personId: string | null, code: string | null) {
   return useQuery({
     queryKey: ["single-measurement-history", personId, code],
     queryFn: () => fetchSingleMeasurementHistory(personId!, code!),
@@ -257,9 +252,7 @@ export function useSingleMeasurementHistory(
 // ============================================================================
 // CREATE MEASUREMENT
 // ============================================================================
-async function createMeasurement(
-  input: CreateMeasurementInput
-): Promise<Measurement> {
+async function createMeasurement(input: CreateMeasurementInput): Promise<Measurement> {
   const supabase = createClient();
 
   // Get the current user
@@ -353,12 +346,7 @@ export function useUpdateMeasurement() {
 // ============================================================================
 // DELETE MEASUREMENT
 // ============================================================================
-async function deleteMeasurement({
-  id,
-}: {
-  id: string;
-  personId: string;
-}): Promise<void> {
+async function deleteMeasurement({ id }: { id: string; personId: string }): Promise<void> {
   const supabase = createClient();
 
   const { error } = await supabase.from("measurements").delete().eq("id", id);

@@ -2,10 +2,7 @@
 // Import framework types (canonical payload, connector contract)
 // ============================================================================
 
-import type {
-  MoneyTransactionType,
-  MoneyTransactionStatus,
-} from "./money";
+import type { MoneyTransactionType, MoneyTransactionStatus } from "./money";
 
 export type ImportConnectorKind = "file" | "extension";
 
@@ -69,9 +66,7 @@ export interface MoneyExtensionImportConnector extends MoneyImportConnectorBase 
   kind: "extension";
 }
 
-export type MoneyImportConnector =
-  | MoneyFileImportConnector
-  | MoneyExtensionImportConnector;
+export type MoneyImportConnector = MoneyFileImportConnector | MoneyExtensionImportConnector;
 
 /** Row shape sent to money-import Edge Function apply_rows action. */
 export interface BatchTransactionRow {

@@ -16,10 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  useCreateObservation,
-  useUpdateObservation,
-} from "@/hooks";
+import { useCreateObservation, useUpdateObservation } from "@/hooks";
 import type { ObservationCatalog, UnitConversion } from "@/types";
 
 interface ObservationEditDialogProps {
@@ -80,15 +77,15 @@ export function ObservationEditDialog({
         setSynonymsEn(observation.synonyms_en || []);
         setDefaultRefLow(observation.default_ref_low?.toString() || "");
         setDefaultRefHigh(observation.default_ref_high?.toString() || "");
-        
+
         // Convert accepted_units object to array
-        const units: AcceptedUnitEntry[] = Object.entries(
-          observation.accepted_units || {}
-        ).map(([unit, config]) => ({
-          unit,
-          factor: config.factor_to_canonical?.toString() || "",
-          formula: config.formula_to_canonical || "",
-        }));
+        const units: AcceptedUnitEntry[] = Object.entries(observation.accepted_units || {}).map(
+          ([unit, config]) => ({
+            unit,
+            factor: config.factor_to_canonical?.toString() || "",
+            formula: config.formula_to_canonical || "",
+          }),
+        );
         setAcceptedUnits(units);
       } else {
         // Reset form for create mode
@@ -149,17 +146,13 @@ export function ObservationEditDialog({
 
   const updateUnitFactor = (unit: string, factor: string) => {
     setAcceptedUnits(
-      acceptedUnits.map((u) =>
-        u.unit === unit ? { ...u, factor, formula: "" } : u
-      )
+      acceptedUnits.map((u) => (u.unit === unit ? { ...u, factor, formula: "" } : u)),
     );
   };
 
   const updateUnitFormula = (unit: string, formula: string) => {
     setAcceptedUnits(
-      acceptedUnits.map((u) =>
-        u.unit === unit ? { ...u, formula, factor: "" } : u
-      )
+      acceptedUnits.map((u) => (u.unit === unit ? { ...u, formula, factor: "" } : u)),
     );
   };
 
@@ -210,20 +203,14 @@ export function ObservationEditDialog({
     }
   };
 
-  const isValid =
-    obsCode.trim() &&
-    nameRu.trim() &&
-    nameEn.trim() &&
-    canonicalUnit.trim();
+  const isValid = obsCode.trim() && nameRu.trim() && nameEn.trim() && canonicalUnit.trim();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isEditMode
-              ? t("catalogs.editObservation")
-              : t("catalogs.addObservation")}
+            {isEditMode ? t("catalogs.editObservation") : t("catalogs.addObservation")}
           </DialogTitle>
           <DialogDescription>
             {isEditMode
@@ -280,10 +267,14 @@ export function ObservationEditDialog({
           {/* Default Reference Range */}
           <div className="space-y-2">
             <Label>{t("catalogs.defaultRefRange")}</Label>
-            <p className="text-xs text-muted-foreground">{t("catalogs.defaultRefRangeDescription")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("catalogs.defaultRefRangeDescription")}
+            </p>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="default_ref_low" className="text-xs">{t("catalogs.refLow")}</Label>
+                <Label htmlFor="default_ref_low" className="text-xs">
+                  {t("catalogs.refLow")}
+                </Label>
                 <Input
                   id="default_ref_low"
                   type="number"
@@ -294,7 +285,9 @@ export function ObservationEditDialog({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="default_ref_high" className="text-xs">{t("catalogs.refHigh")}</Label>
+                <Label htmlFor="default_ref_high" className="text-xs">
+                  {t("catalogs.refHigh")}
+                </Label>
                 <Input
                   id="default_ref_high"
                   type="number"

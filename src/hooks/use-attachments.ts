@@ -138,10 +138,7 @@ async function deleteAttachment(attachment: RecordAttachment): Promise<void> {
   }
 
   // Delete from database
-  const { error } = await supabase
-    .from("record_attachments")
-    .delete()
-    .eq("id", attachment.id);
+  const { error } = await supabase.from("record_attachments").delete().eq("id", attachment.id);
 
   if (error) {
     throw new Error(error.message);
@@ -190,9 +187,7 @@ export function useAttachmentUrl(storagePath: string | null) {
 // ============================================================================
 // GET MULTIPLE SIGNED URLS
 // ============================================================================
-async function getAttachmentUrls(
-  attachments: RecordAttachment[]
-): Promise<Record<string, string>> {
+async function getAttachmentUrls(attachments: RecordAttachment[]): Promise<Record<string, string>> {
   const supabase = createClient();
   const urls: Record<string, string> = {};
 
@@ -212,10 +207,7 @@ async function getAttachmentUrls(
 
 export function useAttachmentUrls(attachments: RecordAttachment[]) {
   return useQuery({
-    queryKey: [
-      "attachment-urls",
-      attachments.map((a) => a.id).sort(),
-    ],
+    queryKey: ["attachment-urls", attachments.map((a) => a.id).sort()],
     queryFn: () => getAttachmentUrls(attachments),
     enabled: attachments.length > 0,
     staleTime: 1000 * 60 * 50,
@@ -231,10 +223,7 @@ interface UpdateOrderInput {
   newOrder: number;
 }
 
-async function updateAttachmentOrder({
-  attachmentId,
-  newOrder,
-}: UpdateOrderInput): Promise<void> {
+async function updateAttachmentOrder({ attachmentId, newOrder }: UpdateOrderInput): Promise<void> {
   const supabase = createClient();
 
   const { error } = await supabase

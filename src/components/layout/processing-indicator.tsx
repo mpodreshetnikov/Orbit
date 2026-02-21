@@ -7,10 +7,7 @@ import { Loader2, CheckCircle2, XCircle, ChevronUp, ChevronDown, X } from "lucid
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import {
-  useProcessingQueueStore,
-  type ProcessingJob,
-} from "@/stores/processing-queue-store";
+import { useProcessingQueueStore, type ProcessingJob } from "@/stores/processing-queue-store";
 import { cn } from "@/lib/utils";
 
 export function ProcessingIndicator() {
@@ -22,9 +19,7 @@ export function ProcessingIndicator() {
   const removeJob = useProcessingQueueStore((state) => state.removeJob);
 
   const jobList = Object.values(jobs);
-  const activeJobs = jobList.filter(
-    (j) => j.stage === "uploading" || j.stage === "processing"
-  );
+  const activeJobs = jobList.filter((j) => j.stage === "uploading" || j.stage === "processing");
 
   // Don't render if no jobs
   if (jobList.length === 0) {
@@ -77,12 +72,8 @@ export function ProcessingIndicator() {
         className="tap-target w-full justify-between p-3 h-auto hover:bg-muted/50"
       >
         <div className="flex items-center gap-2">
-          {activeJobs.length > 0 && (
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          )}
-          <span className="font-medium text-sm">
-            {t("processing.title")}
-          </span>
+          {activeJobs.length > 0 && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+          <span className="font-medium text-sm">{t("processing.title")}</span>
           {activeJobs.length > 0 && (
             <Badge variant="secondary" className="h-5 px-1.5 text-xs">
               {activeJobs.length}
@@ -100,9 +91,7 @@ export function ProcessingIndicator() {
       {isExpanded && (
         <div className="max-h-64 overflow-auto border-t">
           {jobList.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">
-              {t("processing.noJobs")}
-            </p>
+            <p className="p-3 text-sm text-muted-foreground">{t("processing.noJobs")}</p>
           ) : (
             <div className="divide-y">
               {jobList.map((job) => (
@@ -111,7 +100,7 @@ export function ProcessingIndicator() {
                   className={cn(
                     "p-3 space-y-2",
                     job.stage === "completed" && "bg-green-50/50 dark:bg-green-950/20",
-                    job.stage === "failed" && "bg-red-50/50 dark:bg-red-950/20"
+                    job.stage === "failed" && "bg-red-50/50 dark:bg-red-950/20",
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -143,9 +132,7 @@ export function ProcessingIndicator() {
 
                   {/* Error message */}
                   {job.stage === "failed" && job.error && (
-                    <p className="text-xs text-destructive truncate">
-                      {job.error}
-                    </p>
+                    <p className="text-xs text-destructive truncate">{job.error}</p>
                   )}
 
                   {/* Action buttons for completed/failed */}

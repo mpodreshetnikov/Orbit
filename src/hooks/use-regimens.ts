@@ -44,9 +44,7 @@ function toRpcOptionalString(value?: string | null): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function normalizeIntakeAdviceType(
-  value?: string | null
-): MedIntakeAdviceType | null | undefined {
+function normalizeIntakeAdviceType(value?: string | null): MedIntakeAdviceType | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   return MED_INTAKE_ADVICE_TYPES.includes(value as MedIntakeAdviceType)
@@ -81,7 +79,10 @@ function rowToDoseEvent(row: Record<string, unknown>): MedDoseEvent {
     regimen_id: row.regimen_id as string,
     scheduled_at: row.scheduled_at as string,
     actual_at: row.actual_at as string,
-    planned_intake: (row.planned_intake as PlannedIntake) ?? { intake: { amount: 1, unit: "pill" }, active: [] },
+    planned_intake: (row.planned_intake as PlannedIntake) ?? {
+      intake: { amount: 1, unit: "pill" },
+      active: [],
+    },
     status: row.status as MedDoseEvent["status"],
     taken_at: (row.taken_at as string | null) ?? null,
     note: (row.note as string | null) ?? null,
@@ -109,7 +110,7 @@ function rowToInventoryTransaction(row: Record<string, unknown>): MedInventoryTr
 
 async function fetchRegimens(
   personId: string,
-  status?: MedRegimenStatus | null
+  status?: MedRegimenStatus | null,
 ): Promise<MedRegimen[]> {
   const supabase = createClient();
   let query = supabase
@@ -128,7 +129,7 @@ async function fetchRegimens(
 
 export function useRegimens(
   personId: string | null,
-  options?: { status?: MedRegimenStatus | null }
+  options?: { status?: MedRegimenStatus | null },
 ) {
   return useQuery({
     queryKey: ["regimens", personId, options?.status],
@@ -167,7 +168,7 @@ export function useRegimen(regimenId: string | null) {
 async function fetchDoseEventsForPerson(
   personId: string,
   dayStartIso: string,
-  dayEndIso: string
+  dayEndIso: string,
 ): Promise<MedDoseEventWithRegimen[]> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -176,7 +177,7 @@ async function fetchDoseEventsForPerson(
       `
       *,
       regimen:med_regimens(custom_name, intake_unit, intake_advice_type, intake_advice_text, schedule)
-    `
+    `,
     )
     .eq("person_id", personId)
     .is("deleted_at", null)
@@ -201,7 +202,7 @@ async function fetchDoseEventsForPerson(
 export function useDoseEventsForPerson(
   personId: string | null,
   dayStartIso: string,
-  dayEndIso: string
+  dayEndIso: string,
 ) {
   return useQuery({
     queryKey: ["dose-events-person", personId, dayStartIso, dayEndIso],
@@ -285,7 +286,7 @@ export function useInventoryTransactions(regimenId: string | null) {
 async function markDoseTaken(
   doseEventId: string,
   note?: string | null,
-  takenAt?: string | null
+  takenAt?: string | null,
 ): Promise<void> {
   const supabase = createClient();
   const payload: { p_dose_event_id: string; p_note?: string; p_taken_at?: string } = {
@@ -372,7 +373,7 @@ export function useUndoDoseIntake() {
 
 async function updateDoseEventResolutionDetails(
   doseEventId: string,
-  params: { takenAt?: string | null; amountTaken?: number | null; note?: string | null }
+  params: { takenAt?: string | null; amountTaken?: number | null; note?: string | null },
 ): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.rpc("update_dose_event_resolution_details", {
@@ -411,7 +412,7 @@ export function useUpdateDoseEventResolutionDetails() {
 async function snoozeDose(
   doseEventId: string,
   authUserId: string,
-  minutesFromNow: number = 15
+  minutesFromNow: number = 15,
 ): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.rpc("snooze_dose", {
@@ -462,11 +463,7 @@ async function createRegimen(input: CreateMedRegimenInput): Promise<MedRegimen> 
     inventory: toJsonOrNull(input.inventory),
     notes: input.notes ?? null,
   };
-  const { data, error } = await supabase
-    .from("med_regimens")
-    .insert(payload)
-    .select()
-    .single();
+  const { data, error } = await supabase.from("med_regimens").insert(payload).select().single();
   if (error) throw new Error(error.message);
   return rowToRegimen(data);
 }
@@ -557,20 +554,11 @@ async function updateRegimen({
   const payload: MedRegimenUpdate = {
     ...rest,
     intake_advice_type: normalizeIntakeAdviceType(intake_advice_type),
-    dose_definition:
-      dose_definition === undefined
-        ? undefined
-        : toJsonOrNull(dose_definition),
+    dose_definition: dose_definition === undefined ? undefined : toJsonOrNull(dose_definition),
     schedule: schedule === undefined ? undefined : (schedule as unknown as Json),
     duration: duration === undefined ? undefined : (duration as unknown as Json),
-    reminder_prefs:
-      reminder_prefs === undefined
-        ? undefined
-        : toJsonOrNull(reminder_prefs),
-    inventory:
-      inventory === undefined
-        ? undefined
-        : toJsonOrNull(inventory),
+    reminder_prefs: reminder_prefs === undefined ? undefined : toJsonOrNull(reminder_prefs),
+    inventory: inventory === undefined ? undefined : toJsonOrNull(inventory),
   };
   const { data, error } = await supabase
     .from("med_regimens")
@@ -661,7 +649,7 @@ async function updateRegimenInventory(
   regimenId: string,
   type: "refill" | "set_absolute" | "correction",
   amount: number,
-  note?: string | null
+  note?: string | null,
 ): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.rpc("update_regimen_inventory", {

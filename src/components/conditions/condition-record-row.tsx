@@ -3,7 +3,19 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Pencil, Trash2, AlertTriangle, ChevronDown, ChevronUp, Quote, ArrowRight, CircleDot, History, CirclePlus, ExternalLink } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Quote,
+  ArrowRight,
+  CircleDot,
+  History,
+  CirclePlus,
+  ExternalLink,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -31,14 +43,21 @@ function ConditionComparisonBadge({ comparison }: { comparison: ConditionCompari
   const t = useTranslations();
   if (comparison.isNew) {
     return (
-      <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1">
+      <Badge
+        variant="outline"
+        className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+      >
         <CircleDot className="h-3 w-3" />
         {t("conditions.comparison.new")}
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1" title={t("conditions.comparison.knownTitle", { count: comparison.previousOccurrences })}>
+    <Badge
+      variant="outline"
+      className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1"
+      title={t("conditions.comparison.knownTitle", { count: comparison.previousOccurrences })}
+    >
       <History className="h-3 w-3" />
       {t("conditions.comparison.known", { count: comparison.previousOccurrences })}
     </Badge>
@@ -57,8 +76,11 @@ export function ConditionRecordRow({
   const t = useTranslations();
   const [showAnchor, setShowAnchor] = useState(false);
 
-  const hasStatusChange = conditionRecord.status_in_record !== conditionRecord.condition_current_status;
-  const isActiveOrSuspected = conditionRecord.status_in_record === "active" || conditionRecord.status_in_record === "suspected";
+  const hasStatusChange =
+    conditionRecord.status_in_record !== conditionRecord.condition_current_status;
+  const isActiveOrSuspected =
+    conditionRecord.status_in_record === "active" ||
+    conditionRecord.status_in_record === "suspected";
 
   // ICD name (English only for ICD-10), if present
   const icdName = getConditionIcdName(conditionRecord.condition_icd_name_en);
@@ -66,11 +88,13 @@ export function ConditionRecordRow({
   const displayName = icdName || conditionRecord.condition_name;
 
   return (
-    <div className={cn(
-      "rounded-lg border p-3",
-      isActiveOrSuspected && "border-orange-500/30 bg-orange-500/5",
-      comparison?.isNew && "border-amber-500/30 bg-amber-500/5"
-    )}>
+    <div
+      className={cn(
+        "rounded-lg border p-3",
+        isActiveOrSuspected && "border-orange-500/30 bg-orange-500/5",
+        comparison?.isNew && "border-amber-500/30 bg-amber-500/5",
+      )}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1 space-y-1">
           {/* Condition name with ICD code */}
@@ -86,7 +110,7 @@ export function ConditionRecordRow({
               </span>
             )}
           </div>
-          
+
           {/* Show original name if different from ICD name */}
           {icdName && icdName !== conditionRecord.condition_name && (
             <div className="text-xs text-muted-foreground mt-0.5">
@@ -117,11 +141,7 @@ export function ConditionRecordRow({
             >
               <Quote className="h-3 w-3 shrink-0" />
               <span>{t("conditions.showSource")}</span>
-              {showAnchor ? (
-                <ChevronUp className="h-3 w-3" />
-              ) : (
-                <ChevronDown className="h-3 w-3" />
-              )}
+              {showAnchor ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             </Button>
           )}
         </div>
@@ -129,9 +149,7 @@ export function ConditionRecordRow({
         {/* Badges and actions - wrap on mobile, row on desktop */}
         <div className="flex flex-wrap items-center gap-2 shrink-0 sm:flex-nowrap">
           {comparison && <ConditionComparisonBadge comparison={comparison} />}
-          {!hasStatusChange && (
-            <ConditionStatusBadge status={conditionRecord.status_in_record} />
-          )}
+          {!hasStatusChange && <ConditionStatusBadge status={conditionRecord.status_in_record} />}
 
           {/* Confidence indicator */}
           {conditionRecord.confidence !== null && conditionRecord.confidence < 0.8 && (

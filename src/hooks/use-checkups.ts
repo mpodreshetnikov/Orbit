@@ -75,7 +75,7 @@ function rowToCheckupCompletion(row: Record<string, unknown>): CheckupCompletion
 
 async function fetchCheckupItems(
   personId: string,
-  filters: CheckupItemsFilters = {}
+  filters: CheckupItemsFilters = {},
 ): Promise<CheckupItem[]> {
   const supabase = createClient();
 
@@ -104,30 +104,25 @@ async function fetchCheckupItems(
   if (filters.dueWindow === "overdue") {
     const today = new Date().toISOString().slice(0, 10);
     items = items.filter(
-      (i) => i.next_due_at != null && i.next_due_at < today && i.status === "active"
+      (i) => i.next_due_at != null && i.next_due_at < today && i.status === "active",
     );
   } else if (filters.dueWindow === "upcoming") {
     const today = new Date().toISOString().slice(0, 10);
     items = items.filter(
-      (i) => i.next_due_at != null && i.next_due_at >= today && i.status === "active"
+      (i) => i.next_due_at != null && i.next_due_at >= today && i.status === "active",
     );
   }
 
   if (filters.conditionId) {
     items = items.filter((i) =>
-      i.why_links.some(
-        (l) => l.type === "condition" && l.id === filters.conditionId
-      )
+      i.why_links.some((l) => l.type === "condition" && l.id === filters.conditionId),
     );
   }
 
   return items;
 }
 
-export function useCheckupItems(
-  personId: string | null,
-  filters: CheckupItemsFilters = {}
-) {
+export function useCheckupItems(personId: string | null, filters: CheckupItemsFilters = {}) {
   return useQuery({
     queryKey: ["checkup-items", personId, filters],
     queryFn: () => fetchCheckupItems(personId!, filters),
@@ -168,9 +163,7 @@ export function useCheckupItem(itemId: string | null) {
 // CHECKUP COMPLETIONS
 // ============================================================================
 
-async function fetchCheckupCompletions(
-  itemId: string
-): Promise<CheckupCompletion[]> {
+async function fetchCheckupCompletions(itemId: string): Promise<CheckupCompletion[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -198,9 +191,7 @@ export function useCheckupCompletions(itemId: string | null) {
 // CHECKUPS FOR CONDITION (RPC)
 // ============================================================================
 
-async function fetchCheckupsForCondition(
-  conditionId: string
-): Promise<CheckupItem[]> {
+async function fetchCheckupsForCondition(conditionId: string): Promise<CheckupItem[]> {
   const supabase = createClient();
 
   const { data, error } = await supabase.rpc("get_checkups_for_condition", {
@@ -226,9 +217,7 @@ export function useCheckupsForCondition(conditionId: string | null) {
 // MUTATIONS
 // ============================================================================
 
-async function createCheckupItem(
-  input: CreateCheckupItemInput
-): Promise<CheckupItem> {
+async function createCheckupItem(input: CreateCheckupItemInput): Promise<CheckupItem> {
   const supabase = createClient();
   const payload: CheckupItemInsert = {
     person_id: input.person_id,
@@ -241,11 +230,7 @@ async function createCheckupItem(
     notes: input.notes ?? null,
   };
 
-  const { data, error } = await supabase
-    .from("checkup_items")
-    .insert(payload)
-    .select()
-    .single();
+  const { data, error } = await supabase.from("checkup_items").insert(payload).select().single();
 
   if (error) {
     throw new Error(error.message);
@@ -333,7 +318,7 @@ function toDateOnly(date: string | undefined | null): string {
 }
 
 async function completeCheckupItem(
-  input: CreateCheckupCompletionInput
+  input: CreateCheckupCompletionInput,
 ): Promise<CheckupCompletion> {
   const supabase = createClient();
   const doneAt = toDateOnly(input.done_at);
@@ -440,10 +425,7 @@ async function deleteCheckupCompletion({
 }): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("checkup_completions")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("checkup_completions").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);
@@ -472,12 +454,7 @@ export function useDeleteCheckupCompletion() {
   });
 }
 
-async function deleteCheckupItem({
-  id,
-}: {
-  id: string;
-  personId: string;
-}): Promise<void> {
+async function deleteCheckupItem({ id }: { id: string; personId: string }): Promise<void> {
   const supabase = createClient();
 
   const { error } = await supabase.from("checkup_items").delete().eq("id", id);

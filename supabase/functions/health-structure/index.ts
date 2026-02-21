@@ -4,12 +4,12 @@ import type { Database, Json } from "../_shared/database.types.ts";
 
 /**
  * health-structure: Text LLM function for structured data extraction
- * 
+ *
  * This is step 2 of the medical record processing pipeline.
  * It extracts structured data (title, type, date, summary, keywords) from OCR text.
  * It also extracts observations/lab values using the observation catalog.
  * It also extracts findings (polyps, stones, cysts, etc.) using finding and body site catalogs.
- * 
+ *
  * Flow: Upload -> health-ocr -> OCR Review -> [health-structure] -> Structure Review -> Save
  */
 
@@ -19,7 +19,16 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 /** Record types allowed by DB enum - normalize LLM output to avoid constraint errors */
-const ALLOWED_RECORD_TYPES = ["lab", "visit", "imaging", "prescription", "vaccination", "vet", "procedure", "other"] as const;
+const ALLOWED_RECORD_TYPES = [
+  "lab",
+  "visit",
+  "imaging",
+  "prescription",
+  "vaccination",
+  "vet",
+  "procedure",
+  "other",
+] as const;
 
 interface StructureRequest {
   record_id: string;
@@ -94,9 +103,9 @@ interface BodySiteCatalogItem {
 }
 
 interface ExtractedCondition {
-  existing_condition_id: string | null;  // ID from existing conditions list
-  name: string;                          // Name (required for new, optional for existing)
-  icd_code: string | null;               // ICD-10 code (e.g., "D50.9", "E11.9")
+  existing_condition_id: string | null; // ID from existing conditions list
+  name: string; // Name (required for new, optional for existing)
+  icd_code: string | null; // ICD-10 code (e.g., "D50.9", "E11.9")
   status: "active" | "resolved" | "suspected" | "history";
   confidence: number;
   source_anchor: string | null;
@@ -112,7 +121,7 @@ interface IcdLookupResult {
 interface ExistingCondition {
   id: string;
   name: string;
-  code: string | null;  // ICD-10 code
+  code: string | null; // ICD-10 code
   current_status: string;
   onset_date: string | null;
   resolved_date: string | null;
@@ -184,10 +193,14 @@ interface StructuredDataWithObservationsAndFindings extends StructuredData {
 }
 
 // Fetch observation catalog from database
-async function fetchObservationCatalog(supabase: SupabaseClient<Database>): Promise<ObservationCatalogItem[]> {
+async function fetchObservationCatalog(
+  supabase: SupabaseClient<Database>,
+): Promise<ObservationCatalogItem[]> {
   const { data, error } = await supabase
     .from("observation_catalog")
-    .select("id, obs_code, name_ru, name_en, canonical_unit, synonyms_ru, synonyms_en, accepted_units")
+    .select(
+      "id, obs_code, name_ru, name_en, canonical_unit, synonyms_ru, synonyms_en, accepted_units",
+    )
     .order("obs_code");
 
   if (error) {
@@ -199,7 +212,9 @@ async function fetchObservationCatalog(supabase: SupabaseClient<Database>): Prom
 }
 
 // Fetch finding type catalog from database
-async function fetchFindingTypeCatalog(supabase: SupabaseClient<Database>): Promise<FindingTypeCatalogItem[]> {
+async function fetchFindingTypeCatalog(
+  supabase: SupabaseClient<Database>,
+): Promise<FindingTypeCatalogItem[]> {
   const { data, error } = await supabase
     .from("finding_type_catalog")
     .select("id, finding_code, name_ru, name_en, synonyms_ru, synonyms_en")
@@ -214,7 +229,9 @@ async function fetchFindingTypeCatalog(supabase: SupabaseClient<Database>): Prom
 }
 
 // Fetch body site catalog from database
-async function fetchBodySiteCatalog(supabase: SupabaseClient<Database>): Promise<BodySiteCatalogItem[]> {
+async function fetchBodySiteCatalog(
+  supabase: SupabaseClient<Database>,
+): Promise<BodySiteCatalogItem[]> {
   const { data, error } = await supabase
     .from("body_site_catalog")
     .select("id, site_code, name_ru, name_en, parent_site_code, synonyms_ru, synonyms_en")
@@ -231,7 +248,7 @@ async function fetchBodySiteCatalog(supabase: SupabaseClient<Database>): Promise
 // Fetch existing conditions for a person (to provide context to LLM)
 async function fetchPersonConditions(
   supabase: SupabaseClient<Database>,
-  personId: string
+  personId: string,
 ): Promise<ExistingCondition[]> {
   const { data, error } = await supabase
     .from("conditions")
@@ -257,12 +274,13 @@ function isResolved(size: number | null, count: number | null): boolean {
 // Returns only findings that are NOT resolved (latest entry has size_mm > 0 or count > 0)
 async function fetchPersonActiveFindings(
   supabase: SupabaseClient<Database>,
-  personId: string
+  personId: string,
 ): Promise<ExistingFinding[]> {
   // Fetch all findings from active records for this person
   const { data, error } = await supabase
     .from("record_findings")
-    .select(`
+    .select(
+      `
       id,
       finding_code,
       finding_type_text,
@@ -280,7 +298,8 @@ async function fetchPersonActiveFindings(
         record_date,
         status
       )
-    `)
+    `,
+    )
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
     .order("created_at", { ascending: false });
@@ -295,22 +314,25 @@ async function fetchPersonActiveFindings(
   }
 
   // Group by finding_code + site_code (or finding_type_text + body_site_text for unrecognized)
-  const findingMap = new Map<string, {
-    rows: Array<{
-      finding_code: string | null;
-      finding_type_text: string;
-      site_code: string | null;
-      body_site_text: string | null;
-      finding_type_id: string | null;
-      body_site_id: string | null;
-      size_mm: number | null;
-      count: number | null;
-      severity: string;
-      finding_date: string | null;
-      created_at: string;
-      medical_records: { record_date: string | null };
-    }>;
-  }>();
+  const findingMap = new Map<
+    string,
+    {
+      rows: Array<{
+        finding_code: string | null;
+        finding_type_text: string;
+        site_code: string | null;
+        body_site_text: string | null;
+        finding_type_id: string | null;
+        body_site_id: string | null;
+        size_mm: number | null;
+        count: number | null;
+        severity: string;
+        finding_date: string | null;
+        created_at: string;
+        medical_records: { record_date: string | null };
+      }>;
+    }
+  >();
 
   for (const row of data as unknown[]) {
     const r = row as {
@@ -330,7 +352,7 @@ async function fetchPersonActiveFindings(
 
     // Create a unique key for grouping
     const findingKey = r.finding_code || r.finding_type_text.toLowerCase().trim();
-    const siteKey = r.site_code || (r.body_site_text?.toLowerCase().trim() || "unknown");
+    const siteKey = r.site_code || r.body_site_text?.toLowerCase().trim() || "unknown";
     const key = `${findingKey}::${siteKey}`;
 
     if (findingMap.has(key)) {
@@ -360,8 +382,8 @@ async function fetchPersonActiveFindings(
     }
 
     // Find the most recent size/count values (in case latest has nulls)
-    const latestWithSize = rows.find(r => r.size_mm !== null);
-    const latestWithCount = rows.find(r => r.count !== null);
+    const latestWithSize = rows.find((r) => r.size_mm !== null);
+    const latestWithCount = rows.find((r) => r.count !== null);
 
     activeFindings.push({
       finding_code: latest.finding_code,
@@ -383,7 +405,7 @@ async function fetchPersonActiveFindings(
 // Fetch upcoming/overdue checkup items for a person (active, with next_due_at)
 async function fetchUpcomingOverdueCheckupItems(
   supabase: SupabaseClient<Database>,
-  personId: string
+  personId: string,
 ): Promise<CheckupItemForContext[]> {
   const { data, error } = await supabase
     .from("checkup_items")
@@ -398,12 +420,14 @@ async function fetchUpcomingOverdueCheckupItems(
     return [];
   }
 
-  return (data || []).map((row: { id: string; title: string; category: string; next_due_at: string | null }) => ({
-    id: row.id,
-    title: row.title,
-    category: row.category,
-    next_due_at: row.next_due_at,
-  }));
+  return (data || []).map(
+    (row: { id: string; title: string; category: string; next_due_at: string | null }) => ({
+      id: row.id,
+      title: row.title,
+      category: row.category,
+      next_due_at: row.next_due_at,
+    }),
+  );
 }
 
 // Build observation catalog prompt section
@@ -412,7 +436,7 @@ function buildObservationCatalogPrompt(catalog: ObservationCatalogItem[]): strin
     return "Каталог показателей пуст. Извлекай показатели без привязки к коду.";
   }
 
-  const items = catalog.map(item => {
+  const items = catalog.map((item) => {
     const synonyms = [...new Set([...item.synonyms_ru, ...item.synonyms_en])].join(", ");
     const units = Object.keys(item.accepted_units).join(", ");
     return `- ${item.obs_code}: "${item.name_ru}" / "${item.name_en}" (синонимы: ${synonyms}) [ДОПУСТИМЫЕ ЕДИНИЦЫ: ${units}]`;
@@ -434,7 +458,7 @@ function buildFindingTypeCatalogPrompt(catalog: FindingTypeCatalogItem[]): strin
     return "Каталог типов находок пуст.";
   }
 
-  const items = catalog.map(item => {
+  const items = catalog.map((item) => {
     const synonyms = [...new Set([...item.synonyms_ru, ...item.synonyms_en])].join(", ");
     return `- ${item.finding_code}: "${item.name_ru}" / "${item.name_en}" (синонимы: ${synonyms})`;
   });
@@ -449,7 +473,7 @@ function buildBodySiteCatalogPrompt(catalog: BodySiteCatalogItem[]): string {
     return "Каталог локализаций пуст.";
   }
 
-  const items = catalog.map(item => {
+  const items = catalog.map((item) => {
     const synonyms = [...new Set([...item.synonyms_ru, ...item.synonyms_en])].join(", ");
     const parent = item.parent_site_code ? ` [родитель: ${item.parent_site_code}]` : "";
     return `- ${item.site_code}: "${item.name_ru}" / "${item.name_en}" (синонимы: ${synonyms})${parent}`;
@@ -466,8 +490,12 @@ function buildExistingConditionsPrompt(conditions: ExistingCondition[]): string 
   }
 
   // Separate active conditions for emphasis
-  const activeConditions = conditions.filter(c => c.current_status === "active" || c.current_status === "suspected");
-  const otherConditions = conditions.filter(c => c.current_status !== "active" && c.current_status !== "suspected");
+  const activeConditions = conditions.filter(
+    (c) => c.current_status === "active" || c.current_status === "suspected",
+  );
+  const otherConditions = conditions.filter(
+    (c) => c.current_status !== "active" && c.current_status !== "suspected",
+  );
 
   const formatCondition = (c: ExistingCondition) => {
     const dates = [];
@@ -479,12 +507,12 @@ function buildExistingConditionsPrompt(conditions: ExistingCondition[]): string 
   };
 
   let prompt = `СУЩЕСТВУЮЩИЕ ДИАГНОЗЫ ПАЦИЕНТА:`;
-  
+
   if (activeConditions.length > 0) {
     prompt += `\n\n*** АКТИВНЫЕ ДИАГНОЗЫ (проверь, не нужно ли закрыть на основе этого документа!) ***
 ${activeConditions.map(formatCondition).join("\n")}`;
   }
-  
+
   if (otherConditions.length > 0) {
     prompt += `\n\nПрочие диагнозы (resolved/history):
 ${otherConditions.map(formatCondition).join("\n")}`;
@@ -514,7 +542,7 @@ function buildExistingFindingsPrompt(findings: ExistingFinding[]): string {
     return "У пациента пока нет зарегистрированных активных находок.";
   }
 
-  const items = findings.map(f => {
+  const items = findings.map((f) => {
     const parts = [];
     if (f.finding_code) parts.push(`finding_code: "${f.finding_code}"`);
     if (f.site_code) parts.push(`site_code: "${f.site_code}"`);
@@ -537,7 +565,7 @@ function buildCheckupsPrompt(checkups: CheckupItemForContext[]): string {
     return "У пациента нет предстоящих или просроченных обследований (checkups).";
   }
 
-  const items = checkups.map(c => {
+  const items = checkups.map((c) => {
     const due = c.next_due_at ? ` next_due_at: ${c.next_due_at}` : "";
     return `- id: "${c.id}" | title: "${c.title}" | category: ${c.category}${due}`;
   });
@@ -556,7 +584,7 @@ async function extractStructuredData(
   bodySiteCatalog: BodySiteCatalogItem[],
   existingConditions: ExistingCondition[],
   existingFindings: ExistingFinding[],
-  checkupItems: CheckupItemForContext[]
+  checkupItems: CheckupItemForContext[],
 ): Promise<StructuredDataWithObservationsAndFindings> {
   if (!ocrText || ocrText.trim().length === 0) {
     return {
@@ -816,7 +844,7 @@ ${checkupsPrompt}
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
       "Content-Type": "application/json",
       "HTTP-Referer": SUPABASE_URL || "http://localhost:3000",
     },
@@ -839,7 +867,7 @@ ${checkupsPrompt}
 
   const data = await response.json();
   const responseContent = data.choices[0]?.message?.content;
-  
+
   if (!responseContent) {
     throw new Error("No response from OpenRouter");
   }
@@ -847,71 +875,100 @@ ${checkupsPrompt}
   try {
     const parsed = JSON.parse(responseContent);
     const rawRecordType = parsed.record_type || "other";
-    const record_type = (typeof rawRecordType === "string" && (ALLOWED_RECORD_TYPES as readonly string[]).includes(rawRecordType))
-      ? rawRecordType
-      : "other";
+    const record_type =
+      typeof rawRecordType === "string" &&
+      (ALLOWED_RECORD_TYPES as readonly string[]).includes(rawRecordType)
+        ? rawRecordType
+        : "other";
     return {
       record_type,
       title: parsed.title || "Медицинский документ",
       record_date: parsed.record_date || null,
       summary: parsed.summary || "",
       keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
-      observations: Array.isArray(parsed.observations) ? parsed.observations.map((obs: Partial<ExtractedObservation>) => ({
-        obs_code: obs.obs_code || null,
-        obs_name: obs.obs_name || "Неизвестный показатель",
-        value: obs.value || "",
-        value_numeric: typeof obs.value_numeric === "number" ? obs.value_numeric : null,
-        unit: obs.unit || null,
-        ref_range: obs.ref_range || null,
-        ref_range_low: typeof obs.ref_range_low === "number" ? obs.ref_range_low : null,
-        ref_range_high: typeof obs.ref_range_high === "number" ? obs.ref_range_high : null,
-        status: obs.status || null,
-        confidence: typeof obs.confidence === "number" ? obs.confidence : 0.8,
-      })) : [],
-      findings: Array.isArray(parsed.findings) ? parsed.findings.map((f: Partial<ExtractedFinding>) => ({
-        finding_code: f.finding_code || null,
-        finding_type_text: f.finding_type_text || "Неизвестная находка",
-        site_code: f.site_code || null,
-        body_site_text: f.body_site_text || null,
-        size_mm: typeof f.size_mm === "number" ? f.size_mm : null,
-        count: typeof f.count === "number" ? f.count : null,
-        severity: (f.severity === "mild" || f.severity === "moderate" || f.severity === "severe") ? f.severity : "unknown",
-        laterality: (f.laterality === "left" || f.laterality === "right" || f.laterality === "bilateral") ? f.laterality : "none",
-        morphology: f.morphology || null,
-        description: f.description || null,
-        histology: f.histology || null,
-        finding_date: f.finding_date || null,
-        source_anchor: f.source_anchor || "",
-        confidence: typeof f.confidence === "number" ? f.confidence : 0.8,
-      })) : [],
-      conditions: Array.isArray(parsed.conditions) ? parsed.conditions.map((c: Partial<ExtractedCondition>) => ({
-        existing_condition_id: c.existing_condition_id || null,
-        name: c.name || "",
-        icd_code: c.icd_code || null,
-        status: (c.status === "active" || c.status === "resolved" || c.status === "suspected" || c.status === "history") ? c.status : "suspected",
-        confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
-        source_anchor: c.source_anchor || null,
-      })) : [],
-      findings_to_resolve: Array.isArray(parsed.findings_to_resolve) ? parsed.findings_to_resolve.map((f: Partial<FindingToResolve>) => ({
-        finding_code: f.finding_code || null,
-        finding_type_text: f.finding_type_text || "",
-        site_code: f.site_code || null,
-        body_site_text: f.body_site_text || null,
-        reason: f.reason || "",
-        source_anchor: f.source_anchor || "",
-        confidence: typeof f.confidence === "number" ? f.confidence : 0.8,
-      })) : [],
-      conditions_to_resolve: Array.isArray(parsed.conditions_to_resolve) ? parsed.conditions_to_resolve.map((c: Partial<ConditionToResolve>) => ({
-        condition_id: c.condition_id || "",
-        reason: c.reason || "",
-        source_anchor: c.source_anchor || "",
-        confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
-      })) : [],
-      checkups_to_complete: Array.isArray(parsed.checkups_to_complete) ? parsed.checkups_to_complete.map((c: Partial<CheckupToComplete>) => ({
-        checkup_item_id: c.checkup_item_id || "",
-        reason: c.reason || "",
-        suggested_done_at: (typeof c.suggested_done_at === "string" && c.suggested_done_at.trim().length > 0) ? c.suggested_done_at.trim().slice(0, 10) : (parsed.record_date || new Date().toISOString().slice(0, 10)),
-      })) : [],
+      observations: Array.isArray(parsed.observations)
+        ? parsed.observations.map((obs: Partial<ExtractedObservation>) => ({
+            obs_code: obs.obs_code || null,
+            obs_name: obs.obs_name || "Неизвестный показатель",
+            value: obs.value || "",
+            value_numeric: typeof obs.value_numeric === "number" ? obs.value_numeric : null,
+            unit: obs.unit || null,
+            ref_range: obs.ref_range || null,
+            ref_range_low: typeof obs.ref_range_low === "number" ? obs.ref_range_low : null,
+            ref_range_high: typeof obs.ref_range_high === "number" ? obs.ref_range_high : null,
+            status: obs.status || null,
+            confidence: typeof obs.confidence === "number" ? obs.confidence : 0.8,
+          }))
+        : [],
+      findings: Array.isArray(parsed.findings)
+        ? parsed.findings.map((f: Partial<ExtractedFinding>) => ({
+            finding_code: f.finding_code || null,
+            finding_type_text: f.finding_type_text || "Неизвестная находка",
+            site_code: f.site_code || null,
+            body_site_text: f.body_site_text || null,
+            size_mm: typeof f.size_mm === "number" ? f.size_mm : null,
+            count: typeof f.count === "number" ? f.count : null,
+            severity:
+              f.severity === "mild" || f.severity === "moderate" || f.severity === "severe"
+                ? f.severity
+                : "unknown",
+            laterality:
+              f.laterality === "left" || f.laterality === "right" || f.laterality === "bilateral"
+                ? f.laterality
+                : "none",
+            morphology: f.morphology || null,
+            description: f.description || null,
+            histology: f.histology || null,
+            finding_date: f.finding_date || null,
+            source_anchor: f.source_anchor || "",
+            confidence: typeof f.confidence === "number" ? f.confidence : 0.8,
+          }))
+        : [],
+      conditions: Array.isArray(parsed.conditions)
+        ? parsed.conditions.map((c: Partial<ExtractedCondition>) => ({
+            existing_condition_id: c.existing_condition_id || null,
+            name: c.name || "",
+            icd_code: c.icd_code || null,
+            status:
+              c.status === "active" ||
+              c.status === "resolved" ||
+              c.status === "suspected" ||
+              c.status === "history"
+                ? c.status
+                : "suspected",
+            confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
+            source_anchor: c.source_anchor || null,
+          }))
+        : [],
+      findings_to_resolve: Array.isArray(parsed.findings_to_resolve)
+        ? parsed.findings_to_resolve.map((f: Partial<FindingToResolve>) => ({
+            finding_code: f.finding_code || null,
+            finding_type_text: f.finding_type_text || "",
+            site_code: f.site_code || null,
+            body_site_text: f.body_site_text || null,
+            reason: f.reason || "",
+            source_anchor: f.source_anchor || "",
+            confidence: typeof f.confidence === "number" ? f.confidence : 0.8,
+          }))
+        : [],
+      conditions_to_resolve: Array.isArray(parsed.conditions_to_resolve)
+        ? parsed.conditions_to_resolve.map((c: Partial<ConditionToResolve>) => ({
+            condition_id: c.condition_id || "",
+            reason: c.reason || "",
+            source_anchor: c.source_anchor || "",
+            confidence: typeof c.confidence === "number" ? c.confidence : 0.8,
+          }))
+        : [],
+      checkups_to_complete: Array.isArray(parsed.checkups_to_complete)
+        ? parsed.checkups_to_complete.map((c: Partial<CheckupToComplete>) => ({
+            checkup_item_id: c.checkup_item_id || "",
+            reason: c.reason || "",
+            suggested_done_at:
+              typeof c.suggested_done_at === "string" && c.suggested_done_at.trim().length > 0
+                ? c.suggested_done_at.trim().slice(0, 10)
+                : parsed.record_date || new Date().toISOString().slice(0, 10),
+          }))
+        : [],
     };
   } catch {
     throw new Error("Failed to parse OpenRouter response as JSON");
@@ -921,28 +978,28 @@ ${checkupsPrompt}
 // Find catalog entry by obs_code
 function findCatalogEntry(
   obsCode: string | null,
-  catalog: ObservationCatalogItem[]
+  catalog: ObservationCatalogItem[],
 ): ObservationCatalogItem | null {
   if (!obsCode) return null;
-  return catalog.find(c => c.obs_code === obsCode) || null;
+  return catalog.find((c) => c.obs_code === obsCode) || null;
 }
 
 // Find finding type catalog entry by finding_code
 function findFindingTypeCatalogEntry(
   findingCode: string | null,
-  catalog: FindingTypeCatalogItem[]
+  catalog: FindingTypeCatalogItem[],
 ): FindingTypeCatalogItem | null {
   if (!findingCode) return null;
-  return catalog.find(c => c.finding_code === findingCode) || null;
+  return catalog.find((c) => c.finding_code === findingCode) || null;
 }
 
 // Find body site catalog entry by site_code
 function findBodySiteCatalogEntry(
   siteCode: string | null,
-  catalog: BodySiteCatalogItem[]
+  catalog: BodySiteCatalogItem[],
 ): BodySiteCatalogItem | null {
   if (!siteCode) return null;
-  return catalog.find(c => c.site_code === siteCode) || null;
+  return catalog.find((c) => c.site_code === siteCode) || null;
 }
 
 // Evaluate a simple formula string for unit conversion
@@ -952,20 +1009,20 @@ function evaluateFormula(formula: string, inputValue: number): number | null {
     // Extract the expression part (after the "=")
     const parts = formula.split("=");
     if (parts.length !== 2) return null;
-    
+
     let expression = parts[1].trim();
-    
+
     // Replace common variable names with the input value
     // Common patterns: mmol_per_mol, value, x, input, etc.
     expression = expression.replace(/mmol_per_mol|value|input|x/gi, inputValue.toString());
-    
+
     // Simple safe evaluation using Function constructor
     // Only allows numbers, operators, and parentheses
     if (!/^[\d\s+\-*/().]+$/.test(expression)) {
       console.warn(`Unsafe formula expression: ${expression}`);
       return null;
     }
-    
+
     // Evaluate the expression
     const result = new Function(`return ${expression}`)();
     return typeof result === "number" && !isNaN(result) ? result : null;
@@ -978,13 +1035,13 @@ function evaluateFormula(formula: string, inputValue: number): number | null {
 // Get unit config from catalog entry (case-insensitive matching)
 function getUnitConfig(
   unit: string | null,
-  catalogEntry: ObservationCatalogItem | null
+  catalogEntry: ObservationCatalogItem | null,
 ): { factor_to_canonical?: number; formula_to_canonical?: string } | null {
   if (!catalogEntry || !unit) return null;
 
   // Try case-sensitive first
   let unitConfig = catalogEntry.accepted_units[unit];
-  
+
   if (!unitConfig) {
     // Try case-insensitive match
     const unitLower = unit.toLowerCase();
@@ -995,14 +1052,14 @@ function getUnitConfig(
       }
     }
   }
-  
+
   return unitConfig || null;
 }
 
 // Convert a single value using unit config
 function convertValueWithConfig(
   value: number | null,
-  unitConfig: { factor_to_canonical?: number; formula_to_canonical?: string } | null
+  unitConfig: { factor_to_canonical?: number; formula_to_canonical?: string } | null,
 ): number | null {
   if (value === null || !unitConfig) return null;
 
@@ -1010,7 +1067,7 @@ function convertValueWithConfig(
   if (unitConfig.factor_to_canonical !== undefined) {
     return value * unitConfig.factor_to_canonical;
   }
-  
+
   // Try formula-based conversion
   if (unitConfig.formula_to_canonical) {
     return evaluateFormula(unitConfig.formula_to_canonical, value);
@@ -1023,7 +1080,7 @@ function convertValueWithConfig(
 function convertToCanonical(
   value: number | null,
   unit: string | null,
-  catalogEntry: ObservationCatalogItem | null
+  catalogEntry: ObservationCatalogItem | null,
 ): { value_canonical: number | null; unit_canonical: string | null } {
   if (!catalogEntry || value === null || !unit) {
     return { value_canonical: null, unit_canonical: null };
@@ -1050,7 +1107,7 @@ function convertRefRangeToCanonical(
   refLow: number | null,
   refHigh: number | null,
   unit: string | null,
-  catalogEntry: ObservationCatalogItem | null
+  catalogEntry: ObservationCatalogItem | null,
 ): { ref_range_low_canonical: number | null; ref_range_high_canonical: number | null } {
   if (!catalogEntry || !unit) {
     return { ref_range_low_canonical: null, ref_range_high_canonical: null };
@@ -1102,12 +1159,15 @@ Deno.serve(async (req) => {
           autoRefreshToken: false,
           persistSession: false,
         },
-      }
+      },
     );
 
     // Verify user is authenticated by getting user info
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
-    
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseClient.auth.getUser(token);
+
     if (authError || !user) {
       console.error("Auth error:", authError);
       throw new Error("Unauthorized - invalid token");
@@ -1155,7 +1215,14 @@ Deno.serve(async (req) => {
     }
 
     // Fetch all catalogs, existing conditions, existing findings, and checkup items for LLM context
-    const [observationCatalog, findingTypeCatalog, bodySiteCatalog, existingConditions, existingFindings, checkupItems] = await Promise.all([
+    const [
+      observationCatalog,
+      findingTypeCatalog,
+      bodySiteCatalog,
+      existingConditions,
+      existingFindings,
+      checkupItems,
+    ] = await Promise.all([
       fetchObservationCatalog(supabaseAdmin),
       fetchFindingTypeCatalog(supabaseAdmin),
       fetchBodySiteCatalog(supabaseAdmin),
@@ -1178,7 +1245,7 @@ Deno.serve(async (req) => {
       bodySiteCatalog,
       existingConditions,
       existingFindings,
-      checkupItems
+      checkupItems,
     );
     console.log(`Extracted ${structuredData.observations.length} observations`);
     console.log(`Extracted ${structuredData.findings.length} findings`);
@@ -1191,9 +1258,9 @@ Deno.serve(async (req) => {
     const llmSuggestedCheckupCompletions: LlmSuggestedCheckupCompletionStored[] | null =
       structuredData.checkups_to_complete.length > 0
         ? structuredData.checkups_to_complete
-            .filter(c => c.checkup_item_id && c.checkup_item_id.trim().length > 0)
-            .map(c => {
-              const item = checkupItems.find(ci => ci.id === c.checkup_item_id);
+            .filter((c) => c.checkup_item_id && c.checkup_item_id.trim().length > 0)
+            .map((c) => {
+              const item = checkupItems.find((ci) => ci.id === c.checkup_item_id);
               return {
                 checkup_item_id: c.checkup_item_id,
                 reason: c.reason || "",
@@ -1205,8 +1272,14 @@ Deno.serve(async (req) => {
     console.log("Extracted observations:", JSON.stringify(structuredData.observations, null, 2));
     console.log("Extracted findings:", JSON.stringify(structuredData.findings, null, 2));
     console.log("Extracted conditions:", JSON.stringify(structuredData.conditions, null, 2));
-    console.log("Findings to resolve:", JSON.stringify(structuredData.findings_to_resolve, null, 2));
-    console.log("Conditions to resolve:", JSON.stringify(structuredData.conditions_to_resolve, null, 2));
+    console.log(
+      "Findings to resolve:",
+      JSON.stringify(structuredData.findings_to_resolve, null, 2),
+    );
+    console.log(
+      "Conditions to resolve:",
+      JSON.stringify(structuredData.conditions_to_resolve, null, 2),
+    );
 
     // Update the medical record with structured data (including LLM-suggested checkup completions)
     type RecordType = Database["public"]["Tables"]["medical_records"]["Row"]["record_type"];
@@ -1229,25 +1302,22 @@ Deno.serve(async (req) => {
     }
 
     // Delete existing observations for this record (in case of re-extraction)
-    await supabaseAdmin
-      .from("record_observations")
-      .delete()
-      .eq("record_id", record_id);
+    await supabaseAdmin.from("record_observations").delete().eq("record_id", record_id);
 
     // Insert extracted observations
     if (structuredData.observations.length > 0) {
-      const observationsToInsert = structuredData.observations.map(obs => {
+      const observationsToInsert = structuredData.observations.map((obs) => {
         const catalogEntry = findCatalogEntry(obs.obs_code, observationCatalog);
         const { value_canonical, unit_canonical } = convertToCanonical(
           obs.value_numeric,
           obs.unit,
-          catalogEntry
+          catalogEntry,
         );
         const { ref_range_low_canonical, ref_range_high_canonical } = convertRefRangeToCanonical(
           obs.ref_range_low,
           obs.ref_range_high,
           obs.unit,
-          catalogEntry
+          catalogEntry,
         );
 
         return {
@@ -1284,16 +1354,13 @@ Deno.serve(async (req) => {
     }
 
     // Delete existing findings for this record (in case of re-extraction)
-    await supabaseAdmin
-      .from("record_findings")
-      .delete()
-      .eq("record_id", record_id);
+    await supabaseAdmin.from("record_findings").delete().eq("record_id", record_id);
 
     // Insert extracted findings
     if (structuredData.findings.length > 0) {
       const findingsToInsert = structuredData.findings
-        .filter(f => f.source_anchor && f.source_anchor.trim().length > 0) // source_anchor is required
-        .map(f => {
+        .filter((f) => f.source_anchor && f.source_anchor.trim().length > 0) // source_anchor is required
+        .map((f) => {
           const findingTypeEntry = findFindingTypeCatalogEntry(f.finding_code, findingTypeCatalog);
           const bodySiteEntry = findBodySiteCatalogEntry(f.site_code, bodySiteCatalog);
 
@@ -1334,10 +1401,7 @@ Deno.serve(async (req) => {
     }
 
     // Delete existing condition_records for this record (in case of re-extraction)
-    await supabaseAdmin
-      .from("condition_records")
-      .delete()
-      .eq("record_id", record_id);
+    await supabaseAdmin.from("condition_records").delete().eq("record_id", record_id);
 
     // Recompute condition's current_status from the most recent condition_record by record_date
     async function recomputeConditionCurrentStatus(conditionId: string): Promise<void> {
@@ -1368,12 +1432,12 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({ code }),
         });
-        
+
         if (!icdRes.ok) {
           console.error(`ICD lookup failed for ${code}:`, icdRes.status);
           return null;
         }
-        
+
         return await icdRes.json();
       } catch (error) {
         console.error(`ICD lookup error for ${code}:`, error);
@@ -1421,7 +1485,9 @@ Deno.serve(async (req) => {
           if (byCode) {
             // Found existing condition with same ICD code
             conditionId = byCode.id;
-            console.log(`Found existing condition by ICD code ${extracted.icd_code}: ${conditionId}`);
+            console.log(
+              `Found existing condition by ICD code ${extracted.icd_code}: ${conditionId}`,
+            );
           } else {
             // Create new condition with ICD info
             const { data: newCondition, error: conditionError } = await supabaseAdmin
@@ -1442,7 +1508,9 @@ Deno.serve(async (req) => {
               continue;
             }
             conditionId = newCondition.id;
-            console.log(`Created new condition with ICD code ${extracted.icd_code}: ${conditionId}`);
+            console.log(
+              `Created new condition with ICD code ${extracted.icd_code}: ${conditionId}`,
+            );
           }
         } else if (extracted.name) {
           // New condition without valid ICD code - check for duplicates by name (fallback)
@@ -1484,17 +1552,15 @@ Deno.serve(async (req) => {
         }
 
         // Create condition_record linking condition to this record
-        const { error: crError } = await supabaseAdmin
-          .from("condition_records")
-          .insert({
-            condition_id: conditionId,
-            record_id: record_id,
-            status_in_record: extracted.status,
-            source_anchor: extracted.source_anchor,
-            confidence: extracted.confidence,
-            is_llm_extracted: true,
-            is_user_verified: false,
-          });
+        const { error: crError } = await supabaseAdmin.from("condition_records").insert({
+          condition_id: conditionId,
+          record_id: record_id,
+          status_in_record: extracted.status,
+          source_anchor: extracted.source_anchor,
+          confidence: extracted.confidence,
+          is_llm_extracted: true,
+          is_user_verified: false,
+        });
 
         if (crError) {
           console.error("Error inserting condition_record:", crError);
@@ -1510,10 +1576,10 @@ Deno.serve(async (req) => {
     // Process findings to resolve (create resolution entries with size=0, count=0)
     if (structuredData.findings_to_resolve.length > 0) {
       console.log(`Processing ${structuredData.findings_to_resolve.length} findings to resolve`);
-      
+
       for (const toResolve of structuredData.findings_to_resolve) {
         // Find matching existing finding to get catalog IDs
-        const matchingFinding = existingFindings.find(f => {
+        const matchingFinding = existingFindings.find((f) => {
           // Match by finding_code + site_code if available
           if (toResolve.finding_code && toResolve.site_code) {
             return f.finding_code === toResolve.finding_code && f.site_code === toResolve.site_code;
@@ -1523,52 +1589,60 @@ Deno.serve(async (req) => {
             return f.finding_code === toResolve.finding_code;
           }
           // Match by text (fallback)
-          const findingTextMatch = f.finding_type_text.toLowerCase().trim() === toResolve.finding_type_text.toLowerCase().trim();
-          const siteTextMatch = !toResolve.body_site_text || 
-            (f.body_site_text?.toLowerCase().trim() === toResolve.body_site_text.toLowerCase().trim());
+          const findingTextMatch =
+            f.finding_type_text.toLowerCase().trim() ===
+            toResolve.finding_type_text.toLowerCase().trim();
+          const siteTextMatch =
+            !toResolve.body_site_text ||
+            f.body_site_text?.toLowerCase().trim() ===
+              toResolve.body_site_text.toLowerCase().trim();
           return findingTextMatch && siteTextMatch;
         });
 
         if (!matchingFinding) {
-          console.warn(`Could not find matching existing finding to resolve: ${toResolve.finding_type_text}`);
+          console.warn(
+            `Could not find matching existing finding to resolve: ${toResolve.finding_type_text}`,
+          );
           continue;
         }
 
         // Create resolution entry (finding with size=0, count=0)
-        const { error: resolveError } = await supabaseAdmin
-          .from("record_findings")
-          .insert({
-            person_id: record.person_id,
-            record_id,
-            finding_type_id: matchingFinding.finding_type_id,
-            finding_code: matchingFinding.finding_code,
-            finding_type_text: matchingFinding.finding_type_text,
-            body_site_id: matchingFinding.body_site_id,
-            site_code: matchingFinding.site_code,
-            body_site_text: matchingFinding.body_site_text,
-            size_mm: 0,
-            count: 0,
-            severity: "unknown",
-            laterality: "none",
-            finding_date: structuredData.record_date || null,
-            source_anchor: toResolve.source_anchor || `Resolved: ${toResolve.reason}`,
-            is_llm_extracted: true,
-            is_user_verified: false,
-            confidence: toResolve.confidence,
-          });
+        const { error: resolveError } = await supabaseAdmin.from("record_findings").insert({
+          person_id: record.person_id,
+          record_id,
+          finding_type_id: matchingFinding.finding_type_id,
+          finding_code: matchingFinding.finding_code,
+          finding_type_text: matchingFinding.finding_type_text,
+          body_site_id: matchingFinding.body_site_id,
+          site_code: matchingFinding.site_code,
+          body_site_text: matchingFinding.body_site_text,
+          size_mm: 0,
+          count: 0,
+          severity: "unknown",
+          laterality: "none",
+          finding_date: structuredData.record_date || null,
+          source_anchor: toResolve.source_anchor || `Resolved: ${toResolve.reason}`,
+          is_llm_extracted: true,
+          is_user_verified: false,
+          confidence: toResolve.confidence,
+        });
 
         if (resolveError) {
           console.error("Error creating resolution entry for finding:", resolveError);
         } else {
-          console.log(`Created resolution entry for finding: ${matchingFinding.finding_type_text} at ${matchingFinding.body_site_text || matchingFinding.site_code}`);
+          console.log(
+            `Created resolution entry for finding: ${matchingFinding.finding_type_text} at ${matchingFinding.body_site_text || matchingFinding.site_code}`,
+          );
         }
       }
     }
 
     // Process conditions to resolve (update status and create condition_record)
     if (structuredData.conditions_to_resolve.length > 0) {
-      console.log(`Processing ${structuredData.conditions_to_resolve.length} conditions to resolve`);
-      
+      console.log(
+        `Processing ${structuredData.conditions_to_resolve.length} conditions to resolve`,
+      );
+
       for (const toResolve of structuredData.conditions_to_resolve) {
         if (!toResolve.condition_id) {
           console.warn("Skipping condition to resolve without condition_id");
@@ -1576,24 +1650,24 @@ Deno.serve(async (req) => {
         }
 
         // Verify the condition exists and belongs to this person
-        const existingCond = existingConditions.find(c => c.id === toResolve.condition_id);
+        const existingCond = existingConditions.find((c) => c.id === toResolve.condition_id);
         if (!existingCond) {
-          console.warn(`Condition to resolve not found in existing conditions: ${toResolve.condition_id}`);
+          console.warn(
+            `Condition to resolve not found in existing conditions: ${toResolve.condition_id}`,
+          );
           continue;
         }
 
         // Create condition_record linking to this record (status "resolved" in this record)
-        const { error: crError } = await supabaseAdmin
-          .from("condition_records")
-          .insert({
-            condition_id: toResolve.condition_id,
-            record_id: record_id,
-            status_in_record: "resolved",
-            source_anchor: toResolve.source_anchor,
-            confidence: toResolve.confidence,
-            is_llm_extracted: true,
-            is_user_verified: false,
-          });
+        const { error: crError } = await supabaseAdmin.from("condition_records").insert({
+          condition_id: toResolve.condition_id,
+          record_id: record_id,
+          status_in_record: "resolved",
+          source_anchor: toResolve.source_anchor,
+          confidence: toResolve.confidence,
+          is_llm_extracted: true,
+          is_user_verified: false,
+        });
 
         if (crError) {
           console.error("Error inserting condition_record for resolved condition:", crError);
@@ -1614,7 +1688,7 @@ Deno.serve(async (req) => {
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
-      }
+      },
     );
   } catch (error) {
     console.error("Structure extraction error:", error);
@@ -1626,7 +1700,7 @@ Deno.serve(async (req) => {
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,
-      }
+      },
     );
   }
 });

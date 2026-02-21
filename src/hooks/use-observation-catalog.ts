@@ -2,11 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import type {
-  ObservationCatalog,
-  CreateObservationInput,
-  UpdateObservationInput,
-} from "@/types";
+import type { ObservationCatalog, CreateObservationInput, UpdateObservationInput } from "@/types";
 import type { Database, Json } from "@/types/database";
 
 type ObservationInsert = Database["public"]["Tables"]["observation_catalog"]["Insert"];
@@ -15,9 +11,7 @@ type ObservationUpdate = Database["public"]["Tables"]["observation_catalog"]["Up
 // ============================================================================
 // FETCH ALL OBSERVATIONS
 // ============================================================================
-async function fetchObservationCatalog(
-  search?: string
-): Promise<ObservationCatalog[]> {
+async function fetchObservationCatalog(search?: string): Promise<ObservationCatalog[]> {
   const supabase = createClient();
 
   let query = supabase
@@ -29,7 +23,7 @@ async function fetchObservationCatalog(
   if (search && search.trim()) {
     const searchTerm = `%${search.trim().toLowerCase()}%`;
     query = query.or(
-      `obs_code.ilike.${searchTerm},name_ru.ilike.${searchTerm},name_en.ilike.${searchTerm}`
+      `obs_code.ilike.${searchTerm},name_ru.ilike.${searchTerm},name_en.ilike.${searchTerm}`,
     );
   }
 
@@ -52,9 +46,7 @@ export function useObservationCatalog(search?: string) {
 // ============================================================================
 // FETCH SINGLE OBSERVATION
 // ============================================================================
-async function fetchObservation(
-  id: string
-): Promise<ObservationCatalog | null> {
+async function fetchObservation(id: string): Promise<ObservationCatalog | null> {
   const supabase = createClient();
 
   const { data, error } = await supabase
@@ -84,9 +76,7 @@ export function useObservation(id: string | null) {
 // ============================================================================
 // CREATE OBSERVATION
 // ============================================================================
-async function createObservation(
-  input: CreateObservationInput
-): Promise<ObservationCatalog> {
+async function createObservation(input: CreateObservationInput): Promise<ObservationCatalog> {
   const supabase = createClient();
   const payload: ObservationInsert = {
     obs_code: input.obs_code,
@@ -141,10 +131,7 @@ async function updateObservation({
   const { accepted_units, ...rest } = updates;
   const payload: ObservationUpdate = {
     ...rest,
-    accepted_units:
-      accepted_units === undefined
-        ? undefined
-        : (accepted_units as unknown as Json),
+    accepted_units: accepted_units === undefined ? undefined : (accepted_units as unknown as Json),
   };
 
   const { data, error } = await supabase
@@ -183,10 +170,7 @@ export function useUpdateObservation() {
 async function deleteObservation(id: string): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from("observation_catalog")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("observation_catalog").delete().eq("id", id);
 
   if (error) {
     throw new Error(error.message);

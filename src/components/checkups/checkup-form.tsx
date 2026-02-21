@@ -72,10 +72,10 @@ function getSeasonStart(season: "winter" | "spring" | "summer" | "autumn"): stri
   const now = new Date();
   const year = now.getFullYear();
   const seasonDates: Record<string, [number, number]> = {
-    winter: [12, 1],   // Dec 1
-    spring: [3, 1],    // Mar 1
-    summer: [6, 1],    // Jun 1
-    autumn: [9, 1],    // Sep 1
+    winter: [12, 1], // Dec 1
+    spring: [3, 1], // Mar 1
+    summer: [6, 1], // Jun 1
+    autumn: [9, 1], // Sep 1
   };
   const [m, d] = seasonDates[season];
   let targetYear = year;
@@ -120,12 +120,12 @@ export function CheckupForm({
   const [title, setTitle] = useState(() => initial?.title ?? "");
   const [category, setCategory] = useState<CheckupCategory>(() => getInitialCategory(initial));
   const [scheduleType, setScheduleType] = useState<"interval" | "one_off">(() =>
-    initial?.schedule.type === "one_off" ? "one_off" : "interval"
+    initial?.schedule.type === "one_off" ? "one_off" : "interval",
   );
 
   // Interval settings — initialize from initial so edit shows correct values on first paint
   const [frequencyPreset, setFrequencyPreset] = useState<FrequencyPreset>(() =>
-    getInitialFrequencyPreset(initial)
+    getInitialFrequencyPreset(initial),
   );
   const [customEvery, setCustomEvery] = useState(() => {
     if (!initial || initial.schedule.type !== "interval") return 1;
@@ -152,32 +152,36 @@ export function CheckupForm({
 
   // One-off
   const [oneOffDueAt, setOneOffDueAt] = useState(() =>
-    initial?.schedule.type === "one_off" ? toDateOnly(initial.schedule.due_at) : ""
+    initial?.schedule.type === "one_off" ? toDateOnly(initial.schedule.due_at) : "",
   );
 
   // Reminder days before due (empty = day-of reminder only, always active)
   const [reminderDaysBefore, setReminderDaysBefore] = useState<number[]>(() =>
-    Array.isArray(initial?.reminder_days_before)
-      ? [...initial.reminder_days_before]
-      : [7]
+    Array.isArray(initial?.reminder_days_before) ? [...initial.reminder_days_before] : [7],
   );
 
   // Why/conditions
   const [whyText, setWhyText] = useState(() => initial?.why_text ?? "");
   const [whyLinks, setWhyLinks] = useState<CheckupWhyLink[]>(() =>
-    Array.isArray(initial?.why_links) ? initial.why_links : []
+    Array.isArray(initial?.why_links) ? initial.why_links : [],
   );
   const [conditionSearch, setConditionSearch] = useState("");
   const [conditionOpen, setConditionOpen] = useState(false);
   const conditionRef = useRef<HTMLDivElement>(null);
 
   // Compute effective interval values
-  const effectiveEvery = frequencyPreset === "custom" ? customEvery : 
-    frequencyPreset === "1_month" ? 1 : 
-    frequencyPreset === "3_month" ? 3 : 
-    frequencyPreset === "6_month" ? 6 : 1;
-  const effectiveUnit: IntervalUnit = frequencyPreset === "custom" ? customUnit :
-    frequencyPreset === "1_year" ? "year" : "month";
+  const effectiveEvery =
+    frequencyPreset === "custom"
+      ? customEvery
+      : frequencyPreset === "1_month"
+        ? 1
+        : frequencyPreset === "3_month"
+          ? 3
+          : frequencyPreset === "6_month"
+            ? 6
+            : 1;
+  const effectiveUnit: IntervalUnit =
+    frequencyPreset === "custom" ? customUnit : frequencyPreset === "1_year" ? "year" : "month";
 
   // Compute anchor date based on preset
   const computeAnchorDate = (): string => {
@@ -289,7 +293,7 @@ export function CheckupForm({
   // Reset anchor preset when frequency changes (if current preset not available)
   useEffect(() => {
     const options = getAnchorOptions();
-    if (!options.find(o => o.value === anchorPreset)) {
+    if (!options.find((o) => o.value === anchorPreset)) {
       setAnchorPreset("next_period");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -327,7 +331,9 @@ export function CheckupForm({
     if (!title.trim()) return;
     if (scheduleType === "one_off" && !oneOffDueAt.trim()) return;
 
-    const days = reminderDaysBefore.filter((d) => typeof d === "number" && d >= 0).sort((a, b) => b - a);
+    const days = reminderDaysBefore
+      .filter((d) => typeof d === "number" && d >= 0)
+      .sort((a, b) => b - a);
     const reminder_days_before = days;
 
     if (mode === "create") {
@@ -413,7 +419,10 @@ export function CheckupForm({
           {/* Frequency */}
           <div className="space-y-2">
             <Label>{t("checkups.frequency")}</Label>
-            <Select value={frequencyPreset} onValueChange={(v) => setFrequencyPreset(v as FrequencyPreset)}>
+            <Select
+              value={frequencyPreset}
+              onValueChange={(v) => setFrequencyPreset(v as FrequencyPreset)}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -425,7 +434,7 @@ export function CheckupForm({
                 <SelectItem value="custom">{t("checkups.customFrequency")}</SelectItem>
               </SelectContent>
             </Select>
-            
+
             {frequencyPreset === "custom" && (
               <div className="flex items-center gap-2 mt-2">
                 <span className="text-sm text-muted-foreground">{t("checkups.every")}</span>
@@ -466,7 +475,7 @@ export function CheckupForm({
                 ))}
               </SelectContent>
             </Select>
-            
+
             {anchorPreset === "custom" && (
               <Input
                 type="date"
@@ -480,7 +489,10 @@ export function CheckupForm({
           {/* After completion: next due from completion date or target date */}
           <div className="space-y-2">
             <Label>{t("checkups.nextDueFrom")}</Label>
-            <Select value={nextDueFrom} onValueChange={(v) => setNextDueFrom(v as CheckupNextDueFrom)}>
+            <Select
+              value={nextDueFrom}
+              onValueChange={(v) => setNextDueFrom(v as CheckupNextDueFrom)}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -634,7 +646,9 @@ export function CheckupForm({
                   <CommandList className="max-h-48">
                     <CommandGroup>
                       {filteredConditions.map((c) => {
-                        const selected = whyLinks.some((l) => l.type === "condition" && l.id === c.id);
+                        const selected = whyLinks.some(
+                          (l) => l.type === "condition" && l.id === c.id,
+                        );
                         return (
                           <CommandItem
                             key={c.id}
@@ -642,7 +656,9 @@ export function CheckupForm({
                             onSelect={() => toggleCondition(c)}
                             className={selected ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 shrink-0 ${selected ? "opacity-100" : "opacity-0"}`} />
+                            <Check
+                              className={`h-4 w-4 shrink-0 ${selected ? "opacity-100" : "opacity-0"}`}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="truncate">{c.name}</div>
                               {c.code && (
@@ -662,7 +678,9 @@ export function CheckupForm({
                 <div className="py-4 px-3 text-sm text-muted-foreground space-y-3">
                   <p>{t("checkups.linkedConditionsEmpty")}</p>
                   <Button variant="outline" size="sm" asChild>
-                    <Link href="/health/conditions">{t("checkups.linkedConditionsGoToConditions")}</Link>
+                    <Link href="/health/conditions">
+                      {t("checkups.linkedConditionsGoToConditions")}
+                    </Link>
                   </Button>
                 </div>
               )}

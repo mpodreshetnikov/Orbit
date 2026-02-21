@@ -2,7 +2,21 @@
 
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { ChevronsUpDown, Check, Plus, Loader2, AlertTriangle, Info, ChevronDown, ChevronUp, AlertCircle, HelpCircle, CheckCircle2, History, ExternalLink } from "lucide-react";
+import {
+  ChevronsUpDown,
+  Check,
+  Plus,
+  Loader2,
+  AlertTriangle,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle,
+  HelpCircle,
+  CheckCircle2,
+  History,
+  ExternalLink,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,11 +47,7 @@ import {
 } from "@/components/ui/dialog";
 import { useIcdLookup } from "@/hooks";
 import { cn } from "@/lib/utils";
-import type {
-  Condition,
-  ConditionRecordWithDetails,
-  ConditionStatus,
-} from "@/types";
+import type { Condition, ConditionRecordWithDetails, ConditionStatus } from "@/types";
 
 interface ConditionEditDialogProps {
   open: boolean;
@@ -85,7 +95,7 @@ export function ConditionEditDialog({
 
   // ICD validation hook (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
-    icdCode.length >= 2 ? icdCode : null
+    icdCode.length >= 2 ? icdCode : null,
   );
 
   // Initialize form when dialog opens
@@ -115,11 +125,11 @@ export function ConditionEditDialog({
 
   // Get current selected condition
   const selectedCondition = selectedConditionId
-    ? existingConditions.find(c => c.id === selectedConditionId)
+    ? existingConditions.find((c) => c.id === selectedConditionId)
     : null;
 
   // Filter conditions based on search
-  const filteredConditions = existingConditions.filter(condition => {
+  const filteredConditions = existingConditions.filter((condition) => {
     if (!conditionSearch.trim()) return true;
     const search = conditionSearch.toLowerCase();
     return (
@@ -137,7 +147,7 @@ export function ConditionEditDialog({
     } else {
       setMode("existing");
       setSelectedConditionId(id);
-      const condition = existingConditions.find(c => c.id === id);
+      const condition = existingConditions.find((c) => c.id === id);
       if (condition) {
         setName(condition.name);
       }
@@ -153,19 +163,20 @@ export function ConditionEditDialog({
   };
 
   // Get the name to use for Google search (prefer original name, fallback to current input)
-  const searchName = mode === "existing" && selectedCondition 
-    ? selectedCondition.name 
-    : name.trim();
+  const searchName =
+    mode === "existing" && selectedCondition ? selectedCondition.name : name.trim();
 
   // Handle save
   const handleSave = async () => {
     const icdCodeTrimmed = icdCode.trim();
     const hasIcdCode = !!icdCodeTrimmed;
-    const icdData = hasIcdCode ? {
-      code: icdCodeTrimmed,
-      icd_name_en: icdLookup?.found ? icdLookup.name_en : null,
-      icd_name_ru: null,
-    } : {};
+    const icdData = hasIcdCode
+      ? {
+          code: icdCodeTrimmed,
+          icd_name_en: icdLookup?.found ? icdLookup.name_en : null,
+          icd_name_ru: null,
+        }
+      : {};
 
     let payload: Parameters<typeof onSave>[0] | null = null;
     if (mode === "existing" && selectedConditionId) {
@@ -206,9 +217,7 @@ export function ConditionEditDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
-          <DialogTitle>
-            {isNew ? t("conditions.add") : t("conditions.edit")}
-          </DialogTitle>
+          <DialogTitle>{isNew ? t("conditions.add") : t("conditions.edit")}</DialogTitle>
           <DialogDescription>
             {isNew ? t("conditions.addDescription") : t("conditions.editDescription")}
           </DialogDescription>
@@ -229,7 +238,7 @@ export function ConditionEditDialog({
                       aria-expanded={isConditionOpen}
                       className={cn(
                         "h-10 w-full justify-between px-3 py-2 text-sm",
-                        !conditionDisplayValue && "text-muted-foreground"
+                        !conditionDisplayValue && "text-muted-foreground",
                       )}
                     >
                       <span className="truncate">
@@ -268,11 +277,11 @@ export function ConditionEditDialog({
                                 key={condition.id}
                                 value={condition.id}
                                 onSelect={() => handleConditionSelect(condition.id)}
-                                className={cn(
-                                  selectedConditionId === condition.id && "bg-accent"
-                                )}
+                                className={cn(selectedConditionId === condition.id && "bg-accent")}
                               >
-                                <Check className={`h-4 w-4 shrink-0 ${selectedConditionId === condition.id ? "opacity-100" : "opacity-0"}`} />
+                                <Check
+                                  className={`h-4 w-4 shrink-0 ${selectedConditionId === condition.id ? "opacity-100" : "opacity-0"}`}
+                                />
                                 <div className="flex-1 min-w-0">
                                   <div className="truncate">{condition.name}</div>
                                   <div className="text-xs text-muted-foreground truncate">
@@ -292,7 +301,6 @@ export function ConditionEditDialog({
             </div>
           )}
 
-
           {/* Condition Name (for new conditions) */}
           {(mode === "new" || !isNew) && (
             <div className="space-y-2">
@@ -308,7 +316,9 @@ export function ConditionEditDialog({
           )}
 
           {/* ICD-10 Code (for new conditions, existing without ICD, or when editing) */}
-          {(mode === "new" || (mode === "existing" && isNew && selectedCondition && !selectedCondition.code) || (!isNew && conditionRecord)) && (
+          {(mode === "new" ||
+            (mode === "existing" && isNew && selectedCondition && !selectedCondition.code) ||
+            (!isNew && conditionRecord)) && (
             <div className="space-y-2">
               <Label htmlFor="icdCode">{t("conditions.icdCode")}</Label>
               <div className="space-y-1.5 min-w-0">
@@ -323,9 +333,7 @@ export function ConditionEditDialog({
                   {icdLoading && (
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
                   )}
-                  {icdLookup?.found && (
-                    <Check className="h-4 w-4 shrink-0 text-green-600" />
-                  )}
+                  {icdLookup?.found && <Check className="h-4 w-4 shrink-0 text-green-600" />}
                   {icdCode && !icdLoading && icdLookup && !icdLookup.found && (
                     <div className="flex items-center gap-1 text-yellow-600 shrink-0">
                       <AlertTriangle className="h-4 w-4" />
@@ -334,12 +342,10 @@ export function ConditionEditDialog({
                   )}
                 </div>
                 {icdLookup?.found && (
-                  <p className="text-sm text-green-600 break-words min-w-0">
-                    {icdLookup.name_en}
-                  </p>
+                  <p className="text-sm text-green-600 break-words min-w-0">{icdLookup.name_en}</p>
                 )}
               </div>
-              
+
               {/* Google search link to find ICD code */}
               {searchName && (
                 <a
@@ -358,77 +364,80 @@ export function ConditionEditDialog({
           {/* Status in this record */}
           <div className="space-y-2">
             <Label>{t("conditions.statusInRecord")}</Label>
-              <Select value={statusInRecord} onValueChange={(v) => setStatusInRecord(v as ConditionStatus)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 text-orange-500" />
-                      {t("conditions.status.active")}
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="suspected">
-                    <div className="flex items-center gap-2">
-                      <HelpCircle className="h-3.5 w-3.5 text-yellow-500" />
-                      {t("conditions.status.suspected")}
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="resolved">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                      {t("conditions.status.resolved")}
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="history">
-                    <div className="flex items-center gap-2">
-                      <History className="h-3.5 w-3.5 text-gray-500" />
-                      {t("conditions.status.history")}
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              
-              {/* Status tips toggle */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowStatusTips(!showStatusTips)}
-                className="h-auto p-0 text-xs font-normal text-muted-foreground hover:text-foreground hover:bg-transparent"
-              >
-                <Info className="h-3.5 w-3.5" />
-                <span>{t("conditions.statusTips.title")}</span>
-                {showStatusTips ? (
-                  <ChevronUp className="h-3 w-3" />
-                ) : (
-                  <ChevronDown className="h-3 w-3" />
-                )}
-              </Button>
-              
-              {/* Status tips content */}
-              {showStatusTips && (
-                <div className="rounded-md bg-muted/50 p-3 space-y-2 text-xs">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="h-3.5 w-3.5 text-orange-500 mt-0.5 shrink-0" />
-                    <span>{t("conditions.statusTips.active")}</span>
+            <Select
+              value={statusInRecord}
+              onValueChange={(v) => setStatusInRecord(v as ConditionStatus)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 text-orange-500" />
+                    {t("conditions.status.active")}
                   </div>
-                  <div className="flex items-start gap-2">
-                    <HelpCircle className="h-3.5 w-3.5 text-yellow-500 mt-0.5 shrink-0" />
-                    <span>{t("conditions.statusTips.suspected")}</span>
+                </SelectItem>
+                <SelectItem value="suspected">
+                  <div className="flex items-center gap-2">
+                    <HelpCircle className="h-3.5 w-3.5 text-yellow-500" />
+                    {t("conditions.status.suspected")}
                   </div>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
-                    <span>{t("conditions.statusTips.resolved")}</span>
+                </SelectItem>
+                <SelectItem value="resolved">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                    {t("conditions.status.resolved")}
                   </div>
-                  <div className="flex items-start gap-2">
-                    <History className="h-3.5 w-3.5 text-gray-500 mt-0.5 shrink-0" />
-                    <span>{t("conditions.statusTips.history")}</span>
+                </SelectItem>
+                <SelectItem value="history">
+                  <div className="flex items-center gap-2">
+                    <History className="h-3.5 w-3.5 text-gray-500" />
+                    {t("conditions.status.history")}
                   </div>
-                </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Status tips toggle */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowStatusTips(!showStatusTips)}
+              className="h-auto p-0 text-xs font-normal text-muted-foreground hover:text-foreground hover:bg-transparent"
+            >
+              <Info className="h-3.5 w-3.5" />
+              <span>{t("conditions.statusTips.title")}</span>
+              {showStatusTips ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
               )}
-            </div>
+            </Button>
+
+            {/* Status tips content */}
+            {showStatusTips && (
+              <div className="rounded-md bg-muted/50 p-3 space-y-2 text-xs">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-3.5 w-3.5 text-orange-500 mt-0.5 shrink-0" />
+                  <span>{t("conditions.statusTips.active")}</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <HelpCircle className="h-3.5 w-3.5 text-yellow-500 mt-0.5 shrink-0" />
+                  <span>{t("conditions.statusTips.suspected")}</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                  <span>{t("conditions.statusTips.resolved")}</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <History className="h-3.5 w-3.5 text-gray-500 mt-0.5 shrink-0" />
+                  <span>{t("conditions.statusTips.history")}</span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Source Anchor */}
           <div className="space-y-2">

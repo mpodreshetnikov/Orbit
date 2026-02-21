@@ -21,10 +21,7 @@ export function ConditionStatusBadge({ status, className }: ConditionStatusBadge
   const t = useTranslations();
 
   return (
-    <Badge
-      variant="outline"
-      className={cn(statusColors[status], className)}
-    >
+    <Badge variant="outline" className={cn(statusColors[status], className)}>
       {t(`conditions.status.${status}`)}
     </Badge>
   );

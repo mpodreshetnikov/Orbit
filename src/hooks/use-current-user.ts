@@ -6,7 +6,9 @@ import type { User } from "@supabase/supabase-js";
 
 async function fetchCurrentUser(): Promise<User | null> {
   const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   return user;
 }
 

@@ -74,14 +74,12 @@ interface RoutedPersonRow {
 function isNotificationWindowForUser(
   now: Date,
   notificationTime: string,
-  timezone: string | null
+  timezone: string | null,
 ): boolean {
   const parts = notificationTime.split(":").map(Number);
   const hour = parts[0] ?? 9;
   const min = parts[1] ?? 0;
-  const userNow = timezone
-    ? new Date(now.toLocaleString("en-US", { timeZone: timezone }))
-    : now;
+  const userNow = timezone ? new Date(now.toLocaleString("en-US", { timeZone: timezone })) : now;
   const userMinutes = userNow.getHours() * 60 + userNow.getMinutes();
   const windowStart = hour * 60 + min;
   const windowEnd = windowStart + 30;
@@ -89,7 +87,7 @@ function isNotificationWindowForUser(
     return userMinutes >= windowStart && userMinutes < windowEnd;
   }
   // Window spans midnight (e.g. 23:45 → 23:45–00:15)
-  return userMinutes >= windowStart || userMinutes < (windowEnd % (24 * 60));
+  return userMinutes >= windowStart || userMinutes < windowEnd % (24 * 60);
 }
 
 Deno.serve(async (req) => {
@@ -146,9 +144,7 @@ Deno.serve(async (req) => {
       p_recipient_user_id: authUserId,
     });
     const routedPersonRows = (routedPersons ?? []) as RoutedPersonRow[];
-    const personMetaById = new Map(
-      routedPersonRows.map((p) => [p.person_id, p] as const)
-    );
+    const personMetaById = new Map(routedPersonRows.map((p) => [p.person_id, p] as const));
 
     // Load all unsent digests (medication digests created by create_medication_reminder_digests at start).
     // One row per dose — do not limit; we need every dose (e.g. 2 from one med + 1 from another = 3 rows).
@@ -284,7 +280,7 @@ Deno.serve(async (req) => {
     const processPayloadRows = async (
       provider: { type: string; rpc: string },
       payloadRows: PayloadRow[] | null,
-      personMeta: RoutedPersonRow | null
+      personMeta: RoutedPersonRow | null,
     ) => {
       if (!payloadRows || !Array.isArray(payloadRows) || payloadRows.length === 0) return;
       for (const payloadRow of payloadRows as PayloadRow[]) {
@@ -418,11 +414,14 @@ Deno.serve(async (req) => {
     };
 
     for (const provider of NOTIFICATION_PROVIDERS_EVERY_TICK) {
-      const { data: payloadRows } = await supabase.rpc(provider.rpc as keyof Database["public"]["Functions"], {
-        p_auth_user_id: authUserId,
-        p_now_timestamptz: now.toISOString(),
-        p_timezone: tz ?? null,
-      });
+      const { data: payloadRows } = await supabase.rpc(
+        provider.rpc as keyof Database["public"]["Functions"],
+        {
+          p_auth_user_id: authUserId,
+          p_now_timestamptz: now.toISOString(),
+          p_timezone: tz ?? null,
+        },
+      );
       await processPayloadRows(provider, payloadRows as PayloadRow[] | null, null);
     }
 
@@ -432,12 +431,15 @@ Deno.serve(async (req) => {
         : now.toISOString().slice(0, 10);
       for (const provider of NOTIFICATION_PROVIDERS_IN_WINDOW) {
         for (const person of routedPersonRows) {
-          const { data: payloadRows } = await supabase.rpc(provider.rpc as keyof Database["public"]["Functions"], {
-            p_person_id: person.person_id,
-            p_date: dateStr,
-            p_notification_time: timeStr,
-            p_timezone: tz ?? null,
-          });
+          const { data: payloadRows } = await supabase.rpc(
+            provider.rpc as keyof Database["public"]["Functions"],
+            {
+              p_person_id: person.person_id,
+              p_date: dateStr,
+              p_notification_time: timeStr,
+              p_timezone: tz ?? null,
+            },
+          );
           await processPayloadRows(provider, payloadRows as PayloadRow[] | null, person);
         }
       }
@@ -452,16 +454,12 @@ Deno.serve(async (req) => {
 
     if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && userSubs?.length) {
       try {
-        webpush.setVapidDetails(
-          "mailto:support@example.com",
-          VAPID_PUBLIC_KEY,
-          VAPID_PRIVATE_KEY
-        );
+        webpush.setVapidDetails("mailto:support@example.com", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
         const medItemsFromDigests = notificationsForUser.filter(
-          (n) => n.type === "medication" || n.type === "medication_snoozed"
+          (n) => n.type === "medication" || n.type === "medication_snoozed",
         );
         const nonMedItems = notificationsForUser.filter(
-          (n) => n.type !== "medication" && n.type !== "medication_snoozed"
+          (n) => n.type !== "medication" && n.type !== "medication_snoozed",
         );
         const medGroups = new Map<
           string,
@@ -470,7 +468,12 @@ Deno.serve(async (req) => {
             personName: string | null;
             titlePrefix: string | null;
             ids: Set<string>;
-            medItems: { medicationName: string | null; amount: string | null; unit: string; body: string }[];
+            medItems: {
+              medicationName: string | null;
+              amount: string | null;
+              unit: string;
+              body: string;
+            }[];
             scheduledAt: string;
             doseEventIds: string[];
           }
@@ -551,7 +554,7 @@ Deno.serve(async (req) => {
                 keys: { p256dh: sub.p256dh, auth: sub.auth },
               },
               JSON.stringify({ notifications: payloadToSend }),
-              { TTL: 86400 }
+              { TTL: 86400 },
             );
           } catch (e) {
             if (

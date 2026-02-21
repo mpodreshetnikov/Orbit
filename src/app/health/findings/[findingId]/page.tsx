@@ -6,13 +6,37 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
-import { ArrowLeft, Calendar, Ruler, FileText, AlertTriangle, MapPin, TrendingUp, TrendingDown, Minus, CheckCircle2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Calendar,
+  Ruler,
+  FileText,
+  AlertTriangle,
+  MapPin,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  CheckCircle2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useSingleFindingHistory, useMarkFindingResolved } from "@/hooks";
 import { useMedicalRecords } from "@/hooks/use-medical-records";
@@ -26,10 +50,12 @@ interface FindingDetailPageProps {
 // Severity badge
 function SeverityBadge({ severity }: { severity: FindingSeverity }) {
   const t = useTranslations();
-  
+
   const config: Record<FindingSeverity, { color: string }> = {
     mild: { color: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20" },
-    moderate: { color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20" },
+    moderate: {
+      color: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20",
+    },
     severe: { color: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20" },
     unknown: { color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20" },
   };
@@ -47,14 +73,14 @@ function SeverityBadge({ severity }: { severity: FindingSeverity }) {
 // History is sorted with newest first, so [0] is latest and [1] is previous
 function SizeTrendIndicator({ history }: { history: FindingHistoryPoint[] }) {
   if (history.length < 2) return <Minus className="h-4 w-4 text-muted-foreground" />;
-  
-  const sizesWithData = history.filter(h => h.size_mm !== null);
+
+  const sizesWithData = history.filter((h) => h.size_mm !== null);
   if (sizesWithData.length < 2) return <Minus className="h-4 w-4 text-muted-foreground" />;
 
   // [0] is latest (newest), [1] is previous
   const latest = sizesWithData[0].size_mm!;
   const previous = sizesWithData[1].size_mm!;
-  
+
   // For findings (polyps, cysts, etc.), smaller is better (green), larger is worse (red)
   if (latest > previous) {
     return <TrendingUp className="h-4 w-4 text-red-500" />;
@@ -74,13 +100,13 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
   const [selectedRecordId, setSelectedRecordId] = useState<string>("");
 
   const { data: finding, isLoading } = useSingleFindingHistory(
-    selectedPersonId, 
+    selectedPersonId,
     decodeURIComponent(findingId),
-    siteCode ? decodeURIComponent(siteCode) : undefined
+    siteCode ? decodeURIComponent(siteCode) : undefined,
   );
 
   // Fetch recent active records for the "attach to record" selector
-  const { data: records } = useMedicalRecords({ 
+  const { data: records } = useMedicalRecords({
     person_id: selectedPersonId || undefined,
     status: "active",
   });
@@ -89,13 +115,13 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 
   const handleMarkResolved = async () => {
     if (!finding || !selectedPersonId || !selectedRecordId) return;
-    
+
     await markResolvedMutation.mutateAsync({
       personId: selectedPersonId,
       recordId: selectedRecordId,
       finding,
     });
-    
+
     setShowResolveDialog(false);
     setSelectedRecordId("");
   };
@@ -161,7 +187,9 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
             ) : null}
           </div>
           {finding.finding_code && (
-            <code className="text-xs sm:text-sm text-muted-foreground block mt-0.5 truncate">{finding.finding_code}</code>
+            <code className="text-xs sm:text-sm text-muted-foreground block mt-0.5 truncate">
+              {finding.finding_code}
+            </code>
           )}
           {siteName && (
             <div className="flex items-center gap-1 mt-1.5 sm:mt-2 text-muted-foreground text-sm">
@@ -175,8 +203,8 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
           {!isResolved && (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
               className="h-8 sm:h-9 text-xs sm:text-sm gap-1.5"
               onClick={() => setShowResolveDialog(true)}
@@ -186,7 +214,10 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
             </Button>
           )}
           {isResolved ? (
-            <Badge variant="outline" className="bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 text-xs">
+            <Badge
+              variant="outline"
+              className="bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 text-xs"
+            >
               {t("findings.resolved")}
             </Badge>
           ) : (
@@ -200,9 +231,7 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("findings.markAsResolved")}</DialogTitle>
-            <DialogDescription>
-              {t("findings.markAsResolvedDescription")}
-            </DialogDescription>
+            <DialogDescription>{t("findings.markAsResolvedDescription")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -214,7 +243,9 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
                 <SelectContent>
                   {records?.map((record) => (
                     <SelectItem key={record.id} value={record.id}>
-                      {record.title} {record.record_date && `(${format(new Date(record.record_date), "dd.MM.yyyy", { locale: dateLocale })})`}
+                      {record.title}{" "}
+                      {record.record_date &&
+                        `(${format(new Date(record.record_date), "dd.MM.yyyy", { locale: dateLocale })})`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -225,7 +256,7 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
             <Button variant="outline" onClick={() => setShowResolveDialog(false)}>
               {t("common.cancel")}
             </Button>
-            <Button 
+            <Button
               onClick={handleMarkResolved}
               disabled={!selectedRecordId || markResolvedMutation.isPending}
             >
@@ -250,7 +281,9 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
               {finding.latest_size_mm !== null ? (
                 <>
                   <span className="text-lg sm:text-2xl font-bold">{finding.latest_size_mm}</span>
-                  <span className="text-muted-foreground text-xs sm:text-sm">{t("findings.mm")}</span>
+                  <span className="text-muted-foreground text-xs sm:text-sm">
+                    {t("findings.mm")}
+                  </span>
                   <SizeTrendIndicator history={finding.history} />
                 </>
               ) : (
@@ -271,7 +304,9 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
               <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
               <span className="text-lg sm:text-2xl font-bold">{finding.occurrence_count}</span>
-              <span className="text-muted-foreground text-xs sm:text-sm">{t("findings.records")}</span>
+              <span className="text-muted-foreground text-xs sm:text-sm">
+                {t("findings.records")}
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -285,10 +320,9 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
           </CardHeader>
           <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
             <span className="text-sm sm:text-xl font-semibold">
-              {finding.latest_laterality !== "none" 
+              {finding.latest_laterality !== "none"
                 ? t(`findings.lateralityOptions.${finding.latest_laterality}`)
-                : t("findings.lateralityOptions.none")
-              }
+                : t("findings.lateralityOptions.none")}
             </span>
           </CardContent>
         </Card>
@@ -302,14 +336,16 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
         <CardContent className="p-3 sm:p-6 pt-0">
           <div className="space-y-3 sm:space-y-4">
             {finding.history.map((point) => (
-              <div key={point.id} className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 border-b pb-3 sm:pb-4 last:border-b-0 last:pb-0">
+              <div
+                key={point.id}
+                className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 border-b pb-3 sm:pb-4 last:border-b-0 last:pb-0"
+              >
                 {/* Date */}
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 sm:w-32 text-xs sm:text-sm text-muted-foreground">
                   <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                  {point.record_date 
+                  {point.record_date
                     ? format(new Date(point.record_date), "dd.MM.yyyy", { locale: dateLocale })
-                    : format(new Date(point.created_at), "dd.MM.yyyy", { locale: dateLocale })
-                  }
+                    : format(new Date(point.created_at), "dd.MM.yyyy", { locale: dateLocale })}
                 </div>
 
                 {/* Details */}
@@ -323,7 +359,9 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
                       </div>
                     )}
                     {point.count !== null && point.count > 1 && (
-                      <span className="text-xs sm:text-sm text-muted-foreground">x{point.count}</span>
+                      <span className="text-xs sm:text-sm text-muted-foreground">
+                        x{point.count}
+                      </span>
                     )}
                     <SeverityBadge severity={point.severity} />
                     {point.laterality !== "none" && (
@@ -349,7 +387,11 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 
                   {/* Link to record */}
                   <Link href={`/health/records/${point.record_id}`}>
-                    <Button variant="outline" size="sm" className="h-6 sm:h-7 mt-1.5 sm:mt-2 text-xs gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 sm:h-7 mt-1.5 sm:mt-2 text-xs gap-1"
+                    >
                       <FileText className="h-3 w-3 shrink-0" />
                       {t("findings.viewRecord")}
                     </Button>
@@ -366,6 +408,6 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
 
 export default function FindingDetailPage({ params }: FindingDetailPageProps) {
   const resolvedParams = use(params);
-  
+
   return <FindingDetailContent findingId={resolvedParams.findingId} />;
 }

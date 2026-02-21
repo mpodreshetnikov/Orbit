@@ -62,9 +62,7 @@ export function AddRecordForm({ personId, personName }: AddRecordFormProps) {
   const deleteMutation = useHardDeleteRecord();
 
   const isLoading =
-    createMutation.isPending ||
-    updateMutation.isPending ||
-    uploadMutation.isPending;
+    createMutation.isPending || updateMutation.isPending || uploadMutation.isPending;
 
   const hasChanges = title || notes || selectedFiles.length > 0;
 
@@ -147,9 +145,7 @@ export function AddRecordForm({ personId, personName }: AddRecordFormProps) {
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {t("records.add.title")}
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t("records.add.title")}</h1>
           <p className="text-muted-foreground">
             {t("records.add.subtitle")} — {personName}
           </p>
@@ -239,10 +235,7 @@ export function AddRecordForm({ personId, personName }: AddRecordFormProps) {
           <Save className="mr-2 h-4 w-4" />
           {t("records.add.saveDraft")}
         </Button>
-        <Button
-          onClick={() => handleSave(true)}
-          disabled={!title.trim() || isLoading}
-        >
+        <Button onClick={() => handleSave(true)} disabled={!title.trim() || isLoading}>
           <FileCheck className="mr-2 h-4 w-4" />
           {t("records.add.saveAndActivate")}
         </Button>
@@ -253,9 +246,7 @@ export function AddRecordForm({ personId, personName }: AddRecordFormProps) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("records.confirm.discardTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("records.confirm.discardMessage")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("records.confirm.discardMessage")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

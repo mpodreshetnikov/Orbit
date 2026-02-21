@@ -24,10 +24,7 @@ type CanonicalConfig = {
   servers: Record<string, CanonicalServer>;
 };
 
-type ResolvedHttpAuth =
-  | { mode: "none" }
-  | { mode: "oauth" }
-  | { mode: "pat"; token: string };
+type ResolvedHttpAuth = { mode: "none" } | { mode: "oauth" } | { mode: "pat"; token: string };
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -47,18 +44,11 @@ function assertValidServer(name: string, server: CanonicalServer): void {
   }
 
   if (server.auth_kind && server.auth_kind !== "bearer") {
-    throw new Error(
-      `Server "${name}" has unsupported "auth_kind": "${server.auth_kind}".`,
-    );
+    throw new Error(`Server "${name}" has unsupported "auth_kind": "${server.auth_kind}".`);
   }
 
-  if (
-    (server.auth_mode_env || server.default_auth_mode || server.token_env) &&
-    !server.auth_kind
-  ) {
-    throw new Error(
-      `Server "${name}" has auth mode fields but no "auth_kind" configured.`,
-    );
+  if ((server.auth_mode_env || server.default_auth_mode || server.token_env) && !server.auth_kind) {
+    throw new Error(`Server "${name}" has auth mode fields but no "auth_kind" configured.`);
   }
 
   if (
@@ -172,9 +162,7 @@ function resolveHttpAuth(
 
     const legacyToken = envValue(envMap, legacyTokenEnv);
     if (!legacyToken) {
-      throw new Error(
-        `Server "${name}" requires env var "${legacyTokenEnv}" for token auth.`,
-      );
+      throw new Error(`Server "${name}" requires env var "${legacyTokenEnv}" for token auth.`);
     }
 
     return { mode: "pat", token: legacyToken };
@@ -194,18 +182,14 @@ function resolveHttpAuth(
 
   if (mode === "oauth") {
     if (server.oauth_supported === false) {
-      throw new Error(
-        `Server "${name}" received auth mode "oauth" but does not support OAuth.`,
-      );
+      throw new Error(`Server "${name}" received auth mode "oauth" but does not support OAuth.`);
     }
     return { mode: "oauth" };
   }
 
   const tokenEnvVar = server.token_env ?? getLegacyHttpTokenEnv(server);
   if (!tokenEnvVar) {
-    throw new Error(
-      `Server "${name}" uses PAT auth but no token env var is configured.`,
-    );
+    throw new Error(`Server "${name}" uses PAT auth but no token env var is configured.`);
   }
 
   const token = envValue(envMap, tokenEnvVar);
@@ -219,7 +203,7 @@ function resolveHttpAuth(
 }
 
 function tomlEscape(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function tomlArray(values: string[]): string {
@@ -228,9 +212,7 @@ function tomlArray(values: string[]): string {
 
 function tomlInlineMap(values: Record<string, string>): string {
   const entries = Object.entries(values).sort(([a], [b]) => a.localeCompare(b));
-  return `{ ${entries
-    .map(([key, value]) => `${key} = "${tomlEscape(value)}"`)
-    .join(", ")} }`;
+  return `{ ${entries.map(([key, value]) => `${key} = "${tomlEscape(value)}"`).join(", ")} }`;
 }
 
 function resolveStdioEnvValues(
@@ -254,10 +236,7 @@ function resolveStdioEnvValues(
   return resolved;
 }
 
-function buildClaudeConfig(
-  canonical: CanonicalConfig,
-  envMap: Record<string, string>,
-): string {
+function buildClaudeConfig(canonical: CanonicalConfig, envMap: Record<string, string>): string {
   const mcpServers: Record<string, Record<string, unknown>> = {};
 
   for (const [name, server] of Object.entries(sortObject(canonical.servers))) {
@@ -286,10 +265,7 @@ function buildClaudeConfig(
   return stringifyJson({ mcpServers });
 }
 
-function buildCursorConfig(
-  canonical: CanonicalConfig,
-  envMap: Record<string, string>,
-): string {
+function buildCursorConfig(canonical: CanonicalConfig, envMap: Record<string, string>): string {
   const mcpServers: Record<string, Record<string, unknown>> = {};
 
   for (const [name, server] of Object.entries(sortObject(canonical.servers))) {
@@ -317,10 +293,7 @@ function buildCursorConfig(
   return stringifyJson({ mcpServers });
 }
 
-function buildCodexToml(
-  canonical: CanonicalConfig,
-  envMap: Record<string, string>,
-): string {
+function buildCodexToml(canonical: CanonicalConfig, envMap: Record<string, string>): string {
   const lines: string[] = [];
   const sortedServers = sortObject(canonical.servers);
 
@@ -342,9 +315,7 @@ function buildCodexToml(
       lines.push(`url = "${tomlEscape(server.url as string)}"`);
       const auth = resolveHttpAuth(name, server, envMap);
       if (auth.mode === "pat") {
-        lines.push(
-          `http_headers = ${tomlInlineMap({ Authorization: `Bearer ${auth.token}` })}`,
-        );
+        lines.push(`http_headers = ${tomlInlineMap({ Authorization: `Bearer ${auth.token}` })}`);
       }
     }
 
@@ -369,7 +340,7 @@ async function main(): Promise<void> {
   };
 
   if (!canonical.servers || typeof canonical.servers !== "object") {
-    throw new Error("Invalid canonical config: expected top-level \"servers\" object.");
+    throw new Error('Invalid canonical config: expected top-level "servers" object.');
   }
 
   for (const [name, server] of Object.entries(canonical.servers)) {

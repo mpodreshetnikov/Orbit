@@ -74,7 +74,10 @@ function runSupabaseCli(args, options = {}) {
 
 function parseStatusEnvOutput(output) {
   const envValues = {};
-  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
   for (const line of lines) {
     const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
@@ -82,8 +85,8 @@ function parseStatusEnvOutput(output) {
 
     const key = match[1];
     let value = match[2];
-    if (value.startsWith("\"") && value.endsWith("\"")) {
-      value = value.slice(1, -1).replace(/\\"/g, "\"");
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1).replace(/\\"/g, '"');
     }
     envValues[key] = value;
   }
@@ -270,23 +273,16 @@ function main() {
       generateTableOnlySnapshot();
     } catch (error) {
       console.error(
-        error instanceof Error
-          ? error.message
-          : "Failed generating table-only schema snapshot.",
+        error instanceof Error ? error.message : "Failed generating table-only schema snapshot.",
       );
       exitCode = 1;
       return;
     }
 
-    const typesResult = runSupabaseCli([
-      "gen",
-      "types",
-      "--local",
-      "--lang",
-      "typescript",
-      "--schema",
-      "public",
-    ], { captureOutput: true });
+    const typesResult = runSupabaseCli(
+      ["gen", "types", "--local", "--lang", "typescript", "--schema", "public"],
+      { captureOutput: true },
+    );
 
     if (typesResult.status !== 0) {
       if (typesResult.stdout) process.stdout.write(typesResult.stdout);
@@ -295,11 +291,7 @@ function main() {
       return;
     }
 
-    fs.writeFileSync(
-      DB_TYPES_PATH,
-      typesResult.stdout,
-      "utf8",
-    );
+    fs.writeFileSync(DB_TYPES_PATH, typesResult.stdout, "utf8");
 
     if (verifyMode) {
       const diffResult = run("git", [

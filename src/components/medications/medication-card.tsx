@@ -18,7 +18,7 @@ const DAY_SUFFIX = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 function formatScheduleSummary(
   medication: Medication,
   t: (key: string) => string,
-  dateLocale: Locale
+  dateLocale: Locale,
 ): string | null {
   if (medication.kind === "one_time") {
     if (medication.scheduled_at)
@@ -34,10 +34,7 @@ function formatScheduleSummary(
     return `${t("medications.frequencyDaily")} ${t("medications.scheduleAt")} ${times}`;
   if (freq.type === "interval") {
     const every = freq.every ?? 1;
-    const unit =
-      freq.unit === "hour"
-        ? t("medications.hours")
-        : t("medications.days");
+    const unit = freq.unit === "hour" ? t("medications.hours") : t("medications.days");
     return `${t("medications.every")} ${every} ${unit} ${t("medications.scheduleAt")} ${times}`;
   }
   if (freq.type === "days_of_week" && freq.days?.length) {
@@ -86,7 +83,7 @@ export function MedicationCard({ medication }: MedicationCardProps) {
       <Card
         className={cn(
           "hover:shadow-md transition-shadow min-w-0 overflow-hidden w-full tap-target cursor-pointer",
-          isLowInventory && "border-amber-400 dark:border-amber-600"
+          isLowInventory && "border-amber-400 dark:border-amber-600",
         )}
       >
         <CardContent className="p-3 sm:p-4 w-full">
@@ -102,7 +99,10 @@ export function MedicationCard({ medication }: MedicationCardProps) {
                   </Badge>
                   <StatusBadge status={medication.status} />
                   {isLowInventory && (
-                    <Badge variant="outline" className="text-xs border-amber-500/50 text-amber-700 dark:text-amber-400 gap-1">
+                    <Badge
+                      variant="outline"
+                      className="text-xs border-amber-500/50 text-amber-700 dark:text-amber-400 gap-1"
+                    >
                       <AlertTriangle className="h-3 w-3" />
                       {t("medications.lowInventory")}
                     </Badge>
@@ -115,14 +115,13 @@ export function MedicationCard({ medication }: MedicationCardProps) {
               })()}
             </div>
             {scheduleSummary && (
-              <div className="text-xs text-muted-foreground line-clamp-2">
-                {scheduleSummary}
-              </div>
+              <div className="text-xs text-muted-foreground line-clamp-2">{scheduleSummary}</div>
             )}
             <div className="min-h-5 text-xs text-muted-foreground">
               {medication.inventory_enabled && medication.inventory_current != null ? (
                 <>
-                  {formatAmountWithUnit(medication.inventory_current, medication.unit, t)} {t("medications.stockLeft")}
+                  {formatAmountWithUnit(medication.inventory_current, medication.unit, t)}{" "}
+                  {t("medications.stockLeft")}
                 </>
               ) : (
                 "\u00A0"

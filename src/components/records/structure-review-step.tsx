@@ -51,12 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -65,7 +60,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { 
+import {
   useUpdateMedicalRecord,
   useRecordObservations,
   useUpdateRecordObservation,
@@ -88,10 +83,14 @@ import {
   useCompleteCheckupItem,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
-import { ConditionRecordRow, ConditionEditDialog, type ConditionComparison } from "@/components/conditions";
-import { 
-  RECORD_TYPES, 
-  type RecordType, 
+import {
+  ConditionRecordRow,
+  ConditionEditDialog,
+  type ConditionComparison,
+} from "@/components/conditions";
+import {
+  RECORD_TYPES,
+  type RecordType,
   type MedicalRecordWithAttachments,
   type RecordObservationWithCatalog,
   type ObservationStatus,
@@ -112,12 +111,15 @@ interface StructureReviewStepProps {
 // Status badge component
 function ObservationStatusBadge({ status }: { status: ObservationStatus | null }) {
   const t = useTranslations();
-  
+
   if (!status || status === "unknown") {
     return null;
   }
 
-  const config: Record<string, { variant: "default" | "destructive" | "secondary" | "outline"; icon: React.ReactNode }> = {
+  const config: Record<
+    string,
+    { variant: "default" | "destructive" | "secondary" | "outline"; icon: React.ReactNode }
+  > = {
     normal: { variant: "secondary", icon: <Check className="h-3 w-3" /> },
     low: { variant: "outline", icon: <ArrowDown className="h-3 w-3 text-blue-500" /> },
     high: { variant: "outline", icon: <ArrowUp className="h-3 w-3 text-orange-500" /> },
@@ -136,8 +138,8 @@ function ObservationStatusBadge({ status }: { status: ObservationStatus | null }
 }
 
 // Type for observation comparison
-type ObservationComparisonData = { 
-  isNew: boolean; 
+type ObservationComparisonData = {
+  isNew: boolean;
   previousOccurrences: number;
   previousValue: number | null;
   previousUnit: string | null;
@@ -145,16 +147,16 @@ type ObservationComparisonData = {
 
 // Observation value change indicator
 // Uses "closer to middle of reference range is better" logic
-function ObservationValueChangeIndicator({ 
-  currentValue, 
+function ObservationValueChangeIndicator({
+  currentValue,
   previousValue,
   unit,
   refLow,
   refHigh,
   defaultRefLow,
   defaultRefHigh,
-}: { 
-  currentValue: number | null; 
+}: {
+  currentValue: number | null;
   previousValue: number | null;
   unit?: string | null;
   refLow?: number | null;
@@ -163,27 +165,30 @@ function ObservationValueChangeIndicator({
   defaultRefHigh?: number | null;
 }) {
   const t = useTranslations();
-  
+
   if (currentValue === null || previousValue === null) return null;
-  
+
   // Round to 2 decimal places to avoid floating point issues
   const change = Math.round((currentValue - previousValue) * 100) / 100;
-  
+
   if (change === 0) {
     return (
       <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-        <span>= {previousValue}{unit ? ` ${unit}` : ""}</span>
+        <span>
+          = {previousValue}
+          {unit ? ` ${unit}` : ""}
+        </span>
       </span>
     );
   }
-  
+
   const isIncrease = change > 0;
   const changeText = isIncrease ? `+${change}` : `${change}`;
-  
+
   // Use specific ref range if available, otherwise use defaults
   const effectiveRefLow = refLow ?? defaultRefLow;
   const effectiveRefHigh = refHigh ?? defaultRefHigh;
-  
+
   // Determine if change is an improvement based on distance from reference range middle
   let isImprovement: boolean | null = null;
   if (effectiveRefLow != null && effectiveRefHigh != null) {
@@ -192,7 +197,7 @@ function ObservationValueChangeIndicator({
     const currDistance = Math.abs(currentValue - middle);
     isImprovement = currDistance < prevDistance;
   }
-  
+
   // Determine color: green = improvement, red = worsening, gray = unknown
   let colorClass = "text-muted-foreground"; // fallback if no ref range
   if (isImprovement === true) {
@@ -200,16 +205,14 @@ function ObservationValueChangeIndicator({
   } else if (isImprovement === false) {
     colorClass = "text-red-600 dark:text-red-400";
   }
-  
+
   return (
     <span className={`flex items-center gap-0.5 text-xs ${colorClass}`}>
-      {isIncrease ? (
-        <TrendingUp className="h-3 w-3" />
-      ) : (
-        <TrendingDown className="h-3 w-3" />
-      )}
+      {isIncrease ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
       <span>{changeText}</span>
-      <span className="text-muted-foreground/70">({t("observations.comparison.was")} {previousValue.toFixed(2)})</span>
+      <span className="text-muted-foreground/70">
+        ({t("observations.comparison.was")} {previousValue.toFixed(2)})
+      </span>
     </span>
   );
 }
@@ -219,14 +222,21 @@ function ObservationComparisonBadge({ comparison }: { comparison: ObservationCom
   const t = useTranslations();
   if (comparison.isNew) {
     return (
-      <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1">
+      <Badge
+        variant="outline"
+        className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+      >
         <CircleDot className="h-3 w-3" />
         {t("observations.comparison.new")}
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1" title={t("observations.comparison.knownTitle", { count: comparison.previousOccurrences })}>
+    <Badge
+      variant="outline"
+      className="text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20 gap-1"
+      title={t("observations.comparison.knownTitle", { count: comparison.previousOccurrences })}
+    >
       <History className="h-3 w-3" />
       {t("observations.comparison.known", { count: comparison.previousOccurrences })}
     </Badge>
@@ -234,14 +244,14 @@ function ObservationComparisonBadge({ comparison }: { comparison: ObservationCom
 }
 
 // Observation row component
-function ObservationRow({ 
+function ObservationRow({
   observation,
   comparison,
-  onEdit, 
+  onEdit,
   onDelete,
   onApply,
   isProcessing,
-}: { 
+}: {
   observation: RecordObservationWithCatalog;
   comparison?: ObservationComparisonData | null;
   onEdit: () => void;
@@ -254,15 +264,17 @@ function ObservationRow({
   const isUnapplied = isCustom && !observation.is_applied;
 
   return (
-    <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 p-3 rounded-lg border bg-card ${
-      isUnapplied 
-        ? "border-dashed border-muted-foreground/40 opacity-70" 
-        : isCustom 
-          ? "border-dashed border-muted-foreground/40"
-          : comparison?.isNew
-            ? "border-amber-500/30 bg-amber-500/5" 
-          : ""
-    }`}>
+    <div
+      className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 p-3 rounded-lg border bg-card ${
+        isUnapplied
+          ? "border-dashed border-muted-foreground/40 opacity-70"
+          : isCustom
+            ? "border-dashed border-muted-foreground/40"
+            : comparison?.isNew
+              ? "border-amber-500/30 bg-amber-500/5"
+              : ""
+      }`}
+    >
       {/* Name and value */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -270,19 +282,17 @@ function ObservationRow({
             {observation.obs_name}
           </span>
           {observation.obs_code ? (
-            <code className="text-xs bg-muted px-1 py-0.5 rounded">
-              {observation.obs_code}
-            </code>
+            <code className="text-xs bg-muted px-1 py-0.5 rounded">{observation.obs_code}</code>
           ) : isUnapplied ? (
-            <Badge 
-              variant="outline" 
+            <Badge
+              variant="outline"
               className="text-xs border-dashed text-yellow-600 border-yellow-400"
             >
               {t("observations.pendingBadge")}
             </Badge>
           ) : (
-            <Badge 
-              variant="outline" 
+            <Badge
+              variant="outline"
               className="text-xs border-dashed text-muted-foreground"
               title={t("observations.addToCatalogHint")}
             >
@@ -300,9 +310,7 @@ function ObservationRow({
           <span className={`font-semibold ${isUnapplied ? "text-muted-foreground" : ""}`}>
             {observation.value_text || observation.value_numeric}
           </span>
-          {observation.unit && (
-            <span className="text-muted-foreground">{observation.unit}</span>
-          )}
+          {observation.unit && <span className="text-muted-foreground">{observation.unit}</span>}
           {/* Value change indicator */}
           {comparison && !comparison.isNew && comparison.previousValue !== null && (
             <ObservationValueChangeIndicator
@@ -318,9 +326,7 @@ function ObservationRow({
         </div>
         {/* Hint for unapplied custom observations */}
         {isUnapplied && (
-          <p className="text-xs text-yellow-600 mt-1 italic">
-            {t("observations.applyHint")}
-          </p>
+          <p className="text-xs text-yellow-600 mt-1 italic">{t("observations.applyHint")}</p>
         )}
         {/* Subtle hint for applied custom observations */}
         {isCustom && !isUnapplied && (
@@ -340,37 +346,37 @@ function ObservationRow({
           </span>
         )}
         <div className="flex items-center gap-1 ms-auto sm:ms-0">
-        {/* Apply button for unapplied custom observations */}
-        {isUnapplied && (
+          {/* Apply button for unapplied custom observations */}
+          {isUnapplied && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1"
+              onClick={onApply}
+              disabled={isProcessing}
+            >
+              <Check className="h-3.5 w-3.5" />
+              {t("observations.applyButton")}
+            </Button>
+          )}
           <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1"
-            onClick={onApply}
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onEdit}
             disabled={isProcessing}
           >
-            <Check className="h-3.5 w-3.5" />
-            {t("observations.applyButton")}
+            <Pencil className="h-4 w-4" />
           </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={onEdit}
-          disabled={isProcessing}
-        >
-          <Pencil className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-destructive hover:text-destructive"
-          onClick={onDelete}
-          disabled={isProcessing}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={onDelete}
+            disabled={isProcessing}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         </div>
       </div>
     </div>
@@ -420,8 +426,8 @@ function EditObservationDialog({
   const [obsCode, setObsCode] = useState<string | null>(null);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [isComboboxOpen, setIsComboboxOpen] = useState(false);
-  
-  const currentCatalogEntry = obsCode ? catalog?.find(c => c.obs_code === obsCode) : null;
+
+  const currentCatalogEntry = obsCode ? catalog?.find((c) => c.obs_code === obsCode) : null;
 
   useEffect(() => {
     if (open && observation) {
@@ -431,7 +437,7 @@ function EditObservationDialog({
       setRefRange(observation.ref_range_text || "");
       setRefRangeLow(observation.ref_range_low?.toString() || "");
       setRefRangeHigh(observation.ref_range_high?.toString() || "");
-      setStatus(observation.status as ObservationStatus || null);
+      setStatus((observation.status as ObservationStatus) || null);
       setObsCode(observation.obs_code || null);
       setCatalogSearch("");
       setIsComboboxOpen(false);
@@ -453,14 +459,14 @@ function EditObservationDialog({
   const convertToCanonical = (value: number | null, unitStr: string): number | null => {
     if (value === null) return null;
     if (!currentCatalogEntry?.accepted_units) return value;
-    
+
     // Find unit config (case-insensitive)
     const unitConfig = Object.entries(currentCatalogEntry.accepted_units).find(
-      ([u]) => u.toLowerCase() === unitStr.toLowerCase()
+      ([u]) => u.toLowerCase() === unitStr.toLowerCase(),
     )?.[1] as { factor_to_canonical?: number; formula_to_canonical?: string } | undefined;
-    
+
     if (!unitConfig) return value;
-    
+
     // Apply formula if exists
     if (unitConfig.formula_to_canonical) {
       try {
@@ -470,12 +476,12 @@ function EditObservationDialog({
         return value;
       }
     }
-    
+
     // Apply factor if exists
     if (unitConfig.factor_to_canonical) {
       return value * unitConfig.factor_to_canonical;
     }
-    
+
     return value;
   };
 
@@ -487,15 +493,15 @@ function EditObservationDialog({
     const refLowVal = !isNaN(refLow) ? refLow : null;
     const refHighVal = !isNaN(refHigh) ? refHigh : null;
     const unitTrimmed = unit.trim();
-    
+
     // Convert values to canonical
     const valueCanonical = convertToCanonical(valueNumeric, unitTrimmed);
     const refLowCanonical = convertToCanonical(refLowVal, unitTrimmed);
     const refHighCanonical = convertToCanonical(refHighVal, unitTrimmed);
-    
+
     // Get canonical unit from catalog
     const unitCanonical = currentCatalogEntry?.canonical_unit || null;
-    
+
     onSave({
       obs_name: obsName.trim(),
       value_text: valueText.trim(),
@@ -521,7 +527,7 @@ function EditObservationDialog({
       setIsComboboxOpen(false);
       return;
     }
-    const entry = catalog?.find(c => c.obs_code === code);
+    const entry = catalog?.find((c) => c.obs_code === code);
     if (entry) {
       setObsCode(code);
       setObsName(entry.name_ru);
@@ -532,25 +538,26 @@ function EditObservationDialog({
   };
 
   // Get accepted units from catalog entry
-  const acceptedUnits = currentCatalogEntry?.accepted_units 
-    ? Object.keys(currentCatalogEntry.accepted_units) 
+  const acceptedUnits = currentCatalogEntry?.accepted_units
+    ? Object.keys(currentCatalogEntry.accepted_units)
     : null;
 
   // Filter catalog items based on search
-  const filteredCatalog = catalog?.filter(item => {
-    if (!catalogSearch.trim()) return true;
-    const search = catalogSearch.toLowerCase();
-    return (
-      item.obs_code.toLowerCase().includes(search) ||
-      item.name_ru.toLowerCase().includes(search) ||
-      item.name_en.toLowerCase().includes(search) ||
-      item.synonyms_ru?.some(s => s.toLowerCase().includes(search)) ||
-      item.synonyms_en?.some(s => s.toLowerCase().includes(search))
-    );
-  }) || [];
+  const filteredCatalog =
+    catalog?.filter((item) => {
+      if (!catalogSearch.trim()) return true;
+      const search = catalogSearch.toLowerCase();
+      return (
+        item.obs_code.toLowerCase().includes(search) ||
+        item.name_ru.toLowerCase().includes(search) ||
+        item.name_en.toLowerCase().includes(search) ||
+        item.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
+        item.synonyms_en?.some((s) => s.toLowerCase().includes(search))
+      );
+    }) || [];
 
   // Display value for the combobox
-  const displayValue = currentCatalogEntry 
+  const displayValue = currentCatalogEntry
     ? `${currentCatalogEntry.name_ru} (${currentCatalogEntry.obs_code})`
     : "";
 
@@ -561,9 +568,7 @@ function EditObservationDialog({
           <DialogTitle>
             {isNew ? t("observations.addObservation") : t("observations.editObservation")}
           </DialogTitle>
-          <DialogDescription>
-            {t("observations.editDescription")}
-          </DialogDescription>
+          <DialogDescription>{t("observations.editDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -608,7 +613,9 @@ function EditObservationDialog({
                             onSelect={() => handleCatalogSelect(null)}
                             className={obsCode === null ? "bg-accent" : ""}
                           >
-                            <Check className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`} />
+                            <Check
+                              className={`h-4 w-4 ${obsCode === null ? "opacity-100" : "opacity-0"}`}
+                            />
                             <span className="text-muted-foreground italic">
                               {t("observations.customObservation")}
                             </span>
@@ -620,7 +627,9 @@ function EditObservationDialog({
                               onSelect={() => handleCatalogSelect(item.obs_code)}
                               className={obsCode === item.obs_code ? "bg-accent" : ""}
                             >
-                              <Check className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`} />
+                              <Check
+                                className={`h-4 w-4 shrink-0 ${obsCode === item.obs_code ? "opacity-100" : "opacity-0"}`}
+                              />
                               <div className="flex-1 min-w-0">
                                 <div className="truncate">{item.name_ru}</div>
                                 <div className="text-xs text-muted-foreground truncate">
@@ -657,9 +666,7 @@ function EditObservationDialog({
               disabled={!!currentCatalogEntry}
             />
             {currentCatalogEntry && (
-              <p className="text-xs text-muted-foreground">
-                {t("observations.nameFromCatalog")}
-              </p>
+              <p className="text-xs text-muted-foreground">{t("observations.nameFromCatalog")}</p>
             )}
           </div>
 
@@ -677,7 +684,10 @@ function EditObservationDialog({
             <div className="space-y-2">
               <Label>{t("observations.unit")}</Label>
               {acceptedUnits && acceptedUnits.length > 0 ? (
-                <Select value={unit || "_none"} onValueChange={(v) => setUnit(v === "_none" ? "" : v)}>
+                <Select
+                  value={unit || "_none"}
+                  onValueChange={(v) => setUnit(v === "_none" ? "" : v)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={t("observations.selectUnit")} />
                   </SelectTrigger>
@@ -691,11 +701,7 @@ function EditObservationDialog({
                   </SelectContent>
                 </Select>
               ) : (
-                <Input
-                  value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
-                  placeholder="g/L"
-                />
+                <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="g/L" />
               )}
             </div>
           </div>
@@ -742,9 +748,9 @@ function EditObservationDialog({
           {/* Status */}
           <div className="space-y-2">
             <Label>{t("observations.statusLabel")}</Label>
-            <Select 
-              value={status || "_unknown"} 
-              onValueChange={(v) => setStatus(v === "_unknown" ? null : v as ObservationStatus)}
+            <Select
+              value={status || "_unknown"}
+              onValueChange={(v) => setStatus(v === "_unknown" ? null : (v as ObservationStatus))}
             >
               <SelectTrigger>
                 <SelectValue placeholder={t("observations.selectStatus")} />
@@ -754,8 +760,12 @@ function EditObservationDialog({
                 <SelectItem value="normal">{t("observations.status.normal")}</SelectItem>
                 <SelectItem value="low">{t("observations.status.low")}</SelectItem>
                 <SelectItem value="high">{t("observations.status.high")}</SelectItem>
-                <SelectItem value="critical_low">{t("observations.status.critical_low")}</SelectItem>
-                <SelectItem value="critical_high">{t("observations.status.critical_high")}</SelectItem>
+                <SelectItem value="critical_low">
+                  {t("observations.status.critical_low")}
+                </SelectItem>
+                <SelectItem value="critical_high">
+                  {t("observations.status.critical_high")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -784,7 +794,7 @@ function EditObservationDialog({
 export function StructureReviewStep({ record, onComplete, onBack }: StructureReviewStepProps) {
   const t = useTranslations();
   const router = useRouter();
-  
+
   // Form state
   const [title, setTitle] = useState(record.title);
   const [recordType, setRecordType] = useState<RecordType>(record.record_type);
@@ -796,7 +806,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
   // Observations
   const { data: observations, isLoading: observationsLoading } = useRecordObservations(record.id);
-  const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(null);
+  const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(
+    null,
+  );
   const [isAddingObservation, setIsAddingObservation] = useState(false);
   const [showObservations, setShowObservations] = useState(true);
 
@@ -830,48 +842,55 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const createConditionWithRecordMutation = useCreateConditionWithRecord();
   const linkConditionToRecordMutation = useLinkConditionToRecord();
 
-  const isProcessing = updateMutation.isPending || updateObsMutation.isPending || 
-    deleteObsMutation.isPending || createObsMutation.isPending ||
-    updateFindingMutation.isPending || deleteFindingMutation.isPending || createFindingMutation.isPending ||
-    updateConditionRecordMutation.isPending || deleteConditionRecordMutation.isPending || 
-    createConditionWithRecordMutation.isPending || linkConditionToRecordMutation.isPending ||
+  const isProcessing =
+    updateMutation.isPending ||
+    updateObsMutation.isPending ||
+    deleteObsMutation.isPending ||
+    createObsMutation.isPending ||
+    updateFindingMutation.isPending ||
+    deleteFindingMutation.isPending ||
+    createFindingMutation.isPending ||
+    updateConditionRecordMutation.isPending ||
+    deleteConditionRecordMutation.isPending ||
+    createConditionWithRecordMutation.isPending ||
+    linkConditionToRecordMutation.isPending ||
     completeCheckupMutation.isPending;
 
   // Stable sort by created_at so edited items don't jump in the list
   const observationsSorted = useMemo(() => {
     if (!observations?.length) return observations ?? [];
     return [...observations].sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
   }, [observations]);
 
   const findingsSorted = useMemo(() => {
     if (!findings?.length) return findings ?? [];
     return [...findings].sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
   }, [findings]);
 
   const conditionRecordsSorted = useMemo(() => {
     if (!conditionRecords?.length) return conditionRecords ?? [];
     return [...conditionRecords].sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
   }, [conditionRecords]);
 
   // Helper function to compute comparison data for a finding
   const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null => {
     if (personFindingHistory === undefined) return null; // Still loading
-    
+
     const findingKey = finding.finding_code || finding.finding_type_text.toLowerCase().trim();
-    const siteKey = finding.site_code || (finding.body_site_text?.toLowerCase().trim() || "unknown");
-    
-    const historyMatch = personFindingHistory.find(h => {
+    const siteKey = finding.site_code || finding.body_site_text?.toLowerCase().trim() || "unknown";
+
+    const historyMatch = personFindingHistory.find((h) => {
       const historyFindingKey = h.finding_code || h.finding_type_text.toLowerCase().trim();
-      const historySiteKey = h.site_code || (h.body_site_text?.toLowerCase().trim() || "unknown");
+      const historySiteKey = h.site_code || h.body_site_text?.toLowerCase().trim() || "unknown";
       return historyFindingKey === findingKey && historySiteKey === siteKey;
     });
-    
+
     if (!historyMatch) {
       return {
         isNew: true,
@@ -881,10 +900,10 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         previousDate: null,
       };
     }
-    
+
     // Filter out findings from this same record
-    const previousOccurrences = historyMatch.history.filter(h => h.record_id !== record.id);
-    
+    const previousOccurrences = historyMatch.history.filter((h) => h.record_id !== record.id);
+
     if (previousOccurrences.length === 0) {
       return {
         isNew: true,
@@ -894,7 +913,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         previousDate: null,
       };
     }
-    
+
     const mostRecentPrevious = previousOccurrences[0];
     return {
       isNew: false,
@@ -905,7 +924,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     };
   };
 
-  const getComparisonForCondition = (cr: ConditionRecordWithDetails): ConditionComparison | null => {
+  const getComparisonForCondition = (
+    cr: ConditionRecordWithDetails,
+  ): ConditionComparison | null => {
     if (personConditionRecordHistory === undefined) return null;
     const recordIds = personConditionRecordHistory[cr.condition_id] ?? [];
     const previousOccurrences = recordIds.filter((id) => id !== record.id).length;
@@ -915,15 +936,17 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     };
   };
 
-  const getComparisonForObservation = (obs: RecordObservationWithCatalog): { 
-    isNew: boolean; 
+  const getComparisonForObservation = (
+    obs: RecordObservationWithCatalog,
+  ): {
+    isNew: boolean;
     previousOccurrences: number;
     previousValue: number | null;
     previousUnit: string | null;
   } | null => {
     if (personObservationHistory === undefined) return null;
     const obsKey = obs.obs_code || obs.obs_name.toLowerCase().trim();
-    const historySummary = personObservationHistory.find(h => {
+    const historySummary = personObservationHistory.find((h) => {
       const historyKey = h.obs_code || h.obs_name.toLowerCase().trim();
       return historyKey === obsKey;
     });
@@ -932,7 +955,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     }
     // Filter out current record and sort by date descending to get most recent previous
     const previousHistory = historySummary.history
-      .filter(h => h.record_id !== record.id)
+      .filter((h) => h.record_id !== record.id)
       .sort((a, b) => {
         const dateA = new Date(a.record_date || a.created_at).getTime();
         const dateB = new Date(b.record_date || b.created_at).getTime();
@@ -973,13 +996,11 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     if (!title.trim()) return;
 
     // Remove unapplied custom observations so they are not persisted with the record
-    const unappliedCustom = observations?.filter(
-      (obs) => !obs.obs_code && !obs.is_applied
-    ) ?? [];
+    const unappliedCustom = observations?.filter((obs) => !obs.obs_code && !obs.is_applied) ?? [];
     await Promise.all(
       unappliedCustom.map((obs) =>
-        deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id })
-      )
+        deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id }),
+      ),
     );
 
     await updateMutation.mutateAsync({
@@ -996,11 +1017,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
     // When activating, mark all observations, findings, and conditions as verified, and apply suggested checkup completions
     if (activate) {
-      await Promise.all([
-        verifyAllObservations(),
-        verifyAllFindings(),
-        verifyAllConditions(),
-      ]);
+      await Promise.all([verifyAllObservations(), verifyAllFindings(), verifyAllConditions()]);
       const suggested = record.llm_suggested_checkup_completions ?? [];
       if (suggested.length > 0) {
         for (const s of suggested) {
@@ -1107,16 +1124,16 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
   const verifyAllObservations = async () => {
     if (!observations || observations.length === 0) return;
-    
+
     // Verify all unverified observations
-    const unverified = observations.filter(obs => !obs.is_user_verified);
+    const unverified = observations.filter((obs) => !obs.is_user_verified);
     await Promise.all(
-      unverified.map(obs => 
+      unverified.map((obs) =>
         updateObsMutation.mutateAsync({
           id: obs.id,
           updates: { is_user_verified: true },
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -1176,15 +1193,15 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
   const verifyAllFindings = async () => {
     if (!findings || findings.length === 0) return;
-    
-    const unverified = findings.filter(f => !f.is_user_verified);
+
+    const unverified = findings.filter((f) => !f.is_user_verified);
     await Promise.all(
-      unverified.map(f => 
+      unverified.map((f) =>
         updateFindingMutation.mutateAsync({
           id: f.id,
           updates: { is_user_verified: true },
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -1262,24 +1279,22 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
   const verifyAllConditions = async () => {
     if (!conditionRecords || conditionRecords.length === 0) return;
-    
-    const unverified = conditionRecords.filter(cr => !cr.is_user_verified);
+
+    const unverified = conditionRecords.filter((cr) => !cr.is_user_verified);
     await Promise.all(
-      unverified.map(cr => 
+      unverified.map((cr) =>
         updateConditionRecordMutation.mutateAsync({
           id: cr.id,
           updates: { is_user_verified: true },
-        })
-      )
+        }),
+      ),
     );
   };
 
   const suggestedCheckups = record.llm_suggested_checkup_completions ?? [];
 
   const handleDismissSuggestion = async (suggestion: LlmSuggestedCheckupCompletion) => {
-    const next = suggestedCheckups.filter(
-      (s) => s.checkup_item_id !== suggestion.checkup_item_id
-    );
+    const next = suggestedCheckups.filter((s) => s.checkup_item_id !== suggestion.checkup_item_id);
     await updateMutation.mutateAsync({
       id: record.id,
       updates: { llm_suggested_checkup_completions: next.length > 0 ? next : null },
@@ -1423,7 +1438,8 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                 <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                   <FileText className="h-4 w-4" />
                   <span>
-                    {t("records.detail.ocrText")} ({record.ocr_text.length} {t("records.wizard.chars")})
+                    {t("records.detail.ocrText")} ({record.ocr_text.length}{" "}
+                    {t("records.wizard.chars")})
                   </span>
                 </div>
                 {showOcrText ? (
@@ -1532,7 +1548,10 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         observation={editingObservation}
         onSave={handleSaveObservation}
         isNew={isAddingObservation}
-        isSaving={(!!editingObservation && updateObsMutation.isPending) || (isAddingObservation && createObsMutation.isPending)}
+        isSaving={
+          (!!editingObservation && updateObsMutation.isPending) ||
+          (isAddingObservation && createObsMutation.isPending)
+        }
       />
 
       {/* Findings Section */}
@@ -1615,7 +1634,10 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
         recordDate={record.record_date ?? null}
         onSave={handleSaveFinding}
         isNew={isAddingFinding}
-        isSaving={(!!editingFinding && updateFindingMutation.isPending) || (isAddingFinding && createFindingMutation.isPending)}
+        isSaving={
+          (!!editingFinding && updateFindingMutation.isPending) ||
+          (isAddingFinding && createFindingMutation.isPending)
+        }
       />
 
       {/* Conditions Section */}

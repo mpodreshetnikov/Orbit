@@ -19,11 +19,7 @@ import {
   Minus,
   Loader2,
 } from "lucide-react";
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-} from "recharts";
+import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,21 +32,21 @@ import type { ObservationSummary, ObservationStatus } from "@/types";
 const MINI_CHART_WIDTH = 64;
 const MINI_CHART_HEIGHT = 32;
 
-function MiniChart({ 
-  data, 
-  refLow, 
-  refHigh 
-}: { 
+function MiniChart({
+  data,
+  refLow,
+  refHigh,
+}: {
   data: { value: number | null; date: string }[];
   refLow?: number | null;
   refHigh?: number | null;
 }) {
-  const chartData = data
-    .filter(d => d.value !== null)
-    .map(d => ({ value: d.value }));
+  const chartData = data.filter((d) => d.value !== null).map((d) => ({ value: d.value }));
 
   if (chartData.length < 2) {
-    return <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }} />;
+    return (
+      <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }} />
+    );
   }
 
   // Determine color based on latest value and ref range
@@ -70,9 +66,9 @@ function MiniChart({
     <div className="shrink-0" style={{ width: MINI_CHART_WIDTH, height: MINI_CHART_HEIGHT }}>
       <ResponsiveContainer width={MINI_CHART_WIDTH} height={MINI_CHART_HEIGHT}>
         <LineChart data={chartData}>
-          <Line 
-            type="monotone" 
-            dataKey="value" 
+          <Line
+            type="monotone"
+            dataKey="value"
             stroke={strokeColor}
             strokeWidth={1.5}
             dot={false}
@@ -86,19 +82,34 @@ function MiniChart({
 // Status badge
 function StatusBadge({ status }: { status: ObservationStatus | null }) {
   const t = useTranslations();
-  
+
   if (!status || status === "unknown") {
     return null;
   }
 
-  const config: Record<string, { 
-    variant: "default" | "destructive" | "secondary" | "outline"; 
-    icon: React.ReactNode;
-    className?: string;
-  }> = {
-    normal: { variant: "secondary", icon: <Check className="h-3 w-3" />, className: "text-green-600" },
-    low: { variant: "outline", icon: <ArrowDown className="h-3 w-3" />, className: "text-blue-600 border-blue-300" },
-    high: { variant: "outline", icon: <ArrowUp className="h-3 w-3" />, className: "text-orange-600 border-orange-300" },
+  const config: Record<
+    string,
+    {
+      variant: "default" | "destructive" | "secondary" | "outline";
+      icon: React.ReactNode;
+      className?: string;
+    }
+  > = {
+    normal: {
+      variant: "secondary",
+      icon: <Check className="h-3 w-3" />,
+      className: "text-green-600",
+    },
+    low: {
+      variant: "outline",
+      icon: <ArrowDown className="h-3 w-3" />,
+      className: "text-blue-600 border-blue-300",
+    },
+    high: {
+      variant: "outline",
+      icon: <ArrowUp className="h-3 w-3" />,
+      className: "text-orange-600 border-orange-300",
+    },
     critical_low: { variant: "destructive", icon: <ArrowDown className="h-3 w-3" /> },
     critical_high: { variant: "destructive", icon: <ArrowUp className="h-3 w-3" /> },
   };
@@ -115,8 +126,8 @@ function StatusBadge({ status }: { status: ObservationStatus | null }) {
 
 // Trend indicator
 function TrendIndicator({ history }: { history: { value: number | null }[] }) {
-  const values = history.filter(h => h.value !== null).map(h => h.value as number);
-  
+  const values = history.filter((h) => h.value !== null).map((h) => h.value as number);
+
   if (values.length < 2) {
     return null;
   }
@@ -143,27 +154,35 @@ function ObservationCard({ observation }: { observation: ObservationSummary }) {
   const displayName = observation.catalog_name_ru || observation.obs_name;
   const displayValue = observation.latest_value ?? observation.latest_value_text;
   const displayUnit = observation.latest_unit || observation.canonical_unit;
-  
-  const chartData = observation.history.map(h => ({
+
+  const chartData = observation.history.map((h) => ({
     value: h.value_canonical ?? h.value_numeric,
     date: h.record_date || h.created_at,
   }));
 
-  const isBad = observation.latest_status && 
-    observation.latest_status !== "normal" && 
+  const isBad =
+    observation.latest_status &&
+    observation.latest_status !== "normal" &&
     observation.latest_status !== "unknown";
 
   return (
-    <Link href={`/health/observations/${encodeURIComponent(observation.obs_code)}`} className="tap-target block">
-      <Card className={`hover:shadow-md transition-shadow cursor-pointer ${
-        isBad ? "border-orange-300 dark:border-orange-700" : ""
-      }`}>
+    <Link
+      href={`/health/observations/${encodeURIComponent(observation.obs_code)}`}
+      className="tap-target block"
+    >
+      <Card
+        className={`hover:shadow-md transition-shadow cursor-pointer ${
+          isBad ? "border-orange-300 dark:border-orange-700" : ""
+        }`}
+      >
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="font-medium truncate text-sm sm:text-base">{displayName}</h3>
-                {isBad && <AlertTriangle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-orange-500 shrink-0" />}
+                {isBad && (
+                  <AlertTriangle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-orange-500 shrink-0" />
+                )}
               </div>
               {observation.obs_code !== observation.obs_name && (
                 <code className="text-[10px] sm:text-xs text-muted-foreground">
@@ -171,8 +190,8 @@ function ObservationCard({ observation }: { observation: ObservationSummary }) {
                 </code>
               )}
             </div>
-            <MiniChart 
-              data={chartData} 
+            <MiniChart
+              data={chartData}
               refLow={observation.latest_ref_low ?? observation.default_ref_low}
               refHigh={observation.latest_ref_high ?? observation.default_ref_high}
             />
@@ -182,8 +201,8 @@ function ObservationCard({ observation }: { observation: ObservationSummary }) {
             <div>
               <div className="flex items-baseline gap-1">
                 <span className="text-xl sm:text-2xl font-bold">
-                  {typeof displayValue === "number" 
-                    ? displayValue.toFixed(displayValue % 1 === 0 ? 0 : 1) 
+                  {typeof displayValue === "number"
+                    ? displayValue.toFixed(displayValue % 1 === 0 ? 0 : 1)
                     : displayValue || "—"}
                 </span>
                 {displayUnit && (
@@ -261,9 +280,7 @@ function ObservationsTable({ observations }: { observations: ObservationSummary[
 
   if (tableData.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
-        {t("observationHistory.noData")}
-      </div>
+      <div className="text-center py-8 text-muted-foreground">{t("observationHistory.noData")}</div>
     );
   }
 
@@ -285,10 +302,12 @@ function ObservationsTable({ observations }: { observations: ObservationSummary[
             {tableData.map((row) => (
               <tr key={row.id} className="hover:bg-muted/30">
                 <td className="p-3 whitespace-nowrap">
-                  {row.date ? format(new Date(row.date), "dd.MM.yyyy", { locale: dateLocale }) : "—"}
+                  {row.date
+                    ? format(new Date(row.date), "dd.MM.yyyy", { locale: dateLocale })
+                    : "—"}
                 </td>
                 <td className="p-3">
-                  <Link 
+                  <Link
                     href={`/health/observations/${encodeURIComponent(row.obs_code)}`}
                     className="hover:underline"
                   >
@@ -296,13 +315,11 @@ function ObservationsTable({ observations }: { observations: ObservationSummary[
                   </Link>
                 </td>
                 <td className="p-3 text-right font-mono">
-                  {row.value !== null 
+                  {row.value !== null
                     ? row.value.toFixed(row.value % 1 === 0 ? 0 : 1)
                     : row.value_text || "—"}
                 </td>
-                <td className="p-3 text-muted-foreground">
-                  {row.unit || "—"}
-                </td>
+                <td className="p-3 text-muted-foreground">{row.unit || "—"}</td>
                 <td className="p-3 text-muted-foreground text-xs">
                   {row.ref_low !== null && row.ref_high !== null
                     ? `${row.ref_low}–${row.ref_high}`
@@ -335,10 +352,11 @@ export default function ObservationsHistoryPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data: observations, isLoading, error } = usePersonObservationHistory(
-    selectedPersonId,
-    debouncedSearch
-  );
+  const {
+    data: observations,
+    isLoading,
+    error,
+  } = usePersonObservationHistory(selectedPersonId, debouncedSearch);
 
   return (
     <div className="space-y-6">
@@ -416,7 +434,7 @@ export default function ObservationsHistoryPage() {
               <CardContent className="py-12 text-center">
                 <FlaskConical className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                 <p className="text-muted-foreground">
-                  {search 
+                  {search
                     ? t("observationHistory.noSearchResults")
                     : t("observationHistory.noData")}
                 </p>

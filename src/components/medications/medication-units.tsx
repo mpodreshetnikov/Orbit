@@ -14,11 +14,7 @@ import {
   Wind,
   type LucideIcon,
 } from "lucide-react";
-import {
-  medicationUnitKey,
-  formatMedicationAmount,
-  type MedicationUnit,
-} from "@/types";
+import { medicationUnitKey, formatMedicationAmount, type MedicationUnit } from "@/types";
 
 const UNIT_ICONS: Record<MedicationUnit, LucideIcon> = {
   pill: Pill,
@@ -50,7 +46,7 @@ export function getUnitIcon(unit: MedicationUnit): LucideIcon {
 export function formatAmountWithUnit(
   amount: number,
   unit: MedicationUnit,
-  t: (key: string, values?: { count?: number }) => string
+  t: (key: string, values?: { count?: number }) => string,
 ): string {
   const label = t(medicationUnitKey(unit), { count: amount });
   return formatMedicationAmount(amount, label);
@@ -59,7 +55,7 @@ export function formatAmountWithUnit(
 /** Get translated unit label (category form for dropdowns/labels). */
 export function getUnitLabel(
   unit: MedicationUnit,
-  t: (key: string, values?: { count?: number }) => string
+  t: (key: string, values?: { count?: number }) => string,
 ): string {
   return t(medicationUnitKey(unit), { count: 2 });
 }

@@ -14,8 +14,8 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-      },
+    "allowSyntheticDefaultImports": true
+  },
   "include": ["src/**/*.ts"],
   "types": ["chrome"],
   "exclude": ["node_modules"]

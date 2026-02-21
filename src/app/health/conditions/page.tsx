@@ -2,11 +2,11 @@
 
 import { useState, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { 
-  Search, 
-  LayoutGrid, 
-  List, 
-  CheckCircle2, 
+import {
+  Search,
+  LayoutGrid,
+  List,
+  CheckCircle2,
   AlertCircle,
   HelpCircle,
   History,
@@ -52,37 +52,39 @@ function ConditionsContent() {
   const filteredConditions = useMemo(() => {
     if (!conditions) return [];
     if (!search.trim()) return conditions;
-    
+
     const searchLower = search.toLowerCase();
-    return conditions.filter(c => 
-      c.name.toLowerCase().includes(searchLower) ||
-      c.icd_name_en?.toLowerCase().includes(searchLower) ||
-      c.code?.toLowerCase().includes(searchLower)
+    return conditions.filter(
+      (c) =>
+        c.name.toLowerCase().includes(searchLower) ||
+        c.icd_name_en?.toLowerCase().includes(searchLower) ||
+        c.code?.toLowerCase().includes(searchLower),
     );
   }, [conditions, search]);
 
   // Split conditions by status and sort each group by last mention date (most recent first; nulls last)
-  const { activeConditions, suspectedConditions, resolvedConditions, historyConditions } = useMemo(() => {
-    const sortByLastMention = (a: ConditionWithHistory, b: ConditionWithHistory) => {
-      const aTime = a.last_mentioned_date ? new Date(a.last_mentioned_date).getTime() : 0;
-      const bTime = b.last_mentioned_date ? new Date(b.last_mentioned_date).getTime() : 0;
-      return bTime - aTime;
-    };
-    return {
-      activeConditions: filteredConditions
-        .filter(c => c.current_status === "active")
-        .sort(sortByLastMention),
-      suspectedConditions: filteredConditions
-        .filter(c => c.current_status === "suspected")
-        .sort(sortByLastMention),
-      resolvedConditions: filteredConditions
-        .filter(c => c.current_status === "resolved")
-        .sort(sortByLastMention),
-      historyConditions: filteredConditions
-        .filter(c => c.current_status === "history")
-        .sort(sortByLastMention),
-    };
-  }, [filteredConditions]);
+  const { activeConditions, suspectedConditions, resolvedConditions, historyConditions } =
+    useMemo(() => {
+      const sortByLastMention = (a: ConditionWithHistory, b: ConditionWithHistory) => {
+        const aTime = a.last_mentioned_date ? new Date(a.last_mentioned_date).getTime() : 0;
+        const bTime = b.last_mentioned_date ? new Date(b.last_mentioned_date).getTime() : 0;
+        return bTime - aTime;
+      };
+      return {
+        activeConditions: filteredConditions
+          .filter((c) => c.current_status === "active")
+          .sort(sortByLastMention),
+        suspectedConditions: filteredConditions
+          .filter((c) => c.current_status === "suspected")
+          .sort(sortByLastMention),
+        resolvedConditions: filteredConditions
+          .filter((c) => c.current_status === "resolved")
+          .sort(sortByLastMention),
+        historyConditions: filteredConditions
+          .filter((c) => c.current_status === "history")
+          .sort(sortByLastMention),
+      };
+    }, [filteredConditions]);
 
   if (!selectedPersonId) {
     return (
@@ -93,7 +95,9 @@ function ConditionsContent() {
   }
 
   const renderConditionsGrid = (items: ConditionWithHistory[], isInactive = false) => (
-    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0 ${isInactive ? "opacity-60" : ""}`}>
+    <div
+      className={`grid gap-4 md:grid-cols-2 lg:grid-cols-3 min-w-0 ${isInactive ? "opacity-60" : ""}`}
+    >
       {items.map((condition) => (
         <div key={condition.id} className="min-w-0">
           <ConditionCard condition={condition} />
@@ -138,7 +142,9 @@ function ConditionsContent() {
                         </p>
                       )}
                     </div>
-                  ) : "-"}
+                  ) : (
+                    "-"
+                  )}
                 </td>
                 <td className="p-3">
                   <Badge variant="outline" className="text-xs">
@@ -146,16 +152,15 @@ function ConditionsContent() {
                   </Badge>
                 </td>
                 <td className="p-3 text-sm text-muted-foreground">
-                  {condition.onset_date 
-? format(new Date(condition.onset_date), "dd.MM.yyyy", { locale: dateLocale })
-                      : condition.first_mentioned_date
-                      ? format(new Date(condition.first_mentioned_date), "dd.MM.yyyy", { locale: dateLocale })
-                      : "-"
-                  }
+                  {condition.onset_date
+                    ? format(new Date(condition.onset_date), "dd.MM.yyyy", { locale: dateLocale })
+                    : condition.first_mentioned_date
+                      ? format(new Date(condition.first_mentioned_date), "dd.MM.yyyy", {
+                          locale: dateLocale,
+                        })
+                      : "-"}
                 </td>
-                <td className="p-3 text-sm text-muted-foreground">
-                  {condition.mention_count}
-                </td>
+                <td className="p-3 text-sm text-muted-foreground">{condition.mention_count}</td>
               </tr>
             );
           })}
@@ -168,20 +173,19 @@ function ConditionsContent() {
     title: string,
     items: ConditionWithHistory[],
     icon: React.ReactNode,
-    isInactive = false
+    isInactive = false,
   ) => {
     if (items.length === 0) return null;
-    
+
     return (
       <div className="space-y-4">
         <h2 className="text-lg font-semibold flex items-center gap-2">
           {icon}
           {title} ({items.length})
         </h2>
-        {viewMode === "cards" 
+        {viewMode === "cards"
           ? renderConditionsGrid(items, isInactive)
-          : renderConditionsTable(items, isInactive)
-        }
+          : renderConditionsTable(items, isInactive)}
       </div>
     );
   };
@@ -214,7 +218,7 @@ function ConditionsContent() {
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           )}
         </Button>
-        
+
         {showStatusTips && (
           <div className="px-3 pb-3 grid gap-3 sm:grid-cols-2">
             <div className="flex items-start gap-2 p-2 rounded-md bg-orange-500/5">
@@ -281,14 +285,14 @@ function ConditionsContent() {
           {renderSection(
             t("conditions.activeSection"),
             activeConditions,
-            <AlertCircle className="h-5 w-5 text-orange-500" />
+            <AlertCircle className="h-5 w-5 text-orange-500" />,
           )}
 
           {/* Suspected Conditions */}
           {renderSection(
             t("conditions.suspectedSection"),
             suspectedConditions,
-            <HelpCircle className="h-5 w-5 text-yellow-500" />
+            <HelpCircle className="h-5 w-5 text-yellow-500" />,
           )}
 
           {/* Resolved Conditions */}
@@ -296,7 +300,7 @@ function ConditionsContent() {
             t("conditions.resolvedSection"),
             resolvedConditions,
             <CheckCircle2 className="h-5 w-5 text-green-500" />,
-            true
+            true,
           )}
 
           {/* History */}
@@ -304,17 +308,18 @@ function ConditionsContent() {
             t("conditions.historySection"),
             historyConditions,
             <History className="h-5 w-5 text-gray-500" />,
-            true
+            true,
           )}
 
           {/* No active conditions message */}
-          {activeConditions.length === 0 && suspectedConditions.length === 0 && 
-           (resolvedConditions.length > 0 || historyConditions.length > 0) && (
-            <div className="text-center py-8 text-muted-foreground">
-              <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
-              <p>{t("conditions.allResolved")}</p>
-            </div>
-          )}
+          {activeConditions.length === 0 &&
+            suspectedConditions.length === 0 &&
+            (resolvedConditions.length > 0 || historyConditions.length > 0) && (
+              <div className="text-center py-8 text-muted-foreground">
+                <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
+                <p>{t("conditions.allResolved")}</p>
+              </div>
+            )}
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
