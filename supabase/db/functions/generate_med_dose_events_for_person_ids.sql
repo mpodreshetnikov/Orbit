@@ -26,7 +26,6 @@ DECLARE
   v_end_date date;
   v_days_count int;
   v_every int;
-  v_time_of_day text;
   v_days_of_week jsonb;
   v_due_at timestamptz;
   v_planned_intake jsonb;
@@ -36,7 +35,6 @@ DECLARE
   v_inserted int := 0;
   v_in_range boolean;
   v_end_type text;
-  v_i int;
   v_ref timestamptz;
 BEGIN
   v_tz := COALESCE(NULLIF(trim(p_timezone), ''), 'UTC');
@@ -129,9 +127,9 @@ BEGIN
       CONTINUE;
     END IF;
 
-    FOR v_i IN 0 .. (p_horizon_days - 1)
+    FOR i IN 0 .. (p_horizon_days - 1)
     LOOP
-      v_date := v_today + (v_i || ' days')::interval;
+      v_date := v_today + (i || ' days')::interval;
       IF v_date < v_start_date THEN
         CONTINUE;
       END IF;

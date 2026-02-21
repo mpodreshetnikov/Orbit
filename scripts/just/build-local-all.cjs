@@ -79,12 +79,14 @@ try {
   }
 
   const recipes = [
-    "supabase-local-start",
-    "supabase-local-reset-and-deploy",
-    "web-build-production",
-    "extension-build-production",
+    "quality-format-check",
     "quality-lint",
     "quality-typecheck",
+    "web-build-production",
+    "extension-build-production",
+    "supabase-local-start",
+    "supabase-local-reset-and-deploy",
+    "quality-db-lint",
   ];
 
   for (const recipe of recipes) {

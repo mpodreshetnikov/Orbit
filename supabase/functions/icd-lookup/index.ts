@@ -141,7 +141,7 @@ async function lookupIcdCode(code: string, lang: "en" | "ru"): Promise<string | 
  */
 async function searchIcdCodes(
   query: string,
-  lang: "en" | "ru",
+  _lang: "en" | "ru",
   maxResults = 10,
 ): Promise<Array<{ code: string; name: string }>> {
   const token = await getAccessToken();
@@ -151,7 +151,7 @@ async function searchIcdCodes(
   const codePattern = /^[A-Z][0-9]/i;
   if (codePattern.test(trimmedQuery)) {
     console.log("Query looks like a code, using code lookup strategy");
-    return await searchIcd10Release(trimmedQuery, lang, token, maxResults);
+    return await searchIcd10Release(trimmedQuery, maxResults);
   }
 
   // Strategy 2: Try ICD-11 entity search (English only, better results)
@@ -264,8 +264,6 @@ async function searchIcdCodes(
  */
 async function searchIcd10Release(
   query: string,
-  lang: "en" | "ru",
-  token: string,
   maxResults: number,
 ): Promise<Array<{ code: string; name: string }>> {
   const results: Array<{ code: string; name: string }> = [];

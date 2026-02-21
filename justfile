@@ -40,17 +40,46 @@ quality-format-check:
 quality-format-write:
   npx prettier --write .
 
-# Run ESLint with zero warnings allowed.
-quality-lint:
-  npx eslint src browserExtension/src browserExtension/popup-src scripts/extension supabase/functions --ext .ts,.tsx --max-warnings=0
+# Run ESLint for the web app and shared UI.
+quality-lint-web:
+  npx eslint src shared --ext .ts,.tsx --max-warnings=0
 
-# Run TypeScript type checks.
-quality-typecheck:
+# Run ESLint for browser extension runtime and popup surfaces.
+quality-lint-extension:
+  npx eslint browserExtension/src browserExtension/popup-src --ext .ts,.tsx --max-warnings=0
+
+# Run ESLint for scripts and tooling.
+quality-lint-scripts:
+  npx eslint scripts vite.config.extension.ts --ext .js,.cjs,.mjs,.ts,.tsx --max-warnings=0
+
+# Run Deno lint for Supabase Edge Functions.
+quality-lint-supabase-functions:
+  deno lint --config supabase/functions/deno.json supabase/functions
+
+# Run all lint surfaces with zero warnings allowed.
+quality-lint: quality-lint-web quality-lint-extension quality-lint-scripts quality-lint-supabase-functions
+
+# Run ESLint autofix where safe.
+quality-lint-fix:
+  npx eslint src shared browserExtension/src browserExtension/popup-src scripts vite.config.extension.ts --ext .js,.cjs,.mjs,.ts,.tsx --fix --max-warnings=0
+
+# Run TypeScript type checks for web and extension surfaces.
+quality-typecheck-web:
   npx tsc --noEmit
-  npx tsc --noEmit -p supabase/functions/tsconfig.json
+
+# Run Deno type checks for Supabase Edge Functions.
+quality-typecheck-supabase-functions:
+  deno check --config supabase/functions/deno.json supabase/functions/*/index.ts
+
+# Run aggregate type checks.
+quality-typecheck: quality-typecheck-web quality-typecheck-supabase-functions
 
 # Run current smoke gate (web production build).
 quality-smoke-build: web-build-production
+
+# Run local Supabase DB lint (public schema only), failing on warnings.
+quality-db-lint:
+  npx supabase db lint --local --schema public --fail-on warning
 
 # Start local Supabase stack.
 supabase-local-start:

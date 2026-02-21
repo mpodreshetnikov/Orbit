@@ -11,7 +11,7 @@ declare module "web-push" {
     setVapidDetails(subject: string, publicKey: string, privateKey: string): void;
     sendNotification(
       subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
-      payload: string | Buffer,
+      payload: string | Uint8Array | ArrayBuffer,
       options?: Record<string, unknown>,
     ): Promise<unknown>;
   }

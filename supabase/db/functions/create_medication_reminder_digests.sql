@@ -15,8 +15,6 @@ DECLARE
   v_row record;
   v_tz text;
   v_interval_min int;
-  v_today_start timestamptz;
-  v_today_end timestamptz;
   v_in_due_window boolean;
   v_overdue_today boolean;
   v_last_sent timestamptz;
@@ -45,8 +43,6 @@ BEGIN
 
     v_tz := COALESCE(NULLIF(TRIM(v_tz), ''), 'UTC');
     v_interval_min := GREATEST(1, v_interval_min);
-    v_today_start := ((p_now_timestamptz AT TIME ZONE v_tz)::date)::timestamp AT TIME ZONE v_tz;
-    v_today_end := v_today_start + interval '1 day';
 
     FOR v_route IN
       SELECT *

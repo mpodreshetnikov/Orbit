@@ -27,7 +27,7 @@ DECLARE
   row_idx int := 0;
   row_status text;
   row_message text;
-  row_results jsonb[] := '{}';
+  row_results jsonb[] := ARRAY[]::jsonb[];
 BEGIN
   IF p_rows IS NULL OR jsonb_typeof(p_rows) <> 'array' THEN
     RETURN jsonb_build_object('inserted', 0, 'skipped', 0, 'row_results', '[]'::jsonb, 'error', 'rows must be a JSON array');
@@ -163,6 +163,7 @@ BEGIN
   END LOOP;
 
   RETURN jsonb_build_object(
+    'batch_id', p_batch_id,
     'inserted', inserted_count,
     'skipped', skipped_count,
     'row_results', (SELECT jsonb_agg(elem ORDER BY (elem->>'idx')::int) FROM unnest(row_results) AS elem)

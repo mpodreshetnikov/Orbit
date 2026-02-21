@@ -13,9 +13,17 @@ Use these command IDs in plans, PRs, and handoffs:
 - `install`: `just install-dependencies`
 - `dev-ready`: `just dev-ready-local`
 - `dev-stop`: `just dev-local-stop`
+- `format-check`: `just quality-format-check`
+- `format-write`: `just quality-format-write`
 - `test`: `just quality-smoke-build` (current smoke/integration gate; no dedicated unit test runner yet)
 - `lint`: `just quality-lint`
+- `lint-fix`: `just quality-lint-fix`
+- `lint-web`: `just quality-lint-web`
+- `lint-ext`: `just quality-lint-extension`
+- `lint-scripts`: `just quality-lint-scripts`
+- `lint-supabase`: `just quality-lint-supabase-functions`
 - `types`: `just quality-typecheck`
+- `db-lint`: `just quality-db-lint` (local DB lint scoped to `public` schema, warnings fail)
 - `db-run`: `just supabase-local-migrate-and-deploy` (non-destructive; use for normal day-to-day local sync)
 - `db-reset`: `just supabase-local-reset-and-deploy` (destructive; use when schema/seed drift needs a clean rebuild)
 - `db-artifacts-refresh`: `just supabase-local-artifacts-refresh` (regenerate generated DB schema snapshot and TS DB types from reset local DB)
@@ -32,6 +40,7 @@ For less common and environment-specific commands (deploy, targeted DB ops, sing
 
 - Prefer `db-run` when you want latest migrations + deploy SQL without wiping local data.
 - Use `db-reset` after migration/seed refactors, when local DB state looks inconsistent, or when you need deterministic from-scratch validation.
+- Run `db-lint` to validate DB quality before merge (`--schema public --fail-on warning`).
 
 ## Where Rules Live
 

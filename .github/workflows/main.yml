@@ -37,8 +37,28 @@ jobs:
       - name: Verify generated DB artifacts
         run: just supabase-local-artifacts-verify
 
+  quality-gates:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - uses: taiki-e/install-action@just
+      - name: Install dependencies
+        run: npm ci
+      - name: Run quality gates
+        run: just ci-verify-local
+
   deploy-vercel-production:
-    needs: [secrets-scan, db-artifacts-clean-check]
+    needs: [secrets-scan, db-artifacts-clean-check, quality-gates]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -62,7 +82,7 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
-    needs: [secrets-scan, db-artifacts-clean-check]
+    needs: [secrets-scan, db-artifacts-clean-check, quality-gates]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production

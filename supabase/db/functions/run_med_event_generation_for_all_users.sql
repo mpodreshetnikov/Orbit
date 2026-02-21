@@ -15,7 +15,6 @@ DECLARE
   v_tz text;
   v_events int;
   v_refills int;
-  v_cleared int;
   v_horizon int;
 BEGIN
   v_horizon := COALESCE(NULLIF(p_horizon_days, 0), 7);
@@ -38,10 +37,10 @@ BEGIN
     v_tz := COALESCE(NULLIF(TRIM(v_tz), ''), 'UTC');
 
     -- Clear existing future scheduled events before regenerating.
-    SELECT public.clear_future_med_dose_events(
+    PERFORM public.clear_future_med_dose_events(
       v_rec.auth_user_id,
       v_horizon
-    ) INTO v_cleared;
+    );
 
     SELECT public.generate_med_dose_events_for_horizon(
       v_rec.auth_user_id,

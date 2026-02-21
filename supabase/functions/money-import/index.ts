@@ -469,7 +469,7 @@ async function insertOrResolveTransaction(
   };
 }
 
-async function buildLineItemImportHash(
+function buildLineItemImportHash(
   txIdentity: string,
   lineItem: ImportLineItemInput,
   lineIndex: number,

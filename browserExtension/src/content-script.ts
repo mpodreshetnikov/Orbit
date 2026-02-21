@@ -1,7 +1,7 @@
 const WEBAPP_SOURCE = "orbit-webapp";
 const BRIDGE_SOURCE = "orbit-extension";
 
-window.addEventListener("message", async (event: MessageEvent) => {
+window.addEventListener("message", (event: MessageEvent) => {
   if (event.source !== window) return;
   const data = event.data as { source?: string; type?: string; session?: unknown };
   if (!data || data.source !== WEBAPP_SOURCE) return;

@@ -1,18 +1,12 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "./popup.css";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Button } from "@shared/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@shared/ui/card";
+import { Label } from "@shared/ui/label";
+import { Input } from "@shared/ui/input";
+import { Textarea } from "@shared/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
 
 function formatSession(session: Record<string, unknown> | null): string {
   if (!session) return "No active session";
@@ -71,7 +65,7 @@ function App() {
   }, []);
 
   React.useEffect(() => {
-    seedSessionFromLaunchUrl().then(() => refreshSession());
+    void seedSessionFromLaunchUrl().then(() => refreshSession());
   }, [seedSessionFromLaunchUrl, refreshSession]);
 
   const onRefreshSession = async () => {

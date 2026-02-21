@@ -19,8 +19,16 @@ Command source of truth remains `AGENTS.md` and `just --list --unsorted`.
 Use command IDs from `AGENTS.md`.
 
 - `test` -> `just quality-smoke-build`
+- `format-check` -> `just quality-format-check`
+- `format-write` -> `just quality-format-write`
 - `lint` -> `just quality-lint`
+- `lint-fix` -> `just quality-lint-fix`
+- `lint-web` -> `just quality-lint-web`
+- `lint-ext` -> `just quality-lint-extension`
+- `lint-scripts` -> `just quality-lint-scripts`
+- `lint-supabase` -> `just quality-lint-supabase-functions`
 - `types` -> `just quality-typecheck`
+- `db-lint` -> `just quality-db-lint`
 - `ci` -> `just ci-verify-local`
 - `db-run` -> `just supabase-local-migrate-and-deploy`
 - `db-reset` -> `just supabase-local-reset-and-deploy`
@@ -33,15 +41,15 @@ Do not replace these with ad-hoc alternatives when equivalent command IDs alread
 
 ## Change-Type Check Matrix
 
-| Change Type                            | Mandatory Checks                                          | Additional Checks                                      | Evidence Required                              |
-| -------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
-| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check | none                                                   | list of changed docs and cross-links validated |
-| UI/routes/components                   | `lint`, `types`, `test`                                   | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
-| Hooks/client orchestration             | `lint`, `types`, `test`                                   | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
-| Edge/API workflow                      | `lint`, `types`, `test`                                   | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
-| DB schema/policy/function/trigger/cron | `lint`, `types`, `test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
-| Extension/service worker/import flow   | `lint`, `types`, `test`                                   | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
-| CI/deploy/security config              | `lint`, `types`, `test`, `secrets-preflight`              | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
+| Change Type                            | Mandatory Checks                                                     | Additional Checks                                      | Evidence Required                              |
+| -------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
+| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check            | none                                                   | list of changed docs and cross-links validated |
+| UI/routes/components                   | `lint`, `types`, `test`                                              | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
+| Hooks/client orchestration             | `lint`, `types`, `test`                                              | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `lint`, `types`, `test`                                              | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
+| DB schema/policy/function/trigger/cron | `lint`, `types`, `test`, `db-lint`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
+| Extension/service worker/import flow   | `lint`, `types`, `test`                                              | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
+| CI/deploy/security config              | `lint`, `types`, `test`, `secrets-preflight`                         | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 
@@ -49,14 +57,18 @@ Do not replace these with ad-hoc alternatives when equivalent command IDs alread
 
 Run from repository root:
 
+- `format-check`
 - `test`
 - `lint`
 - `types`
 
 Pass criteria:
 
+- `format-check`: zero formatting drift.
 - `lint`: zero warnings, zero errors.
+- `lint`: includes web, extension, scripts, and Supabase function (`deno lint`) surfaces.
 - `types`: no TypeScript diagnostics.
+- `types`: includes Deno type checks for Supabase functions (`deno check`).
 - `test` (smoke gate): successful production build and static generation.
 
 ### 2. Secret safety gate
@@ -80,6 +92,7 @@ When DB behavior changes:
 
 - ensure migration exists in `supabase/migrations/`.
 - ensure relevant SQL objects updated in `supabase/db/`.
+- run `db-lint` to validate local DB SQL quality (`supabase db lint --local --schema public --fail-on warning`).
 - run `db-run` for non-destructive validation.
 - run `db-reset` when drift/refactor demands deterministic rebuild.
 - regenerate DB artifacts via `db-artifacts-refresh`.
@@ -97,6 +110,7 @@ Pass criteria:
 
 - migrations apply cleanly,
 - deploy SQL applies cleanly,
+- DB lint passes (public schema) with zero warnings/errors,
 - generated DB artifacts are current and unchanged after regeneration,
 - runtime behavior reflects updated RLS/functions/triggers/cron.
 
@@ -116,6 +130,7 @@ Use route and flow-specific evidence (screenshots, logs, notes).
 Validate that:
 
 - CI workflow behavior is compatible with the change,
+- CI `quality-gates` job is green before deployment jobs run,
 - required docs were updated,
 - security and operational implications were captured in relevant docs.
 

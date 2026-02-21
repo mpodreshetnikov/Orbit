@@ -90,7 +90,7 @@ chrome.runtime.onMessage.addListener(
     _sender,
     sendResponse,
   ) => {
-    (async () => {
+    void (async () => {
       try {
         if (message.type === "MONEY_IMPORT_PING") {
           sendResponse({ ok: true });

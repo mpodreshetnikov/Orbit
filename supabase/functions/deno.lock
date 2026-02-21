@@ -1,0 +1,12 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@types/web-push@~3.6.4/index.d.ts": "https://esm.sh/@types/web-push@3.6.4/index.d.ts"
+  },
+  "remote": {
+    "https://deno.land/std@0.220.0/encoding/_util.ts": "beacef316c1255da9bc8e95afb1fa56ed69baef919c88dc06ae6cb7a6103d376",
+    "https://deno.land/std@0.220.0/encoding/base64.ts": "8ccae67a1227b875340a8582ff707f37b131df435b07080d3bb58e07f5f97807",
+    "https://esm.sh/@supabase/supabase-js@2.91.1": "6c889cd9ee2c4a3a6f586c892343117431b167c3168b1d0e2a8941782efa868f",
+    "https://esm.sh/web-push@3.6.7": "e3c6dacc6581629be7433797d5fe1f756ad12d3f8732f97c9b71129affd90906"
+  }
+}

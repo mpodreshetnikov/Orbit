@@ -430,6 +430,46 @@ async function fetchUpcomingOverdueCheckupItems(
   );
 }
 
+async function recomputeConditionCurrentStatus(
+  supabaseAdmin: SupabaseClient<Database>,
+  conditionId: string,
+): Promise<void> {
+  const { data: latest } = await supabaseAdmin
+    .from("condition_records")
+    .select("status_in_record, medical_records!inner(record_date)")
+    .eq("condition_id", conditionId)
+    .order("medical_records(record_date)", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const status = (latest as { status_in_record?: string } | null)?.status_in_record;
+  if (status) {
+    await supabaseAdmin.from("conditions").update({ current_status: status }).eq("id", conditionId);
+  }
+}
+
+async function lookupIcdCode(code: string): Promise<IcdLookupResult | null> {
+  try {
+    const icdRes = await fetch(`${SUPABASE_URL}/functions/v1/icd-lookup`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!icdRes.ok) {
+      console.error(`ICD lookup failed for ${code}:`, icdRes.status);
+      return null;
+    }
+
+    return await icdRes.json();
+  } catch (error) {
+    console.error(`ICD lookup error for ${code}:`, error);
+    return null;
+  }
+}
+
 // Build observation catalog prompt section
 function buildObservationCatalogPrompt(catalog: ObservationCatalogItem[]): string {
   if (catalog.length === 0) {
@@ -1403,48 +1443,6 @@ Deno.serve(async (req) => {
     // Delete existing condition_records for this record (in case of re-extraction)
     await supabaseAdmin.from("condition_records").delete().eq("record_id", record_id);
 
-    // Recompute condition's current_status from the most recent condition_record by record_date
-    async function recomputeConditionCurrentStatus(conditionId: string): Promise<void> {
-      const { data: latest } = await supabaseAdmin
-        .from("condition_records")
-        .select("status_in_record, medical_records!inner(record_date)")
-        .eq("condition_id", conditionId)
-        .order("medical_records(record_date)", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const status = (latest as { status_in_record?: string } | null)?.status_in_record;
-      if (status) {
-        await supabaseAdmin
-          .from("conditions")
-          .update({ current_status: status })
-          .eq("id", conditionId);
-      }
-    }
-
-    // Helper function to lookup ICD code via icd-lookup edge function
-    async function lookupIcdCode(code: string): Promise<IcdLookupResult | null> {
-      try {
-        const icdRes = await fetch(`${SUPABASE_URL}/functions/v1/icd-lookup`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ code }),
-        });
-
-        if (!icdRes.ok) {
-          console.error(`ICD lookup failed for ${code}:`, icdRes.status);
-          return null;
-        }
-
-        return await icdRes.json();
-      } catch (error) {
-        console.error(`ICD lookup error for ${code}:`, error);
-        return null;
-      }
-    }
-
     // Process extracted conditions
     if (structuredData.conditions.length > 0) {
       for (const extracted of structuredData.conditions) {
@@ -1568,7 +1566,7 @@ Deno.serve(async (req) => {
         } else {
           // Recompute condition current_status from most recent mention by record_date
           // (so an older record with "Active" does not override a newer "Suspected")
-          await recomputeConditionCurrentStatus(conditionId);
+          await recomputeConditionCurrentStatus(supabaseAdmin, conditionId);
         }
       }
     }
@@ -1673,7 +1671,7 @@ Deno.serve(async (req) => {
           console.error("Error inserting condition_record for resolved condition:", crError);
         } else {
           // Recompute condition current_status from most recent mention by record_date
-          await recomputeConditionCurrentStatus(toResolve.condition_id);
+          await recomputeConditionCurrentStatus(supabaseAdmin, toResolve.condition_id);
           console.log(`Marked condition as resolved: ${existingCond.name}`);
         }
       }

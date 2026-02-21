@@ -10,7 +10,8 @@ MCP setup and sync instructions are canonical in `mcp/README.md`.
 1. `just` installed.
 2. Supabase CLI installed.
 3. Node.js and npm installed.
-4. Environment variables configured.
+4. Deno 2.x installed.
+5. Environment variables configured.
 
 ## Environment Variables
 

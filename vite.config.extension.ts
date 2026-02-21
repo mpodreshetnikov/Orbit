@@ -11,6 +11,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.join(rootDir, "src"),
+      "@shared": path.join(rootDir, "shared"),
     },
   },
   root: rootDir,

@@ -12,6 +12,7 @@
 Notes:
 
 - GitHub Actions jobs run in environment `production`.
+- Deploy jobs are gated by `secrets-scan`, `db-artifacts-clean-check`, and `quality-gates`.
 - Configure GitHub Actions Vercel values:
   - Secrets: `VERCEL_TOKEN`
   - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
@@ -29,7 +30,8 @@ Notes:
 3. Reproduce locally if possible.
 4. Check recent DB migrations and `supabase/db` changes.
 5. If DB schema/types drift is suspected, run `db-artifacts-verify` from `AGENTS.md`.
-6. Decide whether the fix is app code, function code, SQL, or config/secrets.
+6. If DB lint failures occur, run `db-lint` from `AGENTS.md` (public schema warnings fail).
+7. Decide whether the fix is app code, function code, SQL, or config/secrets.
 
 ## Auth And Access Issues
 
@@ -112,6 +114,20 @@ Checks:
 - Confirm required secrets are set (`OPENROUTER_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
 - Confirm attachment exists in `medical-attachments` bucket.
 - Check function logs for auth failures, timeout, or model/provider errors.
+
+## Lint And Typecheck Gate Issues
+
+Quality gate commands:
+
+- `format-check`
+- `lint`
+- `types`
+
+Supabase function-specific checks:
+
+- run `lint-supabase` for Deno lint issues.
+- run `types` (or `quality-typecheck-supabase-functions`) for `deno check` failures.
+- if Deno fails on unresolved URL imports, confirm `supabase/functions/deno.json` imports are valid and cache is fresh (`deno cache` can help diagnose).
 
 ## Money Import Issues
 
