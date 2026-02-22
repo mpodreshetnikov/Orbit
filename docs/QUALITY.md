@@ -14,43 +14,19 @@ Quality intent in this project spans:
 
 Command source of truth remains `AGENTS.md` and `just --list --unsorted`.
 
+## Primary commands
+
+Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day-to-day quality checks, use these entry points:
+
+- **`ci-fast`**: quick local gate (format, lint, types, unit tests, web + extension builds). Use for fast feedback during work. No Supabase, no coverage.
+- **`ci`**: full local gate (adds `build-local-all`, unit coverage, `coverage-check`). Use before push or PR.
+- **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
+
+**After code changes:** When a task involves code changes, run **`ci`** (`just ci-verify-local`) and ensure it passes before marking the task complete or opening/updating a PR. Use **`ci-fast`** during development for faster feedback.
+
 ## Canonical Command Policy
 
-Use command IDs from `AGENTS.md`.
-
-- `test` -> `just quality-smoke-build`
-- `test-unit-web` -> `just test-unit-web`
-- `test-unit-ext` -> `just test-unit-ext`
-- `test-unit-node` -> `just test-unit-node`
-- `test-unit-functions` -> `just test-unit-functions`
-- `test-unit` -> `just test-unit`
-- `test-unit-coverage` -> `just test-unit-coverage`
-- `coverage-report` -> `just coverage-report`
-- `coverage-check` -> `just coverage-check`
-- `format-check` -> `just quality-format-check`
-- `format-write` -> `just quality-format-write`
-- `lint` -> `just quality-lint`
-- `lint-fix` -> `just quality-lint-fix`
-- `lint-web` -> `just quality-lint-web`
-- `lint-ext` -> `just quality-lint-extension`
-- `lint-scripts` -> `just quality-lint-scripts`
-- `lint-supabase` -> `just quality-lint-supabase-functions`
-- `types` -> `just quality-typecheck`
-- `quality` -> `just quality` (all static checks: format, lint, typecheck)
-- `db-lint` -> `just quality-db-lint`
-- `db-test` -> `just quality-db-test`
-- `db-coverage-report` -> `just db-coverage-report`
-- `ci` -> `just ci-verify-local`
-- `ci-fast` -> `just ci-verify-local-fast` (quick local gate: format, lint, typecheck, unit tests, builds; no Supabase, no coverage; use for fast feedback; use `ci` for full pre-push/CI-equivalent gate)
-- `check` -> `just check`
-- `db-run` -> `just supabase-local-migrate-and-deploy`
-- `db-reset` -> `just supabase-local-reset-and-deploy`
-- `db-artifacts-refresh` -> `just supabase-local-artifacts-refresh`
-- `db-artifacts-verify` -> `just supabase-local-artifacts-verify`
-- `secrets-preflight` -> `just secrets-preflight`
-- `secrets-preflight-range` -> `just secrets-preflight-range <from> <to>`
-
-Do not replace these with ad-hoc alternatives when equivalent command IDs already exist.
+Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `ci`, `ci-fast`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`. Full list: **AGENTS.md** and `just --list --unsorted`.
 
 ## Test Impact Policy
 
@@ -63,44 +39,32 @@ Every behavior change must update tests in the same change set.
 
 ## Change-Type Check Matrix
 
-| Change Type                            | Mandatory Checks                                                        | Additional Checks                                      | Evidence Required                              |
-| -------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
-| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check               | none                                                   | list of changed docs and cross-links validated |
-| UI/routes/components                   | `lint`, `types`, `test-unit-web`, `test`                                | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
-| Hooks/client orchestration             | `lint`, `types`, `test-unit-web`                                        | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
-| Edge/API workflow                      | `lint`, `types`, `test-unit-functions`, `test`                          | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
-| DB schema/policy/function/trigger/cron | `lint`, `types`, `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
-| Extension/service worker/import flow   | `lint`, `types`, `test-unit-ext`, `test`                                | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
-| Scripts/tooling                        | `lint`, `types`, `test-unit-node`                                       | verify CLI behavior and error handling                 | command outcomes + command transcript          |
-| CI/deploy/security config              | `lint`, `types`, `test-unit`, `test`, `secrets-preflight`               | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
+For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.
+
+| Change Type                            | Mandatory Checks                                              | Additional Checks                                      | Evidence Required                              |
+| -------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
+| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check     | none                                                   | list of changed docs and cross-links validated |
+| UI/routes/components                   | `ci`                                                          | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
+| Hooks/client orchestration             | `ci`                                                          | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `ci`                                                          | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
+| DB schema/policy/function/trigger/cron | `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
+| Extension/service worker/import flow   | `ci`                                                          | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
+| Scripts/tooling                        | `ci`                                                          | verify CLI behavior and error handling                 | command outcomes + command transcript          |
+| CI/deploy/security config              | `ci`, `secrets-preflight`                                     | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 
 ### 1. Static and build gates
 
-Run from repository root:
+Run **`ci`** from the repository root for full verification (or **`ci-fast`** for quick iteration without Supabase/coverage). `ci` runs `quality`, then `build-local-all`, `test-unit-coverage`, and `coverage-check`.
 
-- `format-check`
-- `test-unit`
-- `test-unit-coverage`
-- `coverage-check`
-- `test`
-- `lint`
-- `types`
+Pass criteria: all steps exit successfully; coverage thresholds and ratchets are enforced (zero format drift, zero lint/type issues, unit and coverage checks pass, smoke build succeeds).
 
-Pass criteria:
+#### Reference: per-step pass criteria
 
-- `format-check`: zero formatting drift.
-- `lint`: zero warnings, zero errors.
-- `lint`: includes web, extension, scripts, and Supabase function (`deno lint`) surfaces.
-- `types`: no TypeScript diagnostics.
-- `types`: includes Deno type checks for Supabase functions (`deno check`).
-- `test-unit`: runtime-split unit suites pass (Vitest + Deno tests).
-- `test-unit-coverage`: runtime coverage artifacts generated (`coverage/combined-summary.json`, `coverage/combined-report.md`).
-- `coverage-check`: `src/**` coverage is enforced at `>=75%` lines and `>=75%` branches via `scripts/just/src-coverage-threshold.cjs`.
-- `coverage-check`: Supabase Edge Functions are enforced per function directory aggregate at `>=75%` lines and `>=75%` branches via `scripts/just/supabase-function-coverage-threshold.cjs` (source: `.coverage/deno/lcov.info`).
-- `coverage-check`: ratchet metrics are non-regressing and changed DB objects are mapped to pgTAP tests.
-- `test` (smoke gate): successful production build and static generation.
+- Format: zero drift. Lint: zero warnings/errors (web, extension, scripts, Supabase functions). Types: no TS/Deno diagnostics.
+- Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` and per-function aggregates at `>=75%` lines/branches; ratchet and DB object mapping enforced.
+- Smoke: production build and static generation succeed.
 
 ### 2. Secret safety gate
 

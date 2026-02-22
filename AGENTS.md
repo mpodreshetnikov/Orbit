@@ -40,7 +40,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `db-artifacts-refresh`: `just supabase-local-artifacts-refresh` (regenerate generated DB schema snapshot and TS DB types from reset local DB)
 - `db-artifacts-verify`: `just supabase-local-artifacts-verify` (regenerate generated DB artifacts and fail on drift)
 - `build-local`: `just build-local-all`
-- `ci`: `just ci-verify-local`
+- `ci`: `just ci-verify-local` (run after completing a task that changed code; see docs/QUALITY.md)
 - `ci-fast`: `just ci-verify-local-fast` (quick local gate: no Supabase, no coverage; use for fast feedback; use `ci` for full pre-push)
 - `check`: `just check` (full local quality gate)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
