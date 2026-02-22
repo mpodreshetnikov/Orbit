@@ -58,7 +58,7 @@ jobs:
         run: just test-unit-coverage && just coverage-check
 
   deploy-vercel-production:
-    needs: [secrets-scan, quality-and-db-artifacts]
+    needs: [secrets-scan, quality-gates]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -82,7 +82,7 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
-    needs: [secrets-scan, quality-and-db-artifacts]
+    needs: [secrets-scan, quality-gates]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production
