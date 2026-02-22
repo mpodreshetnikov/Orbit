@@ -757,9 +757,7 @@ describe("RecordDetail", () => {
     });
   }, 20000);
 
-  it(
-    "covers observation helper components and edit-dialog edge branches",
-    async () => {
+  it("covers observation helper components and edit-dialog edge branches", async () => {
     const {
       ObservationStatusBadge,
       ObservationValueChangeIndicator,
@@ -884,9 +882,7 @@ describe("RecordDetail", () => {
         unit_canonical: "mmol/L",
       }),
     );
-  },
-    20000,
-  );
+  }, 20000);
 
   it("covers finding/condition/observation comparison helper branches", async () => {
     const {

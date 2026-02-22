@@ -31,6 +31,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `lint-scripts`: `just quality-lint-scripts`
 - `lint-supabase`: `just quality-lint-supabase-functions`
 - `types`: `just quality-typecheck`
+- `quality`: `just quality` (all static checks: format, lint, typecheck; no builds, DB, or tests)
 - `db-lint`: `just quality-db-lint` (local DB lint scoped to `public` schema, warnings fail)
 - `db-test`: `just quality-db-test` (pgTAP tests under `supabase/tests`)
 - `db-coverage-report`: `just db-coverage-report` (DB object to pgTAP mapping coverage report)
@@ -40,6 +41,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `db-artifacts-verify`: `just supabase-local-artifacts-verify` (regenerate generated DB artifacts and fail on drift)
 - `build-local`: `just build-local-all`
 - `ci`: `just ci-verify-local`
+- `ci-fast`: `just ci-verify-local-fast` (quick local gate: no Supabase, no coverage; use for fast feedback; use `ci` for full pre-push)
 - `check`: `just check` (full local quality gate)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
 - `secrets-preflight`: `just secrets-preflight` (scan likely push range for accidentally committed secrets)

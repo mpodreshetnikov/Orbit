@@ -47,53 +47,47 @@ describe("EditMeasurementDialog", () => {
     hookMocks.useUpdateMeasurement.mockReturnValue(mutationMock());
   });
 
-  it(
-    "renders initial data and submits updated measurement payload",
-    async () => {
-      const onOpenChange = vi.fn();
-      const updateMutation = mutationMock();
-      hookMocks.useUpdateMeasurement.mockReturnValue(updateMutation);
+  it("renders initial data and submits updated measurement payload", async () => {
+    const onOpenChange = vi.fn();
+    const updateMutation = mutationMock();
+    hookMocks.useUpdateMeasurement.mockReturnValue(updateMutation);
 
-      const { EditMeasurementDialog } = await import("./edit-measurement-dialog");
-      render(
-        <EditMeasurementDialog
-          open
-          onOpenChange={onOpenChange}
-          personId="person-1"
-          measurement={measurement}
-          catalogId="catalog-1"
-        />,
-      );
+    const { EditMeasurementDialog } = await import("./edit-measurement-dialog");
+    render(
+      <EditMeasurementDialog
+        open
+        onOpenChange={onOpenChange}
+        personId="person-1"
+        measurement={measurement}
+        catalogId="catalog-1"
+      />,
+    );
 
-      expect(screen.getByDisplayValue("72.5")).toBeInTheDocument();
-      expect(screen.getByLabelText("measurements.notes")).toHaveValue(
-        "  initial note  ",
-      );
-      expect(screen.getByText("kg")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("72.5")).toBeInTheDocument();
+    expect(screen.getByLabelText("measurements.notes")).toHaveValue("  initial note  ");
+    expect(screen.getByText("kg")).toBeInTheDocument();
 
-      const user = userEvent.setup();
-      await user.clear(screen.getByLabelText("measurements.value"));
-      await user.type(screen.getByLabelText("measurements.value"), "73.1");
-      await user.clear(screen.getByLabelText("measurements.notes"));
-      await user.type(screen.getByLabelText("measurements.notes"), "  updated  ");
-      await user.click(screen.getByRole("button", { name: "common.save" }));
+    const user = userEvent.setup();
+    await user.clear(screen.getByLabelText("measurements.value"));
+    await user.type(screen.getByLabelText("measurements.value"), "73.1");
+    await user.clear(screen.getByLabelText("measurements.notes"));
+    await user.type(screen.getByLabelText("measurements.notes"), "  updated  ");
+    await user.click(screen.getByRole("button", { name: "common.save" }));
 
-      await waitFor(() =>
-        expect(updateMutation.mutateAsync).toHaveBeenCalledWith(
-          expect.objectContaining({
-            id: "m-1",
-            personId: "person-1",
-            updates: expect.objectContaining({
-              value: 73.1,
-              notes: "updated",
-            }),
+    await waitFor(() =>
+      expect(updateMutation.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "m-1",
+          personId: "person-1",
+          updates: expect.objectContaining({
+            value: 73.1,
+            notes: "updated",
           }),
-        ),
-      );
-      expect(onOpenChange).toHaveBeenCalledWith(false);
-    },
-    20000,
-  );
+        }),
+      ),
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  }, 20000);
 
   it("uses RU locale unit label and closes from cancel", async () => {
     document.documentElement.lang = "ru";

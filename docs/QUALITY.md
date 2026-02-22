@@ -36,10 +36,12 @@ Use command IDs from `AGENTS.md`.
 - `lint-scripts` -> `just quality-lint-scripts`
 - `lint-supabase` -> `just quality-lint-supabase-functions`
 - `types` -> `just quality-typecheck`
+- `quality` -> `just quality` (all static checks: format, lint, typecheck)
 - `db-lint` -> `just quality-db-lint`
 - `db-test` -> `just quality-db-test`
 - `db-coverage-report` -> `just db-coverage-report`
 - `ci` -> `just ci-verify-local`
+- `ci-fast` -> `just ci-verify-local-fast` (quick local gate: format, lint, typecheck, unit tests, builds; no Supabase, no coverage; use for fast feedback; use `ci` for full pre-push/CI-equivalent gate)
 - `check` -> `just check`
 - `db-run` -> `just supabase-local-migrate-and-deploy`
 - `db-reset` -> `just supabase-local-reset-and-deploy`

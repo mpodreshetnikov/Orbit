@@ -59,6 +59,10 @@ quality-lint-supabase-functions:
 # Run all lint surfaces with zero warnings allowed.
 quality-lint: quality-lint-web quality-lint-extension quality-lint-scripts quality-lint-supabase-functions
 
+# Run all lint surfaces in parallel (faster for CI).
+quality-lint-parallel:
+  node scripts/just/run-lint-parallel.cjs
+
 # Run ESLint autofix where safe.
 quality-lint-fix:
   npx eslint src shared browserExtension/src browserExtension/popup-src scripts vite.config.extension.ts --ext .js,.cjs,.mjs,.ts,.tsx --fix --max-warnings=0
@@ -73,6 +77,9 @@ quality-typecheck-supabase-functions:
 
 # Run aggregate type checks.
 quality-typecheck: quality-typecheck-web quality-typecheck-supabase-functions
+
+# All static quality checks: format, lint, typecheck (no builds, no DB, no tests).
+quality: quality-format-check quality-lint-parallel quality-typecheck
 
 # Run current smoke gate (web production build).
 quality-smoke-build: web-build-production
@@ -111,10 +118,7 @@ coverage-report:
 
 # Validate coverage ratchet and changed DB object coverage mapping.
 coverage-check:
-  node scripts/just/src-coverage-threshold.cjs
-  node scripts/just/supabase-function-coverage-threshold.cjs
-  node scripts/just/coverage-ratchet.cjs
-  node scripts/just/db-coverage-report.cjs --strict-changed
+  node scripts/just/run-coverage-check-parallel.cjs
 
 # Report DB object to pgTAP test mapping coverage.
 db-coverage-report:
@@ -182,7 +186,10 @@ build-local-all:
   node scripts/just/build-local-all.cjs
 
 # CI-style local confidence gate before PR push.
-ci-verify-local: quality-lint build-local-all test-unit-coverage coverage-check
+ci-verify-local: quality build-local-all test-unit-coverage coverage-check
+
+# Quick local gate (no Supabase, no coverage): quality + unit tests + builds.
+ci-verify-local-fast: quality test-unit web-build-production extension-build-production
 
 # Full local quality gate.
 check: build-local-all test-unit-coverage coverage-check

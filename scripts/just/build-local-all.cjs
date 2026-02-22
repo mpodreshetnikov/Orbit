@@ -79,10 +79,6 @@ try {
   }
 
   const recipes = [
-    "quality-format-check",
-    "quality-lint",
-    "quality-typecheck",
-    "test-unit",
     "web-build-production",
     "extension-build-production",
     "supabase-local-start",
