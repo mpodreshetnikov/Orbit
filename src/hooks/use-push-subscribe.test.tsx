@@ -20,9 +20,9 @@ function createWrapper() {
 
 describe("usePushSubscribe", () => {
   it("submits subscription payload to API", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 204 }));
 
     const { result } = renderHook(() => usePushSubscribe(), {
       wrapper: createWrapper(),
@@ -46,9 +46,7 @@ describe("usePushSubscribe", () => {
   });
 
   it("throws API response text when subscription request fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("not allowed", { status: 401 }),
-    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("not allowed", { status: 401 }));
 
     const { result } = renderHook(() => usePushSubscribe(), {
       wrapper: createWrapper(),
@@ -62,4 +60,3 @@ describe("usePushSubscribe", () => {
     ).rejects.toThrow("not allowed");
   });
 });
-

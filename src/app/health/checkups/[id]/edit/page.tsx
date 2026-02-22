@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import React, { use } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import Link from "next/link";

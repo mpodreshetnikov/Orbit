@@ -34,17 +34,19 @@ const MED_INTAKE_ADVICE_TYPES: readonly MedIntakeAdviceType[] = [
   "none",
 ];
 
-function toJsonOrNull(value: unknown): Json | null {
+export function toJsonOrNull(value: unknown): Json | null {
   return value == null ? null : (value as Json);
 }
 
-function toRpcOptionalString(value?: string | null): string | undefined {
+export function toRpcOptionalString(value?: string | null): string | undefined {
   if (value == null) return undefined;
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function normalizeIntakeAdviceType(value?: string | null): MedIntakeAdviceType | null | undefined {
+export function normalizeIntakeAdviceType(
+  value?: string | null,
+): MedIntakeAdviceType | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   return MED_INTAKE_ADVICE_TYPES.includes(value as MedIntakeAdviceType)
@@ -52,7 +54,7 @@ function normalizeIntakeAdviceType(value?: string | null): MedIntakeAdviceType |
     : null;
 }
 
-function rowToRegimen(row: Record<string, unknown>): MedRegimen {
+export function rowToRegimen(row: Record<string, unknown>): MedRegimen {
   return {
     id: row.id as string,
     person_id: row.person_id as string,
@@ -72,7 +74,7 @@ function rowToRegimen(row: Record<string, unknown>): MedRegimen {
   };
 }
 
-function rowToDoseEvent(row: Record<string, unknown>): MedDoseEvent {
+export function rowToDoseEvent(row: Record<string, unknown>): MedDoseEvent {
   return {
     id: row.id as string,
     person_id: row.person_id as string,
@@ -91,7 +93,7 @@ function rowToDoseEvent(row: Record<string, unknown>): MedDoseEvent {
   };
 }
 
-function rowToInventoryTransaction(row: Record<string, unknown>): MedInventoryTransaction {
+export function rowToInventoryTransaction(row: Record<string, unknown>): MedInventoryTransaction {
   return {
     id: row.id as string,
     regimen_id: row.regimen_id as string,

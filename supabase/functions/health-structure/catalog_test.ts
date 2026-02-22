@@ -9,6 +9,7 @@ Deno.test("findCatalogEntry returns matching observation by obs_code", () => {
   const catalog = [{ obs_code: "HB", name: "Hemoglobin" }];
   assertEquals(findCatalogEntry("HB", catalog), catalog[0]);
   assertEquals(findCatalogEntry("GLU", catalog), null);
+  assertEquals(findCatalogEntry(null, catalog), null);
 });
 
 Deno.test("findFindingTypeCatalogEntry returns matching finding by finding_code", () => {
@@ -21,4 +22,5 @@ Deno.test("findBodySiteCatalogEntry returns matching site by site_code", () => {
   const catalog = [{ site_code: "HEAD", name: "Head" }];
   assertEquals(findBodySiteCatalogEntry("HEAD", catalog), catalog[0]);
   assertEquals(findBodySiteCatalogEntry("CHEST", catalog), null);
+  assertEquals(findBodySiteCatalogEntry(null, catalog), null);
 });

@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Camera, X, RotateCcw, Check, SwitchCamera } from "lucide-react";

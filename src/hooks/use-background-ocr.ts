@@ -25,7 +25,7 @@ const OCR_FETCH_TIMEOUT_MS = 120_000; // 120s so client does not wait indefinite
 const OCR_FAILED_UPDATE_RETRIES = 3;
 const OCR_FAILED_UPDATE_DELAY_MS = 1500;
 
-async function updateRecordToOcrFailed(
+export async function updateRecordToOcrFailed(
   supabase: ReturnType<typeof createClient>,
   recordId: string,
   errorMessage: string,

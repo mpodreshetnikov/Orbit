@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { ChevronDown, User, PawPrint, Users } from "lucide-react";

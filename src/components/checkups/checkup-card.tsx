@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";

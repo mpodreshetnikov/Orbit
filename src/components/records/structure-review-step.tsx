@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
@@ -109,7 +109,7 @@ interface StructureReviewStepProps {
 }
 
 // Status badge component
-function ObservationStatusBadge({ status }: { status: ObservationStatus | null }) {
+export function ObservationStatusBadge({ status }: { status: ObservationStatus | null }) {
   const t = useTranslations();
 
   if (!status || status === "unknown") {
@@ -147,7 +147,7 @@ type ObservationComparisonData = {
 
 // Observation value change indicator
 // Uses "closer to middle of reference range is better" logic
-function ObservationValueChangeIndicator({
+export function ObservationValueChangeIndicator({
   currentValue,
   previousValue,
   unit,
@@ -218,7 +218,11 @@ function ObservationValueChangeIndicator({
 }
 
 // Observation comparison badge
-function ObservationComparisonBadge({ comparison }: { comparison: ObservationComparisonData }) {
+export function ObservationComparisonBadge({
+  comparison,
+}: {
+  comparison: ObservationComparisonData;
+}) {
   const t = useTranslations();
   if (comparison.isNew) {
     return (
@@ -244,7 +248,7 @@ function ObservationComparisonBadge({ comparison }: { comparison: ObservationCom
 }
 
 // Observation row component
-function ObservationRow({
+export function ObservationRow({
   observation,
   comparison,
   onEdit,
@@ -384,7 +388,7 @@ function ObservationRow({
 }
 
 // Edit observation dialog
-function EditObservationDialog({
+export function EditObservationDialog({
   open,
   onOpenChange,
   observation,

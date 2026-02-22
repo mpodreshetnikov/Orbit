@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useTranslations } from "next-intl";
 import { UserX } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";

@@ -95,7 +95,9 @@ describe("POST /api/notifications/medication-action", () => {
     );
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "action must be 'taken' or 'skipped'" });
+    await expect(response.json()).resolves.toEqual({
+      error: "action must be 'taken' or 'skipped'",
+    });
   });
 
   it("calls mark_dose_taken for valid ids and returns 204", async () => {

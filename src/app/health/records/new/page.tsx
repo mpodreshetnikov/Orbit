@@ -1,12 +1,12 @@
 "use client";
 
+import React, { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { AddRecordWizard } from "@/components/records";
 import { useUIStore } from "@/stores/ui-store";
 import { usePersons } from "@/hooks";
 import { UserX } from "lucide-react";
-import { useEffect } from "react";
 
 export default function NewRecordPage() {
   const t = useTranslations();

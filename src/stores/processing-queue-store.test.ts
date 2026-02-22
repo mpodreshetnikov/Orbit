@@ -43,4 +43,3 @@ describe("processing-queue-store", () => {
     expect(useProcessingQueueStore.getState().getUnreadNotificationCount()).toBe(0);
   });
 });
-

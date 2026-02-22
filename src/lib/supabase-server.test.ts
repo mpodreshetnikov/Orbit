@@ -73,4 +73,3 @@ describe("supabase-server helpers", () => {
     await expect(isUserAllowed()).resolves.toBe(true);
   });
 });
-

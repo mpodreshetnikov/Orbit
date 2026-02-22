@@ -9,7 +9,7 @@ import type { CanonicalTransactionRow, ImportParseResult } from "@/types";
 
 const SOURCE_ID = "tbank";
 
-const COL = {
+export const COL = {
   DATE_OP: "Дата операции",
   DATE_PAY: "Дата платежа",
   CARD: "Номер карты",
@@ -22,7 +22,7 @@ const COL = {
 } as const;
 
 /** Parse semicolon-separated CSV with double-quoted fields */
-function parseCSV(text: string): string[][] {
+export function parseCSV(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
@@ -58,7 +58,7 @@ function parseCSV(text: string): string[][] {
   return rows;
 }
 
-function parseTBankDate(s: string): string | null {
+export function parseTBankDate(s: string): string | null {
   const t = s.trim();
   if (!t) return null;
   const withTime = /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/;
@@ -76,20 +76,20 @@ function parseTBankDate(s: string): string | null {
   return null;
 }
 
-function parseAmount(s: string): number {
+export function parseAmount(s: string): number {
   const t = s.trim().replace(/\s/g, "").replace(",", ".");
   const n = parseFloat(t);
   return Number.isFinite(n) ? n : 0;
 }
 
-function extractAccountHint(card: string): string {
+export function extractAccountHint(card: string): string {
   const t = card.trim().replace(/\*/g, "").trim();
   if (t.length >= 4) return t.slice(-4);
   return t || "";
 }
 
 /** Fixed heuristic: only "Между своими счетами" for internal transfer */
-function isTransfer(category: string, description: string): boolean {
+export function isTransfer(category: string, description: string): boolean {
   const cat = category.trim();
   const desc = description.trim();
   return cat === "Переводы" && desc === "Между своими счетами";

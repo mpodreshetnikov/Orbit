@@ -2,6 +2,16 @@
 
 This document describes the requirements for an execution plan ("ExecPlan"), a design document that a coding agent can follow to deliver a working feature or system change. Treat the reader as a complete beginner to this repository: they have only the current working tree and the single ExecPlan file you provide. There is no memory of prior plans and no external context.
 
+## Where ExecPlans live
+
+ExecPlans live under `docs/exec-plans/`. Organize them by status using subfolders:
+
+- **done** — Plans that are finished. Move a plan here when all milestones are complete and outcomes are documented.
+- **in progress** — Plans currently being worked on. Keep a plan here from first commit until it is done.
+- **todo** — Plans not yet started (backlog, deferred, or future work). Put new or shelved plans here until work begins.
+
+When you start working on a plan, move it from `todo/` to `in-progress/`. When you finish, move it from `in-progress/` to `done/`. See `docs/exec-plans/` for existing plans and any plan index referenced in this repo.
+
 ## How to use ExecPlans and PLANS.md
 
 When authoring an executable specification (ExecPlan), follow PLANS.md _to the letter_. If it is not in your context, refresh your memory by reading the entire PLANS.md file. Be thorough in reading (and re-reading) source material to produce an accurate specification. When creating a spec, start from the skeleton and flesh it out as you do your research.

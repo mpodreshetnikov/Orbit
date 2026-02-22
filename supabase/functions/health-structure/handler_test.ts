@@ -1,50 +1,240 @@
+// deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
 import { corsHeaders } from "../_shared/cors.ts";
+import { assertJsonResponse } from "../_shared/testing/response.ts";
+import { createHealthStructureHandler } from "./handler.ts";
+import type { HealthStructureRepository } from "./repository.ts";
+import type { StructuredDataWithEntities } from "./types.ts";
 
-function assertIncludes(actual: string, expected: string): void {
-  if (!actual.includes(expected)) {
-    throw new Error(`Expected "${actual}" to include "${expected}"`);
-  }
+function createRepositoryMock(): HealthStructureRepository {
+  return {
+    authenticateAllowedUser: async () => ({ id: "user-1", email: "user@example.com" }),
+    getRecord: async () => ({
+      id: "record-1",
+      person_id: "person-1",
+      ocr_text: "text",
+      status: "ocr_review",
+    }),
+    fetchObservationCatalog: async () => [],
+    fetchFindingTypeCatalog: async () => [],
+    fetchBodySiteCatalog: async () => [],
+    fetchPersonConditions: async () => [],
+    fetchPersonActiveFindings: async () => [],
+    fetchUpcomingOverdueCheckupItems: async () => [],
+    updateMedicalRecord: async () => {},
+    replaceRecordObservations: async () => {},
+    replaceRecordFindings: async () => {},
+    clearConditionRecords: async () => {},
+    findConditionByIcd: async () => null,
+    findConditionByName: async () => null,
+    createCondition: async () => ({ id: "cond-1" }),
+    updateCondition: async () => {},
+    insertConditionRecord: async () => {},
+    recomputeConditionCurrentStatus: async () => {},
+    insertFinding: async () => {},
+  };
 }
 
+const minimalStructuredData: StructuredDataWithEntities = {
+  record_type: "other",
+  title: "Doc",
+  record_date: null,
+  summary: "",
+  keywords: [],
+  observations: [],
+  findings: [],
+  conditions: [],
+  findings_to_resolve: [],
+  conditions_to_resolve: [],
+  checkups_to_complete: [],
+};
+
 Deno.test("health-structure handler responds to OPTIONS", async () => {
-  const { handleRequest } = await import(`./handler.ts?opts=${Date.now()}`);
-  const response = await handleRequest(
+  const handler = createHealthStructureHandler({
+    config: {
+      openRouterApiKey: "key",
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role",
+    },
+    repository: createRepositoryMock(),
+    parseStructuredData: async () => minimalStructuredData,
+    lookupIcdCode: async () => null,
+  });
+  const response = await handler(
     new Request("http://localhost/functions/v1/health-structure", { method: "OPTIONS" }),
   );
   assertEquals(response.status, 200);
-  assertEquals(response.headers.get("Access-Control-Allow-Origin"), corsHeaders["Access-Control-Allow-Origin"]);
+  assertEquals(
+    response.headers.get("Access-Control-Allow-Origin"),
+    corsHeaders["Access-Control-Allow-Origin"],
+  );
 });
 
-Deno.test("health-structure handler fails fast when OPENROUTER key is missing", async () => {
-  const prevOpenRouter = Deno.env.get("OPENROUTER_API_KEY");
-  const prevUrl = Deno.env.get("SUPABASE_URL");
-  const prevServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+Deno.test("health-structure handler rejects non-POST methods", async () => {
+  const handler = createHealthStructureHandler({
+    config: {
+      openRouterApiKey: "key",
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role",
+    },
+    repository: createRepositoryMock(),
+    parseStructuredData: async () => minimalStructuredData,
+    lookupIcdCode: async () => null,
+  });
+  const payload = await assertJsonResponse<{ success: boolean; error: string }>(
+    await handler(new Request("http://localhost/functions/v1/health-structure", { method: "GET" })),
+    405,
+  );
+  assertEquals(payload.success, false);
+  assertEquals(payload.error, "Method not allowed");
+});
 
-  Deno.env.delete("OPENROUTER_API_KEY");
-  Deno.env.set("SUPABASE_URL", "https://example.supabase.co");
-  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "service-role-key");
+Deno.test("health-structure handler validates env configuration", async () => {
+  const missingOpenRouter = createHealthStructureHandler({
+    config: {
+      openRouterApiKey: undefined,
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role",
+    },
+    repository: createRepositoryMock(),
+    parseStructuredData: async () => minimalStructuredData,
+    lookupIcdCode: async () => null,
+  });
 
-  try {
-    const { handleRequest } = await import(`./handler.ts?missing-openrouter=${Date.now()}`);
-    const response = await handleRequest(
+  const payload1 = await assertJsonResponse<{ success: boolean; error: string }>(
+    await missingOpenRouter(
       new Request("http://localhost/functions/v1/health-structure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ record_id: "rec-1" }),
+        body: JSON.stringify({ record_id: "record-1" }),
       }),
-    );
-    assertEquals(response.status, 400);
-    const payload = (await response.json()) as { success: boolean; error: string };
-    assertEquals(payload.success, false);
-    assertIncludes(payload.error, "OPENROUTER_API_KEY");
-  } finally {
-    if (prevOpenRouter === undefined) Deno.env.delete("OPENROUTER_API_KEY");
-    else Deno.env.set("OPENROUTER_API_KEY", prevOpenRouter);
-    if (prevUrl === undefined) Deno.env.delete("SUPABASE_URL");
-    else Deno.env.set("SUPABASE_URL", prevUrl);
-    if (prevServiceKey === undefined) Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
-    else Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", prevServiceKey);
-  }
+    ),
+    400,
+  );
+  assertEquals(payload1.error, "OPENROUTER_API_KEY is required");
+
+  const missingSupabase = createHealthStructureHandler({
+    config: {
+      openRouterApiKey: "key",
+      supabaseUrl: undefined,
+      supabaseServiceRoleKey: undefined,
+    },
+    repository: createRepositoryMock(),
+    parseStructuredData: async () => minimalStructuredData,
+    lookupIcdCode: async () => null,
+  });
+
+  const payload2 = await assertJsonResponse<{ success: boolean; error: string }>(
+    await missingSupabase(
+      new Request("http://localhost/functions/v1/health-structure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record_id: "record-1" }),
+      }),
+    ),
+    400,
+  );
+  assertEquals(payload2.error, "Supabase environment not configured");
 });
 
+Deno.test("health-structure handler executes success and auth-failure paths", async () => {
+  const handler = createHealthStructureHandler({
+    config: {
+      openRouterApiKey: "key",
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role",
+    },
+    repository: createRepositoryMock(),
+    parseStructuredData: async () => minimalStructuredData,
+    lookupIcdCode: async () => null,
+  });
+
+  const successPayload = await assertJsonResponse<{ success: boolean; structured_data: unknown }>(
+    await handler(
+      new Request("http://localhost/functions/v1/health-structure", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer token",
+        },
+        body: JSON.stringify({ record_id: "record-1" }),
+      }),
+    ),
+    200,
+  );
+  assertEquals(successPayload.success, true);
+
+  const authFailHandler = createHealthStructureHandler({
+    config: {
+      openRouterApiKey: "key",
+      supabaseUrl: "https://example.supabase.co",
+      supabaseServiceRoleKey: "service-role",
+    },
+    repository: {
+      ...createRepositoryMock(),
+      authenticateAllowedUser: async () => null,
+    },
+    parseStructuredData: async () => minimalStructuredData,
+    lookupIcdCode: async () => null,
+  });
+
+  const failPayload = await assertJsonResponse<{ success: boolean; error: string }>(
+    await authFailHandler(
+      new Request("http://localhost/functions/v1/health-structure", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer bad-token",
+        },
+        body: JSON.stringify({ record_id: "record-1" }),
+      }),
+    ),
+    400,
+  );
+  assertEquals(failPayload.success, false);
+  assertEquals(failPayload.error, "Unauthorized - invalid token");
+});
+
+Deno.test(
+  "health-structure handler handles missing auth token and malformed json body",
+  async () => {
+    const handler = createHealthStructureHandler({
+      config: {
+        openRouterApiKey: "key",
+        supabaseUrl: "https://example.supabase.co",
+        supabaseServiceRoleKey: "service-role",
+      },
+      repository: createRepositoryMock(),
+      parseStructuredData: async () => minimalStructuredData,
+      lookupIcdCode: async () => null,
+    });
+
+    const missingAuthPayload = await assertJsonResponse<{ success: boolean; error: string }>(
+      await handler(
+        new Request("http://localhost/functions/v1/health-structure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ record_id: "record-1" }),
+        }),
+      ),
+      400,
+    );
+    assertEquals(missingAuthPayload.error, "Missing authorization header");
+
+    const malformedPayload = await assertJsonResponse<{ success: boolean; error: string }>(
+      await handler(
+        new Request("http://localhost/functions/v1/health-structure", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer token",
+          },
+          body: "{",
+        }),
+      ),
+      400,
+    );
+    assertEquals(malformedPayload.success, false);
+    assertEquals(typeof malformedPayload.error, "string");
+  },
+);

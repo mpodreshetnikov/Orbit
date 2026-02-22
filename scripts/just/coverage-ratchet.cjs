@@ -46,7 +46,9 @@ function writeBaseline(summary) {
     metrics,
   };
   fs.writeFileSync(BASELINE_PATH, JSON.stringify(baseline, null, 2) + "\n");
-  console.log(`[coverage-ratchet] baseline updated: ${path.relative(REPO_ROOT, BASELINE_PATH).replace(/\\/g, "/")}`);
+  console.log(
+    `[coverage-ratchet] baseline updated: ${path.relative(REPO_ROOT, BASELINE_PATH).replace(/\\/g, "/")}`,
+  );
 }
 
 function main() {
@@ -55,7 +57,9 @@ function main() {
   const summary = loadJson(SUMMARY_PATH);
 
   if (!summary) {
-    console.error("[coverage-ratchet] missing coverage/combined-summary.json; run coverage-report first");
+    console.error(
+      "[coverage-ratchet] missing coverage/combined-summary.json; run coverage-report first",
+    );
     process.exit(1);
   }
 

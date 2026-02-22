@@ -73,6 +73,7 @@ const eslintConfig = [
           varsIgnorePattern: "^_",
         },
       ],
+      "@typescript-eslint/no-explicit-any": "error",
       "import/no-cycle": "error",
       "import/no-unresolved": "error",
     },
@@ -138,6 +139,16 @@ const eslintConfig = [
             },
           ],
         },
+      ],
+    },
+  },
+  {
+    files: ["src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^(React|_)$" },
       ],
     },
   },

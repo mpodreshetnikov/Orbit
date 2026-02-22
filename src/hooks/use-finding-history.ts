@@ -379,7 +379,7 @@ export function useSingleFindingHistory(
 // Creates a new entry with size=0, count=0 to indicate the finding is gone
 // ============================================================================
 
-interface MarkResolvedInput {
+export interface MarkResolvedInput {
   personId: string;
   recordId: string; // The record to attach the "resolved" entry to
   finding: FindingSummary;

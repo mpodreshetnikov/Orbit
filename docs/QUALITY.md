@@ -95,6 +95,8 @@ Pass criteria:
 - `types`: includes Deno type checks for Supabase functions (`deno check`).
 - `test-unit`: runtime-split unit suites pass (Vitest + Deno tests).
 - `test-unit-coverage`: runtime coverage artifacts generated (`coverage/combined-summary.json`, `coverage/combined-report.md`).
+- `coverage-check`: `src/**` coverage is enforced at `>=75%` lines and `>=75%` branches via `scripts/just/src-coverage-threshold.cjs`.
+- `coverage-check`: Supabase Edge Functions are enforced per function directory aggregate at `>=75%` lines and `>=75%` branches via `scripts/just/supabase-function-coverage-threshold.cjs` (source: `.coverage/deno/lcov.info`).
 - `coverage-check`: ratchet metrics are non-regressing and changed DB objects are mapped to pgTAP tests.
 - `test` (smoke gate): successful production build and static generation.
 

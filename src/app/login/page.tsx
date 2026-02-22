@@ -1,3 +1,4 @@
+import React from "react";
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { isUserAllowed } from "@/lib/supabase-server";

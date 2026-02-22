@@ -58,7 +58,9 @@ describe("GET /api/notifications", () => {
     });
 
     const { GET } = await import("./route");
-    const response = await GET(new Request("http://localhost/api/notifications", { method: "GET" }));
+    const response = await GET(
+      new Request("http://localhost/api/notifications", { method: "GET" }),
+    );
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
@@ -68,7 +70,9 @@ describe("GET /api/notifications", () => {
     mockAuthenticatedSupabase({ queryError: "db failed" });
 
     const { GET } = await import("./route");
-    const response = await GET(new Request("http://localhost/api/notifications", { method: "GET" }));
+    const response = await GET(
+      new Request("http://localhost/api/notifications", { method: "GET" }),
+    );
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: "db failed" });
@@ -111,9 +115,12 @@ describe("GET /api/notifications", () => {
 
     const { GET } = await import("./route");
     const response = await GET(
-      new Request("http://localhost/api/notifications?from=2026-02-01T00:00:00.000Z&to=2026-02-02T00:00:00.000Z", {
-        method: "GET",
-      }),
+      new Request(
+        "http://localhost/api/notifications?from=2026-02-01T00:00:00.000Z&to=2026-02-02T00:00:00.000Z",
+        {
+          method: "GET",
+        },
+      ),
     );
 
     expect(response.status).toBe(200);
@@ -155,9 +162,12 @@ describe("GET /api/notifications", () => {
 
     const { GET } = await import("./route");
     await GET(
-      new Request("http://localhost/api/notifications?from=2026-01-01T00:00:00.000Z&to=2026-01-02T00:00:00.000Z", {
-        method: "GET",
-      }),
+      new Request(
+        "http://localhost/api/notifications?from=2026-01-01T00:00:00.000Z&to=2026-01-02T00:00:00.000Z",
+        {
+          method: "GET",
+        },
+      ),
     );
 
     expect(gte).toHaveBeenCalledWith("scheduled_at", "2026-01-01T00:00:00.000Z");

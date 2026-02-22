@@ -102,7 +102,7 @@ test-unit:
 test-unit-coverage:
   npx vitest run --coverage
   deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
-  deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions/_shared/cors_test.ts supabase/functions/health-ocr/title_test.ts supabase/functions/health-structure/catalog_test.ts supabase/functions/icd-lookup/query-utils_test.ts supabase/functions/money-import/progress_test.ts supabase/functions/notifications-cron/window_test.ts
+  deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions
   node scripts/just/coverage-report.cjs
 
 # Generate combined runtime + DB coverage report artifacts.
@@ -111,6 +111,8 @@ coverage-report:
 
 # Validate coverage ratchet and changed DB object coverage mapping.
 coverage-check:
+  node scripts/just/src-coverage-threshold.cjs
+  node scripts/just/supabase-function-coverage-threshold.cjs
   node scripts/just/coverage-ratchet.cjs
   node scripts/just/db-coverage-report.cjs --strict-changed
 
@@ -180,7 +182,7 @@ build-local-all:
   node scripts/just/build-local-all.cjs
 
 # CI-style local confidence gate before PR push.
-ci-verify-local: build-local-all test-unit-coverage coverage-check
+ci-verify-local: quality-lint build-local-all test-unit-coverage coverage-check
 
 # Full local quality gate.
 check: build-local-all test-unit-coverage coverage-check

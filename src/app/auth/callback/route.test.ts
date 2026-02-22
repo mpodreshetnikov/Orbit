@@ -50,4 +50,3 @@ describe("GET /auth/callback", () => {
     expect(response.headers.get("location")).toBe("http://localhost/settings");
   });
 });
-

@@ -151,7 +151,7 @@ function readFileSafe(relativePath) {
   if (!fs.existsSync(absolutePath)) return null;
   try {
     return fs.readFileSync(absolutePath, "utf8");
-  } catch (_error) {
+  } catch {
     return null;
   }
 }
@@ -179,7 +179,10 @@ function isProdTs(filePath) {
 
 function collectSurfaceFiles() {
   const web = walkFiles("src").filter(isProdTs);
-  const extension = [...walkFiles("browserExtension/src"), ...walkFiles("browserExtension/popup-src")].filter(isProdTs);
+  const extension = [
+    ...walkFiles("browserExtension/src"),
+    ...walkFiles("browserExtension/popup-src"),
+  ].filter(isProdTs);
   const scripts = walkFiles("scripts").filter(isProdTs);
   const supabaseFunctionCandidates = walkFiles("supabase/functions")
     .filter((filePath) => /\.ts$/.test(filePath))
@@ -189,8 +192,12 @@ function collectSurfaceFiles() {
     .filter((filePath) => filePath !== "supabase/functions/_shared/deno.d.ts")
     .filter((filePath) => filePath !== "supabase/functions/_shared/url-modules.d.ts");
 
-  const supabaseEntrypointWrappers = supabaseFunctionCandidates.filter(isThinSupabaseEntrypointWrapper);
-  const supabaseFunctions = supabaseFunctionCandidates.filter((filePath) => !supabaseEntrypointWrappers.includes(filePath));
+  const supabaseEntrypointWrappers = supabaseFunctionCandidates.filter(
+    isThinSupabaseEntrypointWrapper,
+  );
+  const supabaseFunctions = supabaseFunctionCandidates.filter(
+    (filePath) => !supabaseEntrypointWrappers.includes(filePath),
+  );
 
   return {
     web,
@@ -250,10 +257,18 @@ function writeTextReport(summary) {
   lines.push("");
   lines.push("## Runtime Metrics");
   lines.push("");
-  lines.push(`- Vitest lines: ${summary.vitest.lines_pct}% (${summary.vitest.lines_hit}/${summary.vitest.lines_found})`);
-  lines.push(`- Vitest branches: ${summary.vitest.branches_pct}% (${summary.vitest.branches_hit}/${summary.vitest.branches_found})`);
-  lines.push(`- Deno lines: ${summary.deno.lines_pct}% (${summary.deno.lines_hit}/${summary.deno.lines_found})`);
-  lines.push(`- Deno branches: ${summary.deno.branches_pct}% (${summary.deno.branches_hit}/${summary.deno.branches_found})`);
+  lines.push(
+    `- Vitest lines: ${summary.vitest.lines_pct}% (${summary.vitest.lines_hit}/${summary.vitest.lines_found})`,
+  );
+  lines.push(
+    `- Vitest branches: ${summary.vitest.branches_pct}% (${summary.vitest.branches_hit}/${summary.vitest.branches_found})`,
+  );
+  lines.push(
+    `- Deno lines: ${summary.deno.lines_pct}% (${summary.deno.lines_hit}/${summary.deno.lines_found})`,
+  );
+  lines.push(
+    `- Deno branches: ${summary.deno.branches_pct}% (${summary.deno.branches_hit}/${summary.deno.branches_found})`,
+  );
   lines.push("");
   lines.push("## Surface Instrumentation");
   lines.push("");
@@ -351,7 +366,11 @@ function main() {
     scripts: surfaces.scripts,
     supabase_functions: surfaces.supabase_functions,
   };
-  const vitestTargetFiles = [...targetSurfaces.web, ...targetSurfaces.extension, ...targetSurfaces.scripts];
+  const vitestTargetFiles = [
+    ...targetSurfaces.web,
+    ...targetSurfaces.extension,
+    ...targetSurfaces.scripts,
+  ];
   const denoTargetFiles = targetSurfaces.supabase_functions;
 
   const vitestSet = new Set(vitestCoverage.records.map((record) => record.file));

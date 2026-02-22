@@ -19,7 +19,9 @@ function readJson(filePath, fallback) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch (error) {
-    throw new Error(`Failed to parse JSON at ${normalizePath(path.relative(REPO_ROOT, filePath))}: ${error.message}`);
+    throw new Error(
+      `Failed to parse JSON at ${normalizePath(path.relative(REPO_ROOT, filePath))}: ${error.message}`,
+    );
   }
 }
 
@@ -60,12 +62,7 @@ function changedFilesFromGit() {
     .map((filePath) => normalizePath(filePath));
 }
 
-function resolveTests({
-  kind,
-  filePath,
-  map,
-  availableTests,
-}) {
+function resolveTests({ kind, filePath, map, availableTests }) {
   const rel = normalizePath(filePath);
   const fileName = path.basename(rel, ".sql");
   const mapForKind = map[kind] || {};
@@ -145,8 +142,12 @@ function collectDbCoverage(options = {}) {
       filePath.startsWith("supabase/db/functions/") || filePath.startsWith("supabase/db/policies/"),
   );
 
-  const functionUnmapped = functionRecords.filter((record) => record.tests.length === 0).map((record) => record.file);
-  const policyUnmapped = policyRecords.filter((record) => record.tests.length === 0).map((record) => record.file);
+  const functionUnmapped = functionRecords
+    .filter((record) => record.tests.length === 0)
+    .map((record) => record.file);
+  const policyUnmapped = policyRecords
+    .filter((record) => record.tests.length === 0)
+    .map((record) => record.file);
 
   const changedUnmapped = changedDbObjects.filter((filePath) => {
     const byFunction = functionRecords.find((record) => record.file === filePath);
@@ -179,11 +180,21 @@ function collectDbCoverage(options = {}) {
       function_mapping_ratio_pct:
         dbFunctionFiles.length === 0
           ? 100
-          : Number((((dbFunctionFiles.length - functionUnmapped.length) / dbFunctionFiles.length) * 100).toFixed(2)),
+          : Number(
+              (
+                ((dbFunctionFiles.length - functionUnmapped.length) / dbFunctionFiles.length) *
+                100
+              ).toFixed(2),
+            ),
       policy_mapping_ratio_pct:
         dbPolicyFiles.length === 0
           ? 100
-          : Number((((dbPolicyFiles.length - policyUnmapped.length) / dbPolicyFiles.length) * 100).toFixed(2)),
+          : Number(
+              (
+                ((dbPolicyFiles.length - policyUnmapped.length) / dbPolicyFiles.length) *
+                100
+              ).toFixed(2),
+            ),
     },
     changed: {
       db_objects: changedDbObjects,
@@ -200,9 +211,7 @@ function collectDbCoverage(options = {}) {
 
   const errors = [];
   if (missingMappedTests.length > 0) {
-    errors.push(
-      `coverage-map references missing test files: ${missingMappedTests.join(", ")}`,
-    );
+    errors.push(`coverage-map references missing test files: ${missingMappedTests.join(", ")}`);
   }
   if (strictAll && (functionUnmapped.length > 0 || policyUnmapped.length > 0)) {
     errors.push(
@@ -227,8 +236,12 @@ if (require.main === module) {
   const outputPath = path.join(coverageDir, "db-coverage-summary.json");
   fs.writeFileSync(outputPath, JSON.stringify(summary, null, 2) + "\n");
 
-  console.log(`[db-coverage] functions mapped: ${summary.totals.mapped_db_functions}/${summary.totals.db_functions} (${summary.totals.function_mapping_ratio_pct}%)`);
-  console.log(`[db-coverage] policies mapped: ${summary.totals.mapped_db_policies}/${summary.totals.db_policies} (${summary.totals.policy_mapping_ratio_pct}%)`);
+  console.log(
+    `[db-coverage] functions mapped: ${summary.totals.mapped_db_functions}/${summary.totals.db_functions} (${summary.totals.function_mapping_ratio_pct}%)`,
+  );
+  console.log(
+    `[db-coverage] policies mapped: ${summary.totals.mapped_db_policies}/${summary.totals.db_policies} (${summary.totals.policy_mapping_ratio_pct}%)`,
+  );
   if (summary.changed.db_objects.length > 0) {
     console.log(`[db-coverage] changed DB objects: ${summary.changed.db_objects.length}`);
   }
@@ -238,10 +251,11 @@ if (require.main === module) {
     }
     process.exit(1);
   }
-  console.log(`[db-coverage] summary written to ${normalizePath(path.relative(REPO_ROOT, outputPath))}`);
+  console.log(
+    `[db-coverage] summary written to ${normalizePath(path.relative(REPO_ROOT, outputPath))}`,
+  );
 }
 
 module.exports = {
   collectDbCoverage,
 };
-

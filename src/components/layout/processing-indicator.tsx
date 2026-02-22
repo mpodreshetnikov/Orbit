@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Loader2, CheckCircle2, XCircle, ChevronUp, ChevronDown, X } from "lucide-react";

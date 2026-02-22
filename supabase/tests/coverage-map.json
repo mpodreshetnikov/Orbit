@@ -145,9 +145,7 @@
     "supabase/db/policies/notification_routing.sql": [
       "supabase/tests/policies/notification_rls_access_test.sql"
     ],
-    "supabase/db/policies/persons.sql": [
-      "supabase/tests/policies/allowlist_rls_access_test.sql"
-    ],
+    "supabase/db/policies/persons.sql": ["supabase/tests/policies/allowlist_rls_access_test.sql"],
     "supabase/db/policies/push_subscriptions.sql": [
       "supabase/tests/policies/notification_rls_access_test.sql"
     ],

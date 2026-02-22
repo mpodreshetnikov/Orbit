@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2, Plus, Trash2, ChevronDown, Check } from "lucide-react";
@@ -89,11 +90,11 @@ const PRESET_INTAKE_TIMES: string[] = [
 const INTAKES_1_TO_5_TIMES: string[] = ["09:00", "20:00", "15:00", "12:00", "23:00"];
 
 /** Format a Date as YYYY-MM-DDTHH:mm for datetime-local input */
-function toDatetimeLocalString(d: Date): string {
+export function toDatetimeLocalString(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function getReminderSlotsForIntakesPerDay(n: number): { time: string; amount: number }[] {
+export function getReminderSlotsForIntakesPerDay(n: number): { time: string; amount: number }[] {
   if (n < 1 || n > 10) return [{ time: "09:00", amount: 1 }];
   if (n <= 5) {
     const times = INTAKES_1_TO_5_TIMES.slice(0, n).sort();
@@ -103,7 +104,7 @@ function getReminderSlotsForIntakesPerDay(n: number): { time: string; amount: nu
   return ordered.slice(0, n).map((time) => ({ time, amount: 1 }));
 }
 
-function getInitialSchedule(
+export function getInitialSchedule(
   initial: MedRegimen | null | undefined,
   defaultKind: MedicationKind | undefined,
 ): MedSchedule {
@@ -140,7 +141,7 @@ function getInitialSchedule(
   return DEFAULT_SCHEDULE;
 }
 
-function getInitialDuration(initial: MedRegimen | null | undefined): MedDuration {
+export function getInitialDuration(initial: MedRegimen | null | undefined): MedDuration {
   if (!initial?.duration) return DEFAULT_DURATION;
   const d = initial.duration;
   const start = (d as { start_date?: string }).start_date;
@@ -150,13 +151,13 @@ function getInitialDuration(initial: MedRegimen | null | undefined): MedDuration
   return { type: "endless", start_date: start };
 }
 
-function getInitialStartDate(initial: MedRegimen | null | undefined): string {
+export function getInitialStartDate(initial: MedRegimen | null | undefined): string {
   const start = initial?.duration && (initial.duration as { start_date?: string }).start_date;
   if (start) return start;
   return new Date().toISOString().slice(0, 10);
 }
 
-const mapLegacyIntakeAdvice = (v: string | null | undefined): string => {
+export const mapLegacyIntakeAdvice = (v: string | null | undefined): string => {
   if (!v) return "";
   const legacyToNew: Record<string, string> = {
     before_breakfast: "before_meal",

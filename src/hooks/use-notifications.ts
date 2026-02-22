@@ -3,17 +3,17 @@
 import { useEffect, useRef, useCallback } from "react";
 import type { NotificationForDevice } from "@/types";
 
-const NOTIFICATIONS_STORAGE_KEY = "notifications_shown";
-const BUFFER_MS = 60 * 1000;
+export const NOTIFICATIONS_STORAGE_KEY = "notifications_shown";
+export const BUFFER_MS = 60 * 1000;
 
-function resolveTitlePrefix(notification: NotificationForDevice): string | null {
+export function resolveTitlePrefix(notification: NotificationForDevice): string | null {
   if ("title_prefix" in notification) {
     return notification.title_prefix ?? null;
   }
   return notification.person_name ?? null;
 }
 
-function applyTitlePrefix(title: string, prefix?: string | null): string {
+export function applyTitlePrefix(title: string, prefix?: string | null): string {
   if (!prefix) return title;
   const trimmed = prefix.trim();
   if (!trimmed) return title;
@@ -21,7 +21,7 @@ function applyTitlePrefix(title: string, prefix?: string | null): string {
   return title.startsWith(prefixText) ? title : `${prefixText}${title}`;
 }
 
-function getShownToday(): Set<string> {
+export function getShownToday(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
     const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
@@ -35,7 +35,7 @@ function getShownToday(): Set<string> {
   }
 }
 
-function markShownToday(id: string): void {
+export function markShownToday(id: string): void {
   if (typeof window === "undefined") return;
   try {
     const today = new Date().toISOString().slice(0, 10);
@@ -50,7 +50,7 @@ function markShownToday(id: string): void {
   }
 }
 
-async function fetchNotifications(): Promise<NotificationForDevice[]> {
+export async function fetchNotifications(): Promise<NotificationForDevice[]> {
   const now = new Date();
   const start = new Date(now);
   start.setDate(start.getDate() - 1);
@@ -63,7 +63,7 @@ async function fetchNotifications(): Promise<NotificationForDevice[]> {
   return data.notifications ?? [];
 }
 
-async function callMarkShown(id: string): Promise<void> {
+export async function callMarkShown(id: string): Promise<void> {
   try {
     await fetch("/api/notifications/mark-shown", {
       method: "POST",
@@ -76,14 +76,14 @@ async function callMarkShown(id: string): Promise<void> {
 }
 
 /** Ask the SW to show a notification (reuses SW buildNotificationOptions + show + mark-shown). */
-function requestSwShowNotification(notification: NotificationForDevice): void {
+export function requestSwShowNotification(notification: NotificationForDevice): void {
   const controller = navigator.serviceWorker?.controller;
   if (!controller) return;
   controller.postMessage({ type: "showNotification", notification });
 }
 
 /** Fallback when no SW: show a basic notification and mark shown. */
-async function showNotificationFallback(notification: NotificationForDevice): Promise<void> {
+export async function showNotificationFallback(notification: NotificationForDevice): Promise<void> {
   if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   const origin = typeof window !== "undefined" ? window.location.origin : "";

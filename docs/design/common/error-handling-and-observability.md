@@ -18,6 +18,17 @@ Define consistent failure handling and operational visibility expectations acros
 3. Ensure error messages support next-step actions.
 4. Add runbook references for new operational failure modes.
 5. For critical workflows, include manual verification queries/commands.
+6. **Always add debug information**: Include contextual IDs (record, batch, user, session), operation names, and error context in logs and error payloads. See [`docs/RUNBOOK.md`](../../RUNBOOK.md#debug-information).
+
+## Debug Information (Always Add)
+
+Add debug information as much as possible to support triage and incident recovery:
+
+- **Errors**: Never swallow errors. Log with context (IDs, operation name) and include `cause` when rethrowing.
+- **Entry/exit**: Log significant operations at start and completion with relevant IDs.
+- **State changes**: Log workflow state transitions so logs can be correlated with DB state.
+- **API/edge responses**: Include `message`, `code`, and optional `details` (IDs, validation errors) in error payloads.
+- **Secrets**: Never log secrets, tokens, or PII beyond necessary identifiers (e.g. record ID, not full record).
 
 ## Anti-Patterns To Avoid
 

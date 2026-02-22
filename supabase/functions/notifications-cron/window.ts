@@ -4,9 +4,11 @@ export function isNotificationWindowForUser(
   notificationTime: string,
   timezone: string | null,
 ): boolean {
-  const parts = notificationTime.split(":").map(Number);
-  const hour = parts[0] ?? 9;
-  const min = parts[1] ?? 0;
+  const [hourRaw, minRaw] = notificationTime.split(":");
+  const parsedHour = Number(hourRaw);
+  const parsedMin = Number(minRaw);
+  const hour = Number.isFinite(parsedHour) ? parsedHour : 9;
+  const min = Number.isFinite(parsedMin) ? parsedMin : 0;
   const userNow = timezone ? new Date(now.toLocaleString("en-US", { timeZone: timezone })) : now;
   const userMinutes = userNow.getHours() * 60 + userNow.getMinutes();
   const windowStart = hour * 60 + min;

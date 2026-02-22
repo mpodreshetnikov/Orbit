@@ -8,7 +8,16 @@ Deno.test("looksLikeIcdCodeQuery detects code-like input", () => {
 });
 
 Deno.test("buildIcd10CandidateCodes builds specific code neighbors", () => {
-  assertEquals(buildIcd10CandidateCodes("H52.3", 10), ["H52.1", "H52.2", "H52.3", "H52.4", "H52.5", "H52.6", "H52.7", "H52.8"]);
+  assertEquals(buildIcd10CandidateCodes("H52.3", 10), [
+    "H52.1",
+    "H52.2",
+    "H52.3",
+    "H52.4",
+    "H52.5",
+    "H52.6",
+    "H52.7",
+    "H52.8",
+  ]);
 });
 
 Deno.test("buildIcd10CandidateCodes builds category and prefix candidates", () => {

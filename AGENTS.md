@@ -58,6 +58,7 @@ For less common and environment-specific commands (deploy, targeted DB ops, sing
 
 - Architecture rules: `docs/ARCHITECTURE.md`
 - Debugging and operations: `docs/RUNBOOK.md`
+- Debug information in code: `docs/design/common/error-handling-and-observability.md`
 - Quality gates and PR checks: `docs/QUALITY.md`
 - Security and RLS expectations: `docs/SECURITY.md`
 - Multi-hour execution plans index: `docs/PLANS.md/`

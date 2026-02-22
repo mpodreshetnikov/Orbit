@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Upload, X, FileText, Image as ImageIcon, Loader2, Camera, ImagePlus } from "lucide-react";

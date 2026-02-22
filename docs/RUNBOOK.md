@@ -52,6 +52,16 @@ For full local verification before merge:
 - `test`
 - `check`
 
+## Supabase Function Coverage Gate Failures
+
+When `coverage-check` fails on Supabase functions:
+
+- Re-run `test-unit-coverage` first to refresh `.coverage/deno/lcov.info`.
+- Re-run `coverage-check` and inspect `supabase-function-coverage-threshold` output to identify the failing function directory.
+- Confirm that production files (non-`_shared`, non-test, non-`index.ts`) have deterministic unit tests for both success and error branches.
+- Confirm tests do not rely on live internet calls; use mocked `fetch`/web-push responses for all external integrations.
+- If branch numbers look unexpectedly low for a module, check for duplicate LCOV `SF` records and ensure the per-file merge logic in `scripts/just/supabase-function-coverage-threshold.cjs` is being used.
+
 ## Auth And Access Issues
 
 Symptoms:
@@ -163,6 +173,30 @@ Checks:
   - `money_import_batches`
   - `money_import_batch_rows`
 - Verify upsert RPC behavior (`money_upsert_transactions_batch`).
+
+## Debug Information
+
+When writing or modifying code, add debug information as much as possible to support triage and incident recovery.
+
+### What to add
+
+- **Contextual IDs**: Include record IDs, batch IDs, user IDs, or session IDs in log messages and error payloads.
+- **Operation names**: Log entry/exit of significant operations (e.g. `ocr_start`, `import_batch_complete`).
+- **Error context**: Attach `cause`, status codes, and relevant identifiers when throwing or logging errors.
+- **State transitions**: Log workflow state changes (e.g. `ocr_failed`, `batch_imported`) so logs can be correlated with DB state.
+
+### Where to add it
+
+- **Edge Functions**: Use `console.error` / `console.warn` with structured context (IDs, operation, error message). Avoid logging secrets.
+- **API routes**: Return structured error payloads with `message`, `code`, and optional `details` (IDs, validation errors).
+- **Hooks**: Persist error status and message for user feedback; log to console in development when useful.
+- **DB workflows**: Ensure RPC/trigger errors surface in `return_message` or equivalent so cron logs are actionable.
+
+### During triage
+
+- Check function logs (Supabase dashboard, Vercel logs) for the contextual IDs above.
+- Cross-reference with DB tables (`money_import_batch_rows`, `record_attachments`, etc.) using those IDs.
+- See [`docs/design/common/error-handling-and-observability.md`](./design/common/error-handling-and-observability.md) for canonical guidance.
 
 ## Incident Recovery Rules
 

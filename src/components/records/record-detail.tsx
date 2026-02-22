@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -142,6 +142,141 @@ interface RecordDetailProps {
   recordId: string;
 }
 
+export type FindingHistorySummary = {
+  finding_code: string | null;
+  finding_type_text: string;
+  site_code: string | null;
+  body_site_text: string | null;
+  history: Array<{
+    record_id: string;
+    size_mm: number | null;
+    count: number | null;
+    record_date: string | null;
+  }>;
+};
+
+export type ObservationComparisonData = {
+  isNew: boolean;
+  previousOccurrences: number;
+  previousValue: number | null;
+  previousUnit: string | null;
+};
+
+export type ObservationHistorySummary = {
+  obs_code: string;
+  obs_name: string;
+  history: Array<{
+    record_id: string;
+    record_date: string | null;
+    created_at: string;
+    value_canonical: number | null;
+    value_numeric: number | null;
+    unit_canonical: string | null;
+    unit: string | null;
+  }>;
+};
+
+export function getComparisonForFindingData(input: {
+  finding: RecordFindingWithCatalog;
+  personFindingHistory: FindingHistorySummary[] | undefined;
+  recordId: string;
+  recordLoaded: boolean;
+}): FindingComparison | null {
+  if (!input.recordLoaded || input.personFindingHistory === undefined) return null;
+
+  const findingKey =
+    input.finding.finding_code || input.finding.finding_type_text.toLowerCase().trim();
+  const siteKey =
+    input.finding.site_code || input.finding.body_site_text?.toLowerCase().trim() || "unknown";
+
+  const historyMatch = input.personFindingHistory.find((h) => {
+    const historyFindingKey = h.finding_code || h.finding_type_text.toLowerCase().trim();
+    const historySiteKey = h.site_code || h.body_site_text?.toLowerCase().trim() || "unknown";
+    return historyFindingKey === findingKey && historySiteKey === siteKey;
+  });
+
+  if (!historyMatch) {
+    return {
+      isNew: true,
+      previousOccurrences: 0,
+      previousSize: null,
+      previousCount: null,
+      previousDate: null,
+    };
+  }
+
+  const previousOccurrences = historyMatch.history.filter((h) => h.record_id !== input.recordId);
+  if (previousOccurrences.length === 0) {
+    return {
+      isNew: true,
+      previousOccurrences: 0,
+      previousSize: null,
+      previousCount: null,
+      previousDate: null,
+    };
+  }
+
+  const mostRecentPrevious = previousOccurrences[0];
+  return {
+    isNew: false,
+    previousOccurrences: previousOccurrences.length,
+    previousSize: mostRecentPrevious.size_mm,
+    previousCount: mostRecentPrevious.count,
+    previousDate: mostRecentPrevious.record_date,
+  };
+}
+
+export function getComparisonForConditionData(input: {
+  conditionRecord: ConditionRecordWithDetails;
+  personConditionRecordHistory: Record<string, string[]> | undefined;
+  recordId: string;
+  recordLoaded: boolean;
+}): ConditionComparison | null {
+  if (!input.recordLoaded || input.personConditionRecordHistory === undefined) return null;
+  const recordIds = input.personConditionRecordHistory[input.conditionRecord.condition_id] ?? [];
+  const previousOccurrences = recordIds.filter((id) => id !== input.recordId).length;
+  return {
+    isNew: previousOccurrences === 0,
+    previousOccurrences,
+  };
+}
+
+export function getComparisonForObservationData(input: {
+  observation: RecordObservationWithCatalog;
+  personObservationHistory: ObservationHistorySummary[] | undefined;
+  recordId: string;
+  recordLoaded: boolean;
+}): ObservationComparisonData | null {
+  if (!input.recordLoaded || input.personObservationHistory === undefined) return null;
+  const obsKey = input.observation.obs_code || input.observation.obs_name.toLowerCase().trim();
+  const historySummary = input.personObservationHistory.find((h) => {
+    const historyKey = h.obs_code || h.obs_name.toLowerCase().trim();
+    return historyKey === obsKey;
+  });
+  if (!historySummary) {
+    return { isNew: true, previousOccurrences: 0, previousValue: null, previousUnit: null };
+  }
+
+  const previousHistory = historySummary.history
+    .filter((h) => h.record_id !== input.recordId)
+    .sort((a, b) => {
+      const dateA = new Date(a.record_date || a.created_at).getTime();
+      const dateB = new Date(b.record_date || b.created_at).getTime();
+      return dateB - dateA;
+    });
+  if (previousHistory.length === 0) {
+    return { isNew: true, previousOccurrences: 0, previousValue: null, previousUnit: null };
+  }
+
+  const mostRecent = previousHistory[0];
+  return {
+    isNew: false,
+    previousOccurrences: previousHistory.length,
+    previousValue: mostRecent.value_canonical ?? mostRecent.value_numeric,
+    previousUnit: mostRecent.unit_canonical || mostRecent.unit,
+  };
+}
+
 export function RecordDetail({ recordId }: RecordDetailProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -219,111 +354,31 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     createConditionWithRecordMutation.isPending ||
     linkConditionToRecordMutation.isPending;
 
-  // Helper function to compute comparison data for a finding
-  // Compares the current finding with previous occurrences from the person's history
-  const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null => {
-    // Wait for record to load, but proceed even if history is empty (means everything is new)
-    if (!record) return null;
-    if (personFindingHistory === undefined) return null; // Still loading
-
-    // Build the key for matching - same logic as in use-finding-history.ts
-    const findingKey = finding.finding_code || finding.finding_type_text.toLowerCase().trim();
-    const siteKey = finding.site_code || finding.body_site_text?.toLowerCase().trim() || "unknown";
-
-    // Find matching history entry
-    const historyMatch = personFindingHistory.find((h) => {
-      const historyFindingKey = h.finding_code || h.finding_type_text.toLowerCase().trim();
-      const historySiteKey = h.site_code || h.body_site_text?.toLowerCase().trim() || "unknown";
-      return historyFindingKey === findingKey && historySiteKey === siteKey;
+  const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null =>
+    getComparisonForFindingData({
+      finding,
+      personFindingHistory: personFindingHistory as FindingHistorySummary[] | undefined,
+      recordId,
+      recordLoaded: !!record,
     });
 
-    if (!historyMatch) {
-      // This is a completely new finding type+site combination
-      return {
-        isNew: true,
-        previousOccurrences: 0,
-        previousSize: null,
-        previousCount: null,
-        previousDate: null,
-      };
-    }
-
-    // Filter out the current finding from history to find truly previous occurrences
-    // An occurrence is "previous" if it's from a different record (not the current one)
-    const previousOccurrences = historyMatch.history.filter((h) => h.record_id !== recordId);
-
-    if (previousOccurrences.length === 0) {
-      // This is the first occurrence of this finding (only this record has it)
-      return {
-        isNew: true,
-        previousOccurrences: 0,
-        previousSize: null,
-        previousCount: null,
-        previousDate: null,
-      };
-    }
-
-    // Sort by date to get the most recent previous occurrence
-    // History is already sorted newest first, so the first item after filtering is the most recent previous
-    const mostRecentPrevious = previousOccurrences[0];
-
-    return {
-      isNew: false,
-      previousOccurrences: previousOccurrences.length,
-      previousSize: mostRecentPrevious.size_mm,
-      previousCount: mostRecentPrevious.count,
-      previousDate: mostRecentPrevious.record_date,
-    };
-  };
-
-  const getComparisonForCondition = (
-    cr: ConditionRecordWithDetails,
-  ): ConditionComparison | null => {
-    if (!record || personConditionRecordHistory === undefined) return null;
-    const recordIds = personConditionRecordHistory[cr.condition_id] ?? [];
-    const previousOccurrences = recordIds.filter((id) => id !== recordId).length;
-    return {
-      isNew: previousOccurrences === 0,
-      previousOccurrences,
-    };
-  };
+  const getComparisonForCondition = (cr: ConditionRecordWithDetails): ConditionComparison | null =>
+    getComparisonForConditionData({
+      conditionRecord: cr,
+      personConditionRecordHistory,
+      recordId,
+      recordLoaded: !!record,
+    });
 
   const getComparisonForObservation = (
     obs: RecordObservationWithCatalog,
-  ): {
-    isNew: boolean;
-    previousOccurrences: number;
-    previousValue: number | null;
-    previousUnit: string | null;
-  } | null => {
-    if (!record || personObservationHistory === undefined) return null;
-    const obsKey = obs.obs_code || obs.obs_name.toLowerCase().trim();
-    const historySummary = personObservationHistory.find((h) => {
-      const historyKey = h.obs_code || h.obs_name.toLowerCase().trim();
-      return historyKey === obsKey;
+  ): ObservationComparisonData | null =>
+    getComparisonForObservationData({
+      observation: obs,
+      personObservationHistory: personObservationHistory as ObservationHistorySummary[] | undefined,
+      recordId,
+      recordLoaded: !!record,
     });
-    if (!historySummary) {
-      return { isNew: true, previousOccurrences: 0, previousValue: null, previousUnit: null };
-    }
-    // Filter out current record and sort by date descending to get most recent previous
-    const previousHistory = historySummary.history
-      .filter((h) => h.record_id !== recordId)
-      .sort((a, b) => {
-        const dateA = new Date(a.record_date || a.created_at).getTime();
-        const dateB = new Date(b.record_date || b.created_at).getTime();
-        return dateB - dateA;
-      });
-    if (previousHistory.length === 0) {
-      return { isNew: true, previousOccurrences: 0, previousValue: null, previousUnit: null };
-    }
-    const mostRecent = previousHistory[0];
-    return {
-      isNew: false,
-      previousOccurrences: previousHistory.length,
-      previousValue: mostRecent.value_canonical ?? mostRecent.value_numeric,
-      previousUnit: mostRecent.unit_canonical || mostRecent.unit,
-    };
-  };
 
   const handleEditObservation = (obs: RecordObservationWithCatalog) => {
     setEditingObservation(obs);
@@ -1287,7 +1342,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
 }
 
 // Helper component for displaying observation status
-function ObservationStatusBadge({ status }: { status: ObservationStatus | null }) {
+export function ObservationStatusBadge({ status }: { status: ObservationStatus | null }) {
   if (!status || status === "unknown") return null;
 
   const config: Record<ObservationStatus, { color: string; icon: React.ReactNode }> = {
@@ -1327,17 +1382,9 @@ function ObservationStatusBadge({ status }: { status: ObservationStatus | null }
   );
 }
 
-// Type for observation comparison
-type ObservationComparisonData = {
-  isNew: boolean;
-  previousOccurrences: number;
-  previousValue: number | null;
-  previousUnit: string | null;
-};
-
-// Observation value change indicator
+// Observation value change indicator (ObservationComparisonData is exported above)
 // Uses "closer to middle of reference range is better" logic
-function ObservationValueChangeIndicator({
+export function ObservationValueChangeIndicator({
   currentValue,
   previousValue,
   unit,
@@ -1408,7 +1455,11 @@ function ObservationValueChangeIndicator({
 }
 
 // Observation comparison badge
-function ObservationComparisonBadge({ comparison }: { comparison: ObservationComparisonData }) {
+export function ObservationComparisonBadge({
+  comparison,
+}: {
+  comparison: ObservationComparisonData;
+}) {
   const t = useTranslations();
   if (comparison.isNew) {
     return (
@@ -1434,7 +1485,7 @@ function ObservationComparisonBadge({ comparison }: { comparison: ObservationCom
 }
 
 // Observation row component with edit/delete buttons
-function ObservationRowEditable({
+export function ObservationRowEditable({
   observation,
   comparison,
   onEdit,
@@ -1567,7 +1618,7 @@ function ObservationRowEditable({
 }
 
 // Observation Edit Dialog
-function ObservationEditDialog({
+export function ObservationEditDialog({
   open,
   onOpenChange,
   observation,

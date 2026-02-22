@@ -1,3 +1,4 @@
+import React from "react";
 import { getTranslations } from "next-intl/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { Button } from "@/components/ui/button";

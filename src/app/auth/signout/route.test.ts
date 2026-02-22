@@ -33,4 +33,3 @@ describe("POST /auth/signout", () => {
     expect(response.headers.get("location")).toBe("http://localhost/login");
   });
 });
-

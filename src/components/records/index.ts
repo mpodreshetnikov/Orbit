@@ -7,4 +7,8 @@ export * from "./record-detail";
 export * from "./camera-capture";
 export * from "./add-record-wizard";
 export * from "./ocr-review-step";
-export * from "./structure-review-step";
+export {
+  ObservationRow,
+  EditObservationDialog,
+  StructureReviewStep,
+} from "./structure-review-step";
