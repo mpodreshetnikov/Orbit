@@ -12,7 +12,7 @@
 Notes:
 
 - GitHub Actions jobs run in environment `production`.
-- Deploy jobs are gated by `secrets-scan`, `db-artifacts-clean-check`, and `quality-gates`.
+- Deploy jobs are gated by `secrets-scan` and `quality-and-db-artifacts`.
 - Configure GitHub Actions Vercel values:
   - Secrets: `VERCEL_TOKEN`
   - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`

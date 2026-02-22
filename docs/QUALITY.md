@@ -127,7 +127,7 @@ Use route and flow-specific evidence (screenshots, logs, notes).
 Validate that:
 
 - CI workflow behavior is compatible with the change,
-- CI `quality-gates` job is green before deployment jobs run,
+- CI `quality-and-db-artifacts` job is green before deployment jobs run,
 - required docs were updated,
 - security and operational implications were captured in relevant docs.
 

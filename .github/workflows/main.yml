@@ -23,20 +23,6 @@ jobs:
       - name: Run secret preflight
         run: just secrets-preflight-range "${{ github.event.before }}" "${{ github.sha }}"
 
-  db-artifacts-clean-check:
-    name: DB Artifacts Clean Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: taiki-e/install-action@just
-      - name: Install dependencies
-        run: npm ci
-      - name: Verify generated DB artifacts
-        run: just supabase-local-artifacts-verify
-
   quality-gates:
     name: Quality Gates
     runs-on: ubuntu-latest
@@ -54,11 +40,25 @@ jobs:
       - uses: taiki-e/install-action@just
       - name: Install dependencies
         run: npm ci
-      - name: Run quality gates
-        run: just ci-verify-local
+      - name: Run quality (format, lint, typecheck)
+        run: just quality
+      - name: Start Supabase
+        run: just supabase-local-start
+      - name: Verify generated DB artifacts
+        env:
+          SUPABASE_ALREADY_RUNNING: "1"
+        run: node scripts/just/db-artifacts.cjs --verify
+      - name: Build and DB checks
+        env:
+          SUPABASE_ALREADY_RUNNING: "1"
+        run: node scripts/just/build-local-all.cjs
+      - name: Stop Supabase
+        run: just supabase-local-stop
+      - name: Test and coverage
+        run: just test-unit-coverage && just coverage-check
 
   deploy-vercel-production:
-    needs: [secrets-scan, db-artifacts-clean-check, quality-gates]
+    needs: [secrets-scan, quality-and-db-artifacts]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -82,7 +82,7 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
-    needs: [secrets-scan, db-artifacts-clean-check, quality-gates]
+    needs: [secrets-scan, quality-and-db-artifacts]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production

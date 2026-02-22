@@ -252,16 +252,19 @@ function main() {
     process.exit(dockerReadyCode);
   }
 
+  const reuseSupabase = process.env.SUPABASE_ALREADY_RUNNING === "1";
   let started = false;
   let exitCode = 0;
 
   try {
-    const startResult = runOrExit(JUST_BIN, ["supabase-local-start"]);
-    if (startResult.status !== 0) {
-      exitCode = startResult.status ?? 1;
-      return;
+    if (!reuseSupabase) {
+      const startResult = runOrExit(JUST_BIN, ["supabase-local-start"]);
+      if (startResult.status !== 0) {
+        exitCode = startResult.status ?? 1;
+        return;
+      }
+      started = true;
     }
-    started = true;
 
     const resetDeployResult = runOrExit(JUST_BIN, ["supabase-local-reset-and-deploy"]);
     if (resetDeployResult.status !== 0) {

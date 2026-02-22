@@ -50,6 +50,9 @@ function cleanup() {
     return 0;
   }
   cleanedUp = true;
+  if (process.env.SUPABASE_ALREADY_RUNNING === "1") {
+    return 0;
+  }
   return runStep("supabase-local-stop");
 }
 
@@ -78,10 +81,11 @@ try {
     process.exit(dockerReadyCode);
   }
 
+  const reuseSupabase = process.env.SUPABASE_ALREADY_RUNNING === "1";
   const recipes = [
     "web-build-production",
     "extension-build-production",
-    "supabase-local-start",
+    ...(reuseSupabase ? [] : ["supabase-local-start"]),
     "supabase-local-reset-and-deploy",
     "quality-db-lint",
     "quality-db-test",
