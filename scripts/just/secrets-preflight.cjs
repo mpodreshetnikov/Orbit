@@ -84,6 +84,7 @@ function runGitleaks(rangeSpec) {
     GITLEAKS_IMAGE,
     "detect",
     "--source=/repo",
+    "--config=/repo/.gitleaks.toml",
     "--redact",
     "--no-banner",
     `--log-opts=${rangeSpec}`,

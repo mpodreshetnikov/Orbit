@@ -1,0 +1,12 @@
+# Extend default Gitleaks rules; allowlist lockfiles that contain integrity hashes
+# mistaken for secrets (e.g. deno.lock content hashes).
+title = "Orbit gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Lockfiles and integrity hashes (false positives for generic-api-key)"
+paths = [
+  '''(?:^|/)supabase/functions/deno\.lock$''',
+]
