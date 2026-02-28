@@ -1,9 +1,32 @@
 {
   "servers": {
+    "supabase-cloud": {
+      "transport": "http",
+      "enabled_env": "MCP_SUPABASE_CLOUD_ENABLED",
+      "url": "https://mcp.supabase.com/mcp",
+      "auth_kind": "bearer",
+      "auth_mode_env": "MCP_SUPABASE_CLOUD_AUTH_MODE",
+      "default_auth_mode": "oauth",
+      "token_env": "SUPABASE_CLOUD_ACCESS_TOKEN",
+      "oauth_supported": true
+    },
+    "supabase-local": {
+      "transport": "http",
+      "enabled_env": "MCP_SUPABASE_LOCAL_ENABLED",
+      "url": "http://127.0.0.1:54321/mcp"
+    },
     "tempo-local": {
       "transport": "http",
       "enabled_env": "MCP_TEMPO_LOCAL_ENABLED",
       "url": "http://localhost:3200/api/mcp"
+    },
+    "tempo-cloud": {
+      "transport": "http",
+      "enabled_env": "MCP_TEMPO_CLOUD_ENABLED",
+      "url_env": "GRAFANA_CLOUD_TEMPO_MCP_URL",
+      "http_headers_env_map": {
+        "Authorization": "GRAFANA_CLOUD_TEMPO_AUTHORIZATION"
+      }
     },
     "grafana-local": {
       "transport": "stdio",
@@ -34,21 +57,8 @@
     "grafana-cloud": {
       "transport": "stdio",
       "enabled_env": "MCP_GRAFANA_CLOUD_ENABLED",
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "-e",
-        "GRAFANA_URL",
-        "-e",
-        "GRAFANA_SERVICE_ACCOUNT_TOKEN",
-        "-e",
-        "GRAFANA_ORG_ID",
-        "grafana/mcp-grafana",
-        "-t",
-        "stdio"
-      ],
+      "command": "mcp-grafana",
+      "command_env": "MCP_GRAFANA_CLOUD_COMMAND",
       "env_map": {
         "GRAFANA_URL": "GRAFANA_CLOUD_URL",
         "GRAFANA_SERVICE_ACCOUNT_TOKEN": "GRAFANA_CLOUD_SERVICE_ACCOUNT_TOKEN"

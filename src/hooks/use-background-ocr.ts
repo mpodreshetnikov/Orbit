@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
 import { useProcessingQueueStore } from "@/stores/processing-queue-store";
 import type { HealthOcrResponse } from "@/types";
 
@@ -130,15 +131,25 @@ export function useBackgroundOCR() {
         const timeoutId = setTimeout(() => controller.abort(), OCR_FETCH_TIMEOUT_MS);
         let response: Response;
         try {
-          response = await fetch(`${supabaseUrl}/functions/v1/health-ocr`, {
-            method: "POST",
-            signal: controller.signal,
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
+          response = await fetchEdgeFunctionWithTelemetry(
+            `${supabaseUrl}/functions/v1/health-ocr`,
+            {
+              method: "POST",
+              signal: controller.signal,
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ record_id: recordId }),
             },
-            body: JSON.stringify({ record_id: recordId }),
-          });
+            {
+              component: "use-background-ocr",
+              operation: "health-ocr",
+              attrs: {
+                has_record_id: Boolean(recordId),
+              },
+            },
+          );
         } finally {
           clearTimeout(timeoutId);
         }
@@ -318,15 +329,25 @@ export function useBackgroundOCR() {
       const timeoutId = setTimeout(() => controller.abort(), OCR_FETCH_TIMEOUT_MS);
       let response: Response;
       try {
-        response = await fetch(`${supabaseUrl}/functions/v1/health-ocr`, {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
+        response = await fetchEdgeFunctionWithTelemetry(
+          `${supabaseUrl}/functions/v1/health-ocr`,
+          {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ record_id: recordId }),
           },
-          body: JSON.stringify({ record_id: recordId }),
-        });
+          {
+            component: "use-background-ocr",
+            operation: "health-ocr-retry",
+            attrs: {
+              has_record_id: Boolean(recordId),
+            },
+          },
+        );
       } catch (fetchError) {
         clearTimeout(timeoutId);
         const errorMessage =

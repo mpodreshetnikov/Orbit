@@ -1,4 +1,5 @@
 import { isSessionUsable } from "./auth.ts";
+import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
   buildLineItemImportHash,
   extractAccountHintFromRow,
@@ -16,6 +17,7 @@ import type { AuthContext, CanonicalTransactionRowInput, RowStatus } from "./typ
 interface ApplyRowsDeps {
   repository: MoneyImportRepository;
   now?: () => Date;
+  telemetry?: EdgeTelemetry;
 }
 
 function accountCacheKeyForRow(row: CanonicalTransactionRowInput, fallbackSource: string): string {
@@ -32,10 +34,18 @@ export async function applyRowsAction(
   auth: AuthContext,
   deps: ApplyRowsDeps,
 ): Promise<Response> {
+  const actionSpan = deps.telemetry?.startSpan("edge.money_import.apply_rows");
   const rowsRaw = body.rows;
   if (!Array.isArray(rowsRaw)) {
+    await actionSpan?.end({
+      status: "error",
+      statusMessage: "rows must be an array",
+    });
     return jsonResponse({ error: "rows must be an array" }, 400);
   }
+  deps.telemetry?.info("money_import_apply_rows_started", {
+    row_count: rowsRaw.length,
+  });
 
   let source = normalizeText(body.source) ?? "manual";
   let payerPersonId = normalizeText(body.payer_person_id);
@@ -46,6 +56,10 @@ export async function applyRowsAction(
   if (auth.mode === "session") {
     const session = auth.session;
     if (!isSessionUsable(session)) {
+      await actionSpan?.end({
+        status: "error",
+        statusMessage: "Import session expired or revoked",
+      });
       return jsonResponse({ error: "Import session expired or revoked" }, 401);
     }
 
@@ -65,6 +79,10 @@ export async function applyRowsAction(
   }
 
   if (!payerPersonId) {
+    await actionSpan?.end({
+      status: "error",
+      statusMessage: "payer_person_id is required",
+    });
     return jsonResponse({ error: "payer_person_id is required" }, 400);
   }
 
@@ -95,6 +113,10 @@ export async function applyRowsAction(
 
   const batchBefore = await deps.repository.getImportBatch(batchId);
   if (!batchBefore) {
+    await actionSpan?.end({
+      status: "error",
+      statusMessage: "Batch not found",
+    });
     return jsonResponse({ error: "Batch not found" }, 404);
   }
 
@@ -106,6 +128,11 @@ export async function applyRowsAction(
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
     const raw = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    const rowSpan = deps.telemetry?.startSpan("edge.money_import.apply_rows.row", {
+      attrs: {
+        row_index: rowIndex,
+      },
+    });
 
     try {
       const accountCacheKey = accountCacheKeyForRow(raw, transactionSourceFallback);
@@ -213,6 +240,14 @@ export async function applyRowsAction(
         transaction_id: tx.transactionId,
         line_results: lineResults,
       });
+      await rowSpan?.end({
+        status: "ok",
+        attrs: {
+          row_index: rowIndex,
+          status: txStatus,
+          line_item_count: lineResults.length,
+        },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Import row failed";
       errorCount += 1;
@@ -235,6 +270,13 @@ export async function applyRowsAction(
         status: "error",
         message,
         transaction_id: null,
+      });
+      await rowSpan?.end({
+        status: "error",
+        statusMessage: message,
+        attrs: {
+          row_index: rowIndex,
+        },
       });
     }
   }
@@ -284,9 +326,14 @@ export async function applyRowsAction(
   try {
     await deps.repository.updateImportBatch(batchId, patch);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to update batch";
+    await actionSpan?.end({
+      status: "error",
+      statusMessage: message,
+    });
     return jsonResponse(
       {
-        error: error instanceof Error ? error.message : "Failed to update batch",
+        error: message,
       },
       400,
     );
@@ -301,6 +348,22 @@ export async function applyRowsAction(
     if (windowToInput) sessionPatch.window_to = windowToInput;
     await deps.repository.updateImportSession(sessionId, sessionPatch);
   }
+  deps.telemetry?.info("money_import_apply_rows_completed", {
+    batch_id: batchId,
+    inserted: insertedCount,
+    skipped: skippedCount,
+    error_count: errorCount,
+  });
+  await actionSpan?.end({
+    status: "ok",
+    attrs: {
+      batch_id: batchId,
+      inserted: insertedCount,
+      skipped: skippedCount,
+      error_count: errorCount,
+      row_count: rowsRaw.length,
+    },
+  });
 
   return jsonResponse({
     batch_id: batchId,

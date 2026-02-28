@@ -25,14 +25,30 @@ Optional hints:
 
 - Never commit OTLP tokens or cloud auth headers.
 - Never expose cloud OTLP secrets to browser or extension runtime.
-- Browser and extension send telemetry only to `POST /api/observability/relay`.
+- Browser and extension send telemetry only to:
+  - `POST /api/observability/relay` (logs)
+  - `POST /api/observability/relay/traces` (spans)
 - Relay forwards to cloud using server-side env vars.
 
 ## Production Ingestion Paths
 
 - Node backend traces: exported by server OTel bootstrap (`src/instrumentation.ts`).
-- Browser / extension logs: forwarded through relay endpoint.
-- Supabase functions: structured logs include correlation fields and can be forwarded by platform log pipeline.
+- Browser / extension logs: forwarded through logs relay endpoint.
+- Browser / extension spans: forwarded through traces relay endpoint.
+- Supabase functions: structured logs and spans are emitted with shared correlation IDs and forwarded best effort via OTLP.
+
+## Propagation Requirements
+
+Cross-surface requests should propagate:
+
+- `traceparent`
+- `x-request-id`
+
+Expected span naming patterns:
+
+- `web.edge_function.<operation>`
+- `web.supabase.rpc.<rpc_name>`
+- `edge.<function>.<step>`
 
 ## Validation
 
@@ -41,3 +57,4 @@ Optional hints:
 3. In Grafana Cloud:
    - Query logs in Loki using `app`/`component` fields.
    - Open trace by `trace_id` and verify related logs contain the same `trace_id`.
+   - Confirm one `request_id` is visible on both frontend and edge logs for the same trace.

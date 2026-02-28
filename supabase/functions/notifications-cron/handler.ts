@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
 import { corsHeaders } from "../_shared/cors.ts";
 import type { Database } from "../_shared/database.types.ts";
-import { createEdgeLogEvent, logEdgeEvent } from "../_shared/observability.ts";
+import { createEdgeRequestContext, createEdgeTelemetry } from "../_shared/observability.ts";
 import {
   filterUnsentRowsByAllowedPersons,
   mapDigestRowsToNotifications,
@@ -92,49 +92,112 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
   const resolvedServiceRoleKey = deps.supabaseServiceRoleKey ?? SUPABASE_SERVICE_ROLE_KEY;
   const resolvedVapidPublic = deps.vapidPublicKey ?? VAPID_PUBLIC_KEY;
   const resolvedVapidPrivate = deps.vapidPrivateKey ?? VAPID_PRIVATE_KEY;
-  const emit = (
-    level: "debug" | "info" | "warn" | "error",
-    message: string,
-    attrs?: Record<string, boolean | number | string | null>,
-  ) => {
-    logEdgeEvent(
-      createEdgeLogEvent(level, message, {
-        component: "notifications-cron",
-        attrs,
-      }),
-    );
-  };
 
   return async function handleNotificationsCronRequest(req: Request): Promise<Response> {
+    const context = createEdgeRequestContext(req, "notifications-cron");
+    const telemetry = createEdgeTelemetry(context);
+    const requestSpan = telemetry.startSpan("edge.notifications_cron.request", {
+      kind: "server",
+      attrs: {
+        request_method: req.method,
+      },
+    });
+    const emit = (
+      level: "debug" | "info" | "warn" | "error",
+      message: string,
+      attrs?: Record<string, boolean | number | string | null>,
+    ) => {
+      if (level === "debug") telemetry.debug(message, attrs);
+      if (level === "info") telemetry.info(message, attrs);
+      if (level === "warn") telemetry.warn(message, attrs);
+      if (level === "error") telemetry.error(message, attrs);
+    };
+
     emit("info", "notifications_cron_invocation_started", {
       request_method: req.method,
     });
 
     if (req.method === "OPTIONS") {
+      await requestSpan.end({ status: "ok", attrs: { cors_preflight: true } });
       return new Response("ok", { headers: corsHeaders });
     }
 
     if (!resolvedSupabaseUrl || !resolvedServiceRoleKey) {
       log.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
       emit("error", "notifications_cron_missing_supabase_config");
+      await requestSpan.end({
+        status: "error",
+        statusMessage: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY",
+      });
       return jsonResponse({ error: "Server configuration error" }, 500);
     }
 
     const supabase = createClientFn<Database>(resolvedSupabaseUrl, resolvedServiceRoleKey);
     const now = deps.now ? deps.now() : new Date();
+    const rpcWithTelemetry = async <
+      TArgs extends Record<string, unknown>,
+      TName extends keyof Database["public"]["Functions"],
+    >(
+      rpcName: TName,
+      args: TArgs,
+    ): Promise<{ data: unknown; error: unknown }> => {
+      const rpcSpan = telemetry.startSpan(`edge.notifications_cron.rpc.${String(rpcName)}`, {
+        kind: "client",
+        attrs: {
+          rpc_name: String(rpcName),
+        },
+      });
+      emit("debug", "notifications_cron_rpc_started", {
+        rpc_name: String(rpcName),
+      });
+      const result = await supabase.rpc(rpcName, args);
+      const hasError = Boolean(result.error);
+      if (hasError) {
+        emit("warn", "notifications_cron_rpc_failed", {
+          rpc_name: String(rpcName),
+          error_message:
+            result.error && typeof result.error === "object" && "message" in result.error
+              ? String((result.error as { message?: unknown }).message ?? "Unknown RPC error")
+              : "Unknown RPC error",
+        });
+      }
+      await rpcSpan.end({
+        status: hasError ? "error" : "ok",
+        statusMessage:
+          hasError && result.error && typeof result.error === "object" && "message" in result.error
+            ? String((result.error as { message?: unknown }).message ?? "RPC failed")
+            : undefined,
+      });
+      return result as { data: unknown; error: unknown };
+    };
 
+    const subscriptionSpan = telemetry.startSpan("edge.notifications_cron.load_subscriptions");
     const { data: subs } = await supabase.from("push_subscriptions").select("auth_user_id");
     const userIds = [
       ...new Set((subs ?? []).map((row: { auth_user_id: string }) => row.auth_user_id)),
     ];
+    await subscriptionSpan.end({
+      status: "ok",
+      attrs: {
+        user_count: userIds.length,
+      },
+    });
     if (userIds.length === 0) {
       emit("info", "notifications_cron_no_subscriptions");
+      await requestSpan.end({
+        status: "ok",
+        attrs: {
+          processed: 0,
+        },
+      });
       return jsonResponse({ ok: true, processed: 0 }, 200);
     }
 
-    await supabase.rpc("create_medication_reminder_digests", {
+    const digestSpan = telemetry.startSpan("edge.notifications_cron.create_medication_digests");
+    await rpcWithTelemetry("create_medication_reminder_digests", {
       p_now_timestamptz: now.toISOString(),
     });
+    await digestSpan.end({ status: "ok" });
 
     const { data: prefsRows } = await supabase
       .from("user_preferences")
@@ -154,12 +217,13 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
 
     let processed = 0;
     for (const authUserId of userIds) {
+      const userSpan = telemetry.startSpan("edge.notifications_cron.user_loop");
       const prefs = prefsByUser.get(authUserId) ?? { ...defaultPrefs, auth_user_id: authUserId };
       const timeStr = prefs.checkup_notification_time ?? "09:00";
       const tz = prefs.checkup_notification_timezone ?? undefined;
       const inWindow = isNotificationWindowForUser(now, timeStr, tz ?? null);
 
-      const { data: routedPersons } = await supabase.rpc("get_routed_persons_for_recipient", {
+      const { data: routedPersons } = await rpcWithTelemetry("get_routed_persons_for_recipient", {
         p_recipient_user_id: authUserId,
       });
       const routedPersonRows = (routedPersons ?? []) as RoutedPersonRow[];
@@ -331,7 +395,7 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
       };
 
       for (const provider of providersEveryTick) {
-        const { data: payloadRows } = await supabase.rpc(
+        const { data: payloadRows } = await rpcWithTelemetry(
           provider.rpc as keyof Database["public"]["Functions"],
           {
             p_auth_user_id: authUserId,
@@ -348,7 +412,7 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
           : now.toISOString().slice(0, 10);
         for (const provider of providersInWindow) {
           for (const person of routedPersonRows) {
-            const { data: payloadRows } = await supabase.rpc(
+            const { data: payloadRows } = await rpcWithTelemetry(
               provider.rpc as keyof Database["public"]["Functions"],
               {
                 p_person_id: person.person_id,
@@ -362,7 +426,17 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
         }
       }
 
-      if (notificationsForUser.length === 0) continue;
+      if (notificationsForUser.length === 0) {
+        await userSpan.end({
+          status: "ok",
+          attrs: {
+            in_window: inWindow,
+            notification_count: 0,
+            processed,
+          },
+        });
+        continue;
+      }
 
       const { data: userSubs } = await supabase
         .from("push_subscriptions")
@@ -370,6 +444,12 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
         .eq("auth_user_id", authUserId);
 
       if (resolvedVapidPublic && resolvedVapidPrivate && userSubs?.length) {
+        const pushSpan = telemetry.startSpan("edge.notifications_cron.send_push", {
+          attrs: {
+            subscription_count: userSubs.length,
+            notification_count: notificationsForUser.length,
+          },
+        });
         try {
           webpushClient.setVapidDetails(
             "mailto:support@example.com",
@@ -420,14 +500,36 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
               .update({ status: "sent", updated_at: new Date().toISOString() })
               .in("id", doseEventIdsToMarkSent);
           }
+          await pushSpan.end({ status: "ok" });
         } catch (error) {
           log.error("Web Push send failed:", error);
+          emit("error", "notifications_cron_push_failed", {
+            error_message: error instanceof Error ? error.message : "Unknown push error",
+          });
+          await pushSpan.end({
+            status: "error",
+            statusMessage: error instanceof Error ? error.message : "Unknown push error",
+          });
         }
       }
 
       processed += 1;
+      await userSpan.end({
+        status: "ok",
+        attrs: {
+          in_window: inWindow,
+          notification_count: notificationsForUser.length,
+          processed,
+        },
+      });
     }
 
+    await requestSpan.end({
+      status: "ok",
+      attrs: {
+        processed,
+      },
+    });
     return jsonResponse({ ok: true, processed }, 200);
   };
 }

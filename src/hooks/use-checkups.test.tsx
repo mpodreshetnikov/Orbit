@@ -344,4 +344,102 @@ describe("use-checkups", () => {
     expect(insertPayload.done_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(builder.update).toHaveBeenCalledWith({ note: "kept" });
   });
+
+  it("returns query errors and keeps disabled hooks idle", async () => {
+    const errorBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "query failed" },
+    });
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "rpc failed" },
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn(() => errorBuilder),
+      rpc,
+    });
+
+    const { useCheckupItems, useCheckupCompletions, useCheckupsForCondition } =
+      await import("./use-checkups");
+    const itemsError = renderHookWithQueryClient(() => useCheckupItems("person-1"));
+    const completionsError = renderHookWithQueryClient(() => useCheckupCompletions("checkup-1"));
+    const conditionError = renderHookWithQueryClient(() => useCheckupsForCondition("cond-1"));
+    const itemsDisabled = renderHookWithQueryClient(() => useCheckupItems(null));
+    const completionsDisabled = renderHookWithQueryClient(() => useCheckupCompletions(null));
+
+    await waitFor(() => expect(itemsError.result.current.isError).toBe(true));
+    await waitFor(() => expect(completionsError.result.current.isError).toBe(true));
+    await waitFor(() => expect(conditionError.result.current.isError).toBe(true));
+    expect((itemsError.result.current.error as Error).message).toBe("query failed");
+    expect((completionsError.result.current.error as Error).message).toBe("query failed");
+    expect((conditionError.result.current.error as Error).message).toBe("rpc failed");
+    expect(itemsDisabled.result.current.fetchStatus).toBe("idle");
+    expect(completionsDisabled.result.current.fetchStatus).toBe("idle");
+  });
+
+  it("propagates create/update/delete mutation errors", async () => {
+    const createErrorBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "create failed" },
+    });
+    const updateErrorBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "update failed" },
+    });
+    const deleteCompletionBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "delete completion failed" },
+    });
+    const deleteItemBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "delete item failed" },
+    });
+
+    let callCount = 0;
+    createClientMock.mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) return { from: vi.fn(() => createErrorBuilder) };
+      if (callCount === 2) return { from: vi.fn(() => updateErrorBuilder) };
+      if (callCount === 3) return { from: vi.fn(() => deleteCompletionBuilder) };
+      return { from: vi.fn(() => deleteItemBuilder) };
+    });
+
+    const {
+      useCreateCheckupItem,
+      useUpdateCheckupItem,
+      useDeleteCheckupCompletion,
+      useDeleteCheckupItem,
+    } = await import("./use-checkups");
+    const createHook = renderHookWithQueryClient(() => useCreateCheckupItem());
+    const updateHook = renderHookWithQueryClient(() => useUpdateCheckupItem());
+    const deleteCompletionHook = renderHookWithQueryClient(() => useDeleteCheckupCompletion());
+    const deleteItemHook = renderHookWithQueryClient(() => useDeleteCheckupItem());
+
+    await expect(
+      createHook.result.current.mutateAsync({
+        person_id: "person-1",
+        title: "x",
+        category: "lab",
+        schedule: { cadence: "yearly" },
+      } as unknown as import("@/types").CreateCheckupItemInput),
+    ).rejects.toThrow("create failed");
+    await expect(
+      updateHook.result.current.mutateAsync({
+        id: "checkup-1",
+        updates: { title: "changed" },
+      }),
+    ).rejects.toThrow("update failed");
+    await expect(
+      deleteCompletionHook.result.current.mutateAsync({
+        id: "completion-1",
+        checkupItemId: "checkup-1",
+      }),
+    ).rejects.toThrow("delete completion failed");
+    await expect(
+      deleteItemHook.result.current.mutateAsync({
+        id: "checkup-1",
+        personId: "person-1",
+      }),
+    ).rejects.toThrow("delete item failed");
+  });
 });

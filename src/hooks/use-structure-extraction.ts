@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
 import type { HealthStructureResponse, StructuredData } from "@/types";
 
 interface StructureExtractionInput {
@@ -47,14 +48,24 @@ export function useStructureExtraction() {
           throw new Error("Supabase URL not configured");
         }
 
-        const response = await fetch(`${supabaseUrl}/functions/v1/health-structure`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
+        const response = await fetchEdgeFunctionWithTelemetry(
+          `${supabaseUrl}/functions/v1/health-structure`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ record_id: recordId }),
           },
-          body: JSON.stringify({ record_id: recordId }),
-        });
+          {
+            component: "use-structure-extraction",
+            operation: "health-structure",
+            attrs: {
+              has_record_id: Boolean(recordId),
+            },
+          },
+        );
 
         if (!response.ok) {
           const errorText = await response.text();

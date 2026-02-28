@@ -1,4 +1,5 @@
 import { computeProgressPercent } from "./progress.ts";
+import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
   jsonResponse,
   normalizeSourceForTransactions,
@@ -16,6 +17,7 @@ interface SessionActionDeps {
   repository: MoneyImportRepository;
   now?: () => Date;
   sessionTtlMinutes?: number;
+  telemetry?: EdgeTelemetry;
 }
 
 export async function createSessionAction(
@@ -23,9 +25,14 @@ export async function createSessionAction(
   auth: UserAuthContext,
   deps: SessionActionDeps,
 ): Promise<Response> {
+  const span = deps.telemetry?.startSpan("edge.money_import.create_session");
   const source = normalizeText(body.source);
   const payerPersonId = normalizeText(body.payer_person_id);
   if (!source || !payerPersonId) {
+    await span?.end({
+      status: "error",
+      statusMessage: "source and payer_person_id are required",
+    });
     return jsonResponse({ error: "source and payer_person_id are required" }, 400);
   }
 
@@ -74,6 +81,18 @@ export async function createSessionAction(
     normalizeSourceForTransactions(source),
     payerPersonId,
   );
+  deps.telemetry?.info("money_import_create_session_completed", {
+    session_id: session.id,
+    batch_id: batchId,
+    source,
+  });
+  await span?.end({
+    status: "ok",
+    attrs: {
+      source,
+      has_last_imported_at: Boolean(lastImportedAt),
+    },
+  });
 
   return jsonResponse({
     session_id: session.id,
@@ -92,11 +111,24 @@ export async function sessionStatusAction(
   auth: UserAuthContext,
   deps: SessionActionDeps,
 ): Promise<Response> {
+  const span = deps.telemetry?.startSpan("edge.money_import.session_status");
   const sessionId = normalizeText(body.session_id);
-  if (!sessionId) return jsonResponse({ error: "session_id is required" }, 400);
+  if (!sessionId) {
+    await span?.end({
+      status: "error",
+      statusMessage: "session_id is required",
+    });
+    return jsonResponse({ error: "session_id is required" }, 400);
+  }
 
   const session = await deps.repository.getImportSessionForUser(sessionId, auth.userId);
-  if (!session) return jsonResponse({ error: "Session not found" }, 404);
+  if (!session) {
+    await span?.end({
+      status: "error",
+      statusMessage: "Session not found",
+    });
+    return jsonResponse({ error: "Session not found" }, 404);
+  }
 
   const batchId = normalizeText(session.batch_id);
   const batch = batchId ? await deps.repository.getImportBatch(batchId) : null;
@@ -106,6 +138,14 @@ export async function sessionStatusAction(
   const windowTo = toIsoOrNull(windowSource.window_to);
   const parsedThrough = toIsoOrNull(batch?.parsed_through_at);
   const progressPercent = computeProgressPercent(windowFrom, windowTo, parsedThrough);
+  await span?.end({
+    status: "ok",
+    attrs: {
+      session_id: sessionId,
+      has_batch: Boolean(batch),
+      progress_percent: progressPercent,
+    },
+  });
 
   return jsonResponse({
     session: {
@@ -142,6 +182,7 @@ export async function completeSessionAction(
   auth: AuthContext,
   deps: SessionActionDeps,
 ): Promise<Response> {
+  const span = deps.telemetry?.startSpan("edge.money_import.complete_session");
   let sessionId = normalizeText(body.session_id);
   let batchId = normalizeText(body.batch_id);
 
@@ -150,11 +191,23 @@ export async function completeSessionAction(
     batchId = normalizeText(auth.session.batch_id) ?? batchId;
   }
 
-  if (!sessionId) return jsonResponse({ error: "session_id is required" }, 400);
+  if (!sessionId) {
+    await span?.end({
+      status: "error",
+      statusMessage: "session_id is required",
+    });
+    return jsonResponse({ error: "session_id is required" }, 400);
+  }
 
   if (auth.mode === "user") {
     const ownedSession = await deps.repository.getImportSessionForUser(sessionId, auth.userId);
-    if (!ownedSession) return jsonResponse({ error: "Session not found" }, 404);
+    if (!ownedSession) {
+      await span?.end({
+        status: "error",
+        statusMessage: "Session not found",
+      });
+      return jsonResponse({ error: "Session not found" }, 404);
+    }
     batchId = normalizeText(ownedSession.batch_id) ?? batchId;
   }
 
@@ -175,6 +228,14 @@ export async function completeSessionAction(
       completed_at: nowIso,
     });
   }
+  await span?.end({
+    status: "ok",
+    attrs: {
+      session_id: sessionId,
+      has_batch_id: Boolean(batchId),
+      status: finalStatus,
+    },
+  });
 
   return jsonResponse({
     session_id: sessionId,

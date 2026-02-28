@@ -30,6 +30,8 @@ Disable lifecycle auto-start/stop:
 - Tempo MCP endpoint: `http://127.0.0.1:3200/api/mcp`
 - OTLP gRPC ingest: `http://127.0.0.1:4317`
 - OTLP HTTP ingest: `http://127.0.0.1:4318`
+- App logs relay: `POST /api/observability/relay`
+- App traces relay: `POST /api/observability/relay/traces`
 
 Default Grafana credentials in local LGTM image:
 
@@ -57,6 +59,26 @@ It prints `trace_id` and `span_id` for lookup.
    `{service_name="orbit"} |= "obs-smoke-log"`
 
 3. Open Tempo and search by `trace_id` from smoke output.
+
+## Frontend -> Edge -> RPC Correlation Check
+
+Run one web flow that calls edge functions and/or Supabase RPC (for example OCR, structure extraction, ICD lookup, or money import), then:
+
+1. In Loki, search for one known operation log:
+
+   `{service_name="orbit"} | json | message=~"edge_function_request_started|supabase_rpc_started"`
+
+2. Capture `trace_id` and `request_id` from that log line.
+3. In Tempo, open the same `trace_id` and verify spans like:
+   - `web.edge_function.<operation>`
+   - `web.supabase.rpc.<rpc_name>`
+   - `edge.<function>.*`
+4. Confirm the same `trace_id` appears in:
+   - frontend structured logs,
+   - edge function structured logs,
+   - trace spans.
+
+If one surface is missing, validate outbound headers include `traceparent` and `x-request-id`.
 
 ## Troubleshooting
 

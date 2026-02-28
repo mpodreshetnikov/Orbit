@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase";
+import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
 import type { MoneyImportSessionStatus } from "@/types";
 
 export function getFunctionUrl(functionName: string): string {
@@ -22,14 +23,24 @@ export async function callMoneyImportAction<T>(
   action: Record<string, unknown>,
   accessToken: string,
 ): Promise<T> {
-  const response = await fetch(getFunctionUrl("money-import"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
+  const response = await fetchEdgeFunctionWithTelemetry(
+    getFunctionUrl("money-import"),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(action),
     },
-    body: JSON.stringify(action),
-  });
+    {
+      component: "money-import-client",
+      operation: "money-import-action",
+      attrs: {
+        action: typeof action.action === "string" ? action.action : "unknown",
+      },
+    },
+  );
 
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {

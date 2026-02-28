@@ -25,7 +25,7 @@ Investigate issues with an evidence-first flow that correlates structured logs, 
 
 4. Correlate with structured logs
 - Query the same service and incident window.
-- Parse log fields (`trace_id`, `request_id`, `user_id`, `error_code`, `feature_flag`, `build_sha`) before filtering.
+- Parse log fields (`trace_id`, `span_id`, `request_id`, `user_id`, `error_code`, `feature_flag`, `build_sha`) before filtering.
 - Identify repeated signatures and first-seen timestamps.
 - Save at least one representative log line with timestamp.
 
@@ -69,6 +69,17 @@ Investigate issues with an evidence-first flow that correlates structured logs, 
 - Prefer parsed structured fields over raw free-text grep when both are available.
 - Verify label keys and values before declaring "no data."
 - If cloud MCP is unavailable, continue with the UI/API fallback from `references/local-cloud-modes.md`.
+
+## Orbit-Specific Correlation
+
+- Treat `trace_id` + `request_id` as primary join keys across frontend logs, edge logs, and traces.
+- Frontend spans commonly use:
+  - `web.edge_function.<operation>`
+  - `web.supabase.rpc.<rpc_name>`
+- Edge spans commonly use:
+  - `edge.<function>.request`
+  - `edge.<function>.<step>`
+- If frontend and edge logs do not match on `request_id`, verify `traceparent` and `x-request-id` propagation first.
 
 ## References
 

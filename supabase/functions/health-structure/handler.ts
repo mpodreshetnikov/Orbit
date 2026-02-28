@@ -1,14 +1,22 @@
 import { corsHeaders } from "../_shared/cors.ts";
-import { createEdgeLogEvent, logEdgeEvent } from "../_shared/observability.ts";
+import {
+  buildEdgePropagationHeaders,
+  createEdgeRequestContext,
+  createEdgeTelemetry,
+} from "../_shared/observability.ts";
 import { createDefaultHealthStructureDeps, type HealthStructureDeps } from "./deps.ts";
 import { runHealthStructureService } from "./service.ts";
 
 export interface HealthStructureHandlerDeps extends HealthStructureDeps {}
 
-function jsonResponse(body: unknown, status: number): Response {
+function jsonResponse(
+  body: unknown,
+  status: number,
+  extraHeaders?: Record<string, string>,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json", ...(extraHeaders ?? {}) },
   });
 }
 
@@ -26,34 +34,37 @@ function asBody(value: unknown): Record<string, unknown> {
 
 export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
   return async function handleHealthStructureRequest(req: Request): Promise<Response> {
+    const context = createEdgeRequestContext(req, "health-structure");
+    const telemetry = createEdgeTelemetry(context);
+    const requestSpan = telemetry.startSpan("edge.health_structure.request", {
+      kind: "server",
+      attrs: {
+        request_method: req.method,
+      },
+    });
+
     if (req.method === "OPTIONS") {
+      await requestSpan.end({ status: "ok", attrs: { cors_preflight: true } });
       return new Response("ok", { headers: corsHeaders });
     }
 
-    const requestId = req.headers.get("x-request-id") ?? `health_structure_${crypto.randomUUID()}`;
-    const emit = (
-      level: "debug" | "info" | "warn" | "error",
-      message: string,
-      attrs?: Record<string, boolean | number | string | null>,
-    ) => {
-      logEdgeEvent(
-        createEdgeLogEvent(level, message, {
-          component: "health-structure",
-          requestId,
-          attrs,
-        }),
-      );
-    };
-
-    emit("info", "health_structure_invocation_started", {
+    telemetry.info("health_structure_invocation_started", {
       request_method: req.method,
     });
 
     if (req.method !== "POST") {
-      emit("warn", "health_structure_method_not_allowed", {
+      telemetry.warn("health_structure_method_not_allowed", {
         request_method: req.method,
       });
-      return jsonResponse({ success: false, error: "Method not allowed" }, 405);
+      await requestSpan.end({
+        status: "error",
+        statusMessage: "Method not allowed",
+      });
+      return jsonResponse(
+        { success: false, error: "Method not allowed" },
+        405,
+        buildEdgePropagationHeaders(context, requestSpan.spanId),
+      );
     }
 
     try {
@@ -78,19 +89,35 @@ export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
           parseStructuredData: deps.parseStructuredData,
           lookupIcdCode: deps.lookupIcdCode,
           log: deps.log,
+          telemetry,
         },
       );
 
-      emit("info", "health_structure_invocation_completed", {
+      telemetry.info("health_structure_invocation_completed", {
         status_code: result.status,
         has_record_id: recordId !== null,
       });
+      await requestSpan.end({
+        status: result.status >= 400 ? "error" : "ok",
+        attrs: {
+          status_code: result.status,
+          has_record_id: recordId !== null,
+        },
+      });
 
-      return jsonResponse(result.payload, result.status);
+      return jsonResponse(
+        result.payload,
+        result.status,
+        buildEdgePropagationHeaders(context, requestSpan.spanId),
+      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      emit("error", "health_structure_invocation_failed", {
+      telemetry.error("health_structure_invocation_failed", {
         error_message: errorMessage,
+      });
+      await requestSpan.end({
+        status: "error",
+        statusMessage: errorMessage,
       });
 
       return jsonResponse(
@@ -99,6 +126,7 @@ export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
           error: errorMessage,
         },
         400,
+        buildEdgePropagationHeaders(context, requestSpan.spanId),
       );
     }
   };

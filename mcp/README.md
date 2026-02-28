@@ -15,9 +15,15 @@ This folder is the canonical source for MCP server definitions.
 - Grafana MCP generation is opt-in per target:
   - `MCP_GRAFANA_LOCAL_ENABLED=1` generates `grafana-local`.
   - `MCP_GRAFANA_CLOUD_ENABLED=1` generates `grafana-cloud`.
-- Both Grafana MCP servers run `grafana/mcp-grafana` over stdio; only URL/token/org env values differ per target.
+- `grafana-local` runs `grafana/mcp-grafana` via Docker stdio.
+- `grafana-cloud` runs `mcp-grafana` binary via stdio (no Docker requirement).
+  - Optional command override: `MCP_GRAFANA_CLOUD_COMMAND` (for full executable paths).
 - Tempo MCP generation is opt-in:
   - `MCP_TEMPO_LOCAL_ENABLED=1` generates `tempo-local` pointing to local Tempo MCP endpoint.
+  - `MCP_TEMPO_CLOUD_ENABLED=1` generates `tempo-cloud` pointing to Grafana Cloud Tempo MCP endpoint.
+- Supabase MCP generation is opt-in:
+  - `MCP_SUPABASE_CLOUD_ENABLED=1` generates `supabase-cloud` pointing to hosted Supabase MCP endpoint.
+  - `MCP_SUPABASE_LOCAL_ENABLED=1` generates `supabase-local` pointing to local Supabase MCP endpoint.
 
 ## IDE Install Flow
 
@@ -30,6 +36,12 @@ This folder is the canonical source for MCP server definitions.
 
 ### Grafana MCP (Option A: Two Stdio Servers, Recommended)
 
+Required prerequisite for cloud server (`grafana-cloud`):
+
+- Install `mcp-grafana` binary before running `mcp-sync`.
+- Verify install with `mcp-grafana --version`.
+- If your MCP client still fails with `spawn mcp-grafana ENOENT`, set an absolute executable path in the client-native config (for example on Windows: `command = "C:\\Users\\<you>\\bin\\mcp-grafana.exe"`).
+
 1. Configure local target in `mcp/.env`:
    - `MCP_GRAFANA_LOCAL_ENABLED=1`
    - `GRAFANA_LOCAL_URL=http://localhost:3300` (or your local Grafana port)
@@ -37,20 +49,42 @@ This folder is the canonical source for MCP server definitions.
    - optional `GRAFANA_LOCAL_ORG_ID=<org-id>`
 2. Configure cloud target in `mcp/.env`:
    - `MCP_GRAFANA_CLOUD_ENABLED=1`
+   - optional `MCP_GRAFANA_CLOUD_COMMAND=<full-path-to-mcp-grafana>`
    - `GRAFANA_CLOUD_URL=https://<stack>.grafana.net`
    - `GRAFANA_CLOUD_SERVICE_ACCOUNT_TOKEN=<token>`
    - optional `GRAFANA_CLOUD_ORG_ID=<org-id>`
+   - ensure `mcp-grafana` is installed and available on PATH, or set `MCP_GRAFANA_CLOUD_COMMAND` to an absolute executable path
 3. Re-run `mcp-sync` to regenerate client MCP configs.
 4. Confirm your client sees separate servers: `grafana-local` and `grafana-cloud`.
 
-### Tempo MCP (Local HTTP Server)
+### Tempo MCP (Local + Cloud HTTP Servers)
 
 1. Configure local target in `mcp/.env`:
    - `MCP_TEMPO_LOCAL_ENABLED=1`
 2. Ensure local Tempo MCP endpoint is reachable:
    - `http://localhost:3200/api/mcp`
-3. Re-run `mcp-sync` to regenerate client MCP configs.
-4. Confirm your client sees `tempo-local`.
+3. Configure cloud target in `mcp/.env`:
+   - `MCP_TEMPO_CLOUD_ENABLED=1`
+   - `GRAFANA_CLOUD_TEMPO_MCP_URL=https://<stack>.grafana.net/tempo/api/mcp`
+   - `GRAFANA_CLOUD_TEMPO_AUTHORIZATION=Basic <base64(instance_id:token)>`
+4. Re-run `mcp-sync` to regenerate client MCP configs.
+5. Confirm your client sees `tempo-local` and/or `tempo-cloud` based on enabled flags.
+6. Reference docs: https://grafana.com/docs/grafana-cloud/send-data/traces/mcp-server/
+
+### Supabase MCP (Local + Cloud HTTP Servers)
+
+1. Configure local target in `mcp/.env`:
+   - `MCP_SUPABASE_LOCAL_ENABLED=1`
+2. Ensure local Supabase MCP endpoint is reachable:
+   - `http://127.0.0.1:54321/mcp`
+3. Configure cloud target in `mcp/.env`:
+   - `MCP_SUPABASE_CLOUD_ENABLED=1`
+   - optional `MCP_SUPABASE_CLOUD_AUTH_MODE=oauth|pat` (default `oauth`)
+   - if using `pat` mode: set `SUPABASE_CLOUD_ACCESS_TOKEN=<personal-access-token>`
+4. Hosted endpoint used by `supabase-cloud`:
+   - `https://mcp.supabase.com/mcp`
+5. Re-run `mcp-sync` to regenerate client MCP configs.
+6. Confirm your client sees `supabase-local` and/or `supabase-cloud` based on enabled flags.
 
 ### Create Grafana MCP Tokens via API
 

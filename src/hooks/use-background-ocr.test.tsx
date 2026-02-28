@@ -3,11 +3,13 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 
-const { createClientMock, useProcessingQueueStoreMock, toastErrorMock } = vi.hoisted(() => ({
-  createClientMock: vi.fn(),
-  useProcessingQueueStoreMock: vi.fn(),
-  toastErrorMock: vi.fn(),
-}));
+const { createClientMock, useProcessingQueueStoreMock, toastErrorMock, edgeFunctionFetchMock } =
+  vi.hoisted(() => ({
+    createClientMock: vi.fn(),
+    useProcessingQueueStoreMock: vi.fn(),
+    toastErrorMock: vi.fn(),
+    edgeFunctionFetchMock: vi.fn(),
+  }));
 
 vi.mock("@/lib/supabase", () => ({
   createClient: createClientMock,
@@ -25,6 +27,10 @@ vi.mock("sonner", () => ({
   toast: {
     error: toastErrorMock,
   },
+}));
+
+vi.mock("@/lib/observability/edge-function-fetch", () => ({
+  fetchEdgeFunctionWithTelemetry: edgeFunctionFetchMock,
 }));
 
 function renderHookWithQueryClient<T>(hook: () => T) {
@@ -91,6 +97,10 @@ describe("use-background-ocr", () => {
     createClientMock.mockReset();
     useProcessingQueueStoreMock.mockReset();
     toastErrorMock.mockReset();
+    edgeFunctionFetchMock.mockReset();
+    edgeFunctionFetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      fetch(url, init),
+    );
     vi.unstubAllGlobals();
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   });

@@ -10,12 +10,16 @@ type AuthMode = "pat" | "oauth";
 type CanonicalServer = {
   transport: Transport;
   command?: string;
+  command_env?: string;
   args?: string[];
   url?: string;
+  url_env?: string;
   env?: string[];
   optional_env?: string[];
   env_map?: Record<string, string>;
   optional_env_map?: Record<string, string>;
+  http_headers_env_map?: Record<string, string>;
+  optional_http_headers_env_map?: Record<string, string>;
   enabled_env?: string;
   auth_kind?: AuthKind;
   auth_mode_env?: string;
@@ -33,6 +37,10 @@ type StdioEnvBindings = {
   required: Record<string, string>;
   optional: Record<string, string>;
 };
+type HttpHeaderBindings = {
+  required: Record<string, string>;
+  optional: Record<string, string>;
+};
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -45,8 +53,11 @@ function assertValidServer(name: string, server: CanonicalServer): void {
   }
 
   if (server.transport === "stdio") {
-    if (!server.command) {
-      throw new Error(`Server "${name}" uses stdio but is missing "command".`);
+    if (!server.command && !server.command_env) {
+      throw new Error(`Server "${name}" uses stdio but is missing "command" or "command_env".`);
+    }
+    if (server.command_env && server.command_env.trim().length === 0) {
+      throw new Error(`Server "${name}" has empty "command_env".`);
     }
     assertValidEnvList(name, "env", server.env);
     assertValidEnvList(name, "optional_env", server.optional_env);
@@ -56,13 +67,21 @@ function assertValidServer(name: string, server: CanonicalServer): void {
     return;
   }
 
-  if (!server.url) {
-    throw new Error(`Server "${name}" uses http but is missing "url".`);
+  if (!server.url && !server.url_env) {
+    throw new Error(`Server "${name}" uses http but is missing "url" or "url_env".`);
+  }
+
+  if (server.url_env && server.url_env.trim().length === 0) {
+    throw new Error(`Server "${name}" has empty "url_env".`);
   }
 
   if (server.auth_kind && server.auth_kind !== "bearer") {
     throw new Error(`Server "${name}" has unsupported "auth_kind": "${server.auth_kind}".`);
   }
+
+  assertValidEnvMap(name, "http_headers_env_map", server.http_headers_env_map);
+  assertValidEnvMap(name, "optional_http_headers_env_map", server.optional_http_headers_env_map);
+  assertNoHttpHeaderBindingOverlap(name, server);
 
   if ((server.auth_mode_env || server.default_auth_mode || server.token_env) && !server.auth_kind) {
     throw new Error(`Server "${name}" has auth mode fields but no "auth_kind" configured.`);
@@ -105,6 +124,17 @@ function assertValidServer(name: string, server: CanonicalServer): void {
         `Only one token env var is currently supported for Codex output.`,
     );
   }
+
+  const httpHeaderBindings = getHttpHeaderBindings(server);
+  const hasAuthorizationBinding =
+    "Authorization" in httpHeaderBindings.required ||
+    "Authorization" in httpHeaderBindings.optional;
+  if (server.auth_kind === "bearer" && hasAuthorizationBinding) {
+    throw new Error(
+      `Server "${name}" configures bearer auth and maps "Authorization" in HTTP headers. ` +
+        `Remove one of these configurations.`,
+    );
+  }
 }
 
 function assertValidEnvList(
@@ -121,7 +151,11 @@ function assertValidEnvList(
 
 function assertValidEnvMap(
   serverName: string,
-  fieldName: "env_map" | "optional_env_map",
+  fieldName:
+    | "env_map"
+    | "optional_env_map"
+    | "http_headers_env_map"
+    | "optional_http_headers_env_map",
   value: Record<string, string> | undefined,
 ): void {
   for (const [targetEnvVar, sourceEnvVar] of Object.entries(value ?? {})) {
@@ -134,6 +168,22 @@ function assertValidEnvMap(
       );
     }
   }
+}
+
+function getHttpHeaderBindings(server: CanonicalServer): HttpHeaderBindings {
+  const required: Record<string, string> = {};
+  const optional: Record<string, string> = {};
+
+  for (const [headerName, sourceEnvVar] of Object.entries(server.http_headers_env_map ?? {})) {
+    required[headerName] = sourceEnvVar;
+  }
+  for (const [headerName, sourceEnvVar] of Object.entries(
+    server.optional_http_headers_env_map ?? {},
+  )) {
+    optional[headerName] = sourceEnvVar;
+  }
+
+  return { required, optional };
 }
 
 function getStdioEnvBindings(server: CanonicalServer): StdioEnvBindings {
@@ -163,6 +213,17 @@ function assertNoBindingOverlap(serverName: string, server: CanonicalServer): vo
     if (requiredTargetEnvVar in bindings.optional) {
       throw new Error(
         `Server "${serverName}" defines "${requiredTargetEnvVar}" as both required and optional env.`,
+      );
+    }
+  }
+}
+
+function assertNoHttpHeaderBindingOverlap(serverName: string, server: CanonicalServer): void {
+  const bindings = getHttpHeaderBindings(server);
+  for (const requiredHeaderName of Object.keys(bindings.required)) {
+    if (requiredHeaderName in bindings.optional) {
+      throw new Error(
+        `Server "${serverName}" defines "${requiredHeaderName}" as both required and optional HTTP header env binding.`,
       );
     }
   }
@@ -289,6 +350,69 @@ function resolveHttpAuth(
   return { mode: "pat", token };
 }
 
+function resolveHttpUrl(
+  name: string,
+  server: CanonicalServer,
+  envMap: Record<string, string>,
+): string {
+  if (server.url_env) {
+    const resolvedUrl = envValue(envMap, server.url_env);
+    if (!resolvedUrl) {
+      throw new Error(
+        `Server "${name}" requires env var "${server.url_env}" for HTTP URL generation.`,
+      );
+    }
+
+    return resolvedUrl;
+  }
+
+  if (server.url) {
+    return server.url;
+  }
+
+  throw new Error(`Server "${name}" uses http but no URL could be resolved.`);
+}
+
+function resolveHttpHeaderValues(
+  name: string,
+  server: CanonicalServer,
+  envMap: Record<string, string>,
+): Record<string, string> {
+  const bindings = getHttpHeaderBindings(server);
+  const resolved: Record<string, string> = {};
+
+  for (const [headerName, sourceEnvVar] of Object.entries(bindings.required)) {
+    const value = envValue(envMap, sourceEnvVar);
+    if (!value) {
+      throw new Error(
+        `Server "${name}" requires env var "${sourceEnvVar}" for HTTP header ` +
+          `"${headerName}" generation.`,
+      );
+    }
+    resolved[headerName] = normalizeHttpHeaderValue(headerName, value);
+  }
+
+  for (const [headerName, sourceEnvVar] of Object.entries(bindings.optional)) {
+    const value = envValue(envMap, sourceEnvVar);
+    if (value) {
+      resolved[headerName] = normalizeHttpHeaderValue(headerName, value);
+    }
+  }
+
+  return resolved;
+}
+
+function normalizeHttpHeaderValue(headerName: string, value: string): string {
+  const normalizedValue = value.trim().replace(/^["']([\s\S]*)["']$/, "$1");
+
+  if (headerName.toLowerCase() !== "authorization") {
+    return normalizedValue;
+  }
+
+  const authPrefix = /^authorization\s*:\s*/i;
+  return normalizedValue.replace(authPrefix, "");
+}
+
 function tomlEscape(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
@@ -331,6 +455,31 @@ function resolveStdioEnvValues(
   return resolved;
 }
 
+function resolveStdioCommand(
+  name: string,
+  server: CanonicalServer,
+  envMap: Record<string, string>,
+): string {
+  if (server.command_env) {
+    const envCommand = envValue(envMap, server.command_env);
+    if (envCommand) {
+      return envCommand;
+    }
+  }
+
+  if (server.command) {
+    return server.command;
+  }
+
+  if (server.command_env) {
+    throw new Error(
+      `Server "${name}" requires env var "${server.command_env}" for stdio command generation.`,
+    );
+  }
+
+  throw new Error(`Server "${name}" uses stdio but no command could be resolved.`);
+}
+
 function buildClaudeConfig(canonical: CanonicalConfig, envMap: Record<string, string>): string {
   const mcpServers: Record<string, Record<string, unknown>> = {};
 
@@ -340,9 +489,10 @@ function buildClaudeConfig(canonical: CanonicalConfig, envMap: Record<string, st
     }
 
     if (server.transport === "stdio") {
+      const command = resolveStdioCommand(name, server, envMap);
       const resolvedEnv = resolveStdioEnvValues(name, server, envMap);
       mcpServers[name] = {
-        command: server.command,
+        command,
         ...(server.args && server.args.length > 0 ? { args: server.args } : {}),
         ...(Object.keys(resolvedEnv).length > 0 ? { env: resolvedEnv } : {}),
       };
@@ -350,16 +500,16 @@ function buildClaudeConfig(canonical: CanonicalConfig, envMap: Record<string, st
     }
 
     const auth = resolveHttpAuth(name, server, envMap);
+    const url = resolveHttpUrl(name, server, envMap);
+    const headers = resolveHttpHeaderValues(name, server, envMap);
+    if (auth.mode === "pat") {
+      headers.Authorization = `Bearer ${auth.token}`;
+    }
+
     mcpServers[name] = {
       type: "http",
-      url: server.url,
-      ...(auth.mode === "pat"
-        ? {
-            headers: {
-              Authorization: `Bearer ${auth.token}`,
-            },
-          }
-        : {}),
+      url,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
   }
 
@@ -375,9 +525,10 @@ function buildCursorConfig(canonical: CanonicalConfig, envMap: Record<string, st
     }
 
     if (server.transport === "stdio") {
+      const command = resolveStdioCommand(name, server, envMap);
       const resolvedEnv = resolveStdioEnvValues(name, server, envMap);
       mcpServers[name] = {
-        command: server.command,
+        command,
         ...(server.args && server.args.length > 0 ? { args: server.args } : {}),
         ...(Object.keys(resolvedEnv).length > 0 ? { env: resolvedEnv } : {}),
       };
@@ -385,15 +536,15 @@ function buildCursorConfig(canonical: CanonicalConfig, envMap: Record<string, st
     }
 
     const auth = resolveHttpAuth(name, server, envMap);
+    const url = resolveHttpUrl(name, server, envMap);
+    const headers = resolveHttpHeaderValues(name, server, envMap);
+    if (auth.mode === "pat") {
+      headers.Authorization = `Bearer ${auth.token}`;
+    }
+
     mcpServers[name] = {
-      url: server.url,
-      ...(auth.mode === "pat"
-        ? {
-            headers: {
-              Authorization: `Bearer ${auth.token}`,
-            },
-          }
-        : {}),
+      url,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
   }
 
@@ -412,7 +563,8 @@ function buildCodexToml(canonical: CanonicalConfig, envMap: Record<string, strin
     lines.push(`[mcp_servers.${name}]`);
 
     if (server.transport === "stdio") {
-      lines.push(`command = "${tomlEscape(server.command as string)}"`);
+      const command = resolveStdioCommand(name, server, envMap);
+      lines.push(`command = "${tomlEscape(command)}"`);
 
       if (server.args && server.args.length > 0) {
         lines.push(`args = ${tomlArray(server.args)}`);
@@ -423,10 +575,15 @@ function buildCodexToml(canonical: CanonicalConfig, envMap: Record<string, strin
         lines.push(`env = ${tomlInlineMap(resolvedEnv)}`);
       }
     } else {
-      lines.push(`url = "${tomlEscape(server.url as string)}"`);
+      const url = resolveHttpUrl(name, server, envMap);
+      lines.push(`url = "${tomlEscape(url)}"`);
       const auth = resolveHttpAuth(name, server, envMap);
+      const headers = resolveHttpHeaderValues(name, server, envMap);
       if (auth.mode === "pat") {
-        lines.push(`http_headers = ${tomlInlineMap({ Authorization: `Bearer ${auth.token}` })}`);
+        headers.Authorization = `Bearer ${auth.token}`;
+      }
+      if (Object.keys(headers).length > 0) {
+        lines.push(`http_headers = ${tomlInlineMap(headers)}`);
       }
     }
 

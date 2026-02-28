@@ -3,12 +3,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock } = vi.hoisted(() => ({
+const { createClientMock, edgeFunctionFetchMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
+  edgeFunctionFetchMock: vi.fn(),
 }));
 
 vi.mock("../lib/supabase", () => ({
   createClient: createClientMock,
+}));
+
+vi.mock("@/lib/observability/edge-function-fetch", () => ({
+  fetchEdgeFunctionWithTelemetry: edgeFunctionFetchMock,
 }));
 
 function createWrapper() {
@@ -30,6 +35,10 @@ describe("useIcdLookup + useIcdSearch", () => {
 
   beforeEach(() => {
     createClientMock.mockReset();
+    edgeFunctionFetchMock.mockReset();
+    edgeFunctionFetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      fetch(url, init),
+    );
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
   });
 

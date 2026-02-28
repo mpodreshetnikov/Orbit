@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "../lib/supabase";
+import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
 import type { IcdLookupResult, IcdSearchResult } from "@/types";
 
 /**
@@ -21,14 +22,24 @@ export function useIcdLookup(code: string | null) {
         throw new Error("Not authenticated");
       }
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
+      const res = await fetchEdgeFunctionWithTelemetry(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ code }),
         },
-        body: JSON.stringify({ code }),
-      });
+        {
+          component: "use-icd-lookup",
+          operation: "icd-lookup-code",
+          attrs: {
+            has_code: Boolean(code),
+          },
+        },
+      );
 
       if (!res.ok) {
         const error = await res.text();
@@ -60,14 +71,25 @@ export function useIcdSearch(query: string, lang: "en" | "ru" = "en") {
         throw new Error("Not authenticated");
       }
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
+      const res = await fetchEdgeFunctionWithTelemetry(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ search: query, lang, maxResults: 15 }),
         },
-        body: JSON.stringify({ search: query, lang, maxResults: 15 }),
-      });
+        {
+          component: "use-icd-search",
+          operation: "icd-lookup-search",
+          attrs: {
+            query_length: query.length,
+            lang,
+          },
+        },
+      );
 
       if (!res.ok) {
         const error = await res.text();

@@ -35,6 +35,33 @@ Notes:
 7. If DB function/policy behavior changed, run `db-test` from `AGENTS.md` (pgTAP suite under `supabase/tests`).
 8. Decide whether the fix is app code, function code, SQL, or config/secrets.
 
+## Observability Correlation Triage
+
+Use this when debugging frontend -> edge function -> RPC workflows.
+
+1. Start from logs in Loki and capture one concrete `trace_id` + `request_id`.
+2. Open the same `trace_id` in Tempo.
+3. Confirm expected spans exist in a single trace:
+   - `web.edge_function.<operation>`
+   - `web.supabase.rpc.<rpc_name>`
+   - `edge.<function>.<step>`
+4. If a hop is missing, inspect request headers for:
+   - `traceparent`
+   - `x-request-id`
+5. Verify edge logs include `trace_id`, `span_id`, and `request_id` on important step events.
+
+Fast LogQL starter:
+
+```logql
+{service_name="orbit"} | json | trace_id!="" | request_id!=""
+```
+
+Fast TraceQL starter:
+
+```traceql
+{ resource.service.name = "orbit" && trace:id = "$trace_id" }
+```
+
 ## Runtime-Split Test Triage
 
 Use the smallest failing lane first:

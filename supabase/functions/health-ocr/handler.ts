@@ -1,5 +1,9 @@
 import { corsHeaders } from "../_shared/cors.ts";
-import { createEdgeLogEvent, logEdgeEvent } from "../_shared/observability.ts";
+import {
+  buildEdgePropagationHeaders,
+  createEdgeRequestContext,
+  createEdgeTelemetry,
+} from "../_shared/observability.ts";
 import { createDefaultHealthOcrDeps, type HealthOcrDeps } from "./deps.ts";
 import { runHealthOcrService } from "./service.ts";
 import type { HealthOcrRepository } from "./repository.ts";
@@ -23,26 +27,21 @@ function getBearerToken(req: Request): string | null {
 
 export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
   return async function handleHealthOcrRequest(req: Request): Promise<Response> {
+    const context = createEdgeRequestContext(req, "health-ocr");
+    const telemetry = createEdgeTelemetry(context);
+    const requestSpan = telemetry.startSpan("edge.health_ocr.request", {
+      kind: "server",
+      attrs: {
+        request_method: req.method,
+      },
+    });
+
     if (req.method === "OPTIONS") {
+      await requestSpan.end({ status: "ok", attrs: { cors_preflight: true } });
       return new Response("ok", { headers: corsHeaders });
     }
 
-    const requestId = req.headers.get("x-request-id") ?? `health_ocr_${crypto.randomUUID()}`;
-    const emit = (
-      level: "debug" | "info" | "warn" | "error",
-      message: string,
-      attrs?: Record<string, boolean | number | string | null>,
-    ) => {
-      logEdgeEvent(
-        createEdgeLogEvent(level, message, {
-          component: "health-ocr",
-          requestId,
-          attrs,
-        }),
-      );
-    };
-
-    emit("info", "health_ocr_invocation_started", {
+    telemetry.info("health_ocr_invocation_started", {
       request_method: req.method,
     });
 
@@ -82,22 +81,38 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
           defaultTitle: deps.defaultTitle,
           log: deps.log,
           now: deps.now,
+          telemetry,
         },
       );
 
-      emit("info", "health_ocr_invocation_completed", {
+      telemetry.info("health_ocr_invocation_completed", {
         status_code: result.status,
         has_record_id: recordId !== null,
       });
+      await requestSpan.end({
+        status: result.status >= 400 ? "error" : "ok",
+        attrs: {
+          status_code: result.status,
+          has_record_id: recordId !== null,
+        },
+      });
 
       return new Response(JSON.stringify(result.payload), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+          ...buildEdgePropagationHeaders(context, requestSpan.spanId),
+        },
         status: result.status,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      emit("error", "health_ocr_invocation_failed", {
+      telemetry.error("health_ocr_invocation_failed", {
         error_message: errorMessage,
+      });
+      await requestSpan.end({
+        status: "error",
+        statusMessage: errorMessage,
       });
 
       return new Response(
@@ -106,7 +121,11 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
           error: errorMessage,
         }),
         {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+            ...buildEdgePropagationHeaders(context, requestSpan.spanId),
+          },
           status: 400,
         },
       );

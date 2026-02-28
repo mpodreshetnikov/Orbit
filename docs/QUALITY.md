@@ -23,6 +23,8 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 - **`ci`**: full local gate (adds `build-local-all`, unit coverage, `coverage-check`). Use before push or PR.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 
+`ci-fast` is never a substitute for final pre-push validation on non-doc changes; final validation must include coverage gates.
+
 ## Stage-Based Execution Cadence
 
 This section is the canonical source for when checks run during a task.
@@ -35,7 +37,10 @@ When a task changes files, apply checks by stage, not after every single edit.
   - for non-doc stages, run `ci-fast` before moving to the next stage.
 - Final stage before handoff for tasks with non-doc file changes:
   - run `dev` and verify clean boot;
+  - run `test-unit-coverage`;
+  - run `coverage-check`;
   - run `ci` and require success.
+- Coverage enforcement (non-doc changes): `test-unit-coverage` and `coverage-check` are mandatory and must not be skipped, even when `ci-fast` was used earlier for iteration.
 - Docs-only tasks:
   - use docs checks from the matrix and skip `ci` unless full validation is explicitly requested.
 

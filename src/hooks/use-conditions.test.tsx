@@ -548,4 +548,128 @@ describe("use-conditions", () => {
     expect(conditionsBuilder.update).not.toHaveBeenCalled();
     expect(conditionRecordsBuilder.insert).toHaveBeenCalled();
   });
+
+  it("handles query errors, null detail states, and disabled hooks", async () => {
+    const errorBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "conditions fetch failed" },
+    });
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "history rpc failed" },
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn(() => errorBuilder),
+      rpc,
+    });
+
+    const { usePersonConditions, usePersonConditionsWithHistory, useConditionDetail } =
+      await import("./use-conditions");
+    const listError = renderHookWithQueryClient(() => usePersonConditions("person-1"));
+    const historyError = renderHookWithQueryClient(() =>
+      usePersonConditionsWithHistory("person-1"),
+    );
+    const detailNull = renderHookWithQueryClient(() => useConditionDetail("cond-1"));
+    const listDisabled = renderHookWithQueryClient(() => usePersonConditions(null));
+    const detailDisabled = renderHookWithQueryClient(() => useConditionDetail(null));
+
+    await waitFor(() => expect(listError.result.current.isError).toBe(true));
+    await waitFor(() => expect(historyError.result.current.isError).toBe(true));
+    await waitFor(() => expect(detailNull.result.current.isSuccess).toBe(true));
+    expect((listError.result.current.error as Error).message).toBe("conditions fetch failed");
+    expect((historyError.result.current.error as Error).message).toBe("history rpc failed");
+    expect(detailNull.result.current.data).toBeNull();
+    expect(listDisabled.result.current.fetchStatus).toBe("idle");
+    expect(detailDisabled.result.current.fetchStatus).toBe("idle");
+  });
+
+  it("propagates condition detail record errors", async () => {
+    const conditionsBuilder = createQueryBuilder({
+      data: conditionRow(),
+      error: null,
+    });
+    const recordsErrorBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "record history failed" },
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "conditions" ? conditionsBuilder : recordsErrorBuilder,
+      ),
+    });
+
+    const { useConditionDetail } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useConditionDetail("cond-1"));
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect((result.current.error as Error).message).toBe("record history failed");
+  });
+
+  it("propagates create-with-record errors and handles null record-date link branch", async () => {
+    const createErrorBuilder = createQueryBuilder({
+      data: null,
+      error: { message: "create condition failed" },
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn(() => createErrorBuilder),
+    });
+
+    const { useCreateConditionWithRecord } = await import("./use-conditions");
+    const createHook = renderHookWithQueryClient(() => useCreateConditionWithRecord());
+    await expect(
+      createHook.result.current.mutateAsync({
+        person_id: "person-1",
+        record_id: "record-1",
+        name: "Asthma",
+        status: "active",
+      }),
+    ).rejects.toThrow("create condition failed");
+
+    const conditionBuilder = createQueryBuilder({
+      data: conditionRow(),
+      error: null,
+    });
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-link-3", record_id: "record-undated", condition_id: "cond-1" },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.single)
+      .mockResolvedValueOnce({
+        data: { id: "cr-link-3", record_id: "record-undated", condition_id: "cond-1" },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { medical_records: { record_date: "2026-03-01" } },
+        error: null,
+      });
+    const medicalRecordsBuilder = createQueryBuilder({
+      data: { record_date: null },
+      error: null,
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "condition_records") return conditionRecordsBuilder;
+        if (table === "medical_records") return medicalRecordsBuilder;
+        return conditionBuilder;
+      }),
+    });
+
+    const { useLinkConditionToRecord } = await import("./use-conditions");
+    const linkHook = renderHookWithQueryClient(() => useLinkConditionToRecord());
+    await act(async () => {
+      await linkHook.result.current.mutateAsync({
+        condition_id: "cond-1",
+        record_id: "record-undated",
+        status_in_record: "resolved",
+        code: "J45",
+        icd_name_en: "Asthma",
+      });
+    });
+
+    // null record date disables status update, but code update still applies
+    expect(conditionBuilder.update).toHaveBeenCalledWith({
+      code: "J45",
+      icd_name_en: "Asthma",
+    });
+  });
 });

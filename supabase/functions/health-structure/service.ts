@@ -8,6 +8,7 @@ import {
   processExtractedConditions,
   processFindingsToResolve,
 } from "./resolution.ts";
+import type { EdgeTelemetry } from "../_shared/observability.ts";
 import type { HealthStructureRepository } from "./repository.ts";
 import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
 import { convertRefRangeToCanonical, convertToCanonical } from "./unit-conversion.ts";
@@ -34,6 +35,7 @@ export interface HealthStructureServiceDeps {
   ) => Promise<StructuredDataWithEntities>;
   lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
   log?: Pick<Console, "log" | "warn" | "error">;
+  telemetry?: EdgeTelemetry;
 }
 
 type ServiceResult = {
@@ -150,20 +152,49 @@ export async function runHealthStructureService(
   input: HealthStructureServiceInput,
   deps: HealthStructureServiceDeps,
 ): Promise<ServiceResult> {
+  const telemetry = deps.telemetry;
+  const serviceSpan = telemetry?.startSpan("edge.health_structure.service");
   try {
-    if (!input.authToken) throw new Error("Missing authorization header");
+    telemetry?.info("health_structure_service_started", {
+      has_record_id: Boolean(input.recordId),
+    });
+
+    const authSpan = telemetry?.startSpan("edge.health_structure.auth");
+    if (!input.authToken) {
+      await authSpan?.end({
+        status: "error",
+        statusMessage: "Missing authorization header",
+      });
+      throw new Error("Missing authorization header");
+    }
     const user = await deps.repository.authenticateAllowedUser(input.authToken);
-    if (!user) throw new Error("Unauthorized - invalid token");
+    if (!user) {
+      await authSpan?.end({
+        status: "error",
+        statusMessage: "Unauthorized - invalid token",
+      });
+      throw new Error("Unauthorized - invalid token");
+    }
+    await authSpan?.end({ status: "ok" });
 
     if (!input.recordId) throw new Error("Missing required field: record_id");
 
+    const recordSpan = telemetry?.startSpan("edge.health_structure.get_record");
     const record = await deps.repository.getRecord(input.recordId);
     if (!record) throw new Error("Record not found or access denied");
     const personId = asString(record.person_id);
     if (!personId) throw new Error("Record is missing person_id");
     const ocrText = asString(record.ocr_text);
     if (!ocrText) throw new Error("No OCR text found for this record. Run health-ocr first.");
+    await recordSpan?.end({
+      status: "ok",
+      attrs: {
+        has_person_id: true,
+        ocr_text_chars: ocrText.length,
+      },
+    });
 
+    const contextSpan = telemetry?.startSpan("edge.health_structure.load_context");
     const [
       observationCatalog,
       findingTypeCatalog,
@@ -179,6 +210,14 @@ export async function runHealthStructureService(
       deps.repository.fetchPersonActiveFindings(personId),
       deps.repository.fetchUpcomingOverdueCheckupItems(personId),
     ]);
+    await contextSpan?.end({
+      status: "ok",
+      attrs: {
+        observation_catalog_count: observationCatalog.length,
+        finding_type_catalog_count: findingTypeCatalog.length,
+        body_site_catalog_count: bodySiteCatalog.length,
+      },
+    });
 
     const context: HealthStructureParseContext = {
       observationCatalog,
@@ -189,9 +228,19 @@ export async function runHealthStructureService(
       checkupItems,
     };
 
+    const parseSpan = telemetry?.startSpan("edge.health_structure.parse_llm");
     const structuredData = await deps.parseStructuredData(ocrText, context);
+    await parseSpan?.end({
+      status: "ok",
+      attrs: {
+        observation_count: structuredData.observations.length,
+        finding_count: structuredData.findings.length,
+        condition_count: structuredData.conditions.length,
+      },
+    });
     const checkupSuggestions = buildCheckupSuggestions(structuredData, checkupItems);
 
+    const updateRecordSpan = telemetry?.startSpan("edge.health_structure.update_record");
     await deps.repository.updateMedicalRecord(input.recordId, {
       title: structuredData.title,
       record_type: structuredData.record_type,
@@ -202,14 +251,23 @@ export async function runHealthStructureService(
       llm_suggested_checkup_completions: checkupSuggestions,
       status: "structure_review",
     });
+    await updateRecordSpan?.end({ status: "ok" });
 
+    const observationSpan = telemetry?.startSpan("edge.health_structure.persist_observations");
     const observationRows = buildObservationRows(
       input.recordId,
       structuredData,
       observationCatalog,
     );
     await deps.repository.replaceRecordObservations(input.recordId, observationRows);
+    await observationSpan?.end({
+      status: "ok",
+      attrs: {
+        row_count: observationRows.length,
+      },
+    });
 
+    const findingSpan = telemetry?.startSpan("edge.health_structure.persist_findings");
     const findingRows = buildFindingRows(
       input.recordId,
       personId,
@@ -218,7 +276,14 @@ export async function runHealthStructureService(
       bodySiteCatalog,
     );
     await deps.repository.replaceRecordFindings(input.recordId, findingRows);
+    await findingSpan?.end({
+      status: "ok",
+      attrs: {
+        row_count: findingRows.length,
+      },
+    });
 
+    const resolutionSpan = telemetry?.startSpan("edge.health_structure.resolve_entities");
     await deps.repository.clearConditionRecords(input.recordId);
     await processExtractedConditions(input.recordId, personId, structuredData.conditions, {
       repository: deps.repository,
@@ -249,6 +314,15 @@ export async function runHealthStructureService(
         log: deps.log,
       },
     );
+    await resolutionSpan?.end({ status: "ok" });
+
+    telemetry?.info("health_structure_service_completed", {
+      record_id: input.recordId,
+      observation_count: structuredData.observations.length,
+      finding_count: structuredData.findings.length,
+      condition_count: structuredData.conditions.length,
+    });
+    await serviceSpan?.end({ status: "ok" });
 
     return {
       status: 200,
@@ -258,11 +332,20 @@ export async function runHealthStructureService(
       },
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    telemetry?.error("health_structure_service_failed", {
+      record_id: input.recordId ?? "missing",
+      error_message: message,
+    });
+    await serviceSpan?.end({
+      status: "error",
+      statusMessage: message,
+    });
     return {
       status: 400,
       payload: {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: message,
       },
     };
   }

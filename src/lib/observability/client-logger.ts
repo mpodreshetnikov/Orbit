@@ -2,6 +2,7 @@ import {
   buildCorrelationContext,
   createTraceparent,
   generateSessionId,
+  type TelemetryCorrelationContext,
 } from "@shared/lib/observability/correlation";
 import { createTelemetryLogger } from "@shared/lib/observability/logger";
 import type { TelemetryLogAttrs, TelemetryLogEvent } from "@shared/lib/observability/schema";
@@ -15,6 +16,10 @@ export interface ClientLoggerOptions {
   sessionId?: string;
   userIdHash?: string;
 }
+
+export type ClientLogCorrelation =
+  | (Partial<TelemetryCorrelationContext> & { traceparent?: string | null })
+  | undefined;
 
 async function postToRelay(relayPath: string, events: TelemetryLogEvent[]): Promise<void> {
   await fetch(relayPath, {
@@ -50,17 +55,22 @@ export function createClientTelemetryLogger(options: ClientLoggerOptions) {
   );
 
   return {
-    debug(message: string, attrs?: TelemetryLogAttrs) {
-      return logger.debug(message, { attrs });
+    debug(message: string, attrs?: TelemetryLogAttrs, correlation?: ClientLogCorrelation) {
+      return logger.debug(message, { attrs, correlation });
     },
-    info(message: string, attrs?: TelemetryLogAttrs) {
-      return logger.info(message, { attrs });
+    info(message: string, attrs?: TelemetryLogAttrs, correlation?: ClientLogCorrelation) {
+      return logger.info(message, { attrs, correlation });
     },
-    warn(message: string, attrs?: TelemetryLogAttrs) {
-      return logger.warn(message, { attrs });
+    warn(message: string, attrs?: TelemetryLogAttrs, correlation?: ClientLogCorrelation) {
+      return logger.warn(message, { attrs, correlation });
     },
-    error(message: string, attrs?: TelemetryLogAttrs, error?: { name: string; message: string }) {
-      return logger.error(message, { attrs, error });
+    error(
+      message: string,
+      attrs?: TelemetryLogAttrs,
+      error?: { name: string; message: string },
+      correlation?: ClientLogCorrelation,
+    ) {
+      return logger.error(message, { attrs, error, correlation });
     },
     correlation() {
       const correlation = buildCorrelationContext({ session_id: sessionId });

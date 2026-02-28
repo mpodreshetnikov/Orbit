@@ -66,6 +66,16 @@ sum by (error_code) (
 {service_name="$service", env="$env"} | json | trace_id!="" | line_format "{{.trace_id}} {{.error_code}} {{.message}}"
 ```
 
+Orbit frontend/edge correlation starters:
+
+```logql
+{service_name="orbit"} | json | message=~"edge_function_request_started|edge_function_request_failed|supabase_rpc_started|supabase_rpc_failed"
+```
+
+```logql
+{service_name="supabase-function"} | json | trace_id="$trace_id" | line_format "{{.component}} {{.message}} {{.request_id}}"
+```
+
 Pattern analysis input must be a selector-only stream:
 
 ```logql
@@ -90,6 +100,20 @@ Latency-focused:
 
 ```traceql
 { resource.service.name = "$service" && duration > 500ms }
+```
+
+Orbit span-name filters:
+
+```traceql
+{ resource.service.name = "orbit" && name =~ "web\\.supabase\\.rpc\\..*" }
+```
+
+```traceql
+{ resource.service.name = "orbit" && name =~ "web\\.edge_function\\..*" }
+```
+
+```traceql
+{ resource.service.name = "supabase-function" && name =~ "edge\\..*\\.request" }
 ```
 
 Bug RCA focus:

@@ -1,4 +1,5 @@
 import { encodeBase64 } from "std/encoding/base64";
+import type { EdgeTelemetry } from "../_shared/observability.ts";
 import { selectSuggestedTitle } from "./title.ts";
 import type { OpenRouterOcrClient, OcrImageDataUrl } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
@@ -11,6 +12,7 @@ export interface HealthOcrServiceDeps {
   defaultTitle?: string;
   now?: () => number;
   log?: Pick<Console, "log" | "error">;
+  telemetry?: EdgeTelemetry;
 }
 
 export interface HealthOcrServiceInput {
@@ -68,44 +70,87 @@ export async function runHealthOcrService(
   deps: HealthOcrServiceDeps,
 ): Promise<ServiceResult> {
   const log = deps.log ?? console;
+  const telemetry = deps.telemetry;
   const startMs = (deps.now ?? (() => Date.now()))();
   const maxOcrErrorLength = deps.maxOcrErrorLength ?? DEFAULT_MAX_OCR_ERROR_LENGTH;
   const defaultTitle = deps.defaultTitle ?? DEFAULT_TITLE;
   const recordId = input.recordId;
   let shouldMarkFailure = false;
+  const serviceSpan = telemetry?.startSpan("edge.health_ocr.service", {
+    attrs: {
+      has_record_id: Boolean(recordId),
+    },
+  });
+  telemetry?.info("health_ocr_service_started", {
+    has_record_id: Boolean(recordId),
+  });
 
   try {
+    const authSpan = telemetry?.startSpan("edge.health_ocr.auth");
     const user = await deps.repository.authenticateUser(input.authToken);
     if (!user) {
+      await authSpan?.end({
+        status: "error",
+        statusMessage: "Unauthorized - invalid token",
+      });
       throw new Error("Unauthorized - invalid token");
     }
 
     const allowed = await deps.repository.isAllowedUser(user);
     if (!allowed) {
+      await authSpan?.end({
+        status: "error",
+        statusMessage: "User not in allowlist",
+      });
       throw new Error("User not in allowlist");
     }
+    await authSpan?.end({ status: "ok" });
 
     if (!recordId) {
       throw new Error("Missing required field: record_id");
     }
     shouldMarkFailure = true;
 
+    const recordSpan = telemetry?.startSpan("edge.health_ocr.get_record");
     const record = await deps.repository.getRecord(recordId);
     if (!record) {
+      await recordSpan?.end({
+        status: "error",
+        statusMessage: "Record not found or access denied",
+      });
       throw new Error("Record not found or access denied");
     }
+    await recordSpan?.end({ status: "ok" });
 
+    const attachmentsSpan = telemetry?.startSpan("edge.health_ocr.get_attachments");
     const attachments = await deps.repository.getAttachments(recordId);
     if (attachments.length === 0) {
+      await attachmentsSpan?.end({
+        status: "error",
+        statusMessage: "No attachments found for this record",
+      });
       throw new Error("No attachments found for this record");
     }
+    await attachmentsSpan?.end({
+      status: "ok",
+      attrs: { attachment_count: attachments.length },
+    });
 
     const pageTexts: string[] = [];
     let suggestedTitle = defaultTitle;
 
     for (let index = 0; index < attachments.length; index++) {
+      const pageSpan = telemetry?.startSpan("edge.health_ocr.page", {
+        attrs: {
+          attachment_index: index,
+        },
+      });
       const dataUrl = await downloadOneDataUrl(deps, attachments[index]);
       if (!dataUrl) {
+        await pageSpan?.end({
+          status: "error",
+          statusMessage: "Attachment download failed",
+        });
         pageTexts.push("");
         continue;
       }
@@ -118,8 +163,18 @@ export async function runHealthOcrService(
         if (index === 0) {
           suggestedTitle = selectSuggestedTitle(result.suggested_title, suggestedTitle);
         }
+        await pageSpan?.end({
+          status: "ok",
+          attrs: {
+            ocr_chars: result.ocr_text.length,
+          },
+        });
       } catch (error) {
         log.error(`OCR failed for ${attachments[index].storage_path}:`, error);
+        await pageSpan?.end({
+          status: "error",
+          statusMessage: error instanceof Error ? error.message : "OCR failed",
+        });
         pageTexts.push("");
       }
     }
@@ -129,9 +184,16 @@ export async function runHealthOcrService(
     }
 
     const fullOcrText = buildCombinedPageText(pageTexts);
+    const persistSpan = telemetry?.startSpan("edge.health_ocr.persist_record");
     await deps.repository.updateRecordSuccess(recordId, {
       ocrText: fullOcrText,
       title: suggestedTitle,
+    });
+    await persistSpan?.end({
+      status: "ok",
+      attrs: {
+        full_text_chars: fullOcrText.length,
+      },
     });
 
     log.log(
@@ -140,6 +202,17 @@ export async function runHealthOcrService(
       "duration_ms:",
       (deps.now ?? (() => Date.now()))() - startMs,
     );
+    telemetry?.info("health_ocr_service_completed", {
+      record_id: recordId,
+      duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+      char_count: fullOcrText.length,
+    });
+    await serviceSpan?.end({
+      status: "ok",
+      attrs: {
+        duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+      },
+    });
 
     return {
       status: 200,
@@ -161,14 +234,28 @@ export async function runHealthOcrService(
       "error:",
       error,
     );
+    telemetry?.error("health_ocr_service_failed", {
+      record_id: recordId ?? "missing",
+      duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+      error_message: errorMessage,
+    });
 
     if (recordId && shouldMarkFailure) {
       try {
+        const failureSpan = telemetry?.startSpan("edge.health_ocr.persist_failure");
         await deps.repository.updateRecordFailure(recordId, truncatedMessage);
+        await failureSpan?.end({ status: "ok" });
       } catch (updateError) {
         log.error("Failed to update record with ocr_failed:", updateError);
       }
     }
+    await serviceSpan?.end({
+      status: "error",
+      statusMessage: errorMessage,
+      attrs: {
+        duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+      },
+    });
 
     return {
       status: 400,

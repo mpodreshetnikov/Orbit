@@ -10,6 +10,7 @@ const hookMocks = vi.hoisted(() => ({
   useCreateMoneyAccount: vi.fn(),
   useMoneyCardsByAccountIds: vi.fn(),
   useCreateMoneyCard: vi.fn(),
+  fetchEdgeFunctionWithTelemetry: vi.fn(),
 }));
 
 const i18nMocks = vi.hoisted(() => ({
@@ -72,6 +73,12 @@ vi.mock("@/lib/supabase", () => ({
 vi.mock("@/lib/import/connector-types", () => ({
   getConnectors: () => connectorsState,
   registerConnector: vi.fn(),
+}));
+
+vi.mock("@/lib/observability/edge-function-fetch", () => ({
+  fetchEdgeFunctionWithTelemetry: (
+    ...args: Parameters<(typeof hookMocks)["fetchEdgeFunctionWithTelemetry"]>
+  ) => hookMocks.fetchEdgeFunctionWithTelemetry(...args),
 }));
 
 vi.mock("react-dropzone", () => ({
@@ -138,6 +145,7 @@ describe("MoneyImportPage", () => {
     createCardMutateAsync.mockReset();
     fetchMock.mockReset();
     getSessionMock.mockReset();
+    hookMocks.fetchEdgeFunctionWithTelemetry.mockReset();
     routerMock.push.mockReset();
     routerMock.replace.mockReset();
     routerMock.refresh.mockReset();
@@ -149,6 +157,9 @@ describe("MoneyImportPage", () => {
     getSessionMock.mockResolvedValue({
       data: { session: { access_token: "access-token" } },
     });
+    hookMocks.fetchEdgeFunctionWithTelemetry.mockImplementation(
+      async (url: string, init?: RequestInit) => fetchMock(url, init),
+    );
     (globalThis.fetch as unknown) = fetchMock;
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.test";
 
