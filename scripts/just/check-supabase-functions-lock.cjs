@@ -22,7 +22,9 @@ let parsedLock;
 try {
   parsedLock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
 } catch (error) {
-  fail(`Failed to parse supabase/functions/deno.lock: ${error instanceof Error ? error.message : String(error)}`);
+  fail(
+    `Failed to parse supabase/functions/deno.lock: ${error instanceof Error ? error.message : String(error)}`,
+  );
 }
 
 const actualVersion = String(parsedLock.version ?? "");

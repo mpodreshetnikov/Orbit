@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grafana Issue Investigation"
+  short_description: "Investigate bugs/incidents via logs, traces, metrics"
+  default_prompt: "Use $grafana-issue-investigation to run RCA for this bug or production issue using Grafana structured logs, traces, and metrics."

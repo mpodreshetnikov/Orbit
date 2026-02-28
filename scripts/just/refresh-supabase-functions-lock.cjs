@@ -78,7 +78,12 @@ if ((refreshResult.status ?? 1) !== 0) {
   process.exit(refreshResult.status ?? 1);
 }
 
-const verifyScriptPath = path.join(repoRoot, "scripts", "just", "check-supabase-functions-lock.cjs");
+const verifyScriptPath = path.join(
+  repoRoot,
+  "scripts",
+  "just",
+  "check-supabase-functions-lock.cjs",
+);
 const verifyResult = spawnSync(process.execPath, [verifyScriptPath], {
   cwd: repoRoot,
   stdio: "inherit",

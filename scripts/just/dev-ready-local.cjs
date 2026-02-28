@@ -58,7 +58,8 @@ const CONCURRENTLY_BIN = path.join(
 );
 const stopDbOnExit = (process.argv[2] || "true").toLowerCase() !== "false";
 const obsAutoEnabled = (process.env.OBS_AUTO || "1").toLowerCase() !== "0";
-const syncSupabaseOnVersionDrift = (process.env.SUPABASE_SYNC_ON_DRIFT || "0").toLowerCase() === "1";
+const syncSupabaseOnVersionDrift =
+  (process.env.SUPABASE_SYNC_ON_DRIFT || "0").toLowerCase() === "1";
 const requiredWebPort = Number.parseInt(process.env.WEB_DEV_PORT || "3000", 10);
 let cleanedUp = false;
 let obsStarted = false;
@@ -189,9 +190,7 @@ function startSupabaseWithVersionSync() {
   const combinedOutput = `${firstStart.stdout}\n${firstStart.stderr}`;
   if (firstStart.status !== 0) {
     if (hasInconsistentLocalStack(combinedOutput)) {
-      logInfo(
-        "Detected inconsistent local Supabase stack. Stopping and retrying startup once.",
-      );
+      logInfo("Detected inconsistent local Supabase stack. Stopping and retrying startup once.");
       const stopCode = runStep("supabase-local-stop");
       if (stopCode !== 0) {
         return stopCode;
@@ -368,7 +367,9 @@ function ensureRequiredWebPortAvailable(port) {
       (commandLine.includes("start-server.js") || commandLine.includes("next\\dist\\bin\\next"));
 
     if (isStaleNextProcess) {
-      logInfo(`Port ${port} is occupied by stale Next.js process ${pid}. Terminating process tree.`);
+      logInfo(
+        `Port ${port} is occupied by stale Next.js process ${pid}. Terminating process tree.`,
+      );
       terminateProcessTree(pid);
     }
   }

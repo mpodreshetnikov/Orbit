@@ -1,0 +1,3 @@
+interface:
+  display_name: "Relevant Quality Checks"
+  short_description: "Run relevant repo quality checks before handoff"

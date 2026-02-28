@@ -23,7 +23,23 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 - **`ci`**: full local gate (adds `build-local-all`, unit coverage, `coverage-check`). Use before push or PR.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 
-**After code changes:** When a task involves code changes, run **`dev`** (`just dev`) and verify the local stack starts without build/runtime boot errors (it may remain running for HMR/watch flows). Also run **`ci`** (`just ci-verify-local`) and ensure it passes before marking the task complete or opening/updating a PR. Use **`ci-fast`** during development for faster feedback.
+## Stage-Based Execution Cadence
+
+This section is the canonical source for when checks run during a task.
+
+When a task changes files, apply checks by stage, not after every single edit.
+
+- During each task stage that changes files:
+  - select checks from **Change-Type Check Matrix** for files touched in that stage;
+  - run scoped checks needed for quick confidence;
+  - for non-doc stages, run `ci-fast` before moving to the next stage.
+- Final stage before handoff for tasks with non-doc file changes:
+  - run `dev` and verify clean boot;
+  - run `ci` and require success.
+- Docs-only tasks:
+  - use docs checks from the matrix and skip `ci` unless full validation is explicitly requested.
+
+Automation and agent skills must reference this section and the matrix instead of duplicating their content.
 
 ## Canonical Command Policy
 
@@ -42,16 +58,16 @@ Every behavior change must update tests in the same change set.
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.
 
-| Change Type                            | Mandatory Checks                                              | Additional Checks                                      | Evidence Required                              |
-| -------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
-| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check     | none                                                   | list of changed docs and cross-links validated |
-| UI/routes/components                   | `dev` + `ci`                                                  | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
-| Hooks/client orchestration             | `dev` + `ci`                                                  | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
-| Edge/API workflow                      | `dev` + `ci`                                                  | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
+| Change Type                            | Mandatory Checks                                                      | Additional Checks                                      | Evidence Required                              |
+| -------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
+| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check             | none                                                   | list of changed docs and cross-links validated |
+| UI/routes/components                   | `dev` + `ci`                                                          | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
+| Hooks/client orchestration             | `dev` + `ci`                                                          | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `dev` + `ci`                                                          | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
 | DB schema/policy/function/trigger/cron | `dev` + `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
-| Extension/service worker/import flow   | `dev` + `ci`                                                  | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
-| Scripts/tooling                        | `dev` + `ci`                                                  | verify CLI behavior and error handling                 | command outcomes + command transcript          |
-| CI/deploy/security config              | `dev` + `ci`, `secrets-preflight`                            | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
+| Extension/service worker/import flow   | `dev` + `ci`                                                          | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
+| Scripts/tooling                        | `dev` + `ci`                                                          | verify CLI behavior and error handling                 | command outcomes + command transcript          |
+| CI/deploy/security config              | `dev` + `ci`, `secrets-preflight`                                     | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 
