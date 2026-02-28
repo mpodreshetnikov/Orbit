@@ -125,6 +125,19 @@ describe("updateSession", () => {
     expect(mockRefs.redirect).not.toHaveBeenCalled();
   });
 
+  it("returns next response for dev login route when unauthenticated", async () => {
+    const { request } = createRequest("/auth/dev-login");
+    createSupabase({
+      user: null,
+    });
+
+    const { updateSession } = await import("./supabase-middleware");
+    const response = await updateSession(request);
+
+    expect(response).toEqual(expect.objectContaining({ kind: "next" }));
+    expect(mockRefs.redirect).not.toHaveBeenCalled();
+  });
+
   it("redirects unauthenticated user from protected route to login", async () => {
     const { request } = createRequest("/health/records");
     createSupabase({

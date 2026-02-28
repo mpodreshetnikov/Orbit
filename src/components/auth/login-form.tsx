@@ -5,13 +5,20 @@ import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function LoginForm() {
   const t = useTranslations();
   const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
+  const [isDevLoading, setIsDevLoading] = useState(false);
+  const [devEmail, setDevEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const isDevAuthBypassEnabled = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED === "1";
 
   const handleGoogleLogin = async () => {
     setIsLoading(true);
@@ -46,12 +53,34 @@ export function LoginForm() {
     }
   };
 
+  const handleDevLogin = () => {
+    setError(null);
+
+    const email = devEmail.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(email)) {
+      setError(t("auth.devBypass.invalidEmail"));
+      return;
+    }
+
+    setIsDevLoading(true);
+    const redirectTo = searchParams.get("redirect") || "/health";
+    const devLoginUrl = new URL("/auth/dev-login", window.location.origin);
+    devLoginUrl.searchParams.set("email", email);
+    devLoginUrl.searchParams.set("next", redirectTo);
+    window.open(devLoginUrl.toString(), "_self");
+  };
+
   return (
     <div className="space-y-4">
       {error && (
         <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
       )}
-      <Button onClick={handleGoogleLogin} disabled={isLoading} className="w-full" size="lg">
+      <Button
+        onClick={handleGoogleLogin}
+        disabled={isLoading || isDevLoading}
+        className="w-full"
+        size="lg"
+      >
         {isLoading ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -81,6 +110,33 @@ export function LoginForm() {
           </>
         )}
       </Button>
+
+      {isDevAuthBypassEnabled && (
+        <div className="space-y-3 rounded-md border border-dashed border-border p-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {t("auth.devBypass.title")}
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="dev-bypass-email">{t("auth.devBypass.emailLabel")}</Label>
+            <Input
+              id="dev-bypass-email"
+              type="email"
+              value={devEmail}
+              onChange={(event) => setDevEmail(event.target.value)}
+              placeholder={t("auth.devBypass.emailPlaceholder")}
+              disabled={isLoading || isDevLoading}
+            />
+          </div>
+          <Button
+            onClick={handleDevLogin}
+            disabled={isLoading || isDevLoading}
+            className="w-full"
+            variant="outline"
+          >
+            {isDevLoading ? t("auth.devBypass.signingIn") : t("auth.devBypass.signInButton")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

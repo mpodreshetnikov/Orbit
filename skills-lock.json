@@ -16,6 +16,16 @@
       "sourceType": "github",
       "computedHash": "07009b14341d7441cb31951b42287f986b6c4b4a9496ea03ef3ec6f9715bd7b7"
     },
+    "playwright-cli": {
+      "source": "microsoft/playwright-cli",
+      "sourceType": "github",
+      "computedHash": "d0c9769e2df40ba1f51660294e6833566cec8a0f8c6a6ef5eb922afe3f573ef6"
+    },
+    "playwright-skill": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "a88631790e6a0ef2a3fbe70528a2a599357efa63b89729997d79fce08e5dabc3"
+    },
     "supabase-postgres-best-practices": {
       "source": "supabase/agent-skills",
       "sourceType": "github",

@@ -457,6 +457,14 @@
     "subtitle": "Sign in to access your family superapp",
     "signInWithGoogle": "Sign in with Google",
     "signingIn": "Signing in...",
+    "devBypass": {
+      "title": "Local dev sign in",
+      "emailLabel": "Email",
+      "emailPlaceholder": "tester@example.com",
+      "signInButton": "Sign in as this user (dev)",
+      "signingIn": "Signing in (dev)...",
+      "invalidEmail": "Enter a valid email for dev sign in."
+    },
     "signIn": "Sign in",
     "signOut": "Sign out",
     "accessDenied": {

@@ -120,6 +120,35 @@ insert into public.allowed_users (email) values
 
 Verify in Table Editor `allowed_users`. `auth_user_id` stays null until first sign-in.
 
+## Local Dev Auth Bypass (No Google)
+
+Use this only for local testing when you need to sign in quickly as any email.
+
+1. Add local env flags in `.env.local`:
+
+```env
+DEV_AUTH_BYPASS_ENABLED=1
+NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED=1
+SUPABASE_SERVICE_ROLE_KEY=<your-local-service-role-key>
+```
+
+2. Ensure local stack is running (`dev-ready` from `AGENTS.md`).
+3. Open `/login`.
+4. In **Local dev sign in**, enter any email and continue.
+
+How it works:
+
+- Calls `GET /auth/dev-login?email=<email>&next=<path>`.
+- Creates user when missing (or reuses existing user).
+- Upserts `public.allowed_users`.
+- Generates a magic-link token and completes login via `/auth/callback`.
+
+Safety constraints:
+
+- Disabled by default.
+- Works only when `DEV_AUTH_BYPASS_ENABLED=1` and non-production runtime.
+- Requires `SUPABASE_SERVICE_ROLE_KEY` in local env.
+
 ## Test Setup
 
 1. Start all local services in one terminal: run `dev-ready` from `AGENTS.md` (recommended).

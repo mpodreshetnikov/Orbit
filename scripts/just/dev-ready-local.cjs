@@ -57,12 +57,39 @@ const CONCURRENTLY_BIN = path.join(
   "concurrently.js",
 );
 const stopDbOnExit = (process.argv[2] || "true").toLowerCase() !== "false";
+const authMode = (process.argv[3] || "default").toLowerCase();
 const obsAutoEnabled = (process.env.OBS_AUTO || "1").toLowerCase() !== "0";
 const syncSupabaseOnVersionDrift =
   (process.env.SUPABASE_SYNC_ON_DRIFT || "0").toLowerCase() === "1";
 const requiredWebPort = Number.parseInt(process.env.WEB_DEV_PORT || "3000", 10);
 let cleanedUp = false;
 let obsStarted = false;
+
+function parseSupabaseStatusEnv(output) {
+  const parsed = {};
+  const lines = output.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.includes("=")) {
+      continue;
+    }
+
+    const [key, ...valueParts] = trimmed.split("=");
+    if (!key) {
+      continue;
+    }
+
+    let value = valueParts.join("=");
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    parsed[key] = value;
+  }
+  return parsed;
+}
 
 function runNpxSync(args, options = {}) {
   const baseOptions = {
@@ -76,6 +103,51 @@ function runNpxSync(args, options = {}) {
   }
 
   return spawnSync(NPX_BIN, args, baseOptions);
+}
+
+function readSupabaseRuntimeEnv() {
+  const result = runNpxSync(["supabase", "status", "-o", "env"], {
+    stdio: "pipe",
+    encoding: "utf8",
+  });
+
+  if (typeof result.status !== "number" || result.status !== 0) {
+    return null;
+  }
+
+  return parseSupabaseStatusEnv(result.stdout || "");
+}
+
+function configureDevAuthBypassEnv() {
+  if (authMode !== "bypass") {
+    return 0;
+  }
+
+  process.env.DEV_AUTH_BYPASS_ENABLED = "1";
+  process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED = "1";
+
+  const runtimeEnv = readSupabaseRuntimeEnv();
+  if (runtimeEnv) {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY && runtimeEnv.SERVICE_ROLE_KEY) {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = runtimeEnv.SERVICE_ROLE_KEY;
+    }
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL && runtimeEnv.API_URL) {
+      process.env.NEXT_PUBLIC_SUPABASE_URL = runtimeEnv.API_URL;
+    }
+    if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY && runtimeEnv.ANON_KEY) {
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = runtimeEnv.ANON_KEY;
+    }
+  }
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error(
+      "[dev-ready-local] Missing SUPABASE_SERVICE_ROLE_KEY for bypass mode. Set it in env and retry.",
+    );
+    return 1;
+  }
+
+  logInfo("Dev auth bypass enabled for this session.");
+  return 0;
 }
 
 function formatArgsForLogs(args) {
@@ -390,6 +462,12 @@ function ensureRequiredWebPortAvailable(port) {
 
 logInfo(`Using just binary: ${JUST_BIN}`);
 logInfo(`Using npx binary: ${NPX_BIN}`);
+logInfo(`Auth mode: ${authMode}`);
+
+if (authMode !== "default" && authMode !== "bypass") {
+  console.error(`[dev-ready-local] Unknown auth mode '${authMode}'. Use 'default' or 'bypass'.`);
+  process.exit(1);
+}
 
 const dockerReadyCode = ensureDockerReady();
 if (dockerReadyCode !== 0) {
@@ -421,6 +499,13 @@ if (migrateCode !== 0) {
   stopSupabaseIfNeeded();
   stopObservabilityIfNeeded();
   process.exit(migrateCode);
+}
+
+const bypassEnvCode = configureDevAuthBypassEnv();
+if (bypassEnvCode !== 0) {
+  stopSupabaseIfNeeded();
+  stopObservabilityIfNeeded();
+  process.exit(bypassEnvCode);
 }
 
 const webPortCheckCode = ensureRequiredWebPortAvailable(requiredWebPort);

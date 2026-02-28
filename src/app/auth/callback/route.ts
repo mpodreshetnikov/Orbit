@@ -2,14 +2,39 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 
+const EMAIL_OTP_TYPES = new Set([
+  "magiclink",
+  "invite",
+  "recovery",
+  "signup",
+  "email_change",
+  "email",
+] as const);
+
+type EmailOtpType = "magiclink" | "invite" | "recovery" | "signup" | "email_change" | "email";
+
+function sanitizeNextPath(next: string | null): string {
+  if (next && next.startsWith("/") && !next.startsWith("//")) {
+    return next;
+  }
+
+  return "/health";
+}
+
+function isEmailOtpType(value: string | null): value is EmailOtpType {
+  return value !== null && EMAIL_OTP_TYPES.has(value as EmailOtpType);
+}
+
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
-  const next = requestUrl.searchParams.get("next") || "/health";
+  const tokenHash = requestUrl.searchParams.get("token_hash");
+  const type = requestUrl.searchParams.get("type");
+  const next = sanitizeNextPath(requestUrl.searchParams.get("next"));
 
   const redirectUrl = new URL(next, request.url);
 
-  if (code) {
+  if (code || (tokenHash && isEmailOtpType(type))) {
     // Create a response that we'll use to set cookies
     const response = NextResponse.redirect(redirectUrl);
 
@@ -30,7 +55,14 @@ export async function GET(request: NextRequest) {
       },
     );
 
-    await supabase.auth.exchangeCodeForSession(code);
+    if (code) {
+      await supabase.auth.exchangeCodeForSession(code);
+    } else if (tokenHash && isEmailOtpType(type)) {
+      await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type,
+      });
+    }
 
     return response;
   }

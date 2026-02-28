@@ -192,16 +192,16 @@ obs-down:
   docker compose -f docker-compose.observability.yml down --remove-orphans; if ($LASTEXITCODE -ne 0) { Write-Output "obs-down skipped (stack not running or Docker unavailable)."; exit 0 }
 
 # Prepare DB, run web dev + extension watch + functions serve, and cleanup on exit.
-dev-ready-local stop_db='true':
-  node scripts/just/dev-ready-local.cjs {{stop_db}}
+dev-ready-local stop_db='true' auth='default':
+  node scripts/just/dev-ready-local.cjs {{stop_db}} {{auth}}
 
 # Stop local developer services.
 dev-local-stop:
   {{ just_executable() }} supabase-local-stop; $supabaseExit = $LASTEXITCODE; if ($env:OBS_AUTO -ne "0") { {{ just_executable() }} obs-down }; if ($supabaseExit -ne 0) { exit $supabaseExit }
 
-# Simple dev command aliases (`just dev` and `just dev stop`).
-dev action='start':
-  if ("{{action}}" -eq "start") { {{ just_executable() }} dev-ready-local } elseif ("{{action}}" -eq "stop") { {{ just_executable() }} dev-local-stop } else { Write-Error "Unknown dev action: {{action}}. Use 'start' or 'stop'."; exit 1 }
+# Simple dev command aliases (`just dev`, `just dev stop`, `just dev start bypass`).
+dev action='start' auth='default':
+  if ("{{action}}" -eq "start") { if ("{{auth}}" -eq "default" -or "{{auth}}" -eq "bypass") { {{ just_executable() }} dev-ready-local true {{auth}} } else { Write-Error "Unknown dev auth mode: {{auth}}. Use 'default' or 'bypass'."; exit 1 } } elseif ("{{action}}" -eq "stop") { {{ just_executable() }} dev-local-stop } else { Write-Error "Unknown dev action: {{action}}. Use 'start' or 'stop'."; exit 1 }
 
 # Single command to build and check all local apps plus database with guaranteed cleanup.
 build-local-all:

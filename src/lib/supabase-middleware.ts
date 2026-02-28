@@ -36,7 +36,7 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Public routes that don't require auth
-  const publicRoutes = ["/login", "/auth/callback", "/access-denied"];
+  const publicRoutes = ["/login", "/auth/callback", "/auth/dev-login", "/access-denied"];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
 
   // If accessing a protected route

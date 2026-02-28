@@ -1,4 +1,4 @@
-{
+﻿{
   "app": {
     "name": "Семейное приложение",
     "tagline": "Цифровой дом вашей семьи"
@@ -457,6 +457,14 @@
     "subtitle": "Войдите, чтобы получить доступ к семейному приложению",
     "signInWithGoogle": "Войти через Google",
     "signingIn": "Вход...",
+    "devBypass": {
+      "title": "Локальный вход для разработки",
+      "emailLabel": "Email",
+      "emailPlaceholder": "tester@example.com",
+      "signInButton": "Войти как этот пользователь (dev)",
+      "signingIn": "Вход (dev)...",
+      "invalidEmail": "Введите корректный email для dev-входа."
+    },
     "signIn": "Войти",
     "signOut": "Выйти",
     "accessDenied": {

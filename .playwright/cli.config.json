@@ -1,0 +1,13 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "launchOptions": {
+      "channel": "chromium",
+      "headless": false,
+      "args": [
+        "--disable-extensions-except=C:/Users/dev/Documents/Coding/Orbit/browserExtension/dist",
+        "--load-extension=C:/Users/dev/Documents/Coding/Orbit/browserExtension/dist"
+      ]
+    }
+  }
+}
