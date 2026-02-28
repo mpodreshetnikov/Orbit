@@ -13,6 +13,9 @@ Use these command IDs in plans, PRs, and handoffs:
 - `install`: `just install-dependencies`
 - `dev-ready`: `just dev-ready-local`
 - `dev-stop`: `just dev-local-stop`
+- `dev`: `just dev` (start local developer stack; long-running for HMR/watch workflows; use `just dev stop` when teardown is needed)
+- `obs-up`: `just obs-up` (start local Grafana LGTM stack)
+- `obs-down`: `just obs-down` (stop local Grafana LGTM stack)
 - `format-check`: `just quality-format-check`
 - `format-write`: `just quality-format-write`
 - `test`: `just quality-smoke-build` (smoke/integration build gate)
@@ -30,6 +33,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `lint-ext`: `just quality-lint-extension`
 - `lint-scripts`: `just quality-lint-scripts`
 - `lint-supabase`: `just quality-lint-supabase-functions`
+- `functions-lock-check`: `just quality-check-supabase-functions-lock` (verify Supabase Edge Functions lockfile format compatibility)
+- `functions-lock-refresh`: `just supabase-functions-lock-refresh` (regenerate `supabase/functions/deno.lock` with runtime-compatible Deno)
 - `types`: `just quality-typecheck`
 - `quality`: `just quality` (all static checks: format, lint, typecheck; no builds, DB, or tests)
 - `db-lint`: `just quality-db-lint` (local DB lint scoped to `public` schema, warnings fail)
@@ -44,6 +49,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `ci-fast`: `just ci-verify-local-fast` (quick local gate: no Supabase, no coverage; use for fast feedback; use `ci` for full pre-push)
 - `check`: `just check` (full local quality gate)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
+- `mcp-grafana-token-create`: `just mcp-grafana-token-create [service_account_id] [token_name]` (create a local Grafana service account token for MCP via Grafana API; auto-creates `mcp-local` when id is omitted)
+- `mcp-grafana-token-list`: `just mcp-grafana-token-list [service_account_id]` (list local Grafana service account token metadata via Grafana API; defaults to `mcp-local`)
 - `secrets-preflight`: `just secrets-preflight` (scan likely push range for accidentally committed secrets)
 - `secrets-preflight-range`: `just secrets-preflight-range <from> <to>` (scan an explicit commit range; used by CI)
 

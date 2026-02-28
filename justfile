@@ -18,7 +18,7 @@ install-dependencies:
 
 # Run Next.js development server.
 web-dev-server:
-  npx next dev
+  $port = if ($env:WEB_DEV_PORT) { $env:WEB_DEV_PORT } else { "3000" }; npx next dev --port $port
 
 # Build the web app for production.
 web-build-production:
@@ -71,8 +71,16 @@ quality-lint-fix:
 quality-typecheck-web:
   npx tsc --noEmit
 
+# Verify Supabase Edge Functions lockfile compatibility.
+quality-check-supabase-functions-lock:
+  node scripts/just/check-supabase-functions-lock.cjs
+
+# Regenerate Supabase Edge Functions lockfile with runtime-compatible Deno.
+supabase-functions-lock-refresh:
+  node scripts/just/refresh-supabase-functions-lock.cjs
+
 # Run Deno type checks for Supabase Edge Functions.
-quality-typecheck-supabase-functions:
+quality-typecheck-supabase-functions: quality-check-supabase-functions-lock
   deno check --config supabase/functions/deno.json supabase/functions/*/index.ts
 
 # Run aggregate type checks.
@@ -174,12 +182,26 @@ supabase-local-artifacts-verify:
 supabase-local-functions-serve:
   npx supabase functions serve
 
+# Start local observability stack (grafana/otel-lgtm).
+obs-up:
+  node -e "const { ensureDockerReady } = require('./scripts/just/docker-preflight.cjs'); process.exit(ensureDockerReady());"
+  docker compose -f docker-compose.observability.yml up -d
+
+# Stop local observability stack (idempotent).
+obs-down:
+  docker compose -f docker-compose.observability.yml down --remove-orphans; if ($LASTEXITCODE -ne 0) { Write-Output "obs-down skipped (stack not running or Docker unavailable)."; exit 0 }
+
 # Prepare DB, run web dev + extension watch + functions serve, and cleanup on exit.
 dev-ready-local stop_db='true':
   node scripts/just/dev-ready-local.cjs {{stop_db}}
 
 # Stop local developer services.
-dev-local-stop: supabase-local-stop
+dev-local-stop:
+  {{ just_executable() }} supabase-local-stop; $supabaseExit = $LASTEXITCODE; if ($env:OBS_AUTO -ne "0") { {{ just_executable() }} obs-down }; if ($supabaseExit -ne 0) { exit $supabaseExit }
+
+# Simple dev command aliases (`just dev` and `just dev stop`).
+dev action='start':
+  if ("{{action}}" -eq "start") { {{ just_executable() }} dev-ready-local } elseif ("{{action}}" -eq "stop") { {{ just_executable() }} dev-local-stop } else { Write-Error "Unknown dev action: {{action}}. Use 'start' or 'stop'."; exit 1 }
 
 # Single command to build and check all local apps plus database with guaranteed cleanup.
 build-local-all:
@@ -197,6 +219,14 @@ check: build-local-all test-unit-coverage coverage-check
 # Regenerate per-client MCP configs from canonical source.
 mcp-sync:
   npx tsx scripts/sync-mcp-configs.ts
+
+# Create a local Grafana service account token for MCP via Grafana API.
+mcp-grafana-token-create service_account_id='' token_name='mcp-grafana-local':
+  $args = @("scripts/mcp/create-grafana-mcp-token.ts", "--token-name", "{{token_name}}"); if ("{{service_account_id}}" -ne "") { $args += @("--service-account-id", "{{service_account_id}}") }; npx tsx @args
+
+# List local Grafana service account token metadata for MCP service accounts.
+mcp-grafana-token-list service_account_id='':
+  $args = @("scripts/mcp/create-grafana-mcp-token.ts", "--list-only"); if ("{{service_account_id}}" -ne "") { $args += @("--service-account-id", "{{service_account_id}}") }; npx tsx @args
 
 # Scan likely push range for accidentally committed secrets.
 secrets-preflight:

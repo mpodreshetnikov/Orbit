@@ -1,4 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
+import { createEdgeLogEvent, logEdgeEvent } from "../_shared/observability.ts";
 import { createDefaultHealthOcrDeps, type HealthOcrDeps } from "./deps.ts";
 import { runHealthOcrService } from "./service.ts";
 import type { HealthOcrRepository } from "./repository.ts";
@@ -25,6 +26,25 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
     if (req.method === "OPTIONS") {
       return new Response("ok", { headers: corsHeaders });
     }
+
+    const requestId = req.headers.get("x-request-id") ?? `health_ocr_${crypto.randomUUID()}`;
+    const emit = (
+      level: "debug" | "info" | "warn" | "error",
+      message: string,
+      attrs?: Record<string, boolean | number | string | null>,
+    ) => {
+      logEdgeEvent(
+        createEdgeLogEvent(level, message, {
+          component: "health-ocr",
+          requestId,
+          attrs,
+        }),
+      );
+    };
+
+    emit("info", "health_ocr_invocation_started", {
+      request_method: req.method,
+    });
 
     try {
       if (!deps.config.openRouterApiKey || !deps.openRouterClient) {
@@ -65,15 +85,25 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
         },
       );
 
+      emit("info", "health_ocr_invocation_completed", {
+        status_code: result.status,
+        has_record_id: recordId !== null,
+      });
+
       return new Response(JSON.stringify(result.payload), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: result.status,
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      emit("error", "health_ocr_invocation_failed", {
+        error_message: errorMessage,
+      });
+
       return new Response(
         JSON.stringify({
           success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: errorMessage,
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

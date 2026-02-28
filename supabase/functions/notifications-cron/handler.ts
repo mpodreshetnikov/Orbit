@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
 import { corsHeaders } from "../_shared/cors.ts";
 import type { Database } from "../_shared/database.types.ts";
+import { createEdgeLogEvent, logEdgeEvent } from "../_shared/observability.ts";
 import {
   filterUnsentRowsByAllowedPersons,
   mapDigestRowsToNotifications,
@@ -91,14 +92,31 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
   const resolvedServiceRoleKey = deps.supabaseServiceRoleKey ?? SUPABASE_SERVICE_ROLE_KEY;
   const resolvedVapidPublic = deps.vapidPublicKey ?? VAPID_PUBLIC_KEY;
   const resolvedVapidPrivate = deps.vapidPrivateKey ?? VAPID_PRIVATE_KEY;
+  const emit = (
+    level: "debug" | "info" | "warn" | "error",
+    message: string,
+    attrs?: Record<string, boolean | number | string | null>,
+  ) => {
+    logEdgeEvent(
+      createEdgeLogEvent(level, message, {
+        component: "notifications-cron",
+        attrs,
+      }),
+    );
+  };
 
   return async function handleNotificationsCronRequest(req: Request): Promise<Response> {
+    emit("info", "notifications_cron_invocation_started", {
+      request_method: req.method,
+    });
+
     if (req.method === "OPTIONS") {
       return new Response("ok", { headers: corsHeaders });
     }
 
     if (!resolvedSupabaseUrl || !resolvedServiceRoleKey) {
       log.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+      emit("error", "notifications_cron_missing_supabase_config");
       return jsonResponse({ error: "Server configuration error" }, 500);
     }
 
@@ -110,6 +128,7 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
       ...new Set((subs ?? []).map((row: { auth_user_id: string }) => row.auth_user_id)),
     ];
     if (userIds.length === 0) {
+      emit("info", "notifications_cron_no_subscriptions");
       return jsonResponse({ ok: true, processed: 0 }, 200);
     }
 

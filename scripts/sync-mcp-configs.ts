@@ -13,6 +13,10 @@ type CanonicalServer = {
   args?: string[];
   url?: string;
   env?: string[];
+  optional_env?: string[];
+  env_map?: Record<string, string>;
+  optional_env_map?: Record<string, string>;
+  enabled_env?: string;
   auth_kind?: AuthKind;
   auth_mode_env?: string;
   default_auth_mode?: AuthMode;
@@ -25,6 +29,10 @@ type CanonicalConfig = {
 };
 
 type ResolvedHttpAuth = { mode: "none" } | { mode: "oauth" } | { mode: "pat"; token: string };
+type StdioEnvBindings = {
+  required: Record<string, string>;
+  optional: Record<string, string>;
+};
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -32,10 +40,19 @@ const canonicalPath = path.join(repoRoot, "mcp", "servers.canonical.json");
 const mcpEnvPath = path.join(repoRoot, "mcp", ".env");
 
 function assertValidServer(name: string, server: CanonicalServer): void {
+  if (server.enabled_env && server.enabled_env.trim().length === 0) {
+    throw new Error(`Server "${name}" has empty "enabled_env".`);
+  }
+
   if (server.transport === "stdio") {
     if (!server.command) {
       throw new Error(`Server "${name}" uses stdio but is missing "command".`);
     }
+    assertValidEnvList(name, "env", server.env);
+    assertValidEnvList(name, "optional_env", server.optional_env);
+    assertValidEnvMap(name, "env_map", server.env_map);
+    assertValidEnvMap(name, "optional_env_map", server.optional_env_map);
+    assertNoBindingOverlap(name, server);
     return;
   }
 
@@ -88,6 +105,76 @@ function assertValidServer(name: string, server: CanonicalServer): void {
         `Only one token env var is currently supported for Codex output.`,
     );
   }
+}
+
+function assertValidEnvList(
+  serverName: string,
+  fieldName: "env" | "optional_env",
+  value: string[] | undefined,
+): void {
+  for (const envVarName of value ?? []) {
+    if (envVarName.trim().length === 0) {
+      throw new Error(`Server "${serverName}" has an empty env var name in "${fieldName}".`);
+    }
+  }
+}
+
+function assertValidEnvMap(
+  serverName: string,
+  fieldName: "env_map" | "optional_env_map",
+  value: Record<string, string> | undefined,
+): void {
+  for (const [targetEnvVar, sourceEnvVar] of Object.entries(value ?? {})) {
+    if (targetEnvVar.trim().length === 0) {
+      throw new Error(`Server "${serverName}" has an empty target env var in "${fieldName}".`);
+    }
+    if (sourceEnvVar.trim().length === 0) {
+      throw new Error(
+        `Server "${serverName}" has an empty source env var for target "${targetEnvVar}" in "${fieldName}".`,
+      );
+    }
+  }
+}
+
+function getStdioEnvBindings(server: CanonicalServer): StdioEnvBindings {
+  const required: Record<string, string> = {};
+  const optional: Record<string, string> = {};
+
+  for (const envVarName of server.env ?? []) {
+    required[envVarName] = envVarName;
+  }
+  for (const [targetEnvVar, sourceEnvVar] of Object.entries(server.env_map ?? {})) {
+    required[targetEnvVar] = sourceEnvVar;
+  }
+
+  for (const envVarName of server.optional_env ?? []) {
+    optional[envVarName] = envVarName;
+  }
+  for (const [targetEnvVar, sourceEnvVar] of Object.entries(server.optional_env_map ?? {})) {
+    optional[targetEnvVar] = sourceEnvVar;
+  }
+
+  return { required, optional };
+}
+
+function assertNoBindingOverlap(serverName: string, server: CanonicalServer): void {
+  const bindings = getStdioEnvBindings(server);
+  for (const requiredTargetEnvVar of Object.keys(bindings.required)) {
+    if (requiredTargetEnvVar in bindings.optional) {
+      throw new Error(
+        `Server "${serverName}" defines "${requiredTargetEnvVar}" as both required and optional env.`,
+      );
+    }
+  }
+}
+
+function isServerEnabled(server: CanonicalServer, envMap: Record<string, string>): boolean {
+  if (!server.enabled_env) {
+    return true;
+  }
+
+  const value = envValue(envMap, server.enabled_env)?.toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
 function sortObject<T>(obj: Record<string, T>): Record<string, T> {
@@ -220,17 +307,25 @@ function resolveStdioEnvValues(
   server: CanonicalServer,
   envMap: Record<string, string>,
 ): Record<string, string> {
-  const envVars = server.env ?? [];
+  const bindings = getStdioEnvBindings(server);
   const resolved: Record<string, string> = {};
 
-  for (const envVarName of envVars) {
-    const value = envValue(envMap, envVarName);
+  for (const [targetEnvVar, sourceEnvVar] of Object.entries(bindings.required)) {
+    const value = envValue(envMap, sourceEnvVar);
     if (!value) {
       throw new Error(
-        `Server "${name}" requires env var "${envVarName}" for stdio config generation.`,
+        `Server "${name}" requires env var "${sourceEnvVar}" for stdio config generation ` +
+          `(target "${targetEnvVar}").`,
       );
     }
-    resolved[envVarName] = value;
+    resolved[targetEnvVar] = value;
+  }
+
+  for (const [targetEnvVar, sourceEnvVar] of Object.entries(bindings.optional)) {
+    const value = envValue(envMap, sourceEnvVar);
+    if (value) {
+      resolved[targetEnvVar] = value;
+    }
   }
 
   return resolved;
@@ -240,10 +335,16 @@ function buildClaudeConfig(canonical: CanonicalConfig, envMap: Record<string, st
   const mcpServers: Record<string, Record<string, unknown>> = {};
 
   for (const [name, server] of Object.entries(sortObject(canonical.servers))) {
+    if (!isServerEnabled(server, envMap)) {
+      continue;
+    }
+
     if (server.transport === "stdio") {
+      const resolvedEnv = resolveStdioEnvValues(name, server, envMap);
       mcpServers[name] = {
         command: server.command,
         ...(server.args && server.args.length > 0 ? { args: server.args } : {}),
+        ...(Object.keys(resolvedEnv).length > 0 ? { env: resolvedEnv } : {}),
       };
       continue;
     }
@@ -269,10 +370,16 @@ function buildCursorConfig(canonical: CanonicalConfig, envMap: Record<string, st
   const mcpServers: Record<string, Record<string, unknown>> = {};
 
   for (const [name, server] of Object.entries(sortObject(canonical.servers))) {
+    if (!isServerEnabled(server, envMap)) {
+      continue;
+    }
+
     if (server.transport === "stdio") {
+      const resolvedEnv = resolveStdioEnvValues(name, server, envMap);
       mcpServers[name] = {
         command: server.command,
         ...(server.args && server.args.length > 0 ? { args: server.args } : {}),
+        ...(Object.keys(resolvedEnv).length > 0 ? { env: resolvedEnv } : {}),
       };
       continue;
     }
@@ -298,6 +405,10 @@ function buildCodexToml(canonical: CanonicalConfig, envMap: Record<string, strin
   const sortedServers = sortObject(canonical.servers);
 
   for (const [name, server] of Object.entries(sortedServers)) {
+    if (!isServerEnabled(server, envMap)) {
+      continue;
+    }
+
     lines.push(`[mcp_servers.${name}]`);
 
     if (server.transport === "stdio") {

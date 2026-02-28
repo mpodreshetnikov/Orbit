@@ -1,5 +1,62 @@
 {
   "servers": {
+    "tempo-local": {
+      "transport": "http",
+      "enabled_env": "MCP_TEMPO_LOCAL_ENABLED",
+      "url": "http://localhost:3200/api/mcp"
+    },
+    "grafana-local": {
+      "transport": "stdio",
+      "enabled_env": "MCP_GRAFANA_LOCAL_ENABLED",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "GRAFANA_URL",
+        "-e",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+        "-e",
+        "GRAFANA_ORG_ID",
+        "grafana/mcp-grafana",
+        "-t",
+        "stdio"
+      ],
+      "env_map": {
+        "GRAFANA_URL": "GRAFANA_LOCAL_URL",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "GRAFANA_LOCAL_SERVICE_ACCOUNT_TOKEN"
+      },
+      "optional_env_map": {
+        "GRAFANA_ORG_ID": "GRAFANA_LOCAL_ORG_ID"
+      }
+    },
+    "grafana-cloud": {
+      "transport": "stdio",
+      "enabled_env": "MCP_GRAFANA_CLOUD_ENABLED",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "GRAFANA_URL",
+        "-e",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+        "-e",
+        "GRAFANA_ORG_ID",
+        "grafana/mcp-grafana",
+        "-t",
+        "stdio"
+      ],
+      "env_map": {
+        "GRAFANA_URL": "GRAFANA_CLOUD_URL",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "GRAFANA_CLOUD_SERVICE_ACCOUNT_TOKEN"
+      },
+      "optional_env_map": {
+        "GRAFANA_ORG_ID": "GRAFANA_CLOUD_ORG_ID"
+      }
+    },
     "github": {
       "transport": "http",
       "url": "https://api.githubcopilot.com/mcp/readonly",

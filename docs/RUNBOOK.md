@@ -22,6 +22,7 @@ Notes:
 - Disable Vercel's automatic Git deploy integration if you want GitHub Actions to be the only deployment trigger.
 - Command execution policy (including avoiding `npm run` for project workflows) is canonical in `docs/QUALITY.md`.
 - MCP setup instructions are in `mcp/README.md`.
+- Observability stack setup (local LGTM + cloud + MCP queries) is in `docs/observability/README.md`.
 
 ## Triage Checklist
 
@@ -158,6 +159,7 @@ Supabase function-specific checks:
 - run `lint-supabase` for Deno lint issues.
 - run `types` (or `quality-typecheck-supabase-functions`) for `deno check` failures.
 - if Deno fails on unresolved URL imports, confirm `supabase/functions/deno.json` imports are valid and cache is fresh (`deno cache` can help diagnose).
+- if function requests fail with `worker boot error` and `Unsupported lockfile version`, run `functions-lock-refresh` from `AGENTS.md`, then rerun `functions-lock-check` and `types`.
 
 ## Money Import Issues
 
@@ -197,6 +199,7 @@ When writing or modifying code, add debug information as much as possible to sup
 - Check function logs (Supabase dashboard, Vercel logs) for the contextual IDs above.
 - Cross-reference with DB tables (`money_import_batch_rows`, `record_attachments`, etc.) using those IDs.
 - See [`docs/design/common/error-handling-and-observability.md`](./design/common/error-handling-and-observability.md) for canonical guidance.
+- See [`docs/observability/log-schema.md`](./observability/log-schema.md) for required structured log fields and PII policy.
 
 ## Incident Recovery Rules
 

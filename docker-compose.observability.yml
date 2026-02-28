@@ -1,0 +1,12 @@
+services:
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: orbit-otel-lgtm
+    volumes:
+      - ./observability/tempo-config.yaml:/otel-lgtm/tempo-config.yaml:ro
+    ports:
+      - "3300:3000"
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped

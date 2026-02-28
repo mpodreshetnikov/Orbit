@@ -2,6 +2,7 @@ import "./connectors/tbank-web.js";
 import { getConnector } from "./connectors/registry.js";
 import { APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
 import { routeBackgroundMessage, type BackgroundMessage } from "./core/background-router.js";
+import { createExtensionLogger } from "./core/observability.js";
 import { createSessionStore } from "./core/session-store.js";
 
 async function broadcastToAppTabs(message: Record<string, unknown>): Promise<void> {
@@ -76,6 +77,11 @@ async function callEdge(
 }
 
 const sessionStore = createSessionStore(chrome.storage.local);
+const telemetry = createExtensionLogger("background");
+telemetry.info("extension_background_initialized", {
+  dev_hot_reload: DEV_HOT_RELOAD,
+  app_origin_pattern_count: Array.isArray(APP_ORIGIN_PATTERNS) ? APP_ORIGIN_PATTERNS.length : 0,
+});
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, _sender, sendResponse) => {
   void (async () => {
@@ -92,6 +98,9 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, _sender, sendR
       sendResponse(response);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Unknown extension error";
+      telemetry.error("extension_background_message_error", {
+        error_message: messageText,
+      });
       await broadcastToAppTabs({
         type: "MONEY_IMPORT_ERROR",
         error: messageText,

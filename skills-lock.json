@@ -6,6 +6,16 @@
       "sourceType": "github",
       "computedHash": "516bd2154eb843a8240e43d5b285229129853114ad7075a5e141e1c08e408c84"
     },
+    "grafana-dashboards": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "3cd3a761f7e9d0f2c1ad570d9b4510dc1c4a4d9bee864d7abeb066bc0cacbbeb"
+    },
+    "opentelemetry": {
+      "source": "bobmatnyc/claude-mpm-skills",
+      "sourceType": "github",
+      "computedHash": "07009b14341d7441cb31951b42287f986b6c4b4a9496ea03ef3ec6f9715bd7b7"
+    },
     "supabase-postgres-best-practices": {
       "source": "supabase/agent-skills",
       "sourceType": "github",

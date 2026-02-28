@@ -1,5 +1,5 @@
 {
-  "version": "5",
+  "version": "4",
   "redirects": {
     "https://esm.sh/@types/bn.js@~4.11.6/index.d.ts": "https://esm.sh/@types/bn.js@4.11.6/index.d.ts",
     "https://esm.sh/@types/debug@~4.1.12/index.d.ts": "https://esm.sh/@types/debug@4.1.12/index.d.ts",

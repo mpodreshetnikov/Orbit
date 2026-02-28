@@ -1,4 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
+import { createEdgeLogEvent, logEdgeEvent } from "../_shared/observability.ts";
 import { createDefaultHealthStructureDeps, type HealthStructureDeps } from "./deps.ts";
 import { runHealthStructureService } from "./service.ts";
 
@@ -29,7 +30,29 @@ export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
       return new Response("ok", { headers: corsHeaders });
     }
 
+    const requestId = req.headers.get("x-request-id") ?? `health_structure_${crypto.randomUUID()}`;
+    const emit = (
+      level: "debug" | "info" | "warn" | "error",
+      message: string,
+      attrs?: Record<string, boolean | number | string | null>,
+    ) => {
+      logEdgeEvent(
+        createEdgeLogEvent(level, message, {
+          component: "health-structure",
+          requestId,
+          attrs,
+        }),
+      );
+    };
+
+    emit("info", "health_structure_invocation_started", {
+      request_method: req.method,
+    });
+
     if (req.method !== "POST") {
+      emit("warn", "health_structure_method_not_allowed", {
+        request_method: req.method,
+      });
       return jsonResponse({ success: false, error: "Method not allowed" }, 405);
     }
 
@@ -58,12 +81,22 @@ export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
         },
       );
 
+      emit("info", "health_structure_invocation_completed", {
+        status_code: result.status,
+        has_record_id: recordId !== null,
+      });
+
       return jsonResponse(result.payload, result.status);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      emit("error", "health_structure_invocation_failed", {
+        error_message: errorMessage,
+      });
+
       return jsonResponse(
         {
           success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: errorMessage,
         },
         400,
       );

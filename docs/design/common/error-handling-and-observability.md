@@ -52,3 +52,5 @@ Add debug information as much as possible to support triage and incident recover
 - `src/hooks/use-structure-extraction.ts`
 - `src/app/api/notifications/run-cron/route.ts`
 - [`docs/RUNBOOK.md`](../../RUNBOOK.md)
+- [`docs/observability/README.md`](../../observability/README.md)
+- [`docs/observability/log-schema.md`](../../observability/log-schema.md)

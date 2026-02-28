@@ -26,7 +26,8 @@ browserExtension/dist
 # misc
 .DS_Store
 *.pem
-.temp
+.temp*
+.tmp*
 
 # debug
 npm-debug.log*
@@ -37,6 +38,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !mcp/.env.example
+!.env.observability.example
 browserExtension/env.js
 
 # MCP generated local configs and env

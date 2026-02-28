@@ -57,7 +57,11 @@ const CONCURRENTLY_BIN = path.join(
   "concurrently.js",
 );
 const stopDbOnExit = (process.argv[2] || "true").toLowerCase() !== "false";
+const obsAutoEnabled = (process.env.OBS_AUTO || "1").toLowerCase() !== "0";
+const syncSupabaseOnVersionDrift = (process.env.SUPABASE_SYNC_ON_DRIFT || "0").toLowerCase() === "1";
+const requiredWebPort = Number.parseInt(process.env.WEB_DEV_PORT || "3000", 10);
 let cleanedUp = false;
+let obsStarted = false;
 
 function runNpxSync(args, options = {}) {
   const baseOptions = {
@@ -127,6 +131,13 @@ function linkedProjectVersionDrift(output) {
   );
 }
 
+function hasInconsistentLocalStack(output) {
+  return (
+    /supabase start is already running\./i.test(output) &&
+    /(container is not running: exited|No such container)/i.test(output)
+  );
+}
+
 function readLinkedProjectRef() {
   const projectRefPath = path.join(process.cwd(), "supabase", ".temp", "project-ref");
   if (!fs.existsSync(projectRefPath)) {
@@ -176,9 +187,42 @@ function startSupabaseWithVersionSync() {
   }
 
   const combinedOutput = `${firstStart.stdout}\n${firstStart.stderr}`;
+  if (firstStart.status !== 0) {
+    if (hasInconsistentLocalStack(combinedOutput)) {
+      logInfo(
+        "Detected inconsistent local Supabase stack. Stopping and retrying startup once.",
+      );
+      const stopCode = runStep("supabase-local-stop");
+      if (stopCode !== 0) {
+        return stopCode;
+      }
+
+      const retryStart = runStepCapture("supabase-local-start");
+      if (retryStart.error) {
+        console.error(retryStart.error.message);
+        return 1;
+      }
+
+      if (retryStart.status !== 0) {
+        return retryStart.status;
+      }
+      logInfo("Supabase start succeeded after local stack recovery.");
+      return 0;
+    }
+
+    return firstStart.status;
+  }
+
   const driftDetected = linkedProjectVersionDrift(combinedOutput);
   if (!driftDetected) {
     logInfo("Supabase start completed without linked-project service version drift.");
+    return firstStart.status;
+  }
+
+  if (!syncSupabaseOnVersionDrift) {
+    logInfo(
+      "Supabase linked-project version drift detected. Continuing startup (set SUPABASE_SYNC_ON_DRIFT=1 to auto-relink and retry).",
+    );
     return firstStart.status;
   }
 
@@ -204,8 +248,9 @@ function startSupabaseWithVersionSync() {
 
   const secondOutput = `${secondStart.stdout}\n${secondStart.stderr}`;
   if (linkedProjectVersionDrift(secondOutput)) {
-    logInfo("Service version drift warning still present after relink/start retry.");
-    return 1;
+    logInfo(
+      "Service version drift warning still present after relink/start retry. Continuing with local startup.",
+    );
   }
 
   if (secondStart.status === 0) {
@@ -223,6 +268,125 @@ function stopSupabaseIfNeeded() {
   return runStep("supabase-local-stop");
 }
 
+function stopObservabilityIfNeeded() {
+  if (!obsAutoEnabled || !obsStarted) {
+    return 0;
+  }
+  logInfo("Stopping local observability services for cleanup.");
+  obsStarted = false;
+  return runStep("obs-down");
+}
+
+function getListeningPidsForPort(port) {
+  const result = spawnSync("netstat", ["-ano", "-p", "tcp"], {
+    stdio: "pipe",
+    encoding: "utf8",
+  });
+  if (result.error || typeof result.stdout !== "string") {
+    return [];
+  }
+
+  const pids = new Set();
+  const portSuffix = `:${port}`;
+  const lines = result.stdout.split(/\r?\n/);
+  for (const line of lines) {
+    if (!/\bLISTENING\b/i.test(line)) {
+      continue;
+    }
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5) {
+      continue;
+    }
+
+    const localAddress = parts[1] || "";
+    const pid = Number.parseInt(parts[4], 10);
+    if (!localAddress.endsWith(portSuffix) || Number.isNaN(pid)) {
+      continue;
+    }
+    pids.add(pid);
+  }
+
+  return [...pids];
+}
+
+function getWindowsProcessCommandLine(pid) {
+  if (process.platform !== "win32") {
+    return "";
+  }
+
+  const result = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue; if ($p) { $p.CommandLine }`,
+    ],
+    {
+      stdio: "pipe",
+      encoding: "utf8",
+    },
+  );
+  if (result.error || typeof result.stdout !== "string") {
+    return "";
+  }
+  return result.stdout.trim();
+}
+
+function terminateProcessTree(pid) {
+  if (process.platform === "win32") {
+    const result = spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "pipe",
+      encoding: "utf8",
+    });
+    return typeof result.status === "number" ? result.status : 1;
+  }
+
+  const result = spawnSync("kill", ["-9", String(pid)], {
+    stdio: "pipe",
+    encoding: "utf8",
+  });
+  return typeof result.status === "number" ? result.status : 1;
+}
+
+function ensureRequiredWebPortAvailable(port) {
+  if (!Number.isInteger(port) || port <= 0) {
+    return 0;
+  }
+
+  const listeningPids = getListeningPidsForPort(port);
+  if (listeningPids.length === 0) {
+    return 0;
+  }
+
+  const cwdLower = process.cwd().toLowerCase().replace(/\//g, "\\");
+  for (const pid of listeningPids) {
+    const commandLine = getWindowsProcessCommandLine(pid).toLowerCase();
+    const isStaleNextProcess =
+      commandLine.includes(cwdLower) &&
+      commandLine.includes("next") &&
+      (commandLine.includes("start-server.js") || commandLine.includes("next\\dist\\bin\\next"));
+
+    if (isStaleNextProcess) {
+      logInfo(`Port ${port} is occupied by stale Next.js process ${pid}. Terminating process tree.`);
+      terminateProcessTree(pid);
+    }
+  }
+
+  const remainingPids = getListeningPidsForPort(port);
+  if (remainingPids.length === 0) {
+    return 0;
+  }
+
+  const ownerPid = remainingPids[0];
+  const ownerCommand = getWindowsProcessCommandLine(ownerPid);
+  console.error(
+    `Required web port ${port} is already in use by PID ${ownerPid}. ${ownerCommand ? `Command: ${ownerCommand}` : ""}`.trim(),
+  );
+  console.error("Free port 3000 (or set WEB_DEV_PORT) and retry.");
+  return 1;
+}
+
 logInfo(`Using just binary: ${JUST_BIN}`);
 logInfo(`Using npx binary: ${NPX_BIN}`);
 
@@ -231,10 +395,21 @@ if (dockerReadyCode !== 0) {
   process.exit(dockerReadyCode);
 }
 
+if (obsAutoEnabled) {
+  logInfo("Starting local observability services.");
+  const obsUpCode = runStep("obs-up");
+  if (obsUpCode !== 0) {
+    logInfo(`Observability start failed with exit code ${obsUpCode}.`);
+    process.exit(obsUpCode);
+  }
+  obsStarted = true;
+}
+
 const startCode = startSupabaseWithVersionSync();
 if (startCode !== 0) {
   logInfo(`Supabase start/setup failed with exit code ${startCode}.`);
   stopSupabaseIfNeeded();
+  stopObservabilityIfNeeded();
   process.exit(startCode);
 }
 
@@ -243,7 +418,15 @@ const migrateCode = runStep("supabase-local-migrate-and-deploy");
 if (migrateCode !== 0) {
   logInfo(`Migration/deploy step failed with exit code ${migrateCode}.`);
   stopSupabaseIfNeeded();
+  stopObservabilityIfNeeded();
   process.exit(migrateCode);
+}
+
+const webPortCheckCode = ensureRequiredWebPortAvailable(requiredWebPort);
+if (webPortCheckCode !== 0) {
+  stopSupabaseIfNeeded();
+  stopObservabilityIfNeeded();
+  process.exit(webPortCheckCode);
 }
 
 logInfo("Launching web, extension, and edge-function dev processes.");
@@ -301,9 +484,13 @@ function finalize(code) {
   }
 
   const cleanupCode = stopSupabaseIfNeeded();
+  const obsCleanupCode = stopObservabilityIfNeeded();
   let exitCode = typeof code === "number" ? code : 1;
   if (exitCode === 0 && cleanupCode !== 0) {
     exitCode = cleanupCode;
+  }
+  if (exitCode === 0 && obsCleanupCode !== 0) {
+    exitCode = obsCleanupCode;
   }
 
   if (requestedSignal) {
@@ -326,6 +513,7 @@ process.on("uncaughtException", (error) => {
 });
 process.on("exit", () => {
   stopSupabaseIfNeeded();
+  stopObservabilityIfNeeded();
 });
 
 child.on("exit", (code) => {

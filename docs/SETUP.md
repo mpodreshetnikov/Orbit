@@ -11,7 +11,10 @@ MCP setup and sync instructions are canonical in `mcp/README.md`.
 2. Supabase CLI installed.
 3. Node.js and npm installed.
 4. Deno 2.x installed.
-5. Environment variables configured.
+5. Docker Desktop installed (required for local Supabase and lock refresh workflows).
+6. Environment variables configured.
+
+If Edge Functions fail with `Unsupported lockfile version` errors, run `functions-lock-refresh` from `AGENTS.md` to regenerate `supabase/functions/deno.lock` with the local edge-runtime-compatible Deno image.
 
 ## Environment Variables
 
@@ -23,6 +26,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 ```
 
 Get anon key from local Supabase status output after stack is up (for one-off commands, use `commands-list` from `AGENTS.md`).
+
+Observability env template:
+
+- Copy `.env.observability.example` values into your local env source as needed.
+- Local dev lifecycle (`dev-ready`/`dev-stop`) auto-starts/stops observability unless `OBS_AUTO=0`.
 
 ## Local Database Setup
 

@@ -18,15 +18,16 @@ Command source of truth remains `AGENTS.md` and `just --list --unsorted`.
 
 Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day-to-day quality checks, use these entry points:
 
+- **`dev`**: local developer runtime check. Run `just dev` after code changes to verify the dev build boots cleanly. Keep it running for HMR/watch workflows; use `just dev stop` only when teardown is needed.
 - **`ci-fast`**: quick local gate (format, lint, types, unit tests, web + extension builds). Use for fast feedback during work. No Supabase, no coverage.
 - **`ci`**: full local gate (adds `build-local-all`, unit coverage, `coverage-check`). Use before push or PR.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 
-**After code changes:** When a task involves code changes, run **`ci`** (`just ci-verify-local`) and ensure it passes before marking the task complete or opening/updating a PR. Use **`ci-fast`** during development for faster feedback.
+**After code changes:** When a task involves code changes, run **`dev`** (`just dev`) and verify the local stack starts without build/runtime boot errors (it may remain running for HMR/watch flows). Also run **`ci`** (`just ci-verify-local`) and ensure it passes before marking the task complete or opening/updating a PR. Use **`ci-fast`** during development for faster feedback.
 
 ## Canonical Command Policy
 
-Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `ci`, `ci-fast`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`. Full list: **AGENTS.md** and `just --list --unsorted`.
+Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `dev`, `ci`, `ci-fast`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`. Full list: **AGENTS.md** and `just --list --unsorted`.
 
 ## Test Impact Policy
 
@@ -44,13 +45,13 @@ For most code changes, **`ci`** satisfies static/build and test requirements; ad
 | Change Type                            | Mandatory Checks                                              | Additional Checks                                      | Evidence Required                              |
 | -------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
 | Docs only                              | `lint` (if touched TS/JS snippets only), docs links check     | none                                                   | list of changed docs and cross-links validated |
-| UI/routes/components                   | `ci`                                                          | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
-| Hooks/client orchestration             | `ci`                                                          | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
-| Edge/API workflow                      | `ci`                                                          | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
-| DB schema/policy/function/trigger/cron | `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
-| Extension/service worker/import flow   | `ci`                                                          | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
-| Scripts/tooling                        | `ci`                                                          | verify CLI behavior and error handling                 | command outcomes + command transcript          |
-| CI/deploy/security config              | `ci`, `secrets-preflight`                                     | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
+| UI/routes/components                   | `dev` + `ci`                                                  | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
+| Hooks/client orchestration             | `dev` + `ci`                                                  | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `dev` + `ci`                                                  | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
+| DB schema/policy/function/trigger/cron | `dev` + `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
+| Extension/service worker/import flow   | `dev` + `ci`                                                  | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
+| Scripts/tooling                        | `dev` + `ci`                                                  | verify CLI behavior and error handling                 | command outcomes + command transcript          |
+| CI/deploy/security config              | `dev` + `ci`, `secrets-preflight`                            | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 
