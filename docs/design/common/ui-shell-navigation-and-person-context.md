@@ -24,12 +24,14 @@ Describe shared UI shell behavior, app-section navigation model, and person cont
 3. Top-level navigation entries should correspond to concrete domain route roots.
 4. Language and theme state must remain synchronized with runtime consumers.
 5. New global UI controls should be added in shell-level components, not duplicated per route.
+6. Prefer shadcn/ui components for shell controls; add/extend shared primitives in `src/components/ui/*` before introducing custom base controls.
 
 ## Anti-Patterns To Avoid
 
 - Domain-specific shell forks unless behavior cannot be shared.
 - Hidden person context assumptions in domain components.
 - Hardcoding section logic outside `getAppSection`-style helpers.
+- Implementing shell-level controls with bespoke primitives when an equivalent shadcn/ui component is already available.
 
 ## Tradeoffs
 

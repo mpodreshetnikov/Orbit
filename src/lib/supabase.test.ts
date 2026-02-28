@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+type InstrumentedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 const {
   createBrowserClientMock,
   loggerInfoMock,
@@ -33,9 +35,8 @@ vi.mock("@/lib/observability/client-tracer", () => ({
   startClientSpan: startClientSpanMock,
 }));
 
-async function setupCapturedFetch() {
-  let capturedFetch: ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) | null =
-    null;
+async function setupCapturedFetch(): Promise<InstrumentedFetch> {
+  let capturedFetch: InstrumentedFetch | null = null;
   createBrowserClientMock.mockImplementation((_url: string, _key: string, options: unknown) => {
     capturedFetch = (options as { global?: { fetch?: typeof fetch } }).global?.fetch ?? null;
     return {} as unknown;
@@ -45,7 +46,10 @@ async function setupCapturedFetch() {
   createClient();
 
   expect(capturedFetch).toBeTruthy();
-  return capturedFetch;
+  if (!capturedFetch) {
+    throw new Error("Expected instrumented fetch to be set");
+  }
+  return capturedFetch as InstrumentedFetch;
 }
 
 describe("createClient browser rpc instrumentation", () => {
@@ -77,7 +81,7 @@ describe("createClient browser rpc instrumentation", () => {
 
     const capturedFetch = await setupCapturedFetch();
 
-    await capturedFetch?.("https://project.supabase.co/rest/v1/rpc/get_record_findings", {
+    await capturedFetch("https://project.supabase.co/rest/v1/rpc/get_record_findings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,7 +110,7 @@ describe("createClient browser rpc instrumentation", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const capturedFetch = await setupCapturedFetch();
-    await capturedFetch?.("https://project.supabase.co/rest/v1/medical_records", { method: "GET" });
+    await capturedFetch("https://project.supabase.co/rest/v1/medical_records", { method: "GET" });
 
     expect(startClientSpanMock).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -124,7 +128,7 @@ describe("createClient browser rpc instrumentation", () => {
         "x-request-id": "req_existing",
       },
     });
-    await capturedFetch?.(request);
+    await capturedFetch(request);
 
     const headers = new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers);
     expect(headers.get("traceparent")).toBe(
@@ -154,7 +158,7 @@ describe("createClient browser rpc instrumentation", () => {
     const capturedFetch = await setupCapturedFetch();
 
     await expect(
-      capturedFetch?.(new URL("https://project.supabase.co/rest/v1/rpc/get_conditions"), {
+      capturedFetch(new URL("https://project.supabase.co/rest/v1/rpc/get_conditions"), {
         method: "POST",
       }),
     ).rejects.toBe("boom");

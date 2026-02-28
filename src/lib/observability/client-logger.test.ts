@@ -27,8 +27,10 @@ describe("createClientTelemetryLogger", () => {
   });
 
   it("emits logs to default relay with environment defaults", async () => {
-    process.env.NODE_ENV = "test";
-    process.env.NEXT_PUBLIC_APP_VERSION = "v-test";
+    Object.assign(process.env, {
+      NODE_ENV: "test",
+      NEXT_PUBLIC_APP_VERSION: "v-test",
+    });
 
     const { createClientTelemetryLogger } = await import("./client-logger");
     const logger = createClientTelemetryLogger({ component: "dashboard" });

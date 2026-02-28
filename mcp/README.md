@@ -12,6 +12,7 @@ This folder is the canonical source for MCP server definitions.
 - PAT is the default mode for generated configs (`MCP_GITHUB_AUTH_MODE=pat`).
 - OAuth is preferred when your IDE/agent supports native OAuth flow.
 - To prefer OAuth generation, set `MCP_GITHUB_AUTH_MODE=oauth` in `mcp/.env`.
+- Vercel MCP defaults to OAuth mode (`MCP_VERCEL_AUTH_MODE=oauth`) and supports PAT mode via `VERCEL_ACCESS_TOKEN`.
 - Grafana MCP generation is opt-in per target:
   - `MCP_GRAFANA_LOCAL_ENABLED=1` generates `grafana-local`.
   - `MCP_GRAFANA_CLOUD_ENABLED=1` generates `grafana-cloud`.
@@ -24,6 +25,9 @@ This folder is the canonical source for MCP server definitions.
 - Supabase MCP generation is opt-in:
   - `MCP_SUPABASE_CLOUD_ENABLED=1` generates `supabase-cloud` pointing to hosted Supabase MCP endpoint.
   - `MCP_SUPABASE_LOCAL_ENABLED=1` generates `supabase-local` pointing to local Supabase MCP endpoint.
+- Vercel MCP is always generated as `vercel` and targets:
+  - `https://mcp.vercel.com/<your-team-slug>/<your-project-slug>`
+- shadcn MCP is always generated as `shadcn` and runs `npx shadcn@latest mcp`.
 
 ## IDE Install Flow
 
@@ -85,6 +89,14 @@ Required prerequisite for cloud server (`grafana-cloud`):
    - `https://mcp.supabase.com/mcp`
 5. Re-run `mcp-sync` to regenerate client MCP configs.
 6. Confirm your client sees `supabase-local` and/or `supabase-cloud` based on enabled flags.
+
+### shadcn MCP (Stdio Server)
+
+No extra env configuration is required.
+
+1. Re-run `mcp-sync` to regenerate client MCP configs.
+2. Confirm your client sees `shadcn`.
+3. `shadcn` runs `npx shadcn@latest mcp`.
 
 ### Create Grafana MCP Tokens via API
 

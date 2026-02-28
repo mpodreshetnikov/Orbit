@@ -18,6 +18,7 @@ Cross-links:
 3. Use explicit trust boundaries (middleware, auth checks, RLS, function-level auth).
 4. Keep async workflows observable with status transitions and user feedback.
 5. Prefer additive evolution with migration history and idempotent deploy parity.
+6. Prefer shadcn/ui as the default frontend component system; extend `src/components/ui/*` before introducing bespoke primitives.
 
 ## Common Patterns Followed In This Repo
 
@@ -34,7 +35,8 @@ Cross-links:
 - New DB behavior shipped without migration and `supabase/db` parity.
 - Security-sensitive endpoints without explicit auth behavior.
 - Expanding already monolithic files without extracting modules.
-- Adding second ‚Äúsource of truth‚Äù docs when canonical docs already exist.
+- Creating new custom base UI primitives when equivalent shadcn/ui components already exist in `src/components/ui/*`.
+- Adding second ìsource of truthî docs when canonical docs already exist.
 
 ## Detailed Design Map
 
