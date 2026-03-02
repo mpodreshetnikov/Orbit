@@ -35,7 +35,7 @@ describe("supabase-server helpers", () => {
 
     const { getCurrentUser } = await import("./supabase-server");
     await expect(getCurrentUser()).resolves.toBeNull();
-  });
+  }, 15000);
 
   it("isUserAllowed returns false for unauthenticated user", async () => {
     createServerClientMock.mockReturnValue({

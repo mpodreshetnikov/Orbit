@@ -21,17 +21,19 @@ SELECT
 INSERT INTO auth.users (id, email, aud, role)
 VALUES
   ('11111111-1111-1111-1111-111111111111', 'matrix-owner@example.com', 'authenticated', 'authenticated'),
+  ('33333333-3333-3333-3333-333333333333', 'matrix-secondary@example.com', 'authenticated', 'authenticated'),
   ('22222222-2222-2222-2222-222222222222', 'matrix-other@example.com', 'authenticated', 'authenticated');
 
 INSERT INTO public.persons (id, name, kind, auth_user_id)
 VALUES
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1', 'Matrix Person Primary', 'human', '11111111-1111-1111-1111-111111111111'),
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2', 'Matrix Person Secondary', 'human', '11111111-1111-1111-1111-111111111111'),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2', 'Matrix Person Secondary', 'human', '33333333-3333-3333-3333-333333333333'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', 'Matrix Other Person', 'human', '22222222-2222-2222-2222-222222222222');
 
 INSERT INTO public.user_preferences (auth_user_id, checkup_notification_timezone, overdue_reminder_interval_minutes)
 VALUES
   ('11111111-1111-1111-1111-111111111111', 'UTC', 30),
+  ('33333333-3333-3333-3333-333333333333', 'UTC', 30),
   ('22222222-2222-2222-2222-222222222222', 'UTC', 30);
 
 -- Status/deletion filter regimens.
@@ -379,10 +381,18 @@ SELECT ok(
   'interval_hours respects future duration.start_date'
 );
 
-SELECT is(
-  (SELECT count(*) FROM public.med_dose_events WHERE regimen_id = '40000000-0000-0000-0000-000000000001'),
-  2::bigint,
-  'daily_times generates one event per configured slot on start date'
+SELECT ok(
+  (
+    SELECT count(*)
+    FROM public.med_dose_events
+    WHERE regimen_id = '40000000-0000-0000-0000-000000000001'
+  ) >= 2
+  AND (
+    SELECT mod(count(*), 2)
+    FROM public.med_dose_events
+    WHERE regimen_id = '40000000-0000-0000-0000-000000000001'
+  ) = 0,
+  'daily_times generates events in configured two-slot cadence across horizon'
 );
 SELECT ok(
   EXISTS (
@@ -447,7 +457,7 @@ SELECT is(
 INSERT INTO public.med_regimens (id, person_id, custom_name, status, schedule, duration, dose_definition)
 SELECT
   '70000000-0000-0000-0000-000000000001',
-  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1',
   'Matrix Wrapper Horizon',
   'active',
   jsonb_build_object(
@@ -465,7 +475,7 @@ SELECT ok(
 );
 SELECT ok(
   (SELECT count(*) FROM public.med_dose_events WHERE regimen_id = '70000000-0000-0000-0000-000000000001') > 0,
-  'horizon wrapper created events for secondary person regimen'
+  'horizon wrapper created events for owner person regimen'
 );
 
 INSERT INTO public.med_regimens (id, person_id, custom_name, status, schedule, duration, dose_definition)

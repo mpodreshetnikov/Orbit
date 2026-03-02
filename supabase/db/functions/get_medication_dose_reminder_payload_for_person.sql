@@ -56,6 +56,8 @@ BEGIN
     to_char(e.actual_at AT TIME ZONE v_tz, 'HH24:MI')::text
   FROM public.med_dose_events e
   JOIN public.med_regimens r ON r.id = e.regimen_id
+    AND r.deleted_at IS NULL
+    AND r.status = 'active'
   WHERE e.person_id = p_person_id
     AND e.status IN ('scheduled', 'sent')
     AND (
@@ -67,4 +69,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.get_medication_dose_reminder_payload_for_person(uuid, timestamptz, text) IS
-  'Return dose events for one person due in 1-min window or overdue for today.';
+  'Return dose events for one person due in 1-min window or overdue for today. Only active, non-deleted regimens.';
