@@ -10,6 +10,7 @@ const hookMocks = vi.hoisted(() => ({
   useUpdateRegimenInventory: vi.fn(),
   useDeleteRegimen: vi.fn(),
   useArchiveRegimen: vi.fn(),
+  useUnarchiveRegimen: vi.fn(),
   useUndoDoseIntake: vi.fn(),
   useMarkDoseTaken: vi.fn(),
   useMarkDoseSkipped: vi.fn(),
@@ -26,6 +27,7 @@ const routerMock = {
 
 const deleteMutateAsync = vi.fn();
 const archiveMutateAsync = vi.fn();
+const unarchiveMutateAsync = vi.fn();
 const updateInventoryMutateAsync = vi.fn();
 const updateResolutionMutateAsync = vi.fn();
 const undoMutate = vi.fn();
@@ -51,6 +53,7 @@ vi.mock("@/hooks", () => ({
   useUpdateRegimenInventory: (...args: unknown[]) => hookMocks.useUpdateRegimenInventory(...args),
   useDeleteRegimen: (...args: unknown[]) => hookMocks.useDeleteRegimen(...args),
   useArchiveRegimen: (...args: unknown[]) => hookMocks.useArchiveRegimen(...args),
+  useUnarchiveRegimen: (...args: unknown[]) => hookMocks.useUnarchiveRegimen(...args),
   useUndoDoseIntake: (...args: unknown[]) => hookMocks.useUndoDoseIntake(...args),
   useMarkDoseTaken: (...args: unknown[]) => hookMocks.useMarkDoseTaken(...args),
   useMarkDoseSkipped: (...args: unknown[]) => hookMocks.useMarkDoseSkipped(...args),
@@ -220,6 +223,7 @@ describe("MedicationDetailPage", () => {
 
     deleteMutateAsync.mockReset();
     archiveMutateAsync.mockReset();
+    unarchiveMutateAsync.mockReset();
     updateInventoryMutateAsync.mockReset();
     updateResolutionMutateAsync.mockReset();
     undoMutate.mockReset();
@@ -228,6 +232,7 @@ describe("MedicationDetailPage", () => {
 
     deleteMutateAsync.mockResolvedValue(undefined);
     archiveMutateAsync.mockResolvedValue(undefined);
+    unarchiveMutateAsync.mockResolvedValue(undefined);
     updateInventoryMutateAsync.mockResolvedValue(undefined);
     updateResolutionMutateAsync.mockResolvedValue(undefined);
 
@@ -241,6 +246,10 @@ describe("MedicationDetailPage", () => {
     });
     hookMocks.useArchiveRegimen.mockReturnValue({
       mutateAsync: archiveMutateAsync,
+      isPending: false,
+    });
+    hookMocks.useUnarchiveRegimen.mockReturnValue({
+      mutateAsync: unarchiveMutateAsync,
       isPending: false,
     });
     hookMocks.useUndoDoseIntake.mockReturnValue({
@@ -377,6 +386,14 @@ describe("MedicationDetailPage", () => {
 
     const Page = (await import("./page")).default;
     render(<Page params={resolvedParams("reg-1")} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "medications.unarchiveMedication" }));
+    await user.click(screen.getAllByRole("button", { name: "medications.unarchiveMedication" })[1]);
+    await waitFor(() => {
+      expect(unarchiveMutateAsync).toHaveBeenCalledWith({ id: "reg-1", personId: "person-1" });
+      expect(routerMock.push).toHaveBeenCalledWith("/health/medications");
+    });
 
     expect(screen.getByText("medications.noIntakes")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "medications.archiveMedication" })).toBeNull();

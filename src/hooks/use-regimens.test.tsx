@@ -377,7 +377,7 @@ describe("use-regimens", () => {
     });
   });
 
-  it("deletes and archives regimen", async () => {
+  it("deletes, archives, and unarchives regimen", async () => {
     const eventBuilder = createQueryBuilder({ data: null, error: null });
     const regimenBuilder = createQueryBuilder({ data: null, error: null });
     createClientMock.mockReturnValue({
@@ -389,9 +389,11 @@ describe("use-regimens", () => {
       rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
     });
 
-    const { useDeleteRegimen, useArchiveRegimen } = await import("./use-regimens");
+    const { useDeleteRegimen, useArchiveRegimen, useUnarchiveRegimen } =
+      await import("./use-regimens");
     const deleteHook = renderHookWithQueryClient(() => useDeleteRegimen());
     const archiveHook = renderHookWithQueryClient(() => useArchiveRegimen());
+    const unarchiveHook = renderHookWithQueryClient(() => useUnarchiveRegimen());
 
     await act(async () => {
       await deleteHook.result.current.mutateAsync({
@@ -402,10 +404,15 @@ describe("use-regimens", () => {
         id: "reg-1",
         personId: "person-1",
       });
+      await unarchiveHook.result.current.mutateAsync({
+        id: "reg-1",
+        personId: "person-1",
+      });
     });
 
     expect(regimenBuilder.update).toHaveBeenCalledWith({ deleted_at: expect.any(String) });
     expect(regimenBuilder.update).toHaveBeenCalledWith({ status: "archived" });
+    expect(regimenBuilder.update).toHaveBeenCalledWith({ status: "active" });
     expect(eventBuilder.delete).toHaveBeenCalled();
     expect(eventBuilder.in).toHaveBeenCalledWith("status", ["scheduled", "sent", "snoozed"]);
   });

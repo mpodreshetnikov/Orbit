@@ -643,6 +643,28 @@ export function useArchiveRegimen() {
   });
 }
 
+async function unarchiveRegimen({ id }: { id: string; personId: string }): Promise<void> {
+  const supabase = createClient();
+  const { error: updateError } = await supabase
+    .from("med_regimens")
+    .update({ status: "active" })
+    .eq("id", id);
+  if (updateError) throw new Error(updateError.message);
+}
+
+export function useUnarchiveRegimen() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: unarchiveRegimen,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["regimen", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["regimens", variables.personId] });
+      queryClient.invalidateQueries({ queryKey: ["dose-events-person"] });
+      queryClient.invalidateQueries({ queryKey: ["dose-events-regimen", variables.id] });
+    },
+  });
+}
+
 // ============================================================================
 // MUTATIONS: update regimen inventory (refill / set_absolute / correction)
 // ============================================================================

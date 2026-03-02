@@ -48,6 +48,7 @@ import {
   useUpdateRegimenInventory,
   useDeleteRegimen,
   useArchiveRegimen,
+  useUnarchiveRegimen,
   useUndoDoseIntake,
   useMarkDoseTaken,
   useMarkDoseSkipped,
@@ -99,6 +100,7 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
   const updateInventory = useUpdateRegimenInventory();
   const deleteMutation = useDeleteRegimen();
   const archiveMutation = useArchiveRegimen();
+  const unarchiveMutation = useUnarchiveRegimen();
   const undoIntake = useUndoDoseIntake();
   const markTaken = useMarkDoseTaken();
   const markSkipped = useMarkDoseSkipped();
@@ -106,6 +108,7 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
   const [refillOpen, setRefillOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [unarchiveConfirmOpen, setUnarchiveConfirmOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [editIntakeEvent, setEditIntakeEvent] = useState<MedDoseEvent | null>(null);
 
@@ -128,6 +131,13 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
     if (!regimen) return;
     await archiveMutation.mutateAsync({ id: regimen.id, personId: regimen.person_id });
     setArchiveConfirmOpen(false);
+    router.push("/health/medications");
+  };
+
+  const handleUnarchive = async () => {
+    if (!regimen) return;
+    await unarchiveMutation.mutateAsync({ id: regimen.id, personId: regimen.person_id });
+    setUnarchiveConfirmOpen(false);
     router.push("/health/medications");
   };
 
@@ -444,6 +454,16 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
             {t("medications.archiveMedication")}
           </Button>
         )}
+        {regimen.status === "archived" && (
+          <Button
+            variant="ghost"
+            onClick={() => setUnarchiveConfirmOpen(true)}
+            disabled={unarchiveMutation.isPending}
+          >
+            {unarchiveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {t("medications.unarchiveMedication")}
+          </Button>
+        )}
         <Button
           variant="ghost"
           className="text-destructive hover:text-destructive"
@@ -521,6 +541,24 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
             <Button onClick={handleArchive} disabled={archiveMutation.isPending}>
               {archiveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {t("medications.archiveMedication")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={unarchiveConfirmOpen} onOpenChange={setUnarchiveConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("medications.unarchiveMedication")}</DialogTitle>
+            <DialogDescription>{t("medications.unarchiveMedicationConfirm")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUnarchiveConfirmOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button onClick={handleUnarchive} disabled={unarchiveMutation.isPending}>
+              {unarchiveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {t("medications.unarchiveMedication")}
             </Button>
           </DialogFooter>
         </DialogContent>

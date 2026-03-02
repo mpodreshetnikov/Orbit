@@ -1125,6 +1125,8 @@
     "refillWarning": "Refill soon",
     "archiveMedication": "Archive medication",
     "archiveMedicationConfirm": "Archive this medication? Intake history stays visible; reminders stop. You can filter by \"Archived\" to see it later.",
+    "unarchiveMedication": "Unarchive medication",
+    "unarchiveMedicationConfirm": "Restore this medication from archive? Reminders will resume according to schedule.",
     "deleteMedication": "Delete medication",
     "deleteMedicationConfirm": "Remove this medication? All intake records will be hidden (soft-deleted). Use Archive if you want to keep history visible.",
     "removeOneTime": "Remove",
