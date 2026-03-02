@@ -1,17 +1,20 @@
 ---
-name: feature-bugfix-validation
-description: Validate feature work and bugfixes end-to-end. Use this when implementing or reviewing app changes that need UI flow checks with playwright-cli plus unit test updates/execution and local dev auth bypass setup for fast sign-in.
+name: e2e-user-behaviour-validation
+description: Mandatory for changes that affect end-to-end user behaviour. Use this skill to test and verify e2e user behaviour via playwright-cli UI flows, unit test updates/execution, and local dev auth bypass for fast sign-in.
 ---
 
-# Feature/Bugfix Validation
+# E2E User Behaviour Validation
 
-Use this skill for feature and bugfix verification in this repository.
+**Use this skill whenever a change affects end-to-end user behaviour.** The agent must test and verify that e2e behaviour before handoff.
 
-## When To Use
+## When To Use (mandatory)
 
-- A change affects user-visible UI flows and needs quick browser validation.
-- A bugfix changes runtime behavior and needs unit coverage updates.
+- **Any change that affects end-to-end user behaviour** — use this skill and run the workflow below.
+- A change affects user-visible UI flows and needs browser validation.
+- A bugfix or feature changes runtime behaviour and needs unit coverage plus e2e checks.
 - Local testing is blocked by Google OAuth and you need dev auth bypass.
+
+If in doubt whether a change affects e2e user behaviour, treat it as affecting it and run this validation.
 
 ## Required Workflow
 
@@ -32,7 +35,7 @@ Minimum expectations:
 - Open target route and capture snapshot evidence.
 - Execute happy path.
 - Execute at least one failure/edge path.
-- Verify redirect and auth-gated behavior when relevant.
+- Verify redirect and auth-gated behaviour when relevant.
 
 ## Unit Test Validation
 
@@ -40,7 +43,7 @@ Follow [references/unit-test-matrix.md](references/unit-test-matrix.md).
 
 Minimum expectations:
 
-- Update/add tests for changed behavior in the same change set.
+- Update/add tests for changed behaviour in the same change set.
 - Run lane-specific commands first, then `test-unit`.
 - Keep tests deterministic and focused on changed logic.
 

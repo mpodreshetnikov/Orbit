@@ -1,4 +1,0 @@
-interface:
-  display_name: "Feature Bugfix Validation"
-  short_description: "Validate UI flows and unit behavior for app changes"
-  default_prompt: "Use $feature-bugfix-validation to validate this feature or bugfix via playwright-cli UI checks and unit tests."
