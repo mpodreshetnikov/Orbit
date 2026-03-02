@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createServerSupabaseClientMock } = vi.hoisted(() => ({
+const { createServerSupabaseClientMock, createClientMock } = vi.hoisted(() => ({
   createServerSupabaseClientMock: vi.fn(),
+  createClientMock: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase-server", () => ({
   createServerSupabaseClient: createServerSupabaseClientMock,
+}));
+vi.mock("@supabase/supabase-js", () => ({
+  createClient: createClientMock,
 }));
 
 describe("POST /api/medications/run-cron", () => {
@@ -14,15 +18,17 @@ describe("POST /api/medications/run-cron", () => {
 
   beforeEach(() => {
     createServerSupabaseClientMock.mockReset();
+    createClientMock.mockReset();
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
   });
 
-  function mockAuthenticatedSupabase(options?: {
+  function mockAuthenticatedSupabaseClients(options?: {
     genRows?: Array<{ events_generated?: number; refill_digests_created?: number }>;
     genError?: string;
   }) {
-    const rpc = vi.fn().mockImplementation((fnName: string) => {
+    const serverRpc = vi.fn();
+    const serviceRpc = vi.fn().mockImplementation((fnName: string) => {
       if (fnName === "run_med_event_generation_for_all_users") {
         if (options?.genError) {
           return Promise.resolve({
@@ -45,10 +51,13 @@ describe("POST /api/medications/run-cron", () => {
           error: null,
         }),
       },
-      rpc,
+      rpc: serverRpc,
+    });
+    createClientMock.mockReturnValue({
+      rpc: serviceRpc,
     });
 
-    return { rpc };
+    return { serverRpc, serviceRpc };
   }
 
   it("returns 401 when user is unauthenticated", async () => {
@@ -69,7 +78,7 @@ describe("POST /api/medications/run-cron", () => {
   });
 
   it("returns 500 when Supabase env variables are missing", async () => {
-    mockAuthenticatedSupabase();
+    mockAuthenticatedSupabaseClients();
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     const { POST } = await import("./route");
@@ -82,7 +91,7 @@ describe("POST /api/medications/run-cron", () => {
   });
 
   it("returns 500 when event generation RPC fails", async () => {
-    mockAuthenticatedSupabase({ genError: "rpc failed" });
+    mockAuthenticatedSupabaseClients({ genError: "rpc failed" });
 
     const { POST } = await import("./route");
     const response = await POST();
@@ -95,7 +104,7 @@ describe("POST /api/medications/run-cron", () => {
   });
 
   it("handles non-JSON error responses from notifications-cron", async () => {
-    mockAuthenticatedSupabase({
+    mockAuthenticatedSupabaseClients({
       genRows: [{ events_generated: 3, refill_digests_created: 1 }],
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -118,7 +127,7 @@ describe("POST /api/medications/run-cron", () => {
   });
 
   it("handles JSON error responses from notifications-cron", async () => {
-    mockAuthenticatedSupabase({
+    mockAuthenticatedSupabaseClients({
       genRows: [{ events_generated: 2, refill_digests_created: 4 }],
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -141,7 +150,7 @@ describe("POST /api/medications/run-cron", () => {
   });
 
   it("returns 500 when cron invocation throws", async () => {
-    mockAuthenticatedSupabase({
+    mockAuthenticatedSupabaseClients({
       genRows: [{ events_generated: 5, refill_digests_created: 6 }],
     });
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
@@ -159,7 +168,7 @@ describe("POST /api/medications/run-cron", () => {
   });
 
   it("returns aggregated counters when run succeeds", async () => {
-    const { rpc } = mockAuthenticatedSupabase({
+    const { serviceRpc, serverRpc } = mockAuthenticatedSupabaseClients({
       genRows: [
         { events_generated: 1, refill_digests_created: 2 },
         { events_generated: 3, refill_digests_created: 4 },
@@ -175,9 +184,10 @@ describe("POST /api/medications/run-cron", () => {
     const { POST } = await import("./route");
     const response = await POST();
 
-    expect(rpc).toHaveBeenCalledWith("run_med_event_generation_for_all_users", {
+    expect(serviceRpc).toHaveBeenCalledWith("run_med_event_generation_for_all_users", {
       p_horizon_days: 7,
     });
+    expect(serverRpc).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       ok: true,

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(36);
+SELECT plan(38);
 
 SELECT has_function('public', 'generate_med_dose_events_for_person_ids', ARRAY['uuid[]', 'text', 'integer']);
 SELECT has_function('public', 'generate_med_dose_events_for_horizon', ARRAY['uuid', 'text', 'integer']);
@@ -28,12 +28,13 @@ INSERT INTO public.persons (id, name, kind, auth_user_id)
 VALUES
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1', 'Matrix Person Primary', 'human', '11111111-1111-1111-1111-111111111111'),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2', 'Matrix Person Secondary', 'human', '33333333-3333-3333-3333-333333333333'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', 'Matrix Other Person', 'human', '22222222-2222-2222-2222-222222222222');
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', 'Matrix Other Person', 'human', '22222222-2222-2222-2222-222222222222'),
+  ('cccccccc-cccc-cccc-cccc-ccccccccccc1', 'Matrix Ownerless Person', 'pet', NULL);
 
 INSERT INTO public.user_preferences (auth_user_id, checkup_notification_timezone, overdue_reminder_interval_minutes)
 VALUES
   ('11111111-1111-1111-1111-111111111111', 'UTC', 30),
-  ('33333333-3333-3333-3333-333333333333', 'UTC', 30),
+  ('33333333-3333-3333-3333-333333333333', 'Asia/Tokyo', 30),
   ('22222222-2222-2222-2222-222222222222', 'UTC', 30);
 
 -- Status/deletion filter regimens.
@@ -518,6 +519,29 @@ SELECT
   jsonb_build_object('intake', jsonb_build_object('amount', 1, 'unit', 'pill'), 'active', '[]'::jsonb)
 FROM _vars v;
 
+INSERT INTO public.notification_routing (recipient_user_id, person_id, enabled, custom_prefix)
+VALUES (
+  '33333333-3333-3333-3333-333333333333',
+  'cccccccc-cccc-cccc-cccc-ccccccccccc1',
+  true,
+  'Ownerless Prefix'
+);
+
+INSERT INTO public.med_regimens (id, person_id, custom_name, status, schedule, duration, dose_definition)
+SELECT
+  '80000000-0000-0000-0000-000000000002',
+  'cccccccc-cccc-cccc-cccc-ccccccccccc1',
+  'Matrix Ownerless Routed',
+  'active',
+  jsonb_build_object(
+    'mode', 'daily_times',
+    'times', jsonb_build_array('09:30'),
+    'amounts', jsonb_build_array(1)
+  ),
+  jsonb_build_object('type', 'ongoing', 'start_date', v.today_utc::text),
+  jsonb_build_object('intake', jsonb_build_object('amount', 1, 'unit', 'pill'), 'active', '[]'::jsonb)
+FROM _vars v;
+
 CREATE TEMP TABLE _run_all AS
 SELECT *
 FROM public.run_med_event_generation_for_all_users(2);
@@ -534,6 +558,19 @@ SELECT is(
 SELECT ok(
   (SELECT count(*) FROM public.med_dose_events WHERE regimen_id = '80000000-0000-0000-0000-000000000001') > 0,
   'run_med_event_generation_for_all_users generated events for other user regimen'
+);
+SELECT ok(
+  (SELECT count(*) FROM public.med_dose_events WHERE regimen_id = '80000000-0000-0000-0000-000000000002') > 0,
+  'run_med_event_generation_for_all_users generated events for ownerless routed regimen'
+);
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.med_dose_events
+    WHERE regimen_id = '80000000-0000-0000-0000-000000000002'
+      AND to_char(scheduled_at AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') = '09:30'
+  ),
+  'ownerless routed regimen uses recipient timezone from user_preferences'
 );
 
 SELECT * FROM finish();

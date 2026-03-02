@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import type { Database } from "@/types/database";
 
 /**
  * POST /api/medications/run-cron
@@ -31,7 +33,14 @@ export async function POST() {
     let refillDigestsCreated = 0;
     let usersProcessed = 0;
 
-    const { data: genRows, error: genError } = await supabase.rpc(
+    const serviceSupabase = createClient<Database>(url, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
+    const { data: genRows, error: genError } = await serviceSupabase.rpc(
       "run_med_event_generation_for_all_users",
       { p_horizon_days: 7 },
     );

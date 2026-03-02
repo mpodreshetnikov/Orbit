@@ -15,8 +15,17 @@ DECLARE
   v_rec record;
   v_prefix text;
 BEGIN
-  SELECT array_agg(id) INTO v_person_ids
-  FROM public.persons WHERE auth_user_id = p_auth_user_id;
+  SELECT array_agg(DISTINCT src.person_id) INTO v_person_ids
+  FROM (
+    SELECT p.id AS person_id
+    FROM public.persons p
+    WHERE p.auth_user_id = p_auth_user_id
+    UNION
+    SELECT r.person_id
+    FROM public.notification_routing r
+    WHERE r.recipient_user_id = p_auth_user_id
+      AND r.enabled = true
+  ) AS src;
 
   IF v_person_ids IS NULL OR array_length(v_person_ids, 1) IS NULL THEN
     RETURN 0;

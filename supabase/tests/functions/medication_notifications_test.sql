@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(14);
 
 SELECT has_function('public', 'get_routed_persons_for_recipient', ARRAY['uuid']);
 SELECT has_function(
@@ -21,6 +21,11 @@ VALUES (
   'Notif Person',
   'human',
   '33333333-3333-3333-3333-333333333333'
+), (
+  'ffffffff-ffff-ffff-ffff-fffffffffff1',
+  'Notif Ownerless Pet',
+  'pet',
+  NULL
 );
 
 INSERT INTO public.med_regimens (
@@ -48,6 +53,30 @@ VALUES (
   'dddddddd-dddd-dddd-dddd-dddddddddddd',
   true,
   'Care Prefix'
+), (
+  '33333333-3333-3333-3333-333333333333',
+  'ffffffff-ffff-ffff-ffff-fffffffffff1',
+  true,
+  'Ownerless Prefix'
+);
+
+INSERT INTO public.med_regimens (
+  id,
+  person_id,
+  custom_name,
+  schedule,
+  duration,
+  dose_definition,
+  inventory
+)
+VALUES (
+  'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee',
+  'ffffffff-ffff-ffff-ffff-fffffffffff1',
+  'Ownerless Refill',
+  '{"mode":"daily_times","times":["09:30"],"amounts":[1]}'::jsonb,
+  '{"type":"ongoing","start_date":"2026-01-01"}'::jsonb,
+  '{"intake":{"amount":1,"unit":"pill"},"active":[]}'::jsonb,
+  '{"enabled":true,"auto_decrement_on_taken":true,"current_amount":1,"refill_threshold_amount":2,"unit":"pill"}'::jsonb
 );
 
 INSERT INTO public.user_preferences (auth_user_id, checkup_notification_timezone, overdue_reminder_interval_minutes)
@@ -98,8 +127,8 @@ SELECT is(
     SELECT count(*)
     FROM public.get_routed_persons_for_recipient('33333333-3333-3333-3333-333333333333')
   ),
-  1::bigint,
-  'owner gets implicit own person route'
+  2::bigint,
+  'owner gets implicit own person route plus ownerless routed person'
 );
 
 SELECT is(
@@ -169,8 +198,19 @@ SELECT is(
 
 SELECT is(
   public.create_medication_refill_digests('33333333-3333-3333-3333-333333333333'),
-  2,
-  'create_medication_refill_digests creates one digest for caregiver and one implicit owner digest'
+  3,
+  'create_medication_refill_digests creates routed+implicit owner digests and includes ownerless routed person'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.notification_digests d
+    WHERE d.type = 'medication_refill'
+      AND d.auth_user_id = '33333333-3333-3333-3333-333333333333'
+      AND (d.payload_json->>'regimen_id') = 'ffffffff-eeee-eeee-eeee-eeeeeeeeeeee'
+  ),
+  'create_medication_refill_digests creates digest for ownerless routed regimen'
 );
 
 SELECT is(
