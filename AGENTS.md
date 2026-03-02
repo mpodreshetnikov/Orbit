@@ -11,7 +11,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `hooks-install`: `just git-hooks-install` (enable repository git hooks, including pre-push secrets preflight)
 - `hooks-status`: `just git-hooks-status`
 - `install`: `just install-dependencies`
-- `dev-ready`: `just dev-ready-local`
+- `dev-ready`: `just dev-ready-local` (long-running: run in background when invoked by an agent—see below)
 - `dev-stop`: `just dev-local-stop`
 - `dev`: `just dev` (start local developer stack; long-running for HMR/watch workflows; use `just dev stop` when teardown is needed)
 - `obs-up`: `just obs-up` (start local Grafana LGTM stack)
@@ -55,6 +55,13 @@ Use these command IDs in plans, PRs, and handoffs:
 - `secrets-preflight-range`: `just secrets-preflight-range <from> <to>` (scan an explicit commit range; used by CI)
 
 For less common and environment-specific commands (deploy, targeted DB ops, single-service dev flows), use `commands-list` and pick from `just --list --unsorted`.
+
+### Long-running commands (run in background when invoked by an agent)
+
+Commands such as `dev-ready` start servers and do not exit until the stack is stopped. If an agent runs them in the foreground, the agent will wait indefinitely. **Run these in the background** so the agent does not block:
+
+- **How:** Start the command with background execution (e.g. run the terminal command with your environment’s “run in background” / “don’t wait for exit” option, such as `is_background: true`). The stack will keep running; use `dev-stop` when teardown is needed.
+- **Which:** `dev-ready`, `dev` (when starting the stack).
 
 ### DB Command Guidance
 
