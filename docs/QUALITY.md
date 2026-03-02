@@ -50,6 +50,25 @@ Automation and agent skills must reference this section and the matrix instead o
 
 Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `dev`, `ci`, `ci-fast`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`. Full list: **AGENTS.md** and `just --list --unsorted`.
 
+## Local stack reuse (agents and parallel runs)
+
+When running **`ci`**, **`ci-verify-local`**, or any recipe that runs **`build-local-all`** in an environment where the Supabase stack may already be running (e.g. another agent, a long-lived **`dev`** session, or a previously started stack), set **`SUPABASE_ALREADY_RUNNING=1`** so the script does not start or stop the stack. This avoids:
+
+- Parallel agents interfering (one stopping the stack the other is using),
+- Wasted time on redundant start/stop when a full redeploy is not needed.
+
+**Use the flag when:**
+
+- The stack is already up and no DB schema or deploy SQL changes are required for the current task, or
+- DB changes will be applied separately (see below).
+
+**When the task requires applying DB changes** (migrations or `supabase/db` deploy SQL), apply them explicitly instead of relying only on a full stack restart:
+
+- Ensure the stack is running (**`supabase-local-start`** or **`dev`**), then run **`db-run`** (non-destructive: migrations + deploy SQL) or **`db-reset`** (destructive: reset then migrations + deploy SQL) as needed. Then run **`ci`** or **`ci-verify-local`** with **`SUPABASE_ALREADY_RUNNING=1`** so the run reuses the stack and does not stop it.
+- Alternatively, run **`ci`** / **`ci-verify-local`** without the flag so the stack is started, **`supabase-local-reset-and-deploy`** runs inside **`build-local-all`**, and the stack is stopped after the run (single-runner or when no other process needs the stack).
+
+Command IDs: **`db-run`**, **`db-reset`** (see **AGENTS.md**).
+
 ## Test Impact Policy
 
 Every behavior change must update tests in the same change set.
