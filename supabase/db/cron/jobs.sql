@@ -32,3 +32,17 @@ SELECT cron.schedule(
   '* * * * *',
   $$SELECT public.run_notifications_cron_http()$$
 );
+
+-- ============================================================================
+-- Job: delete-job-run-details
+-- Delete old pg_cron run history to keep only the last 7 days
+-- Runs daily at 00:00
+-- ============================================================================
+SELECT cron.unschedule('delete-job-run-details')
+WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'delete-job-run-details');
+
+SELECT cron.schedule(
+  'delete-job-run-details',
+  '0 0 * * *',
+  $$DELETE FROM cron.job_run_details WHERE end_time < now() - interval '7 days'$$
+);
