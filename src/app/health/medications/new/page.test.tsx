@@ -85,6 +85,44 @@ vi.mock("@/components/medications", () => ({
       >
         submit-add-onetime
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onSubmit({
+            person_id: "person-1",
+            custom_name: "One Time Med",
+            intake_unit: "pill",
+            dose_definition: { intake: { amount: 3, unit: "pill" }, active: [] },
+            intake_advice_type: "none",
+            intake_advice_text: null,
+            schedule: { mode: "one_off", due_at: "2026-02-01T11:00:00.000Z" },
+            duration: { type: "endless" },
+            inventory: null,
+            notes: "with snack",
+          })
+        }
+      >
+        submit-create-onetime-regimen
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onSubmit({
+            person_id: "person-1",
+            custom_name: "Broken One Time Med",
+            intake_unit: "pill",
+            dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
+            intake_advice_type: "none",
+            intake_advice_text: null,
+            schedule: { mode: "one_off", due_at: "" },
+            duration: { type: "endless" },
+            inventory: null,
+            notes: "broken payload",
+          })
+        }
+      >
+        submit-create-onetime-invalid
+      </button>
       <button type="button" onClick={onCancel}>
         cancel-medication
       </button>
@@ -175,5 +213,68 @@ describe("new medication page", () => {
 
     await user.click(screen.getByRole("button", { name: "cancel-medication" }));
     expect(routerMock.push).toHaveBeenCalledWith("/health/medications");
+  });
+
+  it("creates one-time regimen with notes null and creates intake with one-time form note/dose", async () => {
+    kindParamState = "one_time";
+    const createMutation = {
+      mutateAsync: vi.fn().mockResolvedValue({ id: "reg-new", person_id: "person-1" }),
+      isPending: false,
+    };
+    const addMutation = {
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      isPending: false,
+    };
+    useCreateRegimenMock.mockReturnValue(createMutation);
+    useAddOneTimeDoseToRegimenMock.mockReturnValue(addMutation);
+
+    render(<NewMedicationPage />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "submit-create-onetime-regimen" }));
+
+    await waitFor(() => {
+      expect(createMutation.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          custom_name: "One Time Med",
+          schedule: { mode: "one_off", due_at: "2026-02-01T11:00:00.000Z" },
+          notes: null,
+        }),
+      );
+      expect(addMutation.mutateAsync).toHaveBeenCalledWith({
+        person_id: "person-1",
+        regimen_id: "reg-new",
+        scheduled_at: "2026-02-01T11:00:00.000Z",
+        amount: 3,
+        unit: "pill",
+        notes: "with snack",
+      });
+      expect(regenerateMedicationEventsMock).not.toHaveBeenCalled();
+      expect(routerMock.push).toHaveBeenCalledWith("/health/medications/reg-new");
+    });
+  });
+
+  it("does not mutate when one-time due_at is invalid", async () => {
+    kindParamState = "one_time";
+    const createMutation = {
+      mutateAsync: vi.fn().mockResolvedValue({ id: "reg-new", person_id: "person-1" }),
+      isPending: false,
+    };
+    const addMutation = {
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      isPending: false,
+    };
+    useCreateRegimenMock.mockReturnValue(createMutation);
+    useAddOneTimeDoseToRegimenMock.mockReturnValue(addMutation);
+
+    render(<NewMedicationPage />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "submit-create-onetime-invalid" }));
+
+    await waitFor(() => {
+      expect(createMutation.mutateAsync).not.toHaveBeenCalled();
+      expect(addMutation.mutateAsync).not.toHaveBeenCalled();
+      expect(regenerateMedicationEventsMock).not.toHaveBeenCalled();
+      expect(routerMock.push).not.toHaveBeenCalled();
+    });
   });
 });

@@ -46,6 +46,26 @@ export default function NewMedicationPage() {
       router.push(`/health/medications/${data.addToRegimenId}`);
       return;
     }
+
+    if (data.schedule.mode === "one_off") {
+      const dueAt = data.schedule.due_at;
+      const parsedDueAt = dueAt ? new Date(dueAt) : null;
+      if (!parsedDueAt || Number.isNaN(parsedDueAt.getTime())) return;
+
+      const amount = Math.max(1, Number(data.dose_definition?.intake?.amount ?? 1) || 1);
+      const regimen = await createMutation.mutateAsync({ ...data, notes: null });
+      await addOneTimeDoseMutation.mutateAsync({
+        person_id: selectedPersonId,
+        regimen_id: regimen.id,
+        scheduled_at: parsedDueAt.toISOString(),
+        amount,
+        unit: data.intake_unit ?? "pill",
+        notes: data.notes ?? null,
+      });
+      router.push(`/health/medications/${regimen.id}`);
+      return;
+    }
+
     const regimen = await createMutation.mutateAsync(data);
     await regenerateMedicationEvents(getClientTimezone(), regimen.person_id);
     router.push(`/health/medications/${regimen.id}`);
