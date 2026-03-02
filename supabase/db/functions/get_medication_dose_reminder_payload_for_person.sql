@@ -61,7 +61,10 @@ BEGIN
   WHERE e.person_id = p_person_id
     AND e.status IN ('scheduled', 'sent')
     AND (
-      (e.actual_at >= p_now_timestamptz - interval '1 minute' AND e.actual_at < p_now_timestamptz + interval '1 minute')
+      (
+        p_now_timestamptz >= date_trunc('minute', e.actual_at)
+        AND p_now_timestamptz < date_trunc('minute', e.actual_at) + interval '1 minute'
+      )
       OR (e.actual_at < p_now_timestamptz AND e.actual_at >= v_today_start AND e.actual_at < v_today_end)
     )
   ORDER BY e.actual_at;
@@ -69,4 +72,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.get_medication_dose_reminder_payload_for_person(uuid, timestamptz, text) IS
-  'Return dose events for one person due in 1-min window or overdue for today. Only active, non-deleted regimens.';
+  'Return dose events for one person due in the current dose minute or overdue for today. Only active, non-deleted regimens.';

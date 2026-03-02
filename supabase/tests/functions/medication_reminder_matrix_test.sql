@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(17);
+SELECT plan(18);
 
 SELECT has_function(
   'public',
@@ -309,6 +309,20 @@ SELECT is(
   ),
   4::bigint,
   'payload returns only active/scheduled-or-sent due+overdue-today events across schedule modes'
+);
+
+SELECT is(
+  (
+    SELECT count(*)
+    FROM public.get_medication_dose_reminder_payload_for_person(
+      '92000000-0000-0000-0000-000000000001',
+      (SELECT now_utc FROM _vars) - interval '1 minute',
+      'UTC'
+    ) AS p
+    WHERE p.dose_event_id = '94000000-0000-0000-0000-000000000001'::uuid
+  ),
+  0::bigint,
+  'payload does not include scheduled dose one minute before intake minute'
 );
 
 SELECT ok(

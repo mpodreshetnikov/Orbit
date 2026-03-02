@@ -67,8 +67,8 @@ BEGIN
         )
       LOOP
         v_in_due_window := (
-          v_row.scheduled_at >= p_now_timestamptz - interval '1 minute'
-          AND v_row.scheduled_at < p_now_timestamptz + interval '1 minute'
+          p_now_timestamptz >= v_row.window_start
+          AND p_now_timestamptz < v_row.window_end
         );
         v_overdue_today := (
           v_row.scheduled_at < p_now_timestamptz
