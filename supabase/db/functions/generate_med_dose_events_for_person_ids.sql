@@ -71,7 +71,12 @@ BEGIN
 
     IF v_mode = 'one_off' THEN
       v_due_at := (v_schedule->>'due_at')::timestamptz;
-      IF v_due_at IS NOT NULL THEN
+      IF v_due_at IS NOT NULL
+         AND (v_due_at AT TIME ZONE v_tz)::date >= v_start_date
+         AND v_due_at >= (v_today::text || ' 00:00:00')::timestamp AT TIME ZONE v_tz
+         AND v_due_at < (v_today::text || ' 00:00:00')::timestamp AT TIME ZONE v_tz + (p_horizon_days || ' days')::interval
+         AND NOT (v_end_type = 'until_date' AND v_end_date IS NOT NULL AND (v_due_at AT TIME ZONE v_tz)::date > v_end_date)
+         AND NOT (v_end_type = 'for_days' AND v_days_count IS NOT NULL AND (v_due_at AT TIME ZONE v_tz)::date >= v_start_date + (v_days_count || ' days')::interval) THEN
         INSERT INTO public.med_dose_events (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status, taken_at)
         SELECT v_reg.person_id, v_reg.id, v_due_at, v_due_at, v_planned_intake, 'taken', v_due_at
         WHERE NOT EXISTS (
@@ -176,14 +181,20 @@ BEGIN
             v_slot_planned := jsonb_set(v_planned_intake, '{intake,amount}', to_jsonb(v_slot_amount));
 
             v_slot_ts := (v_date::text || ' ' || v_slot.slot_time)::timestamp AT TIME ZONE v_tz;
-            IF v_slot_ts >= now() THEN
-              INSERT INTO public.med_dose_events (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status)
-              SELECT v_reg.person_id, v_reg.id, v_slot_ts, v_slot_ts, v_slot_planned, 'scheduled'
-              WHERE NOT EXISTS (
-                SELECT 1 FROM public.med_dose_events
-                WHERE regimen_id = v_reg.id AND date_trunc('minute', scheduled_at) = date_trunc('minute', v_slot_ts)
-              );
-              IF FOUND THEN v_inserted := v_inserted + 1; END IF;
+            IF v_slot_ts >= now() AND v_slot_ts < now() + (p_horizon_days || ' days')::interval THEN
+              IF v_end_type = 'until_date' AND v_end_date IS NOT NULL AND v_date > v_end_date THEN
+                NULL;
+              ELSIF v_end_type = 'for_days' AND v_days_count IS NOT NULL AND v_date >= v_start_date + (v_days_count || ' days')::interval THEN
+                NULL;
+              ELSE
+                INSERT INTO public.med_dose_events (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status)
+                SELECT v_reg.person_id, v_reg.id, v_slot_ts, v_slot_ts, v_slot_planned, 'scheduled'
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM public.med_dose_events
+                  WHERE regimen_id = v_reg.id AND date_trunc('minute', scheduled_at) = date_trunc('minute', v_slot_ts)
+                );
+                IF FOUND THEN v_inserted := v_inserted + 1; END IF;
+              END IF;
             END IF;
           END LOOP;
         END IF;
