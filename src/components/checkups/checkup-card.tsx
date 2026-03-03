@@ -81,13 +81,34 @@ export function CheckupCard({
         "hover:shadow-md transition-shadow min-w-0 overflow-hidden w-full tap-target cursor-pointer",
         isOverdue && "border-amber-400 dark:border-amber-600",
       )}
+      onClick={
+        selectionMode && onToggleSelect
+          ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleSelect(item);
+            }
+          : undefined
+      }
+      onKeyDown={
+        selectionMode && onToggleSelect
+          ? (e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleSelect(item);
+            }
+          : undefined
+      }
+      role={selectionMode && onToggleSelect ? "button" : undefined}
+      tabIndex={selectionMode && onToggleSelect ? 0 : undefined}
     >
       <CardContent className="p-3 sm:p-4 w-full">
         <div className="flex flex-col gap-2 sm:gap-3 w-full">
           <div className="flex items-start gap-2 min-w-0">
             {selectionMode && onToggleSelect && (
               <div
-                className="shrink-0 pt-0.5 flex items-center"
+                className="shrink-0 pt-0.5 flex items-center -m-1 p-1"
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -98,6 +119,7 @@ export function CheckupCard({
                   checked={selected}
                   onCheckedChange={() => onToggleSelect(item)}
                   aria-label={t("checkups.selectToPlan")}
+                  className="h-7 w-7 rounded-md sm:h-5 sm:w-5"
                   onClick={(e) => e.stopPropagation()}
                 />
               </div>
@@ -183,6 +205,10 @@ export function CheckupCard({
       </CardContent>
     </Card>
   );
+
+  if (selectionMode) {
+    return <div className="block min-w-0">{cardContent}</div>;
+  }
 
   return (
     <Link href={`/health/checkups/${item.id}`} className="block min-w-0">

@@ -33,7 +33,7 @@ function makeItem(overrides: Record<string, unknown> = {}): import("@/types").Ch
 }
 
 describe("CheckupCard", () => {
-  it("renders overdue active item and runs mark-complete/plan/select actions", async () => {
+  it("renders overdue active item and runs mark-complete/plan/select actions in selection mode", async () => {
     const onMarkComplete = vi.fn();
     const onPlan = vi.fn();
     const onToggleSelect = vi.fn();
@@ -51,7 +51,7 @@ describe("CheckupCard", () => {
     );
 
     expect(screen.getByText("checkups.overdue")).toBeInTheDocument();
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/health/checkups/checkup-1");
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: "checkups.selectToPlan" }));
     await user.click(screen.getByRole("button", { name: "checkups.markComplete" }));
@@ -60,6 +60,11 @@ describe("CheckupCard", () => {
     expect(onToggleSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "checkup-1" }));
     expect(onMarkComplete).toHaveBeenCalledWith(expect.objectContaining({ id: "checkup-1" }));
     expect(onPlan).toHaveBeenCalledWith(expect.objectContaining({ id: "checkup-1" }));
+  });
+
+  it("keeps navigation link in normal mode", () => {
+    render(<CheckupCard item={makeItem()} />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/health/checkups/checkup-1");
   });
 
   it("renders non-active item without action buttons", () => {
