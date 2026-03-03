@@ -7,7 +7,7 @@ type Transport = "stdio" | "http";
 type AuthKind = "bearer";
 type AuthMode = "pat" | "oauth";
 
-type CanonicalServer = {
+export type CanonicalServer = {
   transport: Transport;
   command?: string;
   command_env?: string;
@@ -28,7 +28,7 @@ type CanonicalServer = {
   oauth_supported?: boolean;
 };
 
-type CanonicalConfig = {
+export type CanonicalConfig = {
   servers: Record<string, CanonicalServer>;
 };
 
@@ -426,6 +426,8 @@ function tomlInlineMap(values: Record<string, string>): string {
   return `{ ${entries.map(([key, value]) => `${key} = "${tomlEscape(value)}"`).join(", ")} }`;
 }
 
+const codexNotifyCommand = ["node", path.join(repoRoot, "scripts", "agent-telegram-notify.mjs")];
+
 function resolveStdioEnvValues(
   name: string,
   server: CanonicalServer,
@@ -551,7 +553,7 @@ function buildCursorConfig(canonical: CanonicalConfig, envMap: Record<string, st
   return stringifyJson({ mcpServers });
 }
 
-function buildCodexToml(canonical: CanonicalConfig, envMap: Record<string, string>): string {
+export function buildCodexToml(canonical: CanonicalConfig, envMap: Record<string, string>): string {
   const lines: string[] = [];
   const sortedServers = sortObject(canonical.servers);
 
@@ -589,6 +591,9 @@ function buildCodexToml(canonical: CanonicalConfig, envMap: Record<string, strin
 
     lines.push("");
   }
+
+  lines.push(`notify = ${tomlArray(codexNotifyCommand)}`);
+  lines.push("");
 
   return lines.join("\n");
 }
@@ -628,8 +633,18 @@ async function main(): Promise<void> {
   console.log("Synced MCP configs from mcp/servers.canonical.json");
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`sync:mcp failed: ${message}`);
-  process.exit(1);
-});
+function isDirectExecution(): boolean {
+  if (!process.argv[1]) {
+    return false;
+  }
+
+  return path.resolve(process.argv[1]) === scriptPath;
+}
+
+if (isDirectExecution()) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`sync:mcp failed: ${message}`);
+    process.exit(1);
+  });
+}

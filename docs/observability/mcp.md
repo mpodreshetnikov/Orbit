@@ -2,6 +2,8 @@
 
 This repo supports Grafana MCP through canonical MCP config sync.
 
+For Telegram notifications on agent step completion (Codex + Cursor), use the canonical setup in `mcp/README.md` ("Telegram Agent Notifications" section). Configuration is env-only in `mcp/.env`.
+
 ## Enable Grafana MCP in Repo Config (Two Servers)
 
 Required prerequisite for cloud server (`grafana-cloud`):

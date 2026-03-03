@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "node ./scripts/agent-telegram-notify.mjs cursor afterAgentResponse"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node ./scripts/agent-telegram-notify.mjs cursor stop"
+      }
+    ]
+  }
+}

@@ -137,6 +137,30 @@ Auth behavior:
    - Example global Codex file on Windows: `C:\Users\<you>\.codex\config.toml`
 5. Reload/restart the extension and verify MCP server availability.
 
+## Telegram Agent Notifications (Codex + Cursor)
+
+This repo supports Telegram notifications when agent steps complete:
+
+- Codex uses the generated top-level `notify = [...]` command in `.codex/config.toml` (absolute script path).
+- Cursor uses project hooks from `.cursor/hooks.json` (`afterAgentResponse` + `stop` events).
+- Enablement is env-only via `mcp/.env`.
+
+1. In `mcp/.env`, set:
+   - `AGENT_TELEGRAM_NOTIFICATIONS_ENABLED=1`
+   - `AGENT_TELEGRAM_BOT_TOKEN=<telegram-bot-token>`
+   - `AGENT_TELEGRAM_CHAT_ID=<chat-id-or-channel>`
+   - optional: `AGENT_TELEGRAM_API_BASE_URL=https://api.telegram.org`
+2. Run `mcp-sync` from `AGENTS.md` to regenerate `.codex/config.toml`.
+3. Restart Codex/Cursor clients.
+
+Behavior:
+
+- Codex notifies only on `agent-turn-complete`.
+- Codex notifier parses the official notify JSON event payload argument.
+- Cursor caches last agent response on `afterAgentResponse` and notifies on `stop`.
+- Fail-open: notification failures never block agent execution.
+- Message format is plain text (no Telegram `parse_mode`).
+
 ## Notes
 
 - Generated client configs are local-only and gitignored.
