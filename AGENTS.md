@@ -62,6 +62,7 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 
 - **How:** Start the command with background execution (e.g. run the terminal command with your environment’s “run in background” / “don’t wait for exit” option, such as `is_background: true`). The stack will keep running; use `dev-stop` when teardown is needed.
 - **Which:** `dev-ready`, `dev` (when starting the stack).
+- **If background execution is disabled:** Do not start the stack from the agent. Ask the user to run `dev-ready` or `dev` in a separate terminal before tasks that need the stack, and to run `dev-stop` in that terminal when done.
 
 ### DB Command Guidance
 
