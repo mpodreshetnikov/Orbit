@@ -263,6 +263,132 @@ describe("use-notifications", () => {
     expect(Array.from(getShownToday())).toContain("notif-fallback");
   });
 
+  it("uses stable medication fallback tags so repeat reminders can replace prior cards", async () => {
+    const showNotificationMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "serviceWorker", {
+      configurable: true,
+      writable: true,
+      value: {
+        controller: undefined,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        getRegistration: vi.fn().mockResolvedValue({
+          showNotification: showNotificationMock,
+        }),
+      },
+    });
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      writable: true,
+      value: class NotificationMock {
+        static permission: NotificationPermission = "granted";
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({}),
+      }),
+    );
+
+    const { showNotificationFallback } = await import("./use-notifications");
+    const scheduledAt = new Date().toISOString();
+
+    await showNotificationFallback({
+      id: "med-1",
+      type: "medication",
+      title: "Medications",
+      body: "Dose 1",
+      person_id: "person-1",
+      scheduledAt,
+      url: "/health/medications",
+    } as NotificationForDevice);
+    await showNotificationFallback({
+      id: "med-2",
+      type: "medication_snoozed",
+      title: "Medications",
+      body: "Dose 2",
+      person_id: "person-1",
+      scheduledAt,
+      url: "/health/medications",
+    } as NotificationForDevice);
+
+    expect(showNotificationMock).toHaveBeenNthCalledWith(
+      1,
+      "Medications",
+      expect.objectContaining({ tag: "medication-person-1" }),
+    );
+    expect(showNotificationMock).toHaveBeenNthCalledWith(
+      2,
+      "Medications",
+      expect.objectContaining({ tag: "medication-person-1" }),
+    );
+  });
+
+  it("keeps non-medication fallback tags digest-scoped", async () => {
+    const showNotificationMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "serviceWorker", {
+      configurable: true,
+      writable: true,
+      value: {
+        controller: undefined,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        getRegistration: vi.fn().mockResolvedValue({
+          showNotification: showNotificationMock,
+        }),
+      },
+    });
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      writable: true,
+      value: class NotificationMock {
+        static permission: NotificationPermission = "granted";
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({}),
+      }),
+    );
+
+    const { showNotificationFallback } = await import("./use-notifications");
+    const scheduledAt = new Date().toISOString();
+
+    await showNotificationFallback({
+      id: "checkup-1",
+      type: "checkup",
+      title: "Checkup",
+      body: "Body",
+      person_id: "person-9",
+      scheduledAt,
+      url: "/health/checkups",
+    } as NotificationForDevice);
+    await showNotificationFallback({
+      id: "checkup-2",
+      type: "checkup",
+      title: "Checkup",
+      body: "Body",
+      person_id: "person-9",
+      scheduledAt,
+      url: "/health/checkups",
+    } as NotificationForDevice);
+
+    expect(showNotificationMock).toHaveBeenNthCalledWith(
+      1,
+      "Checkup",
+      expect.objectContaining({ tag: "notification-person-9-checkup-1" }),
+    );
+    expect(showNotificationMock).toHaveBeenNthCalledWith(
+      2,
+      "Checkup",
+      expect.objectContaining({ tag: "notification-person-9-checkup-2" }),
+    );
+  });
+
   it("returns early in fallback when notification permission is denied", async () => {
     const shownCtor = vi.fn();
     const NotificationMock = Object.assign(

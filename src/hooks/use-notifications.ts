@@ -21,6 +21,23 @@ export function applyTitlePrefix(title: string, prefix?: string | null): string 
   return title.startsWith(prefixText) ? title : `${prefixText}${title}`;
 }
 
+export function isMedicationNotificationType(type: string | undefined): boolean {
+  return type === "medication" || type === "medication_snoozed";
+}
+
+export function resolveFallbackNotificationTag(notification: NotificationForDevice): string {
+  if (notification.tag) return notification.tag;
+
+  if (isMedicationNotificationType(notification.type)) {
+    const personKey = notification.person_id ?? "no-person";
+    return `medication-${personKey}`;
+  }
+
+  return notification.person_id
+    ? `notification-${notification.person_id}-${notification.id}`
+    : `notification-${notification.id}`;
+}
+
 export function getShownToday(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
@@ -93,17 +110,12 @@ export async function showNotificationFallback(notification: NotificationForDevi
   const baseTitle = notification.title || "Notification";
   const prefix = resolveTitlePrefix(notification);
   const title = applyTitlePrefix(baseTitle, prefix);
-  const tagBase =
-    notification.tag ??
-    (notification.person_id
-      ? `notification-${notification.person_id}-${notification.id}`
-      : `notification-${notification.id}`);
   const options: NotificationOptions = {
     body: notification.body,
     icon: "/icons/icon-192x192.png",
     badge: "/icons/icon-192x192.png",
     data: { url },
-    tag: tagBase,
+    tag: resolveFallbackNotificationTag(notification),
     requireInteraction: true,
   };
   const reg = await navigator.serviceWorker?.getRegistration();

@@ -200,7 +200,7 @@ var NOTIFICATION_TYPE_HANDLERS = {
     tag: function (n) {
       var personId = n.person_id || n.personId || "";
       var groupKey = "medication-" + (personId ? personId : "no-person");
-      return groupKey + "-" + getNotificationInstanceId(n); // unique tag per instance
+      return groupKey;
     },
     renotify: true,
     // Single action (taken) to avoid Android bug where only the last action works when multiple are shown
