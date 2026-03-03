@@ -6,7 +6,7 @@ Verify changed UI behavior quickly with reproducible browser steps.
 
 ## Steps
 
-1. Start local stack with `dev-ready`.
+1. Start local stack: use **bypass** unless you need to verify auth flow (login/OAuth/redirects). Run `dev start bypass` (or `just dev start bypass`); if the stack is already running, ensure it was started with bypass. Use `dev-ready` only when the task explicitly requires testing the real auth flow.
 2. Open browser session:
 `playwright-cli open http://127.0.0.1:3000`
 3. Navigate to impacted route(s) and capture baseline:
@@ -19,8 +19,8 @@ Verify changed UI behavior quickly with reproducible browser steps.
 
 ## Auth-sensitive Flows
 
-- If testing auth-gated pages, use local dev bypass flow before protected-route checks.
-- Confirm redirect behavior:
+- **When not verifying auth:** Always use bypass (step 1). Sign in via Local dev sign in on `/login` for fast access to auth-gated pages.
+- **When verifying auth flow:** Start with `dev-ready` (no bypass), then confirm redirect behavior:
   - unauthenticated -> `/login`
   - allowlisted/authenticated -> protected page (for example `/health`)
 

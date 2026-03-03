@@ -19,8 +19,8 @@ If in doubt whether a change affects e2e user behaviour, treat it as affecting i
 ## Required Workflow
 
 1. Start local environment:
-   - default auth flow: `dev-ready`
-   - bypass auth flow: `dev start bypass`
+   - **Default:** use bypass so sign-in is fast and no OAuth is required: `dev start bypass` (or ensure stack was started with bypass). Use this whenever the task does **not** require verifying the real auth flow (login, OAuth, redirects).
+   - **Only when verifying auth flow:** use default auth: `dev-ready` (so login/OAuth/redirect behaviour can be tested).
 2. Validate affected UI flows using `playwright-cli`.
 3. Add or update unit tests for changed units.
 4. Run relevant unit lanes, then aggregate unit tests.

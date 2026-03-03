@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Skip Google OAuth locally and sign in as any email for feature/bugfix testing.
+Skip Google OAuth locally and sign in as any email for feature/bugfix testing. **For e2e validation, use bypass by default** unless the task explicitly requires verifying the real auth flow (login, OAuth, redirects).
 
 ## Required env
 
