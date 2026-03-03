@@ -115,7 +115,7 @@ test-unit:
 
 # Run unit tests with coverage reports.
 test-unit-coverage:
-  $env:VITEST_RETRY = "1"; npx vitest run --coverage
+  npx vitest run --coverage --retry=1
   deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
   deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions
   node scripts/just/coverage-report.cjs
