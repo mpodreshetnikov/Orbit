@@ -15,7 +15,7 @@ Use this skill whenever a task edits repository files.
    - `Change-Type Check Matrix`
    - `How To Check Quality (Execution + Validation)`
 3. At each task stage that changed files, run required scoped checks for that stage.
-4. At final task stage with non-doc changes, run final gates required by `docs/QUALITY.md`.
+4. At final task stage with non-doc changes, run final gates required by `docs/QUALITY.md` without duplicating lanes already included in `ci` (run `ci` once unless debugging a failing sub-lane).
 5. MUST fix quality failures and rerun checks until green.
 6. A failure can be named `blocked` ONLY for an external blocker that the agent cannot resolve directly.
 7. Nothing can be named `blocked` until the agent has tried to fix it.

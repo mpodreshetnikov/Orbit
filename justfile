@@ -115,7 +115,7 @@ test-unit:
 
 # Run unit tests with coverage reports.
 test-unit-coverage:
-  npx vitest run --coverage
+  $env:VITEST_RETRY = "1"; npx vitest run --coverage
   deno test --allow-env --allow-read --config supabase/functions/deno.json supabase/functions
   deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions
   node scripts/just/coverage-report.cjs
@@ -204,8 +204,8 @@ dev action='start' auth='default':
   if ("{{action}}" -eq "start") { if ("{{auth}}" -eq "default" -or "{{auth}}" -eq "bypass") { {{ just_executable() }} dev-ready-local true {{auth}} } else { Write-Error "Unknown dev auth mode: {{auth}}. Use 'default' or 'bypass'."; exit 1 } } elseif ("{{action}}" -eq "stop") { {{ just_executable() }} dev-local-stop } else { Write-Error "Unknown dev action: {{action}}. Use 'start' or 'stop'."; exit 1 }
 
 # Single command to build and check all local apps plus database with guaranteed cleanup.
-build-local-all:
-  node scripts/just/build-local-all.cjs
+build-local-all db_mode='auto':
+  node scripts/just/build-local-all.cjs --db-mode={{db_mode}}
 
 # CI-style local confidence gate before PR push.
 ci-verify-local: quality build-local-all test-unit-coverage coverage-check

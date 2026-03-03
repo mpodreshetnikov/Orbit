@@ -37,10 +37,8 @@ When a task changes files, apply checks by stage, not after every single edit.
   - for non-doc stages, run `ci-fast` before moving to the next stage.
 - Final stage before handoff for tasks with non-doc file changes:
   - run `dev` and verify clean boot;
-  - run `test-unit-coverage`;
-  - run `coverage-check`;
   - run `ci` and require success.
-- Coverage enforcement (non-doc changes): `test-unit-coverage` and `coverage-check` are mandatory and must not be skipped, even when `ci-fast` was used earlier for iteration.
+- Coverage enforcement (non-doc changes): `ci` is mandatory and includes `test-unit-coverage` and `coverage-check`; do not duplicate those commands unless debugging a failing lane.
 - Docs-only tasks:
   - use docs checks from the matrix and skip `ci` unless full validation is explicitly requested.
 

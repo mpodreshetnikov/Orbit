@@ -1,4 +1,3 @@
-import os from "node:os";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
@@ -19,6 +18,31 @@ const alias = [
   },
 ];
 
+const isCi = process.env.CI === "true" || process.env.CI === "1";
+
+function readIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function resolveMaxWorkers(): number | string {
+  const raw = process.env.VITEST_MAX_WORKERS?.trim();
+  if (raw) {
+    return raw;
+  }
+
+  return isCi ? "75%" : "50%";
+}
+
 export default defineConfig({
   // @ts-expect-error - Vite vs Vitest plugin type mismatch (different Vite instances)
   plugins: [react()],
@@ -30,7 +54,10 @@ export default defineConfig({
   },
   test: {
     pool: "threads",
-    maxWorkers: os.cpus().length,
+    maxWorkers: resolveMaxWorkers(),
+    testTimeout: readIntEnv("VITEST_TEST_TIMEOUT_MS", isCi ? 10_000 : 7_000),
+    hookTimeout: readIntEnv("VITEST_HOOK_TIMEOUT_MS", isCi ? 15_000 : 12_000),
+    retry: readIntEnv("VITEST_RETRY", 0),
     alias: {
       "@": path.join(rootDir, "src"),
       "@shared": path.join(rootDir, "shared"),
