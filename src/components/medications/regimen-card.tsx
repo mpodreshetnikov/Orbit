@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useIntlLocale } from "@/lib/date-locale";
 import { cn } from "@/lib/utils";
 import type { MedRegimen, MedSchedule } from "@/types/regimen";
+import { getEffectiveStatus } from "@/types/regimen";
 import { medicationUnitKey } from "@/types";
 import { formatAmountWithUnit, getUnitIcon } from "./medication-units";
 
@@ -100,7 +101,7 @@ export function RegimenCard({ regimen }: RegimenCardProps) {
 
   const scheduleSummary = formatRegimenScheduleSummary(regimen, t, intlLocale);
   const isOneOff = (regimen.schedule as { mode?: string })?.mode === "one_off";
-  const displayStatus = isOneOff ? "completed" : regimen.status;
+  const displayStatus = isOneOff ? "completed" : getEffectiveStatus(regimen);
 
   return (
     <Link href={`/health/medications/${regimen.id}`}>

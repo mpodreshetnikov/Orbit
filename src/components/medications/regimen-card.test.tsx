@@ -138,4 +138,18 @@ describe("RegimenCard", () => {
     expect(screen.getByText("medications.statusCompleted")).toBeInTheDocument();
     expect(screen.getByRole("link")).toHaveAttribute("href", "/health/medications/reg-1");
   });
+
+  it("shows Completed badge when status is active but end_date has passed", () => {
+    render(
+      <RegimenCard
+        regimen={regimen({
+          status: "active",
+          duration: { type: "until_date", end_date: "2000-01-01", start_date: "1999-01-01" },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("medications.statusCompleted")).toBeInTheDocument();
+    expect(screen.queryByText("medications.statusActive")).not.toBeInTheDocument();
+  });
 });

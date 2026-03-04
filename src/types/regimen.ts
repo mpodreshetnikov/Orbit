@@ -75,6 +75,41 @@ export type MedDurationForDays = { type: "for_days"; days: number; start_date?: 
 
 export type MedDuration = MedDurationEndless | MedDurationUntilDate | MedDurationForDays;
 
+/** Today's date in local time as YYYY-MM-DD for comparison with duration end_date. */
+function todayDateString(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export type GetEffectiveStatusOptions = { today?: string };
+
+/**
+ * Returns the effective display status: "active" regimens with end_date (or for_days end) in the past
+ * are treated as "completed" so they don't show as active in the list.
+ * @param options.today - YYYY-MM-DD override for "today" (for tests).
+ */
+export function getEffectiveStatus(
+  regimen: { status: MedRegimenStatus; duration?: MedDuration },
+  options?: GetEffectiveStatusOptions,
+): MedRegimenStatus {
+  if (regimen.status !== "active") return regimen.status;
+  const duration = regimen.duration;
+  if (!duration) return regimen.status;
+  const today = options?.today ?? todayDateString();
+  if (duration.type === "until_date" && duration.end_date) {
+    const end = duration.end_date.slice(0, 10);
+    if (end < today) return "completed";
+  }
+  if (duration.type === "for_days" && duration.start_date != null && duration.days != null) {
+    const start = duration.start_date.slice(0, 10);
+    const d = new Date(start + "T12:00:00");
+    d.setDate(d.getDate() + duration.days);
+    const endStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (endStr < today) return "completed";
+  }
+  return regimen.status;
+}
+
 export type PlannedIntake = {
   intake?: { amount: number; unit: string };
   active?: { name: string; amount: number; unit: string }[];

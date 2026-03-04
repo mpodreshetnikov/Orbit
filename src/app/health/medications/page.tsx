@@ -40,6 +40,7 @@ import {
 } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { MedRegimenStatus } from "@/types";
+import { getEffectiveStatus } from "@/types/regimen";
 
 type StatusFilter = "all" | MedRegimenStatus;
 
@@ -112,7 +113,7 @@ export default function MedicationsPage() {
       list = list.filter((r) => {
         const isOneOff = (r.schedule as { mode?: string })?.mode === "one_off";
         if (isOneOff) return statusFilter === "completed";
-        return r.status === statusFilter;
+        return getEffectiveStatus(r) === statusFilter;
       });
     }
     if (searchQuery.trim()) {
@@ -120,7 +121,8 @@ export default function MedicationsPage() {
       list = list.filter((r) => r.custom_name.toLowerCase().includes(q));
     }
     const isCompletedOrOneOff = (r: (typeof list)[number]) =>
-      r.status === "completed" || (r.schedule as { mode?: string })?.mode === "one_off";
+      getEffectiveStatus(r) === "completed" ||
+      (r.schedule as { mode?: string })?.mode === "one_off";
     return [...list].sort((a, b) => {
       const aEnd = isCompletedOrOneOff(a) ? 1 : 0;
       const bEnd = isCompletedOrOneOff(b) ? 1 : 0;

@@ -252,6 +252,36 @@ describe("MedicationsPage", () => {
     expect(screen.getByText("regimen:Done")).toBeInTheDocument();
   });
 
+  it("excludes past end_date regimens from Active filter (effective status)", async () => {
+    const user = userEvent.setup();
+    hookMocks.useRegimens.mockReturnValue({
+      data: [
+        regimen({
+          id: "reg-active",
+          custom_name: "StillActive",
+          status: "active",
+          duration: { type: "endless", start_date: "2026-01-01" },
+        }),
+        regimen({
+          id: "reg-past-end",
+          custom_name: "PastEnd",
+          status: "active",
+          duration: { type: "until_date", end_date: "2000-01-01", start_date: "1999-01-01" },
+        }),
+      ],
+      isLoading: false,
+    });
+    render(<MedicationsPage />);
+
+    expect(screen.getByText("regimen:StillActive")).toBeInTheDocument();
+    expect(screen.getByText("regimen:PastEnd")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "medications.statusActive" }));
+
+    expect(screen.getByText("regimen:StillActive")).toBeInTheDocument();
+    expect(screen.queryByText("regimen:PastEnd")).not.toBeInTheDocument();
+  });
+
   it("saves overdue reminder settings and routes add-menu actions", async () => {
     const user = userEvent.setup();
     render(<MedicationsPage />);
