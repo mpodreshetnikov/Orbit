@@ -68,7 +68,8 @@ export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
     }
 
     try {
-      if (!deps.config.openRouterApiKey) {
+      const parseMode = deps.config.parseMode ?? "openrouter";
+      if (parseMode === "openrouter" && !deps.config.openRouterApiKey) {
         throw new Error("OPENROUTER_API_KEY is required");
       }
       if (!deps.config.supabaseUrl || !deps.config.supabaseServiceRoleKey) {

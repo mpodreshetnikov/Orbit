@@ -14,6 +14,7 @@ function assertErrorMessage(error: unknown, expected: string): void {
 Deno.test("createDefaultHealthStructureDeps handles missing env values", async () => {
   await withEnv(
     {
+      HEALTH_STRUCTURE_PARSER_MODE: undefined,
       OPENROUTER_API_KEY: undefined,
       SUPABASE_URL: undefined,
       SUPABASE_SERVICE_ROLE_KEY: undefined,
@@ -23,6 +24,7 @@ Deno.test("createDefaultHealthStructureDeps handles missing env values", async (
       const deps = createDefaultHealthStructureDeps();
 
       assertEquals(deps.config.openRouterApiKey, undefined);
+      assertEquals(deps.config.parseMode, "openrouter");
       assertEquals(await deps.lookupIcdCode("A00"), null);
 
       let parseError: unknown = null;
@@ -56,6 +58,7 @@ Deno.test(
   async () => {
     await withEnv(
       {
+        HEALTH_STRUCTURE_PARSER_MODE: undefined,
         OPENROUTER_API_KEY: "openrouter-key",
         SUPABASE_URL: "https://example.supabase.co",
         SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
@@ -124,10 +127,69 @@ Deno.test(
 );
 
 Deno.test(
+  "createDefaultHealthStructureDeps supports e2e stub parser mode without OpenRouter calls",
+  async () => {
+    await withEnv(
+      {
+        HEALTH_STRUCTURE_PARSER_MODE: "e2e_stub",
+        OPENROUTER_API_KEY: undefined,
+        SUPABASE_URL: "https://example.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+      },
+      async () => {
+        const originalFetch = globalThis.fetch;
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+          fetchCalls += 1;
+          return new Response("unexpected fetch", { status: 500 });
+        }) as typeof fetch;
+
+        try {
+          const { createDefaultHealthStructureDeps } = await importDepsModule("stub-mode");
+          const deps = createDefaultHealthStructureDeps();
+
+          assertEquals(deps.config.openRouterApiKey, undefined);
+          assertEquals(deps.config.parseMode, "e2e_stub");
+
+          const structured = await deps.parseStructuredData("Hemoglobin 142 g/L", {
+            observationCatalog: [],
+            findingTypeCatalog: [],
+            bodySiteCatalog: [],
+            existingConditions: [],
+            existingFindings: [],
+            checkupItems: [],
+          });
+          assertEquals(structured.title, "Hemoglobin 142 g/L");
+          assertEquals(fetchCalls, 0);
+
+          let parseError: unknown = null;
+          try {
+            await deps.parseStructuredData("[E2E_FORCE_STRUCTURE_FAIL]", {
+              observationCatalog: [],
+              findingTypeCatalog: [],
+              bodySiteCatalog: [],
+              existingConditions: [],
+              existingFindings: [],
+              checkupItems: [],
+            });
+          } catch (error) {
+            parseError = error;
+          }
+          assertErrorMessage(parseError, "E2E stub forced structure failure");
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      },
+    );
+  },
+);
+
+Deno.test(
   "createDefaultHealthStructureDeps handles ICD lookup non-OK and fetch failures",
   async () => {
     await withEnv(
       {
+        HEALTH_STRUCTURE_PARSER_MODE: undefined,
         OPENROUTER_API_KEY: "openrouter-key",
         OPENROUTER_HEALTH_STRUCTURE_MODEL: "openai/gpt-4o",
         SUPABASE_URL: "https://example.supabase.co",

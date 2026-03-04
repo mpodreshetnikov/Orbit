@@ -148,7 +148,12 @@ enabled = true
 # in emails.
 site_url = "http://127.0.0.1:3000"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["http://127.0.0.1:3000/**", "http://localhost:3000/**"]
+additional_redirect_urls = [
+  "http://127.0.0.1:3000/**",
+  "http://localhost:3000/**",
+  "http://127.0.0.1:3100/**",
+  "http://localhost:3100/**",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to the local API URL (http://127.0.0.1:<port>/auth/v1).
@@ -373,6 +378,7 @@ deno_version = 2
 
 [edge_runtime.secrets]
 OPENROUTER_API_KEY = "env(OPENROUTER_API_KEY)"
+HEALTH_STRUCTURE_PARSER_MODE = "env(HEALTH_STRUCTURE_PARSER_MODE)"
 WHO_ICD_CLIENT_ID = "env(WHO_ICD_CLIENT_ID)"
 WHO_ICD_CLIENT_SECRET = "env(WHO_ICD_CLIENT_SECRET)"
 VAPID_PUBLIC_KEY = "env(VAPID_PUBLIC_KEY)"

@@ -33,7 +33,8 @@ function classifyChangedFiles(changedFiles) {
     /^supabase\/(db|migrations|tests)\//.test(filePath),
   );
   const webImpact = normalizedChangedFiles.some(
-    (filePath) => filePath.startsWith("src/") || filePath.startsWith("shared/"),
+    (filePath) =>
+      filePath.startsWith("src/") || filePath.startsWith("shared/") || filePath.startsWith("e2e/"),
   );
   const extensionImpact = normalizedChangedFiles.some((filePath) =>
     filePath.startsWith("browserExtension/"),

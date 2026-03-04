@@ -15,9 +15,10 @@
 .coverage
 coverage
 .playwright-cli
+/test-results
 
 # next.js
-/.next/
+.next
 /out/
 
 # production

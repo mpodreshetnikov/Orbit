@@ -41,4 +41,10 @@ describe("change-impact", () => {
     expect(impact.dbImpact).toBe(false);
     expect(impact.docsOnly).toBe(false);
   });
+
+  it("treats e2e specs as web impact", () => {
+    const impact = classifyChangedFiles(["e2e/health-structure-flow.spec.ts"]);
+    expect(impact.webImpact).toBe(true);
+    expect(impact.docsOnly).toBe(false);
+  });
 });

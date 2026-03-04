@@ -82,6 +82,9 @@ jobs:
         run: just quality
       - name: Start Supabase
         if: steps.impact.outputs.dbImpact == 'true'
+        env:
+          HEALTH_STRUCTURE_PARSER_MODE: e2e_stub
+          OPENROUTER_API_KEY: e2e-local-disabled
         run: just supabase-local-start
       - name: Verify generated DB artifacts
         if: steps.impact.outputs.dbImpact == 'true'
@@ -96,6 +99,12 @@ jobs:
       - name: Build (without DB lifecycle)
         if: steps.impact.outputs.dbImpact != 'true'
         run: node scripts/just/build-local-all.cjs --db-mode=skip
+      - name: Install Playwright browser
+        if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
+        run: just test-e2e
       - name: Stop Supabase
         if: always() && steps.impact.outputs.dbImpact == 'true'
         run: just supabase-local-stop

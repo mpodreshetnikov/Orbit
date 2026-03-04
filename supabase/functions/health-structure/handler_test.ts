@@ -137,6 +137,39 @@ Deno.test("health-structure handler validates env configuration", async () => {
   assertEquals(payload2.error, "Supabase environment not configured");
 });
 
+Deno.test(
+  "health-structure handler allows e2e stub parser mode without OpenRouter key",
+  async () => {
+    const handler = createHealthStructureHandler({
+      config: {
+        parseMode: "e2e_stub",
+        openRouterApiKey: undefined,
+        supabaseUrl: "https://example.supabase.co",
+        supabaseServiceRoleKey: "service-role",
+      },
+      repository: createRepositoryMock(),
+      parseStructuredData: async () => minimalStructuredData,
+      lookupIcdCode: async () => null,
+    });
+
+    const payload = await assertJsonResponse<{ success: boolean; structured_data: unknown }>(
+      await handler(
+        new Request("http://localhost/functions/v1/health-structure", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer token",
+          },
+          body: JSON.stringify({ record_id: "record-1" }),
+        }),
+      ),
+      200,
+    );
+
+    assertEquals(payload.success, true);
+  },
+);
+
 Deno.test("health-structure handler executes success and auth-failure paths", async () => {
   const handler = createHealthStructureHandler({
     config: {

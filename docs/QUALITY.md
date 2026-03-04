@@ -20,7 +20,9 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 
 - **`dev`**: local developer runtime check. Run `just dev` after code changes to verify the dev build boots cleanly. Keep it running for HMR/watch workflows; use `just dev stop` only when teardown is needed.
 - **`ci-fast`**: quick local gate (format, lint, types, unit tests, web + extension builds). Use for fast feedback during work. No Supabase, no coverage.
-- **`ci`**: full local gate (adds `build-local-all`, unit coverage, `coverage-check`). Use before push or PR.
+- **`ci`**: full local gate (adds `build-local-all`, unit coverage, `coverage-check`, `test-e2e`). Use before push or PR.
+- **`test-e2e`**: Playwright end-to-end validation lane for user-facing product flows (including extraction) against local Supabase. Extraction-related suites run in deterministic `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub` mode (no external LLM calls). Runner enforces this mode by restarting local Supabase when needed.
+- CI runs `test-e2e` when change impact includes web, DB, or Supabase Edge Functions surfaces.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
 
 `ci-fast` is never a substitute for final pre-push validation on non-doc changes; final validation must include coverage gates.
@@ -38,7 +40,7 @@ When a task changes files, apply checks by stage, not after every single edit.
 - Final stage before handoff for tasks with non-doc file changes:
   - run `dev` and verify clean boot;
   - run `ci` and require success.
-- Coverage enforcement (non-doc changes): `ci` is mandatory and includes `test-unit-coverage` and `coverage-check`; do not duplicate those commands unless debugging a failing lane.
+- Coverage and flow enforcement (non-doc changes): `ci` is mandatory and includes `test-unit-coverage`, `coverage-check`, and `test-e2e`; do not duplicate those commands unless debugging a failing lane.
 - Docs-only tasks:
   - use docs checks from the matrix and skip `ci` unless full validation is explicitly requested.
 
@@ -46,7 +48,7 @@ Automation and agent skills must reference this section and the matrix instead o
 
 ## Canonical Command Policy
 
-Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `dev`, `ci`, `ci-fast`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`. Full list: **AGENTS.md** and `just --list --unsorted`.
+Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `dev`, `ci`, `ci-fast`, `test-e2e`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`. Full list: **AGENTS.md** and `just --list --unsorted`.
 
 ## Local stack reuse (agents and parallel runs)
 
@@ -72,6 +74,7 @@ Command IDs: **`db-run`**, **`db-reset`** (see **AGENTS.md**).
 Every behavior change must update tests in the same change set.
 
 - If app/extension/script/edge behavior changes, add or update unit tests in the corresponding runtime lane (`test-unit-web`, `test-unit-ext`, `test-unit-node`, `test-unit-functions`).
+- If a user-facing flow changes (especially record processing/extraction), add or update Playwright coverage and run `test-e2e` in the same change set.
 - If SQL function/policy behavior changes under `supabase/migrations/` or `supabase/db/`, add or update pgTAP tests under `supabase/tests/`.
 - Keep `supabase/tests/coverage-map.json` current when DB object naming does not map cleanly to pgTAP test file names.
 - If no automated test change is required, include an explicit rationale in PR evidence (`why-no-test-change` note).
@@ -80,22 +83,22 @@ Every behavior change must update tests in the same change set.
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.
 
-| Change Type                            | Mandatory Checks                                                      | Additional Checks                                      | Evidence Required                              |
-| -------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
-| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check             | none                                                   | list of changed docs and cross-links validated |
-| UI/routes/components                   | `dev` + `ci`                                                          | manual happy-path walkthrough on affected routes       | command outcomes + screenshots/recording       |
-| Hooks/client orchestration             | `dev` + `ci`                                                          | walkthrough for stale cache/mutation behavior          | command outcomes + brief behavior notes        |
-| Edge/API workflow                      | `dev` + `ci`                                                          | verify auth behavior and error path handling           | command outcomes + endpoint behavior notes     |
-| DB schema/policy/function/trigger/cron | `dev` + `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                | command outcomes + SQL diff rationale          |
-| Extension/service worker/import flow   | `dev` + `ci`                                                          | extension bridge/manual import scenario                | command outcomes + scenario transcript         |
-| Scripts/tooling                        | `dev` + `ci`                                                          | verify CLI behavior and error handling                 | command outcomes + command transcript          |
-| CI/deploy/security config              | `dev` + `ci`, `secrets-preflight`                                     | check workflow/job behavior and required env contracts | command outcomes + config review notes         |
+| Change Type                            | Mandatory Checks                                                      | Additional Checks                                                                                                 | Evidence Required                              |
+| -------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Docs only                              | `lint` (if touched TS/JS snippets only), docs links check             | none                                                                                                              | list of changed docs and cross-links validated |
+| UI/routes/components                   | `dev` + `ci`                                                          | run `test-e2e` when route participates in user processing flows; manual happy-path walkthrough on affected routes | command outcomes + screenshots/recording       |
+| Hooks/client orchestration             | `dev` + `ci`                                                          | run `test-e2e` when hook affects end-to-end user flows; walkthrough for stale cache/mutation behavior             | command outcomes + brief behavior notes        |
+| Edge/API workflow                      | `dev` + `ci`                                                          | verify auth behavior and error path handling; run `test-e2e` for user-triggered workflows                         | command outcomes + endpoint behavior notes     |
+| DB schema/policy/function/trigger/cron | `dev` + `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                                                                           | command outcomes + SQL diff rationale          |
+| Extension/service worker/import flow   | `dev` + `ci`                                                          | extension bridge/manual import scenario                                                                           | command outcomes + scenario transcript         |
+| Scripts/tooling                        | `dev` + `ci`                                                          | verify CLI behavior and error handling                                                                            | command outcomes + command transcript          |
+| CI/deploy/security config              | `dev` + `ci`, `secrets-preflight`                                     | check workflow/job behavior and required env contracts                                                            | command outcomes + config review notes         |
 
 ## How To Check Quality (Execution + Validation)
 
 ### 1. Static and build gates
 
-Run **`ci`** from the repository root for full verification (or **`ci-fast`** for quick iteration without Supabase/coverage). `ci` runs `quality`, then `build-local-all`, `test-unit-coverage`, and `coverage-check`.
+Run **`ci`** from the repository root for full verification (or **`ci-fast`** for quick iteration without Supabase/coverage). `ci` runs `quality`, then `build-local-all`, `test-unit-coverage`, `coverage-check`, and `test-e2e`.
 
 Pass criteria: all steps exit successfully; coverage thresholds and ratchets are enforced (zero format drift, zero lint/type issues, unit and coverage checks pass, smoke build succeeds).
 
@@ -103,6 +106,7 @@ Pass criteria: all steps exit successfully; coverage thresholds and ratchets are
 
 - Format: zero drift. Lint: zero warnings/errors (web, extension, scripts, Supabase functions). Types: no TS/Deno diagnostics.
 - Unit tests: all runtime-split suites pass. Coverage: artifacts under `coverage/` and `.coverage/deno/`; `src/**` and per-function aggregates at `>=75%` lines/branches; ratchet and DB object mapping enforced.
+- E2E product flows: Playwright suites pass against local Supabase. For extraction-related suites, `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub` must be active, validating happy and failure paths without external LLM calls.
 - Smoke: production build and static generation succeed.
 
 ### 2. Secret safety gate
@@ -166,7 +170,7 @@ Use route and flow-specific evidence (screenshots, logs, notes).
 Validate that:
 
 - CI workflow behavior is compatible with the change,
-- CI `quality-and-db-artifacts` job is green before deployment jobs run,
+- CI `quality-gates` job is green before deployment jobs run,
 - required docs were updated,
 - security and operational implications were captured in relevant docs.
 

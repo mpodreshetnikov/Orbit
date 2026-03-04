@@ -120,6 +120,10 @@ test-unit-coverage:
   deno test --allow-env --allow-read --config supabase/functions/deno.json --coverage=.coverage/deno supabase/functions
   node scripts/just/coverage-report.cjs
 
+# Run end-to-end product flow checks in deterministic no-external-LLM mode where applicable.
+test-e2e:
+  node scripts/just/run-e2e.cjs
+
 # Generate combined runtime + DB coverage report artifacts.
 coverage-report:
   node scripts/just/coverage-report.cjs
@@ -208,13 +212,13 @@ build-local-all db_mode='auto':
   node scripts/just/build-local-all.cjs --db-mode={{db_mode}}
 
 # CI-style local confidence gate before PR push.
-ci-verify-local: quality build-local-all test-unit-coverage coverage-check
+ci-verify-local: quality build-local-all test-unit-coverage coverage-check test-e2e
 
 # Quick local gate (no Supabase, no coverage): quality + unit tests + builds.
 ci-verify-local-fast: quality test-unit web-build-production extension-build-production
 
 # Full local quality gate.
-check: build-local-all test-unit-coverage coverage-check
+check: build-local-all test-unit-coverage coverage-check test-e2e
 
 # Regenerate per-client MCP configs from canonical source.
 mcp-sync:

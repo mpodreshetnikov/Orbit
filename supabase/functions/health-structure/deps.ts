@@ -1,4 +1,5 @@
 import { callOpenRouterParse } from "./openrouter-parse.ts";
+import { parseStructuredDataE2EStub } from "./e2e-stub-parse.ts";
 import {
   createSupabaseHealthStructureRepository,
   type HealthStructureRepository,
@@ -6,12 +7,15 @@ import {
 import type { HealthStructureParseContext } from "./service.ts";
 import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
 
+export type HealthStructureParserMode = "openrouter" | "e2e_stub";
+
 export interface HealthStructureDeps {
   config: {
     openRouterApiKey?: string;
     supabaseUrl?: string;
     supabaseServiceRoleKey?: string;
     openRouterModel?: string;
+    parseMode?: HealthStructureParserMode;
   };
   repository: HealthStructureRepository;
   parseStructuredData: (
@@ -54,6 +58,9 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const openRouterModel = Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? "openai/gpt-4o-mini";
+  const rawParseMode = Deno.env.get("HEALTH_STRUCTURE_PARSER_MODE");
+  const parseMode: HealthStructureParserMode =
+    rawParseMode === "e2e_stub" ? "e2e_stub" : "openrouter";
   const hasSupabaseEnv = Boolean(supabaseUrl && supabaseServiceRoleKey);
 
   return {
@@ -62,6 +69,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
       supabaseUrl: supabaseUrl ?? undefined,
       supabaseServiceRoleKey: supabaseServiceRoleKey ?? undefined,
       openRouterModel,
+      parseMode,
     },
     repository: hasSupabaseEnv
       ? createSupabaseHealthStructureRepository({
@@ -70,6 +78,9 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
         })
       : createMissingEnvRepository(),
     parseStructuredData: async (ocrText, context) => {
+      if (parseMode === "e2e_stub") {
+        return await parseStructuredDataE2EStub(ocrText, context);
+      }
       if (!openRouterApiKey) {
         throw new Error("OPENROUTER_API_KEY is required");
       }
