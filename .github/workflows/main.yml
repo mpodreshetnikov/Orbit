@@ -80,12 +80,33 @@ jobs:
           node scripts/just/change-impact.cjs --from "$FROM" --to "$TO" --format github-output --output-file "$GITHUB_OUTPUT"
       - name: Run quality (format, lint, typecheck)
         run: just quality
+      - name: Restore Supabase Docker image cache
+        if: steps.impact.outputs.dbImpact == 'true'
+        id: supabase-image-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/docker/supabase-images.tar
+          key: ${{ runner.os }}-supabase-docker-${{ hashFiles('supabase/config.toml') }}
+      - name: Load cached Supabase Docker image
+        if: steps.impact.outputs.dbImpact == 'true'
+        shell: bash
+        run: |
+          mkdir -p .cache/docker
+          if [[ -f .cache/docker/supabase-images.tar ]]; then
+            docker load -i .cache/docker/supabase-images.tar
+          fi
       - name: Start Supabase
         if: steps.impact.outputs.dbImpact == 'true'
         env:
           HEALTH_STRUCTURE_PARSER_MODE: e2e_stub
           OPENROUTER_API_KEY: e2e-local-disabled
         run: just supabase-local-start
+      - name: Capture Supabase Docker images
+        if: steps.impact.outputs.dbImpact == 'true'
+        shell: bash
+        run: |
+          mkdir -p .cache/docker
+          docker ps --format '{{.Image}}' | sort -u > .cache/docker/supabase-images.txt
       - name: Verify generated DB artifacts
         if: steps.impact.outputs.dbImpact == 'true'
         env:
@@ -105,9 +126,27 @@ jobs:
       - name: End-to-end tests
         if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
         run: just test-e2e
+      - name: Bundle Supabase Docker images
+        if: steps.impact.outputs.dbImpact == 'true' && steps.supabase-image-cache.outputs.cache-hit != 'true'
+        id: supabase-image-bundle
+        shell: bash
+        run: |
+          if [[ -s .cache/docker/supabase-images.txt ]]; then
+            mapfile -t images < .cache/docker/supabase-images.txt
+            docker save "${images[@]}" -o .cache/docker/supabase-images.tar
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Stop Supabase
         if: always() && steps.impact.outputs.dbImpact == 'true'
         run: just supabase-local-stop
+      - name: Save Supabase Docker image cache
+        if: always() && steps.impact.outputs.dbImpact == 'true' && steps.supabase-image-cache.outputs.cache-hit != 'true' && steps.supabase-image-bundle.outputs.ready == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/docker/supabase-images.tar
+          key: ${{ steps.supabase-image-cache.outputs.cache-primary-key }}
       - name: Test and coverage
         run: just test-unit-coverage && just coverage-check
 
