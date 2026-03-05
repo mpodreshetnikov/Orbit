@@ -9,11 +9,19 @@ import { Button } from "@/components/ui/button";
 import { CameraCapture } from "./camera-capture";
 import { useIsMobile } from "@/hooks";
 
+export type FileUploadStatus = "queued" | "uploading" | "uploaded" | "failed";
+
+export interface FileUploadState {
+  status: FileUploadStatus;
+  error?: string;
+}
+
 interface FileDropzoneProps {
   onFilesSelected: (files: File[]) => void;
   selectedFiles: File[];
   onRemoveFile: (index: number) => void;
   isUploading?: boolean;
+  fileUploadStates?: FileUploadState[];
   accept?: string;
   maxSizeMB?: number;
   maxFiles?: number;
@@ -27,6 +35,7 @@ export function FileDropzone({
   selectedFiles,
   onRemoveFile,
   isUploading = false,
+  fileUploadStates = [],
   accept = "image/*,application/pdf",
   maxSizeMB = 20,
   maxFiles = 10,
@@ -151,6 +160,31 @@ export function FileDropzone({
     return <FileText className="h-8 w-8 text-red-500" />;
   };
 
+  const getUploadStateLabel = (status: FileUploadStatus): string => {
+    switch (status) {
+      case "uploading":
+        return t("records.add.uploadingFile");
+      case "uploaded":
+        return t("records.add.uploadComplete");
+      case "failed":
+        return t("records.add.uploadFailed");
+      case "queued":
+      default:
+        return t("records.add.uploadQueued");
+    }
+  };
+
+  const getUploadStateTextClass = (status: FileUploadStatus): string => {
+    switch (status) {
+      case "uploaded":
+        return "text-emerald-600";
+      case "failed":
+        return "text-destructive";
+      default:
+        return "text-muted-foreground";
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Dropzone */}
@@ -225,28 +259,39 @@ export function FileDropzone({
             {t("records.add.filesSelected", { count: selectedFiles.length })}
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
-            {selectedFiles.map((file, index) => (
-              <div
-                key={`${file.name}-${index}`}
-                className="flex items-center gap-3 rounded-lg border bg-muted/50 p-3"
-              >
-                {getFileIcon(file.type)}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={() => onRemoveFile(index)}
-                  disabled={isUploading}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
+            {selectedFiles.map((file, index) =>
+              (() => {
+                const uploadState = fileUploadStates[index] ?? { status: "queued" as const };
+                const statusLabel = getUploadStateLabel(uploadState.status);
+                const statusClass = getUploadStateTextClass(uploadState.status);
+                return (
+                  <div
+                    key={`${file.name}-${index}`}
+                    className="flex items-center gap-3 rounded-lg border bg-muted/50 p-3"
+                  >
+                    {getFileIcon(file.type)}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{file.name}</p>
+                      <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
+                      <p className={cn("text-xs", statusClass)}>{statusLabel}</p>
+                      {uploadState.error ? (
+                        <p className="truncate text-xs text-destructive">{uploadState.error}</p>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={() => onRemoveFile(index)}
+                      disabled={isUploading || uploadState.status === "uploading"}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })(),
+            )}
           </div>
         </div>
       )}

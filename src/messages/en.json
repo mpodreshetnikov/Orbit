@@ -336,7 +336,11 @@
       "saveAndActivate": "Save Record",
       "filesSelected": "{count, plural, one {# file selected} other {# files selected}}",
       "maxFilesReached": "Maximum {max} files allowed",
-      "remainingSlots": "{count} of {max} slots remaining"
+      "remainingSlots": "{count} of {max} slots remaining",
+      "uploadQueued": "Waiting for upload",
+      "uploadingFile": "Uploading...",
+      "uploadComplete": "Uploaded",
+      "uploadFailed": "Upload failed"
     },
     "detail": {
       "title": "Record Details",
@@ -400,7 +404,11 @@
       "recordQueued": "Record Queued for Processing",
       "queuedDescription": "Your record has been uploaded and is now being processed. You can add more records or view your existing ones while OCR analysis runs in the background.",
       "notificationHint": "You'll receive a notification when processing is complete.",
-      "recordsQueued": "{count, plural, one {# record queued} other {# records queued}} in this session"
+      "recordsQueued": "{count, plural, one {# record queued} other {# records queued}} in this session",
+      "waitingForUploads": "Please wait until all files are uploaded before starting processing.",
+      "uploadReady": "All files uploaded. You can start processing.",
+      "uploadFailed": "Some files failed to upload. Remove failed files and add them again.",
+      "uploadingProgress": "Uploaded {uploaded} of {total} files"
     },
     "camera": {
       "title": "Take Photo",

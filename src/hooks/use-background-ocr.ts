@@ -13,7 +13,7 @@ interface BackgroundOCRInput {
   recordId: string;
   personId: string;
   personName: string;
-  files: File[];
+  files?: File[];
 }
 
 interface RetryOCRInput {
@@ -25,6 +25,17 @@ interface RetryOCRInput {
 const OCR_FETCH_TIMEOUT_MS = 120_000; // 120s so client does not wait indefinitely
 const OCR_FAILED_UPDATE_RETRIES = 3;
 const OCR_FAILED_UPDATE_DELAY_MS = 1500;
+const OCR_UPLOAD_RETRIES = 3;
+const OCR_UPLOAD_RETRY_DELAY_MS = 1200;
+const RETRYABLE_UPLOAD_ERROR_RE = /\bfailed to fetch\b|network|timeout|fetch failed/i;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableUploadError(message: string): boolean {
+  return RETRYABLE_UPLOAD_ERROR_RE.test(message.toLowerCase());
+}
 
 export async function updateRecordToOcrFailed(
   supabase: ReturnType<typeof createClient>,
@@ -52,8 +63,9 @@ export function useBackgroundOCR() {
   const addNotification = useProcessingQueueStore((state) => state.addNotification);
 
   const startBackgroundOCR = useCallback(
-    async ({ recordId, personId, personName, files }: BackgroundOCRInput) => {
+    async ({ recordId, personId, personName, files = [] }: BackgroundOCRInput) => {
       const jobId = recordId;
+      const hasFilesToUpload = files.length > 0;
 
       // Add job to processing queue
       addJob({
@@ -61,8 +73,8 @@ export function useBackgroundOCR() {
         recordId,
         personId,
         personName,
-        stage: "uploading",
-        progress: 0,
+        stage: hasFilesToUpload ? "uploading" : "processing",
+        progress: hasFilesToUpload ? 0 : 40,
       });
 
       try {
@@ -77,40 +89,63 @@ export function useBackgroundOCR() {
           throw new Error("Not authenticated");
         }
 
-        // Update status: uploading
-        updateJob(jobId, { stage: "uploading", progress: 10 });
+        if (hasFilesToUpload) {
+          // Update status: uploading
+          updateJob(jobId, { stage: "uploading", progress: 10 });
 
-        // Upload files
-        const uploadPromises = files.map(async (file, index) => {
-          const fileExt = file.name.split(".").pop() || "bin";
-          const fileName = `${Date.now()}-${index}.${fileExt}`;
-          const storagePath = `${personId}/${recordId}/${fileName}`;
+          // Upload files sequentially with retry on transient network errors.
+          for (let index = 0; index < files.length; index++) {
+            const file = files[index];
+            const fileExt = file.name.split(".").pop() || "bin";
+            const fileName = `${Date.now()}-${index}.${fileExt}`;
+            const storagePath = `${personId}/${recordId}/${fileName}`;
 
-          const { error: uploadError } = await supabase.storage
-            .from("medical-attachments")
-            .upload(storagePath, file);
+            let uploadErrorMessage: string | null = null;
+            for (let attempt = 0; attempt < OCR_UPLOAD_RETRIES; attempt++) {
+              const { error: uploadError } = await supabase.storage
+                .from("medical-attachments")
+                .upload(storagePath, file, {
+                  cacheControl: "3600",
+                  upsert: false,
+                });
 
-          if (uploadError) {
-            throw new Error(`Upload failed: ${uploadError.message}`);
+              if (!uploadError) {
+                uploadErrorMessage = null;
+                break;
+              }
+
+              uploadErrorMessage = uploadError.message;
+              const hasNextAttempt = attempt < OCR_UPLOAD_RETRIES - 1;
+              if (!hasNextAttempt || !isRetryableUploadError(uploadErrorMessage)) {
+                break;
+              }
+
+              await sleep(OCR_UPLOAD_RETRY_DELAY_MS * (attempt + 1));
+            }
+
+            if (uploadErrorMessage) {
+              throw new Error(`Upload failed: ${uploadErrorMessage}`);
+            }
+
+            // Create attachment record
+            const { error: attachError } = await supabase.from("record_attachments").insert({
+              record_id: recordId,
+              storage_path: storagePath,
+              mime_type: file.type,
+              original_filename: file.name,
+              file_size: file.size,
+              sort_order: index,
+            });
+
+            if (attachError) {
+              await supabase.storage.from("medical-attachments").remove([storagePath]);
+              throw new Error(`Failed to create attachment: ${attachError.message}`);
+            }
+
+            const progress = 10 + Math.round(((index + 1) / files.length) * 20);
+            updateJob(jobId, { stage: "uploading", progress: Math.min(progress, 30) });
           }
-
-          // Create attachment record
-          const { error: attachError } = await supabase.from("record_attachments").insert({
-            record_id: recordId,
-            storage_path: storagePath,
-            mime_type: file.type,
-            original_filename: file.name,
-            file_size: file.size,
-            sort_order: index,
-          });
-
-          if (attachError) {
-            throw new Error(`Failed to create attachment: ${attachError.message}`);
-          }
-        });
-
-        await Promise.all(uploadPromises);
-        updateJob(jobId, { stage: "uploading", progress: 30 });
+        }
 
         // Update record status to "ocr_processing"
         await supabase

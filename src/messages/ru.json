@@ -336,7 +336,11 @@
       "saveAndActivate": "Сохранить запись",
       "filesSelected": "{count, plural, one {# файл выбран} few {# файла выбрано} many {# файлов выбрано} other {# файлов выбрано}}",
       "maxFilesReached": "Максимум {max} файлов",
-      "remainingSlots": "{count} из {max} слотов свободно"
+      "remainingSlots": "{count} из {max} слотов свободно",
+      "uploadQueued": "Ожидает загрузки",
+      "uploadingFile": "Загрузка...",
+      "uploadComplete": "Загружено",
+      "uploadFailed": "Ошибка загрузки"
     },
     "detail": {
       "title": "Детали записи",
@@ -400,7 +404,11 @@
       "recordQueued": "Запись добавлена в очередь",
       "queuedDescription": "Запись загружена и обрабатывается. Вы можете добавить ещё записи или просмотреть существующие, пока OCR-анализ работает в фоне.",
       "notificationHint": "Вы получите уведомление, когда обработка завершится.",
-      "recordsQueued": "{count, plural, one {# запись в очереди} few {# записи в очереди} many {# записей в очереди} other {# записей в очереди}} в этой сессии"
+      "recordsQueued": "{count, plural, one {# запись в очереди} few {# записи в очереди} many {# записей в очереди} other {# записей в очереди}} в этой сессии",
+      "waitingForUploads": "Дождитесь загрузки всех файлов перед началом обработки.",
+      "uploadReady": "Все файлы загружены. Можно запускать обработку.",
+      "uploadFailed": "Некоторые файлы не загрузились. Удалите их и добавьте заново.",
+      "uploadingProgress": "Загружено {uploaded} из {total} файлов"
     },
     "camera": {
       "title": "Сделать фото",

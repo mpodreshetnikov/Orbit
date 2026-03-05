@@ -8,6 +8,8 @@ const hookMocks = vi.hoisted(() => ({
   useCreateMedicalRecord: vi.fn(),
   useHardDeleteRecord: vi.fn(),
   useBackgroundOCR: vi.fn(),
+  useUploadAttachment: vi.fn(),
+  useDeleteAttachment: vi.fn(),
   useUpdateMedicalRecord: vi.fn(),
   useStructureExtraction: vi.fn(),
   useProcessingQueueStore: vi.fn(),
@@ -24,6 +26,8 @@ const routerMock = vi.hoisted(() => ({
 const createMutateAsyncMock = vi.fn();
 const updateMutateAsyncMock = vi.fn();
 const deleteMutateAsyncMock = vi.fn();
+const uploadAttachmentMutateAsyncMock = vi.fn();
+const deleteAttachmentMutateAsyncMock = vi.fn();
 const startBackgroundOCRMock = vi.fn();
 const extractStructureMock = vi.fn();
 
@@ -39,6 +43,8 @@ vi.mock("@/hooks", () => ({
   useCreateMedicalRecord: (...args: unknown[]) => hookMocks.useCreateMedicalRecord(...args),
   useHardDeleteRecord: (...args: unknown[]) => hookMocks.useHardDeleteRecord(...args),
   useBackgroundOCR: (...args: unknown[]) => hookMocks.useBackgroundOCR(...args),
+  useUploadAttachment: (...args: unknown[]) => hookMocks.useUploadAttachment(...args),
+  useDeleteAttachment: (...args: unknown[]) => hookMocks.useDeleteAttachment(...args),
   useUpdateMedicalRecord: (...args: unknown[]) => hookMocks.useUpdateMedicalRecord(...args),
   useStructureExtraction: (...args: unknown[]) => hookMocks.useStructureExtraction(...args),
 }));
@@ -52,13 +58,16 @@ vi.mock("./file-dropzone", () => ({
     onFilesSelected,
     selectedFiles,
     onRemoveFile,
+    fileUploadStates,
   }: {
     onFilesSelected: (files: File[]) => void;
     selectedFiles: File[];
     onRemoveFile: (index: number) => void;
+    fileUploadStates?: Array<{ status: string; error?: string }>;
   }) => (
     <div>
       <p>mock-files:{selectedFiles.length}</p>
+      <p>mock-statuses:{fileUploadStates?.map((state) => state.status).join(",") ?? ""}</p>
       <button
         type="button"
         onClick={() =>
@@ -167,6 +176,8 @@ describe("AddRecordWizard", () => {
     createMutateAsyncMock.mockReset();
     updateMutateAsyncMock.mockReset();
     deleteMutateAsyncMock.mockReset();
+    uploadAttachmentMutateAsyncMock.mockReset();
+    deleteAttachmentMutateAsyncMock.mockReset();
     startBackgroundOCRMock.mockReset();
     extractStructureMock.mockReset();
     routerMock.push.mockReset();
@@ -179,11 +190,28 @@ describe("AddRecordWizard", () => {
     createMutateAsyncMock.mockResolvedValue({ id: "record-1" });
     updateMutateAsyncMock.mockResolvedValue(undefined);
     deleteMutateAsyncMock.mockResolvedValue(undefined);
+    uploadAttachmentMutateAsyncMock.mockResolvedValue({
+      id: "attachment-1",
+      record_id: "record-1",
+      storage_path: "person-1/record-1/scan.pdf",
+      mime_type: "application/pdf",
+      original_filename: "scan.pdf",
+      file_size: 1234,
+      sort_order: 0,
+      created_at: "2026-01-01T00:00:00.000Z",
+    });
+    deleteAttachmentMutateAsyncMock.mockResolvedValue(undefined);
     extractStructureMock.mockResolvedValue({ success: true });
 
     hookMocks.useCreateMedicalRecord.mockReturnValue(makeMutationMock(createMutateAsyncMock));
     hookMocks.useUpdateMedicalRecord.mockReturnValue(makeMutationMock(updateMutateAsyncMock));
     hookMocks.useHardDeleteRecord.mockReturnValue(makeMutationMock(deleteMutateAsyncMock));
+    hookMocks.useUploadAttachment.mockReturnValue(
+      makeMutationMock(uploadAttachmentMutateAsyncMock),
+    );
+    hookMocks.useDeleteAttachment.mockReturnValue(
+      makeMutationMock(deleteAttachmentMutateAsyncMock),
+    );
     hookMocks.useBackgroundOCR.mockReturnValue({
       startBackgroundOCR: startBackgroundOCRMock,
     });
@@ -202,7 +230,14 @@ describe("AddRecordWizard", () => {
     render(<AddRecordWizard personId="person-1" personName="Alex" />);
 
     await user.click(screen.getByRole("button", { name: "mock-add-file" }));
-    await user.click(screen.getByRole("button", { name: "records.wizard.startProcessing" }));
+
+    const startButton = screen.getByRole("button", { name: "records.wizard.startProcessing" });
+    await waitFor(() => {
+      expect(uploadAttachmentMutateAsyncMock).toHaveBeenCalledTimes(1);
+      expect(startButton).toBeEnabled();
+    });
+
+    await user.click(startButton);
 
     await waitFor(() => {
       expect(createMutateAsyncMock).toHaveBeenCalledWith(
@@ -217,7 +252,7 @@ describe("AddRecordWizard", () => {
           recordId: "record-1",
           personId: "person-1",
           personName: "Alex",
-          files: [expect.objectContaining({ name: "scan.pdf" })],
+          files: [],
         }),
       );
     });
@@ -255,7 +290,6 @@ describe("AddRecordWizard", () => {
     render(<AddRecordWizard personId="person-1" personName="Alex" />);
 
     await user.click(screen.getByRole("button", { name: "mock-add-file" }));
-    await user.click(screen.getByRole("button", { name: "records.wizard.startProcessing" }));
 
     expect(await screen.findByText("create failed")).toBeInTheDocument();
     expect(startBackgroundOCRMock).not.toHaveBeenCalled();
@@ -267,5 +301,56 @@ describe("AddRecordWizard", () => {
     await waitFor(() => {
       expect(routerMock.back).toHaveBeenCalled();
     });
+  });
+
+  it("disables start until file upload finishes and shows per-file upload status", async () => {
+    const uploadDeferred: { resolve: (value: unknown) => void } = {
+      resolve: () => {},
+    };
+    uploadAttachmentMutateAsyncMock.mockReturnValue(
+      new Promise((resolve) => {
+        uploadDeferred.resolve = resolve;
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<AddRecordWizard personId="person-1" personName="Alex" />);
+
+    await user.click(screen.getByRole("button", { name: "mock-add-file" }));
+
+    expect(screen.getByText("mock-statuses:uploading")).toBeInTheDocument();
+    const startButton = screen.getByRole("button", { name: "records.wizard.startProcessing" });
+    expect(startButton).toBeDisabled();
+
+    uploadDeferred.resolve({
+      id: "attachment-1",
+      record_id: "record-1",
+      storage_path: "person-1/record-1/scan.pdf",
+      mime_type: "application/pdf",
+      original_filename: "scan.pdf",
+      file_size: 1234,
+      sort_order: 0,
+      created_at: "2026-01-01T00:00:00.000Z",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("mock-statuses:uploaded")).toBeInTheDocument();
+      expect(startButton).toBeEnabled();
+    });
+  });
+
+  it("keeps start disabled when at least one upload fails", async () => {
+    uploadAttachmentMutateAsyncMock.mockRejectedValueOnce(new Error("upload failed"));
+    const user = userEvent.setup();
+    render(<AddRecordWizard personId="person-1" personName="Alex" />);
+
+    await user.click(screen.getByRole("button", { name: "mock-add-file" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("mock-statuses:failed")).toBeInTheDocument();
+      expect(screen.getByText("upload failed")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: "records.wizard.startProcessing" })).toBeDisabled();
   });
 });

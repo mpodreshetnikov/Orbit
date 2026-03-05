@@ -484,6 +484,18 @@ describe("RecordDetail", () => {
       data: baseRecord({
         status: "ocr_failed",
         ocr_error: "ocr failed",
+        attachments: [
+          {
+            id: "attachment-1",
+            record_id: "record-1",
+            storage_path: "person-1/record-1/report.pdf",
+            mime_type: "application/pdf",
+            original_filename: "report.pdf",
+            file_size: 1024,
+            sort_order: 0,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
       }),
       isLoading: false,
       error: null,
@@ -504,6 +516,34 @@ describe("RecordDetail", () => {
       expect(refetch).toHaveBeenCalled();
     });
   }, 20000);
+
+  it("disables OCR retry when no attachments are available", async () => {
+    const { RecordDetail } = await import("./record-detail");
+
+    const retryOcr = vi.fn().mockResolvedValue(undefined);
+    const refetch = vi.fn();
+    hookMocks.useBackgroundOCR.mockReturnValue({ retryOcr });
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({
+        status: "ocr_failed",
+        ocr_error: "No attachments found for this record",
+        attachments: [],
+      }),
+      isLoading: false,
+      error: null,
+      refetch,
+    });
+    render(<RecordDetail recordId="record-1" />);
+
+    const retryButton = screen.getByRole("button", { name: "processing.retryOcr" });
+    expect(retryButton).toBeDisabled();
+    expect(screen.getByText("records.detail.noAttachments")).toBeInTheDocument();
+
+    await userEvent.setup().click(retryButton);
+
+    expect(retryOcr).not.toHaveBeenCalled();
+    expect(refetch).not.toHaveBeenCalled();
+  });
 
   it("renders ocr and structure review branches", async () => {
     const { RecordDetail } = await import("./record-detail");

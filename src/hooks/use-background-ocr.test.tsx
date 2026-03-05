@@ -45,6 +45,7 @@ function renderHookWithQueryClient<T>(hook: () => T) {
 function createSupabaseClientMock(options: {
   sessionToken?: string | null;
   uploadError?: string | null;
+  uploadErrorSequence?: Array<string | null>;
   insertError?: string | null;
   updateError?: string | null;
 }) {
@@ -55,9 +56,18 @@ function createSupabaseClientMock(options: {
   const insertMock = vi.fn().mockResolvedValue({
     error: options.insertError ? { message: options.insertError } : null,
   });
-  const uploadMock = vi.fn().mockResolvedValue({
-    error: options.uploadError ? { message: options.uploadError } : null,
+  const uploadErrorSequence = options.uploadErrorSequence
+    ? [...options.uploadErrorSequence]
+    : undefined;
+  const uploadMock = vi.fn().mockImplementation(async () => {
+    const nextUploadError = uploadErrorSequence?.length
+      ? (uploadErrorSequence.shift() ?? null)
+      : (options.uploadError ?? null);
+    return {
+      error: nextUploadError ? { message: nextUploadError } : null,
+    };
   });
+  const removeMock = vi.fn().mockResolvedValue({ error: null });
 
   const fromMock = vi.fn((table: string) => {
     if (table === "record_attachments") {
@@ -80,7 +90,7 @@ function createSupabaseClientMock(options: {
         }),
       },
       storage: {
-        from: vi.fn(() => ({ upload: uploadMock })),
+        from: vi.fn(() => ({ upload: uploadMock, remove: removeMock })),
       },
       from: fromMock,
     },
@@ -89,6 +99,7 @@ function createSupabaseClientMock(options: {
     updateMock,
     updateEqMock,
     uploadMock,
+    removeMock,
   };
 }
 
@@ -313,6 +324,56 @@ describe("use-background-ocr", () => {
     );
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-records"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-record", "record-1"] });
+    expect(response).toEqual({ success: true, ocr_text: "OCR body" });
+  });
+
+  it("starts OCR for already uploaded attachments when files list is empty", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client, uploadMock } = createSupabaseClientMock({
+      sessionToken: "token-1",
+    });
+    createClientMock.mockReturnValue(client);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          ocr_text: "OCR body",
+          suggested_title: "Uploaded earlier",
+        }),
+      }),
+    );
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    const response = await result.current.startBackgroundOCR({
+      recordId: "record-existing-attachments",
+      personId: "person-1",
+      personName: "Alex",
+      files: [],
+    });
+
+    expect(addJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "record-existing-attachments",
+        stage: "processing",
+        progress: 40,
+      }),
+    );
+    expect(uploadMock).not.toHaveBeenCalled();
     expect(response).toEqual({ success: true, ocr_text: "OCR body" });
   });
 
@@ -662,6 +723,50 @@ describe("use-background-ocr", () => {
         error: "Failed to create attachment: insert failed",
       }),
     );
+  });
+
+  it("retries transient upload errors and continues OCR processing", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client, uploadMock } = createSupabaseClientMock({
+      sessionToken: "token-1",
+      uploadErrorSequence: ["Failed to fetch", "Failed to fetch", null],
+    });
+    createClientMock.mockReturnValue(client);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          ocr_text: "OCR body",
+          suggested_title: "Recovered upload",
+        }),
+      }),
+    );
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    const response = await result.current.startBackgroundOCR({
+      recordId: "record-upload-retry",
+      personId: "person-1",
+      personName: "Alex",
+      files: [new File(["a"], "scan.pdf", { type: "application/pdf" })],
+    });
+
+    expect(uploadMock).toHaveBeenCalledTimes(3);
+    expect(response).toEqual({ success: true, ocr_text: "OCR body" });
   });
 
   it("handles OCR json success=false and plain-text non-ok errors in startBackgroundOCR", async () => {

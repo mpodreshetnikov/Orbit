@@ -717,7 +717,11 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   // Show OCR failed state: error message and Retry OCR button
   if (isOcrFailed) {
     const personName = persons?.find((p) => p.id === record.person_id)?.name ?? record.title ?? "";
+    const hasAttachments = record.attachments.length > 0;
     const handleRetryOcr = async () => {
+      if (!hasAttachments) {
+        return;
+      }
       await retryOcr({
         recordId,
         personId: record.person_id,
@@ -737,7 +741,12 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           <p className="text-sm text-muted-foreground">
             {record.ocr_error || t("processing.failed")}
           </p>
-          <Button onClick={handleRetryOcr}>{t("processing.retryOcr")}</Button>
+          {!hasAttachments ? (
+            <p className="text-sm text-muted-foreground">{t("records.detail.noAttachments")}</p>
+          ) : null}
+          <Button onClick={handleRetryOcr} disabled={!hasAttachments}>
+            {t("processing.retryOcr")}
+          </Button>
         </div>
       </div>
     );

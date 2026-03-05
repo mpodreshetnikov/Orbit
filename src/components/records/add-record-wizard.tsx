@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
@@ -35,17 +35,31 @@ import { Progress } from "@/components/ui/progress";
 import { FileDropzone } from "./file-dropzone";
 import {
   useCreateMedicalRecord,
+  useDeleteAttachment,
   useHardDeleteRecord,
   useBackgroundOCR,
+  useUploadAttachment,
   useUpdateMedicalRecord,
   useStructureExtraction,
 } from "@/hooks";
 import { useProcessingQueueStore } from "@/stores/processing-queue-store";
+import type { RecordAttachment } from "@/types";
 import { cn } from "@/lib/utils";
 
 type InputMode = "upload" | "paste";
 
 type WizardStep = 1 | 2 | 3;
+
+type UploadStatus = "queued" | "uploading" | "uploaded" | "failed";
+
+interface UploadQueueItem {
+  id: string;
+  file: File;
+  status: UploadStatus;
+  sortOrder: number;
+  attachment?: RecordAttachment;
+  error?: string;
+}
 
 interface AddRecordWizardProps {
   personId: string;
@@ -65,17 +79,23 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   const [inputMode, setInputMode] = useState<InputMode>("upload");
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [pastedText, setPastedText] = useState("");
   const [draftRecordId, setDraftRecordId] = useState<string | null>(null);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [recordsStarted, setRecordsStarted] = useState(0);
   const [isSubmittingPaste, setIsSubmittingPaste] = useState(false);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [isRemovingFiles, setIsRemovingFiles] = useState(false);
+  const draftCreationPromiseRef = useRef<Promise<string> | null>(null);
+  const nextSortOrderRef = useRef(0);
 
   // Mutations and hooks
   const createMutation = useCreateMedicalRecord();
   const updateMutation = useUpdateMedicalRecord();
+  const uploadAttachmentMutation = useUploadAttachment();
+  const deleteAttachmentMutation = useDeleteAttachment();
   const deleteMutation = useHardDeleteRecord();
   const { startBackgroundOCR } = useBackgroundOCR();
   const { extractStructure } = useStructureExtraction();
@@ -86,21 +106,132 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
     (job) => job.stage === "uploading" || job.stage === "processing",
   );
 
-  // Handle files selected
-  const handleFilesSelected = useCallback((files: File[]) => {
-    setSelectedFiles((prev) => [...prev, ...files]);
-    setStartError(null);
+  const selectedFiles = uploadQueue.map((item) => item.file);
+  const uploadedCount = uploadQueue.filter((item) => item.status === "uploaded").length;
+  const hasUploadFailures = uploadQueue.some((item) => item.status === "failed");
+  const allUploadsComplete = uploadQueue.length > 0 && uploadedCount === uploadQueue.length;
+
+  const ensureDraftRecord = useCallback(async (): Promise<string> => {
+    if (draftRecordId) {
+      return draftRecordId;
+    }
+
+    if (!draftCreationPromiseRef.current) {
+      draftCreationPromiseRef.current = createMutation
+        .mutateAsync({
+          person_id: personId,
+          title: t("processing.processing"),
+          record_type: "other",
+          record_date: format(new Date(), "yyyy-MM-dd"),
+          status: "draft",
+        })
+        .then((record) => {
+          setDraftRecordId(record.id);
+          return record.id;
+        })
+        .finally(() => {
+          draftCreationPromiseRef.current = null;
+        });
+    }
+
+    return draftCreationPromiseRef.current;
+  }, [createMutation, draftRecordId, personId, t]);
+
+  const updateUploadQueueItem = useCallback((id: string, updates: Partial<UploadQueueItem>) => {
+    setUploadQueue((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
   }, []);
 
+  const uploadFiles = useCallback(
+    async (items: UploadQueueItem[]) => {
+      setIsUploadingFiles(true);
+      let recordId: string;
+      try {
+        recordId = await ensureDraftRecord();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to create record";
+        setStartError(errorMessage);
+        setUploadQueue((prev) =>
+          prev.map((item) =>
+            items.some((queued) => queued.id === item.id)
+              ? { ...item, status: "failed", error: errorMessage }
+              : item,
+          ),
+        );
+        setIsUploadingFiles(false);
+        return;
+      }
+
+      for (const item of items) {
+        updateUploadQueueItem(item.id, { status: "uploading", error: undefined });
+        try {
+          const attachment = await uploadAttachmentMutation.mutateAsync({
+            recordId,
+            personId,
+            file: item.file,
+            sortOrder: item.sortOrder,
+          });
+          updateUploadQueueItem(item.id, {
+            status: "uploaded",
+            attachment,
+            error: undefined,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Upload failed";
+          updateUploadQueueItem(item.id, { status: "failed", error: errorMessage });
+          setStartError(errorMessage);
+        }
+      }
+
+      setIsUploadingFiles(false);
+    },
+    [ensureDraftRecord, personId, updateUploadQueueItem, uploadAttachmentMutation],
+  );
+
+  // Handle files selected
+  const handleFilesSelected = useCallback(
+    (files: File[]) => {
+      const newItems = files.map((file) => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        file,
+        status: "queued" as const,
+        sortOrder: nextSortOrderRef.current++,
+      }));
+      setUploadQueue((prev) => [...prev, ...newItems]);
+      setStartError(null);
+      void uploadFiles(newItems);
+    },
+    [uploadFiles],
+  );
+
   // Handle file removal
-  const handleRemoveFile = useCallback((index: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+  const handleRemoveFile = useCallback(
+    (index: number) => {
+      const queueItem = uploadQueue[index];
+      if (!queueItem || queueItem.status === "uploading") {
+        return;
+      }
+
+      setUploadQueue((prev) => prev.filter((_, i) => i !== index));
+
+      if (queueItem.attachment) {
+        setIsRemovingFiles(true);
+        void deleteAttachmentMutation
+          .mutateAsync(queueItem.attachment)
+          .catch((error) => {
+            const errorMessage =
+              error instanceof Error ? error.message : "Failed to remove attachment";
+            setStartError(errorMessage);
+          })
+          .finally(() => setIsRemovingFiles(false));
+      }
+    },
+    [deleteAttachmentMutation, uploadQueue],
+  );
 
   // Navigate back
   const handleBack = useCallback(() => {
     if (currentStep === 1) {
-      if (selectedFiles.length > 0 || pastedText.trim().length > 0) {
+      if (selectedFiles.length > 0 || pastedText.trim().length > 0 || draftRecordId) {
         setShowDiscardDialog(true);
       } else {
         router.back();
@@ -112,7 +243,7 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
       // From queued screen, just go back to main page
       router.push("/health");
     }
-  }, [currentStep, selectedFiles.length, pastedText, router]);
+  }, [currentStep, selectedFiles.length, pastedText, draftRecordId, router]);
 
   // Discard and go back
   const handleDiscard = useCallback(async () => {
@@ -126,9 +257,11 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
     }
 
     // Reset state
-    setSelectedFiles([]);
+    setUploadQueue([]);
     setPastedText("");
     setDraftRecordId(null);
+    draftCreationPromiseRef.current = null;
+    nextSortOrderRef.current = 0;
     setStartError(null);
     setShowDiscardDialog(false);
     router.back();
@@ -175,28 +308,18 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
 
   // Start processing (Step 1 -> Step 2 -> Step 3)
   const startProcessing = useCallback(async () => {
-    if (selectedFiles.length === 0) return;
+    if (!draftRecordId || !allUploadsComplete) return;
 
     setCurrentStep(2);
     setStartError(null);
 
     try {
-      // Step 1: Create draft record
-      const record = await createMutation.mutateAsync({
-        person_id: personId,
-        title: t("processing.processing"),
-        record_type: "other",
-        record_date: format(new Date(), "yyyy-MM-dd"),
-        status: "draft",
-      });
-      setDraftRecordId(record.id);
-
-      // Step 2: Start background OCR (doesn't wait for completion)
+      // Step 1: Start OCR for already uploaded attachments (doesn't wait for completion)
       startBackgroundOCR({
-        recordId: record.id,
+        recordId: draftRecordId,
         personId: personId,
         personName: personName,
-        files: selectedFiles,
+        files: [],
       });
 
       // Move to queued step
@@ -207,13 +330,15 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
       setStartError(error instanceof Error ? error.message : "Failed to start processing");
       setCurrentStep(1);
     }
-  }, [selectedFiles, personId, personName, t, createMutation, startBackgroundOCR]);
+  }, [allUploadsComplete, draftRecordId, personId, personName, startBackgroundOCR]);
 
   // Add another record (reset wizard)
   const handleAddAnother = useCallback(() => {
-    setSelectedFiles([]);
+    setUploadQueue([]);
     setPastedText("");
     setDraftRecordId(null);
+    draftCreationPromiseRef.current = null;
+    nextSortOrderRef.current = 0;
     setStartError(null);
     setCurrentStep(1);
   }, []);
@@ -320,19 +445,47 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
                   onFilesSelected={handleFilesSelected}
                   selectedFiles={selectedFiles}
                   onRemoveFile={handleRemoveFile}
-                  isUploading={false}
+                  isUploading={isUploadingFiles || isRemovingFiles}
+                  fileUploadStates={uploadQueue.map((item) => ({
+                    status: item.status,
+                    error: item.error,
+                  }))}
                   maxFiles={10}
                   showCamera={true}
                 />
 
                 <div className="flex items-center justify-between">
-                  {recordsStarted > 0 && (
-                    <p className="text-sm text-muted-foreground">
-                      {t("records.wizard.recordsQueued", { count: recordsStarted })}
-                    </p>
-                  )}
+                  <div className="space-y-1">
+                    {recordsStarted > 0 && (
+                      <p className="text-sm text-muted-foreground">
+                        {t("records.wizard.recordsQueued", { count: recordsStarted })}
+                      </p>
+                    )}
+                    {uploadQueue.length > 0 && !allUploadsComplete && !hasUploadFailures && (
+                      <p className="text-sm text-muted-foreground">
+                        {t("records.wizard.waitingForUploads")}
+                      </p>
+                    )}
+                    {uploadQueue.length > 0 && allUploadsComplete && (
+                      <p className="text-sm text-emerald-600">{t("records.wizard.uploadReady")}</p>
+                    )}
+                    {hasUploadFailures && (
+                      <p className="text-sm text-destructive">{t("records.wizard.uploadFailed")}</p>
+                    )}
+                    {uploadQueue.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {t("records.wizard.uploadingProgress", {
+                          uploaded: uploadedCount,
+                          total: uploadQueue.length,
+                        })}
+                      </p>
+                    )}
+                  </div>
                   <div className="flex-1" />
-                  <Button onClick={startProcessing} disabled={selectedFiles.length === 0}>
+                  <Button
+                    onClick={startProcessing}
+                    disabled={!allUploadsComplete || isRemovingFiles}
+                  >
                     {t("records.wizard.startProcessing")}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
