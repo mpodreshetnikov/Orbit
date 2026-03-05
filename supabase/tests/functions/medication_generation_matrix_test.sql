@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(38);
+SELECT plan(39);
 
 SELECT has_function('public', 'generate_med_dose_events_for_person_ids', ARRAY['uuid[]', 'text', 'integer']);
 SELECT has_function('public', 'generate_med_dose_events_for_horizon', ARRAY['uuid', 'text', 'integer']);
@@ -263,6 +263,32 @@ SELECT
   jsonb_build_object('intake', jsonb_build_object('amount', 1, 'unit', 'pill'), 'active', '[]'::jsonb)
 FROM _vars v;
 
+INSERT INTO public.med_regimens (
+  id,
+  person_id,
+  custom_name,
+  status,
+  schedule,
+  duration,
+  dose_definition,
+  created_at
+)
+VALUES (
+  '60000000-0000-0000-0000-000000000003',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1',
+  'Matrix Interval Days Missing Start Date Anchor',
+  'active',
+  jsonb_build_object(
+    'mode', 'interval_days',
+    'interval', jsonb_build_object('every', 30),
+    'times', jsonb_build_array('09:00'),
+    'amounts', jsonb_build_array(1)
+  ),
+  jsonb_build_object('type', 'ongoing'),
+  jsonb_build_object('intake', jsonb_build_object('amount', 1, 'unit', 'pill'), 'active', '[]'::jsonb),
+  now() - interval '7 days'
+);
+
 WITH gen AS (
   SELECT public.generate_med_dose_events_for_person_ids(
     ARRAY['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'::uuid],
@@ -452,6 +478,11 @@ SELECT is(
   (SELECT count(*) FROM public.med_dose_events WHERE regimen_id = '60000000-0000-0000-0000-000000000002'),
   1::bigint,
   'interval_days with for_days=1 generates only one day of events'
+);
+SELECT is(
+  (SELECT count(*) FROM public.med_dose_events WHERE regimen_id = '60000000-0000-0000-0000-000000000003'),
+  0::bigint,
+  'interval_days without start_date uses stable anchor and does not re-anchor to today'
 );
 
 -- Wrapper coverage: generate for auth user and for one person.

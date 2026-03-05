@@ -41,7 +41,7 @@ BEGIN
   v_today := (now() AT TIME ZONE v_tz)::date;
 
   FOR v_reg IN
-    SELECT r.id, r.person_id, r.custom_name, r.schedule, r.duration, r.dose_definition
+    SELECT r.id, r.person_id, r.custom_name, r.schedule, r.duration, r.dose_definition, r.created_at
     FROM public.med_regimens r
     WHERE r.person_id = ANY(p_person_ids)
       AND (r.deleted_at IS NULL)
@@ -55,7 +55,17 @@ BEGIN
     v_end_type := v_duration->>'type';
     v_start_date := (v_duration->>'start_date')::date;
     IF v_start_date IS NULL THEN
-      v_start_date := v_today;
+      SELECT COALESCE(
+        (
+          SELECT min((e.scheduled_at AT TIME ZONE v_tz)::date)
+          FROM public.med_dose_events e
+          WHERE e.regimen_id = v_reg.id
+            AND e.deleted_at IS NULL
+        ),
+        (v_reg.created_at AT TIME ZONE v_tz)::date,
+        v_today
+      )
+      INTO v_start_date;
     END IF;
     v_in_range := true;
     IF v_end_type = 'until_date' THEN
