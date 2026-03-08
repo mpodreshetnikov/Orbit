@@ -24,11 +24,14 @@ BEGIN;
 \i triggers/update_checkup_items_updated_at.sql
 \i triggers/update_user_preferences_updated_at.sql
 \i triggers/update_med_regimens_updated_at.sql
+\i triggers/update_medication_refill_snoozes_updated_at.sql
 \i triggers/update_med_dose_events_updated_at.sql
 \i triggers/update_notification_routing_updated_at.sql
 \i triggers/update_money_accounts_updated_at.sql
 \i triggers/update_money_cards_updated_at.sql
 \i triggers/update_money_categories_updated_at.sql
+\i triggers/update_money_transaction_brands_updated_at.sql
+\i triggers/update_money_transaction_brand_aliases_updated_at.sql
 \i triggers/update_money_transactions_updated_at.sql
 \i triggers/update_money_line_items_updated_at.sql
 

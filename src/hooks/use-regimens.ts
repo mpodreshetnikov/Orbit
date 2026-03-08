@@ -666,6 +666,57 @@ export function useUnarchiveRegimen() {
 }
 
 // ============================================================================
+// REFILL REMINDER SNOOZE
+// ============================================================================
+
+async function fetchMedicationRefillSnooze(regimenId: string): Promise<string | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("get_medication_refill_snooze", {
+    p_regimen_id: regimenId,
+  });
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
+export function useMedicationRefillSnooze(regimenId: string | null) {
+  return useQuery({
+    queryKey: ["medication-refill-snooze", regimenId],
+    queryFn: () => fetchMedicationRefillSnooze(regimenId!),
+    enabled: !!regimenId,
+  });
+}
+
+async function setMedicationRefillSnooze(
+  regimenId: string,
+  snoozeUntil: string | null,
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.rpc("set_medication_refill_snooze", {
+    p_regimen_id: regimenId,
+    p_snooze_until: snoozeUntil,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export function useSetMedicationRefillSnooze() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      regimenId,
+      snoozeUntil,
+    }: {
+      regimenId: string;
+      snoozeUntil: string | null;
+    }) => setMedicationRefillSnooze(regimenId, snoozeUntil),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["medication-refill-snooze", variables.regimenId] });
+      queryClient.invalidateQueries({ queryKey: ["regimen", variables.regimenId] });
+      queryClient.invalidateQueries({ queryKey: ["regimens"] });
+    },
+  });
+}
+
+// ============================================================================
 // MUTATIONS: update regimen inventory (refill / set_absolute / correction)
 // ============================================================================
 

@@ -7,6 +7,8 @@ import type { MedDoseEvent, MedRegimen } from "@/types/regimen";
 const hookMocks = vi.hoisted(() => ({
   useRegimen: vi.fn(),
   useDoseEventsForRegimen: vi.fn(),
+  useMedicationRefillSnooze: vi.fn(),
+  useSetMedicationRefillSnooze: vi.fn(),
   useUpdateRegimenInventory: vi.fn(),
   useDeleteRegimen: vi.fn(),
   useArchiveRegimen: vi.fn(),
@@ -29,6 +31,7 @@ const deleteMutateAsync = vi.fn();
 const archiveMutateAsync = vi.fn();
 const unarchiveMutateAsync = vi.fn();
 const updateInventoryMutateAsync = vi.fn();
+const setRefillSnoozeMutateAsync = vi.fn();
 const updateResolutionMutateAsync = vi.fn();
 const undoMutate = vi.fn();
 const markTakenMutate = vi.fn();
@@ -50,6 +53,8 @@ vi.mock("@/lib/date-locale", () => ({
 vi.mock("@/hooks", () => ({
   useRegimen: (...args: unknown[]) => hookMocks.useRegimen(...args),
   useDoseEventsForRegimen: (...args: unknown[]) => hookMocks.useDoseEventsForRegimen(...args),
+  useMedicationRefillSnooze: (...args: unknown[]) => hookMocks.useMedicationRefillSnooze(...args),
+  useSetMedicationRefillSnooze: (...args: unknown[]) => hookMocks.useSetMedicationRefillSnooze(...args),
   useUpdateRegimenInventory: (...args: unknown[]) => hookMocks.useUpdateRegimenInventory(...args),
   useDeleteRegimen: (...args: unknown[]) => hookMocks.useDeleteRegimen(...args),
   useArchiveRegimen: (...args: unknown[]) => hookMocks.useArchiveRegimen(...args),
@@ -160,6 +165,20 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h3>{children}</h3>,
 }));
 
+vi.mock("@/components/ui/popover", () => ({
+  Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PopoverContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock("@/components/ui/calendar", () => ({
+  Calendar: ({ onSelect }: { onSelect?: (date: Date | undefined) => void }) => (
+    <button type="button" onClick={() => onSelect?.(new Date("2026-04-25T12:00:00.000Z"))}>
+      pick-refill-snooze-date
+    </button>
+  ),
+}));
+
 function resolvedParams(id: string): Promise<{ id: string }> {
   return {
     status: "fulfilled",
@@ -225,6 +244,7 @@ describe("MedicationDetailPage", () => {
     archiveMutateAsync.mockReset();
     unarchiveMutateAsync.mockReset();
     updateInventoryMutateAsync.mockReset();
+    setRefillSnoozeMutateAsync.mockReset();
     updateResolutionMutateAsync.mockReset();
     undoMutate.mockReset();
     markTakenMutate.mockReset();
@@ -234,8 +254,17 @@ describe("MedicationDetailPage", () => {
     archiveMutateAsync.mockResolvedValue(undefined);
     unarchiveMutateAsync.mockResolvedValue(undefined);
     updateInventoryMutateAsync.mockResolvedValue(undefined);
+    setRefillSnoozeMutateAsync.mockResolvedValue(undefined);
     updateResolutionMutateAsync.mockResolvedValue(undefined);
 
+    hookMocks.useMedicationRefillSnooze.mockReturnValue({
+      data: null,
+      isLoading: false,
+    });
+    hookMocks.useSetMedicationRefillSnooze.mockReturnValue({
+      mutateAsync: setRefillSnoozeMutateAsync,
+      isPending: false,
+    });
     hookMocks.useUpdateRegimenInventory.mockReturnValue({
       mutateAsync: updateInventoryMutateAsync,
       isPending: false,
@@ -299,7 +328,7 @@ describe("MedicationDetailPage", () => {
     const Page = (await import("./page")).default;
     render(<Page params={resolvedParams("reg-1")} />);
 
-    expect(screen.getByText("Vitamin D")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Vitamin D" })).toBeInTheDocument();
     expect(screen.getByText("medications.refillWarning")).toBeInTheDocument();
     expect(screen.getByText("daily at 09:00")).toBeInTheDocument();
 
@@ -438,6 +467,49 @@ describe("MedicationDetailPage", () => {
       });
     });
     expect(screen.getByText(/medications\.endDate/)).toBeInTheDocument();
+  });
+
+  it("saves and clears a refill reminder snooze date", async () => {
+    hookMocks.useRegimen.mockReturnValue({
+      data: makeRegimen(),
+      isLoading: false,
+      error: null,
+    });
+    hookMocks.useDoseEventsForRegimen.mockReturnValue({ data: [] });
+
+    const Page = (await import("./page")).default;
+    const user = userEvent.setup();
+
+    const view = render(<Page params={resolvedParams("reg-1")} />);
+
+    await user.click(screen.getByRole("button", { name: "pick-refill-snooze-date" }));
+    await user.click(screen.getByRole("button", { name: "medications.saveRefillReminderSnooze" }));
+
+    await waitFor(() => {
+      expect(setRefillSnoozeMutateAsync).toHaveBeenCalledWith({
+        regimenId: "reg-1",
+        snoozeUntil: "2026-04-25",
+      });
+    });
+
+    view.unmount();
+
+    hookMocks.useMedicationRefillSnooze.mockReturnValue({
+      data: "2026-04-25",
+      isLoading: false,
+    });
+
+    render(<Page params={resolvedParams("reg-1")} />);
+    expect(screen.getByText(/medications\.refillReminderSnoozedUntil/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "medications.clearRefillReminderSnooze" }));
+
+    await waitFor(() => {
+      expect(setRefillSnoozeMutateAsync).toHaveBeenCalledWith({
+        regimenId: "reg-1",
+        snoozeUntil: null,
+      });
+    });
   });
 
   it("supports unspecified/missed/cancelled intake branches and null note fallback", async () => {

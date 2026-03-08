@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { format } from "date-fns";
@@ -41,10 +41,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { RefillDialog, EditIntakeDialog } from "@/components/medications";
 import {
   useRegimen,
   useDoseEventsForRegimen,
+  useMedicationRefillSnooze,
+  useSetMedicationRefillSnooze,
   useUpdateRegimenInventory,
   useDeleteRegimen,
   useArchiveRegimen,
@@ -73,6 +77,10 @@ function getDurationDates(duration: MedDuration): { start: string | null; end: s
   return { start, end: null };
 }
 
+function formatCalendarDateValue(date: Date): string {
+  return format(date, "yyyy-MM-dd");
+}
+
 function getStatusIcon(status: MedDoseEventStatus): { Icon: typeof Check; className?: string } {
   switch (status) {
     case "taken":
@@ -97,6 +105,8 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
 
   const { data: regimen, isLoading, error } = useRegimen(id);
   const { data: doseEvents } = useDoseEventsForRegimen(id);
+  const { data: refillSnoozeUntil } = useMedicationRefillSnooze(id);
+  const setRefillSnooze = useSetMedicationRefillSnooze();
   const updateInventory = useUpdateRegimenInventory();
   const deleteMutation = useDeleteRegimen();
   const archiveMutation = useArchiveRegimen();
@@ -111,6 +121,8 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
   const [unarchiveConfirmOpen, setUnarchiveConfirmOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [editIntakeEvent, setEditIntakeEvent] = useState<MedDoseEvent | null>(null);
+  const [refillSnoozePickerOpen, setRefillSnoozePickerOpen] = useState(false);
+  const [selectedRefillSnoozeDate, setSelectedRefillSnoozeDate] = useState<string | null>(null);
 
   const inv = regimen?.inventory;
   const isLowInventory =
@@ -119,6 +131,15 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
     inv.refill_threshold_amount != null &&
     inv.current_amount != null &&
     inv.current_amount <= inv.refill_threshold_amount;
+  const todayDateStr = formatCalendarDateValue(new Date());
+  const activeRefillSnoozeUntil =
+    refillSnoozeUntil && refillSnoozeUntil >= todayDateStr ? refillSnoozeUntil : null;
+  const refillSnoozeDate =
+    selectedRefillSnoozeDate != null ? new Date(`${selectedRefillSnoozeDate}T12:00:00`) : undefined;
+
+  useEffect(() => {
+    setSelectedRefillSnoozeDate(activeRefillSnoozeUntil ?? todayDateStr);
+  }, [activeRefillSnoozeUntil, todayDateStr]);
 
   const handleDelete = async () => {
     if (!regimen) return;
@@ -148,6 +169,24 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
       type: amount > 0 ? "refill" : "correction",
       amount,
     });
+  };
+
+  const handleSaveRefillSnooze = async () => {
+    if (!regimen || !selectedRefillSnoozeDate) return;
+    await setRefillSnooze.mutateAsync({
+      regimenId: regimen.id,
+      snoozeUntil: selectedRefillSnoozeDate,
+    });
+    setRefillSnoozePickerOpen(false);
+  };
+
+  const handleClearRefillSnooze = async () => {
+    if (!regimen) return;
+    await setRefillSnooze.mutateAsync({
+      regimenId: regimen.id,
+      snoozeUntil: null,
+    });
+    setRefillSnoozePickerOpen(false);
   };
 
   if (isLoading || !regimen) {
@@ -254,6 +293,73 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
                 : "—"}
               {inv.refill_threshold_amount != null &&
                 ` (${t("medications.refillWarning")} ≤ ${formatAmountWithUnit(inv.refill_threshold_amount, regimen.intake_unit, t)})`}
+            </div>
+          )}
+          {isLowInventory && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-50/50 p-3 text-sm dark:bg-amber-950/20">
+              <div className="flex flex-col gap-3">
+                <p className="text-muted-foreground">
+                  {activeRefillSnoozeUntil ? (
+                    <>
+                      {t("medications.refillReminderSnoozedUntil")}:{" "}
+                      {format(new Date(`${activeRefillSnoozeUntil}T12:00:00`), "PP", {
+                        locale: dateLocale,
+                      })}
+                    </>
+                  ) : (
+                    t("medications.refillReminderSnoozeDescription")
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Popover
+                    open={refillSnoozePickerOpen}
+                    onOpenChange={setRefillSnoozePickerOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={t("medications.selectRefillReminderSnoozeDate")}
+                      >
+                        {selectedRefillSnoozeDate
+                          ? format(new Date(`${selectedRefillSnoozeDate}T12:00:00`), "PP", {
+                              locale: dateLocale,
+                            })
+                          : t("medications.selectDate")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={refillSnoozeDate}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          setSelectedRefillSnoozeDate(formatCalendarDateValue(date));
+                          setRefillSnoozePickerOpen(false);
+                        }}
+                        disabled={(date) => formatCalendarDateValue(date) < todayDateStr}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <Button
+                    size="sm"
+                    onClick={() => void handleSaveRefillSnooze()}
+                    disabled={!selectedRefillSnoozeDate || setRefillSnooze.isPending}
+                  >
+                    {t("medications.saveRefillReminderSnooze")}
+                  </Button>
+                  {activeRefillSnoozeUntil && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void handleClearRefillSnooze()}
+                      disabled={setRefillSnooze.isPending}
+                    >
+                      {t("medications.clearRefillReminderSnooze")}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           )}
           {regimen.notes && <p className="text-sm text-muted-foreground">{regimen.notes}</p>}

@@ -14,6 +14,7 @@ DECLARE
   v_reg record;
   v_rec record;
   v_prefix text;
+  v_tz text;
 BEGIN
   SELECT array_agg(DISTINCT src.person_id) INTO v_person_ids
   FROM (
@@ -31,12 +32,27 @@ BEGIN
     RETURN 0;
   END IF;
 
-  v_today := (now() AT TIME ZONE 'UTC')::date;
+  SELECT COALESCE(NULLIF(TRIM(up.checkup_notification_timezone), ''), 'UTC')
+  INTO v_tz
+  FROM public.user_preferences up
+  WHERE up.auth_user_id = p_auth_user_id;
+
+  v_tz := COALESCE(NULLIF(TRIM(v_tz), ''), 'UTC');
+  v_today := (now() AT TIME ZONE v_tz)::date;
 
   FOR v_reg IN
-    SELECT r.id, r.custom_name, r.inventory, r.person_id, p.name AS person_name, p.auth_user_id AS person_owner_user_id
+    SELECT
+      r.id,
+      r.custom_name,
+      r.inventory,
+      r.person_id,
+      p.name AS person_name,
+      p.auth_user_id AS person_owner_user_id
     FROM public.med_regimens r
     JOIN public.persons p ON p.id = r.person_id
+    LEFT JOIN public.medication_refill_snoozes s
+      ON s.regimen_id = r.id
+     AND s.recipient_user_id = p_auth_user_id
     WHERE r.person_id = ANY(v_person_ids)
       AND (r.deleted_at IS NULL)
       AND r.status = 'active'
@@ -45,6 +61,7 @@ BEGIN
       AND (r.inventory->>'current_amount')::numeric IS NOT NULL
       AND (r.inventory->>'refill_threshold_amount')::numeric IS NOT NULL
       AND (r.inventory->>'current_amount')::numeric <= (r.inventory->>'refill_threshold_amount')::numeric
+      AND (s.snooze_until IS NULL OR s.snooze_until < v_today)
   LOOP
     FOR v_rec IN
       SELECT r.recipient_user_id, r.custom_prefix, v_reg.person_name AS person_name, v_reg.person_owner_user_id AS person_owner_user_id

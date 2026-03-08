@@ -30,6 +30,9 @@
     "supabase/db/functions/get_medication_dose_reminder_payload_for_person.sql": [
       "supabase/tests/functions/medication_notifications_test.sql"
     ],
+    "supabase/db/functions/get_medication_refill_snooze.sql": [
+      "supabase/tests/functions/medication_refill_snoozes_test.sql"
+    ],
     "supabase/db/functions/get_money_merchant_default_categories.sql": [
       "supabase/tests/functions/record_query_functions_test.sql"
     ],
@@ -67,6 +70,9 @@
     ],
     "supabase/db/functions/search_medical_records.sql": [
       "supabase/tests/functions/record_query_functions_test.sql"
+    ],
+    "supabase/db/functions/set_medication_refill_snooze.sql": [
+      "supabase/tests/functions/medication_refill_snoozes_test.sql"
     ],
     "supabase/db/functions/snooze_dose.sql": [
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
@@ -125,6 +131,12 @@
       "supabase/tests/policies/money_domain_rls_access_test.sql"
     ],
     "supabase/db/policies/money_categories.sql": [
+      "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_transaction_brands.sql": [
+      "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_transaction_brand_aliases.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
     ],
     "supabase/db/policies/money_import_batch_rows.sql": [
