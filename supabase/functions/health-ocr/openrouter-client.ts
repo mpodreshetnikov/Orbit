@@ -1,4 +1,4 @@
-export interface OcrImageDataUrl {
+export interface OcrAttachmentPayload {
   url: string;
   mimeType: string;
 }
@@ -10,7 +10,7 @@ export interface OcrResult {
 
 export interface OpenRouterOcrClient {
   callVisionOcrSingle(
-    imageDataUrl: OcrImageDataUrl,
+    attachment: OcrAttachmentPayload,
     options: { requestTitle: boolean },
   ): Promise<OcrResult>;
 }
@@ -21,6 +21,20 @@ interface CreateOpenRouterOcrClientDeps {
   referer: string;
   timeoutMs?: number;
 }
+
+type OpenRouterUserContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image_url";
+      image_url: { url: string };
+    }
+  | {
+      type: "file";
+      file: { filename: string; file_data: string };
+    };
 
 const DEFAULT_TIMEOUT_MS = 55_000;
 const DEFAULT_FALLBACK_TITLE = "Медицинский документ";
@@ -49,8 +63,29 @@ export function createOpenRouterOcrClient(
 ): OpenRouterOcrClient {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
+  function buildAttachmentContentPart(attachment: OcrAttachmentPayload): OpenRouterUserContentPart {
+    if (attachment.mimeType.startsWith("image/")) {
+      return {
+        type: "image_url",
+        image_url: { url: attachment.url },
+      };
+    }
+
+    if (attachment.mimeType === "application/pdf") {
+      return {
+        type: "file",
+        file: {
+          filename: "document.pdf",
+          file_data: attachment.url,
+        },
+      };
+    }
+
+    throw new Error(`Unsupported OCR attachment MIME type: ${attachment.mimeType}`);
+  }
+
   return {
-    async callVisionOcrSingle(imageDataUrl, options) {
+    async callVisionOcrSingle(attachment, options) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -74,12 +109,9 @@ export function createOpenRouterOcrClient(
                     type: "text",
                     text: options.requestTitle
                       ? "Extract all text and suggest a short document title."
-                      : "Extract all text from this image.",
+                      : "Extract all text from this document.",
                   },
-                  {
-                    type: "image_url",
-                    image_url: { url: imageDataUrl.url },
-                  },
+                  buildAttachmentContentPart(attachment),
                 ],
               },
             ],

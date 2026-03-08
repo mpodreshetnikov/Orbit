@@ -1,7 +1,7 @@
 import { encodeBase64 } from "std/encoding/base64";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import { selectSuggestedTitle } from "./title.ts";
-import type { OpenRouterOcrClient, OcrImageDataUrl } from "./openrouter-client.ts";
+import type { OpenRouterOcrClient, OcrAttachmentPayload } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
 
 export interface HealthOcrServiceDeps {
@@ -32,7 +32,7 @@ const DEFAULT_TITLE = "Медицинский документ";
 async function downloadOneDataUrl(
   deps: HealthOcrServiceDeps,
   attachment: OcrAttachment,
-): Promise<OcrImageDataUrl | null> {
+): Promise<OcrAttachmentPayload | null> {
   const log = deps.log ?? console;
   const maxAttachmentBytes = deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
   const blob = await deps.repository.downloadAttachment(attachment.storage_path);
@@ -53,6 +53,10 @@ async function downloadOneDataUrl(
     url: `data:${attachment.mime_type};base64,${base64}`,
     mimeType: attachment.mime_type,
   };
+}
+
+function getOcrInputType(mimeType: string): "image_url" | "file" {
+  return mimeType === "application/pdf" ? "file" : "image_url";
 }
 
 function buildCombinedPageText(pageTexts: string[]): string {
@@ -140,16 +144,24 @@ export async function runHealthOcrService(
     let suggestedTitle = defaultTitle;
 
     for (let index = 0; index < attachments.length; index++) {
+      const attachment = attachments[index];
+      const ocrInputType = getOcrInputType(attachment.mime_type);
       const pageSpan = telemetry?.startSpan("edge.health_ocr.page", {
         attrs: {
           attachment_index: index,
+          attachment_mime_type: attachment.mime_type,
+          ocr_input_type: ocrInputType,
         },
       });
-      const dataUrl = await downloadOneDataUrl(deps, attachments[index]);
+      const dataUrl = await downloadOneDataUrl(deps, attachment);
       if (!dataUrl) {
         await pageSpan?.end({
           status: "error",
           statusMessage: "Attachment download failed",
+          attrs: {
+            attachment_mime_type: attachment.mime_type,
+            ocr_input_type: ocrInputType,
+          },
         });
         pageTexts.push("");
         continue;
@@ -166,14 +178,24 @@ export async function runHealthOcrService(
         await pageSpan?.end({
           status: "ok",
           attrs: {
+            attachment_mime_type: attachment.mime_type,
+            ocr_input_type: ocrInputType,
             ocr_chars: result.ocr_text.length,
           },
         });
       } catch (error) {
-        log.error(`OCR failed for ${attachments[index].storage_path}:`, error);
+        log.error(`OCR failed for ${attachment.storage_path}:`, {
+          mime_type: attachment.mime_type,
+          ocr_input_type: ocrInputType,
+          error,
+        });
         await pageSpan?.end({
           status: "error",
           statusMessage: error instanceof Error ? error.message : "OCR failed",
+          attrs: {
+            attachment_mime_type: attachment.mime_type,
+            ocr_input_type: ocrInputType,
+          },
         });
         pageTexts.push("");
       }

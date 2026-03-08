@@ -15,6 +15,7 @@ export interface HealthStructureDeps {
     supabaseUrl?: string;
     supabaseServiceRoleKey?: string;
     openRouterModel?: string;
+    openRouterTimeoutMs?: number;
     parseMode?: HealthStructureParserMode;
   };
   repository: HealthStructureRepository;
@@ -58,6 +59,11 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const openRouterModel = Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? "openai/gpt-4o-mini";
+  const openRouterTimeoutRaw = Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_TIMEOUT_MS");
+  const openRouterTimeoutMs =
+    openRouterTimeoutRaw && Number.isFinite(Number(openRouterTimeoutRaw))
+      ? Number(openRouterTimeoutRaw)
+      : undefined;
   const rawParseMode = Deno.env.get("HEALTH_STRUCTURE_PARSER_MODE");
   const parseMode: HealthStructureParserMode =
     rawParseMode === "e2e_stub" ? "e2e_stub" : "openrouter";
@@ -69,6 +75,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
       supabaseUrl: supabaseUrl ?? undefined,
       supabaseServiceRoleKey: supabaseServiceRoleKey ?? undefined,
       openRouterModel,
+      openRouterTimeoutMs,
       parseMode,
     },
     repository: hasSupabaseEnv
@@ -88,6 +95,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
         fetchFn: globalThis.fetch,
         apiKey: openRouterApiKey,
         model: openRouterModel,
+        timeoutMs: openRouterTimeoutMs,
       });
     },
     lookupIcdCode: async (code) => {

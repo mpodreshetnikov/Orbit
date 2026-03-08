@@ -3,6 +3,7 @@ import { assertEquals } from "std/assert/assert-equals";
 import { runHealthOcrService } from "./service.ts";
 import type { OpenRouterOcrClient } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
+import type { EdgeAttrs, EdgeSpanHandle, EdgeTelemetry } from "../_shared/observability.ts";
 
 interface RepositoryState {
   updatedSuccess: Array<{ recordId: string; ocrText: string; title: string }>;
@@ -76,6 +77,67 @@ function createOpenRouterMock(
 ): OpenRouterOcrClient {
   return {
     callVisionOcrSingle: resolver,
+  };
+}
+
+function createTelemetryMock(): {
+  telemetry: EdgeTelemetry;
+  spans: Array<{
+    name: string;
+    startAttrs?: EdgeAttrs;
+    endAttrs?: EdgeAttrs;
+    status?: "ok" | "error";
+    statusMessage?: string;
+  }>;
+} {
+  const spans: Array<{
+    name: string;
+    startAttrs?: EdgeAttrs;
+    endAttrs?: EdgeAttrs;
+    status?: "ok" | "error";
+    statusMessage?: string;
+  }> = [];
+
+  return {
+    spans,
+    telemetry: {
+      context: {
+        component: "health-ocr",
+        traceId: "trace-id",
+        requestId: "request-id",
+        env: "test",
+        release: "test",
+      },
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      startSpan: (name, options) => {
+        const span: {
+          name: string;
+          startAttrs?: EdgeAttrs;
+          endAttrs?: EdgeAttrs;
+          status?: "ok" | "error";
+          statusMessage?: string;
+        } = {
+          name,
+          startAttrs: options?.attrs,
+        };
+        spans.push(span);
+        return {
+          traceId: "trace-id",
+          spanId: "span-id",
+          requestId: "request-id",
+          traceparent: "00-traceid-spanid-01",
+          log: () => {},
+          end: async (endOptions) => {
+            span.endAttrs = endOptions?.attrs;
+            span.status = endOptions?.status;
+            span.statusMessage = endOptions?.statusMessage;
+          },
+        } satisfies EdgeSpanHandle;
+      },
+    },
   };
 }
 
@@ -165,6 +227,44 @@ Deno.test("runHealthOcrService marks failed when OCR extraction fails for every 
   assertEquals(state.updatedSuccess.length, 0);
   assertEquals(state.updatedFailure.length, 1);
 });
+
+Deno.test(
+  "runHealthOcrService records page telemetry with mime type and OCR input kind",
+  async () => {
+    const { repository } = createRepositoryMock({
+      attachments: [
+        {
+          id: "att-pdf",
+          storage_path: "a.pdf",
+          mime_type: "application/pdf",
+          original_filename: "a.pdf",
+        },
+      ],
+      blobsByPath: {
+        "a.pdf": new Blob(["pdf"], { type: "application/pdf" }),
+      },
+    });
+    const { telemetry, spans } = createTelemetryMock();
+    const openRouter = createOpenRouterMock(async () => ({
+      ocr_text: "usable text",
+      suggested_title: "Title",
+    }));
+
+    const result = await runHealthOcrService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository,
+        openRouterClient: openRouter,
+        telemetry,
+      },
+    );
+
+    assertEquals(result.status, 200);
+    const pageSpan = spans.find((span) => span.name === "edge.health_ocr.page");
+    assertEquals(pageSpan?.startAttrs?.attachment_mime_type, "application/pdf");
+    assertEquals(pageSpan?.endAttrs?.ocr_input_type, "file");
+  },
+);
 
 Deno.test(
   "runHealthOcrService skips oversized attachments and still succeeds when any page works",

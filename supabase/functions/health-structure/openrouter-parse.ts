@@ -36,6 +36,8 @@ export interface OpenRouterParseDeps {
   log?: Pick<Console, "log" | "error">;
 }
 
+const DEFAULT_TIMEOUT_MS = 60_000;
+
 function asObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object") return value as Record<string, unknown>;
   return {};
@@ -258,7 +260,7 @@ export async function callOpenRouterParse(
   deps: OpenRouterParseDeps,
 ): Promise<StructuredDataWithEntities> {
   const controller = new AbortController();
-  const timeout = deps.timeoutMs ?? 20_000;
+  const timeout = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
@@ -307,6 +309,11 @@ export async function callOpenRouterParse(
 
     return parseStructuredFromLlmContent(contentText);
   } catch (error) {
+    if ((error as { name?: string }).name === "AbortError") {
+      const timeoutError = new Error("OpenRouter request timed out");
+      deps.log?.error?.("OpenRouter parse failed:", timeoutError);
+      throw timeoutError;
+    }
     deps.log?.error?.("OpenRouter parse failed:", error);
     throw error;
   } finally {

@@ -200,6 +200,29 @@ Deno.test("callOpenRouterParse logs and rethrows fetch errors", async () => {
   assertEquals(logs.length > 0, true);
 });
 
+Deno.test("callOpenRouterParse maps aborts to timeout error", async () => {
+  const fetchFn: typeof fetch = ((_input, init) =>
+    new Promise((_resolve, reject) => {
+      const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
+      signal?.addEventListener("abort", () => {
+        reject(new DOMException("The signal has been aborted", "AbortError"));
+      });
+    })) as typeof fetch;
+
+  let caught: unknown = null;
+  try {
+    await callOpenRouterParse("text", emptyContext, {
+      fetchFn,
+      apiKey: "key",
+      timeoutMs: 1,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assertEquals((caught as Error).message, "OpenRouter request timed out");
+});
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object") return value as Record<string, unknown>;
   return {};

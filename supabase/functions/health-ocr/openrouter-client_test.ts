@@ -2,6 +2,10 @@
 import { assertEquals } from "std/assert/assert-equals";
 import { createOpenRouterOcrClient } from "./openrouter-client.ts";
 
+interface OpenRouterRequestBody {
+  messages: Array<{ content: Array<Record<string, unknown>> }>;
+}
+
 async function assertThrowsWithMessage(
   run: () => Promise<unknown>,
   expectedSnippet: string,
@@ -47,6 +51,115 @@ Deno.test("createOpenRouterOcrClient parses OCR JSON payload", async () => {
 
   assertEquals(result.ocr_text, "hello");
   assertEquals(result.suggested_title, "Lab Report");
+});
+
+Deno.test("createOpenRouterOcrClient sends images as image_url content", async () => {
+  let requestBody: OpenRouterRequestBody | null = null;
+  const client = createOpenRouterOcrClient({
+    fetchFn: async (_input, init) => {
+      requestBody = JSON.parse(
+        String((init as { body?: BodyInit | null } | undefined)?.body ?? ""),
+      ) as OpenRouterRequestBody;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({ ocr_text: "hello", suggested_title: "Lab Report" }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    },
+    apiKey: "key",
+    referer: "https://example.com",
+  });
+
+  await client.callVisionOcrSingle(
+    { url: "data:image/png;base64,AAA", mimeType: "image/png" },
+    { requestTitle: true },
+  );
+
+  if (!requestBody) {
+    throw new Error("Expected request body to be captured");
+  }
+  const messages = (requestBody as OpenRouterRequestBody).messages;
+  assertEquals(messages[1].content[1].type, "image_url");
+  assertEquals(
+    (messages[1].content[1].image_url as { url: string }).url,
+    "data:image/png;base64,AAA",
+  );
+});
+
+Deno.test("createOpenRouterOcrClient sends PDFs as file content", async () => {
+  let requestBody: OpenRouterRequestBody | null = null;
+  const client = createOpenRouterOcrClient({
+    fetchFn: async (_input, init) => {
+      requestBody = JSON.parse(
+        String((init as { body?: BodyInit | null } | undefined)?.body ?? ""),
+      ) as OpenRouterRequestBody;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({ ocr_text: "hello", suggested_title: "Lab Report" }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    },
+    apiKey: "key",
+    referer: "https://example.com",
+  });
+
+  await client.callVisionOcrSingle(
+    { url: "data:application/pdf;base64,AAA", mimeType: "application/pdf" },
+    { requestTitle: false },
+  );
+
+  if (!requestBody) {
+    throw new Error("Expected request body to be captured");
+  }
+  const messages = (requestBody as OpenRouterRequestBody).messages;
+  assertEquals(messages[1].content[1].type, "file");
+  assertEquals(messages[1].content[1].file as { filename: string; file_data: string }, {
+    filename: "document.pdf",
+    file_data: "data:application/pdf;base64,AAA",
+  });
+});
+
+Deno.test("createOpenRouterOcrClient rejects unsupported MIME types", async () => {
+  const client = createOpenRouterOcrClient({
+    fetchFn: async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({ ocr_text: "hello", suggested_title: "Lab Report" }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    apiKey: "key",
+    referer: "https://example.com",
+  });
+
+  await assertThrowsWithMessage(
+    () =>
+      client.callVisionOcrSingle(
+        { url: "data:text/plain;base64,AAA", mimeType: "text/plain" },
+        { requestTitle: false },
+      ),
+    "Unsupported OCR attachment MIME type",
+  );
 });
 
 Deno.test("createOpenRouterOcrClient throws API errors", async () => {

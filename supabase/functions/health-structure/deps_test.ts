@@ -24,6 +24,7 @@ Deno.test("createDefaultHealthStructureDeps handles missing env values", async (
       const deps = createDefaultHealthStructureDeps();
 
       assertEquals(deps.config.openRouterApiKey, undefined);
+      assertEquals(deps.config.openRouterTimeoutMs, undefined);
       assertEquals(deps.config.parseMode, "openrouter");
       assertEquals(await deps.lookupIcdCode("A00"), null);
 
@@ -242,6 +243,28 @@ Deno.test(
         } finally {
           globalThis.fetch = originalFetch;
         }
+      },
+    );
+  },
+);
+
+Deno.test(
+  "createDefaultHealthStructureDeps reads structure timeout override from env",
+  async () => {
+    await withEnv(
+      {
+        HEALTH_STRUCTURE_PARSER_MODE: undefined,
+        OPENROUTER_API_KEY: "openrouter-key",
+        OPENROUTER_HEALTH_STRUCTURE_MODEL: "openai/gpt-4o",
+        OPENROUTER_HEALTH_STRUCTURE_TIMEOUT_MS: "45000",
+        SUPABASE_URL: "https://example.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+      },
+      async () => {
+        const { createDefaultHealthStructureDeps } = await importDepsModule("timeout-override");
+        const deps = createDefaultHealthStructureDeps();
+
+        assertEquals(deps.config.openRouterTimeoutMs, 45000);
       },
     );
   },
