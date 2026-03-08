@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { createImportDebugStore } from "./import-debug.js";
 import { routeBackgroundMessage } from "./background-router.js";
 
 describe("background-router", () => {
+  function createDeferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
   function createDeps() {
     return {
       sessionStore: {
@@ -11,9 +22,11 @@ describe("background-router", () => {
       importRunnerDeps: {
         getConnector: vi.fn(),
         callEdge: vi.fn(),
-        broadcastToAppTabs: vi.fn(),
+        broadcastToAppTabs: vi.fn().mockResolvedValue(undefined),
+        broadcastToSourceTab: vi.fn().mockResolvedValue(undefined),
         nowIso: vi.fn(() => "2026-01-01T00:00:00.000Z"),
       },
+      debugStore: createImportDebugStore(),
     };
   }
 
@@ -55,5 +68,338 @@ describe("background-router", () => {
     await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
       "No active import session",
     );
+  });
+
+  it("supports debug get/clear without active run", async () => {
+    const deps = createDeps();
+
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" }, deps),
+    ).resolves.toEqual({
+      ok: true,
+      run: null,
+    });
+
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_DEBUG_CLEAR_RUNS" }, deps),
+    ).resolves.toEqual({
+      ok: true,
+    });
+
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_DEBUG_EXPORT_LAST_RUN" }, deps),
+    ).resolves.toEqual({
+      ok: false,
+      error: "No debug run available for export.",
+    });
+  });
+
+  it("runs parse-only import with debug traceability", async () => {
+    const deps = createDeps();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockResolvedValue({
+        rows: [],
+        windowTo: "2026-02-20T00:00:00.000Z",
+        parsedThroughAt: "2026-02-19T00:00:00.000Z",
+        parsedTransactionsCount: 0,
+        debug: {
+          extraction_method: "api",
+          fallback_used: false,
+        },
+      }),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+    });
+
+    const response = await routeBackgroundMessage(
+      {
+        type: "MONEY_IMPORT_RUN",
+        debug: { enabled: true, parse_only: true },
+      },
+      deps,
+    );
+
+    expect(response.ok).toBe(true);
+    expect((response as { debug_run_id?: string }).debug_run_id).toBeTruthy();
+
+    const lastRun = await routeBackgroundMessage({ type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" }, deps);
+    expect((lastRun as { run?: { run?: { status?: string } } }).run?.run?.status).toBe("ok");
+  });
+
+  it("records full debug event sequence for a successful run", async () => {
+    const deps = createDeps();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockResolvedValue({
+        rows: [{ id: 1 }],
+        windowTo: "2026-02-20T00:00:00.000Z",
+        parsedThroughAt: "2026-02-19T00:00:00.000Z",
+        parsedTransactionsCount: 1,
+        debug: {
+          extraction_method: "api",
+          fallback_used: false,
+        },
+      }),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-2" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+    });
+
+    await routeBackgroundMessage(
+      {
+        type: "MONEY_IMPORT_RUN",
+        debug: { enabled: true },
+      },
+      deps,
+    );
+
+    const lastRun = (await routeBackgroundMessage(
+      { type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" },
+      deps,
+    )) as {
+      run: {
+        events: Array<{ event: string }>;
+      };
+    };
+    expect(lastRun.run.events.map((event) => event.event)).toEqual([
+      "session_loaded",
+      "connector_resolved",
+      "parse_started",
+      "parse_completed",
+      "preview_rows_started",
+      "preview_rows_completed",
+      "complete_session_started",
+      "complete_session_completed",
+    ]);
+
+    const exportResponse = (await routeBackgroundMessage(
+      { type: "MONEY_IMPORT_DEBUG_EXPORT_LAST_RUN" },
+      deps,
+    )) as {
+      ok: boolean;
+      bundle?: {
+        exported_at?: string;
+        run?: { run?: { status?: string } };
+      };
+    };
+    expect(exportResponse.ok).toBe(true);
+    expect(typeof exportResponse.bundle?.exported_at).toBe("string");
+    expect(exportResponse.bundle?.run?.run?.status).toBe("ok");
+  });
+
+  it("broadcasts progress events to source tab when run is started from source page overlay", async () => {
+    const deps = createDeps();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockResolvedValue({
+        rows: [{ id: 1 }],
+        windowTo: "2026-02-20T00:00:00.000Z",
+        parsedThroughAt: "2026-02-19T00:00:00.000Z",
+        parsedTransactionsCount: 1,
+      }),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-2" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+      app_origin: "http://localhost:3000",
+    });
+
+    const response = await routeBackgroundMessage(
+      {
+        type: "MONEY_IMPORT_RUN",
+        origin: "source_page_overlay",
+      },
+      deps,
+      { senderTabId: 777 },
+    );
+
+    expect(response).toMatchObject({
+      ok: true,
+      report_url: "http://localhost:3000/money/import/reports/batch-2",
+    });
+
+    expect(deps.importRunnerDeps.broadcastToAppTabs).toHaveBeenCalled();
+    expect(deps.importRunnerDeps.broadcastToSourceTab).toHaveBeenCalledWith(
+      777,
+      expect.objectContaining({
+        type: "MONEY_IMPORT_PROGRESS",
+      }),
+    );
+    expect(deps.importRunnerDeps.broadcastToSourceTab).toHaveBeenCalledWith(
+      777,
+      expect.objectContaining({
+        type: "MONEY_IMPORT_DONE",
+      }),
+    );
+  });
+
+  it("does not provide report url for popup-origin runs", async () => {
+    const deps = createDeps();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockResolvedValue({
+        rows: [{ id: 1 }],
+        windowTo: "2026-02-20T00:00:00.000Z",
+        parsedThroughAt: "2026-02-19T00:00:00.000Z",
+        parsedTransactionsCount: 1,
+      }),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-popup" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+      app_origin: "http://localhost:3000",
+    });
+
+    const response = await routeBackgroundMessage(
+      {
+        type: "MONEY_IMPORT_RUN",
+        origin: "popup",
+      },
+      deps,
+      { senderTabId: 999 },
+    );
+
+    expect(response).toMatchObject({ ok: true });
+    expect(response).not.toHaveProperty("report_url");
+  });
+
+  it("persists structured edge diagnostics in run_failed event", async () => {
+    const deps = createDeps();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockResolvedValue({
+        rows: [{ id: 1 }],
+        windowTo: "2026-02-20T00:00:00.000Z",
+        parsedThroughAt: "2026-02-19T00:00:00.000Z",
+        parsedTransactionsCount: 1,
+      }),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.importRunnerDeps.callEdge = vi.fn().mockRejectedValue(
+      Object.assign(new Error("Edge fetch failed (preview_rows): Failed to fetch"), {
+        code: "EDGE_FETCH_FAILED",
+        action: "preview_rows",
+        function_host: "abc.supabase.co",
+        function_path: "/functions/v1/money-import",
+        http_status: null,
+        response_error: "Failed to fetch",
+        transport: "network",
+      }),
+    );
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://abc.supabase.co/functions/v1/money-import",
+      session_token: "token",
+    });
+
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_RUN",
+          debug: { enabled: true },
+        },
+        deps,
+      ),
+    ).rejects.toThrow("Edge fetch failed");
+
+    const lastRun = (await routeBackgroundMessage(
+      { type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" },
+      deps,
+    )) as {
+      run: {
+        events: Array<{ event: string; attrs?: Record<string, unknown> }>;
+      };
+    };
+    const failedEvent = lastRun.run.events.find((event) => event.event === "run_failed");
+    expect(failedEvent?.attrs).toMatchObject({
+      error_code: "EDGE_FETCH_FAILED",
+      edge_action: "preview_rows",
+      edge_host: "abc.supabase.co",
+      edge_transport: "network",
+    });
+  });
+
+  it("rejects duplicate import runs while a session run is already in flight", async () => {
+    const deps = createDeps();
+    const parseDeferred = createDeferred<{
+      rows: Array<{ id: number }>;
+      windowTo: string;
+      parsedThroughAt: string;
+      parsedTransactionsCount: number;
+    }>();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockReturnValue(parseDeferred.promise),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-2" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+    });
+
+    const firstRunPromise = routeBackgroundMessage(
+      {
+        type: "MONEY_IMPORT_RUN",
+      },
+      deps,
+    );
+
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_RUN",
+        },
+        deps,
+      ),
+    ).rejects.toThrow("Import already running for session session-1");
+
+    parseDeferred.resolve({
+      rows: [{ id: 1 }],
+      windowTo: "2026-02-20T00:00:00.000Z",
+      parsedThroughAt: "2026-02-19T00:00:00.000Z",
+      parsedTransactionsCount: 1,
+    });
+
+    await expect(firstRunPromise).resolves.toMatchObject({ ok: true });
+    expect(deps.importRunnerDeps.callEdge).toHaveBeenCalledTimes(2);
   });
 });

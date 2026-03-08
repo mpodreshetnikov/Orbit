@@ -8,17 +8,12 @@ import { useTranslations } from "next-intl";
 import { useDropzone } from "react-dropzone";
 import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
-import {
-  useMoneyAccounts,
-  useCreateMoneyAccount,
-  useMoneyCardsByAccountIds,
-  useCreateMoneyCard,
-} from "@/hooks";
+import { useMoneyAccounts, useCreateMoneyAccount, useMoneyCardsByAccountIds } from "@/hooks";
 import { getConnectors } from "@/lib/import/connector-types";
 import type {
   BatchTransactionRow,
   CanonicalTransactionRow,
-  MoneyImportApplyResult,
+  MoneyImportPreviewResult,
   MoneyImportSessionCreateResult,
   MoneyImportSessionStatus,
 } from "@/types";
@@ -45,6 +40,15 @@ const TBANK_ICON_URL =
 const EXTENSION_WEBAPP_SOURCE = "orbit-webapp";
 const EXTENSION_BRIDGE_SOURCE = "orbit-extension";
 const EXTENSION_ID = process.env.NEXT_PUBLIC_EXTENSION_ID ?? "";
+const DEFAULT_ACCOUNT_STORAGE_PREFIX = "money-import-default-account";
+
+function connectorSourceToAccountSource(sourceId: string): string {
+  return sourceId === "tbank_web" ? "tbank" : sourceId;
+}
+
+function buildDefaultAccountStorageKey(personId: string, sourceId: string): string {
+  return `${DEFAULT_ACCOUNT_STORAGE_PREFIX}:${personId}:${sourceId}`;
+}
 
 import {
   callMoneyImportAction as callMoneyImportActionClient,
@@ -59,7 +63,6 @@ export default function MoneyImportPage() {
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
   const { data: accounts } = useMoneyAccounts(selectedPersonId);
   const createAccountMutation = useCreateMoneyAccount();
-  const createCardMutation = useCreateMoneyCard();
 
   const connectors = getConnectors();
 
@@ -93,12 +96,16 @@ export default function MoneyImportPage() {
   const isFileConnector = selectedConnector?.kind === "file";
   const isExtensionConnector = selectedConnector?.kind === "extension";
 
+  const accountSourceForSelectedConnector = useMemo(() => {
+    if (!selectedConnector) return null;
+    return connectorSourceToAccountSource(selectedConnector.sourceId);
+  }, [selectedConnector]);
+
   const sourceAccounts = useMemo(() => {
-    if (!accounts || !selectedConnector) return [];
-    const source =
-      selectedConnector.sourceId === "tbank_web" ? "tbank" : selectedConnector.sourceId;
+    if (!accounts || !accountSourceForSelectedConnector) return [];
+    const source = accountSourceForSelectedConnector;
     return accounts.filter((a) => a.source === source);
-  }, [accounts, selectedConnector]);
+  }, [accounts, accountSourceForSelectedConnector]);
 
   const sourceAccountIds = useMemo(() => sourceAccounts.map((a) => a.id), [sourceAccounts]);
   const { data: cardsForImport } = useMoneyCardsByAccountIds(sourceAccountIds);
@@ -114,15 +121,64 @@ export default function MoneyImportPage() {
   useEffect(() => {
     if (!parseResult?.transactions.length) return;
     setAccountMapping((prev) => ({ ...hintToAccountIdFromCards, ...prev }));
-    if (sourceAccounts.length === 1 && !defaultAccountId) {
-      setDefaultAccountId(sourceAccounts[0].id);
+  }, [parseResult?.transactions.length, hintToAccountIdFromCards]);
+
+  useEffect(() => {
+    if (!selectedConnector || !selectedPersonId) {
+      setDefaultAccountId("");
+      return;
     }
-  }, [
-    parseResult?.transactions.length,
-    hintToAccountIdFromCards,
-    sourceAccounts,
-    defaultAccountId,
-  ]);
+
+    if (sourceAccounts.length === 0) {
+      setDefaultAccountId("");
+      return;
+    }
+
+    if (sourceAccounts.length === 1) {
+      const singleAccountId = sourceAccounts[0].id;
+      if (defaultAccountId !== singleAccountId) {
+        setDefaultAccountId(singleAccountId);
+      }
+      return;
+    }
+
+    if (sourceAccounts.some((account) => account.id === defaultAccountId)) return;
+    if (typeof window === "undefined") {
+      setDefaultAccountId("");
+      return;
+    }
+
+    const storedValue =
+      window.localStorage
+        .getItem(buildDefaultAccountStorageKey(selectedPersonId, selectedConnector.sourceId))
+        ?.trim() ?? "";
+
+    if (storedValue && sourceAccounts.some((account) => account.id === storedValue)) {
+      setDefaultAccountId(storedValue);
+      return;
+    }
+
+    setDefaultAccountId("");
+  }, [defaultAccountId, selectedConnector, selectedPersonId, sourceAccounts]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !selectedConnector ||
+      !selectedPersonId ||
+      !defaultAccountId
+    ) {
+      return;
+    }
+
+    const isValid = sourceAccounts.some((account) => account.id === defaultAccountId);
+    if (!isValid) return;
+
+    window.localStorage.setItem(
+      buildDefaultAccountStorageKey(selectedPersonId, selectedConnector.sourceId),
+      defaultAccountId,
+    );
+  }, [defaultAccountId, selectedConnector, selectedPersonId, sourceAccounts]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -143,7 +199,10 @@ export default function MoneyImportPage() {
           setActiveBatchId(status.batch.id);
         }
 
-        if (status.batch?.status === "completed" && status.batch.id) {
+        if (
+          (status.batch?.status === "pending" || status.batch?.status === "completed") &&
+          status.batch.id
+        ) {
           if (pollingRef.current) {
             window.clearInterval(pollingRef.current);
             pollingRef.current = null;
@@ -232,10 +291,16 @@ export default function MoneyImportPage() {
     return parseResult.transactions.every((row) => resolveAccountId(row));
   }, [parseResult?.transactions, resolveAccountId]);
 
-  const normalizeLast4 = useCallback((hint: string | null | undefined): string => {
-    const digits = (hint ?? "").replace(/\D/g, "");
-    return digits.slice(-4);
-  }, []);
+  const handleCreateSourceAccount = useCallback(async () => {
+    if (!selectedConnector || !selectedPersonId) return;
+    await createAccountMutation.mutateAsync({
+      owner_person_id: selectedPersonId,
+      source: connectorSourceToAccountSource(selectedConnector.sourceId),
+      account_kind: "debit",
+      account_label: selectedConnector.displayName,
+      currency: "RUB",
+    });
+  }, [createAccountMutation, selectedConnector, selectedPersonId]);
 
   const parseFile = useCallback(
     async (f: File) => {
@@ -272,38 +337,6 @@ export default function MoneyImportPage() {
     },
   });
 
-  const ensureCardsForRows = useCallback(
-    async (rows: BatchTransactionRow[]) => {
-      const cardIdByKey = new Map<string, string>();
-      (cardsForImport ?? []).forEach((card) => {
-        cardIdByKey.set(`${card.account_id}:${card.last4}`, card.id);
-      });
-
-      const uniqueAccountLast4 = new Map<string, { accountId: string; last4: string }>();
-      rows.forEach((row) => {
-        const last4 = normalizeLast4((row.raw_payload?.account_hint as string | undefined) ?? null);
-        if (!last4) return;
-        const key = `${row.account_id}:${last4}`;
-        if (!uniqueAccountLast4.has(key)) {
-          uniqueAccountLast4.set(key, { accountId: row.account_id, last4 });
-        }
-      });
-
-      for (const { accountId, last4 } of uniqueAccountLast4.values()) {
-        const key = `${accountId}:${last4}`;
-        if (cardIdByKey.has(key)) continue;
-        const card = await createCardMutation.mutateAsync({
-          account_id: accountId,
-          last4,
-        });
-        cardIdByKey.set(key, card.id);
-      }
-
-      return cardIdByKey;
-    },
-    [cardsForImport, createCardMutation, normalizeLast4],
-  );
-
   const buildBatchRows = useCallback((): BatchTransactionRow[] => {
     if (!parseResult?.transactions.length) return [];
     return parseResult.transactions.map((row) => {
@@ -322,6 +355,9 @@ export default function MoneyImportPage() {
         merchant_name: row.merchant_name ?? null,
         mcc: row.mcc ?? null,
         comment: row.comment ?? null,
+        source_comment: row.source_comment ?? null,
+        cashback_amount: row.cashback_amount ?? null,
+        cashback_currency: row.cashback_currency ?? null,
         is_transfer: row.is_transfer,
         transfer_group_id: row.transfer_group_id ?? null,
         raw_payload: {
@@ -344,11 +380,9 @@ export default function MoneyImportPage() {
     try {
       const accessToken = await getAccessToken();
       const rows = buildBatchRows();
-      await ensureCardsForRows(rows);
-
-      const result = await callMoneyImportActionClient<MoneyImportApplyResult>(
+      const result = await callMoneyImportActionClient<MoneyImportPreviewResult>(
         {
-          action: "apply_rows",
+          action: "preview_rows",
           source: selectedConnector.sourceId,
           payer_person_id: selectedPersonId,
           import_type: "file",
@@ -370,7 +404,6 @@ export default function MoneyImportPage() {
   }, [
     allRowsResolved,
     buildBatchRows,
-    ensureCardsForRows,
     file?.name,
     parseResult?.transactions,
     router,
@@ -420,7 +453,11 @@ export default function MoneyImportPage() {
   }, [checkExtension, isExtensionConnector]);
 
   const sendSessionToExtension = useCallback(
-    async (payload: MoneyImportSessionCreateResult): Promise<boolean> => {
+    async (
+      payload: MoneyImportSessionCreateResult,
+      userAccessToken: string,
+      defaultExtensionAccountId: string | null,
+    ): Promise<boolean> => {
       return await new Promise<boolean>((resolve) => {
         const timeout = window.setTimeout(() => {
           window.removeEventListener("message", onMessage);
@@ -445,12 +482,15 @@ export default function MoneyImportPage() {
             session: {
               session_id: payload.session_id,
               session_token: payload.session_token,
+              user_access_token: userAccessToken,
               batch_id: payload.batch_id,
               source: payload.source,
               payer_person_id: payload.payer_person_id,
               expires_at: payload.expires_at,
               last_imported_at: payload.last_imported_at,
+              default_account_id: defaultExtensionAccountId,
               function_url: getFunctionUrl("money-import"),
+              app_origin: window.location.origin,
             },
           },
           "*",
@@ -461,7 +501,10 @@ export default function MoneyImportPage() {
   );
 
   const launchExtensionFallback = useCallback(
-    (payload: MoneyImportSessionCreateResult): boolean => {
+    (
+      payload: MoneyImportSessionCreateResult,
+      defaultExtensionAccountId: string | null,
+    ): boolean => {
       if (!EXTENSION_ID) return false;
       const launchUrl =
         `chrome-extension://${EXTENSION_ID}/popup.html` +
@@ -472,7 +515,8 @@ export default function MoneyImportPage() {
         `&function_url=${encodeURIComponent(getFunctionUrl("money-import"))}` +
         `&payer_person_id=${encodeURIComponent(payload.payer_person_id)}` +
         `&expires_at=${encodeURIComponent(payload.expires_at)}` +
-        `&last_imported_at=${encodeURIComponent(payload.last_imported_at ?? "")}`;
+        `&last_imported_at=${encodeURIComponent(payload.last_imported_at ?? "")}` +
+        `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}`;
 
       window.open(launchUrl, "_blank", "noopener,noreferrer");
       return true;
@@ -482,6 +526,20 @@ export default function MoneyImportPage() {
 
   const handleStartExtensionImport = useCallback(async () => {
     if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "extension") return;
+    if (sourceAccounts.length === 0) {
+      setExtensionStatusMessage(t("money.importNoAccounts"));
+      return;
+    }
+    const selectedDefaultExtensionAccountId =
+      sourceAccounts.length === 1
+        ? sourceAccounts[0].id
+        : defaultAccountId.trim()
+          ? defaultAccountId
+          : null;
+    if (sourceAccounts.length > 1 && !selectedDefaultExtensionAccountId) {
+      setExtensionStatusMessage(t("money.selectAccount"));
+      return;
+    }
 
     setIsStartingExtension(true);
     setExtensionStatusMessage(null);
@@ -504,13 +562,17 @@ export default function MoneyImportPage() {
       setActiveSessionId(session.session_id);
       setActiveBatchId(session.batch_id);
 
-      const deliveredByMessage = await sendSessionToExtension(session);
+      const deliveredByMessage = await sendSessionToExtension(
+        session,
+        accessToken,
+        selectedDefaultExtensionAccountId,
+      );
       if (deliveredByMessage) {
         setExtensionStatusMessage(t("money.importExtensionSessionCreated"));
         return;
       }
 
-      const launched = launchExtensionFallback(session);
+      const launched = launchExtensionFallback(session, selectedDefaultExtensionAccountId);
       if (launched) {
         setExtensionStatusMessage(t("money.importExtensionSessionCreated"));
       } else {
@@ -523,7 +585,15 @@ export default function MoneyImportPage() {
     } finally {
       setIsStartingExtension(false);
     }
-  }, [launchExtensionFallback, selectedPersonId, selectedConnector, sendSessionToExtension, t]);
+  }, [
+    launchExtensionFallback,
+    defaultAccountId,
+    selectedPersonId,
+    selectedConnector,
+    sendSessionToExtension,
+    sourceAccounts,
+    t,
+  ]);
 
   if (!selectedPersonId) {
     return (
@@ -659,18 +729,7 @@ export default function MoneyImportPage() {
                       size="sm"
                       className="gap-2"
                       disabled={createAccountMutation.isPending}
-                      onClick={async () => {
-                        await createAccountMutation.mutateAsync({
-                          owner_person_id: selectedPersonId,
-                          source:
-                            selectedConnector.sourceId === "tbank"
-                              ? "tbank"
-                              : selectedConnector.sourceId,
-                          account_kind: "debit",
-                          account_label: selectedConnector.displayName,
-                          currency: "RUB",
-                        });
-                      }}
+                      onClick={handleCreateSourceAccount}
                     >
                       <Plus className="h-4 w-4" />
                       {t("money.importCreateTbankAccount")}
@@ -790,12 +849,53 @@ export default function MoneyImportPage() {
             <CardTitle className="text-base">{t("money.importExtensionTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {sourceAccounts.length === 0 && (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm text-muted-foreground flex items-center gap-2">
+                  {t("money.importNoAccounts")}
+                  <span
+                    className="inline-flex text-muted-foreground cursor-help"
+                    title={t("money.importNoAccountsTooltip")}
+                  >
+                    <HelpCircle className="h-4 w-4" />
+                  </span>
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={createAccountMutation.isPending}
+                  onClick={handleCreateSourceAccount}
+                >
+                  <Plus className="h-4 w-4" />
+                  {t("money.importCreateTbankAccount")}
+                </Button>
+              </div>
+            )}
+
             {extensionActive === null && (
               <p className="text-sm text-muted-foreground">{t("money.importExtensionChecking")}</p>
             )}
 
             {extensionActive === true && (
               <div className="space-y-4">
+                {sourceAccounts.length > 1 && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">{t("money.importDefaultAccount")}</label>
+                    <Select value={defaultAccountId} onValueChange={setDefaultAccountId}>
+                      <SelectTrigger className="w-full max-w-xs">
+                        <SelectValue placeholder={t("money.selectAccount")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sourceAccounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {account.account_label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
                   <li>{t("money.importExtensionStep1")}</li>
                   <li>{t("money.importExtensionStep2")}</li>
@@ -804,7 +904,11 @@ export default function MoneyImportPage() {
                 <Button
                   className="gap-2"
                   onClick={handleStartExtensionImport}
-                  disabled={isStartingExtension}
+                  disabled={
+                    isStartingExtension ||
+                    sourceAccounts.length === 0 ||
+                    (sourceAccounts.length > 1 && !defaultAccountId)
+                  }
                 >
                   {isStartingExtension ? t("common.loading") : t("money.importStartImport")}
                 </Button>

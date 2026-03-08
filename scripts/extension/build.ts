@@ -28,12 +28,32 @@ const stableExtensionKey =
 
 const EXTENSION_ALLOWED_HOST_PATTERNS = ["https://www.tbank.ru/*", "https://*.tbank.ru/*"];
 
-async function resolveBuildEnv(mode: string): Promise<Record<string, string | undefined>> {
-  if (mode === "development") {
-    const localEnv = await parseDotEnv(localEnvPath);
-    return { ...process.env, ...localEnv };
+function resolveSupabaseHostPattern(
+  env: Record<string, string | undefined>,
+  mode: string,
+): string[] {
+  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  if (!supabaseUrl) {
+    console.warn(
+      `[extension:${mode}] NEXT_PUBLIC_SUPABASE_URL is not set; extension edge calls may fail without host permission.`,
+    );
+    return [];
   }
-  return { ...process.env };
+
+  try {
+    const parsed = new URL(supabaseUrl);
+    return [`${parsed.protocol}//${parsed.host}/*`];
+  } catch {
+    console.warn(
+      `[extension:${mode}] NEXT_PUBLIC_SUPABASE_URL is invalid (${supabaseUrl}); skipping host permission.`,
+    );
+    return [];
+  }
+}
+
+async function resolveBuildEnv(): Promise<Record<string, string | undefined>> {
+  const localEnv = await parseDotEnv(localEnvPath);
+  return { ...process.env, ...localEnv };
 }
 
 /** Copy only static assets into dist (no generated .js/.css). */
@@ -84,14 +104,45 @@ function runViteBuild(): Promise<void> {
   });
 }
 
+function runEsbuildSourcePageWidgetInpageBundle(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const esbuildBin = path.join(rootDir, "node_modules", "esbuild", "bin", "esbuild");
+    const entry = path.join(extensionDir, "src", "source-page-widget-inpage.ts");
+    const outfile = path.join(distDir, "source-page-widget.inpage.js");
+    const child = spawn(
+      process.execPath,
+      [
+        esbuildBin,
+        entry,
+        "--bundle",
+        "--format=iife",
+        "--platform=browser",
+        "--target=es2020",
+        `--outfile=${outfile}`,
+      ],
+      { cwd: rootDir, stdio: "inherit" },
+    );
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`esbuild widget bundle exited with code ${code}`));
+    });
+    child.on("error", reject);
+  });
+}
+
 async function build(mode: string): Promise<void> {
-  const env = await resolveBuildEnv(mode);
+  const env = await resolveBuildEnv();
   const appOrigins = resolveAppOrigins(env, mode);
   const appPatterns = appOrigins.map(originToPattern);
+  const supabasePatterns = resolveSupabaseHostPattern(env, mode);
 
   const manifest: Record<string, unknown> = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   manifest.key = (env.EXTENSION_KEY || stableExtensionKey).trim();
-  manifest.host_permissions = unique([...appPatterns, ...EXTENSION_ALLOWED_HOST_PATTERNS]);
+  manifest.host_permissions = unique([
+    ...appPatterns,
+    ...EXTENSION_ALLOWED_HOST_PATTERNS,
+    ...supabasePatterns,
+  ]);
   manifest.content_scripts = ((manifest.content_scripts as unknown[]) || []).map(
     (entry: unknown) => ({
       ...(entry as Record<string, unknown>),
@@ -108,6 +159,7 @@ async function build(mode: string): Promise<void> {
 
   await copyStaticToDist();
   await runTscExtension();
+  await runEsbuildSourcePageWidgetInpageBundle();
   await runViteBuild();
 
   const envJs = [

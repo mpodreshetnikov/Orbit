@@ -1,7 +1,15 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportReportPage from "./page";
+
+const importActionMock = vi.fn();
+
+vi.mock("../../money-import-client", () => ({
+  getAccessToken: vi.fn(async () => "access-token"),
+  callMoneyImportAction: (...args: unknown[]) => importActionMock(...args),
+}));
 
 let paramsState: { batchId?: string } = { batchId: "batch-1" };
 let batchResult: { data: unknown; error: { message: string } | null } = {
@@ -12,6 +20,15 @@ let rowsResult: { data: unknown; error: { message: string } | null } = {
   data: null,
   error: null,
 };
+let accountsResult: { data: unknown; error: { message: string } | null } = {
+  data: null,
+  error: null,
+};
+let cardsResult: { data: unknown; error: { message: string } | null } = {
+  data: null,
+  error: null,
+};
+const rpcMock = vi.fn();
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -36,6 +53,40 @@ vi.mock("@/lib/supabase", () => ({
         };
       }
 
+      if (table === "money_accounts") {
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          in() {
+            return this;
+          },
+          order() {
+            return this;
+          },
+          then(resolve: (value: unknown) => unknown) {
+            return Promise.resolve(accountsResult).then(resolve);
+          },
+        };
+      }
+
+      if (table === "money_cards") {
+        return {
+          select() {
+            return this;
+          },
+          in() {
+            return this;
+          },
+          then(resolve: (value: unknown) => unknown) {
+            return Promise.resolve(cardsResult).then(resolve);
+          },
+        };
+      }
+
       return {
         select() {
           return this;
@@ -51,6 +102,7 @@ vi.mock("@/lib/supabase", () => ({
         },
       };
     },
+    rpc: (...args: unknown[]) => rpcMock(...args),
   }),
 }));
 
@@ -58,6 +110,7 @@ function makeBatch(overrides: Record<string, unknown> = {}) {
   return {
     id: "batch-1",
     source: "tbank_csv",
+    payer_person_id: "person-1",
     status: "done",
     parsed_transactions_count: 2,
     inserted_count: 1,
@@ -79,10 +132,16 @@ function makeRows() {
       status: "inserted",
       message: "inserted ok",
       payload: {
+        account_id: "account-1",
+        card_id: "card-1",
         posted_at: "2026-01-01T09:00:00.000Z",
         amount: -250,
         currency: "RUB",
+        cashback_amount: 25,
+        cashback_currency: "RUB",
         merchant_name: "Store A",
+        comment: "Main row comment",
+        raw_payload: { debug: "hidden" },
       },
       created_at: "2026-01-01T09:00:00.000Z",
     },
@@ -98,6 +157,12 @@ function makeRows() {
       payload: {
         title: "Item A",
         amount: -125,
+        quantity: 2,
+        unit: "pcs",
+        cashback_amount: 10,
+        cashback_currency: "RUB",
+        comment: "Line item comment",
+        raw_payload: { debug: "hidden" },
       },
       created_at: "2026-01-01T09:00:01.000Z",
     },
@@ -111,9 +176,12 @@ function makeRows() {
       status: "skipped",
       message: "duplicate",
       payload: {
+        account_id: "account-1",
         posted_at: "2026-01-01T10:00:00.000Z",
-        amount: -100,
+        amount: 100,
         currency: "RUB",
+        cashback_amount: 0,
+        cashback_currency: "RUB",
         merchant_name: "Store B",
       },
       created_at: "2026-01-01T10:00:00.000Z",
@@ -126,6 +194,10 @@ describe("MoneyImportReportPage", () => {
     paramsState = { batchId: "batch-1" };
     batchResult = { data: null, error: null };
     rowsResult = { data: null, error: null };
+    accountsResult = { data: [], error: null };
+    cardsResult = { data: [], error: null };
+    rpcMock.mockReset();
+    importActionMock.mockReset();
   });
 
   it("shows missing batch id error", async () => {
@@ -146,9 +218,24 @@ describe("MoneyImportReportPage", () => {
     expect(await screen.findByText("Rows fetch failed")).toBeInTheDocument();
   });
 
-  it("renders grouped report details and row statuses", async () => {
+  it("renders readable report table with expandable line items and JSON modal", async () => {
     batchResult = { data: makeBatch(), error: null };
     rowsResult = { data: makeRows(), error: null };
+    accountsResult = {
+      data: [{ id: "account-1", account_label: "Main account" }],
+      error: null,
+    };
+    cardsResult = {
+      data: [
+        {
+          id: "card-1",
+          account_id: "account-1",
+          card_label: "Travel card",
+          last4: "1234",
+        },
+      ],
+      error: null,
+    };
 
     render(<MoneyImportReportPage />);
 
@@ -156,13 +243,188 @@ describe("MoneyImportReportPage", () => {
       expect(screen.getByText("money.importResultsTitle")).toBeInTheDocument();
     });
 
+    expect(screen.getByTestId("report-table-header-row")).toBeInTheDocument();
+    expect(screen.getByText(/^Date$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Status$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Amount$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Cashback$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Card$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Details$/)).toBeInTheDocument();
+
     expect(screen.getByText("Store A")).toBeInTheDocument();
     expect(screen.getByText("Store B")).toBeInTheDocument();
-    expect(screen.getByText("Item A")).toBeInTheDocument();
-    expect(screen.getByText("No line items reported.")).toBeInTheDocument();
+    expect(screen.getByText("Main row comment")).toBeInTheDocument();
+    expect(screen.getByText("Main account / Travel card")).toBeInTheDocument();
     expect(screen.getByText("money.importResultRowInserted")).toBeInTheDocument();
     expect(screen.getByText("money.importResultRowSkipped")).toBeInTheDocument();
+    expect(screen.queryByText("money.importResultRowError")).not.toBeInTheDocument();
+    expect(screen.getByText("-250 RUB")).toBeInTheDocument();
+    expect(screen.getByText("25 RUB")).toBeInTheDocument();
+    expect(screen.getByText("Line items (1)")).toBeInTheDocument();
+
+    expect(screen.queryByText(/payload_json/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^account_id$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^card_id$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/raw_payload/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Source$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^External$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Type$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Account$/i)).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    const storeARow = screen.getByText("Store A").closest("section");
+    expect(storeARow).not.toBeNull();
+    await user.click(within(storeARow!).getByRole("button", { name: /^JSON$/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /Transaction payload: Store A/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/"merchant_name": "Store A"/)).toBeInTheDocument();
+    expect(screen.getByText(/"raw_payload"/)).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: /Transaction payload: Store A/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Line items \(1\)/i }));
+
+    expect(await screen.findByText("Item A")).toBeInTheDocument();
+    expect(screen.getByText("Line 1")).toBeInTheDocument();
+    expect(screen.getByText("-125 RUB")).toBeInTheDocument();
+    expect(screen.getByText("10 RUB")).toBeInTheDocument();
+    expect(screen.getByText("2 pcs")).toBeInTheDocument();
+    expect(screen.getByText("Line item comment")).toBeInTheDocument();
     expect(screen.getByText("money.importResultRowError")).toBeInTheDocument();
+
+    const jsonButtonsAfterExpand = screen.getAllByRole("button", { name: /^JSON$/i });
+    await user.click(jsonButtonsAfterExpand[2]!);
+    expect(
+      await screen.findByRole("heading", { name: /Line payload: Item A/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/"title": "Item A"/)).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: /Line payload: Item A/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows dom fallback warning for tbank web batches", async () => {
+    batchResult = {
+      data: makeBatch({
+        source: "tbank_web",
+      }),
+      error: null,
+    };
+    rowsResult = {
+      data: [
+        {
+          id: "tx-dom",
+          batch_id: "batch-1",
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: 1,
+          source_line_index: null,
+          status: "inserted",
+          message: null,
+          payload: {
+            posted_at: "2026-01-01T09:00:00.000Z",
+            amount: -10,
+            currency: "RUB",
+            merchant_name: "Fallback store",
+            raw_payload: {
+              connector_source: "tbank_web",
+              extraction_method: "dom",
+            },
+          },
+          created_at: "2026-01-01T09:00:00.000Z",
+        },
+      ],
+      error: null,
+    };
+
+    render(<MoneyImportReportPage />);
+
+    expect(
+      await screen.findByText(
+        "Warning: some TBank Web transactions were imported using DOM fallback. Verify amounts, merchants, and line items before trusting the result.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows transaction posted date and orders transactions by newest date first", async () => {
+    batchResult = { data: makeBatch(), error: null };
+    rowsResult = {
+      data: [
+        {
+          id: "tx-older",
+          batch_id: "batch-1",
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: 1,
+          source_line_index: null,
+          status: "inserted",
+          message: null,
+          payload: {
+            posted_at: "2026-01-01T09:00:00.000Z",
+            amount: -10,
+            currency: "RUB",
+            merchant_name: "Older store",
+          },
+          created_at: "2026-01-03T09:00:00.000Z",
+        },
+        {
+          id: "tx-newer",
+          batch_id: "batch-1",
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: 2,
+          source_line_index: null,
+          status: "inserted",
+          message: null,
+          payload: {
+            posted_at: "2026-01-02T11:30:00.000Z",
+            amount: -20,
+            currency: "RUB",
+            merchant_name: "Newer store",
+          },
+          created_at: "2026-01-01T08:00:00.000Z",
+        },
+      ],
+      error: null,
+    };
+
+    const { container } = render(<MoneyImportReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Older store")).toBeInTheDocument();
+      expect(screen.getByText("Newer store")).toBeInTheDocument();
+    });
+
+    const scrollBody = screen.getByTestId("report-table-scroll-body");
+    expect(scrollBody.textContent).toContain("02.01.2026");
+    expect(scrollBody.textContent).toContain("01.01.2026");
+
+    const newerStore = screen.getByText("Newer store");
+    const olderStore = screen.getByText("Older store");
+    const newerSection = newerStore.closest("section");
+    const olderSection = olderStore.closest("section");
+
+    expect(newerSection).not.toBeNull();
+    expect(olderSection).not.toBeNull();
+    expect(
+      newerSection!.compareDocumentPosition(olderSection as Node) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    expect(container.textContent?.indexOf("Newer store")).toBeLessThan(
+      container.textContent?.indexOf("Older store") ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("renders empty grouped rows state", async () => {
@@ -172,5 +434,171 @@ describe("MoneyImportReportPage", () => {
     render(<MoneyImportReportPage />);
 
     expect(await screen.findByText("No rows imported for this batch.")).toBeInTheDocument();
+  });
+
+  it("shows pending preview actions, applies batch, and hides card mapping while pending", async () => {
+    batchResult = {
+      data: makeBatch({
+        status: "pending",
+        completed_at: null,
+        source: "tbank_web",
+      }),
+      error: null,
+    };
+    rowsResult = { data: makeRows(), error: null };
+    accountsResult = {
+      data: [{ id: "account-1", account_label: "Main account" }],
+      error: null,
+    };
+    cardsResult = {
+      data: [
+        {
+          id: "card-1",
+          account_id: "account-1",
+          card_label: "Travel card",
+          last4: "1234",
+        },
+      ],
+      error: null,
+    };
+    importActionMock.mockResolvedValue({
+      batch_id: "batch-1",
+      inserted: 1,
+      skipped: 0,
+      error_count: 0,
+      row_results: [],
+    });
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText("money.importPendingReviewBanner")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "money.importApplyBatch" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "money.importDiscardBatch" })).toBeInTheDocument();
+    expect(screen.queryByText("Card mapping")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "money.importApplyBatch" }));
+
+    await waitFor(() => {
+      expect(importActionMock).toHaveBeenCalledWith(
+        {
+          action: "apply_batch",
+          batch_id: "batch-1",
+        },
+        "access-token",
+      );
+    });
+  });
+
+  it("shows discarded batch state without review actions", async () => {
+    batchResult = {
+      data: makeBatch({
+        status: "discarded",
+        completed_at: "2026-01-01T10:30:00.000Z",
+      }),
+      error: null,
+    };
+    rowsResult = { data: makeRows(), error: null };
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText("money.importDiscardedBanner")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "money.importApplyBatch" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "money.importDiscardBatch" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("virtualizes long report lists and updates scroll position", async () => {
+    batchResult = { data: makeBatch({ parsed_transactions_count: 65 }), error: null };
+    rowsResult = {
+      data: Array.from({ length: 65 }).map((_, index) => ({
+        id: `tx-${index + 1}`,
+        batch_id: "batch-1",
+        parent_row_id: null,
+        row_kind: "transaction",
+        source_row_index: index + 1,
+        source_line_index: null,
+        status: "inserted",
+        message: null,
+        payload: {
+          posted_at: "2026-01-01T09:00:00.000Z",
+          amount: -(index + 1),
+          currency: "RUB",
+          merchant_name: `Store ${index + 1}`,
+        },
+        created_at: "2026-01-01T09:00:00.000Z",
+      })),
+      error: null,
+    };
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText("Store 1")).toBeInTheDocument();
+
+    const scrollBody = screen.getByTestId("report-table-scroll-body");
+    Object.defineProperty(scrollBody, "scrollTop", {
+      configurable: true,
+      value: 2400,
+      writable: true,
+    });
+    fireEvent.scroll(scrollBody);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Store 1")).not.toBeInTheDocument();
+    });
+  });
+
+  it("renders card mapping panel for current batch cards and calls remap rpc", async () => {
+    batchResult = {
+      data: makeBatch({
+        source: "tbank_web",
+        payer_person_id: "person-1",
+      }),
+      error: null,
+    };
+    rowsResult = { data: makeRows(), error: null };
+    accountsResult = {
+      data: [
+        { id: "account-1", account_label: "Main account" },
+        { id: "account-2", account_label: "Reserve account" },
+      ],
+      error: null,
+    };
+    cardsResult = {
+      data: [
+        {
+          id: "card-1",
+          account_id: "account-1",
+          card_label: "Travel card",
+          last4: "1234",
+        },
+      ],
+      error: null,
+    };
+    rpcMock.mockResolvedValue({
+      data: [{ resulting_card_id: "card-1", moved_transactions_count: 2, merged: false }],
+      error: null,
+    });
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText("Card mapping")).toBeInTheDocument();
+    expect(screen.getByText("Travel card")).toBeInTheDocument();
+    const user = userEvent.setup();
+
+    fireEvent.change(screen.getByTestId("card-remap-select-card-1"), {
+      target: { value: "account-2" },
+    });
+    await user.click(screen.getByTestId("card-remap-apply-card-1"));
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith("money_reassign_card_account", {
+        p_card_id: "card-1",
+        p_target_account_id: "account-2",
+      });
+    });
   });
 });

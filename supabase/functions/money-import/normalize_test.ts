@@ -1,6 +1,7 @@
 import { assertEquals } from "std/assert/assert-equals";
 import {
   buildLineItemImportHash,
+  buildTransactionInsertPayload,
   getBearerToken,
   jsonResponse,
   normalizeSourceForTransactions,
@@ -50,6 +51,69 @@ Deno.test("normalizeTransactionRow fills defaults and normalizes fields", () => 
   assertEquals(normalized.merchant_name, "Shop");
   assertEquals(normalized.line_items?.length, 1);
 });
+
+Deno.test(
+  "normalizeTransactionRow and insert payload keep source_comment and cashback fields",
+  () => {
+    const normalized = normalizeTransactionRow(
+      {
+        posted_at: "2026-01-10",
+        amount: "100.5" as unknown as number,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_comment: "  Paid by card  ",
+        cashback_amount: "12.34" as unknown as number,
+        cashback_currency: " rub ",
+        line_items: null,
+      },
+      "tbank",
+    );
+
+    assertEquals(normalized.source_comment, "Paid by card");
+    assertEquals(normalized.cashback_amount, 12.34);
+    assertEquals(normalized.cashback_currency, "RUB");
+
+    const payload = buildTransactionInsertPayload(normalized, "person-1");
+    assertEquals(payload.source_comment, "Paid by card");
+    assertEquals(payload.cashback_amount, 12.34);
+    assertEquals(payload.cashback_currency, "RUB");
+  },
+);
+
+Deno.test(
+  "normalizeTransactionRow derives source_comment and cashback from raw payload when missing",
+  () => {
+    const normalized = normalizeTransactionRow(
+      {
+        posted_at: "2026-03-06T01:09:11.000Z",
+        amount: 6500,
+        transaction_type: "income",
+        source: "tbank",
+        comment: "В дек/янв за налог?",
+        raw_payload: {
+          operation: {
+            message: "В дек/янв за налог?",
+            cashback: 0,
+            cashbackAmount: {
+              value: 0,
+              currency: { code: 643, name: "RUB", strCode: "643" },
+            },
+            loyaltyBonusSummary: {
+              amount: 101,
+            },
+          },
+        },
+        line_items: [{ title: "Transfer", amount: 6500 }],
+      },
+      "tbank",
+    );
+
+    assertEquals(normalized.comment, "В дек/янв за налог?");
+    assertEquals(normalized.source_comment, "В дек/янв за налог?");
+    assertEquals(normalized.cashback_amount, 101);
+    assertEquals(normalized.cashback_currency, "RUB");
+  },
+);
 
 Deno.test("normalizeTransactionRow throws on invalid posted_at and amount", () => {
   let caughtPostedAt: unknown = null;

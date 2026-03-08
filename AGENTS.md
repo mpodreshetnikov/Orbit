@@ -14,6 +14,10 @@ Use these command IDs in plans, PRs, and handoffs:
 - `dev-ready`: `just dev-ready-local` (long-running: run in background when invoked by an agent—see below)
 - `dev-stop`: `just dev-local-stop`
 - `dev`: `just dev` (start local developer stack; long-running for HMR/watch workflows; use `just dev stop` when teardown is needed)
+- `extension-debug-live`: `just extension-debug-live [source_id] [wait_seconds]` (money-import live debug: source-parameterized extension scraper; auto-detects auth, then generates `diagnostics.json`, `report.md`, `rows-preview.csv`. **If an auth gate appears, ask a human to pass it—do not stop testing.** Pass a short optional `wait_seconds` (e.g. 5–10) to quickly see if a human is needed without waiting long.)
+- `extension-debug-live-full`: `just extension-debug-live-full [source_id] [wait_seconds]` (money-import live debug full run with edge apply/complete. **On auth gate: ask human to pass it; do not stop.** Optional short `wait_seconds` to probe for auth without waiting long.)
+- `extension-debug-analyze`: `just extension-debug-analyze [source_id] [artifact_dir_or_file]` (source-parameterized analyzer with machine diagnostics; defaults to latest artifact when path omitted)
+- `extension-debug-report`: `just extension-debug-report [source_id] [artifact_dir_or_file]` (source-parameterized human-readable report + CSV preview; defaults to latest artifact when path omitted)
 - `obs-up`: `just obs-up` (start local Grafana LGTM stack)
 - `obs-down`: `just obs-down` (stop local Grafana LGTM stack)
 - `format-check`: `just quality-format-check`

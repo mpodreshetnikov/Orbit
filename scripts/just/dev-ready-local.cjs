@@ -47,6 +47,87 @@ function logInfo(message) {
   console.log(`[dev-ready-local] ${message}`);
 }
 
+function parseDotEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const parsed = {};
+  const content = fs.readFileSync(filePath, "utf8");
+  const lines = content.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const separator = line.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = line.slice(0, separator).trim();
+    if (!key) {
+      continue;
+    }
+    let value = line.slice(separator + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    parsed[key] = value;
+  }
+
+  return parsed;
+}
+
+function loadObservabilityEnvDefaults() {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, ".env.observability.local"),
+    path.join(cwd, ".env.observability"),
+    path.join(cwd, ".env.observability.example"),
+  ];
+
+  for (const candidatePath of candidates) {
+    const parsed = parseDotEnvFile(candidatePath);
+    const keys = Object.keys(parsed).filter((key) => key.startsWith("OBS_"));
+    if (keys.length === 0) {
+      continue;
+    }
+
+    for (const key of keys) {
+      if (typeof process.env[key] === "undefined" || process.env[key] === "") {
+        process.env[key] = parsed[key];
+      }
+    }
+    logInfo(`Loaded observability defaults from ${path.basename(candidatePath)}.`);
+  }
+
+  const obsAutoEnabled = (process.env.OBS_AUTO || "1").toLowerCase() !== "0";
+  if (!obsAutoEnabled) {
+    return;
+  }
+
+  const mode = (process.env.OBS_EXPORTER_MODE || "local").toLowerCase();
+  if (mode !== "local") {
+    return;
+  }
+
+  if (!process.env.OBS_LOCAL_OTLP_HTTP_ENDPOINT) {
+    process.env.OBS_LOCAL_OTLP_HTTP_ENDPOINT = "http://127.0.0.1:4318";
+    logInfo(
+      "OBS_LOCAL_OTLP_HTTP_ENDPOINT was not set while observability is enabled. Defaulting to http://127.0.0.1:4318.",
+    );
+  }
+
+  if (!process.env.OBS_OTLP_ENDPOINT) {
+    process.env.OBS_OTLP_ENDPOINT = process.env.OBS_LOCAL_OTLP_HTTP_ENDPOINT;
+  }
+}
+
+loadObservabilityEnvDefaults();
+
 const JUST_BIN = resolveJustBin();
 const NPX_BIN = resolveNpxBin();
 const CONCURRENTLY_PACKAGE_JSON = require.resolve("concurrently/package.json");

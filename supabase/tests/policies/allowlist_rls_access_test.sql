@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(10);
+SELECT plan(11);
 
 INSERT INTO public.allowed_users (email)
 VALUES ('allowlist-pass@example.com');
@@ -100,6 +100,12 @@ SELECT ok(
 SELECT ok(
   EXISTS (SELECT 1 FROM public.money_accounts WHERE id = '12121212-7777-7777-7777-777777777777'),
   'allowlisted user can read target money_accounts row'
+);
+
+SELECT set_config('request.jwt.claim.email', 'AllowList-Pass@Example.Com', true);
+SELECT ok(
+  EXISTS (SELECT 1 FROM public.money_accounts WHERE id = '12121212-7777-7777-7777-777777777777'),
+  'allowlisted user email check is case-insensitive'
 );
 
 SELECT set_config('request.jwt.claim.email', 'allowlist-deny@example.com', true);

@@ -1,18 +1,24 @@
 ---
-name: grafana-issue-investigation
-description: Investigate incidents, bugs, and regressions by correlating Grafana structured logs, traces, and metrics across local and cloud environments. Use when triaging reliability issues, debugging functional defects, performing root cause analysis after failures, validating fixes, or analyzing post-deploy behavior changes.
+name: issue-investigation
+description: Investigate incidents, bugs, and regressions by correlating structured logs, traces, and metrics across local and cloud environments. Use together with systematic-debugging when debugging or doing root cause analysis. Use when triaging reliability issues, debugging functional defects, performing root cause analysis after failures, validating fixes, or analyzing post-deploy behavior changes.
 ---
 
-# Grafana Issue Investigation
+# Issue Investigation
 
 Investigate issues with an evidence-first flow that correlates structured logs, traces, and metrics.
+
+## When to Use
+
+- **With systematic-debugging:** When debugging or doing root cause analysis in systems that have structured logs, traces, or metrics (e.g. Loki, Tempo, Prometheus, or other OTLP-backed backends), apply this skill as part of Phase 1 evidence gathering—before proposing fixes. It fulfills the "gather evidence" step using existing observability.
+- Triaging reliability issues, validating fixes, or analyzing post-deploy behavior changes.
+- **Runbook:** See `docs/RUNBOOK.md` for triage checklists, observability correlation steps, and environment-specific commands.
 
 ## Workflow
 
 1. Scope the incident
 - Confirm service, environment, and an explicit UTC time window.
 - Start with `now-30m` for active issues and expand only if needed.
-- If tool limits reject long windows (for example, some Tempo metrics calls), split into smaller chunks and aggregate findings.
+- If tool limits reject long windows (for example, some trace backends), split into smaller chunks and aggregate findings.
 
 2. Choose local or cloud execution path
 - Follow `references/local-cloud-modes.md`.
@@ -83,6 +89,7 @@ Investigate issues with an evidence-first flow that correlates structured logs, 
 
 ## References
 
+- `docs/RUNBOOK.md`: triage checklists, observability correlation steps, and environment commands.
 - `references/local-cloud-modes.md`: mode selection and tool mapping.
 - `references/query-recipes.md`: discovery-first PromQL/LogQL/TraceQL patterns for incidents and bug RCA.
 - `references/report-template.md`: concise incident write-up template.

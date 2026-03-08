@@ -392,7 +392,7 @@ CREATE TABLE "public"."money_import_batches" (
     "skipped_count" integer DEFAULT 0 NOT NULL,
     "error_count" integer DEFAULT 0 NOT NULL,
     "completed_at" timestamp with time zone,
-    CONSTRAINT "money_import_batches_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text"])))
+    CONSTRAINT "money_import_batches_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text", 'discarded'::"text"])))
 );
 
 
@@ -468,7 +468,10 @@ CREATE TABLE "public"."money_transactions" (
     "dedupe_hash" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "card_id" "uuid"
+    "card_id" "uuid",
+    "source_comment" "text",
+    "cashback_amount" numeric,
+    "cashback_currency" "text"
 );
 
 

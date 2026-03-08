@@ -59,6 +59,9 @@
     "supabase/db/functions/money_upsert_transactions_batch.sql": [
       "supabase/tests/functions/money_upsert_transactions_batch_test.sql"
     ],
+    "supabase/db/functions/money_reassign_card_account.sql": [
+      "supabase/tests/functions/money_reassign_card_account_test.sql"
+    ],
     "supabase/db/functions/run_med_event_generation_for_all_users.sql": [
       "supabase/tests/functions/medication_generation_cleanup_test.sql"
     ],

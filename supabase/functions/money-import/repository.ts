@@ -34,7 +34,15 @@ export interface MoneyImportRepository {
     payerPersonId: string,
     row: CanonicalTransactionRowInput,
     fallbackSource: string,
+    defaultAccountId?: string | null,
   ): Promise<string>;
+  resolveCardIdForRow(
+    accountId: string,
+    row: CanonicalTransactionRowInput,
+    createIfMissing?: boolean,
+  ): Promise<string | null>;
+  findExistingTransactionId(row: CanonicalTransactionRowInput): Promise<string | null>;
+  findExistingLineItemId(transactionId: string, importHash: string): Promise<string | null>;
   insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
@@ -46,6 +54,8 @@ export interface MoneyImportRepository {
     fallbackAmount: number,
   ): Promise<{ lineItemId: string | null; inserted: boolean }>;
   insertReportRow(payload: Record<string, unknown>): Promise<string>;
+  listReportRowsByBatch(batchId: string): Promise<Record<string, unknown>[]>;
+  deleteReportRowsByBatch(batchId: string): Promise<void>;
 }
 
 export interface MoneyImportRepositoryConfig {
@@ -235,6 +245,7 @@ export function createSupabaseMoneyImportRepository(
     payerPersonId: string,
     row: CanonicalTransactionRowInput,
     fallbackSource: string,
+    defaultAccountId?: string | null,
   ): Promise<string> {
     const explicitAccountId = normalizeText(row.account_id);
     if (explicitAccountId) return explicitAccountId;
@@ -286,6 +297,11 @@ export function createSupabaseMoneyImportRepository(
       }
     }
 
+    const normalizedDefaultAccountId = normalizeText(defaultAccountId);
+    if (normalizedDefaultAccountId && accountIds.includes(normalizedDefaultAccountId)) {
+      return normalizedDefaultAccountId;
+    }
+
     if (accountIds.length === 1) return accountIds[0];
     throw new Error("account_id is required and could not be resolved");
   }
@@ -303,6 +319,73 @@ export function createSupabaseMoneyImportRepository(
     }
 
     const { data, error } = await query.maybeSingle();
+    if (error || !data) return null;
+    return normalizeText((data as Record<string, unknown>).id);
+  }
+
+  async function findCardIdByAccountAndLast4(
+    accountId: string,
+    last4: string,
+  ): Promise<string | null> {
+    const { data, error } = await getAdminClient()
+      .from("money_cards")
+      .select("id")
+      .eq("account_id", accountId)
+      .eq("last4", last4)
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return normalizeText((data as Record<string, unknown>).id);
+  }
+
+  async function resolveCardIdForRow(
+    accountId: string,
+    row: CanonicalTransactionRowInput,
+    createIfMissing = true,
+  ): Promise<string | null> {
+    const explicitCardId = normalizeText(row.card_id);
+    if (explicitCardId) return explicitCardId;
+
+    const accountHint = extractAccountHintFromRow(row);
+    if (!accountHint) return null;
+
+    const existingCardId = await findCardIdByAccountAndLast4(accountId, accountHint);
+    if (existingCardId) return existingCardId;
+    if (!createIfMissing) return null;
+
+    const { data, error } = await getAdminClient()
+      .from("money_cards")
+      .insert({
+        account_id: accountId,
+        last4: accountHint,
+      } as Database["public"]["Tables"]["money_cards"]["Insert"])
+      .select("id")
+      .single();
+
+    if (!error && data) {
+      return normalizeText((data as Record<string, unknown>).id);
+    }
+
+    if (!isUniqueViolation(error)) {
+      throw new Error((error as { message?: string })?.message || "Failed to create card");
+    }
+
+    return await findCardIdByAccountAndLast4(accountId, accountHint);
+  }
+
+  async function findExistingLineItemId(
+    transactionId: string,
+    importHash: string,
+  ): Promise<string | null> {
+    const { data, error } = await getAdminClient()
+      .from("money_line_items")
+      .select("id")
+      .eq("transaction_id", transactionId)
+      .eq("import_hash", importHash)
+      .limit(1)
+      .maybeSingle();
+
     if (error || !data) return null;
     return normalizeText((data as Record<string, unknown>).id);
   }
@@ -400,6 +483,33 @@ export function createSupabaseMoneyImportRepository(
     return (data as Record<string, unknown>).id as string;
   }
 
+  async function listReportRowsByBatch(batchId: string): Promise<Record<string, unknown>[]> {
+    const { data, error } = await getAdminClient()
+      .from("money_import_batch_rows")
+      .select("*")
+      .eq("batch_id", batchId)
+      .order("source_row_index", { ascending: true })
+      .order("source_line_index", { ascending: true, nullsFirst: true })
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw new Error(error.message || "Failed to load report rows");
+    }
+
+    return (data ?? []) as Record<string, unknown>[];
+  }
+
+  async function deleteReportRowsByBatch(batchId: string): Promise<void> {
+    const { error } = await getAdminClient()
+      .from("money_import_batch_rows")
+      .delete()
+      .eq("batch_id", batchId);
+
+    if (error) {
+      throw new Error(error.message || "Failed to delete report rows");
+    }
+  }
+
   return {
     authenticateAllowedUser,
     getSessionByToken,
@@ -412,8 +522,13 @@ export function createSupabaseMoneyImportRepository(
     getImportBatch,
     updateImportBatch,
     resolveAccountIdForRow,
+    resolveCardIdForRow,
+    findExistingTransactionId,
+    findExistingLineItemId,
     insertOrResolveTransaction,
     insertLineItemIfNew,
     insertReportRow,
+    listReportRowsByBatch,
+    deleteReportRowsByBatch,
   };
 }

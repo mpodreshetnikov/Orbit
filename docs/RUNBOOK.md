@@ -37,6 +37,8 @@ Notes:
 
 ## Observability Correlation Triage
 
+When debugging bugs or failures in services that have observability (e.g. Loki, Tempo, or other log/trace/metrics backends), use the **issue-investigation** skill together with systematic-debugging to correlate logs and traces as part of root cause investigation.
+
 Use this when debugging frontend -> edge function -> RPC workflows.
 
 1. Start from logs in Loki and capture one concrete `trace_id` + `request_id`.
@@ -49,6 +51,10 @@ Use this when debugging frontend -> edge function -> RPC workflows.
    - `traceparent`
    - `x-request-id`
 5. Verify edge logs include `trace_id`, `span_id`, and `request_id` on important step events.
+6. Before RCA, confirm edge telemetry ingestion is live for the same UTC window:
+   - Loki: query both app and edge streams (for example, `service_name="orbit"` and `service_name="supabase-function"`).
+   - Tempo: confirm traces exist for both `resource.service.name="orbit"` and `resource.service.name="supabase-function"`.
+   - If edge streams are missing locally, verify `OBS_LOCAL_OTLP_HTTP_ENDPOINT` is set (default expected: `http://127.0.0.1:4318`) and restart `dev`.
 
 Fast LogQL starter:
 
@@ -202,6 +208,61 @@ Checks:
   - `money_import_batches`
   - `money_import_batch_rows`
 - Verify upsert RPC behavior (`money_upsert_transactions_batch`).
+
+### T-Bank Extension Scraper Debug (Local)
+
+Use command IDs from `AGENTS.md`:
+
+0. Generic source-parameterized commands (preferred for new connectors):
+   - `extension-debug-live <source_id>`
+   - `extension-debug-live-full <source_id>`
+   - `extension-debug-analyze <source_id> [artifact_dir_or_file]`
+   - `extension-debug-report <source_id> [artifact_dir_or_file]`
+1. Run a live debug session:
+   - `extension-debug-live tbank_web`
+   - This launches a browser with the extension, opens the source target page, and runs an auth-state check first.
+   - If the persisted Playwright session is already authenticated, parsing continues automatically with no manual step.
+   - If login/challenge is detected, interactive runs prompt for manual completion; non-interactive runs fail fast with an actionable message.
+   - Human-readable report artifacts are generated automatically after the run.
+2. Analyze generated artifact:
+   - `extension-debug-analyze tbank_web`
+   - Or analyze explicit folder/file: `extension-debug-analyze tbank_web .tmp/scraper-debug/tbank/<timestamp>-<run_id>`
+3. Re-render human-readable validation report (optional):
+   - `extension-debug-report tbank_web`
+   - Or for explicit folder/file: `extension-debug-report tbank_web .tmp/scraper-debug/tbank/<timestamp>-<run_id>`
+
+Agent/self-verification flow (works when Playwright session is already logged in):
+
+1. `extension-debug-live <source_id>`
+2. `extension-debug-analyze <source_id>`
+3. `extension-debug-report <source_id>`
+
+Notes:
+
+- All commands default to the latest artifact for the source when explicit artifact path is omitted.
+- The runner persists browser session data under `.tmp/scraper-debug/playwright/<session_name>/` so repeated runs can be unattended after one successful login.
+
+Artifact contract:
+
+- Root path: `.tmp/scraper-debug/<normalized_source>/<timestamp>-<run_id>/`
+- Files:
+  - `artifact.json`
+  - `run-response.json`
+  - `debug-run.json`
+  - `parse-output.json`
+  - `network-captures.json`
+  - `summary.json`
+  - `diagnostics.json` (written by analyzer)
+  - `report.md` (human-readable validation report)
+  - `rows-preview.csv` (flat row preview for spreadsheet/manual checks)
+
+Failure category codes from analyzer:
+
+- `AUTH_BLOCKED`
+- `API_DISCOVERY_MISSED`
+- `API_4XX_5XX`
+- `DOM_SELECTOR_DRIFT`
+- `MAPPING_DROP`
 
 ## Debug Information
 

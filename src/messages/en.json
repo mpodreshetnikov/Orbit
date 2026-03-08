@@ -51,7 +51,7 @@
       "lastNotification": "Last notification sent",
       "testNotificationTitle": "Test Notification",
       "testNotificationBody": "This is a test notification from Family Superapp!",
-      "testNotificationBodyRich": "𝐓𝐡𝐢𝐬 𝐢𝐬 𝐚 𝐭𝐞𝐬𝐭 notification.\nTap Open or Settings to try actions.",
+      "testNotificationBodyRich": "рќђ“рќђЎрќђўрќђ¬ рќђўрќђ¬ рќђљ рќђ­рќђћрќђ¬рќђ­ notification.\nTap Open or Settings to try actions.",
       "notificationActionOpen": "Open",
       "notificationActionSettings": "Settings",
       "notificationActionDismiss": "Dismiss",
@@ -98,7 +98,7 @@
   },
   "languages": {
     "en": "English",
-    "ru": "Русский"
+    "ru": "Р СѓСЃСЃРєРёР№"
   },
   "person": {
     "select": "Select person",
@@ -243,10 +243,10 @@
     "importSourceTypeFile": "File",
     "importSourceTypeExtension": "Extension",
     "importExtensionTitle": "Import with extension",
-    "importExtensionGuide": "Open the source website, authorize if needed, then start processing from the extension popup.",
+    "importExtensionGuide": "Open the source website, authorize if needed, then run import directly on that page. Use popup only for debugging/fallback.",
     "importExtensionStep1": "Open T-Bank and go to your operations (we can open it when you click Start import).",
     "importExtensionStep2": "Click Start import — we'll create a session and open T-Bank if needed.",
-    "importExtensionStep3": "Click the extension icon in the toolbar, then Start processing in the popup.",
+    "importExtensionStep3": "On the opened T-Bank page, click the visible Run import button and watch progress there.",
     "importOpenSourceWebsite": "Open source website",
     "importCheckExtension": "Check extension",
     "importStartWithExtension": "Start with extension",
@@ -254,18 +254,22 @@
     "importExtensionRecheck": "Recheck extension",
     "importExtensionActive": "Extension is active",
     "importExtensionInactive": "Extension is not active",
-    "importExtensionChecking": "Checking extension…",
-    "importExtensionInstallDev": "Load the extension from the dev build: run the build script, then in Chrome go to Extensions → Developer mode → Load unpacked and select the browserExtension output folder.",
+    "importExtensionChecking": "Checking extensionвЂ¦",
+    "importExtensionInstallDev": "Load the extension from the dev build: run the build script, then in Chrome go to Extensions в†’ Developer mode в†’ Load unpacked and select the browserExtension output folder.",
     "importExtensionInstallProd": "Installation instructions will be added here.",
     "importExtensionRetryCheck": "Retry check",
     "importExtensionReloadHint": "After installing the extension, reload this page, then click Retry check.",
-    "importExtensionSessionCreated": "Session created. Open your T-Bank tab, then click the extension icon in the toolbar and choose Start processing.",
+    "importExtensionSessionCreated": "Session created. Open your T-Bank tab and click the visible Run import button on the page.",
     "importExtensionSessionStarted": "Session started. Continue in extension popup.",
     "importExtensionFallbackOpened": "Opened extension popup fallback URL.",
-    "importExtensionOpenPopupManual": "Open extension popup manually and start processing there.",
+    "importExtensionOpenPopupManual": "If on-page flow is unavailable, open extension popup and start processing there (debug fallback).",
     "importProgress": "Import progress",
     "importParsedTransactionsCount": "{count} parsed transactions",
-    "importOpenCurrentReport": "Open current report"
+    "importOpenCurrentReport": "Open current report",
+    "importPendingReviewBanner": "This report is a preview. Review the predicted results, then choose whether to apply this batch. Final apply results can differ if the underlying data changed.",
+    "importApplyBatch": "Apply batch",
+    "importDiscardBatch": "Do not apply",
+    "importDiscardedBanner": "This batch was reviewed and not applied. The report is kept for audit purposes."
   },
   "records": {
     "title": "Medical Records",
@@ -375,7 +379,7 @@
       "uploadFiles": "Upload Files",
       "pasteText": "Paste Text",
       "pasteDescription": "Paste raw text from a medical document (e.g., copied from PDF, email, or another source). AI will immediately extract structured data from your text.",
-      "pasteTextPlaceholder": "Paste medical document text here...\n\nExample:\nPatient: John Doe\nDate: 2024-01-15\nTest: Complete Blood Count\nResults:\n- Hemoglobin: 14.2 g/dL\n- White Blood Cells: 7500/µL\n...",
+      "pasteTextPlaceholder": "Paste medical document text here...\n\nExample:\nPatient: John Doe\nDate: 2024-01-15\nTest: Complete Blood Count\nResults:\n- Hemoglobin: 14.2 g/dL\n- White Blood Cells: 7500/ВµL\n...",
       "proceedToReview": "Extract Data",
       "starting": "Starting",
       "queued": "Queued",
@@ -506,7 +510,7 @@
     "retryOcr": "Retry OCR",
     "timeout": "Processing timed out",
     "timeoutDescription": "Check your connection and use Retry OCR from the record.",
-    "failedTapToRetry": "Failed – tap to retry"
+    "failedTapToRetry": "Failed вЂ“ tap to retry"
   },
   "catalogs": {
     "title": "Catalogs",
@@ -859,10 +863,10 @@
     },
     "statusTips": {
       "title": "Status Guide",
-      "active": "Active — Current ongoing condition that requires attention. Will be prominently shown to the chatbot for health decisions.",
-      "suspected": "Suspected — Preliminary diagnosis that needs confirmation. Chatbot will consider it but with lower certainty.",
-      "resolved": "Resolved — Condition that was treated and is no longer present. Kept for medical history context.",
-      "history": "History — Past condition mentioned in records. Provides background context without implying current relevance."
+      "active": "Active вЂ” Current ongoing condition that requires attention. Will be prominently shown to the chatbot for health decisions.",
+      "suspected": "Suspected вЂ” Preliminary diagnosis that needs confirmation. Chatbot will consider it but with lower certainty.",
+      "resolved": "Resolved вЂ” Condition that was treated and is no longer present. Kept for medical history context.",
+      "history": "History вЂ” Past condition mentioned in records. Provides background context without implying current relevance."
     },
     "linkedCheckups": "Checkups linked to this condition",
     "linkedCheckupsEmpty": "No checkups linked to this condition",
@@ -919,7 +923,7 @@
     "nextDueFrom": "After completion, set next due from",
     "nextDueFromCompletion": "Completion date",
     "nextDueFromTarget": "Target (scheduled) date",
-    "nextDueFromHint": "e.g. target 1 Mar, complete 10 Mar → next due 1 Apr (target) or 10 Apr (completion)",
+    "nextDueFromHint": "e.g. target 1 Mar, complete 10 Mar в†’ next due 1 Apr (target) or 10 Apr (completion)",
     "anchorNextPeriod": "From today",
     "anchorFirstOfYear": "January 1st",
     "anchorFirstOfMonth": "1st of next month",

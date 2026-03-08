@@ -1,6 +1,11 @@
 import { APP_ORIGINS } from "../env.js";
 
 type TelemetryLevel = "debug" | "info" | "warn" | "error";
+export interface TelemetryCorrelation {
+  trace_id: string;
+  request_id: string;
+  span_id?: string;
+}
 
 interface ExtensionTelemetryEvent {
   timestamp: string;
@@ -39,6 +44,11 @@ async function relay(event: ExtensionTelemetryEvent): Promise<void> {
 }
 
 export function createExtensionLogger(component: string) {
+  const defaultCorrelation: TelemetryCorrelation = {
+    trace_id: randomHex(16),
+    request_id: `ext_${randomHex(8)}`,
+  };
+
   const base = {
     app: "extension" as const,
     component,
@@ -46,32 +56,38 @@ export function createExtensionLogger(component: string) {
     release: "dev-local",
   };
 
-  const emit = (level: TelemetryLevel, message: string, attrs?: Record<string, unknown>) => {
+  const emit = (
+    level: TelemetryLevel,
+    message: string,
+    attrs?: Record<string, unknown>,
+    correlation?: TelemetryCorrelation,
+  ) => {
+    const activeCorrelation = correlation ?? defaultCorrelation;
     const event: ExtensionTelemetryEvent = {
       timestamp: new Date().toISOString(),
       level,
       message,
       ...base,
-      trace_id: randomHex(16),
-      span_id: randomHex(8),
-      request_id: `ext_${randomHex(8)}`,
+      trace_id: activeCorrelation.trace_id,
+      span_id: activeCorrelation.span_id ?? randomHex(8),
+      request_id: activeCorrelation.request_id,
       attrs: attrs as Record<string, boolean | number | string | null> | undefined,
     };
     void relay(event);
   };
 
   return {
-    debug(message: string, attrs?: Record<string, unknown>) {
-      emit("debug", message, attrs);
+    debug(message: string, attrs?: Record<string, unknown>, correlation?: TelemetryCorrelation) {
+      emit("debug", message, attrs, correlation);
     },
-    info(message: string, attrs?: Record<string, unknown>) {
-      emit("info", message, attrs);
+    info(message: string, attrs?: Record<string, unknown>, correlation?: TelemetryCorrelation) {
+      emit("info", message, attrs, correlation);
     },
-    warn(message: string, attrs?: Record<string, unknown>) {
-      emit("warn", message, attrs);
+    warn(message: string, attrs?: Record<string, unknown>, correlation?: TelemetryCorrelation) {
+      emit("warn", message, attrs, correlation);
     },
-    error(message: string, attrs?: Record<string, unknown>) {
-      emit("error", message, attrs);
+    error(message: string, attrs?: Record<string, unknown>, correlation?: TelemetryCorrelation) {
+      emit("error", message, attrs, correlation);
     },
   };
 }

@@ -183,6 +183,7 @@ Deno.test("repository resolveAccountIdForRow uses card hint when multiple accoun
       raw_payload: { account_hint: "**** 4444" },
     },
     "tbank_web",
+    "acc-1",
   );
 
   assertEquals(resolved, "acc-2");
@@ -218,6 +219,98 @@ Deno.test("repository resolveAccountIdForRow throws when no accounts found", asy
     "No money account found for source tbank",
   );
 });
+
+Deno.test(
+  "repository resolveAccountIdForRow uses default account fallback when card hint is unresolved",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_accounts") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: async () => ({
+                    data: [{ id: "acc-1" }, { id: "acc-2" }],
+                    error: null,
+                  }),
+                }),
+              }),
+            };
+          }
+
+          if (table === "money_cards") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  in: async () => ({
+                    data: [],
+                    error: null,
+                  }),
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const resolved = await repository.resolveAccountIdForRow(
+      "person-1",
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        raw_payload: { account_hint: "**** 9999" },
+      },
+      "tbank_web",
+      "acc-2",
+    );
+
+    assertEquals(resolved, "acc-2");
+  },
+);
+
+Deno.test(
+  "repository resolveAccountIdForRow ignores invalid default and still uses single account fallback",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_accounts") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: async () => ({
+                    data: [{ id: "acc-only" }],
+                    error: null,
+                  }),
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const resolved = await repository.resolveAccountIdForRow(
+      "person-1",
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+      },
+      "manual",
+      "acc-invalid",
+    );
+
+    assertEquals(resolved, "acc-only");
+  },
+);
 
 Deno.test(
   "repository insertOrResolveTransaction handles inserted and duplicate paths",
@@ -863,3 +956,122 @@ Deno.test("repository line-item payload uses defaults and fallback errors", asyn
     "Failed to insert line item",
   );
 });
+
+Deno.test(
+  "repository resolveCardIdForRow supports explicit, existing and no-hint branches",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table !== "money_cards") throw new Error(`Unexpected table ${table}`);
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  limit: () => ({
+                    maybeSingle: async () => ({ data: { id: "card-existing" }, error: null }),
+                  }),
+                }),
+              }),
+            }),
+            insert: () => ({
+              select: () => ({
+                single: async () => ({ data: { id: "card-new" }, error: null }),
+              }),
+            }),
+          };
+        },
+      },
+    });
+
+    assertEquals(
+      await repository.resolveCardIdForRow("acc-1", {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        card_id: "card-explicit",
+        raw_payload: { account_hint: "**** 9999" },
+      }),
+      "card-explicit",
+    );
+
+    assertEquals(
+      await repository.resolveCardIdForRow("acc-1", {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        raw_payload: { account_hint: "**** 4444" },
+      }),
+      "card-existing",
+    );
+
+    assertEquals(
+      await repository.resolveCardIdForRow("acc-1", {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        raw_payload: { account_hint: "no digits" },
+      }),
+      null,
+    );
+  },
+);
+
+Deno.test(
+  "repository resolveCardIdForRow creates card and handles unique-conflict fallback",
+  async () => {
+    let insertCalls = 0;
+    const insertedPayloads: Record<string, unknown>[] = [];
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table !== "money_cards") throw new Error(`Unexpected table ${table}`);
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  limit: () => ({
+                    maybeSingle: async () => {
+                      if (insertCalls === 0) return { data: null, error: null };
+                      return { data: { id: "card-after-conflict" }, error: null };
+                    },
+                  }),
+                }),
+              }),
+            }),
+            insert: (payload: Record<string, unknown>) => {
+              insertedPayloads.push(payload);
+              return {
+                select: () => ({
+                  single: async () => {
+                    insertCalls += 1;
+                    if (insertCalls === 1) return { data: { id: "card-created" }, error: null };
+                    return { data: null, error: { code: "23505", message: "duplicate card" } };
+                  },
+                }),
+              };
+            },
+          };
+        },
+      },
+    });
+
+    const created = await repository.resolveCardIdForRow("acc-2", {
+      posted_at: "2026-01-01T00:00:00.000Z",
+      amount: 10,
+      transaction_type: "expense",
+      raw_payload: { account_hint: "card **** 1234" },
+    });
+    assertEquals(created, "card-created");
+    assertEquals(insertedPayloads[0].account_id, "acc-2");
+    assertEquals(insertedPayloads[0].last4, "1234");
+
+    const conflictResolved = await repository.resolveCardIdForRow("acc-2", {
+      posted_at: "2026-01-01T00:00:00.000Z",
+      amount: 10,
+      transaction_type: "expense",
+      raw_payload: { account_hint: "****1234" },
+    });
+    assertEquals(conflictResolved, "card-after-conflict");
+  },
+);

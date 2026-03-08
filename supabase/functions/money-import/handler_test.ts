@@ -5,6 +5,8 @@ import { assertJsonResponse } from "../_shared/testing/response.ts";
 import { createMoneyImportHandler } from "./handler.ts";
 import type { MoneyImportRepository } from "./repository.ts";
 
+Deno.env.set("OBS_LOCAL_OTLP_HTTP_ENDPOINT", "");
+
 function createRepositoryMock(
   options: {
     sessionForUser?: Record<string, unknown> | null;
@@ -43,15 +45,38 @@ function createRepositoryMock(
     createImportBatch: async () => "batch-1",
     getImportBatch: async () => ({
       id: "batch-1",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      import_type: "file",
       parsed_transactions_count: 0,
       inserted_count: 0,
       skipped_count: 0,
       error_count: 0,
       parsed_through_at: null,
-      status: "running",
+      status: "pending",
     }),
     updateImportBatch: async () => {},
+    listReportRowsByBatch: async () => [
+      {
+        id: "preview-row-1",
+        row_kind: "transaction",
+        payload: {
+          posted_at: "2026-01-01T00:00:00.000Z",
+          amount: 10,
+          currency: "RUB",
+          transaction_type: "expense",
+          status: "posted",
+          source: "tbank_web",
+          account_id: "acc-1",
+          line_items: [],
+        },
+      },
+    ],
+    deleteReportRowsByBatch: async () => {},
     resolveAccountIdForRow: async () => "acc-1",
+    resolveCardIdForRow: async () => null,
+    findExistingTransactionId: async () => null,
+    findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async () => ({ transactionId: "tx-1", inserted: true }),
     insertLineItemIfNew: async () => ({ lineItemId: "line-1", inserted: true }),
     insertReportRow: async () => "report-1",
@@ -67,6 +92,7 @@ Deno.test("money-import handler responds to OPTIONS", async () => {
     new Request("http://localhost/functions/v1/money-import", { method: "OPTIONS" }),
   );
   assertEquals(response.status, 200);
+  await response.text();
   assertEquals(
     response.headers.get("Access-Control-Allow-Origin"),
     corsHeaders["Access-Control-Allow-Origin"],
@@ -135,72 +161,118 @@ Deno.test("money-import handler returns 401 for missing auth on protected action
   assertEquals(payload.error, "Missing Authorization header");
 });
 
-Deno.test("money-import handler runs create_session and apply_rows happy paths", async () => {
-  const handler = createMoneyImportHandler({
-    repository: createRepositoryMock({
-      sessionForUser: {
-        id: "session-1",
-        source: "tbank",
-        payer_person_id: "person-1",
-        status: "running",
-        expires_at: "2999-01-01T00:00:00.000Z",
-        revoked_at: null,
-        batch_id: "batch-1",
-      },
-    }),
-    now: () => new Date("2026-01-01T00:00:00.000Z"),
-  });
-
-  const createSessionPayload = await assertJsonResponse<{ session_id: string; batch_id: string }>(
-    await handler(
-      new Request("http://localhost/functions/v1/money-import", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer user-token",
-        },
-        body: JSON.stringify({
-          action: "create_session",
+Deno.test(
+  "money-import handler runs create_session, preview_rows, apply_batch, and discard_batch happy paths",
+  async () => {
+    const handler = createMoneyImportHandler({
+      repository: createRepositoryMock({
+        sessionForUser: {
+          id: "session-1",
           source: "tbank",
           payer_person_id: "person-1",
-        }),
-      }),
-    ),
-    200,
-  );
-  assertEquals(createSessionPayload.session_id, "session-1");
-  assertEquals(createSessionPayload.batch_id, "batch-1");
-
-  const applyRowsPayload = await assertJsonResponse<{
-    inserted: number;
-    skipped: number;
-    error_count: number;
-  }>(
-    await handler(
-      new Request("http://localhost/functions/v1/money-import", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer session-token",
+          status: "running",
+          expires_at: "2999-01-01T00:00:00.000Z",
+          revoked_at: null,
+          batch_id: "batch-1",
         },
-        body: JSON.stringify({
-          action: "apply_rows",
-          rows: [
-            {
-              posted_at: "2026-01-01T00:00:00.000Z",
-              amount: 10,
-              transaction_type: "expense",
-            },
-          ],
-        }),
       }),
-    ),
-    200,
-  );
-  assertEquals(applyRowsPayload.inserted, 1);
-  assertEquals(applyRowsPayload.skipped, 0);
-  assertEquals(applyRowsPayload.error_count, 0);
-});
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    const createSessionPayload = await assertJsonResponse<{ session_id: string; batch_id: string }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer user-token",
+          },
+          body: JSON.stringify({
+            action: "create_session",
+            source: "tbank",
+            payer_person_id: "person-1",
+          }),
+        }),
+      ),
+      200,
+    );
+    assertEquals(createSessionPayload.session_id, "session-1");
+    assertEquals(createSessionPayload.batch_id, "batch-1");
+
+    const previewRowsPayload = await assertJsonResponse<{
+      inserted: number;
+      skipped: number;
+      error_count: number;
+    }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer session-token",
+          },
+          body: JSON.stringify({
+            action: "preview_rows",
+            rows: [
+              {
+                posted_at: "2026-01-01T00:00:00.000Z",
+                amount: 10,
+                transaction_type: "expense",
+              },
+            ],
+          }),
+        }),
+      ),
+      200,
+    );
+    assertEquals(previewRowsPayload.inserted, 1);
+    assertEquals(previewRowsPayload.skipped, 0);
+    assertEquals(previewRowsPayload.error_count, 0);
+
+    const applyBatchPayload = await assertJsonResponse<{
+      inserted: number;
+      skipped: number;
+      error_count: number;
+    }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer user-token",
+          },
+          body: JSON.stringify({
+            action: "apply_batch",
+            batch_id: "batch-1",
+          }),
+        }),
+      ),
+      200,
+    );
+    assertEquals(applyBatchPayload.inserted, 1);
+    assertEquals(applyBatchPayload.skipped, 0);
+    assertEquals(applyBatchPayload.error_count, 0);
+
+    const discardBatchPayload = await assertJsonResponse<{ batch_id: string; status: string }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer user-token",
+          },
+          body: JSON.stringify({
+            action: "discard_batch",
+            batch_id: "batch-1",
+          }),
+        }),
+      ),
+      200,
+    );
+    assertEquals(discardBatchPayload.batch_id, "batch-1");
+    assertEquals(discardBatchPayload.status, "discarded");
+  },
+);
 
 Deno.test(
   "money-import handler returns session_status and complete_session errors for unknown session",

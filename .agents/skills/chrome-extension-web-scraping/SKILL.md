@@ -1,6 +1,6 @@
 ---
 name: chrome-extension-web-scraping
-description: Scrape and extract data from web pages using a Chrome extension (Manifest V3). Use when building or extending content scripts, injected scripts, DOM extraction, virtualized lists, modals, connector-style scrapers, scraping cascade/fallback, poison-pill detection, or undocumented API discovery. Prefer undocumented APIs over DOM when available. Use Playwright CLI (playwright-cli skill) to investigate the scrape target (including sign-in and API discovery) before production implementation.
+description: Scrape and extract data from web pages using a Chrome extension (Manifest V3). Required workflow: (1) check real data with Playwright CLI, (2) write a specification document, (3) implement the scraper. Use when building or extending content scripts, injected scripts, DOM extraction, virtualized lists, modals, connector-style scrapers, scraping cascade/fallback, poison-pill detection, or undocumented API discovery. Prefer undocumented APIs over DOM when available.
 ---
 
 # Web Scraping with Chrome Extension
@@ -9,20 +9,28 @@ Use this skill when implementing or extending page scraping inside a Chrome exte
 
 **Prefer undocumented APIs over DOM parsing** when the target page loads data via XHR/fetch: use the page’s API from the extension (injected fetch with cookies) as the first strategy in your cascade; use DOM as fallback.
 
-## Investigate the Target Before Production
+## Required Workflow (Do Not Skip)
+
+When building or extending a scraper, follow this order. **Do not implement the scraper before completing steps 1 and 2.**
+
+1. **Check real data** — Investigate the live target with real (or representative) data using Playwright CLI. Confirm structure, APIs, and edge cases on the actual site; do not rely on assumptions or stale docs.
+2. **Write a specification document** — Capture findings in a spec (e.g. `docs/connectors/<target>-scraper-spec.md` or a discovery doc in the connector folder). Include: data sources (API URLs + params vs DOM), selectors/flows, auth requirements, poison-pill signals, and cascade order (API → DOM). This is the single source of truth for implementation.
+3. **Implement the scraper** — Build or extend the connector according to the spec. Reference the spec for selectors, API contracts, and fallback order; add tests that validate against the documented behaviour.
+
+## Investigate the Target Before Production (Step 1 Detail)
 
 Before implementing or changing a connector, **investigate the scrape target** using **Playwright CLI**. Use the **playwright-cli skill** for commands and workflows (open, goto, snapshot, network, run-code, state-save). Do not go straight to extension code.
 
 1. **Open the target URL** in Playwright (`playwright-cli open <url>`), take a snapshot, and inspect DOM for selectors and structure.
 2. **Sign-in:** Many sites (banking, dashboards) require the user to be signed in. **Ask the user to sign in during investigation** if the page shows a login form or “Sign in to continue.” After they log in in the Playwright window, continue (e.g. `playwright-cli state-save auth.json` if you want to reuse auth), then trigger the actions that load the data.
 3. **Discover APIs:** Trigger the actions that load the data (e.g. open list, scroll, open detail). Use `playwright-cli network` or `playwright-cli run-code` to capture XHR/fetch requests and identify API URL, method, params, and that cookies are required. Prefer implementing that API in the extension first; use DOM as fallback.
-4. **Document:** Note in special discovery document API details (for API-first connector) and/or DOM selectors and flow (for DOM fallback). Then implement the extension connector with cascade: API → DOM using this document.
+4. **Document:** Note in the **specification document** (Step 2 above) API details (for API-first connector) and/or DOM selectors and flow (for DOM fallback). Then implement the extension connector (Step 3) with cascade: API → DOM using this spec.
 
 See [references/investigation-with-playwright.md](references/investigation-with-playwright.md).
 
 ## When To Use
 
-- **Investigating a new scrape target** — use Playwright CLI (playwright-cli skill) to open the page, have the user sign in if required, discover XHR/fetch APIs and DOM structure, then implement the extension connector.
+- **Investigating a new scrape target** — follow the required workflow: check real data with Playwright CLI, write a spec document, then implement the extension connector (see Required Workflow above).
 - Adding or changing scrapers that run inside a Chrome extension (content scripts or injected scripts).
 - Designing DOM selectors and extraction logic for third-party or first-party pages.
 - Handling infinite scroll, virtualized lists, or modals/dialogs during scraping.

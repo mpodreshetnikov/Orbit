@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(7);
+SELECT plan(8);
 
 SELECT has_function('public', 'link_allowed_user', ARRAY[]::text[]);
 SELECT has_function('public', 'is_owner_of_person', ARRAY['uuid']);
@@ -24,6 +24,27 @@ SELECT is(
   ),
   '12121212-3434-5656-7878-909090909090',
   'link_allowed_user trigger links auth_user_id on matching allowed_users email'
+);
+
+INSERT INTO public.allowed_users (email)
+VALUES ('link-owner-case@example.com');
+
+INSERT INTO auth.users (id, email, aud, role)
+VALUES (
+  '13131313-3434-5656-7878-909090909090',
+  'Link-Owner-Case@Example.Com',
+  'authenticated',
+  'authenticated'
+);
+
+SELECT is(
+  (
+    SELECT auth_user_id::text
+    FROM public.allowed_users
+    WHERE email = 'link-owner-case@example.com'
+  ),
+  '13131313-3434-5656-7878-909090909090',
+  'link_allowed_user trigger links auth_user_id with case-insensitive email match'
 );
 
 INSERT INTO public.persons (id, name, kind, auth_user_id)

@@ -12,9 +12,32 @@ import { formatSession, toIsoFromInput } from "./helpers";
 function sendMessage(message: Record<string, unknown>): Promise<unknown> {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({
+          ok: false,
+          error: chrome.runtime.lastError.message || "Extension runtime messaging failed",
+          diagnostics: {
+            error_code: "RUNTIME_LAST_ERROR",
+            transport: "runtime",
+          },
+        });
+        return;
+      }
       resolve(response);
     });
   });
+}
+
+interface DebugRunSummary {
+  run?: {
+    debug_run_id?: string;
+    status?: string;
+    started_at?: string;
+    finished_at?: string | null;
+    error_message?: string | null;
+  };
+  events?: Array<Record<string, unknown>>;
+  event_count?: number;
 }
 
 function App() {
@@ -23,6 +46,27 @@ function App() {
   const [windowMode, setWindowMode] = React.useState<"auto" | "manual">("auto");
   const [manualFrom, setManualFrom] = React.useState("");
   const [running, setRunning] = React.useState(false);
+  const [debugEnabled, setDebugEnabled] = React.useState(true);
+  const [debugExporting, setDebugExporting] = React.useState(false);
+  const [debugRunId, setDebugRunId] = React.useState<string | null>(null);
+  const [debugRunStatus, setDebugRunStatus] = React.useState<string | null>(null);
+  const [debugBundleJson, setDebugBundleJson] = React.useState("");
+
+  const refreshDebugState = React.useCallback(async () => {
+    const response = (await sendMessage({ type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" })) as {
+      ok?: boolean;
+      run?: DebugRunSummary | null;
+    };
+    const runContext = response?.run?.run;
+    if (runContext && typeof runContext.debug_run_id === "string") {
+      setDebugRunId(runContext.debug_run_id);
+      setDebugRunStatus(typeof runContext.status === "string" ? runContext.status : null);
+      return response.run ?? null;
+    }
+    setDebugRunId(null);
+    setDebugRunStatus(null);
+    return null;
+  }, []);
 
   const refreshSession = React.useCallback(async () => {
     const response = (await sendMessage({ type: "MONEY_IMPORT_GET_SESSION" })) as {
@@ -50,17 +94,101 @@ function App() {
       payer_person_id: params.get("payer_person_id"),
       expires_at: params.get("expires_at"),
       last_imported_at: params.get("last_imported_at") || null,
+      default_account_id: params.get("default_account_id") || null,
     };
     await sendMessage({ type: "MONEY_IMPORT_START_SESSION", session });
   }, []);
 
   React.useEffect(() => {
-    void seedSessionFromLaunchUrl().then(() => refreshSession());
-  }, [seedSessionFromLaunchUrl, refreshSession]);
+    void seedSessionFromLaunchUrl().then(async () => {
+      await refreshSession();
+      await refreshDebugState();
+    });
+  }, [seedSessionFromLaunchUrl, refreshSession, refreshDebugState]);
+
+  React.useEffect(() => {
+    const onRuntimeMessage = (
+      message: Record<string, unknown> & { type?: string; phase?: string; debug_run_id?: string },
+    ) => {
+      if (message.type !== "MONEY_IMPORT_DEBUG_STATUS") return;
+      if (typeof message.debug_run_id === "string") {
+        setDebugRunId(message.debug_run_id);
+      }
+      if (message.phase === "started") setDebugRunStatus("running");
+      if (message.phase === "completed") setDebugRunStatus("ok");
+      if (message.phase === "failed") setDebugRunStatus("error");
+    };
+
+    chrome.runtime.onMessage.addListener(onRuntimeMessage);
+    return () => {
+      chrome.runtime.onMessage.removeListener(onRuntimeMessage);
+    };
+  }, []);
 
   const onRefreshSession = async () => {
     await refreshSession();
+    await refreshDebugState();
     setStatus("Session refreshed");
+  };
+
+  const onExportLatestDebugBundle = async () => {
+    setDebugExporting(true);
+    try {
+      const response = (await sendMessage({ type: "MONEY_IMPORT_DEBUG_EXPORT_LAST_RUN" })) as {
+        ok?: boolean;
+        error?: string;
+        bundle?: {
+          exported_at: string;
+          run: DebugRunSummary;
+        };
+      };
+      let bundle = response?.bundle;
+      if (!response?.ok || !bundle?.run?.run?.debug_run_id) {
+        const shouldFallback =
+          typeof response?.error === "string" &&
+          response.error.toLowerCase().includes("unsupported message type");
+        if (!shouldFallback) {
+          throw new Error(response?.error || "No debug run available for export.");
+        }
+
+        const lastRunResponse = (await sendMessage({
+          type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN",
+        })) as {
+          ok?: boolean;
+          run?: DebugRunSummary | null;
+          error?: string;
+        };
+        if (!lastRunResponse?.ok || !lastRunResponse.run?.run?.debug_run_id) {
+          throw new Error(lastRunResponse?.error || "No debug run available for export.");
+        }
+        bundle = {
+          exported_at: new Date().toISOString(),
+          run: lastRunResponse.run,
+        };
+      }
+      const runId = bundle?.run?.run?.debug_run_id;
+      if (!runId) {
+        throw new Error("No debug run available for export.");
+      }
+      const bundleJson = JSON.stringify(bundle, null, 2);
+      setDebugBundleJson(bundleJson);
+      const blob = new Blob([bundleJson], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `money-import-debug-${runId}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setStatus(`Debug bundle exported (${runId})`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Unable to export debug bundle");
+    } finally {
+      setDebugExporting(false);
+    }
   };
 
   const onStart = async () => {
@@ -82,12 +210,40 @@ function App() {
       const response = (await sendMessage({
         type: "MONEY_IMPORT_RUN",
         windowFrom,
-      })) as { ok?: boolean; error?: string; result?: { batch_id?: string } };
+        debug: debugEnabled
+          ? {
+              enabled: true,
+            }
+          : undefined,
+      })) as {
+        ok?: boolean;
+        error?: string;
+        diagnostics?: Record<string, unknown> | null;
+        debug_run_id?: string;
+        result?: { batch_id?: string };
+      };
       if (!response?.ok) {
+        if (response.diagnostics && typeof response.diagnostics === "object") {
+          setDebugBundleJson(
+            JSON.stringify(
+              {
+                error: response.error ?? "Import run failed",
+                diagnostics: response.diagnostics,
+              },
+              null,
+              2,
+            ),
+          );
+        }
         throw new Error(response?.error || "Import run failed");
       }
+      if (typeof response.debug_run_id === "string") {
+        setDebugRunId(response.debug_run_id);
+      }
+      await refreshDebugState();
+      const runLabel = response.debug_run_id ? `\nRun: ${response.debug_run_id}` : "";
       setStatus(
-        `Done. Batch: ${response.result?.batch_id ?? (s as { batch_id?: string }).batch_id}`,
+        `Done. Batch: ${response.result?.batch_id ?? (s as { batch_id?: string }).batch_id}${runLabel}`,
       );
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Unknown error");
@@ -153,6 +309,43 @@ function App() {
           </Button>
           {status ? (
             <p className="text-xs text-muted-foreground whitespace-pre-wrap">{status}</p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm">Debug</CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 pt-0 space-y-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={debugEnabled}
+              onChange={(event) => setDebugEnabled(event.target.checked)}
+            />
+            Enable debug run
+          </label>
+          <Button
+            variant="secondary"
+            onClick={onExportLatestDebugBundle}
+            disabled={debugExporting}
+            className="w-full"
+          >
+            Export latest debug bundle
+          </Button>
+          <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+            Run ID: {debugRunId ?? "-"}
+            {"\n"}
+            Run status: {debugRunStatus ?? "-"}
+          </p>
+          {debugBundleJson ? (
+            <Textarea
+              rows={5}
+              readOnly
+              value={debugBundleJson}
+              className="font-mono text-xs resize-y"
+            />
           ) : null}
         </CardContent>
       </Card>

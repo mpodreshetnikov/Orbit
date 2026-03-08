@@ -2,6 +2,7 @@ export type EdgeLogLevel = "debug" | "info" | "warn" | "error";
 export type EdgeSpanKind = "internal" | "client" | "server";
 export type EdgeSpanStatus = "ok" | "error";
 export type EdgeAttrs = Record<string, boolean | number | string | null>;
+const LOCAL_OTLP_DEFAULT_HTTP_ENDPOINT = "http://127.0.0.1:4318";
 
 export interface EdgeLogEvent {
   timestamp: string;
@@ -147,7 +148,9 @@ function resolveOtlpLogsEndpoint(): string {
     return ensureLogsPath(direct);
   }
   const direct =
-    Deno.env.get("OBS_LOCAL_OTLP_HTTP_ENDPOINT") ?? Deno.env.get("OBS_OTLP_ENDPOINT") ?? "";
+    Deno.env.get("OBS_LOCAL_OTLP_HTTP_ENDPOINT") ??
+    Deno.env.get("OBS_OTLP_ENDPOINT") ??
+    LOCAL_OTLP_DEFAULT_HTTP_ENDPOINT;
   return ensureLogsPath(direct);
 }
 
@@ -159,7 +162,9 @@ function resolveOtlpTracesEndpoint(): string {
     return ensureTracesPath(direct);
   }
   const direct =
-    Deno.env.get("OBS_LOCAL_OTLP_HTTP_ENDPOINT") ?? Deno.env.get("OBS_OTLP_ENDPOINT") ?? "";
+    Deno.env.get("OBS_LOCAL_OTLP_HTTP_ENDPOINT") ??
+    Deno.env.get("OBS_OTLP_ENDPOINT") ??
+    LOCAL_OTLP_DEFAULT_HTTP_ENDPOINT;
   return ensureTracesPath(direct);
 }
 

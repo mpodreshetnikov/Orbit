@@ -10,7 +10,7 @@ AS $$
 BEGIN
   UPDATE public.allowed_users
   SET auth_user_id = NEW.id
-  WHERE email = NEW.email AND auth_user_id IS NULL;
+  WHERE lower(trim(email)) = lower(trim(NEW.email)) AND auth_user_id IS NULL;
   RETURN NEW;
 END;
 $$;

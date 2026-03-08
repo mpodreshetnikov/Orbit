@@ -19,6 +19,9 @@ export interface CanonicalTransactionRowInput {
   merchant_name?: string | null;
   mcc?: string | null;
   comment?: string | null;
+  source_comment?: string | null;
+  cashback_amount?: number | null;
+  cashback_currency?: string | null;
   is_transfer?: boolean | null;
   transfer_group_id?: string | null;
   raw_payload?: Record<string, unknown> | null;

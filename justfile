@@ -32,6 +32,23 @@ extension-dev-watch:
 extension-build-production:
   npx tsx scripts/extension/build.ts --mode=production
 
+# Money-import live debug: run extension scraper for any source (auto-detects auth).
+# Agent note: if an auth gate appears, ask a human to pass it; do not stop. Use a short --wait-for-manual <seconds> (e.g. 5–10) to quickly see if a human is needed without waiting long (run the script directly to pass it).
+extension-debug-live source='tbank_web' wait='':
+  if ("{{wait}}" -eq "") { npx tsx scripts/extension/playwright-cli-run-connector-parser.ts --source "{{source}}" } else { npx tsx scripts/extension/playwright-cli-run-connector-parser.ts --source "{{source}}" --wait-for-manual "{{wait}}" }
+
+# Money-import live debug full: parse + edge apply/complete. Agent note: on auth gate, ask human to pass it; use short --wait-for-manual to probe (pass wait as second arg).
+extension-debug-live-full source='tbank_web' wait='':
+  if ("{{wait}}" -eq "") { npx tsx scripts/extension/playwright-cli-run-connector-parser.ts --source "{{source}}" --full-run } else { npx tsx scripts/extension/playwright-cli-run-connector-parser.ts --source "{{source}}" --full-run --wait-for-manual "{{wait}}" }
+
+# Analyze latest (or explicit) scraper debug artifact for a source.
+extension-debug-analyze source='tbank_web' artifact='':
+  if ("{{artifact}}" -eq "") { npx tsx scripts/extension/analyze-tbank-debug-artifact.ts --source "{{source}}" } else { npx tsx scripts/extension/analyze-tbank-debug-artifact.ts --source "{{source}}" --artifact "{{artifact}}" }
+
+# Generate human-readable scraper report (Markdown + CSV preview) for a source.
+extension-debug-report source='tbank_web' artifact='':
+  if ("{{artifact}}" -eq "") { npx tsx scripts/extension/analyze-tbank-debug-artifact.ts --source "{{source}}" --print-report } else { npx tsx scripts/extension/analyze-tbank-debug-artifact.ts --source "{{source}}" --artifact "{{artifact}}" --print-report }
+
 # Check formatting with Prettier.
 quality-format-check:
   npx prettier --check .

@@ -51,6 +51,13 @@ export async function callMoneyImportAction<T>(
 
 export function computeProgressPercent(status: MoneyImportSessionStatus | null): number {
   if (!status?.batch) return 0;
+  if (
+    status.batch.status === "pending" ||
+    status.batch.status === "completed" ||
+    status.batch.status === "discarded"
+  ) {
+    return 100;
+  }
   if (typeof status.batch.progress_percent === "number") {
     return Math.max(0, Math.min(100, status.batch.progress_percent));
   }

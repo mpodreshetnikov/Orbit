@@ -120,6 +120,28 @@ describe("use-money-accounts", () => {
     });
   });
 
+  it("maps RLS create errors to an actionable message", async () => {
+    const builder = createQueryBuilder({
+      data: null,
+      error: { message: 'new row violates row-level security policy for table "money_accounts"' },
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn(() => builder),
+    });
+
+    const { useCreateMoneyAccount } = await import("./use-money-accounts");
+    const { result } = renderHookWithQueryClient(() => useCreateMoneyAccount());
+
+    await expect(
+      result.current.mutateAsync({
+        owner_person_id: "person-1",
+        account_kind: "cash",
+        account_label: "Cash",
+        currency: "USD",
+      }),
+    ).rejects.toThrow("not linked to allowed_users");
+  });
+
   it("updates account and invalidates owner list", async () => {
     const updated = {
       id: "acc-1",

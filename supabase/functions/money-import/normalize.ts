@@ -60,6 +60,91 @@ export function normalizeSourceForTransactions(source: string): string {
   return source;
 }
 
+function toObject(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object") return value as Record<string, unknown>;
+  return null;
+}
+
+function normalizeCurrencyCode(value: unknown): string | null {
+  const text = normalizeText(value)?.toUpperCase() ?? null;
+  if (!text) return null;
+  if (/^\d+$/.test(text)) {
+    if (text === "643") return "RUB";
+    if (text === "840") return "USD";
+    if (text === "978") return "EUR";
+  }
+  const matched = text.match(/[A-Z]{3}/);
+  return matched ? matched[0] : null;
+}
+
+function extractRawOperation(row: CanonicalTransactionRowInput): Record<string, unknown> | null {
+  const rawPayload = toObject(row.raw_payload);
+  return toObject(rawPayload?.operation);
+}
+
+function extractSourceCommentFallback(row: CanonicalTransactionRowInput): string | null {
+  return (
+    normalizeText(row.source_comment) ??
+    normalizeText(row.comment) ??
+    normalizeText(extractRawOperation(row)?.message) ??
+    normalizeText(extractRawOperation(row)?.comment)
+  );
+}
+
+function extractCashbackAmountFallback(row: CanonicalTransactionRowInput): number | null {
+  const explicit = toNumberOrNull(row.cashback_amount);
+  if (explicit !== null) return explicit;
+
+  const operation = extractRawOperation(row);
+  if (!operation) return null;
+
+  const fromSummary = toNumberOrNull(toObject(operation.loyaltyBonusSummary)?.amount);
+  if (fromSummary !== null) return fromSummary;
+
+  const fromCashbackAmount = toNumberOrNull(toObject(operation.cashbackAmount)?.value);
+  if (fromCashbackAmount !== null) return fromCashbackAmount;
+
+  const fromCashback = toNumberOrNull(operation.cashback);
+  if (fromCashback !== null) return fromCashback;
+
+  const loyaltyBonus = Array.isArray(operation.loyaltyBonus) ? operation.loyaltyBonus : [];
+  let sum = 0;
+  let hasItems = false;
+  for (const entry of loyaltyBonus) {
+    const value = toNumberOrNull(toObject(toObject(entry)?.amount)?.value);
+    if (value === null) continue;
+    hasItems = true;
+    sum += value;
+  }
+  return hasItems ? sum : null;
+}
+
+function extractCashbackCurrencyFallback(
+  row: CanonicalTransactionRowInput,
+  cashbackAmount: number | null,
+  normalizedCurrency: string,
+): string | null {
+  const explicit = normalizeCurrencyCode(row.cashback_currency);
+  if (explicit) return explicit;
+  if (cashbackAmount === null) return null;
+
+  const operation = extractRawOperation(row);
+  if (!operation) return normalizedCurrency;
+
+  const cashbackCurrency = toObject(toObject(operation.cashbackAmount)?.currency);
+  const loyaltyCurrency = toObject(toObject(operation.loyaltyUnits)?.currency);
+
+  return (
+    normalizeCurrencyCode(cashbackCurrency?.strCode) ??
+    normalizeCurrencyCode(cashbackCurrency?.name) ??
+    normalizeCurrencyCode(cashbackCurrency?.code) ??
+    normalizeCurrencyCode(loyaltyCurrency?.strCode) ??
+    normalizeCurrencyCode(loyaltyCurrency?.name) ??
+    normalizeCurrencyCode(loyaltyCurrency?.code) ??
+    normalizedCurrency
+  );
+}
+
 export function extractAccountHintFromRow(row: CanonicalTransactionRowInput): string | null {
   const rawPayload =
     row.raw_payload && typeof row.raw_payload === "object"
@@ -96,6 +181,10 @@ export function normalizeTransactionRow(
 
   const amount = toNumberOrNull(row.amount);
   if (amount === null) throw new Error("Invalid amount");
+  const normalizedComment = normalizeText(row.comment);
+  const sourceComment = extractSourceCommentFallback(row);
+  const cashbackAmount = extractCashbackAmountFallback(row);
+  const cashbackCurrency = extractCashbackCurrencyFallback(row, cashbackAmount, currency);
 
   return {
     ...row,
@@ -108,7 +197,10 @@ export function normalizeTransactionRow(
     external_id: normalizeText(row.external_id),
     merchant_name: normalizeText(row.merchant_name),
     mcc: normalizeText(row.mcc),
-    comment: normalizeText(row.comment),
+    comment: normalizedComment,
+    source_comment: sourceComment,
+    cashback_amount: cashbackAmount,
+    cashback_currency: cashbackCurrency,
     transfer_group_id: normalizeText(row.transfer_group_id),
     dedupe_hash: normalizeText(row.dedupe_hash),
     card_id: normalizeText(row.card_id),
@@ -135,6 +227,9 @@ export function buildTransactionInsertPayload(
     merchant_name: row.merchant_name ?? null,
     mcc: row.mcc ?? null,
     comment: row.comment ?? null,
+    source_comment: row.source_comment ?? null,
+    cashback_amount: row.cashback_amount ?? null,
+    cashback_currency: row.cashback_currency ?? null,
     is_transfer: row.is_transfer ?? false,
     transfer_group_id: row.transfer_group_id ?? null,
     raw_payload: row.raw_payload ?? null,

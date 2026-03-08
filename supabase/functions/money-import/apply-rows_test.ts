@@ -3,6 +3,7 @@ import { assertEquals } from "std/assert/assert-equals";
 import { assertJsonResponse } from "../_shared/testing/response.ts";
 import { applyRowsAction } from "./apply-rows.ts";
 import type { MoneyImportRepository } from "./repository.ts";
+import type { EdgeTelemetry } from "../_shared/observability.ts";
 import type { AuthContext, CanonicalTransactionRowInput } from "./types.ts";
 
 interface ApplyRowsRepoState {
@@ -10,6 +11,13 @@ interface ApplyRowsRepoState {
   sessionUpdates: Array<{ sessionId: string; patch: Record<string, unknown> }>;
   batchUpdates: Array<{ batchId: string; patch: Record<string, unknown> }>;
   reportRows: Record<string, unknown>[];
+  resolvedCardRows: Array<{ accountId: string; row: CanonicalTransactionRowInput }>;
+  resolvedAccountRows: Array<{
+    payerPersonId: string;
+    fallbackSource: string;
+    row: CanonicalTransactionRowInput;
+    defaultAccountId: string | null;
+  }>;
 }
 
 function createRepositoryMock(
@@ -23,6 +31,8 @@ function createRepositoryMock(
     sessionUpdates: [],
     batchUpdates: [],
     reportRows: [],
+    resolvedCardRows: [],
+    resolvedAccountRows: [],
   };
 
   let txCounter = 0;
@@ -56,10 +66,35 @@ function createRepositoryMock(
       if (options.updateBatchError) throw new Error(options.updateBatchError);
       state.batchUpdates.push({ batchId, patch });
     },
-    resolveAccountIdForRow: async (_payerPersonId, row) => {
-      if (row.external_id === "account-error") throw new Error("account lookup failed");
-      return row.account_id ?? "acc-1";
+    listReportRowsByBatch: async () => [],
+    deleteReportRowsByBatch: async () => {},
+    resolveAccountIdForRow: async (
+      payerPersonId: string,
+      row: CanonicalTransactionRowInput,
+      fallbackSource: string,
+      defaultAccountId?: string | null,
+    ) => {
+      state.resolvedAccountRows.push({
+        payerPersonId,
+        fallbackSource,
+        row,
+        defaultAccountId: defaultAccountId ?? null,
+      });
+      if (row.external_id === "account-error") {
+        throw new Error("No money account found for source tbank");
+      }
+      return row.account_id ?? defaultAccountId ?? "acc-1";
     },
+    resolveCardIdForRow: async (accountId, row) => {
+      state.resolvedCardRows.push({ accountId, row });
+      if (row.external_id === "card-error") {
+        throw new Error("card resolve failed");
+      }
+      if (row.external_id === "card-none") return null;
+      return "card-1";
+    },
+    findExistingTransactionId: async (row) => (row.external_id === "dup-tx" ? "tx-dup" : null),
+    findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async (row) => {
       if (row.external_id === "dup-tx") {
         return { transactionId: "tx-dup", inserted: false };
@@ -83,6 +118,50 @@ function createRepositoryMock(
   };
 
   return { repository, state };
+}
+
+function createTelemetryMock(): {
+  telemetry: EdgeTelemetry;
+  infoEvents: Array<{ message: string; attrs?: Record<string, unknown> }>;
+  warnEvents: Array<{ message: string; attrs?: Record<string, unknown> }>;
+  spans: Array<{ name: string; ended: number }>;
+} {
+  const infoEvents: Array<{ message: string; attrs?: Record<string, unknown> }> = [];
+  const warnEvents: Array<{ message: string; attrs?: Record<string, unknown> }> = [];
+  const spans: Array<{ name: string; ended: number }> = [];
+
+  const telemetry = {
+    context: {
+      component: "money-import",
+      traceId: "trace-1",
+      requestId: "request-1",
+      env: "local",
+      release: "dev-local",
+    },
+    debug: () => {},
+    info: (message: string, attrs?: Record<string, unknown>) => {
+      infoEvents.push({ message, attrs });
+    },
+    warn: (message: string, attrs?: Record<string, unknown>) => {
+      warnEvents.push({ message, attrs });
+    },
+    error: () => {},
+    startSpan: (name: string) => {
+      spans.push({ name, ended: 0 });
+      return {
+        traceId: "trace-1",
+        spanId: "span-1",
+        requestId: "request-1",
+        traceparent: "00-11111111111111111111111111111111-2222222222222222-01",
+        log: () => {},
+        end: async () => {
+          spans[spans.length - 1].ended += 1;
+        },
+      };
+    },
+  } as unknown as EdgeTelemetry;
+
+  return { telemetry, infoEvents, warnEvents, spans };
 }
 
 const userAuth: AuthContext = {
@@ -211,8 +290,60 @@ Deno.test(
     assertEquals(payload.row_results[2].status, "error");
     assertEquals(state.batchUpdates.length, 1);
     assertEquals(state.batchUpdates[0].patch.status, "completed");
+    assertEquals(state.resolvedCardRows.length > 0, true);
+    const firstTxRow = state.reportRows.find((row) => row.row_kind === "transaction");
+    assertEquals((firstTxRow?.payload as Record<string, unknown>).card_id, "card-1");
   },
 );
+
+Deno.test("applyRowsAction emits row error aggregation telemetry", async () => {
+  const { repository } = createRepositoryMock();
+  const { telemetry, infoEvents, warnEvents } = createTelemetryMock();
+
+  const payload = await assertJsonResponse<{
+    inserted: number;
+    skipped: number;
+    error_count: number;
+  }>(
+    await applyRowsAction(
+      {
+        payer_person_id: "person-1",
+        source: "tbank_web",
+        rows: [
+          txRow({ external_id: "account-error" }),
+          txRow({ external_id: "dup-tx" }),
+          txRow({ posted_at: "bad-date" }),
+        ],
+      },
+      userAuth,
+      { repository, telemetry },
+    ),
+    200,
+  );
+
+  assertEquals(payload.inserted, 0);
+  assertEquals(payload.skipped, 1);
+  assertEquals(payload.error_count, 2);
+
+  const completedEvent = infoEvents.find(
+    (event) => event.message === "money_import_apply_rows_completed",
+  );
+  assertEquals(completedEvent?.attrs?.error_no_account_count, 1);
+  assertEquals(completedEvent?.attrs?.error_duplicate_transaction_count, 1);
+  assertEquals(completedEvent?.attrs?.error_validation_count, 1);
+  assertEquals(completedEvent?.attrs?.error_other_count, 0);
+  assertEquals(
+    typeof completedEvent?.attrs?.top_error_message === "string" ||
+      completedEvent?.attrs?.top_error_message === null,
+    true,
+  );
+
+  const noAccountWarn = warnEvents.find(
+    (event) => event.message === "money_import_apply_rows_no_account_for_source",
+  );
+  assertEquals(noAccountWarn?.attrs?.source, "tbank");
+  assertEquals(noAccountWarn?.attrs?.row_index, 0);
+});
 
 Deno.test("applyRowsAction runs session flow and keeps batch status running", async () => {
   const { repository, state } = createRepositoryMock();
@@ -269,4 +400,24 @@ Deno.test("applyRowsAction returns 400 when batch update fails", async () => {
     400,
   );
   assertEquals(payload.error, "update failed");
+});
+
+Deno.test("applyRowsAction forwards default_account_id into account resolver", async () => {
+  const { repository, state } = createRepositoryMock();
+  await assertJsonResponse(
+    await applyRowsAction(
+      {
+        rows: [txRow({ external_id: "ok-default" })],
+        payer_person_id: "person-1",
+        source: "tbank_web",
+        default_account_id: "acc-default",
+      },
+      userAuth,
+      { repository },
+    ),
+    200,
+  );
+
+  assertEquals(state.resolvedAccountRows.length, 1);
+  assertEquals(state.resolvedAccountRows[0].defaultAccountId, "acc-default");
 });

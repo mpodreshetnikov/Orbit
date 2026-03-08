@@ -61,9 +61,12 @@ export function createContentBridge(deps: ContentBridgeDeps) {
   ): void {
     if (!message || typeof message !== "object") return;
     if (
-      !["MONEY_IMPORT_PROGRESS", "MONEY_IMPORT_DONE", "MONEY_IMPORT_ERROR"].includes(
-        message.type ?? "",
-      )
+      ![
+        "MONEY_IMPORT_PROGRESS",
+        "MONEY_IMPORT_DONE",
+        "MONEY_IMPORT_ERROR",
+        "MONEY_IMPORT_DEBUG_STATUS",
+      ].includes(message.type ?? "")
     ) {
       return;
     }

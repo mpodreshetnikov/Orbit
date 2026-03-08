@@ -51,9 +51,16 @@ function createRepositoryMock(
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
     },
+    listReportRowsByBatch: async () => [],
+    deleteReportRowsByBatch: async () => {},
     resolveAccountIdForRow: async () => {
       throw new Error("unused");
     },
+    resolveCardIdForRow: async () => {
+      throw new Error("unused");
+    },
+    findExistingTransactionId: async () => null,
+    findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async () => {
       throw new Error("unused");
     },
@@ -212,11 +219,15 @@ Deno.test("completeSessionAction validates ownership for user auth", async () =>
   assertEquals(payload.error, "Session not found");
 });
 
-Deno.test("completeSessionAction updates session and batch for user auth", async () => {
+Deno.test("completeSessionAction updates session and leaves pending batch untouched", async () => {
   const { repository, state } = createRepositoryMock({
     sessionForUser: {
       id: "session-1",
       batch_id: "batch-1",
+    },
+    batchById: {
+      id: "batch-1",
+      status: "pending",
     },
   });
 
@@ -236,12 +247,16 @@ Deno.test("completeSessionAction updates session and batch for user auth", async
 
   assertEquals(payload.status, "completed");
   assertEquals(state.sessionUpdates.length, 1);
-  assertEquals(state.batchUpdates.length, 1);
-  assertEquals(state.batchUpdates[0].patch.status, "completed");
+  assertEquals(state.batchUpdates.length, 0);
 });
 
 Deno.test("completeSessionAction supports session auth and failed status", async () => {
-  const { repository, state } = createRepositoryMock();
+  const { repository, state } = createRepositoryMock({
+    batchById: {
+      id: "batch-2",
+      status: "running",
+    },
+  });
   const auth: AuthContext = {
     mode: "session",
     token: "session-token",
@@ -283,7 +298,12 @@ Deno.test(
     );
     assertEquals(missingUserPayload.error, "session_id is required");
 
-    const { repository, state } = createRepositoryMock();
+    const { repository, state } = createRepositoryMock({
+      batchById: {
+        id: "batch-from-body",
+        status: "pending",
+      },
+    });
     const auth: AuthContext = {
       mode: "session",
       token: "session-token",
@@ -313,6 +333,6 @@ Deno.test(
     assertEquals(payload.batch_id, "batch-from-body");
     assertEquals(payload.status, "completed");
     assertEquals(state.sessionUpdates.length, 1);
-    assertEquals(state.batchUpdates.length, 1);
+    assertEquals(state.batchUpdates.length, 0);
   },
 );

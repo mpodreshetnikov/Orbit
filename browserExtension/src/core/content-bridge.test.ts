@@ -83,4 +83,55 @@ describe("content-bridge", () => {
       "*",
     );
   });
+
+  it("forwards debug status and ignores unknown runtime messages", () => {
+    const runtimeSendMessage = vi.fn();
+    const windowPostMessage = vi.fn();
+    const bridge = createContentBridge({
+      runtimeSendMessage,
+      windowPostMessage,
+    });
+
+    bridge.handleRuntimeMessage({
+      type: "MONEY_IMPORT_DEBUG_STATUS",
+      phase: "started",
+      debug_run_id: "dbg-1",
+    });
+    bridge.handleRuntimeMessage({
+      type: "MONEY_IMPORT_UNKNOWN_EVENT",
+    });
+
+    expect(windowPostMessage).toHaveBeenCalledTimes(1);
+    expect(windowPostMessage).toHaveBeenCalledWith(
+      {
+        source: "orbit-extension",
+        type: "MONEY_IMPORT_DEBUG_STATUS",
+        phase: "started",
+        debug_run_id: "dbg-1",
+      },
+      "*",
+    );
+  });
+
+  it("ignores window messages from foreign source", () => {
+    const runtimeSendMessage = vi.fn();
+    const windowPostMessage = vi.fn();
+    const bridge = createContentBridge({
+      runtimeSendMessage,
+      windowPostMessage,
+    });
+
+    bridge.handleWindowMessage(
+      new MessageEvent("message", {
+        source: window,
+        data: {
+          source: "foreign-webapp",
+          type: "MONEY_IMPORT_PING",
+        },
+      }),
+    );
+
+    expect(runtimeSendMessage).not.toHaveBeenCalled();
+    expect(windowPostMessage).not.toHaveBeenCalled();
+  });
 });

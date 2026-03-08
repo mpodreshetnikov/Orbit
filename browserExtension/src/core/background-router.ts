@@ -1,24 +1,143 @@
 import {
   runImportSession,
   tryCompleteSessionAsFailed,
+  type ImportRunnerDebugConfig,
   type ImportRunnerDeps,
 } from "./import-runner.js";
+import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
 
 export interface BackgroundMessage {
   type: string;
   session?: Record<string, unknown>;
   windowFrom?: string;
+  origin?: "source_page_overlay" | "popup" | "automation";
+  debug?: {
+    enabled?: boolean;
+    parse_only?: boolean;
+    tab_id?: number;
+    debug_run_id?: string;
+  };
 }
+
+type BackgroundImportRunnerDeps = ImportRunnerDeps & {
+  broadcastToSourceTab?: (tabId: number, message: Record<string, unknown>) => Promise<void>;
+};
 
 export interface BackgroundRouterDeps {
   sessionStore: SessionStore;
-  importRunnerDeps: ImportRunnerDeps;
+  importRunnerDeps: BackgroundImportRunnerDeps;
+  debugStore: ImportDebugStore;
+}
+
+export interface BackgroundRouterContext {
+  senderTabId?: number | null;
+}
+
+const activeImportRunsBySessionId = new Set<string>();
+
+function resolveFunctionTarget(functionUrl: unknown): {
+  function_url_present: boolean;
+  function_url_valid: boolean;
+  function_scheme: string | null;
+  function_host: string | null;
+  function_path: string | null;
+} {
+  if (typeof functionUrl !== "string" || !functionUrl.trim()) {
+    return {
+      function_url_present: false,
+      function_url_valid: false,
+      function_scheme: null,
+      function_host: null,
+      function_path: null,
+    };
+  }
+  try {
+    const parsed = new URL(functionUrl);
+    return {
+      function_url_present: true,
+      function_url_valid: true,
+      function_scheme: parsed.protocol.replace(":", ""),
+      function_host: parsed.host,
+      function_path: parsed.pathname,
+    };
+  } catch {
+    return {
+      function_url_present: true,
+      function_url_valid: false,
+      function_scheme: null,
+      function_host: null,
+      function_path: null,
+    };
+  }
+}
+
+function extractErrorDiagnostics(error: unknown): Record<string, unknown> | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as Record<string, unknown>;
+  const code = typeof candidate.code === "string" ? candidate.code : null;
+  const action = typeof candidate.action === "string" ? candidate.action : null;
+  const functionHost = typeof candidate.function_host === "string" ? candidate.function_host : null;
+  const functionPath = typeof candidate.function_path === "string" ? candidate.function_path : null;
+  const httpStatus =
+    typeof candidate.http_status === "number" && Number.isFinite(candidate.http_status)
+      ? candidate.http_status
+      : null;
+  const responseError =
+    typeof candidate.response_error === "string" ? candidate.response_error : null;
+  const transport = typeof candidate.transport === "string" ? candidate.transport : null;
+
+  if (!code && !action && !functionHost && !httpStatus && !responseError && !transport) {
+    return null;
+  }
+  return {
+    error_code: code,
+    edge_action: action,
+    edge_host: functionHost,
+    edge_path: functionPath,
+    edge_http_status: httpStatus,
+    edge_response_error: responseError,
+    edge_transport: transport,
+  };
+}
+
+function resolveSenderTabId(context: BackgroundRouterContext | undefined): number | null {
+  if (!context) return null;
+  return typeof context.senderTabId === "number" && Number.isFinite(context.senderTabId)
+    ? context.senderTabId
+    : null;
+}
+
+function resolveBatchId(
+  result: Record<string, unknown>,
+  session: Record<string, unknown>,
+): string | null {
+  const fromResult = typeof result.batch_id === "string" ? result.batch_id.trim() : "";
+  if (fromResult) return fromResult;
+  const fromSession = typeof session.batch_id === "string" ? session.batch_id.trim() : "";
+  return fromSession || null;
+}
+
+function resolveAppOrigin(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return null;
+  }
+}
+
+function buildReportUrl(appOrigin: string, batchId: string): string {
+  const reportUrl = new URL(`/money/import/reports/${batchId}`, appOrigin);
+  return reportUrl.toString();
 }
 
 export async function routeBackgroundMessage(
   message: BackgroundMessage,
   deps: BackgroundRouterDeps,
+  context?: BackgroundRouterContext,
 ): Promise<Record<string, unknown>> {
   if (message.type === "MONEY_IMPORT_PING") {
     return { ok: true };
@@ -39,14 +158,152 @@ export async function routeBackgroundMessage(
     if (!session) {
       throw new Error("No active import session");
     }
+    const activeSessionId =
+      typeof session.session_id === "string" ? session.session_id.trim() : "";
+    if (activeSessionId && activeImportRunsBySessionId.has(activeSessionId)) {
+      throw new Error(`Import already running for session ${activeSessionId}`);
+    }
+    if (activeSessionId) {
+      activeImportRunsBySessionId.add(activeSessionId);
+    }
+    const senderTabId = resolveSenderTabId(context);
+    const shouldBroadcastToSourceTab =
+      message.origin === "source_page_overlay" && senderTabId !== null;
+
+    const broadcastToRelevantTabs = async (payload: Record<string, unknown>) => {
+      await deps.importRunnerDeps.broadcastToAppTabs(payload);
+      if (!shouldBroadcastToSourceTab || !deps.importRunnerDeps.broadcastToSourceTab) {
+        return;
+      }
+      await deps.importRunnerDeps.broadcastToSourceTab(senderTabId, payload).catch(() => undefined);
+    };
+
+    const debugEnabled = Boolean(message.debug?.enabled);
+    const run = debugEnabled
+      ? deps.debugStore.startRun({
+          debug_run_id: message.debug?.debug_run_id,
+          session_id: (session.session_id as string) ?? null,
+          batch_id: (session.batch_id as string) ?? null,
+          source: (session.source as string) ?? null,
+          tab_id: message.debug?.tab_id ?? null,
+          window_from: message.windowFrom ?? (session.last_imported_at as string) ?? null,
+        })
+      : null;
+
+    const emitDebug = (event: string, attrs?: Record<string, unknown>) => {
+      if (!run) return;
+      deps.debugStore.append(run.debug_run_id, { event, attrs });
+    };
+
+    if (run) {
+      const functionTarget = resolveFunctionTarget(session.function_url);
+      emitDebug("session_loaded", {
+        has_session_id: Boolean(session.session_id),
+        has_batch_id: Boolean(session.batch_id),
+        has_session_token: Boolean(session.session_token),
+        has_user_access_token: Boolean(session.user_access_token),
+        has_payer_person_id: Boolean(session.payer_person_id),
+        ...functionTarget,
+      });
+      emitDebug("connector_resolved", {
+        source: (session.source as string) ?? null,
+      });
+      await broadcastToRelevantTabs({
+        type: "MONEY_IMPORT_DEBUG_STATUS",
+        phase: "started",
+        debug_run_id: run.debug_run_id,
+      });
+    }
 
     try {
-      const result = await runImportSession(session, message.windowFrom, deps.importRunnerDeps);
-      return { ok: true, result };
+      const runDeps: ImportRunnerDeps = {
+        ...deps.importRunnerDeps,
+        broadcastToAppTabs: broadcastToRelevantTabs,
+      };
+      const runnerDebug: ImportRunnerDebugConfig = {
+        enabled: debugEnabled,
+        parseOnly: Boolean(message.debug?.parse_only),
+        tabId: message.debug?.tab_id,
+        debugRunId: run?.debug_run_id,
+        emit: emitDebug,
+      };
+      const result = await runImportSession(session, message.windowFrom, runDeps, runnerDebug);
+      if (run) {
+        deps.debugStore.finish(run.debug_run_id, "ok");
+        await broadcastToRelevantTabs({
+          type: "MONEY_IMPORT_DEBUG_STATUS",
+          phase: "completed",
+          debug_run_id: run.debug_run_id,
+        });
+      }
+      const response: Record<string, unknown> = {
+        ok: true,
+        result,
+        debug_run_id: run?.debug_run_id ?? null,
+      };
+      if (message.origin === "source_page_overlay") {
+        const appOrigin = resolveAppOrigin(session.app_origin);
+        const batchId = resolveBatchId(result, session);
+        if (appOrigin && batchId) {
+          response.report_url = buildReportUrl(appOrigin, batchId);
+        }
+      }
+      return response;
     } catch (error) {
-      await tryCompleteSessionAsFailed(session, deps.importRunnerDeps.callEdge);
+      const messageText = error instanceof Error ? error.message : "Unknown import error";
+      const diagnostics = extractErrorDiagnostics(error);
+      if (!message.debug?.parse_only) {
+        await tryCompleteSessionAsFailed(session, deps.importRunnerDeps.callEdge);
+      }
+      if (run) {
+        emitDebug("run_failed", {
+          error_message: messageText,
+          ...(diagnostics ?? {}),
+        });
+        deps.debugStore.finish(run.debug_run_id, "error", messageText);
+        await broadcastToRelevantTabs({
+          type: "MONEY_IMPORT_DEBUG_STATUS",
+          phase: "failed",
+          debug_run_id: run.debug_run_id,
+          error: messageText,
+          diagnostics,
+        });
+      }
       throw error;
+    } finally {
+      if (activeSessionId) {
+        activeImportRunsBySessionId.delete(activeSessionId);
+      }
     }
+  }
+
+  if (message.type === "MONEY_IMPORT_DEBUG_GET_LAST_RUN") {
+    return {
+      ok: true,
+      run: deps.debugStore.getLastRunSummary(),
+    };
+  }
+
+  if (message.type === "MONEY_IMPORT_DEBUG_CLEAR_RUNS") {
+    deps.debugStore.clearRuns();
+    return { ok: true };
+  }
+
+  if (
+    message.type === "MONEY_IMPORT_DEBUG_EXPORT_LAST_RUN" ||
+    message.type === "MONEY_IMPORT_DEBUG_EXPORT_RUN"
+  ) {
+    const run = deps.debugStore.getLastRunSummary();
+    if (!run) {
+      return { ok: false, error: "No debug run available for export." };
+    }
+    return {
+      ok: true,
+      bundle: {
+        exported_at: new Date().toISOString(),
+        run,
+      },
+    };
   }
 
   return { ok: false, error: "Unsupported message type" };

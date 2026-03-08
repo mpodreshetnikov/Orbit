@@ -1114,6 +1114,8 @@ export type Database = {
           account_id: string
           amount: number
           card_id: string | null
+          cashback_amount: number | null
+          cashback_currency: string | null
           comment: string | null
           created_at: string
           currency: string
@@ -1127,6 +1129,7 @@ export type Database = {
           posted_at: string
           raw_payload: Json | null
           source: string
+          source_comment: string | null
           status: Database["public"]["Enums"]["money_transaction_status"]
           transaction_type: Database["public"]["Enums"]["money_transaction_type"]
           transfer_group_id: string | null
@@ -1136,6 +1139,8 @@ export type Database = {
           account_id: string
           amount: number
           card_id?: string | null
+          cashback_amount?: number | null
+          cashback_currency?: string | null
           comment?: string | null
           created_at?: string
           currency: string
@@ -1149,6 +1154,7 @@ export type Database = {
           posted_at: string
           raw_payload?: Json | null
           source?: string
+          source_comment?: string | null
           status?: Database["public"]["Enums"]["money_transaction_status"]
           transaction_type: Database["public"]["Enums"]["money_transaction_type"]
           transfer_group_id?: string | null
@@ -1158,6 +1164,8 @@ export type Database = {
           account_id?: string
           amount?: number
           card_id?: string | null
+          cashback_amount?: number | null
+          cashback_currency?: string | null
           comment?: string | null
           created_at?: string
           currency?: string
@@ -1171,6 +1179,7 @@ export type Database = {
           posted_at?: string
           raw_payload?: Json | null
           source?: string
+          source_comment?: string | null
           status?: Database["public"]["Enums"]["money_transaction_status"]
           transaction_type?: Database["public"]["Enums"]["money_transaction_type"]
           transfer_group_id?: string | null
@@ -1931,6 +1940,14 @@ export type Database = {
       mark_dose_taken: {
         Args: { p_dose_event_id: string; p_note?: string; p_taken_at?: string }
         Returns: undefined
+      }
+      money_reassign_card_account: {
+        Args: { p_card_id: string; p_target_account_id: string }
+        Returns: {
+          merged: boolean
+          moved_transactions_count: number
+          resulting_card_id: string
+        }[]
       }
       money_upsert_transactions_batch: {
         Args: { p_batch_id: string; p_payer_person_id: string; p_rows: Json }

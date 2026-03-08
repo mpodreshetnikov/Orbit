@@ -4,6 +4,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import type { MoneyAccount, CreateMoneyAccountInput, UpdateMoneyAccountInput } from "@/types";
 
+function mapMoneyAccountsError(message: string): Error {
+  if (message.includes("violates row-level security policy")) {
+    return new Error(
+      "Access denied by money account policy. Your user is not linked to allowed_users. Re-login and verify allowed_users has your email/auth_user_id.",
+    );
+  }
+  return new Error(message);
+}
+
 async function fetchMoneyAccounts(ownerPersonId: string): Promise<MoneyAccount[]> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -13,7 +22,7 @@ async function fetchMoneyAccounts(ownerPersonId: string): Promise<MoneyAccount[]
     .order("is_active", { ascending: false })
     .order("account_label", { ascending: true });
 
-  if (error) throw new Error(error.message);
+  if (error) throw mapMoneyAccountsError(error.message);
   return (data || []) as MoneyAccount[];
 }
 
@@ -38,7 +47,7 @@ async function createMoneyAccount(input: CreateMoneyAccountInput): Promise<Money
   };
   const { data, error } = await supabase.from("money_accounts").insert(payload).select().single();
 
-  if (error) throw new Error(error.message);
+  if (error) throw mapMoneyAccountsError(error.message);
   return data as MoneyAccount;
 }
 
@@ -69,7 +78,7 @@ async function updateMoneyAccount({
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) throw mapMoneyAccountsError(error.message);
   return data as MoneyAccount;
 }
 
@@ -89,7 +98,7 @@ async function deleteMoneyAccount({ id }: { id: string; ownerPersonId: string })
   const supabase = createClient();
   const { error } = await supabase.from("money_accounts").delete().eq("id", id);
 
-  if (error) throw new Error(error.message);
+  if (error) throw mapMoneyAccountsError(error.message);
 }
 
 export function useDeleteMoneyAccount() {

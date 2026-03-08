@@ -223,10 +223,22 @@ export async function completeSessionAction(
   });
 
   if (batchId) {
-    await deps.repository.updateImportBatch(batchId, {
-      status: batchStatus,
-      completed_at: nowIso,
-    });
+    const batch = await deps.repository.getImportBatch(batchId);
+    if (batch) {
+      const currentBatchStatus = normalizeText(batch.status);
+      const batchPatch: Record<string, unknown> = {};
+
+      if (batchStatus === "failed") {
+        batchPatch.status = "failed";
+        batchPatch.completed_at = nowIso;
+      } else if (currentBatchStatus === "completed") {
+        batchPatch.completed_at = nowIso;
+      }
+
+      if (Object.keys(batchPatch).length > 0) {
+        await deps.repository.updateImportBatch(batchId, batchPatch);
+      }
+    }
   }
   await span?.end({
     status: "ok",

@@ -2,8 +2,11 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { createEdgeRequestContext, createEdgeTelemetry } from "../_shared/observability.ts";
 import { resolveAuth } from "./auth.ts";
 import { applyRowsAction } from "./apply-rows.ts";
+import { applyBatchAction } from "./apply-batch.ts";
 import { createDefaultMoneyImportDeps, type MoneyImportDeps } from "./deps.ts";
+import { discardBatchAction } from "./discard-batch.ts";
 import { jsonResponse, normalizeText } from "./normalize.ts";
+import { previewRowsAction } from "./preview-rows.ts";
 import {
   completeSessionAction,
   createSessionAction,
@@ -122,6 +125,66 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           { allowUser: true, allowSession: true },
         );
         const response = await applyRowsAction(body, auth, { ...deps, telemetry });
+        await actionSpan.end({ status: "ok" });
+        await requestSpan.end({
+          status: response.status >= 400 ? "error" : "ok",
+          attrs: { action, status_code: response.status },
+        });
+        return response;
+      }
+
+      if (action === "preview_rows") {
+        const actionSpan = telemetry.startSpan("edge.money_import.action.preview_rows");
+        const auth = await resolveAuth(
+          req,
+          {
+            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+            getSessionByToken: deps.repository.getSessionByToken,
+            now: () => (deps.now ?? (() => new Date()))().getTime(),
+          },
+          { allowUser: true, allowSession: true },
+        );
+        const response = await previewRowsAction(body, auth, { ...deps, telemetry });
+        await actionSpan.end({ status: "ok" });
+        await requestSpan.end({
+          status: response.status >= 400 ? "error" : "ok",
+          attrs: { action, status_code: response.status },
+        });
+        return response;
+      }
+
+      if (action === "apply_batch") {
+        const actionSpan = telemetry.startSpan("edge.money_import.action.apply_batch");
+        const auth = (await resolveAuth(
+          req,
+          {
+            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+            getSessionByToken: deps.repository.getSessionByToken,
+            now: () => (deps.now ?? (() => new Date()))().getTime(),
+          },
+          { allowUser: true, allowSession: false },
+        )) as UserAuthContext;
+        const response = await applyBatchAction(body, auth, { ...deps, telemetry });
+        await actionSpan.end({ status: "ok" });
+        await requestSpan.end({
+          status: response.status >= 400 ? "error" : "ok",
+          attrs: { action, status_code: response.status },
+        });
+        return response;
+      }
+
+      if (action === "discard_batch") {
+        const actionSpan = telemetry.startSpan("edge.money_import.action.discard_batch");
+        const auth = (await resolveAuth(
+          req,
+          {
+            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+            getSessionByToken: deps.repository.getSessionByToken,
+            now: () => (deps.now ?? (() => new Date()))().getTime(),
+          },
+          { allowUser: true, allowSession: false },
+        )) as UserAuthContext;
+        const response = await discardBatchAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",

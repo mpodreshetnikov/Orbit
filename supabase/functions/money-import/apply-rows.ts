@@ -20,13 +20,40 @@ interface ApplyRowsDeps {
   telemetry?: EdgeTelemetry;
 }
 
+type RowErrorSignature =
+  | "no_account_for_source"
+  | "duplicate_transaction"
+  | "validation_error"
+  | "other";
+
+function normalizeErrorMessageForTelemetry(message: string): string {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 160) return normalized;
+  return `${normalized.slice(0, 157)}...`;
+}
+
+function classifyRowErrorSignature(message: string): RowErrorSignature {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("no money account found for source")) return "no_account_for_source";
+  if (normalized.includes("duplicate transaction")) return "duplicate_transaction";
+  if (normalized.includes("invalid posted_at") || normalized.includes("invalid amount")) {
+    return "validation_error";
+  }
+  return "other";
+}
+
 function accountCacheKeyForRow(row: CanonicalTransactionRowInput, fallbackSource: string): string {
   const explicitAccountId = normalizeText(row.account_id);
   if (explicitAccountId) return `explicit:${explicitAccountId}`;
 
   const accountHint = extractAccountHintFromRow(row);
   const rowSource = normalizeSourceForTransactions(normalizeText(row.source) ?? fallbackSource);
-  return `${rowSource}|${accountHint ?? "none"}`;
+  if (accountHint) return `${rowSource}|hint:${accountHint}`;
+
+  const externalId = normalizeText(row.external_id);
+  if (externalId) return `${rowSource}|external:${externalId}`;
+
+  return `${rowSource}|posted:${row.posted_at}|amount:${toNumberOrNull(row.amount) ?? "none"}`;
 }
 
 export async function applyRowsAction(
@@ -49,6 +76,7 @@ export async function applyRowsAction(
 
   let source = normalizeText(body.source) ?? "manual";
   let payerPersonId = normalizeText(body.payer_person_id);
+  let defaultAccountId = normalizeText(body.default_account_id);
   let importType = normalizeText(body.import_type) ?? "file";
   let batchId = normalizeText(body.batch_id);
   let sessionId = normalizeText(body.session_id);
@@ -66,6 +94,7 @@ export async function applyRowsAction(
     const sessionStatus = normalizeText(session.status) ?? "";
     source = normalizeText(session.source) ?? source;
     payerPersonId = normalizeText(session.payer_person_id) ?? payerPersonId;
+    defaultAccountId = normalizeText(session.default_account_id) ?? defaultAccountId;
     batchId = normalizeText(session.batch_id) ?? batchId;
     sessionId = normalizeText(session.id) ?? sessionId;
     importType = "web_export";
@@ -123,8 +152,37 @@ export async function applyRowsAction(
   let insertedCount = 0;
   let skippedCount = 0;
   let errorCount = 0;
+  const rowErrorSignatureCounts: Record<RowErrorSignature, number> = {
+    no_account_for_source: 0,
+    duplicate_transaction: 0,
+    validation_error: 0,
+    other: 0,
+  };
+  const errorMessageCounts = new Map<string, number>();
+  let firstNoAccountWarningSent = false;
   const rowResults: Array<Record<string, unknown>> = [];
   const accountResolutionCache = new Map<string, string>();
+
+  const registerFailureSignature = (
+    message: string,
+    rowIndex: number,
+    row: CanonicalTransactionRowInput | null,
+  ) => {
+    const signature = classifyRowErrorSignature(message);
+    rowErrorSignatureCounts[signature] += 1;
+    const normalizedMessage = normalizeErrorMessageForTelemetry(message);
+    errorMessageCounts.set(normalizedMessage, (errorMessageCounts.get(normalizedMessage) ?? 0) + 1);
+
+    if (!firstNoAccountWarningSent && signature === "no_account_for_source") {
+      firstNoAccountWarningSent = true;
+      deps.telemetry?.warn("money_import_apply_rows_no_account_for_source", {
+        row_index: rowIndex,
+        source: normalizeSourceForTransactions(
+          normalizeText(row?.source) ?? transactionSourceFallback,
+        ),
+      });
+    }
+  };
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
     const raw = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
@@ -142,20 +200,32 @@ export async function applyRowsAction(
           payerPersonId,
           raw,
           transactionSourceFallback,
+          defaultAccountId,
         );
         accountResolutionCache.set(accountCacheKey, resolvedAccountId);
       }
 
-      const normalized = normalizeTransactionRow(
+      const normalizedBase = normalizeTransactionRow(
         { ...raw, account_id: resolvedAccountId },
         transactionSourceFallback,
       );
+      const resolvedCardId = await deps.repository.resolveCardIdForRow(
+        resolvedAccountId,
+        normalizedBase,
+      );
+      const normalized: CanonicalTransactionRowInput = {
+        ...normalizedBase,
+        card_id: resolvedCardId,
+      };
       const tx = await deps.repository.insertOrResolveTransaction(normalized, payerPersonId);
 
       const txStatus: RowStatus = tx.inserted ? "inserted" : "skipped";
       const txMessage = tx.inserted ? null : "Duplicate transaction";
       if (txStatus === "inserted") insertedCount += 1;
-      if (txStatus === "skipped") skippedCount += 1;
+      if (txStatus === "skipped") {
+        skippedCount += 1;
+        registerFailureSignature("Duplicate transaction", rowIndex, raw);
+      }
 
       const txReportRowId = await deps.repository.insertReportRow({
         batch_id: batchId,
@@ -210,6 +280,7 @@ export async function applyRowsAction(
           const lineMessage =
             lineError instanceof Error ? lineError.message : "Line item import failed";
           errorCount += 1;
+          registerFailureSignature(lineMessage, rowIndex, raw);
 
           await deps.repository.insertReportRow({
             batch_id: batchId,
@@ -251,6 +322,7 @@ export async function applyRowsAction(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Import row failed";
       errorCount += 1;
+      registerFailureSignature(message, rowIndex, raw);
 
       await deps.repository.insertReportRow({
         batch_id: batchId,
@@ -280,6 +352,9 @@ export async function applyRowsAction(
       });
     }
   }
+
+  const topErrorMessage =
+    Array.from(errorMessageCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
   const parsedCountInput = toNumberOrNull(body.parsed_transactions_count);
   const parsedThroughInput = toIsoOrNull(body.parsed_through_at);
@@ -350,18 +425,29 @@ export async function applyRowsAction(
   }
   deps.telemetry?.info("money_import_apply_rows_completed", {
     batch_id: batchId,
+    row_count: rowsRaw.length,
     inserted: insertedCount,
     skipped: skippedCount,
     error_count: errorCount,
+    error_no_account_count: rowErrorSignatureCounts.no_account_for_source,
+    error_duplicate_transaction_count: rowErrorSignatureCounts.duplicate_transaction,
+    error_validation_count: rowErrorSignatureCounts.validation_error,
+    error_other_count: rowErrorSignatureCounts.other,
+    top_error_message: topErrorMessage,
   });
   await actionSpan?.end({
     status: "ok",
     attrs: {
       batch_id: batchId,
+      row_count: rowsRaw.length,
       inserted: insertedCount,
       skipped: skippedCount,
       error_count: errorCount,
-      row_count: rowsRaw.length,
+      error_no_account_count: rowErrorSignatureCounts.no_account_for_source,
+      error_duplicate_transaction_count: rowErrorSignatureCounts.duplicate_transaction,
+      error_validation_count: rowErrorSignatureCounts.validation_error,
+      error_other_count: rowErrorSignatureCounts.other,
+      top_error_message: topErrorMessage,
     },
   });
 

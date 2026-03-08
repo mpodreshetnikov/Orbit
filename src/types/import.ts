@@ -5,6 +5,7 @@
 import type { MoneyTransactionType, MoneyTransactionStatus } from "./money";
 
 export type ImportConnectorKind = "file" | "extension";
+export type MoneyImportBatchStatus = "pending" | "running" | "completed" | "failed" | "discarded";
 
 /** Line item shape produced by connectors and sent in batch payload */
 export interface ImportLineItem {
@@ -33,6 +34,9 @@ export interface CanonicalTransactionRow {
   merchant_name?: string | null;
   mcc?: string | null;
   comment?: string | null;
+  source_comment?: string | null;
+  cashback_amount?: number | null;
+  cashback_currency?: string | null;
   is_transfer: boolean;
   transfer_group_id?: string | null;
   raw_payload?: Record<string, unknown> | null;
@@ -68,7 +72,7 @@ export interface MoneyExtensionImportConnector extends MoneyImportConnectorBase 
 
 export type MoneyImportConnector = MoneyFileImportConnector | MoneyExtensionImportConnector;
 
-/** Row shape sent to money-import Edge Function apply_rows action. */
+/** Row shape sent to money-import Edge Function preview/apply actions. */
 export interface BatchTransactionRow {
   account_id: string;
   card_id?: string | null;
@@ -82,6 +86,9 @@ export interface BatchTransactionRow {
   merchant_name?: string | null;
   mcc?: string | null;
   comment?: string | null;
+  source_comment?: string | null;
+  cashback_amount?: number | null;
+  cashback_currency?: string | null;
   is_transfer: boolean;
   transfer_group_id?: string | null;
   raw_payload?: Record<string, unknown> | null;
@@ -89,10 +96,10 @@ export interface BatchTransactionRow {
   line_items: ImportLineItem[];
 }
 
-export interface ImportApplyRowsRequest {
-  action: "apply_rows";
+interface MoneyImportRowsRequestBase {
   source: string;
   payer_person_id: string;
+  default_account_id?: string | null;
   import_type: "file" | "web_export";
   batch_id?: string;
   session_id?: string;
@@ -103,6 +110,24 @@ export interface ImportApplyRowsRequest {
   window_to?: string | null;
   meta?: Record<string, unknown> | null;
   rows: BatchTransactionRow[];
+}
+
+export interface ImportApplyRowsRequest extends MoneyImportRowsRequestBase {
+  action: "apply_rows";
+}
+
+export interface MoneyImportPreviewRowsRequest extends MoneyImportRowsRequestBase {
+  action: "preview_rows";
+}
+
+export interface MoneyImportApplyBatchRequest {
+  action: "apply_batch";
+  batch_id: string;
+}
+
+export interface MoneyImportDiscardBatchRequest {
+  action: "discard_batch";
+  batch_id: string;
 }
 
 /** Per-row result from Edge apply_rows action */
@@ -126,6 +151,18 @@ export interface MoneyImportApplyResult {
   skipped: number;
   error_count: number;
   row_results: MoneyImportRowResult[];
+}
+
+/** Result from Edge preview_rows action. Pending means preview-ready awaiting review. */
+export type MoneyImportPreviewResult = MoneyImportApplyResult;
+
+/** Result from Edge apply_batch action. */
+export type MoneyImportApplyBatchResult = MoneyImportApplyResult;
+
+/** Result from Edge discard_batch action. */
+export interface MoneyImportDiscardBatchResult {
+  batch_id: string;
+  status: "discarded";
 }
 
 export interface MoneyImportSessionCreateResult {
@@ -153,7 +190,7 @@ export interface MoneyImportSessionStatus {
   };
   batch: {
     id: string;
-    status: string;
+    status: MoneyImportBatchStatus;
     parsed_transactions_count: number;
     parsed_through_at: string | null;
     inserted_count: number;
@@ -171,7 +208,7 @@ export interface MoneyImportBatch {
   source: string;
   payer_person_id: string;
   import_type: string;
-  status: string;
+  status: MoneyImportBatchStatus;
   file_path: string | null;
   session_id: string | null;
   window_from: string | null;
