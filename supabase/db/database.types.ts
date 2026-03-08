@@ -679,6 +679,41 @@ export type Database = {
           },
         ]
       }
+      medication_refill_snoozes: {
+        Row: {
+          created_at: string
+          id: string
+          recipient_user_id: string
+          regimen_id: string
+          snooze_until: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          recipient_user_id: string
+          regimen_id: string
+          snooze_until: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          recipient_user_id?: string
+          regimen_id?: string
+          snooze_until?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "medication_refill_snoozes_regimen_id_fkey"
+            columns: ["regimen_id"]
+            isOneToOne: false
+            referencedRelation: "med_regimens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       money_accounts: {
         Row: {
           account_kind: string
@@ -1813,6 +1848,10 @@ export type Database = {
           window_start: string
         }[]
       }
+      get_medication_refill_snooze: {
+        Args: { p_regimen_id: string }
+        Returns: string
+      }
       get_money_merchant_default_categories: {
         Args: { p_payer_person_id: string }
         Returns: {
@@ -1990,6 +2029,10 @@ export type Database = {
           title: string
           updated_at: string
         }[]
+      }
+      set_medication_refill_snooze: {
+        Args: { p_regimen_id: string; p_snooze_until: string }
+        Returns: string
       }
       snooze_dose: {
         Args: {

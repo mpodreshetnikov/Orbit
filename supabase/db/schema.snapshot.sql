@@ -1,12 +1,14 @@
 --
 -- PostgreSQL database dump
---
+--
+
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.1
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -295,6 +297,20 @@ CREATE TABLE "public"."medical_records" (
 );
 
 ALTER TABLE ONLY "public"."medical_records" REPLICA IDENTITY FULL;
+
+
+--
+-- Name: medication_refill_snoozes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."medication_refill_snoozes" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "recipient_user_id" "uuid" NOT NULL,
+    "regimen_id" "uuid" NOT NULL,
+    "snooze_until" "date" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
 
 
 --
@@ -671,13 +687,15 @@ ALTER TABLE ONLY "public"."db_deploy_log" ALTER COLUMN "id" SET DEFAULT "nextval
 
 --
 -- PostgreSQL database dump
---
+--
+
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.1
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -845,6 +863,22 @@ ALTER TABLE ONLY "public"."med_regimens"
 
 ALTER TABLE ONLY "public"."medical_records"
     ADD CONSTRAINT "medical_records_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: medication_refill_snoozes medication_refill_snoozes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."medication_refill_snoozes"
+    ADD CONSTRAINT "medication_refill_snoozes_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: medication_refill_snoozes medication_refill_snoozes_recipient_user_id_regimen_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."medication_refill_snoozes"
+    ADD CONSTRAINT "medication_refill_snoozes_recipient_user_id_regimen_id_key" UNIQUE ("recipient_user_id", "regimen_id");
 
 
 --
@@ -1375,6 +1409,20 @@ CREATE INDEX "idx_medical_records_status" ON "public"."medical_records" USING "b
 
 
 --
+-- Name: idx_medication_refill_snoozes_recipient; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_medication_refill_snoozes_recipient" ON "public"."medication_refill_snoozes" USING "btree" ("recipient_user_id");
+
+
+--
+-- Name: idx_medication_refill_snoozes_regimen; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_medication_refill_snoozes_regimen" ON "public"."medication_refill_snoozes" USING "btree" ("regimen_id");
+
+
+--
 -- Name: idx_money_accounts_is_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1747,55 +1795,83 @@ CREATE INDEX "idx_record_observations_record_id" ON "public"."record_observation
 
 --
 -- Name: checkup_completions checkup_completion_after_delete_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_insert_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items checkup_item_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items checkup_item_set_next_due_insert; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: body_site_catalog update_body_site_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items update_checkup_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: conditions update_conditions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: finding_type_catalog update_finding_type_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: measurement_catalog update_measurement_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: measurements update_measurements_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: med_dose_events update_med_dose_events_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: med_regimens update_med_regimens_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: medical_records update_medical_records_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: medication_refill_snoozes update_medication_refill_snoozes_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: money_accounts update_money_accounts_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_cards update_money_cards_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_categories update_money_categories_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_line_items update_money_line_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transactions update_money_transactions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: notification_routing update_notification_routing_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: observation_catalog update_observation_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: persons update_persons_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: record_findings update_record_findings_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: record_observations update_record_observations_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: user_preferences update_user_preferences_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: allowed_users allowed_users_auth_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1937,6 +2013,22 @@ ALTER TABLE ONLY "public"."medical_records"
 
 ALTER TABLE ONLY "public"."medical_records"
     ADD CONSTRAINT "medical_records_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: medication_refill_snoozes medication_refill_snoozes_recipient_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."medication_refill_snoozes"
+    ADD CONSTRAINT "medication_refill_snoozes_recipient_user_id_fkey" FOREIGN KEY ("recipient_user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: medication_refill_snoozes medication_refill_snoozes_regimen_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."medication_refill_snoozes"
+    ADD CONSTRAINT "medication_refill_snoozes_regimen_id_fkey" FOREIGN KEY ("regimen_id") REFERENCES "public"."med_regimens"("id") ON DELETE CASCADE;
 
 
 --
