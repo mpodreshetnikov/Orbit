@@ -92,18 +92,16 @@ async function uploadMultipleAttachments({
   personId,
   files,
 }: UploadMultipleInput): Promise<RecordAttachment[]> {
-  const results: RecordAttachment[] = [];
-
-  for (let i = 0; i < files.length; i++) {
-    const attachment = await uploadAttachment({
-      recordId,
-      personId,
-      file: files[i],
-      sortOrder: i,
-    });
-    results.push(attachment);
-  }
-
+  const results = await Promise.all(
+    files.map((file, i) =>
+      uploadAttachment({
+        recordId,
+        personId,
+        file,
+        sortOrder: i,
+      }),
+    ),
+  );
   return results;
 }
 

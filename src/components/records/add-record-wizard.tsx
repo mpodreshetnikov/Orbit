@@ -161,26 +161,35 @@ export function AddRecordWizard({ personId, personName }: AddRecordWizardProps) 
         return;
       }
 
-      for (const item of items) {
-        updateUploadQueueItem(item.id, { status: "uploading", error: undefined });
-        try {
-          const attachment = await uploadAttachmentMutation.mutateAsync({
+      // Mark all as uploading, then upload in parallel
+      items.forEach((item) =>
+        updateUploadQueueItem(item.id, { status: "uploading", error: undefined }),
+      );
+      const settled = await Promise.allSettled(
+        items.map((item) =>
+          uploadAttachmentMutation.mutateAsync({
             recordId,
             personId,
             file: item.file,
             sortOrder: item.sortOrder,
-          });
+          }),
+        ),
+      );
+      settled.forEach((result, index) => {
+        const item = items[index];
+        if (result.status === "fulfilled") {
           updateUploadQueueItem(item.id, {
             status: "uploaded",
-            attachment,
+            attachment: result.value,
             error: undefined,
           });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Upload failed";
+        } else {
+          const errorMessage =
+            result.reason instanceof Error ? result.reason.message : "Upload failed";
           updateUploadQueueItem(item.id, { status: "failed", error: errorMessage });
           setStartError(errorMessage);
         }
-      }
+      });
 
       setIsUploadingFiles(false);
     },
