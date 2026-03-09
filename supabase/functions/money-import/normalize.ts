@@ -1,5 +1,11 @@
 import { corsHeaders } from "../_shared/cors.ts";
-import type { CanonicalTransactionRowInput, ImportLineItemInput } from "./types.ts";
+import type {
+  CanonicalTransactionRowInput,
+  ImportLineItemInput,
+  ReceiptEnrichmentStatus,
+  SourceBrandInput,
+  SourceCategoryInput,
+} from "./types.ts";
 
 export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -77,9 +83,183 @@ function normalizeCurrencyCode(value: unknown): string | null {
   return matched ? matched[0] : null;
 }
 
+function normalizeUrl(value: unknown): string | null {
+  const text = normalizeText(value);
+  if (!text) return null;
+  try {
+    const parsed = new URL(text);
+    return /^https?:$/i.test(parsed.protocol) ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeColor(value: unknown): string | null {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const compact = text.replace(/^#/, "");
+  return /^[0-9a-fA-F]{3,8}$/.test(compact) ? compact : null;
+}
+
+function isBankNativeBrandLabel(value: unknown): boolean {
+  const text = normalizeText(value)?.toLowerCase();
+  if (!text) return false;
+
+  return /внутрибанковский перевод|внутрибанк(?:овский)? перевод|перевод 3-м лицам|перевод третьим лицам|между своими счетами|пополнение по номеру телефона|закрытие вклада|пополнение вклада|проценты на остаток|кэшбэк за обычные покупки|cashback payout|balance interest/.test(
+    text,
+  );
+}
+
+function normalizeReceiptEnrichmentStatus(value: unknown): ReceiptEnrichmentStatus | null {
+  const text = normalizeText(value);
+  if (
+    text === "ok" ||
+    text === "rate_limited" ||
+    text === "skipped_after_budget" ||
+    text === "not_requested" ||
+    text === "error"
+  ) {
+    return text;
+  }
+  return null;
+}
+
 function extractRawOperation(row: CanonicalTransactionRowInput): Record<string, unknown> | null {
   const rawPayload = toObject(row.raw_payload);
   return toObject(rawPayload?.operation);
+}
+
+function extractMaskedCardLast4(value: unknown): string | null {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const digits = text.replace(/\D/g, "");
+  if (digits.length < 4) return null;
+
+  if (/[\*\u2022xX]/.test(text)) return digits.slice(-4);
+  if (digits.length === 4) return digits;
+  if (digits.length >= 12 && digits.length <= 19) return digits.slice(-4);
+  return null;
+}
+
+function normalizeOperationText(value: unknown): string | null {
+  const text = normalizeText(value);
+  return text ? text.toLowerCase() : null;
+}
+
+function collectOperationHintCandidates(operation: Record<string, unknown> | null): string[] {
+  if (!operation) return [];
+  return Array.from(
+    new Set(
+      [
+        extractMaskedCardLast4(operation.cardNumber),
+        extractMaskedCardLast4(toObject(operation.payment)?.cardNumber),
+        extractMaskedCardLast4(toObject(operation.card)?.panMasked),
+        extractMaskedCardLast4(toObject(operation.card)?.number),
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
+}
+
+function isAccountNativeOperation(row: CanonicalTransactionRowInput): boolean {
+  if (row.is_transfer) return true;
+
+  const operation = extractRawOperation(row);
+  if (!operation) return false;
+
+  const markers = [
+    normalizeOperationText(row.merchant_name),
+    normalizeOperationText(operation.description),
+    normalizeOperationText(operation.merchantKey),
+    normalizeOperationText(operation.subcategory),
+    normalizeOperationText(operation.group),
+    normalizeOperationText(toObject(operation.subgroup)?.name),
+    normalizeOperationText(toObject(operation.spendingCategory)?.name),
+    normalizeOperationText(toObject(toObject(operation.categoryInfo)?.bankCategory)?.name),
+    normalizeOperationText(toObject(toObject(operation.categoryInfo)?.metacategory)?.name),
+    normalizeOperationText(toObject(operation.category)?.name),
+    normalizeOperationText(toObject(operation.payment)?.providerId),
+    normalizeOperationText(toObject(operation.payment)?.providerGroupId),
+    normalizeOperationText(toObject(operation.payment)?.paymentType),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+
+  if (
+    /between own accounts|between my accounts|card to card|p2p|transfer-inner|внутрибанковский перевод|между своими счетами|пополнение по номеру телефона|перевод|переводы/.test(
+      markers,
+    )
+  ) {
+    return true;
+  }
+
+  return /interest|balance interest|deposit|bonus|correction|cashback payout|проценты|вклад|бонус|коррекц|пополнение вклада|закрытие вклада/.test(
+    markers,
+  );
+}
+
+function normalizeSourceCategory(
+  value: SourceCategoryInput | Record<string, unknown> | null | undefined,
+): SourceCategoryInput | null {
+  const category = toObject(value);
+  if (!category) return null;
+  const id = normalizeText(category.id);
+  const name = normalizeText(category.name);
+  if (!id && !name) return null;
+  return { id, name };
+}
+
+function normalizeSourceBrand(
+  value: SourceBrandInput | Record<string, unknown> | null | undefined,
+): SourceBrandInput | null {
+  const brand = toObject(value);
+  if (!brand) return null;
+  const name = normalizeText(brand.name);
+  if (!name) return null;
+  const sourceKey = normalizeText(brand.source_key);
+  if (isBankNativeBrandLabel(name) || isBankNativeBrandLabel(sourceKey)) return null;
+  return {
+    source_key: sourceKey,
+    name,
+    website_url: normalizeUrl(brand.website_url),
+    logo_url: normalizeUrl(brand.logo_url),
+    base_color: normalizeColor(brand.base_color),
+    base_text_color: normalizeColor(brand.base_text_color),
+  };
+}
+
+function extractSourceCategoryFallback(
+  row: CanonicalTransactionRowInput,
+): SourceCategoryInput | null {
+  const explicit = normalizeSourceCategory(row.source_category);
+  if (explicit) return explicit;
+  const bankCategory = toObject(toObject(extractRawOperation(row)?.categoryInfo)?.bankCategory);
+  return normalizeSourceCategory(bankCategory);
+}
+
+function extractSourceBrandFallback(row: CanonicalTransactionRowInput): SourceBrandInput | null {
+  const explicit = normalizeSourceBrand(row.source_brand);
+  if (explicit) return explicit;
+
+  const operation = extractRawOperation(row);
+  const brand = toObject(operation?.brand);
+  if (brand) {
+    return normalizeSourceBrand({
+      source_key:
+        normalizeText(brand.id) ??
+        normalizeText(operation?.merchantKey) ??
+        normalizeText(row.merchant_name),
+      name: normalizeText(brand.name),
+      website_url: normalizeUrl(brand.link),
+      logo_url: normalizeUrl(brand.logo) ?? normalizeUrl(brand.fileLink),
+      base_color: normalizeColor(brand.baseColor),
+      base_text_color: normalizeColor(brand.baseTextColor),
+    });
+  }
+  return null;
+}
+
+function extractOperationIconUrlFallback(row: CanonicalTransactionRowInput): string | null {
+  return normalizeUrl(row.operation_icon_url) ?? normalizeUrl(extractRawOperation(row)?.icon);
 }
 
 function extractSourceCommentFallback(row: CanonicalTransactionRowInput): string | null {
@@ -146,15 +326,29 @@ function extractCashbackCurrencyFallback(
 }
 
 export function extractAccountHintFromRow(row: CanonicalTransactionRowInput): string | null {
+  if (isAccountNativeOperation(row)) return null;
+
+  const directHint = extractMaskedCardLast4(row.account_hint);
   const rawPayload =
     row.raw_payload && typeof row.raw_payload === "object"
       ? (row.raw_payload as Record<string, unknown>)
       : null;
-  const rawHint = normalizeText(rawPayload?.account_hint);
-  if (!rawHint) return null;
-  const digits = rawHint.replace(/\D/g, "");
-  if (!digits) return null;
-  return digits.slice(-4);
+  const rawHint = extractMaskedCardLast4(rawPayload?.account_hint);
+  const operation = toObject(rawPayload?.operation);
+  const operationCandidates = collectOperationHintCandidates(operation);
+  const uniqueHints = Array.from(
+    new Set(
+      [directHint, rawHint, ...operationCandidates].filter((value): value is string =>
+        Boolean(value),
+      ),
+    ),
+  );
+
+  if (operation && uniqueHints.length > 1) return null;
+  if (directHint) return directHint;
+  if (rawHint) return rawHint;
+  if (operationCandidates.length === 1) return operationCandidates[0];
+  return null;
 }
 
 export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLineItemInput[] {
@@ -166,6 +360,29 @@ export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLin
       raw_payload: row.raw_payload ?? null,
     },
   ];
+}
+
+export function isSyntheticImportLineItem(
+  lineItem: ImportLineItemInput | null | undefined,
+): boolean {
+  const rawPayload = toObject(lineItem?.raw_payload);
+  const source = normalizeText(rawPayload?.source)?.toLowerCase();
+  return source === "fallback" || source === "dom_fallback";
+}
+
+export function hasRealImportLineItems(
+  lineItems: Array<ImportLineItemInput | null | undefined>,
+): boolean {
+  return lineItems.some(
+    (lineItem) =>
+      lineItem !== null && lineItem !== undefined && !isSyntheticImportLineItem(lineItem),
+  );
+}
+
+export function hasOnlySyntheticImportLineItems(
+  lineItems: Array<ImportLineItemInput | null | undefined>,
+): boolean {
+  return lineItems.length > 0 && lineItems.every((lineItem) => isSyntheticImportLineItem(lineItem));
 }
 
 export function normalizeTransactionRow(
@@ -185,10 +402,14 @@ export function normalizeTransactionRow(
   const sourceComment = extractSourceCommentFallback(row);
   const cashbackAmount = extractCashbackAmountFallback(row);
   const cashbackCurrency = extractCashbackCurrencyFallback(row, cashbackAmount, currency);
+  const sourceCategory = extractSourceCategoryFallback(row);
+  const sourceBrand = extractSourceBrandFallback(row);
+  const operationIconUrl = extractOperationIconUrlFallback(row);
 
   return {
     ...row,
     source,
+    account_hint: extractAccountHintFromRow(row),
     currency,
     status,
     transaction_type: transactionType,
@@ -201,6 +422,20 @@ export function normalizeTransactionRow(
     source_comment: sourceComment,
     cashback_amount: cashbackAmount,
     cashback_currency: cashbackCurrency,
+    operation_icon_url: operationIconUrl,
+    source_category: sourceCategory,
+    source_brand: sourceBrand,
+    source_category_id: sourceCategory?.id ?? null,
+    source_category_name: sourceCategory?.name ?? null,
+    brand_id: normalizeText(row.brand_id),
+    receipt_request_key: normalizeText(row.receipt_request_key),
+    receipt_enrichment_status: normalizeReceiptEnrichmentStatus(row.receipt_enrichment_status),
+    receipt_line_items_skipped: row.receipt_line_items_skipped === true,
+    receipt_retryable: row.receipt_retryable === true,
+    receipt_retry_attempts: Math.max(0, toNumberOrNull(row.receipt_retry_attempts) ?? 0),
+    receipt_result_code: normalizeText(row.receipt_result_code),
+    receipt_tracking_id: normalizeText(row.receipt_tracking_id),
+    receipt_message: normalizeText(row.receipt_message),
     transfer_group_id: normalizeText(row.transfer_group_id),
     dedupe_hash: normalizeText(row.dedupe_hash),
     card_id: normalizeText(row.card_id),
@@ -230,10 +465,25 @@ export function buildTransactionInsertPayload(
     source_comment: row.source_comment ?? null,
     cashback_amount: row.cashback_amount ?? null,
     cashback_currency: row.cashback_currency ?? null,
+    operation_icon_url: row.operation_icon_url ?? null,
+    source_category_id: row.source_category?.id ?? row.source_category_id ?? null,
+    source_category_name: row.source_category?.name ?? row.source_category_name ?? null,
+    brand_id: row.brand_id ?? null,
+    receipt_request_key: row.receipt_request_key ?? null,
+    receipt_enrichment_status: row.receipt_enrichment_status ?? null,
     is_transfer: row.is_transfer ?? false,
     transfer_group_id: row.transfer_group_id ?? null,
     raw_payload: row.raw_payload ?? null,
     dedupe_hash: row.dedupe_hash ?? null,
+  };
+}
+
+export function buildReceiptPersistenceFields(
+  row: CanonicalTransactionRowInput,
+): Record<string, unknown> {
+  return {
+    receipt_request_key: row.receipt_request_key ?? null,
+    receipt_enrichment_status: row.receipt_enrichment_status ?? null,
   };
 }
 

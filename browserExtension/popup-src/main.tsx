@@ -42,6 +42,7 @@ interface DebugRunSummary {
 
 function App() {
   const [sessionJson, setSessionJson] = React.useState("");
+  const [sessionState, setSessionState] = React.useState<Record<string, unknown> | null>(null);
   const [status, setStatus] = React.useState("");
   const [windowMode, setWindowMode] = React.useState<"auto" | "manual">("auto");
   const [manualFrom, setManualFrom] = React.useState("");
@@ -73,6 +74,7 @@ function App() {
       session?: Record<string, unknown>;
     };
     const s = response?.session ?? null;
+    setSessionState(s);
     setSessionJson(formatSession(s));
     return s;
   }, []);
@@ -94,6 +96,18 @@ function App() {
       payer_person_id: params.get("payer_person_id"),
       expires_at: params.get("expires_at"),
       last_imported_at: params.get("last_imported_at") || null,
+      window_from: params.get("window_from") || null,
+      window_to: params.get("window_to") || null,
+      parse_strategy: params.get("parse_strategy") || null,
+      range_selection_meta: (() => {
+        const raw = params.get("range_selection_meta");
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })(),
       default_account_id: params.get("default_account_id") || null,
     };
     await sendMessage({ type: "MONEY_IMPORT_START_SESSION", session });
@@ -199,11 +213,14 @@ function App() {
       if (!s) {
         throw new Error("No active session. Start from web app first.");
       }
+      const sessionWindowFrom =
+        typeof s.window_from === "string" && s.window_from.trim() ? s.window_from : null;
+      const hasResolvedSessionRange = Boolean(sessionWindowFrom);
       let windowFrom: string | null = null;
-      if (windowMode === "manual") {
+      if (!hasResolvedSessionRange && windowMode === "manual") {
         windowFrom = toIsoFromInput(manualFrom);
         if (!windowFrom) throw new Error("Manual start timestamp is invalid.");
-      } else {
+      } else if (!hasResolvedSessionRange) {
         windowFrom =
           (s.last_imported_at as string) || new Date(Date.now() - 30 * 86400000).toISOString();
       }
@@ -253,6 +270,8 @@ function App() {
   };
 
   const isManual = windowMode === "manual";
+  const hasResolvedSessionRange =
+    typeof sessionState?.window_from === "string" && sessionState.window_from.trim().length > 0;
 
   return (
     <div className="min-w-[340px] p-3 space-y-3">
@@ -281,28 +300,39 @@ function App() {
           <CardTitle className="text-sm">Import window</CardTitle>
         </CardHeader>
         <CardContent className="p-4 pt-0 space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="windowMode">Start date mode</Label>
-            <Select value={windowMode} onValueChange={(v) => setWindowMode(v as "auto" | "manual")}>
-              <SelectTrigger id="windowMode">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">Auto (last imported)</SelectItem>
-                <SelectItem value="manual">Manual</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {isManual && (
-            <div className="space-y-2">
-              <Label htmlFor="manualFrom">Manual start timestamp</Label>
-              <Input
-                id="manualFrom"
-                type="datetime-local"
-                value={manualFrom}
-                onChange={(e) => setManualFrom(e.target.value)}
-              />
-            </div>
+          {hasResolvedSessionRange ? (
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+              {`Using session range:\nFrom: ${String(sessionState?.window_from ?? "-")}\nTo: ${String(sessionState?.window_to ?? "-")}`}
+            </p>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="windowMode">Start date mode</Label>
+                <Select
+                  value={windowMode}
+                  onValueChange={(v) => setWindowMode(v as "auto" | "manual")}
+                >
+                  <SelectTrigger id="windowMode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto (last imported)</SelectItem>
+                    <SelectItem value="manual">Manual</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {isManual && (
+                <div className="space-y-2">
+                  <Label htmlFor="manualFrom">Manual start timestamp</Label>
+                  <Input
+                    id="manualFrom"
+                    type="datetime-local"
+                    value={manualFrom}
+                    onChange={(e) => setManualFrom(e.target.value)}
+                  />
+                </div>
+              )}
+            </>
           )}
           <Button onClick={onStart} disabled={running} className="w-full">
             Start processing

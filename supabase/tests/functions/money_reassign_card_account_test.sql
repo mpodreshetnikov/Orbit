@@ -11,7 +11,7 @@ SELECT function_returns(
   'public',
   'money_reassign_card_account',
   ARRAY['uuid', 'uuid'],
-  'record'
+  'setof record'
 );
 
 INSERT INTO public.persons (id, name, kind)

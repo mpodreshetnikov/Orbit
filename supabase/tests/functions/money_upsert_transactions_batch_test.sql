@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(11);
+SELECT plan(12);
 
 SELECT has_function(
   'public',
@@ -40,6 +40,25 @@ VALUES (
   'RUB'
 );
 
+INSERT INTO public.money_transaction_brands (
+  id,
+  slug,
+  name,
+  website_url,
+  logo_url,
+  base_color,
+  base_text_color
+)
+VALUES (
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  'coffee-shop',
+  'Coffee Shop',
+  'https://coffee.example',
+  'https://cdn.example/coffee.png',
+  '#112233',
+  '#ffffff'
+);
+
 CREATE TEMP TABLE _batch_result AS
 SELECT public.money_upsert_transactions_batch(
   '99999999-9999-9999-9999-999999999999'::uuid,
@@ -55,6 +74,13 @@ SELECT public.money_upsert_transactions_batch(
       "transaction_type":"expense",
       "status":"posted",
       "merchant_name":"Coffee Shop",
+      "source_comment":"SOURCE COFFEE",
+      "cashback_amount":"5",
+      "cashback_currency":"RUB",
+      "operation_icon_url":"https://cdn.example/icon.png",
+      "source_category_id":"bank-food",
+      "source_category_name":"Food",
+      "brand_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       "dedupe_hash":"hash-ext-1",
       "line_item":{"title":"Latte","amount":100,"raw_payload":{"kind":"drink"}}
     },
@@ -118,6 +144,32 @@ SELECT is(
   (SELECT count(*) FROM public.money_transactions WHERE payer_person_id = '77777777-7777-7777-7777-777777777777'),
   2::bigint,
   'two transactions were persisted for payer'
+);
+
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'source_comment', source_comment,
+      'cashback_amount', cashback_amount,
+      'cashback_currency', cashback_currency,
+      'operation_icon_url', operation_icon_url,
+      'source_category_id', source_category_id,
+      'source_category_name', source_category_name,
+      'brand_id', brand_id
+    )
+    FROM public.money_transactions
+    WHERE external_id = 'ext-1'
+  ),
+  jsonb_build_object(
+    'source_comment', 'SOURCE COFFEE',
+    'cashback_amount', 5,
+    'cashback_currency', 'RUB',
+    'operation_icon_url', 'https://cdn.example/icon.png',
+    'source_category_id', 'bank-food',
+    'source_category_name', 'Food',
+    'brand_id', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+  ),
+  'batch persists new import metadata fields on the inserted transaction'
 );
 
 SELECT is(

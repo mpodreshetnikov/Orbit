@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(18);
 
 INSERT INTO auth.users (id, email, aud, role)
 VALUES ('12121212-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'money-rls@example.com', 'authenticated', 'authenticated');
@@ -35,6 +35,32 @@ VALUES (
   'Еда',
   'Food',
   'money-rls-food'
+);
+
+INSERT INTO public.money_transaction_brands (
+  id,
+  slug,
+  name
+)
+VALUES (
+  '91919191-eeee-eeee-eeee-eeeeeeeeeeee',
+  'money-rls-brand',
+  'Money RLS Brand'
+);
+
+INSERT INTO public.money_transaction_brand_aliases (
+  id,
+  brand_id,
+  source,
+  source_key,
+  source_name
+)
+VALUES (
+  '92929292-eeee-eeee-eeee-eeeeeeeeeeee',
+  '91919191-eeee-eeee-eeee-eeeeeeeeeeee',
+  'tbank',
+  'money-rls-brand',
+  'Money RLS Brand'
 );
 
 INSERT INTO public.money_import_sessions (
@@ -82,6 +108,31 @@ VALUES (
   0,
   'inserted',
   '{"source":"seed"}'::jsonb
+);
+
+INSERT INTO public.money_import_batch_brand_resolutions (
+  id,
+  batch_id,
+  source,
+  source_key,
+  source_name,
+  suggested_brand_id,
+  suggested_confidence,
+  suggested_reason,
+  selected_action,
+  selected_brand_id
+)
+VALUES (
+  'dededede-4444-4444-4444-444444444444',
+  'cdcdcdcd-2222-2222-2222-222222222222',
+  'tbank',
+  'money-rls-brand',
+  'Money RLS Brand',
+  '91919191-eeee-eeee-eeee-eeeeeeeeeeee',
+  100,
+  'existing_alias',
+  'match_existing',
+  '91919191-eeee-eeee-eeee-eeeeeeeeeeee'
 );
 
 INSERT INTO public.money_transactions (
@@ -133,6 +184,16 @@ SELECT is(
   'allowlisted user can read target money_categories row'
 );
 SELECT is(
+  (SELECT count(*) FROM public.money_transaction_brands WHERE id = '91919191-eeee-eeee-eeee-eeeeeeeeeeee'),
+  1::bigint,
+  'allowlisted user can read target money_transaction_brands row'
+);
+SELECT is(
+  (SELECT count(*) FROM public.money_transaction_brand_aliases WHERE id = '92929292-eeee-eeee-eeee-eeeeeeeeeeee'),
+  1::bigint,
+  'allowlisted user can read target money_transaction_brand_aliases row'
+);
+SELECT is(
   (SELECT count(*) FROM public.money_import_sessions WHERE id = 'abababab-1111-1111-1111-111111111111'),
   1::bigint,
   'allowlisted user can read target money_import_sessions row'
@@ -151,6 +212,15 @@ SELECT is(
   ),
   1::bigint,
   'allowlisted user can read target money_import_batch_rows row'
+);
+SELECT is(
+  (
+    SELECT count(*)
+    FROM public.money_import_batch_brand_resolutions
+    WHERE id = 'dededede-4444-4444-4444-444444444444'
+  ),
+  1::bigint,
+  'allowlisted user can read target money_import_batch_brand_resolutions row'
 );
 SELECT is(
   (
@@ -176,6 +246,16 @@ SELECT is(
   'non-allowlisted user cannot read target money_categories row'
 );
 SELECT is(
+  (SELECT count(*) FROM public.money_transaction_brands WHERE id = '91919191-eeee-eeee-eeee-eeeeeeeeeeee'),
+  0::bigint,
+  'non-allowlisted user cannot read target money_transaction_brands row'
+);
+SELECT is(
+  (SELECT count(*) FROM public.money_transaction_brand_aliases WHERE id = '92929292-eeee-eeee-eeee-eeeeeeeeeeee'),
+  0::bigint,
+  'non-allowlisted user cannot read target money_transaction_brand_aliases row'
+);
+SELECT is(
   (SELECT count(*) FROM public.money_import_sessions WHERE id = 'abababab-1111-1111-1111-111111111111'),
   0::bigint,
   'non-allowlisted user cannot read target money_import_sessions row'
@@ -194,6 +274,15 @@ SELECT is(
   ),
   0::bigint,
   'non-allowlisted user cannot read target money_import_batch_rows row'
+);
+SELECT is(
+  (
+    SELECT count(*)
+    FROM public.money_import_batch_brand_resolutions
+    WHERE id = 'dededede-4444-4444-4444-444444444444'
+  ),
+  0::bigint,
+  'non-allowlisted user cannot read target money_import_batch_brand_resolutions row'
 );
 SELECT is(
   (

@@ -17,6 +17,15 @@ type WidgetSession = Record<string, unknown> & {
   app_origin?: string;
 };
 
+type WidgetActiveRun = Record<string, unknown> & {
+  running?: boolean;
+  phase?: string;
+  progress_percent?: number;
+  parsed_transactions_count?: number;
+  batch_id?: string;
+  error?: string;
+};
+
 interface WidgetElements {
   host: HTMLDivElement;
   statusText: HTMLDivElement;
@@ -49,8 +58,21 @@ function clampProgress(value: number): number {
 
 function formatPhase(phase: string | null): string {
   if (!phase) return "Idle";
+  if (phase === "starting") return "Starting import";
+  if (phase === "parse_preparing_tab") return "Preparing T-Bank tab";
+  if (phase === "parse_loading_operations_page") return "Opening operations page";
+  if (phase === "parse_extracting_page_data") return "Starting page extraction";
+  if (phase === "parse_discovering_endpoints") return "Discovering bank endpoints";
+  if (phase === "parse_fetching_ranges") return "Loading transaction ranges";
+  if (phase === "parse_enriching_operations") return "Loading transaction details";
+  if (phase === "parse_using_dom_fallback") return "Using page fallback";
+  if (phase === "parse_dom_rows_ready") return "Fallback rows ready";
+  if (phase === "parse_mapping_rows") return "Mapping parsed rows";
   if (phase === "parse_completed") return "Parsing completed";
+  if (phase === "preview_rows_started") return "Preparing preview";
+  if (phase === "complete_session_started") return "Finalizing import";
   if (phase === "parse_only_completed") return "Parse-only completed";
+  if (phase === "review_ready") return "Preview ready for review";
   if (phase === "completed") return "Import completed";
   return phase.replace(/_/g, " ");
 }
@@ -313,6 +335,8 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
       elements.statusText.textContent = "Import is running";
     } else if (state.error) {
       elements.statusText.textContent = "Import failed";
+    } else if (state.batchId && state.phase === "review_ready") {
+      elements.statusText.textContent = "Preview ready for review";
     } else if (state.batchId) {
       elements.statusText.textContent = "Import completed";
     } else {
@@ -387,6 +411,26 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     render();
   };
 
+  const applyActiveRun = (activeRun: WidgetActiveRun | null) => {
+    if (!activeRun) return;
+    state = {
+      ...state,
+      running: typeof activeRun.running === "boolean" ? activeRun.running : state.running,
+      error: readMessageText(activeRun, "error") ?? null,
+      progressPercent:
+        typeof activeRun.progress_percent === "number"
+          ? clampProgress(activeRun.progress_percent)
+          : state.progressPercent,
+      parsedTransactionsCount:
+        typeof activeRun.parsed_transactions_count === "number"
+          ? activeRun.parsed_transactions_count
+          : state.parsedTransactionsCount,
+      phase: readMessageText(activeRun, "phase") ?? state.phase,
+      batchId: readMessageText(activeRun, "batch_id") ?? state.batchId,
+    };
+    render();
+  };
+
   const handleRuntimeMessage = (message: Record<string, unknown>) => {
     const type = readMessageText(message, "type");
     if (!type) return;
@@ -454,6 +498,11 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
             ? (response.session as WidgetSession)
             : null;
         applySession(nextSession);
+        const activeRun =
+          response?.active_run && typeof response.active_run === "object"
+            ? (response.active_run as WidgetActiveRun)
+            : null;
+        applyActiveRun(activeRun);
       },
     );
   };

@@ -47,6 +47,12 @@
    - Build backward chunk ranges from `now` down to `windowFrom` (default chunk = 14 days).
 2. Per-operation enrichment:
    - Fetch `shopping_receipt` when operation indicates receipt availability.
+   - Serialize receipt requests with preventive pacing:
+     - base pause between receipt HTTP requests: `300ms`,
+     - shared retry budget per import run: `2`,
+     - retry pause when rate-limited: `1500ms`.
+   - Treat `resultCode=REQUEST_RATE_LIMIT_EXCEEDED` as a recoverable receipt-enrichment miss.
+   - After the shared retry budget is exhausted, stop requesting more receipts for the remainder of the run and mark later receipt-eligible operations as skipped for later repair.
    - Fetch `tranche_offers` when a base endpoint is discoverable in resources.
 3. DOM fallback:
    - Parse visible operation cards when API path fails.
@@ -58,18 +64,29 @@
 - `amount`: from `accountAmount.value` fallback `amount.value`; sign from `type` (`Debit` negative, `Credit` positive).
 - `comment`: prefer `operation.message`, fallback to available detail payload comments.
 - `line_items`: from receipt items; fallback to a single synthetic item with transaction amount.
+- Persist structured receipt repair markers on transaction rows and report rows:
+  - `receipt_request_key`,
+  - `receipt_enrichment_status`,
+  - `receipt_line_items_skipped`,
+  - `receipt_retryable`,
+  - `receipt_retry_attempts`,
+  - `receipt_result_code`,
+  - `receipt_tracking_id`,
+  - `receipt_message`.
 - `raw_payload` must include:
   - `operation`,
   - `shopping_receipt` (nullable),
   - `tranche_offers` (nullable),
   - any other discovered detail payloads,
-  - metadata fields (`connector_source`, `extraction_method`, `all_details_captured`, `account_hint`).
+  - metadata fields (`connector_source`, `extraction_method`, `all_details_captured`, `account_hint`),
+  - receipt enrichment debug metadata under `raw_payload.enrichment.shopping_receipt`.
 
 ## Blocking / Poison Pills
 
 - Treat as blocked with clear message:
   - unauthorized/login screen,
-  - CAPTCHA/human verification/rate limiting screen.
+  - CAPTCHA/human verification screen.
+- Receipt API rate limiting alone is not import-blocking; degrade to fallback line items and persist retryable repair markers.
 
 ## Notes
 
@@ -126,6 +143,7 @@ Use command IDs from `AGENTS.md`:
     - `API_DISCOVERY_MISSED`
     - `API_4XX_5XX`
     - `DOM_SELECTOR_DRIFT`
-    - `MAPPING_DROP`
+  - `MAPPING_DROP`
+    - `ENRICHMENT_RATE_LIMITED`
   - `report.md` with readable parsing summary, row-level issue table, and row preview
   - `rows-preview.csv` with flattened row preview for spreadsheet/manual validation

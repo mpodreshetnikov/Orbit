@@ -106,6 +106,202 @@ describe("tbank-web connector", () => {
     }
   });
 
+  it("skips all enrichment calls for fulfilled and out-of-range operations", async () => {
+    const isolatedFactory = new Function(
+      `return (${__test__.extractOperationsInPage.toString()});`,
+    ) as () => (input: {
+      windowFromIso?: string;
+      sessionId?: string | null;
+      sourceId?: string | null;
+      payerPersonId?: string | null;
+    }) => Promise<Record<string, unknown>>;
+    const isolatedExtractor = isolatedFactory();
+
+    const originalWindow = (globalThis as Record<string, unknown>).window;
+    const originalDocument = (globalThis as Record<string, unknown>).document;
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    const originalFetch = (globalThis as Record<string, unknown>).fetch;
+    const originalURL = (globalThis as Record<string, unknown>).URL;
+    const originalChrome = (globalThis as Record<string, unknown>).chrome;
+
+    const fetchCalls: string[] = [];
+    const operationsPayload = [
+      {
+        id: "op-fulfilled",
+        authorizationId: "auth-fulfilled",
+        operationTime: { milliseconds: Date.parse("2026-03-08T09:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 100, currency: { strCode: "RUB" } },
+        accountAmount: { value: 100, currency: { strCode: "RUB" } },
+        description: "Fulfilled",
+        documents: ["ShoppingReceipt"],
+      },
+      {
+        id: "op-incomplete",
+        authorizationId: "auth-incomplete",
+        operationTime: { milliseconds: Date.parse("2026-03-08T08:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 200, currency: { strCode: "RUB" } },
+        accountAmount: { value: 200, currency: { strCode: "RUB" } },
+        description: "Incomplete",
+        documents: ["ShoppingReceipt"],
+      },
+      {
+        id: "op-old",
+        authorizationId: "auth-old",
+        operationTime: { milliseconds: Date.parse("2026-02-01T08:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 300, currency: { strCode: "RUB" } },
+        accountAmount: { value: 300, currency: { strCode: "RUB" } },
+        description: "Old",
+        documents: ["ShoppingReceipt"],
+      },
+    ];
+
+    (globalThis as Record<string, unknown>).window = {
+      location: {
+        href: "https://www.tbank.ru/mybank/operations/",
+        origin: "https://www.tbank.ru",
+      },
+    };
+    (globalThis as Record<string, unknown>).document = {
+      body: { innerText: "Operations" },
+      querySelectorAll: vi.fn().mockReturnValue([]),
+    };
+    (globalThis as Record<string, unknown>).performance = {
+      getEntriesByType: vi.fn().mockImplementation((type: string) => {
+        if (type !== "resource") return [];
+        return [
+          {
+            name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2",
+          },
+          {
+            name: "https://www.tbank.ru/api/common/v1/operation?sessionid=abc",
+          },
+          {
+            name: "https://www.tbank.ru/api/common/v1/tranche_offers?sessionid=abc&appName=tbank",
+          },
+        ];
+      }),
+    };
+    (globalThis as Record<string, unknown>).URL = URL;
+    (globalThis as Record<string, unknown>).chrome = {
+      runtime: {
+        sendMessage: vi.fn().mockImplementation((message: Record<string, unknown>, callback) => {
+          if (message.type === "MONEY_IMPORT_GET_EXISTING_TRANSACTION_STATES") {
+            callback?.({
+              ok: true,
+              states: [
+                {
+                  transaction_id: "tx-fulfilled",
+                  exists: true,
+                  fulfilled: true,
+                  has_only_synthetic_line_items: false,
+                  has_real_line_items: true,
+                  receipt_enrichment_status: "ok",
+                },
+                {
+                  transaction_id: "tx-incomplete",
+                  exists: true,
+                  fulfilled: false,
+                  has_only_synthetic_line_items: true,
+                  has_real_line_items: false,
+                  receipt_enrichment_status: "ok",
+                },
+                {
+                  transaction_id: null,
+                  exists: false,
+                  fulfilled: false,
+                  has_only_synthetic_line_items: false,
+                  has_real_line_items: false,
+                  receipt_enrichment_status: null,
+                },
+              ],
+            });
+            return;
+          }
+          callback?.({ ok: true });
+        }),
+      },
+    };
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockImplementation(async (input: string) => {
+        fetchCalls.push(input);
+        const url = new URL(input);
+        if (url.pathname === "/api/common/v1/operations") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: operationsPayload }),
+          };
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              payload: {
+                receipt: {
+                  items: [{ name: "Item", sum: 200, quantity: 1 }],
+                },
+              },
+            }),
+          };
+        }
+        if (url.pathname === "/api/common/v1/operation") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: { message: "detail" } }),
+          };
+        }
+        if (url.pathname === "/api/common/v1/tranche_offers") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: [] }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => null };
+      });
+
+    try {
+      const result = await isolatedExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        sessionId: "abc",
+        sourceId: "tbank_web",
+        payerPersonId: "person-1",
+      });
+
+      expect(fetchCalls.filter((url) => url.includes("/shopping_receipt"))).toHaveLength(1);
+      expect(fetchCalls.filter((url) => url.includes("/api/common/v1/operation?"))).toHaveLength(1);
+      expect(fetchCalls.filter((url) => url.includes("/tranche_offers"))).toHaveLength(1);
+      const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
+      expect(records).toHaveLength(2);
+      expect(records[0]?.shoppingReceiptMeta).toMatchObject({
+        receipt_enrichment_status: "not_requested",
+        skip_reason: "already_fulfilled",
+      });
+      expect(records[1]?.shoppingReceiptMeta).toMatchObject({
+        receipt_enrichment_status: "ok",
+      });
+      expect(result.debug).toMatchObject({
+        preflight_enrichment_skip_count: 2,
+      });
+    } finally {
+      (globalThis as Record<string, unknown>).window = originalWindow;
+      (globalThis as Record<string, unknown>).document = originalDocument;
+      (globalThis as Record<string, unknown>).performance = originalPerformance;
+      (globalThis as Record<string, unknown>).fetch = originalFetch;
+      (globalThis as Record<string, unknown>).URL = originalURL;
+      (globalThis as Record<string, unknown>).chrome = originalChrome;
+    }
+  });
+
   it("maps operation record into canonical row with all details preserved", () => {
     const operationRecord = {
       operation: {
@@ -123,6 +319,21 @@ describe("tbank-web connector", () => {
         mcc: 5411,
         mccString: "MCC 5411",
         merchant: { name: "Samokat", id: "17525", region: "Moscow" },
+        brand: {
+          id: "brand-1",
+          name: "Samokat",
+          link: "https://samokat.ru",
+          logo: "https://cdn.example.com/samokat.png",
+          baseColor: "FF335F",
+          baseTextColor: "FFFFFF",
+        },
+        icon: "https://cdn.example.com/samokat-icon.png",
+        categoryInfo: {
+          bankCategory: {
+            id: "cat-1",
+            name: "Delivery",
+          },
+        },
         cardNumber: "220070******6986",
         message: "Leave near door",
         loyaltyBonusSummary: {
@@ -179,6 +390,19 @@ describe("tbank-web connector", () => {
     expect(row?.cashback_amount).toBe(101);
     expect(row?.cashback_currency).toBe("RUB");
     expect(row?.mcc).toBe("5411");
+    expect(row?.operation_icon_url).toBe("https://cdn.example.com/samokat-icon.png");
+    expect(row?.source_category).toEqual({
+      id: "cat-1",
+      name: "Delivery",
+    });
+    expect(row?.source_brand).toEqual({
+      source_key: "brand-1",
+      name: "Samokat",
+      website_url: "https://samokat.ru/",
+      logo_url: "https://cdn.example.com/samokat.png",
+      base_color: "FF335F",
+      base_text_color: "FFFFFF",
+    });
     expect((row?.raw_payload as Record<string, unknown>)?.account_hint).toBe("6986");
     expect(row?.dedupe_hash).toMatch(/^tbw_/);
     expect(row?.line_items).toHaveLength(2);
@@ -188,6 +412,34 @@ describe("tbank-web connector", () => {
     expect((row?.raw_payload as Record<string, unknown>)?.operation_detail).toBeTruthy();
     expect((row?.raw_payload as Record<string, unknown>)?.shopping_receipt).toBeTruthy();
     expect((row?.raw_payload as Record<string, unknown>)?.all_details_captured).toBe(true);
+  });
+
+  it("drops bank-native source brands for internal transfer operations", () => {
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "native-transfer-brand",
+          operationTime: { milliseconds: 1772680882000 },
+          type: "Debit",
+          status: "OK",
+          amount: { value: 1000, currency: { strCode: "RUB" } },
+          accountAmount: { value: 1000, currency: { strCode: "RUB" } },
+          group: "TRANSFER",
+          description: "Внутрибанковский перевод",
+          brand: {
+            id: "brand-transfer",
+            name: "Внутрибанковский перевод 3-м лицам",
+          },
+        },
+        operationDetail: null,
+        shoppingReceipt: null,
+      },
+      {
+        extractionMethod: "api",
+      },
+    );
+
+    expect(row?.source_brand).toBeNull();
   });
 
   it("does not derive card hint from operation.account-only values", () => {
@@ -213,6 +465,97 @@ describe("tbank-web connector", () => {
 
     const rawPayload = (row?.raw_payload as Record<string, unknown>) ?? {};
     expect(rawPayload.account_hint).toBeNull();
+  });
+
+  it("suppresses ambiguous own-account transfer tails", () => {
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "transfer-ambiguous",
+          operationTime: { milliseconds: 1772680882000 },
+          type: "Credit",
+          status: "OK",
+          amount: { value: 62500, currency: { strCode: "RUB" } },
+          accountAmount: { value: 62500, currency: { strCode: "RUB" } },
+          group: "TRANSFER",
+          description: "Между своими счетами",
+          merchantKey: "Между своими счетами",
+          cardNumber: "518901******1807",
+          payment: {
+            cardNumber: "518901******0926",
+          },
+        },
+        operationDetail: null,
+        shoppingReceipt: null,
+      },
+      {
+        extractionMethod: "api",
+      },
+    );
+
+    expect(row?.transaction_type).toBe("transfer");
+    expect((row?.raw_payload as Record<string, unknown>)?.account_hint).toBeNull();
+  });
+
+  it("suppresses account-native incoming transfer tails", () => {
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "incoming-transfer",
+          operationTime: { milliseconds: 1772680882000 },
+          type: "Credit",
+          status: "OK",
+          amount: { value: 10000, currency: { strCode: "RUB" } },
+          accountAmount: { value: 10000, currency: { strCode: "RUB" } },
+          description: "Максим П.",
+          cardNumber: "220070******1778",
+          subgroup: { name: "Пополнение по номеру телефона" },
+          spendingCategory: { name: "Переводы" },
+          categoryInfo: {
+            bankCategory: { name: "Переводы" },
+          },
+        },
+        operationDetail: null,
+        shoppingReceipt: null,
+      },
+      {
+        extractionMethod: "api",
+      },
+    );
+
+    expect(row?.transaction_type).toBe("income");
+    expect((row?.raw_payload as Record<string, unknown>)?.account_hint).toBeNull();
+  });
+
+  it("suppresses interest-on-balance tails", () => {
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "interest-income",
+          operationTime: { milliseconds: 1772680882000 },
+          type: "Credit",
+          status: "OK",
+          amount: { value: 507.93, currency: { strCode: "RUB" } },
+          accountAmount: { value: 507.93, currency: { strCode: "RUB" } },
+          description: "Проценты на остаток",
+          merchantKey: "Проценты на остаток",
+          subgroup: { name: "Бонусы" },
+          spendingCategory: { name: "Проценты" },
+          categoryInfo: {
+            bankCategory: { name: "Проценты" },
+          },
+          cardNumber: "220070******7770",
+        },
+        operationDetail: null,
+        shoppingReceipt: null,
+      },
+      {
+        extractionMethod: "api",
+      },
+    );
+
+    expect(row?.transaction_type).toBe("income");
+    expect((row?.raw_payload as Record<string, unknown>)?.account_hint).toBeNull();
   });
 
   it("falls back to single line item when receipt is missing", () => {
@@ -301,6 +644,10 @@ describe("tbank-web connector", () => {
     expect(update).not.toHaveBeenCalled();
     expect(executeScript).toHaveBeenCalledOnce();
     expect(executeScript.mock.calls[0]?.[0]?.args?.[0]).toEqual({
+      parseStrategy: "fast",
+      payerPersonId: null,
+      sessionId: null,
+      sourceId: "tbank_web",
       windowFromIso: "2026-02-01T00:00:00.000Z",
     });
     expect(result.parsedTransactionsCount).toBe(1);
@@ -554,6 +901,9 @@ describe("tbank-web connector", () => {
     expect(result.debug?.fallback_reason).toContain("No operations returned by API");
     expect(result.debug?.discovered_endpoints?.operations_api).toContain("sessionid=<redacted>");
     expect(result.debug?.rows_without_line_items).toBe(0);
+    expect(result.debug?.range_request_count).toBe(1);
+    expect(result.debug?.effective_chunk_span_days).toBeGreaterThanOrEqual(1);
+    expect(result.debug?.page_originated_operations_request_seen).toBe(false);
   });
 
   it("throws structured diagnostics when DOM fallback yields zero rows", async () => {
@@ -609,5 +959,350 @@ describe("tbank-web connector", () => {
         windowFrom: "2026-02-01T00:00:00.000Z",
       }),
     ).rejects.toThrow(/DOM fallback returned zero rows.*diagnostics=/);
+  });
+
+  it("keeps fast receipt pacing and reports strategy in receipt enrichment diagnostics", async () => {
+    const isolatedFactory = new Function(
+      `return (${__test__.extractOperationsInPage.toString()});`,
+    ) as () => (input: {
+      windowFromIso?: string;
+      sessionId?: string | null;
+      parseStrategy?: string | null;
+    }) => Promise<Record<string, unknown>>;
+    const isolatedExtractor = isolatedFactory();
+
+    const originalWindow = (globalThis as Record<string, unknown>).window;
+    const originalDocument = (globalThis as Record<string, unknown>).document;
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    const originalFetch = (globalThis as Record<string, unknown>).fetch;
+    const originalURL = (globalThis as Record<string, unknown>).URL;
+    const originalDateNow = Date.now;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalChrome = (globalThis as Record<string, unknown>).chrome;
+
+    let nowMs = Date.parse("2026-03-09T00:00:00.000Z");
+    const fetchCalls: string[] = [];
+    const requestTimes: number[] = [];
+
+    const operationsPayload = [
+      {
+        id: "op-1",
+        authorizationId: "auth-1",
+        operationTime: { milliseconds: Date.parse("2026-03-08T09:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 100, currency: { strCode: "RUB" } },
+        accountAmount: { value: 100, currency: { strCode: "RUB" } },
+        description: "Cafe",
+        documents: ["ShoppingReceipt"],
+      },
+      {
+        id: "op-2",
+        authorizationId: "auth-2",
+        operationTime: { milliseconds: Date.parse("2026-03-08T08:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 200, currency: { strCode: "RUB" } },
+        accountAmount: { value: 200, currency: { strCode: "RUB" } },
+        description: "Market",
+        documents: ["ShoppingReceipt"],
+      },
+      {
+        id: "op-3",
+        authorizationId: "auth-3",
+        operationTime: { milliseconds: Date.parse("2026-03-08T07:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 300, currency: { strCode: "RUB" } },
+        accountAmount: { value: 300, currency: { strCode: "RUB" } },
+        description: "Bakery",
+        documents: ["ShoppingReceipt"],
+      },
+      {
+        id: "op-4",
+        authorizationId: "auth-4",
+        operationTime: { milliseconds: Date.parse("2026-03-08T06:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 400, currency: { strCode: "RUB" } },
+        accountAmount: { value: 400, currency: { strCode: "RUB" } },
+        description: "Deli",
+        documents: ["ShoppingReceipt"],
+      },
+    ];
+
+    (globalThis as Record<string, unknown>).window = {
+      location: {
+        href: "https://www.tbank.ru/mybank/operations/",
+        origin: "https://www.tbank.ru",
+      },
+    };
+    (globalThis as Record<string, unknown>).document = {
+      body: { innerText: "Operations" },
+      querySelectorAll: vi.fn().mockReturnValue([]),
+    };
+    (globalThis as Record<string, unknown>).performance = {
+      getEntriesByType: vi.fn().mockImplementation((type: string) => {
+        if (type !== "resource") return [];
+        return [
+          {
+            name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2",
+          },
+        ];
+      }),
+    };
+    (globalThis as Record<string, unknown>).URL = URL;
+    (globalThis as Record<string, unknown>).chrome = {
+      runtime: {
+        sendMessage: vi.fn(),
+      },
+    };
+    Date.now = () => nowMs;
+    globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+      nowMs += delay ?? 0;
+      callback();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockImplementation(async (input: string) => {
+        fetchCalls.push(input);
+        const url = new URL(input);
+        if (url.pathname === "/api/common/v1/operations") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: operationsPayload }),
+          };
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          requestTimes.push(nowMs);
+          const operationId = url.searchParams.get("operationId");
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resultCode: "REQUEST_RATE_LIMIT_EXCEEDED",
+              errorMessage: `${operationId} - Превышено количество обращений к сервису`,
+              plainMessage: "Превышено количество обращений к сервису",
+              trackingId: `${operationId}-track`,
+            }),
+          };
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => null,
+        };
+      });
+
+    try {
+      const result = await isolatedExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        sessionId: "abc",
+        parseStrategy: "fast",
+      });
+
+      expect(fetchCalls.filter((url) => url.includes("/shopping_receipt"))).toHaveLength(3);
+      expect(requestTimes).toEqual([
+        Date.parse("2026-03-09T00:00:00.000Z"),
+        Date.parse("2026-03-09T00:00:01.800Z"),
+        Date.parse("2026-03-09T00:00:03.600Z"),
+      ]);
+      expect(result).toMatchObject({
+        method: "api",
+        parsed_transactions_count: 4,
+        debug: {
+          receipt_enrichment: {
+            requested_count: 1,
+            success_count: 0,
+            rate_limited_count: 1,
+            skipped_after_budget_count: 3,
+            retry_attempts_total: 2,
+            stopped_after_budget: true,
+            parse_strategy: "fast",
+            base_pause_between_receipts_ms: 300,
+          },
+        },
+      });
+
+      const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
+      expect(records[0]?.shoppingReceiptMeta).toMatchObject({
+        receipt_request_key: "auth-1",
+        receipt_enrichment_status: "rate_limited",
+        receipt_line_items_skipped: true,
+        receipt_retryable: true,
+        receipt_retry_attempts: 2,
+        receipt_result_code: "REQUEST_RATE_LIMIT_EXCEEDED",
+        receipt_tracking_id: "auth-1-track",
+      });
+      expect(records[1]?.shoppingReceiptMeta).toMatchObject({
+        receipt_request_key: "auth-2",
+        receipt_enrichment_status: "skipped_after_budget",
+        receipt_line_items_skipped: true,
+        receipt_retryable: true,
+        receipt_retry_attempts: 0,
+      });
+      expect(records[3]?.shoppingReceiptMeta).toMatchObject({
+        receipt_request_key: "auth-4",
+        receipt_enrichment_status: "skipped_after_budget",
+        receipt_line_items_skipped: true,
+        receipt_retryable: true,
+        receipt_retry_attempts: 0,
+      });
+      expect(records[3]?.shoppingReceipt).toBeNull();
+    } finally {
+      (globalThis as Record<string, unknown>).window = originalWindow;
+      (globalThis as Record<string, unknown>).document = originalDocument;
+      (globalThis as Record<string, unknown>).performance = originalPerformance;
+      (globalThis as Record<string, unknown>).fetch = originalFetch;
+      (globalThis as Record<string, unknown>).URL = originalURL;
+      (globalThis as Record<string, unknown>).chrome = originalChrome;
+      Date.now = originalDateNow;
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  it("uses slower full receipt pacing and reports strategy in receipt enrichment diagnostics", async () => {
+    const isolatedFactory = new Function(
+      `return (${__test__.extractOperationsInPage.toString()});`,
+    ) as () => (input: {
+      windowFromIso?: string;
+      sessionId?: string | null;
+      parseStrategy?: string | null;
+    }) => Promise<Record<string, unknown>>;
+    const isolatedExtractor = isolatedFactory();
+
+    const originalWindow = (globalThis as Record<string, unknown>).window;
+    const originalDocument = (globalThis as Record<string, unknown>).document;
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    const originalFetch = (globalThis as Record<string, unknown>).fetch;
+    const originalURL = (globalThis as Record<string, unknown>).URL;
+    const originalDateNow = Date.now;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalChrome = (globalThis as Record<string, unknown>).chrome;
+
+    let nowMs = Date.parse("2026-03-09T00:00:00.000Z");
+    const requestTimes: number[] = [];
+
+    const operationsPayload = [
+      {
+        id: "op-1",
+        authorizationId: "auth-1",
+        operationTime: { milliseconds: Date.parse("2026-03-08T09:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 100, currency: { strCode: "RUB" } },
+        accountAmount: { value: 100, currency: { strCode: "RUB" } },
+        description: "Cafe",
+        documents: ["ShoppingReceipt"],
+      },
+      {
+        id: "op-2",
+        authorizationId: "auth-2",
+        operationTime: { milliseconds: Date.parse("2026-03-08T08:00:00.000Z") },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 200, currency: { strCode: "RUB" } },
+        accountAmount: { value: 200, currency: { strCode: "RUB" } },
+        description: "Market",
+        documents: ["ShoppingReceipt"],
+      },
+    ];
+
+    (globalThis as Record<string, unknown>).window = {
+      location: {
+        href: "https://www.tbank.ru/mybank/operations/",
+        origin: "https://www.tbank.ru",
+      },
+    };
+    (globalThis as Record<string, unknown>).document = {
+      body: { innerText: "Operations" },
+      querySelectorAll: vi.fn().mockReturnValue([]),
+    };
+    (globalThis as Record<string, unknown>).performance = {
+      getEntriesByType: vi.fn().mockImplementation((type: string) => {
+        if (type !== "resource") return [];
+        return [
+          {
+            name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2",
+          },
+        ];
+      }),
+    };
+    (globalThis as Record<string, unknown>).URL = URL;
+    (globalThis as Record<string, unknown>).chrome = {
+      runtime: {
+        sendMessage: vi.fn(),
+      },
+    };
+    Date.now = () => nowMs;
+    globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+      nowMs += delay ?? 0;
+      callback();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockImplementation(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === "/api/common/v1/operations") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: operationsPayload }),
+          };
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          requestTimes.push(nowMs);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resultCode: "REQUEST_RATE_LIMIT_EXCEEDED",
+              errorMessage: "rate limited",
+              plainMessage: "rate limited",
+              trackingId: "track",
+            }),
+          };
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => null,
+        };
+      });
+
+    try {
+      const result = await isolatedExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        sessionId: "abc",
+        parseStrategy: "full",
+      });
+
+      expect(requestTimes).toEqual([
+        Date.parse("2026-03-09T00:00:00.000Z"),
+        Date.parse("2026-03-09T00:00:02.500Z"),
+        Date.parse("2026-03-09T00:00:05.000Z"),
+      ]);
+      expect(result).toMatchObject({
+        debug: {
+          receipt_enrichment: {
+            parse_strategy: "full",
+            base_pause_between_receipts_ms: 1000,
+            retry_attempts_total: 2,
+          },
+        },
+      });
+    } finally {
+      (globalThis as Record<string, unknown>).window = originalWindow;
+      (globalThis as Record<string, unknown>).document = originalDocument;
+      (globalThis as Record<string, unknown>).performance = originalPerformance;
+      (globalThis as Record<string, unknown>).fetch = originalFetch;
+      (globalThis as Record<string, unknown>).URL = originalURL;
+      (globalThis as Record<string, unknown>).chrome = originalChrome;
+      Date.now = originalDateNow;
+      globalThis.setTimeout = originalSetTimeout;
+    }
   });
 });

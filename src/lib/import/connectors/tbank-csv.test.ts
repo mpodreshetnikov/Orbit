@@ -140,6 +140,12 @@ describe("tbank-csv connector", () => {
         merchant_name: "Coffee",
         mcc: "5812",
         is_transfer: false,
+        source_category: {
+          id: null,
+          name: "Food",
+        },
+        source_brand: null,
+        operation_icon_url: null,
       }),
     );
     expect(result.transactions[1]).toEqual(
@@ -151,6 +157,11 @@ describe("tbank-csv connector", () => {
         account_hint: null,
         merchant_name: null,
         mcc: null,
+        source_category: {
+          id: null,
+          name: "Salary",
+        },
+        source_brand: null,
       }),
     );
     expect(result.transactions[2]).toEqual(

@@ -11,6 +11,8 @@ interface ApplyRowsRepoState {
   sessionUpdates: Array<{ sessionId: string; patch: Record<string, unknown> }>;
   batchUpdates: Array<{ batchId: string; patch: Record<string, unknown> }>;
   reportRows: Record<string, unknown>[];
+  insertedTransactions: CanonicalTransactionRowInput[];
+  repairedTransactions: Array<{ transactionId: string; row: CanonicalTransactionRowInput }>;
   resolvedCardRows: Array<{ accountId: string; row: CanonicalTransactionRowInput }>;
   resolvedAccountRows: Array<{
     payerPersonId: string;
@@ -31,6 +33,8 @@ function createRepositoryMock(
     sessionUpdates: [],
     batchUpdates: [],
     reportRows: [],
+    insertedTransactions: [],
+    repairedTransactions: [],
     resolvedCardRows: [],
     resolvedAccountRows: [],
   };
@@ -66,6 +70,7 @@ function createRepositoryMock(
       if (options.updateBatchError) throw new Error(options.updateBatchError);
       state.batchUpdates.push({ batchId, patch });
     },
+    getExistingTransactionStates: async () => [],
     listReportRowsByBatch: async () => [],
     deleteReportRowsByBatch: async () => {},
     resolveAccountIdForRow: async (
@@ -99,11 +104,26 @@ function createRepositoryMock(
       if (row.external_id === "dup-tx") {
         return { transactionId: "tx-dup", inserted: false };
       }
+      if (row.external_id === "dup-synthetic") {
+        return { transactionId: "tx-synth", inserted: false };
+      }
       if (row.external_id === "err-tx") {
         throw new Error("row insert failed");
       }
+      state.insertedTransactions.push(row);
       txCounter += 1;
       return { transactionId: `tx-${txCounter}`, inserted: true };
+    },
+    repairExistingTransactionDetails: async (
+      transactionId: string,
+      row: CanonicalTransactionRowInput,
+    ) => {
+      state.repairedTransactions.push({ transactionId, row });
+      return {
+        replaced_synthetic_line_items: transactionId === "tx-synth",
+        has_only_synthetic_line_items: transactionId === "tx-synth",
+        has_real_line_items: transactionId !== "tx-synth",
+      };
     },
     insertLineItemIfNew: async (_transactionId, lineItem) => {
       if (lineItem.title === "dup") return { lineItemId: "line-dup", inserted: false };
@@ -223,6 +243,40 @@ Deno.test("applyRowsAction rejects expired session auth", async () => {
   assertEquals(payload.error, "Import session expired or revoked");
 });
 
+Deno.test(
+  "applyRowsAction carries receipt skip fields into transaction inserts and report rows",
+  async () => {
+    const { repository, state } = createRepositoryMock();
+
+    await assertJsonResponse(
+      await applyRowsAction(
+        {
+          rows: [
+            txRow({
+              external_id: "receipt-skip-1",
+              receipt_request_key: "auth-1",
+              receipt_enrichment_status: "rate_limited",
+            }),
+          ],
+          payer_person_id: "person-1",
+        },
+        userAuth,
+        { repository },
+      ),
+      200,
+    );
+
+    assertEquals(state.insertedTransactions.length, 1);
+    const insertedTransaction = state.insertedTransactions[0];
+    assertEquals(insertedTransaction.receipt_request_key, "auth-1");
+    assertEquals(insertedTransaction.receipt_enrichment_status, "rate_limited");
+
+    const transactionRow = state.reportRows.find((row) => row.row_kind === "transaction");
+    assertEquals(transactionRow?.receipt_request_key, "auth-1");
+    assertEquals(transactionRow?.receipt_enrichment_status, "rate_limited");
+  },
+);
+
 Deno.test("applyRowsAction returns 404 when target batch does not exist", async () => {
   const { repository } = createRepositoryMock({ batchBefore: null });
   const payload = await assertJsonResponse<{ error: string }>(
@@ -293,6 +347,48 @@ Deno.test(
     assertEquals(state.resolvedCardRows.length > 0, true);
     const firstTxRow = state.reportRows.find((row) => row.row_kind === "transaction");
     assertEquals((firstTxRow?.payload as Record<string, unknown>).card_id, "card-1");
+  },
+);
+
+Deno.test(
+  "applyRowsAction repairs duplicate transactions by replacing synthetic line items with real receipt items",
+  async () => {
+    const { repository, state } = createRepositoryMock();
+
+    const payload = await assertJsonResponse<{
+      inserted: number;
+      skipped: number;
+      error_count: number;
+      row_results: Array<{ status: string; line_results?: Array<{ status: string }> }>;
+    }>(
+      await applyRowsAction(
+        {
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [
+            txRow({
+              external_id: "dup-synthetic",
+              receipt_enrichment_status: "ok",
+              line_items: [
+                { title: "Milk", amount: 4, raw_payload: { source: "receipt" } },
+                { title: "Bread", amount: 6, raw_payload: { source: "receipt" } },
+              ],
+            }),
+          ],
+        },
+        userAuth,
+        { repository },
+      ),
+      200,
+    );
+
+    assertEquals(payload.inserted, 0);
+    assertEquals(payload.skipped, 1);
+    assertEquals(payload.error_count, 0);
+    assertEquals(state.repairedTransactions.length, 1);
+    assertEquals(state.repairedTransactions[0].transactionId, "tx-synth");
+    assertEquals(payload.row_results[0].line_results?.[0]?.status, "inserted");
+    assertEquals(payload.row_results[0].line_results?.[1]?.status, "inserted");
   },
 );
 
@@ -421,3 +517,139 @@ Deno.test("applyRowsAction forwards default_account_id into account resolver", a
   assertEquals(state.resolvedAccountRows.length, 1);
   assertEquals(state.resolvedAccountRows[0].defaultAccountId, "acc-default");
 });
+
+Deno.test(
+  "applyRowsAction maps account-native rows to the default account without creating a card",
+  async () => {
+    const { repository, state } = createRepositoryMock();
+
+    const payload = await assertJsonResponse<{
+      inserted: number;
+      skipped: number;
+      error_count: number;
+      row_results: Array<{ status: string; transaction_id?: string | null }>;
+    }>(
+      await applyRowsAction(
+        {
+          rows: [
+            txRow({
+              external_id: "card-none",
+              source: "tbank_web",
+              transaction_type: "income",
+              raw_payload: {
+                connector_source: "tbank_web",
+                account_hint: null,
+                operation: {
+                  description: "Проценты на остаток",
+                  merchantKey: "Проценты на остаток",
+                  subgroup: { name: "Бонусы" },
+                  spendingCategory: { name: "Проценты" },
+                  categoryInfo: {
+                    bankCategory: { name: "Проценты" },
+                  },
+                  cardNumber: "220070******7770",
+                },
+              },
+            }),
+          ],
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          default_account_id: "acc-default",
+        },
+        userAuth,
+        { repository },
+      ),
+      200,
+    );
+
+    assertEquals(payload.inserted, 1);
+    assertEquals(payload.skipped, 0);
+    assertEquals(payload.error_count, 0);
+    assertEquals(payload.row_results[0]?.status, "inserted");
+    assertEquals(state.resolvedAccountRows.length, 1);
+    assertEquals(state.resolvedAccountRows[0]?.defaultAccountId, "acc-default");
+    assertEquals(state.resolvedCardRows.length, 1);
+    assertEquals(state.resolvedCardRows[0]?.accountId, "acc-default");
+    assertEquals(state.resolvedCardRows[0]?.row.account_hint ?? null, null);
+  },
+);
+
+Deno.test(
+  "applyRowsAction filters rows outside selected range and keeps raw payload in report rows",
+  async () => {
+    const { repository, state } = createRepositoryMock();
+
+    const payload = await assertJsonResponse<{
+      inserted: number;
+      skipped: number;
+      error_count: number;
+      row_results: Array<{ status: string; message?: string | null }>;
+    }>(
+      await applyRowsAction(
+        {
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          window_from: "2026-01-10T00:00:00.000Z",
+          window_to: "2026-01-20T23:59:59.000Z",
+          rows: [
+            txRow({
+              external_id: "before-range",
+              posted_at: "2026-01-05T09:00:00.000Z",
+              raw_payload: { original: "before" },
+              line_items: [{ title: "before-line", amount: 10 }],
+            }),
+            txRow({
+              external_id: "bad-date",
+              posted_at: "not-a-date",
+              raw_payload: { original: "bad-date" },
+              line_items: [{ title: "bad-line", amount: 10 }],
+            }),
+            txRow({
+              external_id: "in-range",
+              posted_at: "2026-01-12T09:00:00.000Z",
+              raw_payload: { original: "in-range" },
+              line_items: [{ title: "kept-line", amount: 10 }],
+            }),
+          ],
+        },
+        userAuth,
+        { repository },
+      ),
+      200,
+    );
+
+    assertEquals(payload.inserted, 1);
+    assertEquals(payload.skipped, 1);
+    assertEquals(payload.error_count, 1);
+    assertEquals(payload.row_results[0].status, "skipped");
+    assertEquals(payload.row_results[0].message, "Outside selected import range");
+    assertEquals(payload.row_results[1].status, "error");
+    assertEquals(payload.row_results[1].message, "Invalid posted_at for selected import range");
+    assertEquals(payload.row_results[2].status, "inserted");
+
+    const transactionRows = state.reportRows.filter((row) => row.row_kind === "transaction");
+    const lineRows = state.reportRows.filter((row) => row.row_kind === "line_item");
+    assertEquals(transactionRows.length, 3);
+    assertEquals(lineRows.length, 1);
+    assertEquals(transactionRows[0].message, "Outside selected import range");
+    assertEquals(
+      (
+        (transactionRows[0].payload as Record<string, unknown>).raw_payload as Record<
+          string,
+          unknown
+        >
+      ).original,
+      "before",
+    );
+    assertEquals(transactionRows[1].message, "Invalid posted_at for selected import range");
+    assertEquals(
+      (
+        (transactionRows[1].payload as Record<string, unknown>).raw_payload as Record<
+          string,
+          unknown
+        >
+      ).original,
+      "bad-date",
+    );
+  },
+);

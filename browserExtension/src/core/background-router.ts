@@ -10,6 +10,14 @@ import type { SessionStore } from "./session-store.js";
 export interface BackgroundMessage {
   type: string;
   session?: Record<string, unknown>;
+  session_id?: string;
+  source?: string;
+  payer_person_id?: string;
+  candidates?: Array<Record<string, unknown>>;
+  phase?: string;
+  progress_percent?: number;
+  parsed_transactions_count?: number;
+  batch_id?: string;
   windowFrom?: string;
   origin?: "source_page_overlay" | "popup" | "automation";
   debug?: {
@@ -35,6 +43,16 @@ export interface BackgroundRouterContext {
 }
 
 const activeImportRunsBySessionId = new Set<string>();
+type ActiveImportRunSnapshot = {
+  running: boolean;
+  phase: string | null;
+  progress_percent: number;
+  parsed_transactions_count: number | null;
+  batch_id: string | null;
+  error: string | null;
+};
+
+const activeImportRunStateBySessionId = new Map<string, ActiveImportRunSnapshot>();
 
 function resolveFunctionTarget(functionUrl: unknown): {
   function_url_present: boolean;
@@ -134,6 +152,42 @@ function buildReportUrl(appOrigin: string, batchId: string): string {
   return reportUrl.toString();
 }
 
+function toTrimmedString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function resolveEdgeAuthToken(session: Record<string, unknown>): string | null {
+  const userToken =
+    typeof session.user_access_token === "string" ? session.user_access_token.trim() : "";
+  if (userToken) return userToken;
+  const sessionToken =
+    typeof session.session_token === "string" ? session.session_token.trim() : "";
+  return sessionToken || null;
+}
+
+function buildActiveRunSnapshot(
+  payload: Record<string, unknown>,
+  current?: ActiveImportRunSnapshot,
+): ActiveImportRunSnapshot {
+  return {
+    running: typeof payload.running === "boolean" ? payload.running : (current?.running ?? false),
+    phase: toTrimmedString(payload.phase) ?? current?.phase ?? null,
+    progress_percent:
+      typeof payload.progress_percent === "number" && Number.isFinite(payload.progress_percent)
+        ? payload.progress_percent
+        : (current?.progress_percent ?? 0),
+    parsed_transactions_count:
+      typeof payload.parsed_transactions_count === "number" &&
+      Number.isFinite(payload.parsed_transactions_count)
+        ? payload.parsed_transactions_count
+        : (current?.parsed_transactions_count ?? null),
+    batch_id: toTrimmedString(payload.batch_id) ?? current?.batch_id ?? null,
+    error: toTrimmedString(payload.error) ?? current?.error ?? null,
+  };
+}
+
 export async function routeBackgroundMessage(
   message: BackgroundMessage,
   deps: BackgroundRouterDeps,
@@ -150,7 +204,76 @@ export async function routeBackgroundMessage(
 
   if (message.type === "MONEY_IMPORT_GET_SESSION") {
     const session = await deps.sessionStore.getSession();
-    return { ok: true, session };
+    const sessionId = toTrimmedString(session?.session_id);
+    return {
+      ok: true,
+      session,
+      active_run: sessionId ? (activeImportRunStateBySessionId.get(sessionId) ?? null) : null,
+    };
+  }
+
+  if (message.type === "MONEY_IMPORT_PROGRESS") {
+    const payload: Record<string, unknown> = {
+      type: "MONEY_IMPORT_PROGRESS",
+    };
+    if (typeof message.phase === "string") payload.phase = message.phase;
+    if (typeof message.progress_percent === "number") {
+      payload.progress_percent = message.progress_percent;
+    }
+    if (typeof message.parsed_transactions_count === "number") {
+      payload.parsed_transactions_count = message.parsed_transactions_count;
+    }
+    if (typeof message.batch_id === "string") payload.batch_id = message.batch_id;
+
+    const sessionId = toTrimmedString(message.session_id);
+    if (sessionId) {
+      activeImportRunStateBySessionId.set(
+        sessionId,
+        buildActiveRunSnapshot(
+          {
+            ...payload,
+            running: true,
+          },
+          activeImportRunStateBySessionId.get(sessionId),
+        ),
+      );
+    }
+
+    await deps.importRunnerDeps.broadcastToAppTabs(payload);
+    const senderTabId = resolveSenderTabId(context);
+    if (senderTabId !== null && deps.importRunnerDeps.broadcastToSourceTab) {
+      await deps.importRunnerDeps.broadcastToSourceTab(senderTabId, payload).catch(() => undefined);
+    }
+
+    return { ok: true };
+  }
+
+  if (message.type === "MONEY_IMPORT_GET_EXISTING_TRANSACTION_STATES") {
+    const session = await deps.sessionStore.getSession();
+    if (!session) {
+      throw new Error("No active import session");
+    }
+    const functionUrl = toTrimmedString(session.function_url);
+    const authToken = resolveEdgeAuthToken(session);
+    const source = toTrimmedString(message.source) ?? toTrimmedString(session.source);
+    const payerPersonId =
+      toTrimmedString(message.payer_person_id) ?? toTrimmedString(session.payer_person_id);
+    const candidates = Array.isArray(message.candidates) ? message.candidates : [];
+
+    if (!functionUrl || !authToken || !source || !payerPersonId) {
+      return { ok: true, states: [] };
+    }
+
+    const response = await deps.importRunnerDeps.callEdge(functionUrl, authToken, {
+      action: "get_existing_transaction_states",
+      source,
+      payer_person_id: payerPersonId,
+      candidates,
+    });
+    return {
+      ok: true,
+      states: Array.isArray(response.states) ? response.states : [],
+    };
   }
 
   if (message.type === "MONEY_IMPORT_RUN") {
@@ -158,19 +281,46 @@ export async function routeBackgroundMessage(
     if (!session) {
       throw new Error("No active import session");
     }
-    const activeSessionId =
-      typeof session.session_id === "string" ? session.session_id.trim() : "";
+    const activeSessionId = typeof session.session_id === "string" ? session.session_id.trim() : "";
     if (activeSessionId && activeImportRunsBySessionId.has(activeSessionId)) {
       throw new Error(`Import already running for session ${activeSessionId}`);
     }
     if (activeSessionId) {
       activeImportRunsBySessionId.add(activeSessionId);
+      activeImportRunStateBySessionId.set(
+        activeSessionId,
+        buildActiveRunSnapshot({
+          running: true,
+          phase: "starting",
+          progress_percent: 2,
+          parsed_transactions_count: null,
+          batch_id: session.batch_id,
+          error: null,
+        }),
+      );
     }
     const senderTabId = resolveSenderTabId(context);
     const shouldBroadcastToSourceTab =
       message.origin === "source_page_overlay" && senderTabId !== null;
 
     const broadcastToRelevantTabs = async (payload: Record<string, unknown>) => {
+      if (activeSessionId) {
+        activeImportRunStateBySessionId.set(
+          activeSessionId,
+          buildActiveRunSnapshot(
+            {
+              ...payload,
+              running:
+                payload.type === "MONEY_IMPORT_ERROR"
+                  ? false
+                  : payload.type === "MONEY_IMPORT_DONE"
+                    ? false
+                    : true,
+            },
+            activeImportRunStateBySessionId.get(activeSessionId),
+          ),
+        );
+      }
       await deps.importRunnerDeps.broadcastToAppTabs(payload);
       if (!shouldBroadcastToSourceTab || !deps.importRunnerDeps.broadcastToSourceTab) {
         return;
@@ -186,7 +336,11 @@ export async function routeBackgroundMessage(
           batch_id: (session.batch_id as string) ?? null,
           source: (session.source as string) ?? null,
           tab_id: message.debug?.tab_id ?? null,
-          window_from: message.windowFrom ?? (session.last_imported_at as string) ?? null,
+          window_from:
+            message.windowFrom ??
+            (session.window_from as string) ??
+            (session.last_imported_at as string) ??
+            null,
         })
       : null;
 
@@ -273,6 +427,7 @@ export async function routeBackgroundMessage(
     } finally {
       if (activeSessionId) {
         activeImportRunsBySessionId.delete(activeSessionId);
+        activeImportRunStateBySessionId.delete(activeSessionId);
       }
     }
   }

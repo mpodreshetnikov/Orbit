@@ -39,6 +39,9 @@ describe("use-money-transactions", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(data);
+    expect(builder.select).toHaveBeenCalledWith(
+      "*, money_cards(id, last4, card_label), money_transaction_brands(*)",
+    );
     expect(builder.eq).toHaveBeenCalledWith("payer_person_id", "p1");
     expect(builder.eq).toHaveBeenCalledWith("account_id", "acc-1");
   });
@@ -113,6 +116,9 @@ describe("use-money-transactions", () => {
         id: "tx-1",
         line_items: [],
       }),
+    );
+    expect(builder.select).toHaveBeenCalledWith(
+      "*, money_cards(id, last4, card_label), money_transaction_brands(*), money_line_items(*)",
     );
 
     const disabled = renderHookWithQueryClient(() => useMoneyTransaction(null));

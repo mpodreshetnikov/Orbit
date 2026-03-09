@@ -1,14 +1,12 @@
 --
 -- PostgreSQL database dump
---
-
+--
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.1
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;
-SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -365,6 +363,31 @@ CREATE TABLE "public"."money_categories" (
 
 
 --
+-- Name: money_import_batch_brand_resolutions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_import_batch_brand_resolutions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "batch_id" "uuid" NOT NULL,
+    "source" "text" NOT NULL,
+    "source_key" "text" NOT NULL,
+    "source_name" "text" NOT NULL,
+    "website_url" "text",
+    "logo_url" "text",
+    "base_color" "text",
+    "base_text_color" "text",
+    "suggested_brand_id" "uuid",
+    "suggested_confidence" integer DEFAULT 0 NOT NULL,
+    "suggested_reason" "text",
+    "selected_action" "text" NOT NULL,
+    "selected_brand_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "money_import_batch_brand_resolutions_selected_action_check" CHECK (("selected_action" = ANY (ARRAY['match_existing'::"text", 'create_new'::"text"])))
+);
+
+
+--
 -- Name: money_import_batch_rows; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -381,6 +404,8 @@ CREATE TABLE "public"."money_import_batch_rows" (
     "line_item_id" "uuid",
     "payload" "jsonb",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "receipt_request_key" "text",
+    "receipt_enrichment_status" "text",
     CONSTRAINT "money_import_batch_rows_row_kind_check" CHECK (("row_kind" = ANY (ARRAY['transaction'::"text", 'line_item'::"text"]))),
     CONSTRAINT "money_import_batch_rows_status_check" CHECK (("status" = ANY (ARRAY['inserted'::"text", 'skipped'::"text", 'error'::"text"])))
 );
@@ -461,6 +486,42 @@ CREATE TABLE "public"."money_line_items" (
 
 
 --
+-- Name: money_transaction_brand_aliases; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_transaction_brand_aliases" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "brand_id" "uuid" NOT NULL,
+    "source" "text" NOT NULL,
+    "source_key" "text" NOT NULL,
+    "source_name" "text" NOT NULL,
+    "website_url" "text",
+    "logo_url" "text",
+    "base_color" "text",
+    "base_text_color" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+--
+-- Name: money_transaction_brands; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_transaction_brands" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "slug" "text" NOT NULL,
+    "name" "text" NOT NULL,
+    "website_url" "text",
+    "logo_url" "text",
+    "base_color" "text",
+    "base_text_color" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+--
 -- Name: money_transactions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -487,7 +548,13 @@ CREATE TABLE "public"."money_transactions" (
     "card_id" "uuid",
     "source_comment" "text",
     "cashback_amount" numeric,
-    "cashback_currency" "text"
+    "cashback_currency" "text",
+    "brand_id" "uuid",
+    "operation_icon_url" "text",
+    "source_category_id" "text",
+    "source_category_name" "text",
+    "receipt_request_key" "text",
+    "receipt_enrichment_status" "text"
 );
 
 
@@ -687,15 +754,13 @@ ALTER TABLE ONLY "public"."db_deploy_log" ALTER COLUMN "id" SET DEFAULT "nextval
 
 --
 -- PostgreSQL database dump
---
-
+--
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.1
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;
-SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -914,6 +979,14 @@ ALTER TABLE ONLY "public"."money_categories"
 
 
 --
+-- Name: money_import_batch_brand_resolutions money_import_batch_brand_resolutions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_batch_brand_resolutions"
+    ADD CONSTRAINT "money_import_batch_brand_resolutions_pkey" PRIMARY KEY ("id");
+
+
+--
 -- Name: money_import_batch_rows money_import_batch_rows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -951,6 +1024,30 @@ ALTER TABLE ONLY "public"."money_import_sessions"
 
 ALTER TABLE ONLY "public"."money_line_items"
     ADD CONSTRAINT "money_line_items_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_transaction_brand_aliases money_transaction_brand_aliases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transaction_brand_aliases"
+    ADD CONSTRAINT "money_transaction_brand_aliases_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_transaction_brands money_transaction_brands_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transaction_brands"
+    ADD CONSTRAINT "money_transaction_brands_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_transaction_brands money_transaction_brands_slug_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transaction_brands"
+    ADD CONSTRAINT "money_transaction_brands_slug_key" UNIQUE ("slug");
 
 
 --
@@ -1465,10 +1562,31 @@ CREATE INDEX "idx_money_categories_parent_id" ON "public"."money_categories" USI
 
 
 --
+-- Name: idx_money_import_batch_brand_resolutions_batch_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_batch_brand_resolutions_batch_id" ON "public"."money_import_batch_brand_resolutions" USING "btree" ("batch_id");
+
+
+--
+-- Name: idx_money_import_batch_brand_resolutions_batch_source_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_import_batch_brand_resolutions_batch_source_key" ON "public"."money_import_batch_brand_resolutions" USING "btree" ("batch_id", "source", "source_key");
+
+
+--
 -- Name: idx_money_import_batch_rows_batch_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX "idx_money_import_batch_rows_batch_id" ON "public"."money_import_batch_rows" USING "btree" ("batch_id");
+
+
+--
+-- Name: idx_money_import_batch_rows_batch_receipt_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_batch_rows_batch_receipt_status" ON "public"."money_import_batch_rows" USING "btree" ("batch_id", "receipt_enrichment_status");
 
 
 --
@@ -1563,10 +1681,31 @@ CREATE UNIQUE INDEX "idx_money_line_items_tx_import_hash" ON "public"."money_lin
 
 
 --
+-- Name: idx_money_transaction_brand_aliases_brand_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transaction_brand_aliases_brand_id" ON "public"."money_transaction_brand_aliases" USING "btree" ("brand_id");
+
+
+--
+-- Name: idx_money_transaction_brand_aliases_source_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_transaction_brand_aliases_source_key" ON "public"."money_transaction_brand_aliases" USING "btree" ("source", "source_key");
+
+
+--
 -- Name: idx_money_transactions_account_posted_at; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX "idx_money_transactions_account_posted_at" ON "public"."money_transactions" USING "btree" ("account_id", "posted_at");
+
+
+--
+-- Name: idx_money_transactions_brand_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transactions_brand_id" ON "public"."money_transactions" USING "btree" ("brand_id");
 
 
 --
@@ -1588,6 +1727,13 @@ CREATE UNIQUE INDEX "idx_money_transactions_dedupe_hash" ON "public"."money_tran
 --
 
 CREATE INDEX "idx_money_transactions_payer_posted_at" ON "public"."money_transactions" USING "btree" ("payer_person_id", "posted_at");
+
+
+--
+-- Name: idx_money_transactions_payer_receipt_status_source_posted_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transactions_payer_receipt_status_source_posted_at" ON "public"."money_transactions" USING "btree" ("payer_person_id", "receipt_enrichment_status", "source", "posted_at");
 
 
 --
@@ -1795,83 +1941,63 @@ CREATE INDEX "idx_record_observations_record_id" ON "public"."record_observation
 
 --
 -- Name: checkup_completions checkup_completion_after_delete_trigger; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: checkup_completions checkup_completion_after_insert_trigger; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: checkup_completions checkup_completion_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: checkup_items checkup_item_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: checkup_items checkup_item_set_next_due_insert; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: body_site_catalog update_body_site_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: checkup_items update_checkup_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: conditions update_conditions_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: finding_type_catalog update_finding_type_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: measurement_catalog update_measurement_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: measurements update_measurements_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: med_dose_events update_med_dose_events_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: med_regimens update_med_regimens_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: medical_records update_medical_records_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: medication_refill_snoozes update_medication_refill_snoozes_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: money_accounts update_money_accounts_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: money_cards update_money_cards_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: money_categories update_money_categories_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
+-- Name: money_import_batch_brand_resolutions update_money_import_batch_brand_resolutions_updated_at; Type: TRIGGER; Schema: public; Owner: -
+----
 -- Name: money_line_items update_money_line_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
+-- Name: money_transaction_brand_aliases update_money_transaction_brand_aliases_updated_at; Type: TRIGGER; Schema: public; Owner: -
+----
+-- Name: money_transaction_brands update_money_transaction_brands_updated_at; Type: TRIGGER; Schema: public; Owner: -
+----
 -- Name: money_transactions update_money_transactions_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: notification_routing update_notification_routing_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: observation_catalog update_observation_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: persons update_persons_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: record_findings update_record_findings_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: record_observations update_record_observations_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: user_preferences update_user_preferences_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
---
+----
 -- Name: allowed_users allowed_users_auth_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2056,6 +2182,30 @@ ALTER TABLE ONLY "public"."money_categories"
 
 
 --
+-- Name: money_import_batch_brand_resolutions money_import_batch_brand_resolutions_batch_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_batch_brand_resolutions"
+    ADD CONSTRAINT "money_import_batch_brand_resolutions_batch_id_fkey" FOREIGN KEY ("batch_id") REFERENCES "public"."money_import_batches"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_import_batch_brand_resolutions money_import_batch_brand_resolutions_selected_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_batch_brand_resolutions"
+    ADD CONSTRAINT "money_import_batch_brand_resolutions_selected_brand_id_fkey" FOREIGN KEY ("selected_brand_id") REFERENCES "public"."money_transaction_brands"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_import_batch_brand_resolutions money_import_batch_brand_resolutions_suggested_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_batch_brand_resolutions"
+    ADD CONSTRAINT "money_import_batch_brand_resolutions_suggested_brand_id_fkey" FOREIGN KEY ("suggested_brand_id") REFERENCES "public"."money_transaction_brands"("id") ON DELETE SET NULL;
+
+
+--
 -- Name: money_import_batch_rows money_import_batch_rows_batch_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2152,11 +2302,27 @@ ALTER TABLE ONLY "public"."money_line_items"
 
 
 --
+-- Name: money_transaction_brand_aliases money_transaction_brand_aliases_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transaction_brand_aliases"
+    ADD CONSTRAINT "money_transaction_brand_aliases_brand_id_fkey" FOREIGN KEY ("brand_id") REFERENCES "public"."money_transaction_brands"("id") ON DELETE CASCADE;
+
+
+--
 -- Name: money_transactions money_transactions_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY "public"."money_transactions"
     ADD CONSTRAINT "money_transactions_account_id_fkey" FOREIGN KEY ("account_id") REFERENCES "public"."money_accounts"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_transactions money_transactions_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transactions"
+    ADD CONSTRAINT "money_transactions_brand_id_fkey" FOREIGN KEY ("brand_id") REFERENCES "public"."money_transaction_brands"("id") ON DELETE SET NULL;
 
 
 --

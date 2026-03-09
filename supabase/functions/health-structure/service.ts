@@ -43,6 +43,12 @@ type ServiceResult = {
   payload: Record<string, unknown>;
 };
 
+type PersistRowsResult = {
+  rows: Record<string, unknown>[];
+  droppedInvalidCount: number;
+  unresolvedCatalogCount: number;
+};
+
 function asString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -71,9 +77,22 @@ function buildObservationRows(
   recordId: string,
   structured: StructuredDataWithEntities,
   observationCatalog: HealthStructureParseContext["observationCatalog"],
-): Record<string, unknown>[] {
-  return structured.observations.map((obs) => {
+): PersistRowsResult {
+  const rows: Record<string, unknown>[] = [];
+  let droppedInvalidCount = 0;
+  let unresolvedCatalogCount = 0;
+
+  for (const obs of structured.observations) {
     const catalogEntry = findCatalogEntry(obs.obs_code, observationCatalog);
+    const obsName = asString(obs.obs_name) ?? catalogEntry?.name_en ?? catalogEntry?.name_ru;
+    if (!obsName) {
+      droppedInvalidCount += 1;
+      continue;
+    }
+    if (obs.obs_code && !catalogEntry) {
+      unresolvedCatalogCount += 1;
+    }
+
     const { value_canonical, unit_canonical } = convertToCanonical(
       obs.value_numeric,
       obs.unit,
@@ -86,11 +105,11 @@ function buildObservationRows(
       catalogEntry,
     );
 
-    return {
+    rows.push({
       record_id: recordId,
       catalog_id: catalogEntry?.id ?? null,
       obs_code: obs.obs_code,
-      obs_name: obs.obs_name,
+      obs_name: obsName,
       value_numeric: obs.value_numeric,
       value_text: obs.value,
       unit: obs.unit,
@@ -104,10 +123,12 @@ function buildObservationRows(
       status: obs.status,
       is_llm_extracted: true,
       is_user_verified: false,
-      is_applied: obs.obs_code !== null,
+      is_applied: catalogEntry !== null,
       confidence: obs.confidence,
-    };
-  });
+    });
+  }
+
+  return { rows, droppedInvalidCount, unresolvedCatalogCount };
 }
 
 function buildFindingRows(
@@ -116,36 +137,51 @@ function buildFindingRows(
   structured: StructuredDataWithEntities,
   findingTypeCatalog: HealthStructureParseContext["findingTypeCatalog"],
   bodySiteCatalog: HealthStructureParseContext["bodySiteCatalog"],
-): Record<string, unknown>[] {
-  return structured.findings
-    .filter((item) => item.source_anchor && item.source_anchor.trim().length > 0)
-    .map((item) => {
-      const findingTypeEntry = findFindingTypeCatalogEntry(item.finding_code, findingTypeCatalog);
-      const bodySiteEntry = findBodySiteCatalogEntry(item.site_code, bodySiteCatalog);
+): PersistRowsResult {
+  const rows: Record<string, unknown>[] = [];
+  let droppedInvalidCount = 0;
+  let unresolvedCatalogCount = 0;
 
-      return {
-        person_id: personId,
-        record_id: recordId,
-        finding_type_id: findingTypeEntry?.id ?? null,
-        finding_code: item.finding_code,
-        finding_type_text: item.finding_type_text,
-        body_site_id: bodySiteEntry?.id ?? null,
-        site_code: item.site_code,
-        body_site_text: item.body_site_text,
-        size_mm: item.size_mm,
-        count: item.count || 1,
-        severity: item.severity,
-        laterality: item.laterality,
-        morphology: item.morphology,
-        description: item.description,
-        histology: item.histology,
-        finding_date: item.finding_date || structured.record_date || null,
-        source_anchor: item.source_anchor,
-        is_llm_extracted: true,
-        is_user_verified: false,
-        confidence: item.confidence,
-      };
+  for (const item of structured.findings) {
+    const findingTypeEntry = findFindingTypeCatalogEntry(item.finding_code, findingTypeCatalog);
+    const bodySiteEntry = findBodySiteCatalogEntry(item.site_code, bodySiteCatalog);
+    const sourceAnchor = asString(item.source_anchor);
+    const findingTypeText =
+      asString(item.finding_type_text) ?? findingTypeEntry?.name_en ?? findingTypeEntry?.name_ru;
+
+    if (!sourceAnchor || !findingTypeText) {
+      droppedInvalidCount += 1;
+      continue;
+    }
+    if ((item.finding_code && !findingTypeEntry) || (item.site_code && !bodySiteEntry)) {
+      unresolvedCatalogCount += 1;
+    }
+
+    rows.push({
+      person_id: personId,
+      record_id: recordId,
+      finding_type_id: findingTypeEntry?.id ?? null,
+      finding_code: item.finding_code,
+      finding_type_text: findingTypeText,
+      body_site_id: bodySiteEntry?.id ?? null,
+      site_code: item.site_code,
+      body_site_text: item.body_site_text,
+      size_mm: item.size_mm,
+      count: item.count || 1,
+      severity: item.severity,
+      laterality: item.laterality,
+      morphology: item.morphology,
+      description: item.description,
+      histology: item.histology,
+      finding_date: item.finding_date || structured.record_date || null,
+      source_anchor: sourceAnchor,
+      is_llm_extracted: true,
+      is_user_verified: false,
+      confidence: item.confidence,
     });
+  }
+
+  return { rows, droppedInvalidCount, unresolvedCatalogCount };
 }
 
 export async function runHealthStructureService(
@@ -254,32 +290,60 @@ export async function runHealthStructureService(
     await updateRecordSpan?.end({ status: "ok" });
 
     const observationSpan = telemetry?.startSpan("edge.health_structure.persist_observations");
-    const observationRows = buildObservationRows(
+    const observationBuild = buildObservationRows(
       input.recordId,
       structuredData,
       observationCatalog,
     );
-    await deps.repository.replaceRecordObservations(input.recordId, observationRows);
+    await deps.repository.replaceRecordObservations(input.recordId, observationBuild.rows);
+    if (observationBuild.droppedInvalidCount > 0) {
+      telemetry?.warn("health_structure_invalid_observations_dropped", {
+        record_id: input.recordId,
+        dropped_count: observationBuild.droppedInvalidCount,
+      });
+    }
+    if (observationBuild.unresolvedCatalogCount > 0) {
+      telemetry?.info("health_structure_unresolved_observation_catalog_refs", {
+        record_id: input.recordId,
+        unresolved_count: observationBuild.unresolvedCatalogCount,
+      });
+    }
     await observationSpan?.end({
       status: "ok",
       attrs: {
-        row_count: observationRows.length,
+        row_count: observationBuild.rows.length,
+        dropped_invalid_count: observationBuild.droppedInvalidCount,
+        unresolved_catalog_count: observationBuild.unresolvedCatalogCount,
       },
     });
 
     const findingSpan = telemetry?.startSpan("edge.health_structure.persist_findings");
-    const findingRows = buildFindingRows(
+    const findingBuild = buildFindingRows(
       input.recordId,
       personId,
       structuredData,
       findingTypeCatalog,
       bodySiteCatalog,
     );
-    await deps.repository.replaceRecordFindings(input.recordId, findingRows);
+    await deps.repository.replaceRecordFindings(input.recordId, findingBuild.rows);
+    if (findingBuild.droppedInvalidCount > 0) {
+      telemetry?.warn("health_structure_invalid_findings_dropped", {
+        record_id: input.recordId,
+        dropped_count: findingBuild.droppedInvalidCount,
+      });
+    }
+    if (findingBuild.unresolvedCatalogCount > 0) {
+      telemetry?.info("health_structure_unresolved_finding_catalog_refs", {
+        record_id: input.recordId,
+        unresolved_count: findingBuild.unresolvedCatalogCount,
+      });
+    }
     await findingSpan?.end({
       status: "ok",
       attrs: {
-        row_count: findingRows.length,
+        row_count: findingBuild.rows.length,
+        dropped_invalid_count: findingBuild.droppedInvalidCount,
+        unresolved_catalog_count: findingBuild.unresolvedCatalogCount,
       },
     });
 

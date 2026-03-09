@@ -8,6 +8,11 @@ import {
   normalizeTransactionRow,
   toIsoOrNull,
 } from "./normalize.ts";
+import {
+  classifyRowForWindow,
+  mergeRangeMeta,
+  resolveEffectiveImportWindow,
+} from "./range-window.ts";
 import type { MoneyImportRepository } from "./repository.ts";
 import type { AuthContext, CanonicalTransactionRowInput, RowStatus } from "./types.ts";
 
@@ -20,6 +25,25 @@ export interface ApplyBatchDeps {
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object") return {};
   return value as Record<string, unknown>;
+}
+
+function brandCacheKeyForRow(
+  row: CanonicalTransactionRowInput,
+  fallbackSource: string,
+): string | null {
+  const sourceBrand =
+    row.source_brand && typeof row.source_brand === "object"
+      ? (row.source_brand as Record<string, unknown>)
+      : null;
+  const sourceKey =
+    typeof sourceBrand?.source_key === "string" && sourceBrand.source_key.trim().length > 0
+      ? sourceBrand.source_key.trim()
+      : typeof sourceBrand?.name === "string" && sourceBrand.name.trim().length > 0
+        ? sourceBrand.name.trim()
+        : null;
+  if (!sourceKey) return null;
+  const source = normalizeSourceForTransactions(normalizeText(row.source) ?? fallbackSource);
+  return `${source}|${sourceKey}`;
 }
 
 export async function applyBatchAction(
@@ -74,10 +98,28 @@ export async function applyBatchAction(
   const reportRows = await deps.repository.listReportRowsByBatch(batchId);
   const rowsRaw = reportRows
     .filter((row) => normalizeText(row.row_kind) === "transaction")
-    .map((row) => asRecord(row.payload) as unknown as CanonicalTransactionRowInput);
+    .map((row) => ({
+      raw: asRecord(row.payload) as unknown as CanonicalTransactionRowInput,
+      status: normalizeText(row.status),
+      message: normalizeText(row.message),
+    }));
   const transactionSourceFallback = normalizeSourceForTransactions(
     normalizeText(batch.source) ?? "manual",
   );
+  const { windowFrom: windowFromInput, windowTo: windowToInput } = resolveEffectiveImportWindow(
+    batch.window_from,
+    batch.window_to,
+  );
+  const batchBrandResolutions = deps.repository.listBatchBrandResolutions
+    ? await deps.repository.listBatchBrandResolutions(batchId)
+    : [];
+  const brandResolutionByKey = new Map<string, Record<string, unknown>>();
+  for (const resolution of batchBrandResolutions) {
+    const resolutionSource = normalizeText(resolution.source);
+    const resolutionSourceKey = normalizeText(resolution.source_key);
+    if (!resolutionSource || !resolutionSourceKey) continue;
+    brandResolutionByKey.set(`${resolutionSource}|${resolutionSourceKey}`, resolution);
+  }
 
   await deps.repository.deleteReportRowsByBatch(batchId);
   await deps.repository.updateImportBatch(batchId, {
@@ -91,12 +133,105 @@ export async function applyBatchAction(
   let insertedCount = 0;
   let skippedCount = 0;
   let errorCount = 0;
+  let inRangeRowCount = 0;
+  let filteredOutOfRangeCount = 0;
+  let filteredInvalidDateCount = 0;
   const rowResults: Array<Record<string, unknown>> = [];
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
-    const raw = rowsRaw[rowIndex];
+    const storedRow = rowsRaw[rowIndex];
+    const raw = storedRow.raw;
     try {
+      if (
+        storedRow.message === "Outside selected import range" ||
+        storedRow.message === "Invalid posted_at for selected import range"
+      ) {
+        const status = storedRow.message === "Outside selected import range" ? "skipped" : "error";
+        if (status === "skipped") {
+          skippedCount += 1;
+          filteredOutOfRangeCount += 1;
+        } else {
+          errorCount += 1;
+          filteredInvalidDateCount += 1;
+        }
+
+        await deps.repository.insertReportRow({
+          batch_id: batchId,
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: rowIndex,
+          source_line_index: null,
+          status,
+          message: storedRow.message,
+          transaction_id: null,
+          line_item_id: null,
+          payload: raw as unknown as Record<string, unknown>,
+        });
+
+        rowResults.push({
+          idx: rowIndex,
+          status,
+          message: storedRow.message,
+          transaction_id: null,
+        });
+        continue;
+      }
+
+      const rawRangeDecision = classifyRowForWindow(raw.posted_at, windowFromInput, windowToInput);
+      if (rawRangeDecision.kind === "invalid_date") {
+        errorCount += 1;
+        filteredInvalidDateCount += 1;
+        await deps.repository.insertReportRow({
+          batch_id: batchId,
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: rowIndex,
+          source_line_index: null,
+          status: "error",
+          message: rawRangeDecision.message,
+          transaction_id: null,
+          line_item_id: null,
+          payload: raw as unknown as Record<string, unknown>,
+        });
+        rowResults.push({
+          idx: rowIndex,
+          status: "error",
+          message: rawRangeDecision.message,
+          transaction_id: null,
+        });
+        continue;
+      }
+
       const normalizedBase = normalizeTransactionRow(raw, transactionSourceFallback);
+      const rangeDecision = classifyRowForWindow(
+        normalizedBase.posted_at,
+        windowFromInput,
+        windowToInput,
+      );
+      if (rangeDecision.kind === "out_of_range") {
+        skippedCount += 1;
+        filteredOutOfRangeCount += 1;
+        await deps.repository.insertReportRow({
+          batch_id: batchId,
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: rowIndex,
+          source_line_index: null,
+          status: "skipped",
+          message: rangeDecision.message,
+          transaction_id: null,
+          line_item_id: null,
+          payload: normalizedBase,
+        });
+        rowResults.push({
+          idx: rowIndex,
+          status: "skipped",
+          message: rangeDecision.message,
+          transaction_id: null,
+        });
+        continue;
+      }
+      inRangeRowCount += 1;
       let accountId = normalizeText(normalizedBase.account_id);
       if (!accountId) {
         accountId = await deps.repository.resolveAccountIdForRow(
@@ -111,10 +246,31 @@ export async function applyBatchAction(
         { ...normalizedBase, account_id: accountId },
         true,
       );
+      const brandResolution = (() => {
+        const key = brandCacheKeyForRow(normalizedBase, transactionSourceFallback);
+        return key ? (brandResolutionByKey.get(key) ?? null) : null;
+      })();
+      const resolvedBrandId = deps.repository.resolveBrandIdForRow
+        ? await deps.repository.resolveBrandIdForRow(
+            normalizedBase,
+            transactionSourceFallback,
+            true,
+            brandResolution
+              ? {
+                  selected_action:
+                    normalizeText(brandResolution.selected_action) === "match_existing"
+                      ? "match_existing"
+                      : "create_new",
+                  selected_brand_id: normalizeText(brandResolution.selected_brand_id),
+                }
+              : null,
+          )
+        : null;
       const normalized: CanonicalTransactionRowInput = {
         ...normalizedBase,
         account_id: accountId,
         card_id: resolvedCardId,
+        brand_id: resolvedBrandId,
       };
       const tx = await deps.repository.insertOrResolveTransaction(normalized, payerPersonId);
 
@@ -237,12 +393,18 @@ export async function applyBatchAction(
     error_count: errorCount,
     status: "completed",
     completed_at: (deps.now ?? (() => new Date()))().toISOString(),
+    meta: mergeRangeMeta(batch.meta, null, {
+      parsedRowCount: 0,
+      inRangeRowCount,
+      filteredOutOfRangeCount,
+      filteredInvalidDateCount,
+    }),
   };
   const parsedThrough =
     normalizeText(batch.parsed_through_at) ??
     (rowsRaw.length > 0
       ? (rowsRaw
-          .map((row) => toIsoOrNull(row.posted_at))
+          .map((row) => toIsoOrNull(row.raw.posted_at))
           .filter((value): value is string => Boolean(value))
           .sort()[0] ?? null)
       : null);

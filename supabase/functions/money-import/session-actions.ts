@@ -8,16 +8,65 @@ import {
   sha256Hex,
   toIsoOrNull,
 } from "./normalize.ts";
+import { buildImportContext, readRangeSelectionMeta } from "./range-window.ts";
 import type { AuthContext, UserAuthContext } from "./types.ts";
 import type { MoneyImportRepository } from "./repository.ts";
 
 export const DEFAULT_SESSION_TTL_MINUTES = 15;
+type ParseStrategy = "fast" | "full";
 
 interface SessionActionDeps {
   repository: MoneyImportRepository;
   now?: () => Date;
   sessionTtlMinutes?: number;
   telemetry?: EdgeTelemetry;
+}
+
+function readParseStrategy(meta: unknown): ParseStrategy | null {
+  if (!meta || typeof meta !== "object") return null;
+  const value = (meta as Record<string, unknown>).parse_strategy;
+  return value === "fast" || value === "full" ? value : null;
+}
+
+export async function getImportContextAction(
+  body: Record<string, unknown>,
+  auth: UserAuthContext,
+  deps: SessionActionDeps,
+): Promise<Response> {
+  const span = deps.telemetry?.startSpan("edge.money_import.get_import_context");
+  const source = normalizeText(body.source);
+  const payerPersonId = normalizeText(body.payer_person_id);
+  if (!source || !payerPersonId) {
+    await span?.end({
+      status: "error",
+      statusMessage: "source and payer_person_id are required",
+    });
+    return jsonResponse({ error: "source and payer_person_id are required" }, 400);
+  }
+
+  const now = (deps.now ?? (() => new Date()))();
+  const lastImportedAt = await deps.repository.findLastImportedAt(
+    normalizeSourceForTransactions(source),
+    payerPersonId,
+  );
+  const context = buildImportContext(lastImportedAt, now);
+
+  deps.telemetry?.info("money_import_get_import_context_completed", {
+    source,
+    user_id: auth.userId,
+    has_last_imported_at: Boolean(lastImportedAt),
+    requires_history_prompt: context.requires_history_prompt,
+  });
+  await span?.end({
+    status: "ok",
+    attrs: {
+      source,
+      has_last_imported_at: Boolean(lastImportedAt),
+      requires_history_prompt: context.requires_history_prompt,
+    },
+  });
+
+  return jsonResponse(context);
 }
 
 export async function createSessionAction(
@@ -44,6 +93,7 @@ export async function createSessionAction(
   const tokenHash = await sha256Hex(token);
   const windowFrom = toIsoOrNull(body.window_from);
   const windowTo = toIsoOrNull(body.window_to);
+  const parseStrategy = readParseStrategy(body.meta);
 
   const session = await deps.repository.createImportSession({
     token_hash: tokenHash,
@@ -103,6 +153,14 @@ export async function createSessionAction(
     expires_at: expiresAt,
     last_imported_at: lastImportedAt,
     ttl_minutes: sessionTtlMinutes,
+    window_from: windowFrom,
+    window_to: windowTo,
+    parse_strategy: parseStrategy,
+    range_selection_meta: readRangeSelectionMeta(
+      body.meta && typeof body.meta === "object"
+        ? (body.meta as Record<string, unknown>).range_selection_meta
+        : null,
+    ),
   });
 }
 

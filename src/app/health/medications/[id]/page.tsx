@@ -311,10 +311,7 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
                   )}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <Popover
-                    open={refillSnoozePickerOpen}
-                    onOpenChange={setRefillSnoozePickerOpen}
-                  >
+                  <Popover open={refillSnoozePickerOpen} onOpenChange={setRefillSnoozePickerOpen}>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"

@@ -693,7 +693,8 @@ async function setMedicationRefillSnooze(
   const supabase = createClient();
   const { error } = await supabase.rpc("set_medication_refill_snooze", {
     p_regimen_id: regimenId,
-    p_snooze_until: snoozeUntil,
+    // Generated RPC types currently narrow nullable date params to string.
+    p_snooze_until: snoozeUntil as unknown as string,
   });
   if (error) throw new Error(error.message);
 }
@@ -701,15 +702,12 @@ async function setMedicationRefillSnooze(
 export function useSetMedicationRefillSnooze() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      regimenId,
-      snoozeUntil,
-    }: {
-      regimenId: string;
-      snoozeUntil: string | null;
-    }) => setMedicationRefillSnooze(regimenId, snoozeUntil),
+    mutationFn: ({ regimenId, snoozeUntil }: { regimenId: string; snoozeUntil: string | null }) =>
+      setMedicationRefillSnooze(regimenId, snoozeUntil),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["medication-refill-snooze", variables.regimenId] });
+      queryClient.invalidateQueries({
+        queryKey: ["medication-refill-snooze", variables.regimenId],
+      });
       queryClient.invalidateQueries({ queryKey: ["regimen", variables.regimenId] });
       queryClient.invalidateQueries({ queryKey: ["regimens"] });
     },

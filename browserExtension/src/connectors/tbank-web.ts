@@ -1,17 +1,44 @@
 import { registerConnector } from "./registry.js";
-import type { Connector, ConnectorParseInput, ConnectorParseOutput } from "./types.js";
+import type {
+  Connector,
+  ConnectorParseInput,
+  ConnectorParseOutput,
+  ConnectorParseStrategy,
+} from "./types.js";
 
 const OPERATIONS_PAGE_URL = "https://www.tbank.ru/mybank/operations/";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_DAYS = 30;
 const EXTRACTION_ATTEMPTS = 2;
+const DEFAULT_RECEIPT_PARSE_STRATEGY: ConnectorParseStrategy = "fast";
 
 type JsonMap = Record<string, unknown>;
+type ReceiptEnrichmentStatus =
+  | "ok"
+  | "rate_limited"
+  | "skipped_after_budget"
+  | "not_requested"
+  | "error";
+
+interface ShoppingReceiptEnrichmentMeta {
+  receipt_request_key: string | null;
+  receipt_enrichment_status: ReceiptEnrichmentStatus;
+  skip_reason?: string | null;
+  receipt_line_items_skipped: boolean;
+  receipt_retryable: boolean;
+  receipt_retry_attempts: number;
+  receipt_result_code: string | null;
+  receipt_tracking_id: string | null;
+  receipt_message: string | null;
+  expected: boolean;
+  requested: boolean;
+}
 
 interface PageOperationRecord {
   operation: JsonMap;
   operationDetail: JsonMap | null;
   shoppingReceipt: JsonMap | null;
+  shoppingReceiptMeta: ShoppingReceiptEnrichmentMeta | null;
   trancheOffers: JsonMap | null;
 }
 
@@ -39,11 +66,30 @@ interface PageExtraction {
       status_code: number | null;
       payload_count: number | null;
     }>;
+    range_request_count?: number;
+    effective_chunk_span_days?: number | null;
+    first_operation_posted_at?: string | null;
+    last_operation_posted_at?: string | null;
+    page_originated_operations_request_seen?: boolean;
     response_status_histogram: Record<string, number>;
     stage_timings_ms: Record<string, number>;
     api_error_message: string | null;
     api_operation_count: number;
     dom_row_count: number;
+    receipt_enrichment?: {
+      requested_count: number;
+      success_count: number;
+      rate_limited_count: number;
+      skipped_after_budget_count: number;
+      failed_count: number;
+      retry_attempts_total: number;
+      stopped_after_budget: boolean;
+      parse_strategy: ConnectorParseStrategy;
+      base_pause_between_receipts_ms: number;
+    };
+    preflight_enrichment_skip_count?: number;
+    fulfilled_skip_count?: number;
+    out_of_range_skip_count?: number;
   };
 }
 
@@ -52,6 +98,19 @@ interface MapOperationRecordOptions {
 }
 
 type MapOperationDropReason = "invalid_record" | "invalid_operation" | "missing_time_or_amount";
+
+function normalizeParseStrategy(value: unknown): ConnectorParseStrategy | null {
+  return value === "fast" || value === "full" ? value : null;
+}
+
+function resolveParseStrategy(session?: Record<string, unknown>): ConnectorParseStrategy {
+  const topLevel = normalizeParseStrategy(session?.parse_strategy);
+  if (topLevel) return topLevel;
+  return (
+    normalizeParseStrategy(asObject(session?.meta)?.parse_strategy) ??
+    DEFAULT_RECEIPT_PARSE_STRATEGY
+  );
+}
 
 export function buildOperationRanges(
   windowFromMs: number,
@@ -79,6 +138,134 @@ export function mapOperationRecordToRow(
   return mapOperationRecordToRowWithReason(recordInput, options).row;
 }
 
+function operationHasShoppingReceipt(operation: JsonMap): boolean {
+  const documents = Array.isArray(operation.documents) ? operation.documents : [];
+  return (
+    Boolean(operation.hasShoppingReceipt) ||
+    documents.some((documentValue) => String(documentValue).toLowerCase() === "shoppingreceipt")
+  );
+}
+
+function extractReceiptRequestKey(operation: JsonMap): string | null {
+  return (
+    firstNonEmpty(
+      normalizeText(operation.authorizationId),
+      normalizeText(asObject(operation.operationId)?.value),
+      normalizeText(operation.id),
+    ) ?? null
+  );
+}
+
+function extractReceiptResultCode(receipt: JsonMap | null): string | null {
+  return normalizeText(receipt?.resultCode)?.toUpperCase() ?? null;
+}
+
+function extractReceiptMessage(receipt: JsonMap | null): string | null {
+  return (
+    firstNonEmpty(
+      normalizeText(receipt?.plainMessage),
+      normalizeText(receipt?.errorMessage),
+      normalizeText(asObject(receipt?.details)?.message),
+    ) ?? null
+  );
+}
+
+function hasReceiptItems(receipt: JsonMap | null): boolean {
+  const payloadReceipt =
+    asObject(asObject(receipt?.payload)?.receipt) ?? asObject(receipt?.receipt);
+  const rawItems = Array.isArray(payloadReceipt?.items) ? payloadReceipt.items : [];
+  return rawItems.length > 0;
+}
+
+function buildShoppingReceiptMeta(
+  operation: JsonMap,
+  shoppingReceipt: JsonMap | null,
+  metaInput?: ShoppingReceiptEnrichmentMeta | null,
+): ShoppingReceiptEnrichmentMeta {
+  if (metaInput) return metaInput;
+
+  const expected = operationHasShoppingReceipt(operation);
+  const receiptRequestKey = extractReceiptRequestKey(operation);
+  if (!expected) {
+    return {
+      receipt_request_key: receiptRequestKey,
+      receipt_enrichment_status: "not_requested",
+      receipt_line_items_skipped: false,
+      receipt_retryable: false,
+      receipt_retry_attempts: 0,
+      receipt_result_code: null,
+      receipt_tracking_id: null,
+      receipt_message: null,
+      skip_reason: null,
+      expected: false,
+      requested: false,
+    };
+  }
+
+  const resultCode = extractReceiptResultCode(shoppingReceipt);
+  if (hasReceiptItems(shoppingReceipt)) {
+    return {
+      receipt_request_key: receiptRequestKey,
+      receipt_enrichment_status: "ok",
+      receipt_line_items_skipped: false,
+      receipt_retryable: false,
+      receipt_retry_attempts: 0,
+      receipt_result_code: resultCode,
+      receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
+      receipt_message: extractReceiptMessage(shoppingReceipt),
+      skip_reason: null,
+      expected: true,
+      requested: Boolean(shoppingReceipt),
+    };
+  }
+
+  if (resultCode === "REQUEST_RATE_LIMIT_EXCEEDED") {
+    return {
+      receipt_request_key: receiptRequestKey,
+      receipt_enrichment_status: "rate_limited",
+      receipt_line_items_skipped: true,
+      receipt_retryable: true,
+      receipt_retry_attempts: 0,
+      receipt_result_code: resultCode,
+      receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
+      receipt_message: extractReceiptMessage(shoppingReceipt),
+      skip_reason: null,
+      expected: true,
+      requested: true,
+    };
+  }
+
+  if (!shoppingReceipt) {
+    return {
+      receipt_request_key: receiptRequestKey,
+      receipt_enrichment_status: "error",
+      receipt_line_items_skipped: true,
+      receipt_retryable: false,
+      receipt_retry_attempts: 0,
+      receipt_result_code: null,
+      receipt_tracking_id: null,
+      receipt_message: "Receipt details were not captured.",
+      skip_reason: null,
+      expected: true,
+      requested: false,
+    };
+  }
+
+  return {
+    receipt_request_key: receiptRequestKey,
+    receipt_enrichment_status: "error",
+    receipt_line_items_skipped: true,
+    receipt_retryable: false,
+    receipt_retry_attempts: 0,
+    receipt_result_code: resultCode,
+    receipt_tracking_id: normalizeText(shoppingReceipt?.trackingId),
+    receipt_message: extractReceiptMessage(shoppingReceipt),
+    skip_reason: null,
+    expected: true,
+    requested: true,
+  };
+}
+
 function mapOperationRecordToRowWithReason(
   recordInput: unknown,
   options: MapOperationRecordOptions,
@@ -97,6 +284,11 @@ function mapOperationRecordToRowWithReason(
 
   const operationDetail = asObject(record.operationDetail);
   const shoppingReceipt = asObject(record.shoppingReceipt);
+  const shoppingReceiptMeta = buildShoppingReceiptMeta(
+    operation,
+    shoppingReceipt,
+    asObject(record.shoppingReceiptMeta) as ShoppingReceiptEnrichmentMeta | null,
+  );
   const trancheOffers = asObject(record.trancheOffers);
   const signedAmount = resolveSignedAmount(operation, baseAmount);
   const merchantName =
@@ -113,13 +305,13 @@ function mapOperationRecordToRowWithReason(
       normalizeText(asObject(operationDetail?.payload)?.comment),
       normalizeText(operationDetail?.comment),
     ) ?? null;
+  const isTransfer = detectTransfer(operation, merchantName);
   const cashbackAmount = extractCashbackAmount(operation);
   const cashbackCurrency = extractCashbackCurrency(operation, cashbackAmount);
   const mcc = normalizeMcc(
     operation.mccString ?? operation.mcc ?? asObject(asObject(operation.merchant)?.mcc)?.value,
   );
-  const accountHint = extractCardLast4FromOperation(operation);
-  const isTransfer = detectTransfer(operation, merchantName);
+  const accountHint = extractCardLast4FromOperation(operation, merchantName, isTransfer);
   const transactionType = isTransfer ? "transfer" : signedAmount >= 0 ? "income" : "expense";
   const externalId =
     firstNonEmpty(
@@ -128,6 +320,11 @@ function mapOperationRecordToRowWithReason(
       normalizeText(operation.authorizationId),
     ) ?? null;
   const postedAt = new Date(postedAtMs).toISOString();
+  const sourceBrand = extractSourceBrand(operation);
+  const sourceCategory = extractSourceCategory(operation);
+  const operationIconUrl = extractAbsoluteUrl(operation.icon);
+  const allDetailsCaptured =
+    !shoppingReceiptMeta.expected || shoppingReceiptMeta.receipt_enrichment_status === "ok";
 
   return {
     row: {
@@ -146,17 +343,43 @@ function mapOperationRecordToRowWithReason(
       source_comment: comment,
       cashback_amount: cashbackAmount,
       cashback_currency: cashbackCurrency,
+      operation_icon_url: operationIconUrl,
+      source_category: sourceCategory,
+      source_brand: sourceBrand,
+      receipt_request_key: shoppingReceiptMeta.receipt_request_key,
+      receipt_enrichment_status: shoppingReceiptMeta.receipt_enrichment_status,
+      receipt_line_items_skipped: shoppingReceiptMeta.receipt_line_items_skipped,
+      receipt_retryable: shoppingReceiptMeta.receipt_retryable,
+      receipt_retry_attempts: shoppingReceiptMeta.receipt_retry_attempts,
+      receipt_result_code: shoppingReceiptMeta.receipt_result_code,
+      receipt_tracking_id: shoppingReceiptMeta.receipt_tracking_id,
+      receipt_message: shoppingReceiptMeta.receipt_message,
       is_transfer: isTransfer,
       transfer_group_id: null,
       raw_payload: {
         connector_source: "tbank_web",
         extraction_method: options.extractionMethod,
-        all_details_captured: true,
+        all_details_captured: allDetailsCaptured,
         account_hint: accountHint,
         operation,
         operation_detail: operationDetail,
         shopping_receipt: shoppingReceipt,
         tranche_offers: trancheOffers,
+        enrichment: {
+          shopping_receipt: {
+            expected: shoppingReceiptMeta.expected,
+            requested: shoppingReceiptMeta.requested,
+            receipt_request_key: shoppingReceiptMeta.receipt_request_key,
+            status: shoppingReceiptMeta.receipt_enrichment_status,
+            retryable: shoppingReceiptMeta.receipt_retryable,
+            retry_attempts: shoppingReceiptMeta.receipt_retry_attempts,
+            line_items_skipped: shoppingReceiptMeta.receipt_line_items_skipped,
+            skip_reason: shoppingReceiptMeta.skip_reason ?? null,
+            result_code: shoppingReceiptMeta.receipt_result_code,
+            tracking_id: shoppingReceiptMeta.receipt_tracking_id,
+            message: shoppingReceiptMeta.receipt_message,
+          },
+        },
       },
       dedupe_hash: buildDedupeHash({
         external_id: externalId,
@@ -169,6 +392,63 @@ function mapOperationRecordToRowWithReason(
       }),
       line_items: buildLineItemsFromReceipt(shoppingReceipt, signedAmount, merchantName),
     },
+  };
+}
+
+function extractAbsoluteUrl(value: unknown): string | null {
+  const text = normalizeText(value);
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    return /^https?:$/i.test(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function isBankNativeBrandLabel(value: unknown): boolean {
+  const text = normalizeText(value)?.toLowerCase();
+  if (!text) return false;
+
+  return /внутрибанковский перевод|внутрибанк(?:овский)? перевод|перевод 3-м лицам|перевод третьим лицам|между своими счетами|пополнение по номеру телефона|закрытие вклада|пополнение вклада|проценты на остаток|кэшбэк за обычные покупки|cashback payout|balance interest/.test(
+    text,
+  );
+}
+
+function extractSourceBrand(operation: JsonMap): JsonMap | null {
+  const brand = asObject(operation.brand);
+  if (!brand) return null;
+
+  const name = normalizeText(brand.name);
+  if (!name) return null;
+  const sourceKey =
+    normalizeText(brand.id) ??
+    normalizeText(operation.merchantKey) ??
+    normalizeText(asObject(operation.merchant)?.id) ??
+    name;
+  if (isBankNativeBrandLabel(name) || isBankNativeBrandLabel(sourceKey)) return null;
+
+  return {
+    source_key: sourceKey,
+    name,
+    website_url: extractAbsoluteUrl(brand.link),
+    logo_url: extractAbsoluteUrl(brand.logo) ?? extractAbsoluteUrl(brand.fileLink),
+    base_color: normalizeText(brand.baseColor),
+    base_text_color: normalizeText(brand.baseTextColor),
+  };
+}
+
+function extractSourceCategory(operation: JsonMap): JsonMap | null {
+  const bankCategory = asObject(asObject(operation.categoryInfo)?.bankCategory);
+  if (!bankCategory) return null;
+
+  const id = normalizeText(bankCategory.id);
+  const name = normalizeText(bankCategory.name);
+  if (!id && !name) return null;
+
+  return {
+    id,
+    name,
   };
 }
 
@@ -208,8 +488,11 @@ function summarizeExtractionDiagnostics(
   extraction: PageExtraction,
   mappingDropCounts: Record<string, number>,
   mappedRowCount: number,
+  parseStrategy: ConnectorParseStrategy,
 ): NonNullable<ConnectorParseOutput["debug"]> {
   const debug = extraction.debug;
+  const firstRangeAttempt = debug?.range_attempts?.[0];
+  const receiptDebug = debug?.receipt_enrichment;
   return {
     extraction_method: debug?.extraction_method ?? extraction.method,
     fallback_used: debug?.fallback_used ?? extraction.method === "dom",
@@ -223,12 +506,37 @@ function summarizeExtractionDiagnostics(
       tranche_offers_api: sanitizeDebugUrl(debug?.discovered_endpoints?.tranche_offers_api ?? null),
     },
     range_attempts: debug?.range_attempts ?? [],
+    range_request_count: debug?.range_request_count ?? debug?.range_attempts?.length ?? 0,
+    effective_chunk_span_days:
+      debug?.effective_chunk_span_days ??
+      (firstRangeAttempt
+        ? Math.max(1, Math.round((firstRangeAttempt.end - firstRangeAttempt.start + 1) / DAY_MS))
+        : null),
+    first_operation_posted_at: debug?.first_operation_posted_at ?? null,
+    last_operation_posted_at: debug?.last_operation_posted_at ?? null,
+    page_originated_operations_request_seen:
+      debug?.page_originated_operations_request_seen ?? false,
     response_status_histogram: debug?.response_status_histogram ?? {},
     stage_timings_ms: debug?.stage_timings_ms ?? {},
     mapping_drop_counts: mappingDropCounts,
     api_operation_count: debug?.api_operation_count ?? 0,
     mapped_row_count: mappedRowCount,
     rows_without_line_items: 0,
+    receipt_enrichment: {
+      requested_count: receiptDebug?.requested_count ?? 0,
+      success_count: receiptDebug?.success_count ?? 0,
+      rate_limited_count: receiptDebug?.rate_limited_count ?? 0,
+      skipped_after_budget_count: receiptDebug?.skipped_after_budget_count ?? 0,
+      failed_count: receiptDebug?.failed_count ?? 0,
+      retry_attempts_total: receiptDebug?.retry_attempts_total ?? 0,
+      stopped_after_budget: receiptDebug?.stopped_after_budget ?? false,
+      parse_strategy: receiptDebug?.parse_strategy ?? parseStrategy,
+      base_pause_between_receipts_ms:
+        receiptDebug?.base_pause_between_receipts_ms ?? (parseStrategy === "full" ? 1000 : 300),
+    },
+    preflight_enrichment_skip_count: debug?.preflight_enrichment_skip_count ?? 0,
+    fulfilled_skip_count: debug?.fulfilled_skip_count ?? 0,
+    out_of_range_skip_count: debug?.out_of_range_skip_count ?? 0,
   };
 }
 
@@ -236,9 +544,21 @@ const connector: Connector = {
   sourceId: "tbank_web",
   displayName: "T-Bank Web",
   async parse({ windowFrom, session, debug }: ConnectorParseInput): Promise<ConnectorParseOutput> {
+    const emitProgress = async (
+      phase: string,
+      progressPercent: number,
+      parsedTransactionsCount?: number | null,
+    ) => {
+      await debug?.on_progress?.({
+        phase,
+        progress_percent: progressPercent,
+        parsed_transactions_count: parsedTransactionsCount ?? null,
+      });
+    };
     const fallbackWindowFromIso = new Date(
       Date.now() - DEFAULT_LOOKBACK_DAYS * DAY_MS,
     ).toISOString();
+    const parseStrategy = resolveParseStrategy(session);
     const normalizedWindowFrom =
       toIsoString(windowFrom) || toIsoString(session?.last_imported_at) || fallbackWindowFromIso;
 
@@ -250,15 +570,26 @@ const connector: Connector = {
       throw new Error("No active tab. Open T-Bank in a tab first.");
     }
 
+    await emitProgress("parse_preparing_tab", 5);
+
     if (!isTbankUrl(activeTab.url)) {
       throw new Error("Active tab is not a T-Bank page. Open https://www.tbank.ru/ and try again.");
     }
 
+    await emitProgress("parse_loading_operations_page", 10);
     const readyTab = await prepareOperationsTab(activeTab);
     if (typeof readyTab.id !== "number") {
       throw new Error("No active tab. Open T-Bank in a tab first.");
     }
-    const extraction = await extractOperationsWithRetry(readyTab.id, normalizedWindowFrom);
+    await emitProgress("parse_extracting_page_data", 14);
+    const extraction = await extractOperationsWithRetry(
+      readyTab.id,
+      normalizedWindowFrom,
+      typeof session?.session_id === "string" ? session.session_id : null,
+      typeof session?.source === "string" ? session.source : "tbank_web",
+      typeof session?.payer_person_id === "string" ? session.payer_person_id : null,
+      parseStrategy,
+    );
     if (extraction.blocked_reason) {
       throw formatDiagnosticError(extraction.blocked_reason, {
         blocked_reason: extraction.blocked_reason,
@@ -271,6 +602,14 @@ const connector: Connector = {
       invalid_operation: 0,
       missing_time_or_amount: 0,
     };
+
+    await emitProgress(
+      "parse_mapping_rows",
+      58,
+      typeof extraction.parsed_transactions_count === "number"
+        ? extraction.parsed_transactions_count
+        : null,
+    );
 
     const rows =
       extraction.method === "api"
@@ -289,7 +628,12 @@ const connector: Connector = {
           ? extraction.rows
           : [];
 
-    const debugSummary = summarizeExtractionDiagnostics(extraction, mappingDropCounts, rows.length);
+    const debugSummary = summarizeExtractionDiagnostics(
+      extraction,
+      mappingDropCounts,
+      rows.length,
+      parseStrategy,
+    );
     debugSummary.rows_without_line_items = countRowsWithoutLineItems(rows);
 
     if (extraction.method === "dom" && rows.length === 0 && extraction.debug?.fallback_used) {
@@ -440,6 +784,10 @@ async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.T
 async function extractOperationsWithRetry(
   tabId: number,
   windowFromIso: string,
+  sessionId: string | null,
+  sourceId: string | null,
+  payerPersonId: string | null,
+  parseStrategy: ConnectorParseStrategy,
 ): Promise<PageExtraction> {
   const attemptDetails: Array<Record<string, unknown>> = [];
 
@@ -458,7 +806,7 @@ async function extractOperationsWithRetry(
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         func: extractOperationsInPage,
-        args: [{ windowFromIso }],
+        args: [{ windowFromIso, sessionId, sourceId, payerPersonId, parseStrategy }],
       });
       const extraction = injected?.[0]?.result as PageExtraction | undefined;
       if (extraction) {
@@ -513,7 +861,144 @@ function findLatestResourceUrlByPath(
   return null;
 }
 
-function extractOperationsInPage(input: { windowFromIso?: string }): Promise<PageExtraction> {
+function extractOperationsInPage(input: {
+  windowFromIso?: string;
+  sessionId?: string | null;
+  sourceId?: string | null;
+  payerPersonId?: string | null;
+  parseStrategy?: ConnectorParseStrategy | null;
+}): Promise<PageExtraction> {
+  const receiptParseStrategy =
+    input.parseStrategy === "fast" || input.parseStrategy === "full" ? input.parseStrategy : "fast";
+  const receiptBasePauseBetweenRequestsMs = receiptParseStrategy === "full" ? 1000 : 300;
+  const receiptMaxSharedRetries = 2;
+  const receiptRetryPauseMs = 1500;
+  const progressSessionId = input.sessionId ?? null;
+
+  function operationHasShoppingReceipt(operation: JsonMap): boolean {
+    const documents = Array.isArray(operation.documents) ? operation.documents : [];
+    return (
+      Boolean(operation.hasShoppingReceipt) ||
+      documents.some((documentValue) => String(documentValue).toLowerCase() === "shoppingreceipt")
+    );
+  }
+
+  function extractReceiptRequestKey(operation: JsonMap): string | null {
+    return (
+      text(operation.authorizationId) ||
+      text(asObj(operation.operationId)?.value) ||
+      text(operation.id)
+    );
+  }
+
+  function extractReceiptResultCode(receipt: JsonMap | null): string | null {
+    return text(receipt?.resultCode)?.toUpperCase() ?? null;
+  }
+
+  function extractReceiptMessage(receipt: JsonMap | null): string | null {
+    return (
+      text(receipt?.plainMessage) ||
+      text(receipt?.errorMessage) ||
+      text(asObj(receipt?.details)?.message) ||
+      null
+    );
+  }
+
+  function hasReceiptItems(receipt: JsonMap | null): boolean {
+    const payloadReceipt = asObj(asObj(receipt?.payload)?.receipt) ?? asObj(receipt?.receipt);
+    const rawItems = Array.isArray(payloadReceipt?.items) ? payloadReceipt.items : [];
+    return rawItems.length > 0;
+  }
+
+  function buildShoppingReceiptMeta(
+    operation: JsonMap,
+    shoppingReceipt: JsonMap | null,
+    metaInput?: ShoppingReceiptEnrichmentMeta | null,
+  ): ShoppingReceiptEnrichmentMeta {
+    if (metaInput) return metaInput;
+
+    const expected = operationHasShoppingReceipt(operation);
+    const receiptRequestKey = extractReceiptRequestKey(operation);
+    if (!expected) {
+      return {
+        receipt_request_key: receiptRequestKey,
+        receipt_enrichment_status: "not_requested",
+        receipt_line_items_skipped: false,
+        receipt_retryable: false,
+        receipt_retry_attempts: 0,
+        receipt_result_code: null,
+        receipt_tracking_id: null,
+        receipt_message: null,
+        skip_reason: null,
+        expected: false,
+        requested: false,
+      };
+    }
+
+    const resultCode = extractReceiptResultCode(shoppingReceipt);
+    if (hasReceiptItems(shoppingReceipt)) {
+      return {
+        receipt_request_key: receiptRequestKey,
+        receipt_enrichment_status: "ok",
+        receipt_line_items_skipped: false,
+        receipt_retryable: false,
+        receipt_retry_attempts: 0,
+        receipt_result_code: resultCode,
+        receipt_tracking_id: text(shoppingReceipt?.trackingId),
+        receipt_message: extractReceiptMessage(shoppingReceipt),
+        skip_reason: null,
+        expected: true,
+        requested: Boolean(shoppingReceipt),
+      };
+    }
+
+    if (resultCode === "REQUEST_RATE_LIMIT_EXCEEDED") {
+      return {
+        receipt_request_key: receiptRequestKey,
+        receipt_enrichment_status: "rate_limited",
+        receipt_line_items_skipped: true,
+        receipt_retryable: true,
+        receipt_retry_attempts: 0,
+        receipt_result_code: resultCode,
+        receipt_tracking_id: text(shoppingReceipt?.trackingId),
+        receipt_message: extractReceiptMessage(shoppingReceipt),
+        skip_reason: null,
+        expected: true,
+        requested: true,
+      };
+    }
+
+    if (!shoppingReceipt) {
+      return {
+        receipt_request_key: receiptRequestKey,
+        receipt_enrichment_status: "error",
+        receipt_line_items_skipped: true,
+        receipt_retryable: false,
+        receipt_retry_attempts: 0,
+        receipt_result_code: null,
+        receipt_tracking_id: null,
+        receipt_message: "Receipt details were not captured.",
+        skip_reason: null,
+        expected: true,
+        requested: false,
+      };
+    }
+
+    return {
+      receipt_request_key: receiptRequestKey,
+      receipt_enrichment_status: "error",
+      receipt_line_items_skipped: true,
+      receipt_retryable: false,
+      receipt_retry_attempts: 0,
+      receipt_result_code: resultCode,
+      receipt_tracking_id: text(shoppingReceipt?.trackingId),
+      receipt_message: extractReceiptMessage(shoppingReceipt),
+      skip_reason: null,
+      expected: true,
+      requested: true,
+    };
+  }
+
   function detectBlockedReasonFromApiEnvelope(value: unknown): string | null {
     const envelope = asObj(value);
     if (!envelope) return null;
@@ -597,7 +1082,10 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
 
   return run(input);
 
-  async function run(args: { windowFromIso?: string }): Promise<PageExtraction> {
+  async function run(args: {
+    windowFromIso?: string;
+    sessionId?: string | null;
+  }): Promise<PageExtraction> {
     const startedAtMs = Date.now();
     const pageDayMs = 24 * 60 * 60 * 1000;
     const windowFromMs = toMs(args.windowFromIso) ?? Date.now() - 30 * pageDayMs;
@@ -613,11 +1101,30 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
         status_code: number | null;
         payload_count: number | null;
       }>,
+      range_request_count: 0,
+      effective_chunk_span_days: null as number | null,
+      first_operation_posted_at: null as string | null,
+      last_operation_posted_at: null as string | null,
+      page_originated_operations_request_seen: false,
       response_status_histogram: {} as Record<string, number>,
       stage_timings_ms: {} as Record<string, number>,
       api_error_message: null as string | null,
       api_operation_count: 0,
       dom_row_count: 0,
+      receipt_enrichment: {
+        requested_count: 0,
+        success_count: 0,
+        rate_limited_count: 0,
+        skipped_after_budget_count: 0,
+        failed_count: 0,
+        retry_attempts_total: 0,
+        stopped_after_budget: false,
+        parse_strategy: receiptParseStrategy,
+        base_pause_between_receipts_ms: receiptBasePauseBetweenRequestsMs,
+      },
+      preflight_enrichment_skip_count: 0,
+      fulfilled_skip_count: 0,
+      out_of_range_skip_count: 0,
     };
 
     function buildBlockedExtraction(blockedReason: string): PageExtraction {
@@ -636,11 +1143,21 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
           blocked_reason: blockedReason,
           discovered_endpoints: debugMeta.discovered_endpoints,
           range_attempts: debugMeta.range_attempts,
+          range_request_count: debugMeta.range_request_count,
+          effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          first_operation_posted_at: debugMeta.first_operation_posted_at,
+          last_operation_posted_at: debugMeta.last_operation_posted_at,
+          page_originated_operations_request_seen:
+            debugMeta.page_originated_operations_request_seen,
           response_status_histogram: debugMeta.response_status_histogram,
           stage_timings_ms: debugMeta.stage_timings_ms,
           api_error_message: debugMeta.api_error_message,
           api_operation_count: debugMeta.api_operation_count,
           dom_row_count: 0,
+          receipt_enrichment: debugMeta.receipt_enrichment,
+          preflight_enrichment_skip_count: debugMeta.preflight_enrichment_skip_count,
+          fulfilled_skip_count: debugMeta.fulfilled_skip_count,
+          out_of_range_skip_count: debugMeta.out_of_range_skip_count,
         },
       };
     }
@@ -650,6 +1167,7 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
       return buildBlockedExtraction(blockedReason);
     }
 
+    reportProgress("parse_discovering_endpoints", 18);
     const apiStartedMs = Date.now();
     try {
       const operationsApiUrl =
@@ -659,16 +1177,28 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
       debugMeta.discovered_endpoints.operations_api = operationsApiUrl;
       debugMeta.discovered_endpoints.operation_detail_api = detailApiUrl;
       debugMeta.discovered_endpoints.tranche_offers_api = trancheOffersApiUrl;
+      debugMeta.page_originated_operations_request_seen = hasPageOriginatedOperationsRequest();
 
       const sessionId = discoverSessionId(operationsApiUrl) || discoverSessionIdFromResources();
       const trancheBaseParams = parseTrancheBaseParams(trancheOffersApiUrl);
 
       const ranges = buildRanges(windowFromMs, Date.now());
+      debugMeta.range_request_count = ranges.length;
+      debugMeta.effective_chunk_span_days =
+        ranges.length > 0
+          ? Math.max(1, Math.round((ranges[0].end - ranges[0].start + 1) / pageDayMs))
+          : null;
       const operationMap = new Map<string, JsonMap>();
       let oldestSeenMs = Number.POSITIVE_INFINITY;
       let newestSeenMs = 0;
 
-      for (const range of ranges) {
+      ranges.forEach((_range, index) => {
+        if (index === 0) {
+          reportProgress("parse_fetching_ranges", 20);
+        }
+      });
+
+      for (const [index, range] of ranges.entries()) {
         const rangeUrl = buildRangeUrl(operationsApiUrl, range.start, range.end);
         const response = await fetch(rangeUrl, {
           credentials: "include",
@@ -699,7 +1229,12 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
           if (!operation) continue;
 
           const operationMs = extractTimeMs(operation);
-          if (operationMs === null || operationMs < windowFromMs) continue;
+          if (operationMs === null) continue;
+          if (operationMs < windowFromMs) {
+            debugMeta.out_of_range_skip_count += 1;
+            debugMeta.preflight_enrichment_skip_count += 1;
+            continue;
+          }
 
           const key = buildOperationKey(operation, operationMs);
           if (!key) continue;
@@ -710,6 +1245,9 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
           oldestSeenMs = Math.min(oldestSeenMs, operationMs);
           newestSeenMs = Math.max(newestSeenMs, operationMs);
         }
+
+        const rangeProgress = 20 + Math.round(((index + 1) / Math.max(1, ranges.length)) * 20);
+        reportProgress("parse_fetching_ranges", rangeProgress, operationMap.size);
       }
 
       if (operationMap.size === 0) {
@@ -721,21 +1259,111 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
         const rightMs = extractTimeMs(right) ?? 0;
         return rightMs - leftMs;
       });
+      const existingTransactionStates = await lookupExistingTransactionStates(sortedOperations);
 
-      const operationRecords = await mapWithConcurrency(sortedOperations, 5, async (operation) => {
-        const [operationDetail, shoppingReceipt, trancheOffers] = await Promise.all([
-          tryFetchOperationDetail(operation, detailApiUrl, sessionId),
-          tryFetchShoppingReceipt(operation, sessionId),
-          tryFetchTrancheOffers(operation, trancheOffersApiUrl, sessionId, trancheBaseParams),
-        ]);
-        return {
-          operation,
-          operationDetail,
-          shoppingReceipt,
-          trancheOffers,
-        };
-      });
+      const receiptState = {
+        hasRequestedReceipt: false,
+        sharedRetriesRemaining: receiptMaxSharedRetries,
+        stoppedAfterBudget: false,
+      };
+      let receiptQueue = Promise.resolve<{
+        shoppingReceipt: JsonMap | null;
+        shoppingReceiptMeta: ShoppingReceiptEnrichmentMeta;
+      } | null>(null);
+      const scheduleShoppingReceipt = (
+        operation: JsonMap,
+      ): Promise<{
+        shoppingReceipt: JsonMap | null;
+        shoppingReceiptMeta: ShoppingReceiptEnrichmentMeta;
+      }> => {
+        const nextReceiptRequest = receiptQueue.then(
+          async () =>
+            tryFetchShoppingReceipt(
+              operation,
+              sessionId,
+              receiptState,
+              debugMeta.receipt_enrichment,
+            ),
+          async () =>
+            tryFetchShoppingReceipt(
+              operation,
+              sessionId,
+              receiptState,
+              debugMeta.receipt_enrichment,
+            ),
+        );
+        receiptQueue = nextReceiptRequest.then(
+          (value) => value,
+          () => null,
+        );
+        return nextReceiptRequest;
+      };
+
+      let completedDetails = 0;
+      reportProgress("parse_enriching_operations", 44, sortedOperations.length);
+      const operationRecords = await mapWithConcurrency(
+        sortedOperations,
+        5,
+        async (operation, index) => {
+          const existingState =
+            existingTransactionStates[index] && typeof existingTransactionStates[index] === "object"
+              ? (existingTransactionStates[index] as Record<string, unknown>)
+              : null;
+          const isFulfilled = existingState?.fulfilled === true;
+          let operationDetail: JsonMap | null = null;
+          let receiptResult: {
+            shoppingReceipt: JsonMap | null;
+            shoppingReceiptMeta: ShoppingReceiptEnrichmentMeta;
+          };
+          let trancheOffers: JsonMap | null = null;
+
+          if (isFulfilled) {
+            debugMeta.preflight_enrichment_skip_count += 1;
+            debugMeta.fulfilled_skip_count += 1;
+            receiptResult = {
+              shoppingReceipt: null,
+              shoppingReceiptMeta: {
+                ...buildShoppingReceiptMeta(operation, null),
+                receipt_enrichment_status: "not_requested",
+                receipt_line_items_skipped: false,
+                receipt_retryable: false,
+                receipt_retry_attempts: 0,
+                receipt_message:
+                  "Skipped because transaction already has complete persisted detail.",
+                skip_reason: "already_fulfilled",
+                expected: operationHasShoppingReceipt(operation),
+                requested: false,
+              },
+            };
+          } else {
+            [operationDetail, receiptResult, trancheOffers] = await Promise.all([
+              tryFetchOperationDetail(operation, detailApiUrl, sessionId),
+              scheduleShoppingReceipt(operation),
+              tryFetchTrancheOffers(operation, trancheOffersApiUrl, sessionId, trancheBaseParams),
+            ]);
+          }
+          completedDetails += 1;
+          reportProgress(
+            "parse_enriching_operations",
+            44 + Math.round((completedDetails / Math.max(1, sortedOperations.length)) * 10),
+            completedDetails,
+          );
+          return {
+            operation,
+            operationDetail,
+            shoppingReceipt: receiptResult.shoppingReceipt,
+            shoppingReceiptMeta: receiptResult.shoppingReceiptMeta,
+            trancheOffers,
+          };
+        },
+      );
       debugMeta.api_operation_count = operationRecords.length;
+      debugMeta.first_operation_posted_at =
+        newestSeenMs > 0 ? new Date(newestSeenMs).toISOString() : null;
+      debugMeta.last_operation_posted_at =
+        Number.isFinite(oldestSeenMs) && oldestSeenMs > 0
+          ? new Date(oldestSeenMs).toISOString()
+          : null;
       debugMeta.stage_timings_ms.api = Date.now() - apiStartedMs;
       debugMeta.stage_timings_ms.total = Date.now() - startedAtMs;
 
@@ -756,20 +1384,32 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
           blocked_reason: null,
           discovered_endpoints: debugMeta.discovered_endpoints,
           range_attempts: debugMeta.range_attempts,
+          range_request_count: debugMeta.range_request_count,
+          effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          first_operation_posted_at: debugMeta.first_operation_posted_at,
+          last_operation_posted_at: debugMeta.last_operation_posted_at,
+          page_originated_operations_request_seen:
+            debugMeta.page_originated_operations_request_seen,
           response_status_histogram: debugMeta.response_status_histogram,
           stage_timings_ms: debugMeta.stage_timings_ms,
           api_error_message: null,
           api_operation_count: debugMeta.api_operation_count,
           dom_row_count: 0,
+          receipt_enrichment: debugMeta.receipt_enrichment,
+          preflight_enrichment_skip_count: debugMeta.preflight_enrichment_skip_count,
+          fulfilled_skip_count: debugMeta.fulfilled_skip_count,
+          out_of_range_skip_count: debugMeta.out_of_range_skip_count,
         },
       };
     } catch (error) {
       debugMeta.api_error_message =
         error instanceof Error ? error.message : "Unknown API extraction error";
       debugMeta.stage_timings_ms.api = Date.now() - apiStartedMs;
+      reportProgress("parse_using_dom_fallback", 46);
       const domStartedMs = Date.now();
       const rows = parseDomFallbackRows(windowFromMs);
       debugMeta.dom_row_count = rows.length;
+      reportProgress("parse_dom_rows_ready", 54, rows.length);
       debugMeta.stage_timings_ms.dom = Date.now() - domStartedMs;
       debugMeta.stage_timings_ms.total = Date.now() - startedAtMs;
       return {
@@ -787,11 +1427,21 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
           blocked_reason: null,
           discovered_endpoints: debugMeta.discovered_endpoints,
           range_attempts: debugMeta.range_attempts,
+          range_request_count: debugMeta.range_request_count,
+          effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          first_operation_posted_at: debugMeta.first_operation_posted_at,
+          last_operation_posted_at: debugMeta.last_operation_posted_at,
+          page_originated_operations_request_seen:
+            debugMeta.page_originated_operations_request_seen,
           response_status_histogram: debugMeta.response_status_histogram,
           stage_timings_ms: debugMeta.stage_timings_ms,
           api_error_message: debugMeta.api_error_message,
           api_operation_count: debugMeta.api_operation_count,
           dom_row_count: debugMeta.dom_row_count,
+          receipt_enrichment: debugMeta.receipt_enrichment,
+          preflight_enrichment_skip_count: debugMeta.preflight_enrichment_skip_count,
+          fulfilled_skip_count: debugMeta.fulfilled_skip_count,
+          out_of_range_skip_count: debugMeta.out_of_range_skip_count,
         },
       };
     }
@@ -799,6 +1449,49 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
 
   function detectBlockedReason(): string | null {
     return detectBlockedReasonFromPageState(window.location.href, document.body?.innerText || "");
+  }
+
+  function reportProgress(
+    phase: string,
+    progressPercent: number,
+    parsedTransactionsCount?: number | null,
+  ): void {
+    const runtime = globalThis.chrome?.runtime;
+    if (!runtime?.sendMessage) return;
+
+    try {
+      void runtime.sendMessage({
+        type: "MONEY_IMPORT_PROGRESS",
+        session_id: progressSessionId,
+        phase,
+        progress_percent: progressPercent,
+        parsed_transactions_count: parsedTransactionsCount ?? null,
+      });
+    } catch {
+      // Ignore progress transport failures; parsing should still continue.
+    }
+  }
+
+  function waitMs(delayMs: number): Promise<void> {
+    if (delayMs <= 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      setTimeout(resolve, delayMs);
+    });
+  }
+
+  function sendRuntimeMessage<T>(message: Record<string, unknown>): Promise<T | null> {
+    const runtime = globalThis.chrome?.runtime;
+    if (!runtime?.sendMessage) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+      try {
+        runtime.sendMessage(message, (response: T | null) => {
+          resolve(response ?? null);
+        });
+      } catch {
+        resolve(null);
+      }
+    });
   }
 
   function discoverOperationsApiUrl(): string | null {
@@ -811,6 +1504,20 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
       "/api/common/v1/operations",
       window.location.origin,
     );
+  }
+
+  function hasPageOriginatedOperationsRequest(): boolean {
+    const resources = performance.getEntriesByType("resource");
+    return resources.some((entry) => {
+      const name = (entry as PerformanceResourceTiming).name;
+      if (typeof name !== "string") return false;
+      try {
+        const parsed = new URL(name, window.location.origin);
+        return parsed.pathname === "/api/common/v1/operations";
+      } catch {
+        return false;
+      }
+    });
   }
 
   function discoverOperationDetailApiUrl(): string | null {
@@ -896,34 +1603,244 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
     return `fallback:${operationMs}:${amount}:${description}`;
   }
 
+  function buildExistingTransactionStateCandidate(operation: JsonMap): JsonMap | null {
+    const operationMs = extractTimeMs(operation);
+    const baseAmount =
+      toNum(asObj(operation.accountAmount)?.value) ?? toNum(asObj(operation.amount)?.value);
+    if (operationMs === null || baseAmount === null) return null;
+    const direction = text(operation.type)?.toLowerCase() ?? "";
+    const signedAmount =
+      direction.includes("credit") || direction.includes("income")
+        ? Math.abs(baseAmount)
+        : direction.includes("debit") || direction.includes("expense")
+          ? -Math.abs(baseAmount)
+          : baseAmount;
+    return {
+      external_id:
+        text(operation.id) ||
+        text(asObj(operation.operationId)?.value) ||
+        text(operation.authorizationId),
+      dedupe_hash: null,
+      posted_at: new Date(operationMs).toISOString(),
+      amount: signedAmount,
+    };
+  }
+
+  async function lookupExistingTransactionStates(
+    operations: JsonMap[],
+  ): Promise<Array<Record<string, unknown> | null>> {
+    if (!input.sourceId || !input.payerPersonId || operations.length === 0) {
+      return operations.map(() => null);
+    }
+    const candidates = operations.map((operation) =>
+      buildExistingTransactionStateCandidate(operation),
+    );
+    const response = await sendRuntimeMessage<{
+      ok?: boolean;
+      states?: Array<Record<string, unknown> | null>;
+    }>({
+      type: "MONEY_IMPORT_GET_EXISTING_TRANSACTION_STATES",
+      source: input.sourceId,
+      payer_person_id: input.payerPersonId,
+      candidates,
+    });
+    const states = Array.isArray(response?.states) ? response.states : [];
+    return operations.map((_, index) => states[index] ?? null);
+  }
+
   async function tryFetchShoppingReceipt(
     operation: JsonMap,
     sessionId: string | null,
-  ): Promise<JsonMap | null> {
-    if (!sessionId) return null;
+    receiptState: {
+      hasRequestedReceipt: boolean;
+      sharedRetriesRemaining: number;
+      stoppedAfterBudget: boolean;
+    },
+    receiptDebug: {
+      requested_count: number;
+      success_count: number;
+      rate_limited_count: number;
+      skipped_after_budget_count: number;
+      failed_count: number;
+      retry_attempts_total: number;
+      stopped_after_budget: boolean;
+      parse_strategy: ConnectorParseStrategy;
+      base_pause_between_receipts_ms: number;
+    },
+  ): Promise<{
+    shoppingReceipt: JsonMap | null;
+    shoppingReceiptMeta: ShoppingReceiptEnrichmentMeta;
+  }> {
+    const hasReceipt = operationHasShoppingReceipt(operation);
+    const receiptRequestKey = extractReceiptRequestKey(operation);
 
-    const documents = Array.isArray(operation.documents) ? operation.documents : [];
-    const hasReceipt =
-      Boolean(operation.hasShoppingReceipt) ||
-      documents.some((documentValue) => String(documentValue).toLowerCase() === "shoppingreceipt");
-    if (!hasReceipt) return null;
+    if (!hasReceipt) {
+      return {
+        shoppingReceipt: null,
+        shoppingReceiptMeta: buildShoppingReceiptMeta(operation, null),
+      };
+    }
 
-    const operationId =
-      text(operation.authorizationId) ||
-      text(asObj(operation.operationId)?.value) ||
-      text(operation.id);
-    if (!operationId) return null;
+    if (!sessionId) {
+      return {
+        shoppingReceipt: null,
+        shoppingReceiptMeta: {
+          receipt_request_key: receiptRequestKey,
+          receipt_enrichment_status: "error",
+          receipt_line_items_skipped: true,
+          receipt_retryable: false,
+          receipt_retry_attempts: 0,
+          receipt_result_code: null,
+          receipt_tracking_id: null,
+          receipt_message: "Receipt request session is missing.",
+          expected: true,
+          requested: false,
+        },
+      };
+    }
+
+    if (!receiptRequestKey) {
+      return {
+        shoppingReceipt: null,
+        shoppingReceiptMeta: {
+          receipt_request_key: null,
+          receipt_enrichment_status: "error",
+          receipt_line_items_skipped: true,
+          receipt_retryable: false,
+          receipt_retry_attempts: 0,
+          receipt_result_code: null,
+          receipt_tracking_id: null,
+          receipt_message: "Receipt request key is missing.",
+          expected: true,
+          requested: false,
+        },
+      };
+    }
+
+    if (receiptState.stoppedAfterBudget) {
+      receiptDebug.skipped_after_budget_count += 1;
+      return {
+        shoppingReceipt: null,
+        shoppingReceiptMeta: {
+          receipt_request_key: receiptRequestKey,
+          receipt_enrichment_status: "skipped_after_budget",
+          receipt_line_items_skipped: true,
+          receipt_retryable: true,
+          receipt_retry_attempts: 0,
+          receipt_result_code: "REQUEST_RATE_LIMIT_EXCEEDED",
+          receipt_tracking_id: null,
+          receipt_message:
+            "Receipt enrichment stopped for this run after shared retry budget was exhausted.",
+          expected: true,
+          requested: false,
+        },
+      };
+    }
 
     const url = new URL("https://www.tbank.ru/api/common/v1/shopping_receipt");
-    url.searchParams.set("operationId", operationId);
+    url.searchParams.set("operationId", receiptRequestKey);
     url.searchParams.set("sessionid", sessionId);
 
-    const response = await fetch(url.toString(), {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
+    let retryAttempts = 0;
+    let lastReceipt: JsonMap | null = null;
+    receiptDebug.requested_count += 1;
 
-    return asObj(await response.json().catch(() => null));
+    while (true) {
+      if (receiptState.hasRequestedReceipt) {
+        await waitMs(receiptBasePauseBetweenRequestsMs);
+      }
+      if (retryAttempts > 0) {
+        receiptDebug.retry_attempts_total += 1;
+        await waitMs(receiptRetryPauseMs);
+      }
+
+      receiptState.hasRequestedReceipt = true;
+      const response = await fetch(url.toString(), {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        receiptDebug.failed_count += 1;
+        return {
+          shoppingReceipt: null,
+          shoppingReceiptMeta: {
+            receipt_request_key: receiptRequestKey,
+            receipt_enrichment_status: "error",
+            receipt_line_items_skipped: true,
+            receipt_retryable: false,
+            receipt_retry_attempts: retryAttempts,
+            receipt_result_code: null,
+            receipt_tracking_id: null,
+            receipt_message: `Receipt request failed with HTTP ${response.status}.`,
+            expected: true,
+            requested: true,
+          },
+        };
+      }
+
+      lastReceipt = asObj(await response.json().catch(() => null));
+      const resultCode = extractReceiptResultCode(lastReceipt);
+      if (hasReceiptItems(lastReceipt)) {
+        receiptDebug.success_count += 1;
+        return {
+          shoppingReceipt: lastReceipt,
+          shoppingReceiptMeta: {
+            receipt_request_key: receiptRequestKey,
+            receipt_enrichment_status: "ok",
+            receipt_line_items_skipped: false,
+            receipt_retryable: false,
+            receipt_retry_attempts: retryAttempts,
+            receipt_result_code: resultCode,
+            receipt_tracking_id: text(lastReceipt?.trackingId),
+            receipt_message: extractReceiptMessage(lastReceipt),
+            expected: true,
+            requested: true,
+          },
+        };
+      }
+
+      if (resultCode !== "REQUEST_RATE_LIMIT_EXCEEDED") {
+        receiptDebug.failed_count += 1;
+        return {
+          shoppingReceipt: lastReceipt,
+          shoppingReceiptMeta: {
+            receipt_request_key: receiptRequestKey,
+            receipt_enrichment_status: "error",
+            receipt_line_items_skipped: true,
+            receipt_retryable: false,
+            receipt_retry_attempts: retryAttempts,
+            receipt_result_code: resultCode,
+            receipt_tracking_id: text(lastReceipt?.trackingId),
+            receipt_message: extractReceiptMessage(lastReceipt),
+            expected: true,
+            requested: true,
+          },
+        };
+      }
+
+      if (receiptState.sharedRetriesRemaining <= 0) {
+        receiptDebug.rate_limited_count += 1;
+        receiptState.stoppedAfterBudget = true;
+        receiptDebug.stopped_after_budget = true;
+        return {
+          shoppingReceipt: lastReceipt,
+          shoppingReceiptMeta: {
+            receipt_request_key: receiptRequestKey,
+            receipt_enrichment_status: "rate_limited",
+            receipt_line_items_skipped: true,
+            receipt_retryable: true,
+            receipt_retry_attempts: retryAttempts,
+            receipt_result_code: resultCode,
+            receipt_tracking_id: text(lastReceipt?.trackingId),
+            receipt_message: extractReceiptMessage(lastReceipt),
+            expected: true,
+            requested: true,
+          },
+        };
+      }
+
+      receiptState.sharedRetriesRemaining -= 1;
+      retryAttempts += 1;
+    }
   }
 
   async function tryFetchOperationDetail(
@@ -1308,18 +2225,75 @@ function normalizeMcc(value: unknown): string | null {
   return match ? match[0] : null;
 }
 
-function extractCardLast4FromOperation(operation: JsonMap): string | null {
+function extractCardLast4FromOperation(
+  operation: JsonMap,
+  merchantName: string,
+  isTransfer: boolean,
+): string | null {
+  if (isAccountNativeOperation(operation, merchantName, isTransfer)) return null;
+
   const candidates = [
     normalizeText(operation.cardNumber),
+    normalizeText(asObject(operation.payment)?.cardNumber),
     normalizeText(asObject(operation.card)?.panMasked),
     normalizeText(asObject(operation.card)?.number),
   ];
 
-  for (const candidate of candidates) {
-    const last4 = extractCardLast4(candidate);
-    if (last4) return last4;
+  const uniqueLast4 = Array.from(
+    new Set(
+      candidates
+        .map((candidate) => extractCardLast4(candidate))
+        .filter((candidate): candidate is string => Boolean(candidate)),
+    ),
+  );
+
+  if (uniqueLast4.length !== 1) return null;
+  return uniqueLast4[0];
+}
+
+function isAccountNativeOperation(
+  operation: JsonMap,
+  merchantName: string,
+  isTransfer: boolean,
+): boolean {
+  if (isTransfer) return true;
+
+  const markers = [
+    merchantName,
+    normalizeText(operation.description),
+    normalizeText(operation.merchantKey),
+    normalizeText(operation.subcategory),
+    normalizeText(operation.group),
+    normalizeText(asObject(operation.subgroup)?.name),
+    normalizeText(asObject(operation.spendingCategory)?.name),
+    normalizeText(asObject(asObject(operation.categoryInfo)?.bankCategory)?.name),
+    normalizeText(asObject(asObject(operation.categoryInfo)?.metacategory)?.name),
+    normalizeText(asObject(operation.category)?.name),
+    normalizeText(asObject(operation.payment)?.providerId),
+    normalizeText(asObject(operation.payment)?.providerGroupId),
+    normalizeText(asObject(operation.payment)?.paymentType),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase())
+    .join(" ");
+
+  if (
+    /between own accounts|between my accounts|card to card|p2p|transfer-inner|внутрибанковский перевод|между своими счетами|пополнение по номеру телефона|перевод|переводы/.test(
+      markers,
+    )
+  ) {
+    return true;
   }
-  return null;
+
+  if (
+    /interest|balance interest|deposit|bonus|correction|cashback payout|проценты|вклад|бонус|коррекц|пополнение вклада|закрытие вклада/.test(
+      markers,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function extractCardLast4(value: string | null): string | null {

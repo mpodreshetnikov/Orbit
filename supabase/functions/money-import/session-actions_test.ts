@@ -4,6 +4,7 @@ import { assertJsonResponse } from "../_shared/testing/response.ts";
 import {
   completeSessionAction,
   createSessionAction,
+  getImportContextAction,
   sessionStatusAction,
 } from "./session-actions.ts";
 import type { MoneyImportRepository } from "./repository.ts";
@@ -51,6 +52,7 @@ function createRepositoryMock(
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
     },
+    getExistingTransactionStates: async () => [],
     listReportRowsByBatch: async () => [],
     deleteReportRowsByBatch: async () => {},
     resolveAccountIdForRow: async () => {
@@ -61,6 +63,11 @@ function createRepositoryMock(
     },
     findExistingTransactionId: async () => null,
     findExistingLineItemId: async () => null,
+    repairExistingTransactionDetails: async () => ({
+      replaced_synthetic_line_items: false,
+      has_only_synthetic_line_items: false,
+      has_real_line_items: false,
+    }),
     insertOrResolveTransaction: async () => {
       throw new Error("unused");
     },
@@ -98,7 +105,7 @@ Deno.test("createSessionAction creates session and batch and returns token paylo
     {
       source: "tbank_web",
       payer_person_id: "person-1",
-      meta: { from: "test" },
+      meta: { from: "test", parse_strategy: "full" },
       window_from: "2026-01-01",
       window_to: "2026-01-31",
     },
@@ -116,18 +123,139 @@ Deno.test("createSessionAction creates session and batch and returns token paylo
     batch_id: string;
     ttl_minutes: number;
     last_imported_at: string | null;
+    parse_strategy: string | null;
   }>(response, 200);
 
   assertEquals(payload.session_id, "session-1");
   assertEquals(payload.batch_id, "batch-1");
   assertEquals(payload.ttl_minutes, 30);
   assertEquals(payload.last_imported_at, "2026-01-01T00:00:00.000Z");
+  assertEquals(payload.parse_strategy, "full");
   assertEquals(typeof payload.session_token, "string");
   assertEquals(payload.session_token.length > 10, true);
   assertEquals(state.createdSessionPayloads.length, 1);
   assertEquals(state.createdBatchPayloads.length, 1);
   assertEquals(state.sessionUpdates.length, 1);
+  assertEquals(
+    (state.createdSessionPayloads[0]?.meta as Record<string, unknown> | undefined)?.parse_strategy,
+    "full",
+  );
+  assertEquals(
+    (state.createdBatchPayloads[0]?.meta as Record<string, unknown> | undefined)?.parse_strategy,
+    "full",
+  );
 });
+
+Deno.test("getImportContextAction returns auto mode for recent source history", async () => {
+  const { repository } = createRepositoryMock({
+    lastImportedAt: "2026-02-20T12:00:00.000Z",
+  });
+
+  const payload = await assertJsonResponse<{
+    last_imported_at: string | null;
+    requires_history_prompt: boolean;
+    stale_threshold_days: number;
+    recommended_mode: string;
+    window_from: string | null;
+    window_to: string | null;
+  }>(
+    await getImportContextAction(
+      {
+        source: "tbank_web",
+        payer_person_id: "person-1",
+      },
+      userAuth,
+      {
+        repository,
+        now: () => new Date("2026-03-08T00:00:00.000Z"),
+      },
+    ),
+    200,
+  );
+
+  assertEquals(payload.last_imported_at, "2026-02-20T12:00:00.000Z");
+  assertEquals(payload.requires_history_prompt, false);
+  assertEquals(payload.stale_threshold_days, 365);
+  assertEquals(payload.recommended_mode, "auto");
+  assertEquals(payload.window_from, "2026-02-20T12:00:00.000Z");
+  assertEquals(payload.window_to, "2026-03-08T00:00:00.000Z");
+});
+
+Deno.test(
+  "getImportContextAction prompts for one-year history when source has no imports",
+  async () => {
+    const { repository } = createRepositoryMock({
+      lastImportedAt: null,
+    });
+
+    const payload = await assertJsonResponse<{
+      last_imported_at: string | null;
+      requires_history_prompt: boolean;
+      stale_threshold_days: number;
+      recommended_mode: string;
+      window_from: string | null;
+      window_to: string | null;
+    }>(
+      await getImportContextAction(
+        {
+          source: "tbank_web",
+          payer_person_id: "person-1",
+        },
+        userAuth,
+        {
+          repository,
+          now: () => new Date("2026-03-08T00:00:00.000Z"),
+        },
+      ),
+      200,
+    );
+
+    assertEquals(payload.last_imported_at, null);
+    assertEquals(payload.requires_history_prompt, true);
+    assertEquals(payload.stale_threshold_days, 365);
+    assertEquals(payload.recommended_mode, "preset");
+    assertEquals(payload.window_from, "2025-03-08T00:00:00.000Z");
+    assertEquals(payload.window_to, "2026-03-08T00:00:00.000Z");
+  },
+);
+
+Deno.test(
+  "getImportContextAction prompts for one-year history when last import is stale",
+  async () => {
+    const { repository } = createRepositoryMock({
+      lastImportedAt: "2024-01-15T09:00:00.000Z",
+    });
+
+    const payload = await assertJsonResponse<{
+      last_imported_at: string | null;
+      requires_history_prompt: boolean;
+      stale_threshold_days: number;
+      recommended_mode: string;
+      window_from: string | null;
+      window_to: string | null;
+    }>(
+      await getImportContextAction(
+        {
+          source: "tbank_web",
+          payer_person_id: "person-1",
+        },
+        userAuth,
+        {
+          repository,
+          now: () => new Date("2026-03-08T00:00:00.000Z"),
+        },
+      ),
+      200,
+    );
+
+    assertEquals(payload.last_imported_at, "2024-01-15T09:00:00.000Z");
+    assertEquals(payload.requires_history_prompt, true);
+    assertEquals(payload.stale_threshold_days, 365);
+    assertEquals(payload.recommended_mode, "preset");
+    assertEquals(payload.window_from, "2025-03-08T00:00:00.000Z");
+    assertEquals(payload.window_to, "2026-03-08T00:00:00.000Z");
+  },
+);
 
 Deno.test("sessionStatusAction returns 404 for unknown session", async () => {
   const { repository } = createRepositoryMock({ sessionForUser: null });

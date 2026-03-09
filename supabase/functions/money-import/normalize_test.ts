@@ -64,6 +64,19 @@ Deno.test(
         source_comment: "  Paid by card  ",
         cashback_amount: "12.34" as unknown as number,
         cashback_currency: " rub ",
+        operation_icon_url: "https://cdn.example.com/icon.png",
+        source_category: {
+          id: "cat-1",
+          name: "Food",
+        },
+        source_brand: {
+          source_key: "brand-1",
+          name: "Shop",
+          website_url: "https://shop.test",
+          logo_url: "https://shop.test/logo.png",
+          base_color: "ff0000",
+          base_text_color: "ffffff",
+        },
         line_items: null,
       },
       "tbank",
@@ -72,13 +85,66 @@ Deno.test(
     assertEquals(normalized.source_comment, "Paid by card");
     assertEquals(normalized.cashback_amount, 12.34);
     assertEquals(normalized.cashback_currency, "RUB");
+    assertEquals(normalized.operation_icon_url, "https://cdn.example.com/icon.png");
+    assertEquals(normalized.source_category, { id: "cat-1", name: "Food" });
+    assertEquals(normalized.source_brand, {
+      source_key: "brand-1",
+      name: "Shop",
+      website_url: "https://shop.test/",
+      logo_url: "https://shop.test/logo.png",
+      base_color: "ff0000",
+      base_text_color: "ffffff",
+    });
 
     const payload = buildTransactionInsertPayload(normalized, "person-1");
     assertEquals(payload.source_comment, "Paid by card");
     assertEquals(payload.cashback_amount, 12.34);
     assertEquals(payload.cashback_currency, "RUB");
+    assertEquals(payload.operation_icon_url, "https://cdn.example.com/icon.png");
+    assertEquals(payload.source_category_id, "cat-1");
+    assertEquals(payload.source_category_name, "Food");
   },
 );
+
+Deno.test(
+  "normalizeTransactionRow does not synthesize source_brand from merchant_name alone",
+  () => {
+    const normalized = normalizeTransactionRow(
+      {
+        posted_at: "2026-01-10",
+        amount: 100.5,
+        transaction_type: "expense",
+        source: "tbank_web",
+        merchant_name: "Закрытие вклада Т-Банк",
+        line_items: null,
+      },
+      "tbank",
+    );
+
+    assertEquals(normalized.merchant_name, "Закрытие вклада Т-Банк");
+    assertEquals(normalized.source_brand, null);
+  },
+);
+
+Deno.test("normalizeTransactionRow drops explicit bank-native source_brand labels", () => {
+  const normalized = normalizeTransactionRow(
+    {
+      posted_at: "2026-01-10",
+      amount: 100.5,
+      transaction_type: "expense",
+      source: "tbank_web",
+      merchant_name: "Внутрибанковский перевод",
+      source_brand: {
+        source_key: "native-transfer",
+        name: "Внутрибанковский перевод 3-м лицам",
+      },
+      line_items: null,
+    },
+    "tbank",
+  );
+
+  assertEquals(normalized.source_brand, null);
+});
 
 Deno.test(
   "normalizeTransactionRow derives source_comment and cashback from raw payload when missing",
@@ -163,6 +229,108 @@ Deno.test("extractAccountHintFromRow returns last 4 digits", () => {
       amount: 1,
       transaction_type: "expense",
       raw_payload: { account_hint: "no digits" },
+    }),
+    null,
+  );
+  assertEquals(
+    extractAccountHintFromRow({
+      posted_at: "2026-01-01",
+      amount: 1,
+      transaction_type: "expense",
+      account_hint: "primary card **** 4321",
+    }),
+    "4321",
+  );
+  assertEquals(
+    extractAccountHintFromRow({
+      posted_at: "2026-01-01",
+      amount: 1,
+      transaction_type: "expense",
+      raw_payload: {
+        operation: {
+          cardNumber: "220070******6986",
+        },
+      },
+    }),
+    "6986",
+  );
+  assertEquals(
+    extractAccountHintFromRow({
+      posted_at: "2026-01-01",
+      amount: 1,
+      transaction_type: "expense",
+      raw_payload: {
+        operation: {
+          payment: {
+            cardNumber: "553691******0666",
+          },
+        },
+      },
+    }),
+    "0666",
+  );
+});
+
+Deno.test("extractAccountHintFromRow suppresses account-native and ambiguous hints", () => {
+  assertEquals(
+    extractAccountHintFromRow({
+      posted_at: "2026-03-02T01:28:47.000Z",
+      amount: 62500,
+      transaction_type: "transfer",
+      is_transfer: true,
+      raw_payload: {
+        account_hint: null,
+        operation: {
+          description: "Между своими счетами",
+          merchantKey: "Между своими счетами",
+          group: "TRANSFER",
+          cardNumber: "518901******1807",
+          payment: {
+            cardNumber: "518901******0926",
+          },
+        },
+      },
+    }),
+    null,
+  );
+
+  assertEquals(
+    extractAccountHintFromRow({
+      posted_at: "2026-03-08T01:41:48.000Z",
+      amount: 10000,
+      transaction_type: "income",
+      raw_payload: {
+        operation: {
+          description: "Максим П.",
+          subgroup: { name: "Пополнение по номеру телефона" },
+          spendingCategory: { name: "Переводы" },
+          categoryInfo: {
+            bankCategory: { name: "Переводы" },
+          },
+          cardNumber: "220070******1778",
+        },
+      },
+    }),
+    null,
+  );
+
+  assertEquals(
+    extractAccountHintFromRow({
+      posted_at: "2026-03-08T02:38:02.000Z",
+      amount: 507.93,
+      transaction_type: "income",
+      raw_payload: {
+        operation: {
+          description: "Проценты на остаток",
+          merchantKey: "Проценты на остаток",
+          subgroup: { name: "Бонусы" },
+          spendingCategory: { name: "Проценты" },
+          categoryInfo: {
+            bankCategory: { name: "Проценты" },
+          },
+          cardNumber: "220070******7770",
+        },
+      },
     }),
     null,
   );

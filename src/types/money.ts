@@ -153,6 +153,7 @@ export interface MoneyTransaction {
   payer_person_id: string;
   account_id: string;
   card_id: string | null;
+  brand_id?: string | null;
   source: string;
   external_id: string | null;
   posted_at: string;
@@ -166,10 +167,33 @@ export interface MoneyTransaction {
   source_comment?: string | null;
   cashback_amount?: number | null;
   cashback_currency?: string | null;
+  operation_icon_url?: string | null;
+  source_category_id?: string | null;
+  source_category_name?: string | null;
+  receipt_request_key?: string | null;
+  receipt_enrichment_status?:
+    | "ok"
+    | "rate_limited"
+    | "skipped_after_budget"
+    | "not_requested"
+    | "error"
+    | null;
   is_transfer: boolean;
   transfer_group_id: string | null;
   raw_payload: Record<string, unknown> | null;
   dedupe_hash: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MoneyTransactionBrand {
+  id: string;
+  slug: string;
+  name: string;
+  website_url: string | null;
+  logo_url: string | null;
+  base_color: string | null;
+  base_text_color: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -198,6 +222,18 @@ export interface CreateMoneyTransactionInput {
   source_comment?: string | null;
   cashback_amount?: number | null;
   cashback_currency?: string | null;
+  operation_icon_url?: string | null;
+  source_category_id?: string | null;
+  source_category_name?: string | null;
+  receipt_request_key?: string | null;
+  receipt_enrichment_status?:
+    | "ok"
+    | "rate_limited"
+    | "skipped_after_budget"
+    | "not_requested"
+    | "error"
+    | null;
+  brand_id?: string | null;
   is_transfer?: boolean;
   transfer_group_id?: string | null;
   raw_payload?: Record<string, unknown> | null;
@@ -218,6 +254,18 @@ export interface UpdateMoneyTransactionInput {
   source_comment?: string | null;
   cashback_amount?: number | null;
   cashback_currency?: string | null;
+  operation_icon_url?: string | null;
+  source_category_id?: string | null;
+  source_category_name?: string | null;
+  receipt_request_key?: string | null;
+  receipt_enrichment_status?:
+    | "ok"
+    | "rate_limited"
+    | "skipped_after_budget"
+    | "not_requested"
+    | "error"
+    | null;
+  brand_id?: string | null;
   is_transfer?: boolean;
   transfer_group_id?: string | null;
 }

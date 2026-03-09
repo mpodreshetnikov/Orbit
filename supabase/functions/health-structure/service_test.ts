@@ -1,5 +1,6 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
+import type { EdgeTelemetry } from "../_shared/observability.ts";
 import { runHealthStructureService } from "./service.ts";
 import type { HealthStructureRepository } from "./repository.ts";
 import type { StructuredDataWithEntities } from "./types.ts";
@@ -209,6 +210,43 @@ const structuredData: StructuredDataWithEntities = {
   ],
 };
 
+function createTelemetryMock(): {
+  telemetry: EdgeTelemetry;
+  infos: Array<{ message: string; attrs?: Record<string, unknown> }>;
+  warns: Array<{ message: string; attrs?: Record<string, unknown> }>;
+} {
+  const infos: Array<{ message: string; attrs?: Record<string, unknown> }> = [];
+  const warns: Array<{ message: string; attrs?: Record<string, unknown> }> = [];
+
+  const telemetry: EdgeTelemetry = {
+    context: {
+      component: "health-structure-test",
+      traceId: "trace-1",
+      requestId: "request-1",
+      env: "test",
+      release: "test",
+    },
+    debug: () => {},
+    info: (message, attrs) => {
+      infos.push({ message, attrs });
+    },
+    warn: (message, attrs) => {
+      warns.push({ message, attrs });
+    },
+    error: () => {},
+    startSpan: () => ({
+      traceId: "trace-1",
+      spanId: "span-1",
+      requestId: "request-1",
+      traceparent: "00-trace-1-span-1-01",
+      log: () => {},
+      end: async () => {},
+    }),
+  };
+
+  return { telemetry, infos, warns };
+}
+
 Deno.test("runHealthStructureService returns auth/guard errors", async () => {
   const noUser = createRepositoryMock({ user: null });
   const unauthorized = await runHealthStructureService(
@@ -407,6 +445,7 @@ Deno.test("runHealthStructureService applies catalog/checkup fallback mappings",
 
   assertEquals(result.status, 200);
   assertEquals(state.observationRows[0].catalog_id, null);
+  assertEquals(state.observationRows[0].is_applied, false);
   assertEquals(state.findingRows[0].finding_type_id, null);
   assertEquals(state.findingRows[0].body_site_id, null);
   assertEquals(state.findingRows[0].count, 1);
@@ -434,3 +473,59 @@ Deno.test("runHealthStructureService handles non-Error parse failures", async ()
   assertEquals(result.status, 400);
   assertEquals(result.payload.error, "Unknown error");
 });
+
+Deno.test(
+  "runHealthStructureService emits telemetry for dropped and unresolved entities",
+  async () => {
+    const { repository } = createRepositoryMock({
+      observationCatalog: [],
+    });
+    const { telemetry, infos, warns } = createTelemetryMock();
+
+    const result = await runHealthStructureService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository,
+        telemetry,
+        parseStructuredData: async () => ({
+          ...structuredData,
+          observations: [
+            { ...structuredData.observations[0], obs_code: "UNKNOWN" },
+            { ...structuredData.observations[0], obs_code: null, obs_name: "   " },
+          ],
+          findings: [
+            { ...structuredData.findings[0], finding_code: "UNKNOWN", site_code: "UNKNOWN" },
+            {
+              ...structuredData.findings[0],
+              finding_code: null,
+              site_code: null,
+              finding_type_text: "   ",
+              source_anchor: "line",
+            },
+          ],
+        }),
+        lookupIcdCode: async () => null,
+      },
+    );
+
+    assertEquals(result.status, 200);
+    assertEquals(
+      infos.some(
+        (entry) => entry.message === "health_structure_unresolved_observation_catalog_refs",
+      ),
+      true,
+    );
+    assertEquals(
+      infos.some((entry) => entry.message === "health_structure_unresolved_finding_catalog_refs"),
+      true,
+    );
+    assertEquals(
+      warns.some((entry) => entry.message === "health_structure_invalid_observations_dropped"),
+      true,
+    );
+    assertEquals(
+      warns.some((entry) => entry.message === "health_structure_invalid_findings_dropped"),
+      true,
+    );
+  },
+);

@@ -840,6 +840,85 @@ export type Database = {
           },
         ]
       }
+      money_import_batch_brand_resolutions: {
+        Row: {
+          base_color: string | null
+          base_text_color: string | null
+          batch_id: string
+          created_at: string
+          id: string
+          logo_url: string | null
+          selected_action: string
+          selected_brand_id: string | null
+          source: string
+          source_key: string
+          source_name: string
+          suggested_brand_id: string | null
+          suggested_confidence: number
+          suggested_reason: string | null
+          updated_at: string
+          website_url: string | null
+        }
+        Insert: {
+          base_color?: string | null
+          base_text_color?: string | null
+          batch_id: string
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          selected_action: string
+          selected_brand_id?: string | null
+          source: string
+          source_key: string
+          source_name: string
+          suggested_brand_id?: string | null
+          suggested_confidence?: number
+          suggested_reason?: string | null
+          updated_at?: string
+          website_url?: string | null
+        }
+        Update: {
+          base_color?: string | null
+          base_text_color?: string | null
+          batch_id?: string
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          selected_action?: string
+          selected_brand_id?: string | null
+          source?: string
+          source_key?: string
+          source_name?: string
+          suggested_brand_id?: string | null
+          suggested_confidence?: number
+          suggested_reason?: string | null
+          updated_at?: string
+          website_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_import_batch_brand_resolutions_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "money_import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_import_batch_brand_resolutions_selected_brand_id_fkey"
+            columns: ["selected_brand_id"]
+            isOneToOne: false
+            referencedRelation: "money_transaction_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_import_batch_brand_resolutions_suggested_brand_id_fkey"
+            columns: ["suggested_brand_id"]
+            isOneToOne: false
+            referencedRelation: "money_transaction_brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       money_import_batch_rows: {
         Row: {
           batch_id: string
@@ -849,6 +928,8 @@ export type Database = {
           message: string | null
           parent_row_id: string | null
           payload: Json | null
+          receipt_enrichment_status: string | null
+          receipt_request_key: string | null
           row_kind: string
           source_line_index: number | null
           source_row_index: number
@@ -863,6 +944,8 @@ export type Database = {
           message?: string | null
           parent_row_id?: string | null
           payload?: Json | null
+          receipt_enrichment_status?: string | null
+          receipt_request_key?: string | null
           row_kind: string
           source_line_index?: number | null
           source_row_index: number
@@ -877,6 +960,8 @@ export type Database = {
           message?: string | null
           parent_row_id?: string | null
           payload?: Json | null
+          receipt_enrichment_status?: string | null
+          receipt_request_key?: string | null
           row_kind?: string
           source_line_index?: number | null
           source_row_index?: number
@@ -1144,10 +1229,97 @@ export type Database = {
           },
         ]
       }
+      money_transaction_brand_aliases: {
+        Row: {
+          base_color: string | null
+          base_text_color: string | null
+          brand_id: string
+          created_at: string
+          id: string
+          logo_url: string | null
+          source: string
+          source_key: string
+          source_name: string
+          updated_at: string
+          website_url: string | null
+        }
+        Insert: {
+          base_color?: string | null
+          base_text_color?: string | null
+          brand_id: string
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          source: string
+          source_key: string
+          source_name: string
+          updated_at?: string
+          website_url?: string | null
+        }
+        Update: {
+          base_color?: string | null
+          base_text_color?: string | null
+          brand_id?: string
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          source?: string
+          source_key?: string
+          source_name?: string
+          updated_at?: string
+          website_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_transaction_brand_aliases_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "money_transaction_brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_transaction_brands: {
+        Row: {
+          base_color: string | null
+          base_text_color: string | null
+          created_at: string
+          id: string
+          logo_url: string | null
+          name: string
+          slug: string
+          updated_at: string
+          website_url: string | null
+        }
+        Insert: {
+          base_color?: string | null
+          base_text_color?: string | null
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name: string
+          slug: string
+          updated_at?: string
+          website_url?: string | null
+        }
+        Update: {
+          base_color?: string | null
+          base_text_color?: string | null
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name?: string
+          slug?: string
+          updated_at?: string
+          website_url?: string | null
+        }
+        Relationships: []
+      }
       money_transactions: {
         Row: {
           account_id: string
           amount: number
+          brand_id: string | null
           card_id: string | null
           cashback_amount: number | null
           cashback_currency: string | null
@@ -1160,10 +1332,15 @@ export type Database = {
           is_transfer: boolean
           mcc: string | null
           merchant_name: string | null
+          operation_icon_url: string | null
           payer_person_id: string
           posted_at: string
           raw_payload: Json | null
+          receipt_enrichment_status: string | null
+          receipt_request_key: string | null
           source: string
+          source_category_id: string | null
+          source_category_name: string | null
           source_comment: string | null
           status: Database["public"]["Enums"]["money_transaction_status"]
           transaction_type: Database["public"]["Enums"]["money_transaction_type"]
@@ -1173,6 +1350,7 @@ export type Database = {
         Insert: {
           account_id: string
           amount: number
+          brand_id?: string | null
           card_id?: string | null
           cashback_amount?: number | null
           cashback_currency?: string | null
@@ -1185,10 +1363,15 @@ export type Database = {
           is_transfer?: boolean
           mcc?: string | null
           merchant_name?: string | null
+          operation_icon_url?: string | null
           payer_person_id: string
           posted_at: string
           raw_payload?: Json | null
+          receipt_enrichment_status?: string | null
+          receipt_request_key?: string | null
           source?: string
+          source_category_id?: string | null
+          source_category_name?: string | null
           source_comment?: string | null
           status?: Database["public"]["Enums"]["money_transaction_status"]
           transaction_type: Database["public"]["Enums"]["money_transaction_type"]
@@ -1198,6 +1381,7 @@ export type Database = {
         Update: {
           account_id?: string
           amount?: number
+          brand_id?: string | null
           card_id?: string | null
           cashback_amount?: number | null
           cashback_currency?: string | null
@@ -1210,10 +1394,15 @@ export type Database = {
           is_transfer?: boolean
           mcc?: string | null
           merchant_name?: string | null
+          operation_icon_url?: string | null
           payer_person_id?: string
           posted_at?: string
           raw_payload?: Json | null
+          receipt_enrichment_status?: string | null
+          receipt_request_key?: string | null
           source?: string
+          source_category_id?: string | null
+          source_category_name?: string | null
           source_comment?: string | null
           status?: Database["public"]["Enums"]["money_transaction_status"]
           transaction_type?: Database["public"]["Enums"]["money_transaction_type"]
@@ -1226,6 +1415,13 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "money_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_transactions_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "money_transaction_brands"
             referencedColumns: ["id"]
           },
           {

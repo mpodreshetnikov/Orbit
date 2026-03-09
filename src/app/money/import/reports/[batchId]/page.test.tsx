@@ -28,6 +28,14 @@ let cardsResult: { data: unknown; error: { message: string } | null } = {
   data: null,
   error: null,
 };
+let brandResolutionsResult: { data: unknown; error: { message: string } | null } = {
+  data: null,
+  error: null,
+};
+let brandsResult: { data: unknown; error: { message: string } | null } = {
+  data: null,
+  error: null,
+};
 const rpcMock = vi.fn();
 
 vi.mock("next-intl", () => ({
@@ -87,6 +95,37 @@ vi.mock("@/lib/supabase", () => ({
         };
       }
 
+      if (table === "money_import_batch_brand_resolutions") {
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          order() {
+            return this;
+          },
+          then(resolve: (value: unknown) => unknown) {
+            return Promise.resolve(brandResolutionsResult).then(resolve);
+          },
+        };
+      }
+
+      if (table === "money_transaction_brands") {
+        return {
+          select() {
+            return this;
+          },
+          order() {
+            return this;
+          },
+          then(resolve: (value: unknown) => unknown) {
+            return Promise.resolve(brandsResult).then(resolve);
+          },
+        };
+      }
+
       return {
         select() {
           return this;
@@ -141,6 +180,13 @@ function makeRows() {
         cashback_currency: "RUB",
         merchant_name: "Store A",
         comment: "Main row comment",
+        operation_icon_url: "https://cdn.example.com/store-a.png",
+        source_category_id: "cat-1",
+        source_category_name: "Food",
+        source_brand: {
+          name: "Store Brand",
+          logo_url: "https://cdn.example.com/store-brand.png",
+        },
         raw_payload: { debug: "hidden" },
       },
       created_at: "2026-01-01T09:00:00.000Z",
@@ -196,6 +242,8 @@ describe("MoneyImportReportPage", () => {
     rowsResult = { data: null, error: null };
     accountsResult = { data: [], error: null };
     cardsResult = { data: [], error: null };
+    brandResolutionsResult = { data: [], error: null };
+    brandsResult = { data: [], error: null };
     rpcMock.mockReset();
     importActionMock.mockReset();
   });
@@ -243,6 +291,11 @@ describe("MoneyImportReportPage", () => {
       expect(screen.getByText("money.importResultsTitle")).toBeInTheDocument();
     });
 
+    expect(screen.getByRole("link", { name: "money.importViewHistory" })).toHaveAttribute(
+      "href",
+      "/money/import/history",
+    );
+
     expect(screen.getByTestId("report-table-header-row")).toBeInTheDocument();
     expect(screen.getByText(/^Date$/)).toBeInTheDocument();
     expect(screen.getByText(/^Status$/)).toBeInTheDocument();
@@ -254,6 +307,8 @@ describe("MoneyImportReportPage", () => {
     expect(screen.getByText("Store A")).toBeInTheDocument();
     expect(screen.getByText("Store B")).toBeInTheDocument();
     expect(screen.getByText("Main row comment")).toBeInTheDocument();
+    expect(screen.getByText("Food")).toBeInTheDocument();
+    expect(screen.getByText("Store Brand")).toBeInTheDocument();
     expect(screen.getByText("Main account / Travel card")).toBeInTheDocument();
     expect(screen.getByText("money.importResultRowInserted")).toBeInTheDocument();
     expect(screen.getByText("money.importResultRowSkipped")).toBeInTheDocument();
@@ -357,6 +412,66 @@ describe("MoneyImportReportPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows transactions without full details count for tbank web batches", async () => {
+    batchResult = {
+      data: makeBatch({
+        source: "tbank_web",
+      }),
+      error: null,
+    };
+    rowsResult = {
+      data: [
+        {
+          id: "tx-receipt-skip",
+          batch_id: "batch-1",
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: 1,
+          source_line_index: null,
+          status: "inserted",
+          message: null,
+          receipt_enrichment_status: "rate_limited",
+          payload: {
+            posted_at: "2026-01-01T09:00:00.000Z",
+            amount: -10,
+            currency: "RUB",
+            merchant_name: "Receipt-limited store",
+            receipt_enrichment_status: "rate_limited",
+          },
+          created_at: "2026-01-01T09:00:00.000Z",
+        },
+        {
+          id: "tx-receipt-budget",
+          batch_id: "batch-1",
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: 2,
+          source_line_index: null,
+          status: "inserted",
+          message: null,
+          payload: {
+            posted_at: "2026-01-01T10:00:00.000Z",
+            amount: -20,
+            currency: "RUB",
+            merchant_name: "Receipt-budget store",
+            receipt_enrichment_status: "skipped_after_budget",
+          },
+          created_at: "2026-01-01T10:00:00.000Z",
+        },
+      ],
+      error: null,
+    };
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText("Transactions without full details: 2")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Warning: 2 TBank Web transactions were imported without full details because receipt line items were skipped due to TBank rate limiting. You can retry receipt enrichment later.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("shows transaction posted date and orders transactions by newest date first", async () => {
     batchResult = { data: makeBatch(), error: null };
     rowsResult = {
@@ -436,7 +551,7 @@ describe("MoneyImportReportPage", () => {
     expect(await screen.findByText("No rows imported for this batch.")).toBeInTheDocument();
   });
 
-  it("shows pending preview actions, applies batch, and hides card mapping while pending", async () => {
+  it("shows pending preview actions, applies batch, and keeps card mapping available", async () => {
     batchResult = {
       data: makeBatch({
         status: "pending",
@@ -474,7 +589,8 @@ describe("MoneyImportReportPage", () => {
     expect(await screen.findByText("money.importPendingReviewBanner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "money.importApplyBatch" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "money.importDiscardBatch" })).toBeInTheDocument();
-    expect(screen.queryByText("Card mapping")).not.toBeInTheDocument();
+    expect(screen.getByText("Card mapping")).toBeInTheDocument();
+    expect(screen.getByTestId("card-remap-apply-card-1")).toBeDisabled();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "money.importApplyBatch" }));
@@ -488,6 +604,156 @@ describe("MoneyImportReportPage", () => {
         "access-token",
       );
     });
+  });
+
+  it("renders pending brand decisions and auto-saves overrides before apply", async () => {
+    batchResult = {
+      data: makeBatch({
+        status: "pending",
+        completed_at: null,
+        source: "tbank_web",
+      }),
+      error: null,
+    };
+    rowsResult = { data: makeRows(), error: null };
+    brandResolutionsResult = {
+      data: [
+        {
+          id: "resolution-1",
+          batch_id: "batch-1",
+          source: "tbank",
+          source_key: "known-brand",
+          source_name: "Known Brand",
+          website_url: "https://known.example.com",
+          logo_url: "https://cdn.example.com/known-brand.png",
+          base_color: null,
+          base_text_color: null,
+          suggested_brand_id: "brand-1",
+          suggested_confidence: 90,
+          suggested_reason: "name_match",
+          selected_action: "create_new",
+          selected_brand_id: null,
+          created_at: "2026-01-01T10:00:00.000Z",
+          updated_at: "2026-01-01T10:00:00.000Z",
+        },
+      ],
+      error: null,
+    };
+    brandsResult = {
+      data: [
+        { id: "brand-1", name: "Known Brand", slug: "known-brand" },
+        { id: "brand-2", name: "Manual Brand", slug: "manual-brand" },
+      ],
+      error: null,
+    };
+    importActionMock.mockResolvedValue({
+      ok: true,
+    });
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText("Brand review")).toBeInTheDocument();
+    expect(await screen.findByText("Confidence: 90")).toBeInTheDocument();
+    expect(screen.getAllByText("Known Brand").length).toBeGreaterThan(0);
+    expect(screen.getByRole("img", { name: "Known Brand logo" })).toHaveAttribute(
+      "src",
+      "https://cdn.example.com/known-brand.png",
+    );
+
+    fireEvent.change(screen.getByTestId("brand-resolution-action-resolution-1"), {
+      target: { value: "match_existing" },
+    });
+    fireEvent.change(screen.getByTestId("brand-resolution-brand-resolution-1"), {
+      target: { value: "brand-2" },
+    });
+
+    expect(screen.queryByTestId("brand-resolution-save-resolution-1")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(importActionMock).toHaveBeenCalledWith(
+        {
+          action: "update_brand_resolution",
+          resolution_id: "resolution-1",
+          selected_action: "match_existing",
+          selected_brand_id: "brand-2",
+        },
+        "access-token",
+      );
+    });
+  });
+
+  it("hides zero-confidence brand decisions inside a collapsed new brands block", async () => {
+    batchResult = {
+      data: makeBatch({
+        status: "pending",
+        completed_at: null,
+        source: "tbank_web",
+      }),
+      error: null,
+    };
+    rowsResult = { data: makeRows(), error: null };
+    brandResolutionsResult = {
+      data: [
+        {
+          id: "resolution-1",
+          batch_id: "batch-1",
+          source: "tbank",
+          source_key: "known-brand",
+          source_name: "Known Brand",
+          website_url: "https://known.example.com",
+          logo_url: "https://cdn.example.com/known-brand.png",
+          base_color: null,
+          base_text_color: null,
+          suggested_brand_id: "brand-1",
+          suggested_confidence: 90,
+          suggested_reason: "name_match",
+          selected_action: "create_new",
+          selected_brand_id: null,
+          created_at: "2026-01-01T10:00:00.000Z",
+          updated_at: "2026-01-01T10:00:00.000Z",
+        },
+        {
+          id: "resolution-2",
+          batch_id: "batch-1",
+          source: "tbank",
+          source_key: "new-brand",
+          source_name: "Unseen Brand",
+          website_url: "https://unseen.example.com",
+          logo_url: "https://cdn.example.com/unseen-brand.png",
+          base_color: null,
+          base_text_color: null,
+          suggested_brand_id: null,
+          suggested_confidence: 0,
+          suggested_reason: "create_new",
+          selected_action: "create_new",
+          selected_brand_id: null,
+          created_at: "2026-01-01T10:00:00.000Z",
+          updated_at: "2026-01-01T10:00:00.000Z",
+        },
+      ],
+      error: null,
+    };
+    brandsResult = {
+      data: [{ id: "brand-1", name: "Known Brand", slug: "known-brand" }],
+      error: null,
+    };
+
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByText("Brand review")).toBeInTheDocument();
+    expect(screen.getByText("Confidence: 90")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /New Brands to review/i })).toBeInTheDocument();
+    expect(screen.queryByText("Unseen Brand")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /New Brands to review/i }));
+
+    expect(await screen.findByText("Unseen Brand")).toBeInTheDocument();
+    expect(screen.getByText("Confidence: 0")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Unseen Brand logo" })).toHaveAttribute(
+      "src",
+      "https://cdn.example.com/unseen-brand.png",
+    );
   });
 
   it("shows discarded batch state without review actions", async () => {
@@ -549,6 +815,162 @@ describe("MoneyImportReportPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Store 1")).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps long lists virtualized while expanded rows are toggled", async () => {
+    batchResult = { data: makeBatch({ parsed_transactions_count: 65 }), error: null };
+    rowsResult = {
+      data: [
+        ...Array.from({ length: 65 }).map((_, index) => ({
+          id: `tx-${index + 1}`,
+          batch_id: "batch-1",
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: index + 1,
+          source_line_index: null,
+          status: "inserted",
+          message: null,
+          payload: {
+            posted_at: "2026-02-01T09:00:00.000Z",
+            amount: -(index + 1),
+            currency: "RUB",
+            merchant_name: `Store ${index + 1}`,
+          },
+          created_at: "2026-03-01T09:00:00.000Z",
+        })),
+        {
+          id: "line-50-1",
+          batch_id: "batch-1",
+          parent_row_id: "tx-50",
+          row_kind: "line_item",
+          source_row_index: 50,
+          source_line_index: 1,
+          status: "inserted",
+          message: null,
+          payload: {
+            title: "Expanded item",
+            amount: -50,
+            currency: "RUB",
+            quantity: 1,
+            unit: "pcs",
+          },
+          created_at: "2026-03-10T09:00:01.000Z",
+        },
+      ],
+      error: null,
+    };
+
+    const user = userEvent.setup();
+    render(<MoneyImportReportPage />);
+
+    expect(await screen.findByTestId("report-table-scroll-body")).toBeInTheDocument();
+
+    const scrollBody = screen.getByTestId("report-table-scroll-body");
+    Object.defineProperty(scrollBody, "scrollTop", {
+      configurable: true,
+      value: 3600,
+      writable: true,
+    });
+    fireEvent.scroll(scrollBody);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Store 1")).not.toBeInTheDocument();
+      expect(screen.getByText("Store 50")).toBeInTheDocument();
+    });
+
+    const store50Row = screen.getByText("Store 50").closest("section");
+    expect(store50Row).not.toBeNull();
+
+    await user.click(within(store50Row!).getByRole("button", { name: /Line items \(1\)/i }));
+
+    expect(await screen.findByText("Expanded item")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.queryByText("Store 1")).not.toBeInTheDocument();
+    });
+
+    await user.click(within(store50Row!).getByRole("button", { name: /Line items \(1\)/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Expanded item")).not.toBeInTheDocument();
+      expect(screen.queryByText("Store 1")).not.toBeInTheDocument();
+      expect(screen.getByText("Store 50")).toBeInTheDocument();
+    });
+  });
+
+  it("does not re-enter row measurement indefinitely after scrolling", async () => {
+    batchResult = { data: makeBatch({ parsed_transactions_count: 65 }), error: null };
+    rowsResult = {
+      data: Array.from({ length: 65 }).map((_, index) => ({
+        id: `tx-${index + 1}`,
+        batch_id: "batch-1",
+        parent_row_id: null,
+        row_kind: "transaction",
+        source_row_index: index + 1,
+        source_line_index: null,
+        status: "inserted",
+        message: null,
+        payload: {
+          posted_at: "2026-01-01T09:00:00.000Z",
+          amount: -(index + 1),
+          currency: "RUB",
+          merchant_name: `Store ${index + 1}`,
+        },
+        created_at: "2026-01-01T09:00:00.000Z",
+      })),
+      error: null,
+    };
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight",
+    );
+    let unstableMeasurements = false;
+    let measurementCount = 0;
+
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        if (!unstableMeasurements) {
+          return 96;
+        }
+        measurementCount += 1;
+        return measurementCount % 2 === 0 ? 96 : 97;
+      },
+    });
+
+    try {
+      render(<MoneyImportReportPage />);
+
+      expect(await screen.findByText("Store 1")).toBeInTheDocument();
+
+      const scrollBody = screen.getByTestId("report-table-scroll-body");
+      Object.defineProperty(scrollBody, "scrollTop", {
+        configurable: true,
+        value: 2400,
+        writable: true,
+      });
+
+      unstableMeasurements = true;
+      fireEvent.scroll(scrollBody);
+
+      await waitFor(() => {
+        expect(screen.queryByText("Store 1")).not.toBeInTheDocument();
+      });
+
+      expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining("Maximum update depth exceeded"),
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      } else {
+        // Match the pre-test environment when offsetHeight was inherited.
+        Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+      }
+    }
   });
 
   it("renders card mapping panel for current batch cards and calls remap rpc", async () => {

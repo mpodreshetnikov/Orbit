@@ -58,7 +58,73 @@ describe("background-router", () => {
     ).resolves.toEqual({
       ok: true,
       session: { source: "tbank_web" },
+      active_run: null,
     });
+  });
+
+  it("includes active run snapshot when session is requested during an in-flight import", async () => {
+    const deps = createDeps();
+    const parseDeferred = createDeferred<{
+      rows: Array<{ id: number }>;
+      windowTo: string;
+      parsedThroughAt: string;
+      parsedTransactionsCount: number;
+    }>();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockReturnValue(parseDeferred.promise),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-2" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+    });
+
+    const runPromise = routeBackgroundMessage(
+      {
+        type: "MONEY_IMPORT_RUN",
+        origin: "source_page_overlay",
+      },
+      deps,
+      { senderTabId: 777 },
+    );
+
+    await Promise.resolve();
+
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, deps),
+    ).resolves.toEqual({
+      ok: true,
+      session: {
+        source: "tbank_web",
+        session_id: "session-1",
+        batch_id: "batch-1",
+        function_url: "https://example.com/fn",
+        session_token: "token",
+      },
+      active_run: expect.objectContaining({
+        running: true,
+        phase: "starting",
+        progress_percent: 2,
+        batch_id: "batch-1",
+      }),
+    });
+
+    parseDeferred.resolve({
+      rows: [{ id: 1 }],
+      windowTo: "2026-02-20T00:00:00.000Z",
+      parsedThroughAt: "2026-02-19T00:00:00.000Z",
+      parsedTransactionsCount: 1,
+    });
+
+    await expect(runPromise).resolves.toMatchObject({ ok: true });
   });
 
   it("fails run when session is missing", async () => {
@@ -67,6 +133,109 @@ describe("background-router", () => {
 
     await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
       "No active import session",
+    );
+  });
+
+  it("rebroadcasts granular parse progress emitted from the page script", async () => {
+    const deps = createDeps();
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+    });
+
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_PROGRESS",
+          session_id: "session-1",
+          phase: "parse_fetching_ranges",
+          progress_percent: 32,
+          parsed_transactions_count: 7,
+        } as never,
+        deps,
+        { senderTabId: 777 },
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    expect(deps.importRunnerDeps.broadcastToAppTabs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "MONEY_IMPORT_PROGRESS",
+        phase: "parse_fetching_ranges",
+        progress_percent: 32,
+        parsed_transactions_count: 7,
+      }),
+    );
+    expect(deps.importRunnerDeps.broadcastToSourceTab).toHaveBeenCalledWith(
+      777,
+      expect.objectContaining({
+        type: "MONEY_IMPORT_PROGRESS",
+        phase: "parse_fetching_ranges",
+        progress_percent: 32,
+      }),
+    );
+  });
+
+  it("returns existing transaction states via the active import session", async () => {
+    const deps = createDeps();
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      function_url: "https://example.com/fn",
+      user_access_token: "user-token",
+      payer_person_id: "person-1",
+    });
+    deps.importRunnerDeps.callEdge.mockResolvedValue({
+      states: [
+        {
+          transaction_id: "tx-1",
+          exists: true,
+          fulfilled: false,
+          has_only_synthetic_line_items: true,
+          has_real_line_items: false,
+          receipt_enrichment_status: "ok",
+        },
+      ],
+    });
+
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_GET_EXISTING_TRANSACTION_STATES",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          candidates: [
+            {
+              external_id: "ext-1",
+              dedupe_hash: "hash-1",
+              posted_at: "2026-01-01T00:00:00.000Z",
+              amount: 10,
+            },
+          ],
+        } as never,
+        deps,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      states: [
+        {
+          transaction_id: "tx-1",
+          exists: true,
+          fulfilled: false,
+          has_only_synthetic_line_items: true,
+          has_real_line_items: false,
+          receipt_enrichment_status: "ok",
+        },
+      ],
+    });
+
+    expect(deps.importRunnerDeps.callEdge).toHaveBeenCalledWith(
+      "https://example.com/fn",
+      "user-token",
+      expect.objectContaining({
+        action: "get_existing_transaction_states",
+        source: "tbank_web",
+        payer_person_id: "person-1",
+      }),
     );
   });
 
@@ -291,6 +460,56 @@ describe("background-router", () => {
 
     expect(response).toMatchObject({ ok: true });
     expect(response).not.toHaveProperty("report_url");
+  });
+
+  it("records resolved session window in debug run state", async () => {
+    const deps = createDeps();
+    const connector = {
+      sourceId: "tbank_web",
+      parse: vi.fn().mockResolvedValue({
+        rows: [{ id: 1 }],
+        windowTo: "2026-03-08T00:00:00.000Z",
+        parsedThroughAt: "2026-03-01T00:00:00.000Z",
+        parsedTransactionsCount: 1,
+      }),
+    };
+    deps.importRunnerDeps.getConnector.mockReturnValue(connector);
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-popup" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+      window_from: "2026-02-01T00:00:00.000Z",
+      window_to: "2026-03-08T00:00:00.000Z",
+      last_imported_at: "2025-01-01T00:00:00.000Z",
+    });
+
+    await routeBackgroundMessage(
+      {
+        type: "MONEY_IMPORT_RUN",
+        origin: "popup",
+        debug: { enabled: true },
+      },
+      deps,
+    );
+
+    const lastRun = (await routeBackgroundMessage(
+      { type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" },
+      deps,
+    )) as {
+      run?: {
+        run?: {
+          window_from?: string | null;
+        };
+      };
+    };
+
+    expect(lastRun.run?.run?.window_from).toBe("2026-02-01T00:00:00.000Z");
   });
 
   it("persists structured edge diagnostics in run_failed event", async () => {

@@ -58,7 +58,8 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
   const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const openRouterModel = Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? "openai/gpt-4o-mini";
+  const openRouterModel =
+    Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? "openai/gpt-5.2:nitro";
   const openRouterTimeoutRaw = Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_TIMEOUT_MS");
   const openRouterTimeoutMs =
     openRouterTimeoutRaw && Number.isFinite(Number(openRouterTimeoutRaw))

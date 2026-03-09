@@ -142,6 +142,9 @@
     "supabase/db/policies/money_import_batch_rows.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
     ],
+    "supabase/db/policies/money_import_batch_brand_resolutions.sql": [
+      "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
     "supabase/db/policies/money_import_batches.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
     ],

@@ -125,7 +125,9 @@ test.describe("medication refill reminder snooze", () => {
       await expect(page.getByText("Waiting for a delivery?", { exact: false })).toBeVisible();
 
       await page.getByRole("button", { name: "Snooze reminder" }).click();
-      await expect(page.getByText("Low-stock reminder snoozed until", { exact: false })).toBeVisible();
+      await expect(
+        page.getByText("Low-stock reminder snoozed until", { exact: false }),
+      ).toBeVisible();
       await expect.poll(() => countSnoozes(regimenId)).toBe(1);
 
       await page.getByRole("button", { name: "Clear snooze" }).click();

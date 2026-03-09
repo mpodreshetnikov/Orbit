@@ -17,6 +17,7 @@ interface MutableArtifact {
       mapping_drop_counts: Record<string, number>;
       api_operation_count: number;
       mapped_row_count: number;
+      receipt_enrichment?: Record<string, unknown>;
     };
   };
   debug_run: {
@@ -137,5 +138,33 @@ describe("analyze-tbank-debug-artifact", () => {
     };
     const diagnostics = analyzeArtifactBundle(asArtifact(artifact), ".tmp/test-artifact");
     expect(diagnostics.categories).toContain("MAPPING_DROP");
+  });
+
+  it("marks receipt enrichment rate limiting", () => {
+    const artifact = createBaseArtifact();
+    artifact.parse_output.rows = [
+      {
+        posted_at: "2026-03-05T00:00:00.000Z",
+        line_items: [{ title: "Fallback", amount: -10 }],
+        receipt_line_items_skipped: true,
+        receipt_enrichment_status: "rate_limited",
+      },
+    ];
+    artifact.parse_output.debug = {
+      ...artifact.parse_output.debug,
+      receipt_enrichment: {
+        requested_count: 1,
+        success_count: 0,
+        rate_limited_count: 1,
+        skipped_after_budget_count: 0,
+        failed_count: 0,
+        retry_attempts_total: 1,
+        stopped_after_budget: false,
+        base_pause_between_receipts_ms: 300,
+      },
+    } as typeof artifact.parse_output.debug;
+    const diagnostics = analyzeArtifactBundle(asArtifact(artifact), ".tmp/test-artifact");
+    expect(diagnostics.categories).toContain("ENRICHMENT_RATE_LIMITED");
+    expect(diagnostics.passed).toBe(false);
   });
 });

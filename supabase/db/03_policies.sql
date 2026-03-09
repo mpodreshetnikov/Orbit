@@ -47,11 +47,14 @@ BEGIN;
 \i policies/money_accounts.sql
 \i policies/money_cards.sql
 \i policies/money_categories.sql
+\i policies/money_transaction_brands.sql
+\i policies/money_transaction_brand_aliases.sql
 \i policies/money_transactions.sql
 \i policies/money_line_items.sql
 \i policies/money_import_batches.sql
 \i policies/money_import_sessions.sql
 \i policies/money_import_batch_rows.sql
+\i policies/money_import_batch_brand_resolutions.sql
 
 -- ============================================================================
 -- Checkups

@@ -197,6 +197,15 @@ describe("MoneyImportPage", () => {
     expect(screen.getByText("person.selectPrompt")).toBeInTheDocument();
   });
 
+  it("shows a history entry point in the page header", () => {
+    render(<MoneyImportPage />);
+
+    expect(screen.getByRole("link", { name: "money.importViewHistory" })).toHaveAttribute(
+      "href",
+      "/money/import/history",
+    );
+  });
+
   it("parses file imports and can create a missing source account", async () => {
     connectorsState = [
       makeFileConnector("csv-src", async () => ({
@@ -277,7 +286,137 @@ describe("MoneyImportPage", () => {
     });
   });
 
-  it("starts extension import flow and shows created-session message", async () => {
+  it("derives tbank card hint from raw payload cardNumber when top-level hint is missing", async () => {
+    connectorsState = [
+      makeFileConnector("tbank_web", async () => ({
+        transactions: [
+          makeParsedTransaction({
+            source: "tbank_web",
+            account_hint: null,
+            raw_payload: {
+              connector_source: "tbank_web",
+              operation: {
+                cardNumber: "220070******6986",
+              },
+            },
+          }),
+        ],
+      })),
+    ];
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-1"), makeAccount("tbank", "acc-2")],
+      isLoading: false,
+    });
+    hookMocks.useMoneyCardsByAccountIds.mockReturnValue({
+      data: [{ id: "card-6986", account_id: "acc-2", last4: "6986", card_label: "TBank" }],
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ batch_id: "batch-raw-card" }),
+    } as Response);
+
+    render(<MoneyImportPage />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /CSV import/ }));
+    const fileInput = screen.getByLabelText("dropzone-input");
+    const file = new File(["date,amount"], "bank.csv", { type: "text/csv" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    const confirmButton = await screen.findByRole("button", { name: "money.importConfirm" });
+    expect(confirmButton).toBeEnabled();
+
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://supabase.test/functions/v1/money-import",
+        expect.objectContaining({
+          body: expect.stringContaining('"account_hint":"6986"'),
+        }),
+      );
+      expect(routerMock.push).toHaveBeenCalledWith("/money/import/reports/batch-raw-card");
+    });
+  });
+
+  it("suppresses account-native tbank hints and falls back to default account", async () => {
+    connectorsState = [
+      makeFileConnector("tbank_web", async () => ({
+        transactions: [
+          makeParsedTransaction({
+            source: "tbank_web",
+            account_hint: null,
+            transaction_type: "income",
+            raw_payload: {
+              connector_source: "tbank_web",
+              operation: {
+                description: "Проценты на остаток",
+                merchantKey: "Проценты на остаток",
+                subgroup: { name: "Бонусы" },
+                spendingCategory: { name: "Проценты" },
+                categoryInfo: {
+                  bankCategory: { name: "Проценты" },
+                },
+                cardNumber: "220070******7770",
+              },
+            },
+          }),
+        ],
+      })),
+    ];
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-1"), makeAccount("tbank", "acc-2")],
+      isLoading: false,
+    });
+    hookMocks.useMoneyCardsByAccountIds.mockReturnValue({
+      data: [],
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ batch_id: "batch-account-native" }),
+    } as Response);
+
+    window.localStorage.setItem("money-import-default-account:person-1:tbank_web", "acc-2");
+
+    render(<MoneyImportPage />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /CSV import/ }));
+    const fileInput = screen.getByLabelText("dropzone-input");
+    const file = new File(["date,amount"], "bank.csv", { type: "text/csv" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.queryByText("*7770")).not.toBeInTheDocument();
+    });
+
+    await user.click(await screen.findByRole("button", { name: "money.importConfirm" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://supabase.test/functions/v1/money-import",
+        expect.objectContaining({
+          body: expect.stringContaining('"account_id":"acc-2"'),
+        }),
+      );
+      const request = fetchMock.mock.calls[0]?.[1];
+      const payload = JSON.parse(String(request?.body ?? "{}")) as {
+        rows?: Array<{
+          account_id?: string | null;
+          account_hint?: string | null;
+          raw_payload?: { account_hint?: string | null; connector_source?: string | null };
+        }>;
+      };
+      const row = payload.rows?.[0];
+      expect(row?.account_id).toBe("acc-2");
+      expect(row?.account_hint).toBeNull();
+      expect(row?.raw_payload?.connector_source).toBe("tbank_web");
+      expect(row?.raw_payload?.account_hint).toBeNull();
+      expect(routerMock.push).toHaveBeenCalledWith("/money/import/reports/batch-account-native");
+    });
+  });
+
+  it("starts extension import flow and posts the created session to the extension bridge", async () => {
     connectorsState = [
       {
         sourceId: "tbank_web",
@@ -286,18 +425,32 @@ describe("MoneyImportPage", () => {
         websiteUrl: "https://example-bank.test",
       },
     ];
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        session_id: "session-1",
-        session_token: "token-1",
-        batch_id: "batch-1",
-        source: "tbank_web",
-        payer_person_id: "person-1",
-        expires_at: "2026-03-01T00:00:00.000Z",
-        last_imported_at: null,
-      }),
-    } as Response);
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          requires_history_prompt: false,
+          stale_threshold_days: 365,
+          recommended_mode: "auto",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "session-1",
+          session_token: "token-1",
+          batch_id: "batch-1",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          expires_at: "2026-03-01T00:00:00.000Z",
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response);
     hookMocks.useMoneyAccounts.mockReturnValue({
       data: [makeAccount("tbank", "acc-tbank")],
       isLoading: false,
@@ -326,28 +479,363 @@ describe("MoneyImportPage", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: /TBank extension/ }));
-    await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
+    expect(await screen.findByText("Import history range")).toBeInTheDocument();
+    const startImportButton = await screen.findByRole("button", {
+      name: "money.importStartImport",
+    });
+    await waitFor(() => {
+      expect(startImportButton).toBeEnabled();
+    });
+    await user.click(startImportButton);
 
-    expect(await screen.findByText("money.importOpenCurrentReport")).toBeInTheDocument();
-    expect(openSpy).toHaveBeenCalledWith(
-      "https://example-bank.test",
-      "_blank",
-      "noopener,noreferrer",
-    );
-    expect(postMessageSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: "orbit-webapp",
-        type: "MONEY_IMPORT_START_SESSION",
-        session: expect.objectContaining({
-          app_origin: window.location.origin,
-          default_account_id: "acc-tbank",
+    await waitFor(() => {
+      expect(openSpy).toHaveBeenCalledWith(
+        "https://example-bank.test",
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(postMessageSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "orbit-webapp",
+          type: "MONEY_IMPORT_START_SESSION",
+          session: expect.objectContaining({
+            app_origin: window.location.origin,
+            default_account_id: "acc-tbank",
+          }),
         }),
-      }),
-      "*",
-    );
+        "*",
+      );
+    });
 
     postMessageSpy.mockRestore();
     openSpy.mockRestore();
+  });
+
+  it("uses recent import context to create extension session with automatic range", async () => {
+    connectorsState = [
+      {
+        sourceId: "tbank_web",
+        displayName: "TBank extension",
+        kind: "extension",
+        websiteUrl: "https://example-bank.test",
+      },
+    ];
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-tbank")],
+      isLoading: false,
+    });
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          requires_history_prompt: false,
+          stale_threshold_days: 365,
+          recommended_mode: "auto",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "session-1",
+          session_token: "token-1",
+          batch_id: "batch-1",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          expires_at: "2026-03-08T01:00:00.000Z",
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response);
+
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string };
+      if (payload.type === "MONEY_IMPORT_PING") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+          }),
+        );
+      }
+      if (payload.type === "MONEY_IMPORT_START_SESSION") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_SESSION_ACK" },
+          }),
+        );
+      }
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      expect(await screen.findByRole("button", { name: "Full" })).toHaveAttribute(
+        "data-state",
+        "on",
+      );
+      await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
+
+      await waitFor(() => {
+        const contextCall = String(fetchMock.mock.calls[0]?.[1]?.body ?? "");
+        const createSessionCall = String(fetchMock.mock.calls[1]?.[1]?.body ?? "");
+        expect(contextCall).toContain('"action":"get_import_context"');
+        expect(createSessionCall).toContain('"action":"create_session"');
+        expect(createSessionCall).toContain('"window_from":"2026-02-20T12:00:00.000Z"');
+        expect(createSessionCall).toContain('"window_to":"2026-03-08T00:00:00.000Z"');
+        expect(createSessionCall).toContain('"selection_mode":"auto"');
+        expect(createSessionCall).toContain('"parse_strategy":"full"');
+      });
+    } finally {
+      postMessageSpy.mockRestore();
+    }
+  });
+
+  it("passes fast parse strategy through session creation and extension handoff", async () => {
+    connectorsState = [
+      {
+        sourceId: "tbank_web",
+        displayName: "TBank extension",
+        kind: "extension",
+      },
+    ];
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-tbank")],
+      isLoading: false,
+    });
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          requires_history_prompt: false,
+          stale_threshold_days: 365,
+          recommended_mode: "auto",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "session-fast",
+          session_token: "token-fast",
+          batch_id: "batch-fast",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          expires_at: "2026-03-08T01:00:00.000Z",
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+          parse_strategy: "fast",
+        }),
+      } as Response);
+
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string; session?: Record<string, unknown> };
+      if (payload.type === "MONEY_IMPORT_PING") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+          }),
+        );
+      }
+      if (payload.type === "MONEY_IMPORT_START_SESSION") {
+        expect(payload.session?.parse_strategy).toBe("fast");
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_SESSION_ACK" },
+          }),
+        );
+      }
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      await user.click(await screen.findByRole("button", { name: "Fast" }));
+      await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
+
+      await waitFor(() => {
+        const createSessionCall = String(fetchMock.mock.calls[1]?.[1]?.body ?? "");
+        expect(createSessionCall).toContain('"parse_strategy":"fast"');
+      });
+    } finally {
+      postMessageSpy.mockRestore();
+    }
+  });
+
+  it("defaults stale extension import context to one year preset before session creation", async () => {
+    connectorsState = [
+      {
+        sourceId: "tbank_web",
+        displayName: "TBank extension",
+        kind: "extension",
+      },
+    ];
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-tbank")],
+      isLoading: false,
+    });
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          last_imported_at: "2024-01-15T09:00:00.000Z",
+          requires_history_prompt: true,
+          stale_threshold_days: 365,
+          recommended_mode: "preset",
+          window_from: "2025-03-08T00:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "session-2",
+          session_token: "token-2",
+          batch_id: "batch-2",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          expires_at: "2026-03-08T01:00:00.000Z",
+          last_imported_at: "2024-01-15T09:00:00.000Z",
+          window_from: "2025-03-08T00:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response);
+
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string };
+      if (payload.type === "MONEY_IMPORT_PING") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+          }),
+        );
+      }
+      if (payload.type === "MONEY_IMPORT_START_SESSION") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_SESSION_ACK" },
+          }),
+        );
+      }
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      expect(await screen.findByText("Import history range")).toBeInTheDocument();
+      await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
+
+      await waitFor(() => {
+        const createSessionCall = String(fetchMock.mock.calls[1]?.[1]?.body ?? "");
+        expect(createSessionCall).toContain('"window_from":"2025-03-08T00:00:00.000Z"');
+        expect(createSessionCall).toContain('"window_to":"2026-03-08T00:00:00.000Z"');
+        expect(createSessionCall).toContain('"selection_mode":"preset"');
+        expect(createSessionCall).toContain('"preset_key":"1y"');
+        expect(createSessionCall).toContain('"prompted_for_history":true');
+      });
+    } finally {
+      postMessageSpy.mockRestore();
+    }
+  });
+
+  it("allows overriding extension import context with a custom date range", async () => {
+    connectorsState = [
+      {
+        sourceId: "tbank_web",
+        displayName: "TBank extension",
+        kind: "extension",
+      },
+    ];
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-tbank")],
+      isLoading: false,
+    });
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          last_imported_at: null,
+          requires_history_prompt: true,
+          stale_threshold_days: 365,
+          recommended_mode: "preset",
+          window_from: "2025-03-08T00:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "session-3",
+          session_token: "token-3",
+          batch_id: "batch-3",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          expires_at: "2026-03-08T01:00:00.000Z",
+          last_imported_at: null,
+          window_from: "2026-02-01T10:00:00.000Z",
+          window_to: "2026-02-15T21:30:00.000Z",
+        }),
+      } as Response);
+
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string };
+      if (payload.type === "MONEY_IMPORT_PING") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+          }),
+        );
+      }
+      if (payload.type === "MONEY_IMPORT_START_SESSION") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_SESSION_ACK" },
+          }),
+        );
+      }
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: /TBank extension/ }));
+      await user.click(await screen.findByRole("button", { name: "Custom" }));
+
+      await user.clear(screen.getByLabelText("From"));
+      await user.type(screen.getByLabelText("From"), "2026-02-01T10:00");
+      await user.clear(screen.getByLabelText("To"));
+      await user.type(screen.getByLabelText("To"), "2026-02-15T21:30");
+
+      const startImportButton = await screen.findByRole("button", {
+        name: "money.importStartImport",
+      });
+      await waitFor(() => {
+        expect(startImportButton).toBeEnabled();
+      });
+      await user.click(startImportButton);
+
+      await waitFor(() => {
+        const createSessionCall = String(fetchMock.mock.calls[1]?.[1]?.body ?? "");
+        expect(createSessionCall).toContain('"selection_mode":"custom"');
+        expect(createSessionCall).toContain('"window_from":"2026-02-01T03:00:00.000Z"');
+        expect(createSessionCall).toContain('"window_to":"2026-02-15T14:30:00.000Z"');
+        expect(createSessionCall).toContain('"prompted_for_history":true');
+      });
+    } finally {
+      postMessageSpy.mockRestore();
+    }
   });
 
   it("creates tbank account source for tbank_web connector account creation", async () => {
@@ -419,10 +907,10 @@ describe("MoneyImportPage", () => {
       const startButton = await screen.findByRole("button", { name: "money.importStartImport" });
       expect(startButton).toBeDisabled();
       expect(await screen.findByText("money.importNoAccounts")).toBeInTheDocument();
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
 
       await user.click(startButton);
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       postMessageSpy.mockRestore();
     }
@@ -458,7 +946,7 @@ describe("MoneyImportPage", () => {
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
       const startButton = await screen.findByRole("button", { name: "money.importStartImport" });
       expect(startButton).toBeDisabled();
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       postMessageSpy.mockRestore();
     }
@@ -477,18 +965,32 @@ describe("MoneyImportPage", () => {
       isLoading: false,
     });
     window.localStorage.setItem("money-import-default-account:person-1:tbank_web", "acc-2");
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        session_id: "session-remembered",
-        session_token: "token-remembered",
-        batch_id: "batch-remembered",
-        source: "tbank_web",
-        payer_person_id: "person-1",
-        expires_at: "2026-03-01T00:00:00.000Z",
-        last_imported_at: null,
-      }),
-    } as Response);
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          requires_history_prompt: false,
+          stale_threshold_days: 365,
+          recommended_mode: "auto",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "session-remembered",
+          session_token: "token-remembered",
+          batch_id: "batch-remembered",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          expires_at: "2026-03-01T00:00:00.000Z",
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response);
 
     const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
       const payload = message as { type?: string };
@@ -598,18 +1100,32 @@ describe("MoneyImportPage", () => {
         kind: "extension",
       },
     ];
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        session_id: "session-2",
-        session_token: "token-2",
-        batch_id: "batch-2",
-        source: "tbank_web",
-        payer_person_id: "person-1",
-        expires_at: "2026-03-01T00:00:00.000Z",
-        last_imported_at: null,
-      }),
-    } as Response);
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          requires_history_prompt: false,
+          stale_threshold_days: 365,
+          recommended_mode: "auto",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "session-2",
+          session_token: "token-2",
+          batch_id: "batch-2",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+          expires_at: "2026-03-01T00:00:00.000Z",
+          last_imported_at: "2026-02-20T12:00:00.000Z",
+          window_from: "2026-02-20T12:00:00.000Z",
+          window_to: "2026-03-08T00:00:00.000Z",
+        }),
+      } as Response);
     hookMocks.useMoneyAccounts.mockReturnValue({
       data: [makeAccount("tbank", "acc-tbank")],
       isLoading: false,
@@ -735,3 +1251,26 @@ describe("MoneyImportPage", () => {
     ).toBe(50);
   });
 });
+fetchMock.mockResolvedValueOnce({
+  ok: true,
+  json: async () => ({
+    last_imported_at: null,
+    requires_history_prompt: true,
+    stale_threshold_days: 365,
+    recommended_mode: "preset",
+    window_from: "2025-03-08T00:00:00.000Z",
+    window_to: "2026-03-08T00:00:00.000Z",
+  }),
+} as Response);
+
+fetchMock.mockResolvedValueOnce({
+  ok: true,
+  json: async () => ({
+    last_imported_at: null,
+    requires_history_prompt: true,
+    stale_threshold_days: 365,
+    recommended_mode: "preset",
+    window_from: "2025-03-08T00:00:00.000Z",
+    window_to: "2026-03-08T00:00:00.000Z",
+  }),
+} as Response);

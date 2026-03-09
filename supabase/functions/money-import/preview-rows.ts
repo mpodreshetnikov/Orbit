@@ -1,6 +1,7 @@
 import { isSessionUsable } from "./auth.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
+  buildReceiptPersistenceFields,
   buildLineItemImportHash,
   extractAccountHintFromRow,
   jsonResponse,
@@ -11,8 +12,18 @@ import {
   toIsoOrNull,
   toNumberOrNull,
 } from "./normalize.ts";
+import {
+  classifyRowForWindow,
+  mergeRangeMeta,
+  resolveEffectiveImportWindow,
+} from "./range-window.ts";
 import type { MoneyImportRepository } from "./repository.ts";
-import type { AuthContext, CanonicalTransactionRowInput, RowStatus } from "./types.ts";
+import type {
+  AuthContext,
+  BatchBrandResolutionInput,
+  CanonicalTransactionRowInput,
+  RowStatus,
+} from "./types.ts";
 
 export interface PreviewRowsDeps {
   repository: MoneyImportRepository;
@@ -54,6 +65,97 @@ function accountCacheKeyForRow(row: CanonicalTransactionRowInput, fallbackSource
   if (externalId) return `${rowSource}|external:${externalId}`;
 
   return `${rowSource}|posted:${row.posted_at}|amount:${toNumberOrNull(row.amount) ?? "none"}`;
+}
+
+function brandCacheKeyForRow(
+  row: CanonicalTransactionRowInput,
+  fallbackSource: string,
+): string | null {
+  const sourceBrand =
+    row.source_brand && typeof row.source_brand === "object"
+      ? (row.source_brand as Record<string, unknown>)
+      : null;
+  const sourceKey =
+    typeof sourceBrand?.source_key === "string" && sourceBrand.source_key.trim().length > 0
+      ? sourceBrand.source_key.trim()
+      : typeof sourceBrand?.name === "string" && sourceBrand.name.trim().length > 0
+        ? sourceBrand.name.trim()
+        : null;
+  if (!sourceKey) return null;
+  const source = normalizeSourceForTransactions(normalizeText(row.source) ?? fallbackSource);
+  return `${source}|${sourceKey}`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object") return value as Record<string, unknown>;
+  return null;
+}
+
+function toNonNegativeInteger(value: unknown, fallback: number): number {
+  const parsed = toNumberOrNull(value);
+  if (parsed === null) return fallback;
+  return Math.max(0, Math.trunc(parsed));
+}
+
+function readChunkState(
+  body: Record<string, unknown>,
+  rowCount: number,
+): {
+  enabled: boolean;
+  chunkIndex: number;
+  chunkCount: number;
+  rowOffset: number;
+  isFinalChunk: boolean;
+  totalRowCount: number | null;
+} {
+  const hasChunkMetadata =
+    "chunk_index" in body ||
+    "chunk_count" in body ||
+    "row_offset" in body ||
+    "is_final_chunk" in body ||
+    "total_row_count" in body;
+  if (!hasChunkMetadata) {
+    return {
+      enabled: false,
+      chunkIndex: 0,
+      chunkCount: 1,
+      rowOffset: 0,
+      isFinalChunk: true,
+      totalRowCount: rowCount,
+    };
+  }
+
+  const chunkIndex = toNonNegativeInteger(body.chunk_index, 0);
+  const chunkCount = Math.max(1, toNonNegativeInteger(body.chunk_count, 1));
+  const rowOffset = toNonNegativeInteger(body.row_offset, 0);
+  const totalRowCount = Math.max(
+    rowOffset + rowCount,
+    toNonNegativeInteger(body.total_row_count, rowOffset + rowCount),
+  );
+
+  return {
+    enabled: true,
+    chunkIndex,
+    chunkCount,
+    rowOffset,
+    isFinalChunk:
+      typeof body.is_final_chunk === "boolean" ? body.is_final_chunk : chunkIndex >= chunkCount - 1,
+    totalRowCount,
+  };
+}
+
+function buildPreviewResetMeta(
+  existingMetaInput: unknown,
+  incomingMetaInput: unknown,
+): Record<string, unknown> {
+  const incomingMeta = asRecord(incomingMetaInput);
+  const existingMeta = asRecord(existingMetaInput);
+  const incomingRangeSelectionMeta = asRecord(incomingMeta?.range_selection_meta);
+  const existingRangeSelectionMeta = asRecord(existingMeta?.range_selection_meta);
+
+  return {
+    range_selection_meta: incomingRangeSelectionMeta ?? existingRangeSelectionMeta ?? null,
+  };
 }
 
 export async function previewRowsAction(
@@ -113,8 +215,13 @@ export async function previewRowsAction(
   }
 
   const transactionSourceFallback = normalizeSourceForTransactions(source);
-  const windowFromInput = toIsoOrNull(body.window_from);
-  const windowToInput = toIsoOrNull(body.window_to);
+  const chunkState = readChunkState(body, rowsRaw.length);
+  const { windowFrom: windowFromInput, windowTo: windowToInput } = resolveEffectiveImportWindow(
+    auth.mode === "session" ? auth.session.window_from : body.window_from,
+    auth.mode === "session" ? auth.session.window_to : body.window_to,
+    body.window_from,
+    body.window_to,
+  );
 
   if (!batchId) {
     batchId = await deps.repository.createImportBatch({
@@ -155,11 +262,41 @@ export async function previewRowsAction(
     return jsonResponse({ error: "Batch is not awaiting preview" }, 409);
   }
 
-  await deps.repository.deleteReportRowsByBatch(batchId);
+  const shouldResetPreview = !chunkState.enabled || chunkState.chunkIndex === 0;
+  if (shouldResetPreview) {
+    await deps.repository.deleteReportRowsByBatch(batchId);
+    if (deps.repository.deleteBatchBrandResolutionsByBatch) {
+      await deps.repository.deleteBatchBrandResolutionsByBatch(batchId);
+    }
+  }
+
+  const accumulatedInsertedBefore =
+    chunkState.enabled && !shouldResetPreview
+      ? toNonNegativeInteger(batchBefore.inserted_count, 0)
+      : 0;
+  const accumulatedSkippedBefore =
+    chunkState.enabled && !shouldResetPreview
+      ? toNonNegativeInteger(batchBefore.skipped_count, 0)
+      : 0;
+  const accumulatedErrorBefore =
+    chunkState.enabled && !shouldResetPreview
+      ? toNonNegativeInteger(batchBefore.error_count, 0)
+      : 0;
+  const batchMetaBase = shouldResetPreview
+    ? buildPreviewResetMeta(batchBefore.meta, body.meta)
+    : batchBefore.meta;
+  const sessionMetaBase = shouldResetPreview
+    ? buildPreviewResetMeta(auth.mode === "session" ? auth.session.meta : null, body.meta)
+    : auth.mode === "session"
+      ? auth.session.meta
+      : null;
 
   let insertedCount = 0;
   let skippedCount = 0;
   let errorCount = 0;
+  let inRangeRowCount = 0;
+  let filteredOutOfRangeCount = 0;
+  let filteredInvalidDateCount = 0;
   const rowErrorSignatureCounts: Record<RowErrorSignature, number> = {
     no_account_for_source: 0,
     duplicate_transaction: 0,
@@ -170,6 +307,7 @@ export async function previewRowsAction(
   let firstNoAccountWarningSent = false;
   const rowResults: Array<Record<string, unknown>> = [];
   const accountResolutionCache = new Map<string, string>();
+  const brandResolutionCache = new Map<string, BatchBrandResolutionInput | null>();
 
   const registerFailureSignature = (
     message: string,
@@ -194,8 +332,9 @@ export async function previewRowsAction(
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
     const raw = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    const absoluteRowIndex = chunkState.rowOffset + rowIndex;
     const rowSpan = deps.telemetry?.startSpan("edge.money_import.preview_rows.row", {
-      attrs: { row_index: rowIndex },
+      attrs: { row_index: absoluteRowIndex },
     });
 
     try {
@@ -211,19 +350,113 @@ export async function previewRowsAction(
         accountResolutionCache.set(accountCacheKey, resolvedAccountId);
       }
 
+      const rawRangeDecision = classifyRowForWindow(raw.posted_at, windowFromInput, windowToInput);
+      if (rawRangeDecision.kind === "invalid_date") {
+        errorCount += 1;
+        filteredInvalidDateCount += 1;
+        registerFailureSignature(rawRangeDecision.message, absoluteRowIndex, raw);
+
+        await deps.repository.insertReportRow({
+          batch_id: batchId,
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: absoluteRowIndex,
+          source_line_index: null,
+          status: "error",
+          message: rawRangeDecision.message,
+          transaction_id: null,
+          line_item_id: null,
+          ...buildReceiptPersistenceFields(raw),
+          payload: rowsRaw[rowIndex] as Record<string, unknown>,
+        });
+
+        rowResults.push({
+          idx: absoluteRowIndex,
+          status: "error",
+          message: rawRangeDecision.message,
+          transaction_id: null,
+        });
+        await rowSpan?.end({
+          status: "error",
+          statusMessage: rawRangeDecision.message,
+          attrs: { row_index: absoluteRowIndex, invalid_date: true },
+        });
+        continue;
+      }
+
       const normalizedBase = normalizeTransactionRow(
         { ...raw, account_id: resolvedAccountId },
         transactionSourceFallback,
       );
+      const brandCacheKey = brandCacheKeyForRow(normalizedBase, transactionSourceFallback);
+      let brandResolution = brandCacheKey ? brandResolutionCache.get(brandCacheKey) : undefined;
+      if (brandResolution === undefined && deps.repository.previewBrandResolutionForRow) {
+        brandResolution =
+          (await deps.repository.previewBrandResolutionForRow(
+            normalizedBase,
+            transactionSourceFallback,
+          )) ?? null;
+        if (brandCacheKey) {
+          brandResolutionCache.set(brandCacheKey, brandResolution);
+        }
+      }
+      if (brandResolution && deps.repository.upsertBatchBrandResolution) {
+        await deps.repository.upsertBatchBrandResolution(batchId, brandResolution);
+      }
       const resolvedCardId = await deps.repository.resolveCardIdForRow(
         resolvedAccountId,
         normalizedBase,
-        false,
+        true,
       );
+      const resolvedBrandId =
+        brandResolution?.suggested_reason === "existing_alias"
+          ? normalizeText(brandResolution.selected_brand_id)
+          : null;
       const normalized: CanonicalTransactionRowInput = {
         ...normalizedBase,
         card_id: resolvedCardId,
+        brand_id: resolvedBrandId,
       };
+      const rangeDecision = classifyRowForWindow(
+        normalized.posted_at,
+        windowFromInput,
+        windowToInput,
+      );
+      if (rangeDecision.kind === "out_of_range") {
+        skippedCount += 1;
+        filteredOutOfRangeCount += 1;
+
+        await deps.repository.insertReportRow({
+          batch_id: batchId,
+          parent_row_id: null,
+          row_kind: "transaction",
+          source_row_index: absoluteRowIndex,
+          source_line_index: null,
+          status: "skipped",
+          message: rangeDecision.message,
+          transaction_id: null,
+          line_item_id: null,
+          ...buildReceiptPersistenceFields(normalized),
+          payload: normalized,
+        });
+
+        rowResults.push({
+          idx: absoluteRowIndex,
+          status: "skipped",
+          message: rangeDecision.message,
+          transaction_id: null,
+        });
+        await rowSpan?.end({
+          status: "ok",
+          attrs: {
+            row_index: absoluteRowIndex,
+            status: "skipped",
+            filtered_by_range: true,
+          },
+        });
+        continue;
+      }
+      inRangeRowCount += 1;
 
       const existingTransactionId = await deps.repository.findExistingTransactionId(normalized);
       const txStatus: RowStatus = existingTransactionId ? "skipped" : "inserted";
@@ -231,25 +464,26 @@ export async function previewRowsAction(
       if (txStatus === "inserted") insertedCount += 1;
       if (txStatus === "skipped") {
         skippedCount += 1;
-        registerFailureSignature("Duplicate transaction", rowIndex, raw);
+        registerFailureSignature("Duplicate transaction", absoluteRowIndex, raw);
       }
 
       const txReportRowId = await deps.repository.insertReportRow({
         batch_id: batchId,
         parent_row_id: null,
         row_kind: "transaction",
-        source_row_index: rowIndex,
+        source_row_index: absoluteRowIndex,
         source_line_index: null,
         status: txStatus,
         message: txMessage,
         transaction_id: existingTransactionId,
         line_item_id: null,
+        ...buildReceiptPersistenceFields(normalized),
         payload: normalized,
       });
 
       const lineItems = normalizeLineItems(normalized);
       const lineResults: Array<Record<string, unknown>> = [];
-      const lineHashTxIdentity = existingTransactionId ?? `preview:${batchId}:${rowIndex}`;
+      const lineHashTxIdentity = existingTransactionId ?? `preview:${batchId}:${absoluteRowIndex}`;
 
       for (let lineIndex = 0; lineIndex < lineItems.length; lineIndex++) {
         const lineItem = lineItems[lineIndex];
@@ -275,7 +509,7 @@ export async function previewRowsAction(
             batch_id: batchId,
             parent_row_id: txReportRowId,
             row_kind: "line_item",
-            source_row_index: rowIndex,
+            source_row_index: absoluteRowIndex,
             source_line_index: lineIndex,
             status: lineStatus,
             message: lineMessage,
@@ -294,13 +528,13 @@ export async function previewRowsAction(
           const lineMessage =
             lineError instanceof Error ? lineError.message : "Line item preview failed";
           errorCount += 1;
-          registerFailureSignature(lineMessage, rowIndex, raw);
+          registerFailureSignature(lineMessage, absoluteRowIndex, raw);
 
           await deps.repository.insertReportRow({
             batch_id: batchId,
             parent_row_id: txReportRowId,
             row_kind: "line_item",
-            source_row_index: rowIndex,
+            source_row_index: absoluteRowIndex,
             source_line_index: lineIndex,
             status: "error",
             message: lineMessage,
@@ -319,7 +553,7 @@ export async function previewRowsAction(
       }
 
       rowResults.push({
-        idx: rowIndex,
+        idx: absoluteRowIndex,
         status: txStatus,
         message: txMessage,
         transaction_id: existingTransactionId,
@@ -328,7 +562,7 @@ export async function previewRowsAction(
       await rowSpan?.end({
         status: "ok",
         attrs: {
-          row_index: rowIndex,
+          row_index: absoluteRowIndex,
           status: txStatus,
           line_item_count: lineResults.length,
         },
@@ -336,23 +570,24 @@ export async function previewRowsAction(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Preview row failed";
       errorCount += 1;
-      registerFailureSignature(message, rowIndex, raw);
+      registerFailureSignature(message, absoluteRowIndex, raw);
 
       await deps.repository.insertReportRow({
         batch_id: batchId,
         parent_row_id: null,
         row_kind: "transaction",
-        source_row_index: rowIndex,
+        source_row_index: absoluteRowIndex,
         source_line_index: null,
         status: "error",
         message,
         transaction_id: null,
         line_item_id: null,
+        ...buildReceiptPersistenceFields(raw),
         payload: rowsRaw[rowIndex] as Record<string, unknown>,
       });
 
       rowResults.push({
-        idx: rowIndex,
+        idx: absoluteRowIndex,
         status: "error",
         message,
         transaction_id: null,
@@ -360,14 +595,14 @@ export async function previewRowsAction(
       await rowSpan?.end({
         status: "error",
         statusMessage: message,
-        attrs: { row_index: rowIndex },
+        attrs: { row_index: absoluteRowIndex },
       });
     }
   }
 
   const parsedCountInput = toNumberOrNull(body.parsed_transactions_count);
   const parsedThroughInput = toIsoOrNull(body.parsed_through_at);
-  const parsedTransactionsCount = parsedCountInput ?? rowsRaw.length;
+  const parsedTransactionsCount = parsedCountInput ?? chunkState.totalRowCount ?? rowsRaw.length;
   const parsedThrough =
     parsedThroughInput ??
     (rowsRaw.length > 0
@@ -379,11 +614,17 @@ export async function previewRowsAction(
 
   const patch: Record<string, unknown> = {
     parsed_transactions_count: parsedTransactionsCount,
-    inserted_count: insertedCount,
-    skipped_count: skippedCount,
-    error_count: errorCount,
-    status: "pending",
+    inserted_count: accumulatedInsertedBefore + insertedCount,
+    skipped_count: accumulatedSkippedBefore + skippedCount,
+    error_count: accumulatedErrorBefore + errorCount,
+    status: chunkState.enabled && !chunkState.isFinalChunk ? "running" : "pending",
     completed_at: null,
+    meta: mergeRangeMeta(batchMetaBase, body.meta, {
+      parsedRowCount: rowsRaw.length,
+      inRangeRowCount,
+      filteredOutOfRangeCount,
+      filteredInvalidDateCount,
+    }),
   };
   if (parsedThrough) patch.parsed_through_at = parsedThrough;
   if (windowFromInput) patch.window_from = windowFromInput;
@@ -398,6 +639,12 @@ export async function previewRowsAction(
     };
     if (windowFromInput) sessionPatch.window_from = windowFromInput;
     if (windowToInput) sessionPatch.window_to = windowToInput;
+    sessionPatch.meta = mergeRangeMeta(sessionMetaBase, body.meta, {
+      parsedRowCount: rowsRaw.length,
+      inRangeRowCount,
+      filteredOutOfRangeCount,
+      filteredInvalidDateCount,
+    });
     await deps.repository.updateImportSession(sessionId, sessionPatch);
   }
 
@@ -407,6 +654,10 @@ export async function previewRowsAction(
   deps.telemetry?.info("money_import_preview_rows_completed", {
     batch_id: batchId,
     row_count: rowsRaw.length,
+    chunk_index: chunkState.enabled ? chunkState.chunkIndex : null,
+    chunk_count: chunkState.enabled ? chunkState.chunkCount : null,
+    row_offset: chunkState.enabled ? chunkState.rowOffset : null,
+    is_final_chunk: chunkState.enabled ? chunkState.isFinalChunk : null,
     inserted: insertedCount,
     skipped: skippedCount,
     error_count: errorCount,
@@ -421,6 +672,8 @@ export async function previewRowsAction(
     attrs: {
       batch_id: batchId,
       row_count: rowsRaw.length,
+      chunk_index: chunkState.enabled ? chunkState.chunkIndex : null,
+      chunk_count: chunkState.enabled ? chunkState.chunkCount : null,
       inserted: insertedCount,
       skipped: skippedCount,
       error_count: errorCount,

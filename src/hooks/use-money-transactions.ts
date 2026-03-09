@@ -6,6 +6,7 @@ import type {
   MoneyTransaction,
   MoneyTransactionDetail,
   MoneyTransactionCard,
+  MoneyTransactionBrand,
   MoneyLineItem,
   CreateMoneyTransactionInput,
   UpdateMoneyTransactionInput,
@@ -38,6 +39,7 @@ function mapDetailRow(row: Record<string, unknown>): MoneyTransactionDetail {
 
 export type MoneyTransactionWithCard = MoneyTransaction & {
   money_cards: MoneyTransactionCard | null;
+  money_transaction_brands: MoneyTransactionBrand | null;
 };
 
 async function fetchMoneyTransactions(
@@ -47,7 +49,7 @@ async function fetchMoneyTransactions(
   const supabase = createClient();
   let query = supabase
     .from("money_transactions")
-    .select("*, money_cards(id, last4, card_label)")
+    .select("*, money_cards(id, last4, card_label), money_transaction_brands(*)")
     .eq("payer_person_id", payerPersonId)
     .order("posted_at", { ascending: false })
     .order("created_at", { ascending: false });
@@ -72,13 +74,19 @@ export function useMoneyTransactions(
   });
 }
 
-async function fetchMoneyTransactionDetail(
-  id: string,
-): Promise<(MoneyTransactionDetail & { money_cards: MoneyTransactionCard | null }) | null> {
+async function fetchMoneyTransactionDetail(id: string): Promise<
+  | (MoneyTransactionDetail & {
+      money_cards: MoneyTransactionCard | null;
+      money_transaction_brands: MoneyTransactionBrand | null;
+    })
+  | null
+> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("money_transactions")
-    .select("*, money_cards(id, last4, card_label), money_line_items(*)")
+    .select(
+      "*, money_cards(id, last4, card_label), money_transaction_brands(*), money_line_items(*)",
+    )
     .eq("id", id)
     .single();
 
@@ -90,6 +98,7 @@ async function fetchMoneyTransactionDetail(
   return data
     ? (mapDetailRow(data as Record<string, unknown>) as MoneyTransactionDetail & {
         money_cards: MoneyTransactionCard | null;
+        money_transaction_brands: MoneyTransactionBrand | null;
       })
     : null;
 }
@@ -123,6 +132,7 @@ async function createMoneyTransactionWithLines({
   const txPayload: MoneyTransactionInsert = {
     payer_person_id: transaction.payer_person_id,
     account_id: transaction.account_id,
+    brand_id: transaction.brand_id ?? null,
     source: transaction.source ?? "manual",
     external_id: transaction.external_id ?? null,
     posted_at: transaction.posted_at,
@@ -133,11 +143,17 @@ async function createMoneyTransactionWithLines({
     merchant_name: transaction.merchant_name ?? null,
     mcc: transaction.mcc ?? null,
     comment: transaction.comment ?? null,
+    source_comment: transaction.source_comment ?? null,
+    cashback_amount: transaction.cashback_amount ?? null,
+    cashback_currency: transaction.cashback_currency ?? null,
+    operation_icon_url: transaction.operation_icon_url ?? null,
+    source_category_id: transaction.source_category_id ?? null,
+    source_category_name: transaction.source_category_name ?? null,
     is_transfer: transaction.is_transfer ?? false,
     transfer_group_id: transaction.transfer_group_id ?? null,
     raw_payload: toJsonOrNull(transaction.raw_payload) ?? null,
     dedupe_hash: transaction.dedupe_hash ?? null,
-  };
+  } as MoneyTransactionInsert;
 
   const { data: tx, error } = await supabase
     .from("money_transactions")

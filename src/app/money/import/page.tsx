@@ -13,6 +13,7 @@ import { getConnectors } from "@/lib/import/connector-types";
 import type {
   BatchTransactionRow,
   CanonicalTransactionRow,
+  MoneyImportParseStrategy,
   MoneyImportPreviewResult,
   MoneyImportSessionCreateResult,
   MoneyImportSessionStatus,
@@ -29,7 +30,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatMoney } from "@/lib/money";
-import { format } from "date-fns";
+import { format, subMonths } from "date-fns";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 import "@/lib/import/connectors/tbank-csv";
 import "@/lib/import/connectors/tbank-web";
@@ -41,6 +44,7 @@ const EXTENSION_WEBAPP_SOURCE = "orbit-webapp";
 const EXTENSION_BRIDGE_SOURCE = "orbit-extension";
 const EXTENSION_ID = process.env.NEXT_PUBLIC_EXTENSION_ID ?? "";
 const DEFAULT_ACCOUNT_STORAGE_PREFIX = "money-import-default-account";
+const DEFAULT_TBANK_PARSE_STRATEGY: MoneyImportParseStrategy = "full";
 
 function connectorSourceToAccountSource(sourceId: string): string {
   return sourceId === "tbank_web" ? "tbank" : sourceId;
@@ -50,12 +54,300 @@ function buildDefaultAccountStorageKey(personId: string, sourceId: string): stri
   return `${DEFAULT_ACCOUNT_STORAGE_PREFIX}:${personId}:${sourceId}`;
 }
 
+function normalizeMaskedCardHint(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 4) return null;
+  return digits.slice(-4);
+}
+
+function normalizeOperationText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.toLowerCase() : null;
+}
+
+function collectOperationHintCandidates(operation: Record<string, unknown> | null): string[] {
+  if (!operation) return [];
+  return Array.from(
+    new Set(
+      [
+        normalizeMaskedCardHint(operation.cardNumber),
+        normalizeMaskedCardHint(
+          operation.payment && typeof operation.payment === "object"
+            ? (operation.payment as Record<string, unknown>).cardNumber
+            : null,
+        ),
+        normalizeMaskedCardHint(
+          operation.card && typeof operation.card === "object"
+            ? (operation.card as Record<string, unknown>).panMasked
+            : null,
+        ),
+        normalizeMaskedCardHint(
+          operation.card && typeof operation.card === "object"
+            ? (operation.card as Record<string, unknown>).number
+            : null,
+        ),
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
+}
+
+function isAccountNativeOperation(
+  row: CanonicalTransactionRow,
+  operation: Record<string, unknown> | null,
+): boolean {
+  if (row.is_transfer) return true;
+  if (!operation) return false;
+
+  const texts = [
+    normalizeOperationText(row.merchant_name),
+    normalizeOperationText(
+      typeof operation.description === "string" ? operation.description : null,
+    ),
+    normalizeOperationText(
+      typeof operation.merchantKey === "string" ? operation.merchantKey : null,
+    ),
+    normalizeOperationText(
+      typeof operation.subcategory === "string" ? operation.subcategory : null,
+    ),
+    normalizeOperationText(typeof operation.group === "string" ? operation.group : null),
+    normalizeOperationText(
+      operation.subgroup && typeof operation.subgroup === "object"
+        ? (operation.subgroup as Record<string, unknown>).name
+        : null,
+    ),
+    normalizeOperationText(
+      operation.spendingCategory && typeof operation.spendingCategory === "object"
+        ? (operation.spendingCategory as Record<string, unknown>).name
+        : null,
+    ),
+    normalizeOperationText(
+      operation.categoryInfo &&
+        typeof operation.categoryInfo === "object" &&
+        (operation.categoryInfo as Record<string, unknown>).bankCategory &&
+        typeof (operation.categoryInfo as Record<string, unknown>).bankCategory === "object"
+        ? ((
+            (operation.categoryInfo as Record<string, unknown>).bankCategory as Record<
+              string,
+              unknown
+            >
+          ).name as unknown)
+        : null,
+    ),
+    normalizeOperationText(
+      operation.categoryInfo &&
+        typeof operation.categoryInfo === "object" &&
+        (operation.categoryInfo as Record<string, unknown>).metacategory &&
+        typeof (operation.categoryInfo as Record<string, unknown>).metacategory === "object"
+        ? ((
+            (operation.categoryInfo as Record<string, unknown>).metacategory as Record<
+              string,
+              unknown
+            >
+          ).name as unknown)
+        : null,
+    ),
+    normalizeOperationText(
+      operation.category && typeof operation.category === "object"
+        ? (operation.category as Record<string, unknown>).name
+        : null,
+    ),
+    normalizeOperationText(
+      operation.payment && typeof operation.payment === "object"
+        ? (operation.payment as Record<string, unknown>).providerId
+        : null,
+    ),
+    normalizeOperationText(
+      operation.payment && typeof operation.payment === "object"
+        ? (operation.payment as Record<string, unknown>).providerGroupId
+        : null,
+    ),
+    normalizeOperationText(
+      operation.payment && typeof operation.payment === "object"
+        ? (operation.payment as Record<string, unknown>).paymentType
+        : null,
+    ),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+
+  if (
+    /between own accounts|between my accounts|card to card|p2p|transfer-inner|внутрибанковский перевод|между своими счетами|пополнение по номеру телефона|перевод|переводы/.test(
+      texts,
+    )
+  ) {
+    return true;
+  }
+
+  return /interest|balance interest|deposit|bonus|correction|cashback payout|проценты|вклад|бонус|коррекц|пополнение вклада|закрытие вклада/.test(
+    texts,
+  );
+}
+
+function getAccountHint(row: CanonicalTransactionRow): string | null {
+  const rawPayload =
+    row.raw_payload && typeof row.raw_payload === "object"
+      ? (row.raw_payload as Record<string, unknown>)
+      : null;
+  const rawOperation =
+    rawPayload?.operation && typeof rawPayload.operation === "object"
+      ? (rawPayload.operation as Record<string, unknown>)
+      : null;
+
+  if (isAccountNativeOperation(row, rawOperation)) return null;
+
+  const directHint = normalizeMaskedCardHint(row.account_hint);
+  const rawHint = normalizeMaskedCardHint(rawPayload?.account_hint);
+  const operationCandidates = collectOperationHintCandidates(rawOperation);
+
+  const uniqueHints = Array.from(
+    new Set(
+      [directHint, rawHint, ...operationCandidates].filter((value): value is string =>
+        Boolean(value),
+      ),
+    ),
+  );
+
+  if (rawOperation && uniqueHints.length > 1) return null;
+  if (directHint) return directHint;
+  if (rawHint) return rawHint;
+  if (operationCandidates.length === 1) return operationCandidates[0];
+  return null;
+}
+
 import {
   callMoneyImportAction as callMoneyImportActionClient,
   computeProgressPercent,
   getAccessToken,
   getFunctionUrl,
 } from "./money-import-client";
+import type {
+  MoneyImportRangePresetKey,
+  MoneyImportRangeSelectionMeta,
+  MoneyImportSourceContextResult,
+} from "@/types";
+
+type ExtensionRangeChoice =
+  | "auto"
+  | "preset:1m"
+  | "preset:3m"
+  | "preset:6m"
+  | "preset:1y"
+  | "preset:since_last_import"
+  | "custom";
+
+function toLocalDateTimeInput(value: string | null): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(
+    parsed.getDate(),
+  ).padStart(2, "0")}T${String(parsed.getHours()).padStart(2, "0")}:${String(
+    parsed.getMinutes(),
+  ).padStart(2, "0")}`;
+}
+
+function toIsoFromDateTimeInput(value: string): string | null {
+  if (!value.trim()) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function resolvePresetWindowFrom(
+  presetKey: MoneyImportRangePresetKey,
+  windowToIso: string,
+  lastImportedAt: string | null,
+): string | null {
+  if (presetKey === "since_last_import") return lastImportedAt;
+  const windowTo = new Date(windowToIso);
+  if (Number.isNaN(windowTo.getTime())) return null;
+  if (presetKey === "1m") return subMonths(windowTo, 1).toISOString();
+  if (presetKey === "3m") return subMonths(windowTo, 3).toISOString();
+  if (presetKey === "6m") return subMonths(windowTo, 6).toISOString();
+  return subMonths(windowTo, 12).toISOString();
+}
+
+function defaultRangeChoiceForContext(
+  context: MoneyImportSourceContextResult,
+): ExtensionRangeChoice {
+  if (!context.requires_history_prompt && context.recommended_mode === "auto") {
+    return "auto";
+  }
+  return "preset:1y";
+}
+
+function buildRangeSelectionPayload(
+  context: MoneyImportSourceContextResult,
+  choice: ExtensionRangeChoice,
+  customFromInput: string,
+  customToInput: string,
+): {
+  windowFrom: string | null;
+  windowTo: string | null;
+  rangeSelectionMeta: MoneyImportRangeSelectionMeta;
+} {
+  if (choice === "auto") {
+    return {
+      windowFrom: context.window_from,
+      windowTo: context.window_to,
+      rangeSelectionMeta: {
+        selection_mode: "auto",
+        preset_key: null,
+        prompted_for_history: context.requires_history_prompt,
+        last_imported_at_at_decision_time: context.last_imported_at,
+        stale_threshold_days: context.stale_threshold_days,
+      },
+    };
+  }
+
+  if (choice === "custom") {
+    const windowFrom = toIsoFromDateTimeInput(customFromInput);
+    const windowTo = toIsoFromDateTimeInput(customToInput) ?? context.window_to;
+    if (!windowFrom || !windowTo) {
+      throw new Error("Custom import range is invalid.");
+    }
+    return {
+      windowFrom,
+      windowTo,
+      rangeSelectionMeta: {
+        selection_mode: "custom",
+        preset_key: null,
+        prompted_for_history: context.requires_history_prompt,
+        last_imported_at_at_decision_time: context.last_imported_at,
+        stale_threshold_days: context.stale_threshold_days,
+      },
+    };
+  }
+
+  const presetKey = choice.replace("preset:", "") as MoneyImportRangePresetKey;
+  const windowFrom = resolvePresetWindowFrom(
+    presetKey,
+    context.window_to ?? new Date().toISOString(),
+    context.last_imported_at,
+  );
+  if (!windowFrom || !context.window_to) {
+    throw new Error("Preset import range is invalid.");
+  }
+  return {
+    windowFrom,
+    windowTo: context.window_to,
+    rangeSelectionMeta: {
+      selection_mode: "preset",
+      preset_key: presetKey,
+      prompted_for_history: context.requires_history_prompt,
+      last_imported_at_at_decision_time: context.last_imported_at,
+      stale_threshold_days: context.stale_threshold_days,
+    },
+  };
+}
+
+function formatSelectedRange(windowFrom: string | null, windowTo: string | null): string {
+  if (!windowFrom || !windowTo) return "-";
+  return `${format(new Date(windowFrom), "dd.MM.yyyy HH:mm")} -> ${format(new Date(windowTo), "dd.MM.yyyy HH:mm")}`;
+}
 
 export default function MoneyImportPage() {
   const t = useTranslations();
@@ -81,6 +373,15 @@ export default function MoneyImportPage() {
   const [extensionActive, setExtensionActive] = useState<boolean | null>(null);
   const [extensionStatusMessage, setExtensionStatusMessage] = useState<string | null>(null);
   const [isStartingExtension, setIsStartingExtension] = useState(false);
+  const [extensionImportContext, setExtensionImportContext] =
+    useState<MoneyImportSourceContextResult | null>(null);
+  const [isLoadingExtensionImportContext, setIsLoadingExtensionImportContext] = useState(false);
+  const [extensionRangeChoice, setExtensionRangeChoice] = useState<ExtensionRangeChoice>("auto");
+  const [extensionParseStrategy, setExtensionParseStrategy] = useState<MoneyImportParseStrategy>(
+    DEFAULT_TBANK_PARSE_STRATEGY,
+  );
+  const [customRangeFrom, setCustomRangeFrom] = useState("");
+  const [customRangeTo, setCustomRangeTo] = useState("");
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
@@ -95,6 +396,7 @@ export default function MoneyImportPage() {
 
   const isFileConnector = selectedConnector?.kind === "file";
   const isExtensionConnector = selectedConnector?.kind === "extension";
+  const isTbankExtensionConnector = selectedConnector?.sourceId === "tbank_web";
 
   const accountSourceForSelectedConnector = useMemo(() => {
     if (!selectedConnector) return null;
@@ -271,7 +573,7 @@ export default function MoneyImportPage() {
     if (!parseResult?.transactions.length) return [];
     const set = new Set<string>();
     parseResult.transactions.forEach((row) => {
-      const hint = row.account_hint?.trim() || "";
+      const hint = getAccountHint(row) ?? "";
       if (hint) set.add(hint);
     });
     return Array.from(set).sort();
@@ -279,7 +581,7 @@ export default function MoneyImportPage() {
 
   const resolveAccountId = useCallback(
     (row: CanonicalTransactionRow): string | null => {
-      const hint = row.account_hint?.trim() || "";
+      const hint = getAccountHint(row) ?? "";
       if (hint && accountMapping[hint]) return accountMapping[hint];
       return defaultAccountId || null;
     },
@@ -342,8 +644,10 @@ export default function MoneyImportPage() {
     return parseResult.transactions.map((row) => {
       const accountId = resolveAccountId(row);
       if (!accountId) throw new Error("Unresolved account mapping");
+      const accountHint = getAccountHint(row);
       return {
         account_id: accountId,
+        account_hint: accountHint,
         card_id: row.card_id ?? null,
         source: row.source,
         external_id: row.external_id ?? null,
@@ -358,11 +662,14 @@ export default function MoneyImportPage() {
         source_comment: row.source_comment ?? null,
         cashback_amount: row.cashback_amount ?? null,
         cashback_currency: row.cashback_currency ?? null,
+        operation_icon_url: row.operation_icon_url ?? null,
+        source_category: row.source_category ?? null,
+        source_brand: row.source_brand ?? null,
         is_transfer: row.is_transfer,
         transfer_group_id: row.transfer_group_id ?? null,
         raw_payload: {
           ...(row.raw_payload ?? {}),
-          account_hint: row.account_hint ?? null,
+          account_hint: accountHint,
         },
         dedupe_hash: row.dedupe_hash ?? null,
         line_items: row.line_items,
@@ -452,6 +759,63 @@ export default function MoneyImportPage() {
     void checkExtension();
   }, [checkExtension, isExtensionConnector]);
 
+  const loadExtensionImportContext = useCallback(async () => {
+    if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "extension") {
+      setExtensionImportContext(null);
+      return null;
+    }
+
+    setIsLoadingExtensionImportContext(true);
+    try {
+      const accessToken = await getAccessToken();
+      const context = await callMoneyImportActionClient<MoneyImportSourceContextResult>(
+        {
+          action: "get_import_context",
+          source: selectedConnector.sourceId,
+          payer_person_id: selectedPersonId,
+        },
+        accessToken,
+      );
+      setExtensionImportContext(context);
+      setExtensionRangeChoice(defaultRangeChoiceForContext(context));
+      setCustomRangeFrom(toLocalDateTimeInput(context.window_from));
+      setCustomRangeTo(toLocalDateTimeInput(context.window_to));
+      return context;
+    } finally {
+      setIsLoadingExtensionImportContext(false);
+    }
+  }, [selectedConnector, selectedPersonId]);
+
+  useEffect(() => {
+    if (!isExtensionConnector || !selectedPersonId) {
+      setExtensionImportContext(null);
+      setIsLoadingExtensionImportContext(false);
+      setExtensionRangeChoice("auto");
+      setCustomRangeFrom("");
+      setCustomRangeTo("");
+      return;
+    }
+    void loadExtensionImportContext().catch((error) => {
+      setExtensionStatusMessage(
+        error instanceof Error ? error.message : "Failed to load import context",
+      );
+    });
+  }, [isExtensionConnector, loadExtensionImportContext, selectedPersonId]);
+
+  const resolvedExtensionRange = useMemo(() => {
+    if (!extensionImportContext) return null;
+    try {
+      return buildRangeSelectionPayload(
+        extensionImportContext,
+        extensionRangeChoice,
+        customRangeFrom,
+        customRangeTo,
+      );
+    } catch {
+      return null;
+    }
+  }, [customRangeFrom, customRangeTo, extensionImportContext, extensionRangeChoice]);
+
   const sendSessionToExtension = useCallback(
     async (
       payload: MoneyImportSessionCreateResult,
@@ -488,6 +852,10 @@ export default function MoneyImportPage() {
               payer_person_id: payload.payer_person_id,
               expires_at: payload.expires_at,
               last_imported_at: payload.last_imported_at,
+              window_from: payload.window_from,
+              window_to: payload.window_to,
+              parse_strategy: payload.parse_strategy ?? null,
+              range_selection_meta: payload.range_selection_meta ?? null,
               default_account_id: defaultExtensionAccountId,
               function_url: getFunctionUrl("money-import"),
               app_origin: window.location.origin,
@@ -516,6 +884,12 @@ export default function MoneyImportPage() {
         `&payer_person_id=${encodeURIComponent(payload.payer_person_id)}` +
         `&expires_at=${encodeURIComponent(payload.expires_at)}` +
         `&last_imported_at=${encodeURIComponent(payload.last_imported_at ?? "")}` +
+        `&window_from=${encodeURIComponent(payload.window_from ?? "")}` +
+        `&window_to=${encodeURIComponent(payload.window_to ?? "")}` +
+        `&parse_strategy=${encodeURIComponent(payload.parse_strategy ?? "")}` +
+        `&range_selection_meta=${encodeURIComponent(
+          JSON.stringify(payload.range_selection_meta ?? null),
+        )}` +
         `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}`;
 
       window.open(launchUrl, "_blank", "noopener,noreferrer");
@@ -545,6 +919,16 @@ export default function MoneyImportPage() {
     setExtensionStatusMessage(null);
 
     try {
+      const importContext = extensionImportContext ?? (await loadExtensionImportContext());
+      if (!importContext) {
+        throw new Error("Import context is unavailable.");
+      }
+      const rangeSelection = buildRangeSelectionPayload(
+        importContext,
+        extensionRangeChoice,
+        customRangeFrom,
+        customRangeTo,
+      );
       if (selectedConnector.websiteUrl) {
         window.open(selectedConnector.websiteUrl, "_blank", "noopener,noreferrer");
       }
@@ -555,6 +939,12 @@ export default function MoneyImportPage() {
           action: "create_session",
           source: selectedConnector.sourceId,
           payer_person_id: selectedPersonId,
+          window_from: rangeSelection.windowFrom,
+          window_to: rangeSelection.windowTo,
+          meta: {
+            parse_strategy: isTbankExtensionConnector ? extensionParseStrategy : null,
+            range_selection_meta: rangeSelection.rangeSelectionMeta,
+          },
         },
         accessToken,
       );
@@ -586,8 +976,15 @@ export default function MoneyImportPage() {
       setIsStartingExtension(false);
     }
   }, [
+    customRangeFrom,
+    customRangeTo,
     launchExtensionFallback,
     defaultAccountId,
+    extensionImportContext,
+    extensionParseStrategy,
+    extensionRangeChoice,
+    isTbankExtensionConnector,
+    loadExtensionImportContext,
     selectedPersonId,
     selectedConnector,
     sendSessionToExtension,
@@ -605,7 +1002,12 @@ export default function MoneyImportPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <h1 className="text-xl font-semibold">{t("money.importTitle")}</h1>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h1 className="text-xl font-semibold">{t("money.importTitle")}</h1>
+        <Button variant="outline" asChild>
+          <Link href="/money/import/history">{t("money.importViewHistory")}</Link>
+        </Button>
+      </div>
 
       <Card>
         <CardHeader>
@@ -627,6 +1029,12 @@ export default function MoneyImportPage() {
                 setDefaultAccountId("");
                 setExtensionActive(null);
                 setExtensionStatusMessage(null);
+                setExtensionImportContext(null);
+                setIsLoadingExtensionImportContext(false);
+                setExtensionRangeChoice("auto");
+                setExtensionParseStrategy(DEFAULT_TBANK_PARSE_STRATEGY);
+                setCustomRangeFrom("");
+                setCustomRangeTo("");
                 setActiveSessionId(null);
                 setActiveBatchId(null);
                 setSessionStatus(null);
@@ -807,7 +1215,7 @@ export default function MoneyImportPage() {
                               </td>
                               <td className="p-2">{row.merchant_name ?? "-"}</td>
                               <td className="p-2">
-                                {row.account_hint ? `*${row.account_hint}` : "-"}
+                                {getAccountHint(row) ? `*${getAccountHint(row)}` : "-"}
                               </td>
                               <td className="p-2">{row.transaction_type}</td>
                             </tr>
@@ -896,6 +1304,145 @@ export default function MoneyImportPage() {
                     </Select>
                   </div>
                 )}
+                <div className="space-y-3 rounded-md border p-4">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Import history range</div>
+                    <p className="text-sm text-muted-foreground">
+                      {isLoadingExtensionImportContext
+                        ? "Loading import context..."
+                        : extensionImportContext?.requires_history_prompt
+                          ? "No recent imports were found for this source. Choose how much history to import."
+                          : "Recent import history was found. The default range will continue from the last imported transaction."}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2 md:grid-cols-3">
+                    <Button
+                      type="button"
+                      variant={extensionRangeChoice === "auto" ? "default" : "outline"}
+                      onClick={() => setExtensionRangeChoice("auto")}
+                      disabled={
+                        !extensionImportContext || extensionImportContext.requires_history_prompt
+                      }
+                    >
+                      Automatic
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={extensionRangeChoice === "preset:1y" ? "default" : "outline"}
+                      onClick={() => setExtensionRangeChoice("preset:1y")}
+                      disabled={!extensionImportContext}
+                    >
+                      1 year
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={
+                        extensionRangeChoice === "preset:since_last_import" ? "default" : "outline"
+                      }
+                      onClick={() => setExtensionRangeChoice("preset:since_last_import")}
+                      disabled={!extensionImportContext?.last_imported_at}
+                    >
+                      Since last import
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-2 md:grid-cols-4">
+                    <Button
+                      type="button"
+                      variant={extensionRangeChoice === "preset:1m" ? "default" : "outline"}
+                      onClick={() => setExtensionRangeChoice("preset:1m")}
+                      disabled={!extensionImportContext}
+                    >
+                      1 month
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={extensionRangeChoice === "preset:3m" ? "default" : "outline"}
+                      onClick={() => setExtensionRangeChoice("preset:3m")}
+                      disabled={!extensionImportContext}
+                    >
+                      3 months
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={extensionRangeChoice === "preset:6m" ? "default" : "outline"}
+                      onClick={() => setExtensionRangeChoice("preset:6m")}
+                      disabled={!extensionImportContext}
+                    >
+                      6 months
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={extensionRangeChoice === "custom" ? "default" : "outline"}
+                      onClick={() => setExtensionRangeChoice("custom")}
+                      disabled={!extensionImportContext}
+                    >
+                      Custom
+                    </Button>
+                  </div>
+
+                  {extensionRangeChoice === "custom" && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="customRangeFrom">From</Label>
+                        <Input
+                          id="customRangeFrom"
+                          type="datetime-local"
+                          value={customRangeFrom}
+                          onChange={(event) => setCustomRangeFrom(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="customRangeTo">To</Label>
+                        <Input
+                          id="customRangeTo"
+                          type="datetime-local"
+                          value={customRangeTo}
+                          onChange={(event) => setCustomRangeTo(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="text-sm text-muted-foreground">
+                    {`Selected range: ${formatSelectedRange(
+                      resolvedExtensionRange?.windowFrom ??
+                        extensionImportContext?.window_from ??
+                        null,
+                      resolvedExtensionRange?.windowTo ?? extensionImportContext?.window_to ?? null,
+                    )}`}
+                  </div>
+                </div>
+                {isTbankExtensionConnector && (
+                  <div className="space-y-3 rounded-md border p-4">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">Receipt detail strategy</div>
+                      <p className="text-sm text-muted-foreground">
+                        Full waits longer between receipt requests to reduce T-Bank rate limit
+                        errors.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <Button
+                        type="button"
+                        variant={extensionParseStrategy === "fast" ? "default" : "outline"}
+                        data-state={extensionParseStrategy === "fast" ? "on" : "off"}
+                        onClick={() => setExtensionParseStrategy("fast")}
+                      >
+                        Fast
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={extensionParseStrategy === "full" ? "default" : "outline"}
+                        data-state={extensionParseStrategy === "full" ? "on" : "off"}
+                        onClick={() => setExtensionParseStrategy("full")}
+                      >
+                        Full
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
                   <li>{t("money.importExtensionStep1")}</li>
                   <li>{t("money.importExtensionStep2")}</li>
@@ -906,6 +1453,9 @@ export default function MoneyImportPage() {
                   onClick={handleStartExtensionImport}
                   disabled={
                     isStartingExtension ||
+                    isLoadingExtensionImportContext ||
+                    !extensionImportContext ||
+                    !resolvedExtensionRange ||
                     sourceAccounts.length === 0 ||
                     (sourceAccounts.length > 1 && !defaultAccountId)
                   }

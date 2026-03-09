@@ -6,6 +6,41 @@ import type { MoneyTransactionType, MoneyTransactionStatus } from "./money";
 
 export type ImportConnectorKind = "file" | "extension";
 export type MoneyImportBatchStatus = "pending" | "running" | "completed" | "failed" | "discarded";
+export type MoneyImportRangeSelectionMode = "auto" | "preset" | "custom";
+export type MoneyImportRangePresetKey = "1m" | "3m" | "6m" | "1y" | "since_last_import";
+
+export interface MoneyImportRangeSelectionMeta {
+  selection_mode: MoneyImportRangeSelectionMode;
+  preset_key: MoneyImportRangePresetKey | null;
+  prompted_for_history: boolean;
+  last_imported_at_at_decision_time: string | null;
+  stale_threshold_days: number;
+}
+
+export interface MoneyImportSourceContextResult {
+  last_imported_at: string | null;
+  requires_history_prompt: boolean;
+  stale_threshold_days: number;
+  recommended_mode: "auto" | "preset";
+  window_from: string | null;
+  window_to: string | null;
+}
+
+export interface MoneyImportExistingTransactionStateCandidate {
+  external_id?: string | null;
+  dedupe_hash?: string | null;
+  posted_at?: string | null;
+  amount?: number | null;
+}
+
+export interface MoneyImportExistingTransactionState {
+  transaction_id: string | null;
+  exists: boolean;
+  fulfilled: boolean;
+  has_only_synthetic_line_items: boolean;
+  has_real_line_items: boolean;
+  receipt_enrichment_status: MoneyImportReceiptEnrichmentStatus | null;
+}
 
 /** Line item shape produced by connectors and sent in batch payload */
 export interface ImportLineItem {
@@ -14,6 +49,49 @@ export interface ImportLineItem {
   quantity?: number | null;
   unit?: string | null;
   raw_payload?: Record<string, unknown> | null;
+}
+
+export interface ImportSourceCategory {
+  id?: string | null;
+  name?: string | null;
+}
+
+export interface ImportSourceBrand {
+  source_key?: string | null;
+  name: string;
+  website_url?: string | null;
+  logo_url?: string | null;
+  base_color?: string | null;
+  base_text_color?: string | null;
+}
+
+export type MoneyImportReceiptEnrichmentStatus =
+  | "ok"
+  | "rate_limited"
+  | "skipped_after_budget"
+  | "not_requested"
+  | "error";
+export type MoneyImportParseStrategy = "fast" | "full";
+
+export type MoneyImportBrandResolutionAction = "match_existing" | "create_new";
+
+export interface MoneyImportBatchBrandResolution {
+  id: string;
+  batch_id: string;
+  source: string;
+  source_key: string;
+  source_name: string;
+  website_url: string | null;
+  logo_url: string | null;
+  base_color: string | null;
+  base_text_color: string | null;
+  suggested_brand_id: string | null;
+  suggested_confidence: number;
+  suggested_reason: string | null;
+  selected_action: MoneyImportBrandResolutionAction;
+  selected_brand_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -37,6 +115,17 @@ export interface CanonicalTransactionRow {
   source_comment?: string | null;
   cashback_amount?: number | null;
   cashback_currency?: string | null;
+  operation_icon_url?: string | null;
+  source_category?: ImportSourceCategory | null;
+  source_brand?: ImportSourceBrand | null;
+  receipt_request_key?: string | null;
+  receipt_enrichment_status?: MoneyImportReceiptEnrichmentStatus | null;
+  receipt_line_items_skipped?: boolean;
+  receipt_retryable?: boolean;
+  receipt_retry_attempts?: number;
+  receipt_result_code?: string | null;
+  receipt_tracking_id?: string | null;
+  receipt_message?: string | null;
   is_transfer: boolean;
   transfer_group_id?: string | null;
   raw_payload?: Record<string, unknown> | null;
@@ -75,6 +164,7 @@ export type MoneyImportConnector = MoneyFileImportConnector | MoneyExtensionImpo
 /** Row shape sent to money-import Edge Function preview/apply actions. */
 export interface BatchTransactionRow {
   account_id: string;
+  account_hint?: string | null;
   card_id?: string | null;
   source: string;
   external_id?: string | null;
@@ -89,6 +179,17 @@ export interface BatchTransactionRow {
   source_comment?: string | null;
   cashback_amount?: number | null;
   cashback_currency?: string | null;
+  operation_icon_url?: string | null;
+  source_category?: ImportSourceCategory | null;
+  source_brand?: ImportSourceBrand | null;
+  receipt_request_key?: string | null;
+  receipt_enrichment_status?: MoneyImportReceiptEnrichmentStatus | null;
+  receipt_line_items_skipped?: boolean;
+  receipt_retryable?: boolean;
+  receipt_retry_attempts?: number;
+  receipt_result_code?: string | null;
+  receipt_tracking_id?: string | null;
+  receipt_message?: string | null;
   is_transfer: boolean;
   transfer_group_id?: string | null;
   raw_payload?: Record<string, unknown> | null;
@@ -108,6 +209,11 @@ interface MoneyImportRowsRequestBase {
   parsed_transactions_count?: number;
   window_from?: string | null;
   window_to?: string | null;
+  chunk_index?: number;
+  chunk_count?: number;
+  row_offset?: number;
+  is_final_chunk?: boolean;
+  total_row_count?: number;
   meta?: Record<string, unknown> | null;
   rows: BatchTransactionRow[];
 }
@@ -128,6 +234,20 @@ export interface MoneyImportApplyBatchRequest {
 export interface MoneyImportDiscardBatchRequest {
   action: "discard_batch";
   batch_id: string;
+}
+
+export interface MoneyImportRemapPreviewCardRequest {
+  action: "remap_preview_card";
+  batch_id: string;
+  card_id: string;
+  target_account_id: string;
+}
+
+export interface MoneyImportGetExistingTransactionStatesRequest {
+  action: "get_existing_transaction_states";
+  source: string;
+  payer_person_id: string;
+  candidates: MoneyImportExistingTransactionStateCandidate[];
 }
 
 /** Per-row result from Edge apply_rows action */
@@ -165,6 +285,31 @@ export interface MoneyImportDiscardBatchResult {
   status: "discarded";
 }
 
+export interface MoneyImportGetExistingTransactionStatesResult {
+  states: MoneyImportExistingTransactionState[];
+}
+
+export interface MoneyImportRemapPreviewCardResult {
+  batch_id: string;
+  previous_card_id: string;
+  resulting_card_id: string;
+  target_account_id: string;
+  updated_row_count: number;
+}
+
+export interface MoneyImportUpdateBrandResolutionRequest {
+  action: "update_brand_resolution";
+  resolution_id: string;
+  selected_action: MoneyImportBrandResolutionAction;
+  selected_brand_id?: string | null;
+}
+
+export interface MoneyImportUpdateBrandResolutionResult {
+  resolution_id: string;
+  selected_action: MoneyImportBrandResolutionAction;
+  selected_brand_id: string | null;
+}
+
 export interface MoneyImportSessionCreateResult {
   session_id: string;
   session_token: string;
@@ -174,6 +319,10 @@ export interface MoneyImportSessionCreateResult {
   expires_at: string;
   ttl_minutes: number;
   last_imported_at: string | null;
+  window_from: string | null;
+  window_to: string | null;
+  parse_strategy?: MoneyImportParseStrategy | null;
+  range_selection_meta?: MoneyImportRangeSelectionMeta | null;
 }
 
 export interface MoneyImportSessionStatus {
@@ -220,6 +369,7 @@ export interface MoneyImportBatch {
   error_count: number;
   completed_at: string | null;
   created_at: string;
+  meta?: Record<string, unknown> | null;
 }
 
 export interface MoneyImportBatchRow {
@@ -233,6 +383,8 @@ export interface MoneyImportBatchRow {
   message: string | null;
   transaction_id: string | null;
   line_item_id: string | null;
+  receipt_request_key?: string | null;
+  receipt_enrichment_status?: MoneyImportReceiptEnrichmentStatus | null;
   payload: Record<string, unknown> | null;
   created_at: string;
 }

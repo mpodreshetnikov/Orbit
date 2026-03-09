@@ -9,6 +9,7 @@ export type FailureCategory =
   | "API_DISCOVERY_MISSED"
   | "API_4XX_5XX"
   | "DOM_SELECTOR_DRIFT"
+  | "ENRICHMENT_RATE_LIMITED"
   | "MAPPING_DROP";
 
 interface ParsedArgs {
@@ -48,6 +49,17 @@ export interface TbankDebugDiagnostics {
   status_histogram: Record<string, number>;
   error_signatures: string[];
   mapping_drop_total: number;
+  receipt_enrichment: {
+    requested_count: number;
+    success_count: number;
+    rate_limited_count: number;
+    skipped_after_budget_count: number;
+    failed_count: number;
+    retry_attempts_total: number;
+    stopped_after_budget: boolean;
+    base_pause_between_receipts_ms: number;
+    line_items_skipped_count: number;
+  };
   categories: FailureCategory[];
   passed: boolean;
 }
@@ -227,6 +239,38 @@ function countRowsWithoutLineItems(rows: Record<string, unknown>[]): number {
   return count;
 }
 
+function countReceiptLineItemsSkipped(rows: Record<string, unknown>[]): number {
+  let count = 0;
+  for (const row of rows) {
+    if (
+      row.receipt_enrichment_status === "rate_limited" ||
+      row.receipt_enrichment_status === "skipped_after_budget" ||
+      row.receipt_line_items_skipped === true
+    ) {
+      count += 1;
+      continue;
+    }
+
+    const payload = toObject(row.payload);
+    if (
+      payload?.receipt_enrichment_status === "rate_limited" ||
+      payload?.receipt_enrichment_status === "skipped_after_budget" ||
+      payload?.receipt_line_items_skipped === true
+    ) {
+      count += 1;
+      continue;
+    }
+
+    const rawPayload = toObject(payload?.raw_payload);
+    const enrichment = toObject(rawPayload?.enrichment);
+    const shoppingReceipt = toObject(enrichment?.shopping_receipt);
+    if (shoppingReceipt?.line_items_skipped === true) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function includesAuthBlockedSignal(value: string): boolean {
   const text = value.toLowerCase();
   return (
@@ -297,6 +341,8 @@ export function analyzeArtifactBundle(
     (sum, count) => sum + (Number.isFinite(count) ? count : 0),
     0,
   );
+  const receiptEnrichmentDebug = toObject(parseDebug.receipt_enrichment) ?? {};
+  const receiptLineItemsSkippedCount = countReceiptLineItemsSkipped(rows);
 
   const parsedThroughAt = toIsoString(parseOutput?.["parsedThroughAt"]) ?? null;
   const windowTo = toIsoString(parseOutput?.["windowTo"]) ?? null;
@@ -317,6 +363,18 @@ export function analyzeArtifactBundle(
     status_histogram: histogram,
     error_signatures: extractErrorSignatures(artifact),
     mapping_drop_total: mappingDropTotal,
+    receipt_enrichment: {
+      requested_count: toNumber(receiptEnrichmentDebug.requested_count) ?? 0,
+      success_count: toNumber(receiptEnrichmentDebug.success_count) ?? 0,
+      rate_limited_count: toNumber(receiptEnrichmentDebug.rate_limited_count) ?? 0,
+      skipped_after_budget_count: toNumber(receiptEnrichmentDebug.skipped_after_budget_count) ?? 0,
+      failed_count: toNumber(receiptEnrichmentDebug.failed_count) ?? 0,
+      retry_attempts_total: toNumber(receiptEnrichmentDebug.retry_attempts_total) ?? 0,
+      stopped_after_budget: receiptEnrichmentDebug.stopped_after_budget === true,
+      base_pause_between_receipts_ms:
+        toNumber(receiptEnrichmentDebug.base_pause_between_receipts_ms) ?? 0,
+      line_items_skipped_count: receiptLineItemsSkippedCount,
+    },
     categories: [],
     passed: true,
   };
@@ -338,6 +396,14 @@ export function analyzeArtifactBundle(
 
   if (extractionMethod === "dom" && rows.length === 0) {
     diagnostics.categories.push("DOM_SELECTOR_DRIFT");
+  }
+
+  if (
+    diagnostics.receipt_enrichment.rate_limited_count > 0 ||
+    diagnostics.receipt_enrichment.skipped_after_budget_count > 0 ||
+    diagnostics.receipt_enrichment.line_items_skipped_count > 0
+  ) {
+    diagnostics.categories.push("ENRICHMENT_RATE_LIMITED");
   }
 
   if (
@@ -754,6 +820,7 @@ function buildHumanReportMarkdown(
         "invalid_posted_at",
         "rows_without_line_items",
         "mapping_drop_total",
+        "receipt_line_items_skipped_count",
         "extraction_method",
         "fallback_used",
       ],
@@ -763,8 +830,39 @@ function buildHumanReportMarkdown(
           diagnostics.invalid_posted_at,
           diagnostics.rows_without_line_items,
           diagnostics.mapping_drop_total,
+          diagnostics.receipt_enrichment.line_items_skipped_count,
           diagnostics.api_vs_dom_used.extraction_method,
           diagnostics.api_vs_dom_used.fallback_used,
+        ],
+      ],
+    ),
+  );
+  reportParts.push("");
+  reportParts.push(`## Receipt Enrichment`);
+  reportParts.push(
+    toMarkdownTable(
+      [
+        "requested_count",
+        "success_count",
+        "rate_limited_count",
+        "skipped_after_budget_count",
+        "failed_count",
+        "retry_attempts_total",
+        "stopped_after_budget",
+        "base_pause_between_receipts_ms",
+        "line_items_skipped_count",
+      ],
+      [
+        [
+          diagnostics.receipt_enrichment.requested_count,
+          diagnostics.receipt_enrichment.success_count,
+          diagnostics.receipt_enrichment.rate_limited_count,
+          diagnostics.receipt_enrichment.skipped_after_budget_count,
+          diagnostics.receipt_enrichment.failed_count,
+          diagnostics.receipt_enrichment.retry_attempts_total,
+          diagnostics.receipt_enrichment.stopped_after_budget,
+          diagnostics.receipt_enrichment.base_pause_between_receipts_ms,
+          diagnostics.receipt_enrichment.line_items_skipped_count,
         ],
       ],
     ),

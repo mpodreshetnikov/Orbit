@@ -54,7 +54,8 @@ vi.mock("@/hooks", () => ({
   useRegimen: (...args: unknown[]) => hookMocks.useRegimen(...args),
   useDoseEventsForRegimen: (...args: unknown[]) => hookMocks.useDoseEventsForRegimen(...args),
   useMedicationRefillSnooze: (...args: unknown[]) => hookMocks.useMedicationRefillSnooze(...args),
-  useSetMedicationRefillSnooze: (...args: unknown[]) => hookMocks.useSetMedicationRefillSnooze(...args),
+  useSetMedicationRefillSnooze: (...args: unknown[]) =>
+    hookMocks.useSetMedicationRefillSnooze(...args),
   useUpdateRegimenInventory: (...args: unknown[]) => hookMocks.useUpdateRegimenInventory(...args),
   useDeleteRegimen: (...args: unknown[]) => hookMocks.useDeleteRegimen(...args),
   useArchiveRegimen: (...args: unknown[]) => hookMocks.useArchiveRegimen(...args),

@@ -139,6 +139,122 @@ Deno.test("repository createImportSession throws on insert error", async () => {
   );
 });
 
+Deno.test(
+  "repository getExistingTransactionStates distinguishes fulfilled and synthetic-only matches",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_transactions") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  in: (column: string, _values: string[]) => {
+                    if (column === "external_id") {
+                      return Promise.resolve({
+                        data: [
+                          {
+                            id: "tx-real",
+                            source: "tbank",
+                            external_id: "ext-real",
+                            dedupe_hash: "hash-real",
+                            receipt_enrichment_status: "ok",
+                          },
+                          {
+                            id: "tx-synth",
+                            source: "tbank",
+                            external_id: "ext-synth",
+                            dedupe_hash: "hash-synth",
+                            receipt_enrichment_status: "ok",
+                          },
+                        ],
+                        error: null,
+                      });
+                    }
+                    throw new Error(`Unexpected external-id column ${column}`);
+                  },
+                }),
+                in: (column: string, _values: string[]) => {
+                  if (column === "dedupe_hash") {
+                    return Promise.resolve({ data: [], error: null });
+                  }
+                  throw new Error(`Unexpected column ${column}`);
+                },
+              }),
+            };
+          }
+
+          if (table === "money_line_items") {
+            return {
+              select: () => ({
+                in: (_column: string, values: string[]) =>
+                  Promise.resolve({
+                    data: values.flatMap((transactionId) =>
+                      transactionId === "tx-real"
+                        ? [{ transaction_id: "tx-real", raw_payload: { source: "receipt" } }]
+                        : transactionId === "tx-synth"
+                          ? [{ transaction_id: "tx-synth", raw_payload: { source: "fallback" } }]
+                          : [],
+                    ),
+                    error: null,
+                  }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const states = await repository.getExistingTransactionStates("tbank_web", "person-1", [
+      {
+        external_id: "ext-real",
+        dedupe_hash: "hash-real",
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+      },
+      {
+        external_id: "ext-synth",
+        dedupe_hash: "hash-synth",
+        posted_at: "2026-01-02T00:00:00.000Z",
+        amount: 20,
+      },
+      {
+        external_id: "ext-missing",
+        dedupe_hash: "hash-missing",
+        posted_at: "2026-01-03T00:00:00.000Z",
+        amount: 30,
+      },
+    ]);
+
+    assertEquals(states[0], {
+      transaction_id: "tx-real",
+      exists: true,
+      fulfilled: true,
+      has_only_synthetic_line_items: false,
+      has_real_line_items: true,
+      receipt_enrichment_status: "ok",
+    });
+    assertEquals(states[1], {
+      transaction_id: "tx-synth",
+      exists: true,
+      fulfilled: false,
+      has_only_synthetic_line_items: true,
+      has_real_line_items: false,
+      receipt_enrichment_status: "ok",
+    });
+    assertEquals(states[2], {
+      transaction_id: null,
+      exists: false,
+      fulfilled: false,
+      has_only_synthetic_line_items: false,
+      has_real_line_items: false,
+      receipt_enrichment_status: null,
+    });
+  },
+);
+
 Deno.test("repository resolveAccountIdForRow uses card hint when multiple accounts", async () => {
   const repository = createRepositoryWithClients({
     adminClient: {
@@ -1073,5 +1189,604 @@ Deno.test(
       raw_payload: { account_hint: "****1234" },
     });
     assertEquals(conflictResolved, "card-after-conflict");
+  },
+);
+
+Deno.test("repository resolveBrandIdForRow creates canonical brand and alias", async () => {
+  const brandInserts: Record<string, unknown>[] = [];
+  const aliasInserts: Record<string, unknown>[] = [];
+
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table === "money_transaction_brand_aliases") {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  limit: () => ({
+                    maybeSingle: async () => ({ data: null, error: null }),
+                  }),
+                }),
+              }),
+              order: async () => ({
+                data: [],
+                error: null,
+              }),
+            }),
+            insert: (payload: Record<string, unknown>) => {
+              aliasInserts.push(payload);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+
+        if (table === "money_transaction_brands") {
+          return {
+            select: () => ({
+              eq: () => ({
+                limit: () => ({
+                  maybeSingle: async () => ({ data: null, error: null }),
+                }),
+              }),
+              order: async () => ({
+                data: [],
+                error: null,
+              }),
+            }),
+            insert: (payload: Record<string, unknown>) => {
+              brandInserts.push(payload);
+              return {
+                select: () => ({
+                  single: async () => ({ data: { id: "brand-1" }, error: null }),
+                }),
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    },
+  });
+
+  const brandId = await repository.resolveBrandIdForRow!(
+    {
+      posted_at: "2026-01-01T00:00:00.000Z",
+      amount: 10,
+      transaction_type: "expense",
+      source: "tbank_web",
+      source_brand: {
+        source_key: "17879",
+        name: "Transport",
+        website_url: "https://mu-kgt.ru",
+        logo_url: "https://cdn.example.com/logo.png",
+        base_color: "C21722",
+        base_text_color: "FFFFFF",
+      },
+    },
+    "tbank_web",
+    true,
+  );
+
+  assertEquals(brandId, "brand-1");
+  assertEquals(brandInserts[0], {
+    slug: "transport",
+    name: "Transport",
+    website_url: "https://mu-kgt.ru",
+    logo_url: "https://cdn.example.com/logo.png",
+    base_color: "C21722",
+    base_text_color: "FFFFFF",
+  });
+  assertEquals(aliasInserts[0], {
+    brand_id: "brand-1",
+    source: "tbank",
+    source_key: "17879",
+    source_name: "Transport",
+    website_url: "https://mu-kgt.ru",
+    logo_url: "https://cdn.example.com/logo.png",
+    base_color: "C21722",
+    base_text_color: "FFFFFF",
+  });
+});
+
+Deno.test(
+  "repository resolveBrandIdForRow reuses existing alias and can skip creation",
+  async () => {
+    let aliasLookupCount = 0;
+    let brandLookupCount = 0;
+
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_transaction_brand_aliases") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => {
+                        aliasLookupCount += 1;
+                        if (aliasLookupCount === 1) {
+                          return { data: { brand_id: "brand-existing" }, error: null };
+                        }
+                        return { data: null, error: null };
+                      },
+                    }),
+                  }),
+                }),
+                order: async () => ({
+                  data: [],
+                  error: null,
+                }),
+              }),
+              insert: () => Promise.resolve({ error: { code: "should-not-insert" } }),
+            };
+          }
+
+          if (table === "money_transaction_brands") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  limit: () => ({
+                    maybeSingle: async () => {
+                      brandLookupCount += 1;
+                      return {
+                        data: {
+                          id: "brand-existing",
+                          name: "Known Brand",
+                          website_url: null,
+                          logo_url: null,
+                          base_color: null,
+                          base_text_color: null,
+                        },
+                        error: null,
+                      };
+                    },
+                  }),
+                }),
+                order: async () => ({
+                  data: [],
+                  error: null,
+                }),
+              }),
+              update: () => ({
+                eq: async () => ({ error: null }),
+              }),
+              insert: () => ({
+                select: () => ({
+                  single: async () => ({ data: null, error: { code: "should-not-insert" } }),
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const reusedBrandId = await repository.resolveBrandIdForRow!(
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "17879",
+          name: "Known Brand",
+          website_url: "https://known.example",
+        },
+      },
+      "tbank_web",
+      true,
+    );
+    assertEquals(reusedBrandId, "brand-existing");
+    assertEquals(brandLookupCount, 1);
+
+    const skippedBrandId = await repository.resolveBrandIdForRow!(
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "new-brand",
+          name: "New Brand",
+        },
+      },
+      "tbank_web",
+      false,
+    );
+    assertEquals(skippedBrandId, null);
+  },
+);
+
+Deno.test(
+  "repository previewBrandResolutionForRow auto-selects website + name match at 100",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_transaction_brand_aliases") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({ data: null, error: null }),
+                    }),
+                  }),
+                }),
+                order: async () => ({
+                  data: [],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          if (table === "money_transaction_brands") {
+            return {
+              select: () => ({
+                order: async () => ({
+                  data: [
+                    {
+                      id: "brand-known",
+                      slug: "known-brand",
+                      name: "Known Brand",
+                      website_url: "https://known.example/store",
+                      logo_url: "https://cdn.example.com/known-brand.png",
+                      base_color: null,
+                      base_text_color: null,
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const resolution = await repository.previewBrandResolutionForRow!(
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "known-brand",
+          name: "Known Brand",
+          website_url: "https://known.example/merchant/42",
+        },
+      },
+      "tbank_web",
+    );
+
+    assertEquals(resolution?.suggested_brand_id, "brand-known");
+    assertEquals(resolution?.suggested_confidence, 100);
+    assertEquals(resolution?.selected_action, "match_existing");
+    assertEquals(resolution?.selected_brand_id, "brand-known");
+  },
+);
+
+Deno.test(
+  "repository previewBrandResolutionForRow auto-selects exact name-only match at 90",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_transaction_brand_aliases") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({ data: null, error: null }),
+                    }),
+                  }),
+                }),
+                order: async () => ({
+                  data: [],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          if (table === "money_transaction_brands") {
+            return {
+              select: () => ({
+                order: async () => ({
+                  data: [
+                    {
+                      id: "brand-name-only",
+                      slug: "known-brand",
+                      name: "Known Brand",
+                      website_url: null,
+                      logo_url: null,
+                      base_color: "111111",
+                      base_text_color: "ffffff",
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const resolution = await repository.previewBrandResolutionForRow!(
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "known-brand",
+          name: "Known Brand",
+          base_color: "ff0000",
+          base_text_color: "000000",
+        },
+      },
+      "tbank_web",
+    );
+
+    assertEquals(resolution?.suggested_brand_id, "brand-name-only");
+    assertEquals(resolution?.suggested_confidence, 90);
+    assertEquals(resolution?.selected_action, "match_existing");
+    assertEquals(resolution?.selected_brand_id, "brand-name-only");
+  },
+);
+
+Deno.test(
+  "repository previewBrandResolutionForRow reuses the indexed brand catalog across calls",
+  async () => {
+    let brandCatalogLoads = 0;
+    let aliasCatalogLoads = 0;
+
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_transaction_brand_aliases") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({ data: null, error: null }),
+                    }),
+                  }),
+                }),
+                order: async () => {
+                  aliasCatalogLoads += 1;
+                  return {
+                    data: [
+                      {
+                        brand_id: "brand-known",
+                        source_name: "Known Brand",
+                        website_url: null,
+                        logo_url: null,
+                      },
+                    ],
+                    error: null,
+                  };
+                },
+              }),
+            };
+          }
+
+          if (table === "money_transaction_brands") {
+            return {
+              select: () => ({
+                order: async () => {
+                  brandCatalogLoads += 1;
+                  return {
+                    data: [
+                      {
+                        id: "brand-known",
+                        slug: "known-brand",
+                        name: "Known Brand",
+                        website_url: null,
+                        logo_url: null,
+                        base_color: null,
+                        base_text_color: null,
+                      },
+                    ],
+                    error: null,
+                  };
+                },
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const firstResolution = await repository.previewBrandResolutionForRow!(
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "known-brand-1",
+          name: "Known Brand",
+        },
+      },
+      "tbank_web",
+    );
+    const secondResolution = await repository.previewBrandResolutionForRow!(
+      {
+        posted_at: "2026-01-02T00:00:00.000Z",
+        amount: 20,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "known-brand-2",
+          name: "Known Brand",
+        },
+      },
+      "tbank_web",
+    );
+
+    assertEquals(firstResolution?.suggested_brand_id, "brand-known");
+    assertEquals(secondResolution?.suggested_brand_id, "brand-known");
+    assertEquals(brandCatalogLoads, 1);
+    assertEquals(aliasCatalogLoads, 1);
+  },
+);
+
+Deno.test(
+  "repository previewBrandResolutionForRow defaults tied top matches to create_new",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_transaction_brand_aliases") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({ data: null, error: null }),
+                    }),
+                  }),
+                }),
+                order: async () => ({
+                  data: [],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          if (table === "money_transaction_brands") {
+            return {
+              select: () => ({
+                order: async () => ({
+                  data: [
+                    {
+                      id: "brand-a",
+                      slug: "known-brand-a",
+                      name: "Known Brand",
+                      website_url: null,
+                      logo_url: null,
+                      base_color: null,
+                      base_text_color: null,
+                    },
+                    {
+                      id: "brand-b",
+                      slug: "known-brand-b",
+                      name: "Known Brand",
+                      website_url: null,
+                      logo_url: null,
+                      base_color: null,
+                      base_text_color: null,
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const resolution = await repository.previewBrandResolutionForRow!(
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "known-brand",
+          name: "Known Brand",
+        },
+      },
+      "tbank_web",
+    );
+
+    assertEquals(resolution?.suggested_brand_id, null);
+    assertEquals(resolution?.suggested_confidence, 90);
+    assertEquals(resolution?.selected_action, "create_new");
+    assertEquals(resolution?.selected_brand_id ?? null, null);
+  },
+);
+
+Deno.test(
+  "repository previewBrandResolutionForRow ignores bank-native labels even when an alias exists",
+  async () => {
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_transaction_brand_aliases") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({
+                        data: {
+                          brand_id: "brand-bad",
+                          source_name: "Внутрибанковский перевод",
+                        },
+                        error: null,
+                      }),
+                    }),
+                  }),
+                }),
+                order: async () => ({
+                  data: [],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          if (table === "money_transaction_brands") {
+            return {
+              select: () => ({
+                order: async () => ({
+                  data: [],
+                  error: null,
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+    });
+
+    const resolution = await repository.previewBrandResolutionForRow!(
+      {
+        posted_at: "2026-01-01T00:00:00.000Z",
+        amount: 10,
+        transaction_type: "expense",
+        source: "tbank_web",
+        source_brand: {
+          source_key: "native-transfer",
+          name: "Внутрибанковский перевод 3-м лицам",
+        },
+      },
+      "tbank_web",
+    );
+
+    assertEquals(resolution, null);
   },
 );

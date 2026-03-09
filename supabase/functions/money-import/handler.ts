@@ -5,11 +5,15 @@ import { applyRowsAction } from "./apply-rows.ts";
 import { applyBatchAction } from "./apply-batch.ts";
 import { createDefaultMoneyImportDeps, type MoneyImportDeps } from "./deps.ts";
 import { discardBatchAction } from "./discard-batch.ts";
+import { getExistingTransactionStatesAction } from "./existing-transaction-states.ts";
 import { jsonResponse, normalizeText } from "./normalize.ts";
 import { previewRowsAction } from "./preview-rows.ts";
+import { remapPreviewCardAction } from "./preview-batch-actions.ts";
+import { updateBrandResolutionAction } from "./update-brand-resolution.ts";
 import {
   completeSessionAction,
   createSessionAction,
+  getImportContextAction,
   sessionStatusAction,
 } from "./session-actions.ts";
 import type { UserAuthContext } from "./types.ts";
@@ -85,6 +89,51 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           { allowUser: true, allowSession: false },
         )) as UserAuthContext;
         const response = await createSessionAction(body, auth, { ...deps, telemetry });
+        await actionSpan.end({ status: "ok" });
+        await requestSpan.end({
+          status: response.status >= 400 ? "error" : "ok",
+          attrs: { action, status_code: response.status },
+        });
+        return response;
+      }
+
+      if (action === "get_import_context") {
+        const actionSpan = telemetry.startSpan("edge.money_import.action.get_import_context");
+        const auth = (await resolveAuth(
+          req,
+          {
+            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+            getSessionByToken: deps.repository.getSessionByToken,
+            now: () => (deps.now ?? (() => new Date()))().getTime(),
+          },
+          { allowUser: true, allowSession: false },
+        )) as UserAuthContext;
+        const response = await getImportContextAction(body, auth, { ...deps, telemetry });
+        await actionSpan.end({ status: "ok" });
+        await requestSpan.end({
+          status: response.status >= 400 ? "error" : "ok",
+          attrs: { action, status_code: response.status },
+        });
+        return response;
+      }
+
+      if (action === "get_existing_transaction_states") {
+        const actionSpan = telemetry.startSpan(
+          "edge.money_import.action.get_existing_transaction_states",
+        );
+        const auth = (await resolveAuth(
+          req,
+          {
+            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+            getSessionByToken: deps.repository.getSessionByToken,
+            now: () => (deps.now ?? (() => new Date()))().getTime(),
+          },
+          { allowUser: true, allowSession: false },
+        )) as UserAuthContext;
+        const response = await getExistingTransactionStatesAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -185,6 +234,50 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           { allowUser: true, allowSession: false },
         )) as UserAuthContext;
         const response = await discardBatchAction(body, auth, { ...deps, telemetry });
+        await actionSpan.end({ status: "ok" });
+        await requestSpan.end({
+          status: response.status >= 400 ? "error" : "ok",
+          attrs: { action, status_code: response.status },
+        });
+        return response;
+      }
+
+      if (action === "update_brand_resolution") {
+        const actionSpan = telemetry.startSpan("edge.money_import.action.update_brand_resolution");
+        const auth = (await resolveAuth(
+          req,
+          {
+            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+            getSessionByToken: deps.repository.getSessionByToken,
+            now: () => (deps.now ?? (() => new Date()))().getTime(),
+          },
+          { allowUser: true, allowSession: false },
+        )) as UserAuthContext;
+        const response = await updateBrandResolutionAction(body, auth, {
+          repository: deps.repository,
+        });
+        await actionSpan.end({ status: "ok" });
+        await requestSpan.end({
+          status: response.status >= 400 ? "error" : "ok",
+          attrs: { action, status_code: response.status },
+        });
+        return response;
+      }
+
+      if (action === "remap_preview_card") {
+        const actionSpan = telemetry.startSpan("edge.money_import.action.remap_preview_card");
+        const auth = (await resolveAuth(
+          req,
+          {
+            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+            getSessionByToken: deps.repository.getSessionByToken,
+            now: () => (deps.now ?? (() => new Date()))().getTime(),
+          },
+          { allowUser: true, allowSession: false },
+        )) as UserAuthContext;
+        const response = await remapPreviewCardAction(body, auth, {
+          repository: deps.repository,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",

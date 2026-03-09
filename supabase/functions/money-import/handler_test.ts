@@ -68,18 +68,36 @@ function createRepositoryMock(
           status: "posted",
           source: "tbank_web",
           account_id: "acc-1",
+          account_hint: "1234",
+          card_id: "card-1",
+          raw_payload: { account_hint: "**** 1234" },
           line_items: [],
         },
       },
     ],
     deleteReportRowsByBatch: async () => {},
     resolveAccountIdForRow: async () => "acc-1",
-    resolveCardIdForRow: async () => null,
+    resolveCardIdForRow: async () => "card-target",
     findExistingTransactionId: async () => null,
     findExistingLineItemId: async () => null,
+    getExistingTransactionStates: async () => [],
+    repairExistingTransactionDetails: async () => ({
+      replaced_synthetic_line_items: false,
+      has_only_synthetic_line_items: false,
+      has_real_line_items: false,
+    }),
     insertOrResolveTransaction: async () => ({ transactionId: "tx-1", inserted: true }),
     insertLineItemIfNew: async () => ({ lineItemId: "line-1", inserted: true }),
     insertReportRow: async () => "report-1",
+    previewBrandResolutionForRow: async () => null,
+    upsertBatchBrandResolution: async () => {},
+    getBatchBrandResolutionById: async (resolutionId: string) => ({
+      id: resolutionId,
+      batch_id: "batch-1",
+    }),
+    listBatchBrandResolutions: async () => [],
+    deleteBatchBrandResolutionsByBatch: async () => {},
+    updateBatchBrandResolutionSelection: async () => {},
   };
 }
 
@@ -162,7 +180,7 @@ Deno.test("money-import handler returns 401 for missing auth on protected action
 });
 
 Deno.test(
-  "money-import handler runs create_session, preview_rows, apply_batch, and discard_batch happy paths",
+  "money-import handler runs create_session, preview_rows, apply_batch, discard_batch, and update_brand_resolution happy paths",
   async () => {
     const handler = createMoneyImportHandler({
       repository: createRepositoryMock({
@@ -271,8 +289,170 @@ Deno.test(
     );
     assertEquals(discardBatchPayload.batch_id, "batch-1");
     assertEquals(discardBatchPayload.status, "discarded");
+
+    const updateBrandResolutionPayload = await assertJsonResponse<{
+      resolution_id: string;
+      selected_action: string;
+      selected_brand_id: string | null;
+    }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer user-token",
+          },
+          body: JSON.stringify({
+            action: "update_brand_resolution",
+            resolution_id: "resolution-1",
+            selected_action: "match_existing",
+            selected_brand_id: "brand-1",
+          }),
+        }),
+      ),
+      200,
+    );
+    assertEquals(updateBrandResolutionPayload.resolution_id, "resolution-1");
+    assertEquals(updateBrandResolutionPayload.selected_action, "match_existing");
+    assertEquals(updateBrandResolutionPayload.selected_brand_id, "brand-1");
   },
 );
+
+Deno.test("money-import handler runs remap_preview_card for authenticated users", async () => {
+  const handler = createMoneyImportHandler({
+    repository: createRepositoryMock(),
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+  });
+
+  const payload = await assertJsonResponse<{
+    batch_id: string;
+    previous_card_id: string;
+    resulting_card_id: string;
+    target_account_id: string;
+    updated_row_count: number;
+  }>(
+    await handler(
+      new Request("http://localhost/functions/v1/money-import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer user-token",
+        },
+        body: JSON.stringify({
+          action: "remap_preview_card",
+          batch_id: "batch-1",
+          card_id: "card-1",
+          target_account_id: "acc-2",
+        }),
+      }),
+    ),
+    200,
+  );
+
+  assertEquals(payload.batch_id, "batch-1");
+  assertEquals(payload.previous_card_id, "card-1");
+  assertEquals(payload.resulting_card_id, "card-target");
+  assertEquals(payload.target_account_id, "acc-2");
+  assertEquals(payload.updated_row_count, 1);
+});
+
+Deno.test(
+  "money-import handler returns existing transaction states for authenticated users",
+  async () => {
+    const repository = createRepositoryMock();
+    repository.getExistingTransactionStates = async () => [
+      {
+        transaction_id: "tx-1",
+        exists: true,
+        fulfilled: false,
+        has_only_synthetic_line_items: true,
+        has_real_line_items: false,
+        receipt_enrichment_status: "ok",
+      },
+    ];
+
+    const handler = createMoneyImportHandler({
+      repository,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{
+      states: Array<{ transaction_id: string | null; fulfilled: boolean }>;
+    }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer user-token",
+          },
+          body: JSON.stringify({
+            action: "get_existing_transaction_states",
+            source: "tbank_web",
+            payer_person_id: "person-1",
+            candidates: [
+              {
+                external_id: "ext-1",
+                dedupe_hash: "hash-1",
+                posted_at: "2026-01-01T00:00:00.000Z",
+                amount: 10,
+              },
+            ],
+          }),
+        }),
+      ),
+      200,
+    );
+
+    assertEquals(payload.states[0].transaction_id, "tx-1");
+    assertEquals(payload.states[0].fulfilled, false);
+  },
+);
+
+Deno.test("money-import handler runs get_import_context for authenticated users", async () => {
+  const handler = createMoneyImportHandler({
+    repository: createRepositoryMock({
+      sessionForUser: {
+        id: "session-1",
+        source: "tbank_web",
+        payer_person_id: "person-1",
+        status: "running",
+        expires_at: "2999-01-01T00:00:00.000Z",
+        revoked_at: null,
+        batch_id: "batch-1",
+      },
+    }),
+    now: () => new Date("2026-03-08T00:00:00.000Z"),
+  });
+
+  const payload = await assertJsonResponse<{
+    requires_history_prompt: boolean;
+    stale_threshold_days: number;
+    recommended_mode: string;
+    window_to: string | null;
+  }>(
+    await handler(
+      new Request("http://localhost/functions/v1/money-import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer user-token",
+        },
+        body: JSON.stringify({
+          action: "get_import_context",
+          source: "tbank_web",
+          payer_person_id: "person-1",
+        }),
+      }),
+    ),
+    200,
+  );
+
+  assertEquals(payload.requires_history_prompt, true);
+  assertEquals(payload.stale_threshold_days, 365);
+  assertEquals(payload.recommended_mode, "preset");
+  assertEquals(payload.window_to, "2026-03-08T00:00:00.000Z");
+});
 
 Deno.test(
   "money-import handler returns session_status and complete_session errors for unknown session",

@@ -99,7 +99,7 @@ export function createOpenRouterOcrClient(
             "HTTP-Referer": deps.referer,
           },
           body: JSON.stringify({
-            model: "openai/gpt-4o",
+            model: "openai/gpt-5.2:nitro",
             messages: [
               { role: "system", content: createSystemPrompt(options.requestTitle) },
               {

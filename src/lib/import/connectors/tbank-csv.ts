@@ -171,6 +171,12 @@ async function parse(file: File): Promise<ImportParseResult> {
       merchant_name: merchantName,
       mcc,
       comment: null,
+      operation_icon_url: null,
+      source_category: {
+        id: null,
+        name: category || null,
+      },
+      source_brand: null,
       is_transfer: transfer,
       raw_payload: rawPayload,
       dedupe_hash,
