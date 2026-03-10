@@ -11,6 +11,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_DAYS = 30;
 const EXTRACTION_ATTEMPTS = 2;
 const DEFAULT_RECEIPT_PARSE_STRATEGY: ConnectorParseStrategy = "fast";
+const FULL_RECEIPT_BASE_PAUSE_MS = 4000;
+const FULL_RECEIPT_RESPONSE_OVERHEAD_MS = 750;
+const FULL_RECEIPT_WINDOW_LIMIT = 70;
+const FULL_RECEIPT_WINDOW_MS = 10 * 60 * 1000;
+const FULL_RECEIPT_WINDOW_BUFFER_MS = 5000;
+const FULL_RECEIPT_FINALIZATION_BUFFER_MS = 30000;
 
 type JsonMap = Record<string, unknown>;
 type ReceiptEnrichmentStatus =
@@ -79,13 +85,20 @@ interface PageExtraction {
     receipt_enrichment?: {
       requested_count: number;
       success_count: number;
+      rate_limit_response_count: number;
       rate_limited_count: number;
       skipped_after_budget_count: number;
       failed_count: number;
       retry_attempts_total: number;
       stopped_after_budget: boolean;
       parse_strategy: ConnectorParseStrategy;
+      retry_strategy: "shared_budget" | "progressive_backoff";
       base_pause_between_receipts_ms: number;
+      max_retry_pause_ms: number;
+      window_limit?: number;
+      window_ms?: number;
+      window_cooldown_count?: number;
+      window_cooldown_total_ms?: number;
     };
     preflight_enrichment_skip_count?: number;
     fulfilled_skip_count?: number;
@@ -110,6 +123,45 @@ function resolveParseStrategy(session?: Record<string, unknown>): ConnectorParse
     normalizeParseStrategy(asObject(session?.meta)?.parse_strategy) ??
     DEFAULT_RECEIPT_PARSE_STRATEGY
   );
+}
+
+export function estimateFullModeReceiptEnrichmentMs(receiptRequestCount: number): number {
+  const normalizedCount = Math.max(0, Math.floor(receiptRequestCount));
+  if (normalizedCount <= 0) return 0;
+
+  let timelineMs = 0;
+  const requestStartedAtMs: number[] = [];
+
+  for (let index = 0; index < normalizedCount; index += 1) {
+    if (index > 0) {
+      timelineMs += FULL_RECEIPT_BASE_PAUSE_MS;
+    }
+
+    while (
+      requestStartedAtMs.length > 0 &&
+      timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
+    ) {
+      requestStartedAtMs.shift();
+    }
+
+    while (requestStartedAtMs.length >= FULL_RECEIPT_WINDOW_LIMIT) {
+      const oldestStartedAtMs = requestStartedAtMs[0];
+      if (typeof oldestStartedAtMs !== "number") break;
+      timelineMs = oldestStartedAtMs + FULL_RECEIPT_WINDOW_MS + FULL_RECEIPT_WINDOW_BUFFER_MS;
+
+      while (
+        requestStartedAtMs.length > 0 &&
+        timelineMs - requestStartedAtMs[0]! >= FULL_RECEIPT_WINDOW_MS
+      ) {
+        requestStartedAtMs.shift();
+      }
+    }
+
+    requestStartedAtMs.push(timelineMs);
+  }
+
+  const requestResponseBudgetMs = normalizedCount * FULL_RECEIPT_RESPONSE_OVERHEAD_MS;
+  return timelineMs + requestResponseBudgetMs + FULL_RECEIPT_FINALIZATION_BUFFER_MS;
 }
 
 export function buildOperationRanges(
@@ -142,7 +194,10 @@ function operationHasShoppingReceipt(operation: JsonMap): boolean {
   const documents = Array.isArray(operation.documents) ? operation.documents : [];
   return (
     Boolean(operation.hasShoppingReceipt) ||
-    documents.some((documentValue) => String(documentValue).toLowerCase() === "shoppingreceipt")
+    documents.some((documentValue) => {
+      const normalized = String(documentValue).toLowerCase();
+      return normalized === "shoppingreceipt";
+    })
   );
 }
 
@@ -525,14 +580,25 @@ function summarizeExtractionDiagnostics(
     receipt_enrichment: {
       requested_count: receiptDebug?.requested_count ?? 0,
       success_count: receiptDebug?.success_count ?? 0,
+      rate_limit_response_count: receiptDebug?.rate_limit_response_count ?? 0,
       rate_limited_count: receiptDebug?.rate_limited_count ?? 0,
       skipped_after_budget_count: receiptDebug?.skipped_after_budget_count ?? 0,
       failed_count: receiptDebug?.failed_count ?? 0,
       retry_attempts_total: receiptDebug?.retry_attempts_total ?? 0,
       stopped_after_budget: receiptDebug?.stopped_after_budget ?? false,
       parse_strategy: receiptDebug?.parse_strategy ?? parseStrategy,
+      retry_strategy:
+        receiptDebug?.retry_strategy ??
+        (parseStrategy === "full" ? "progressive_backoff" : "shared_budget"),
       base_pause_between_receipts_ms:
-        receiptDebug?.base_pause_between_receipts_ms ?? (parseStrategy === "full" ? 1000 : 300),
+        receiptDebug?.base_pause_between_receipts_ms ??
+        (parseStrategy === "full" ? FULL_RECEIPT_BASE_PAUSE_MS : 300),
+      max_retry_pause_ms:
+        receiptDebug?.max_retry_pause_ms ?? (parseStrategy === "full" ? 15000 : 1500),
+      window_limit: receiptDebug?.window_limit,
+      window_ms: receiptDebug?.window_ms,
+      window_cooldown_count: receiptDebug?.window_cooldown_count ?? 0,
+      window_cooldown_total_ms: receiptDebug?.window_cooldown_total_ms ?? 0,
     },
     preflight_enrichment_skip_count: debug?.preflight_enrichment_skip_count ?? 0,
     fulfilled_skip_count: debug?.fulfilled_skip_count ?? 0,
@@ -663,6 +729,7 @@ export const __test__ = {
   buildOperationRanges,
   detectBlockedReasonFromApiEnvelope,
   detectBlockedReasonFromPageState,
+  estimateFullModeReceiptEnrichmentMs,
   extractOperationsInPage,
   findLatestResourceUrlByPath,
   mapOperationRecordToRow,
@@ -868,18 +935,74 @@ function extractOperationsInPage(input: {
   payerPersonId?: string | null;
   parseStrategy?: ConnectorParseStrategy | null;
 }): Promise<PageExtraction> {
+  const fullReceiptBasePauseMs = 4000;
   const receiptParseStrategy =
     input.parseStrategy === "fast" || input.parseStrategy === "full" ? input.parseStrategy : "fast";
-  const receiptBasePauseBetweenRequestsMs = receiptParseStrategy === "full" ? 1000 : 300;
+  const receiptBasePauseBetweenRequestsMs =
+    receiptParseStrategy === "full" ? fullReceiptBasePauseMs : 300;
   const receiptMaxSharedRetries = 2;
   const receiptRetryPauseMs = 1500;
+  const receiptFullModeMaxRetries = 8;
+  const receiptFullModeMaxRetryPauseMs = 15000;
+  const receiptFullModeWindowLimit = 70;
+  const receiptFullModeWindowMs = 10 * 60 * 1000;
+  const receiptFullModeWindowBufferMs = 5000;
+  const receiptRetryStrategy: "shared_budget" | "progressive_backoff" =
+    receiptParseStrategy === "full" ? "progressive_backoff" : "shared_budget";
   const progressSessionId = input.sessionId ?? null;
+
+  function computeReceiptRetryPauseMs(retryAttempts: number): number {
+    if (receiptParseStrategy !== "full") return receiptRetryPauseMs;
+    const retryExponent = Math.max(0, retryAttempts - 1);
+    return Math.min(receiptRetryPauseMs * 2 ** retryExponent, receiptFullModeMaxRetryPauseMs);
+  }
+
+  function estimateReceiptEnrichmentMs(receiptRequestCount: number): number {
+    const normalizedCount = Math.max(0, Math.floor(receiptRequestCount));
+    if (normalizedCount <= 1) return 0;
+
+    let timelineMs = 0;
+    const requestStartedAtMs: number[] = [];
+
+    for (let index = 0; index < normalizedCount; index += 1) {
+      if (index > 0) {
+        timelineMs += receiptBasePauseBetweenRequestsMs;
+      }
+
+      while (
+        requestStartedAtMs.length > 0 &&
+        timelineMs - requestStartedAtMs[0]! >= receiptFullModeWindowMs
+      ) {
+        requestStartedAtMs.shift();
+      }
+
+      while (requestStartedAtMs.length >= receiptFullModeWindowLimit) {
+        const oldestStartedAtMs = requestStartedAtMs[0];
+        if (typeof oldestStartedAtMs !== "number") break;
+        timelineMs = oldestStartedAtMs + receiptFullModeWindowMs + receiptFullModeWindowBufferMs;
+
+        while (
+          requestStartedAtMs.length > 0 &&
+          timelineMs - requestStartedAtMs[0]! >= receiptFullModeWindowMs
+        ) {
+          requestStartedAtMs.shift();
+        }
+      }
+
+      requestStartedAtMs.push(timelineMs);
+    }
+
+    return timelineMs;
+  }
 
   function operationHasShoppingReceipt(operation: JsonMap): boolean {
     const documents = Array.isArray(operation.documents) ? operation.documents : [];
     return (
       Boolean(operation.hasShoppingReceipt) ||
-      documents.some((documentValue) => String(documentValue).toLowerCase() === "shoppingreceipt")
+      documents.some((documentValue) => {
+        const normalized = String(documentValue).toLowerCase();
+        return normalized === "shoppingreceipt";
+      })
     );
   }
 
@@ -1114,13 +1237,21 @@ function extractOperationsInPage(input: {
       receipt_enrichment: {
         requested_count: 0,
         success_count: 0,
+        rate_limit_response_count: 0,
         rate_limited_count: 0,
         skipped_after_budget_count: 0,
         failed_count: 0,
         retry_attempts_total: 0,
         stopped_after_budget: false,
         parse_strategy: receiptParseStrategy,
+        retry_strategy: receiptRetryStrategy,
         base_pause_between_receipts_ms: receiptBasePauseBetweenRequestsMs,
+        max_retry_pause_ms:
+          receiptParseStrategy === "full" ? receiptFullModeMaxRetryPauseMs : receiptRetryPauseMs,
+        window_limit: receiptParseStrategy === "full" ? receiptFullModeWindowLimit : undefined,
+        window_ms: receiptParseStrategy === "full" ? receiptFullModeWindowMs : undefined,
+        window_cooldown_count: 0,
+        window_cooldown_total_ms: 0,
       },
       preflight_enrichment_skip_count: 0,
       fulfilled_skip_count: 0,
@@ -1265,6 +1396,34 @@ function extractOperationsInPage(input: {
         hasRequestedReceipt: false,
         sharedRetriesRemaining: receiptMaxSharedRetries,
         stoppedAfterBudget: false,
+        requestStartedAtMs: [] as number[],
+      };
+      const detailStageStartedAtMs = Date.now();
+      const estimatedReceiptRequestCount = sortedOperations.reduce((count, operation, index) => {
+        const existingState =
+          existingTransactionStates[index] && typeof existingTransactionStates[index] === "object"
+            ? (existingTransactionStates[index] as Record<string, unknown>)
+            : null;
+        if (existingState?.fulfilled === true) return count;
+        return count + (operationHasShoppingReceipt(operation) ? 1 : 0);
+      }, 0);
+      const estimatedFullModeDetailMs =
+        receiptParseStrategy === "full"
+          ? estimateReceiptEnrichmentMs(estimatedReceiptRequestCount)
+          : null;
+      const buildTimingEstimatePayload = (): Record<string, unknown> => {
+        if (receiptParseStrategy !== "full" || estimatedFullModeDetailMs === null) {
+          return {};
+        }
+        return {
+          estimated_total_ms: estimatedFullModeDetailMs,
+          estimated_remaining_ms: Math.max(
+            0,
+            estimatedFullModeDetailMs - (Date.now() - detailStageStartedAtMs),
+          ),
+          estimate_updated_at: new Date().toISOString(),
+          estimated_receipt_request_count: estimatedReceiptRequestCount,
+        };
       };
       let receiptQueue = Promise.resolve<{
         shoppingReceipt: JsonMap | null;
@@ -1300,10 +1459,15 @@ function extractOperationsInPage(input: {
       };
 
       let completedDetails = 0;
-      reportProgress("parse_enriching_operations", 44, sortedOperations.length);
+      reportProgress(
+        "parse_enriching_operations",
+        44,
+        sortedOperations.length,
+        buildTimingEstimatePayload(),
+      );
       const operationRecords = await mapWithConcurrency(
         sortedOperations,
-        5,
+        receiptParseStrategy === "full" ? 2 : 5,
         async (operation, index) => {
           const existingState =
             existingTransactionStates[index] && typeof existingTransactionStates[index] === "object"
@@ -1347,6 +1511,7 @@ function extractOperationsInPage(input: {
             "parse_enriching_operations",
             44 + Math.round((completedDetails / Math.max(1, sortedOperations.length)) * 10),
             completedDetails,
+            buildTimingEstimatePayload(),
           );
           return {
             operation,
@@ -1455,6 +1620,7 @@ function extractOperationsInPage(input: {
     phase: string,
     progressPercent: number,
     parsedTransactionsCount?: number | null,
+    extraPayload?: Record<string, unknown>,
   ): void {
     const runtime = globalThis.chrome?.runtime;
     if (!runtime?.sendMessage) return;
@@ -1466,6 +1632,7 @@ function extractOperationsInPage(input: {
         phase,
         progress_percent: progressPercent,
         parsed_transactions_count: parsedTransactionsCount ?? null,
+        ...(extraPayload ?? {}),
       });
     } catch {
       // Ignore progress transport failures; parsing should still continue.
@@ -1655,17 +1822,25 @@ function extractOperationsInPage(input: {
       hasRequestedReceipt: boolean;
       sharedRetriesRemaining: number;
       stoppedAfterBudget: boolean;
+      requestStartedAtMs: number[];
     },
     receiptDebug: {
       requested_count: number;
       success_count: number;
+      rate_limit_response_count: number;
       rate_limited_count: number;
       skipped_after_budget_count: number;
       failed_count: number;
       retry_attempts_total: number;
       stopped_after_budget: boolean;
       parse_strategy: ConnectorParseStrategy;
+      retry_strategy: "shared_budget" | "progressive_backoff";
       base_pause_between_receipts_ms: number;
+      max_retry_pause_ms: number;
+      window_limit?: number;
+      window_ms?: number;
+      window_cooldown_count?: number;
+      window_cooldown_total_ms?: number;
     },
   ): Promise<{
     shoppingReceipt: JsonMap | null;
@@ -1717,7 +1892,7 @@ function extractOperationsInPage(input: {
       };
     }
 
-    if (receiptState.stoppedAfterBudget) {
+    if (receiptParseStrategy !== "full" && receiptState.stoppedAfterBudget) {
       receiptDebug.skipped_after_budget_count += 1;
       return {
         shoppingReceipt: null,
@@ -1745,16 +1920,50 @@ function extractOperationsInPage(input: {
     let lastReceipt: JsonMap | null = null;
     receiptDebug.requested_count += 1;
 
+    async function awaitReceiptWindowCapacity(): Promise<void> {
+      if (receiptParseStrategy !== "full") return;
+
+      while (true) {
+        const nowMs = Date.now();
+        receiptState.requestStartedAtMs = receiptState.requestStartedAtMs.filter(
+          (startedAtMs) => nowMs - startedAtMs < receiptFullModeWindowMs,
+        );
+        if (receiptState.requestStartedAtMs.length < receiptFullModeWindowLimit) {
+          return;
+        }
+
+        const oldestStartedAtMs = receiptState.requestStartedAtMs[0];
+        if (typeof oldestStartedAtMs !== "number") {
+          return;
+        }
+
+        const pauseMs = Math.max(
+          0,
+          oldestStartedAtMs + receiptFullModeWindowMs + receiptFullModeWindowBufferMs - nowMs,
+        );
+        if (pauseMs <= 0) {
+          continue;
+        }
+
+        receiptDebug.window_cooldown_count = (receiptDebug.window_cooldown_count ?? 0) + 1;
+        receiptDebug.window_cooldown_total_ms =
+          (receiptDebug.window_cooldown_total_ms ?? 0) + pauseMs;
+        await waitMs(pauseMs);
+      }
+    }
+
     while (true) {
       if (receiptState.hasRequestedReceipt) {
         await waitMs(receiptBasePauseBetweenRequestsMs);
       }
       if (retryAttempts > 0) {
         receiptDebug.retry_attempts_total += 1;
-        await waitMs(receiptRetryPauseMs);
+        await waitMs(computeReceiptRetryPauseMs(retryAttempts));
       }
 
+      await awaitReceiptWindowCapacity();
       receiptState.hasRequestedReceipt = true;
+      receiptState.requestStartedAtMs.push(Date.now());
       const response = await fetch(url.toString(), {
         credentials: "include",
       });
@@ -1807,6 +2016,30 @@ function extractOperationsInPage(input: {
             receipt_enrichment_status: "error",
             receipt_line_items_skipped: true,
             receipt_retryable: false,
+            receipt_retry_attempts: retryAttempts,
+            receipt_result_code: resultCode,
+            receipt_tracking_id: text(lastReceipt?.trackingId),
+            receipt_message: extractReceiptMessage(lastReceipt),
+            expected: true,
+            requested: true,
+          },
+        };
+      }
+
+      receiptDebug.rate_limit_response_count += 1;
+      if (receiptParseStrategy === "full") {
+        if (retryAttempts < receiptFullModeMaxRetries) {
+          retryAttempts += 1;
+          continue;
+        }
+        receiptDebug.rate_limited_count += 1;
+        return {
+          shoppingReceipt: lastReceipt,
+          shoppingReceiptMeta: {
+            receipt_request_key: receiptRequestKey,
+            receipt_enrichment_status: "rate_limited",
+            receipt_line_items_skipped: true,
+            receipt_retryable: true,
             receipt_retry_attempts: retryAttempts,
             receipt_result_code: resultCode,
             receipt_tracking_id: text(lastReceipt?.trackingId),

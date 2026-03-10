@@ -859,6 +859,7 @@ export default function MoneyImportPage() {
               default_account_id: defaultExtensionAccountId,
               function_url: getFunctionUrl("money-import"),
               app_origin: window.location.origin,
+              show_source_page_widget: true,
             },
           },
           "*",
@@ -887,6 +888,7 @@ export default function MoneyImportPage() {
         `&window_from=${encodeURIComponent(payload.window_from ?? "")}` +
         `&window_to=${encodeURIComponent(payload.window_to ?? "")}` +
         `&parse_strategy=${encodeURIComponent(payload.parse_strategy ?? "")}` +
+        `&show_source_page_widget=${encodeURIComponent("1")}` +
         `&range_selection_meta=${encodeURIComponent(
           JSON.stringify(payload.range_selection_meta ?? null),
         )}` +

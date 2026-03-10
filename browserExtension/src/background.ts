@@ -37,6 +37,14 @@ function resolveSourcePagePatterns(sourceId: string | null): string[] {
   return [];
 }
 
+function shouldShowSourcePageWidget(session: Record<string, unknown> | null): boolean {
+  return resolveSourceId(session) === "tbank_web" && session?.show_source_page_widget === true;
+}
+
+function matchesKnownSourcePageUrl(url: string | undefined): boolean {
+  return matchesSourcePageUrl("tbank_web", url);
+}
+
 function matchesSourcePageUrl(sourceId: string | null, url: string | undefined): boolean {
   if (!url || !sourceId) return false;
   try {
@@ -59,7 +67,7 @@ async function injectSourcePageWidget(tabId: number): Promise<void> {
 
 async function sendSessionToSourcePageTab(
   tabId: number,
-  session: Record<string, unknown>,
+  session: Record<string, unknown> | null,
 ): Promise<void> {
   await broadcastToSourceTab(tabId, {
     type: "MONEY_IMPORT_SESSION_UPDATED",
@@ -72,24 +80,34 @@ async function syncSourcePageWidgetForSession(
   opts?: { tabId?: number; tabUrl?: string },
 ): Promise<void> {
   const sourceId = resolveSourceId(session);
-  if (!session || !sourceId) return;
+  const showWidget = shouldShowSourcePageWidget(session);
 
   if (typeof opts?.tabId === "number") {
-    if (!matchesSourcePageUrl(sourceId, opts.tabUrl)) return;
-    await injectSourcePageWidget(opts.tabId).catch(() => undefined);
-    await sendSessionToSourcePageTab(opts.tabId, session).catch(() => undefined);
+    if (!matchesKnownSourcePageUrl(opts.tabUrl)) return;
+    if (showWidget && sourceId) {
+      await injectSourcePageWidget(opts.tabId).catch(() => undefined);
+      await sendSessionToSourcePageTab(opts.tabId, session).catch(() => undefined);
+      return;
+    }
+    await sendSessionToSourcePageTab(opts.tabId, null).catch(() => undefined);
     return;
   }
 
-  const patterns = resolveSourcePagePatterns(sourceId);
+  const patterns = showWidget
+    ? resolveSourcePagePatterns(sourceId)
+    : [...TBANK_SOURCE_PAGE_PATTERNS];
   if (patterns.length === 0) return;
 
   const tabs = await chrome.tabs.query({ url: patterns });
   const tasks: Array<Promise<unknown>> = [];
   tabs.forEach((tab) => {
     if (typeof tab.id !== "number") return;
-    tasks.push(injectSourcePageWidget(tab.id).catch(() => undefined));
-    tasks.push(sendSessionToSourcePageTab(tab.id, session).catch(() => undefined));
+    if (showWidget) {
+      tasks.push(injectSourcePageWidget(tab.id).catch(() => undefined));
+      tasks.push(sendSessionToSourcePageTab(tab.id, session).catch(() => undefined));
+      return;
+    }
+    tasks.push(sendSessionToSourcePageTab(tab.id, null).catch(() => undefined));
   });
   await Promise.all(tasks);
 }
@@ -312,8 +330,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
   void (async () => {
     const session = await sessionStore.getSession();
+    if (!session) return;
     await syncSourcePageWidgetForSession(session, { tabId, tabUrl: nextUrl });
   })();
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "money-import-source-widget") return;
+
+  port.onMessage.addListener(() => {
+    // Keeping the port active is enough; payload contents are not needed.
+  });
 });
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
@@ -343,6 +370,11 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
             ? (message.session as Record<string, unknown>)
             : null;
         await syncSourcePageWidgetForSession(session);
+      }
+
+      if (message.type === "MONEY_IMPORT_RUN") {
+        const currentSession = await sessionStore.getSession();
+        await syncSourcePageWidgetForSession(currentSession);
       }
 
       if (message.type === "MONEY_IMPORT_RUN" && message.origin === "source_page_overlay") {

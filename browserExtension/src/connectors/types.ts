@@ -72,13 +72,20 @@ export interface ConnectorParseDebugSummary {
   receipt_enrichment?: {
     requested_count?: number;
     success_count?: number;
+    rate_limit_response_count?: number;
     rate_limited_count?: number;
     skipped_after_budget_count?: number;
     failed_count?: number;
     retry_attempts_total?: number;
     stopped_after_budget?: boolean;
     parse_strategy?: ConnectorParseStrategy;
+    retry_strategy?: "shared_budget" | "progressive_backoff";
     base_pause_between_receipts_ms?: number;
+    max_retry_pause_ms?: number;
+    window_limit?: number;
+    window_ms?: number;
+    window_cooldown_count?: number;
+    window_cooldown_total_ms?: number;
   };
   preflight_enrichment_skip_count?: number;
   fulfilled_skip_count?: number;

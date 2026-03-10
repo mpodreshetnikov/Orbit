@@ -99,6 +99,7 @@ function App() {
       window_from: params.get("window_from") || null,
       window_to: params.get("window_to") || null,
       parse_strategy: params.get("parse_strategy") || null,
+      show_source_page_widget: params.get("show_source_page_widget") === "1",
       range_selection_meta: (() => {
         const raw = params.get("range_selection_meta");
         if (!raw) return null;

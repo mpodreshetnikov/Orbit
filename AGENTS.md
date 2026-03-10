@@ -93,4 +93,8 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 
 ## ExecPlans
 
-When writing complex features or significant refactors, use an ExecPlan (as described in `docs/PLANS.md`) from design to implementation. Track any know and resolved debt in `docs/exec-plans/tech-debt-tracker.md`.
+When writing complex features or significant refactors, use an ExecPlan (as described in `docs/PLANS.md`) from design to implementation.
+
+## TechDebt
+
+Track any know and resolved debt in `docs/exec-plans/tech-debt-tracker.md`.

@@ -39,6 +39,14 @@ describe("tbank-web connector", () => {
     expect(url).toBe("https://www.tbank.ru/api/common/v1/operations?start=1&end=2");
   });
 
+  it("estimates full-mode receipt time using the current pause and cooldown window", () => {
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(0)).toBe(0);
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(1)).toBe(30750);
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(70)).toBe(358500);
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(71)).toBe(688250);
+    expect(__test__.estimateFullModeReceiptEnrichmentMs(108)).toBe(864000);
+  });
+
   it("treats login redirect URLs as blocked even when page text is inconclusive", () => {
     const reason = __test__.detectBlockedReasonFromPageState(
       "https://www.tbank.ru/auth/login/?redirectTo=%2Fmybank%2Foperations%2F",
@@ -584,6 +592,43 @@ describe("tbank-web connector", () => {
     expect(row?.transaction_type).toBe("income");
     expect(row?.line_items).toHaveLength(1);
     expect((row?.line_items as Array<Record<string, unknown>>)[0]?.amount).toBe(1200);
+  });
+
+  it("does not treat plain Receipt document markers as shopping-receipt eligible", () => {
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "receipt-doc-1",
+          authorizationId: "auth-receipt-doc-1",
+          operationTime: { milliseconds: 1773046800000 },
+          type: "Debit",
+          status: "OK",
+          amount: { value: 350, currency: { strCode: "RUB" } },
+          accountAmount: { value: 350, currency: { strCode: "RUB" } },
+          description: "Store",
+          documents: ["Receipt"],
+        },
+        operationDetail: null,
+        shoppingReceipt: null,
+      },
+      {
+        extractionMethod: "api",
+      },
+    ) as Record<string, unknown>;
+
+    expect(row.receipt_request_key).toBe("auth-receipt-doc-1");
+    expect(row.receipt_enrichment_status).toBe("not_requested");
+    expect(row.receipt_line_items_skipped).toBe(false);
+    expect((row.raw_payload as Record<string, unknown>)?.all_details_captured).toBe(true);
+    expect(
+      ((row.raw_payload as Record<string, unknown>)?.enrichment as Record<string, unknown>)
+        ?.shopping_receipt,
+    ).toMatchObject({
+      expected: false,
+      requested: false,
+      receipt_request_key: "auth-receipt-doc-1",
+      status: "not_requested",
+    });
   });
 
   it("uses page extraction output and maps records to rows", async () => {
@@ -1163,7 +1208,7 @@ describe("tbank-web connector", () => {
     }
   });
 
-  it("uses slower full receipt pacing and reports strategy in receipt enrichment diagnostics", async () => {
+  it("keeps retrying full-mode receipt enrichment with progressive backoff instead of skipping later receipts", async () => {
     const isolatedFactory = new Function(
       `return (${__test__.extractOperationsInPage.toString()});`,
     ) as () => (input: {
@@ -1184,6 +1229,7 @@ describe("tbank-web connector", () => {
 
     let nowMs = Date.parse("2026-03-09T00:00:00.000Z");
     const requestTimes: number[] = [];
+    const receiptAttemptsByOperationId = new Map<string, number>();
 
     const operationsPayload = [
       {
@@ -1255,14 +1301,38 @@ describe("tbank-web connector", () => {
         }
         if (url.pathname === "/api/common/v1/shopping_receipt") {
           requestTimes.push(nowMs);
+          const operationId = url.searchParams.get("operationId") ?? "unknown";
+          const attempt = (receiptAttemptsByOperationId.get(operationId) ?? 0) + 1;
+          receiptAttemptsByOperationId.set(operationId, attempt);
+          if (operationId === "auth-1" && attempt <= 3) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                resultCode: "REQUEST_RATE_LIMIT_EXCEEDED",
+                errorMessage: "rate limited",
+                plainMessage: "rate limited",
+                trackingId: `${operationId}-track`,
+              }),
+            };
+          }
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              resultCode: "REQUEST_RATE_LIMIT_EXCEEDED",
-              errorMessage: "rate limited",
-              plainMessage: "rate limited",
-              trackingId: "track",
+              resultCode: "OK",
+              trackingId: `${operationId}-track`,
+              payload: {
+                receipt: {
+                  items: [
+                    {
+                      name: `${operationId}-item`,
+                      sum: operationId === "auth-1" ? 100 : 200,
+                      quantity: 1,
+                    },
+                  ],
+                },
+              },
             }),
           };
         }
@@ -1282,15 +1352,181 @@ describe("tbank-web connector", () => {
 
       expect(requestTimes).toEqual([
         Date.parse("2026-03-09T00:00:00.000Z"),
-        Date.parse("2026-03-09T00:00:02.500Z"),
-        Date.parse("2026-03-09T00:00:05.000Z"),
+        Date.parse("2026-03-09T00:00:05.500Z"),
+        Date.parse("2026-03-09T00:00:12.500Z"),
+        Date.parse("2026-03-09T00:00:22.500Z"),
+        Date.parse("2026-03-09T00:00:26.500Z"),
       ]);
+      const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
+      expect(records[0]?.shoppingReceiptMeta).toMatchObject({
+        receipt_request_key: "auth-1",
+        receipt_enrichment_status: "ok",
+        receipt_line_items_skipped: false,
+        receipt_retry_attempts: 3,
+        receipt_result_code: "OK",
+        receipt_tracking_id: "auth-1-track",
+      });
+      expect(records[1]?.shoppingReceiptMeta).toMatchObject({
+        receipt_request_key: "auth-2",
+        receipt_enrichment_status: "ok",
+        receipt_line_items_skipped: false,
+        receipt_retry_attempts: 0,
+        receipt_result_code: "OK",
+        receipt_tracking_id: "auth-2-track",
+      });
       expect(result).toMatchObject({
         debug: {
           receipt_enrichment: {
             parse_strategy: "full",
-            base_pause_between_receipts_ms: 1000,
-            retry_attempts_total: 2,
+            retry_strategy: "progressive_backoff",
+            base_pause_between_receipts_ms: 4000,
+            max_retry_pause_ms: 15000,
+            rate_limit_response_count: 3,
+            retry_attempts_total: 3,
+          },
+        },
+      });
+    } finally {
+      (globalThis as Record<string, unknown>).window = originalWindow;
+      (globalThis as Record<string, unknown>).document = originalDocument;
+      (globalThis as Record<string, unknown>).performance = originalPerformance;
+      (globalThis as Record<string, unknown>).fetch = originalFetch;
+      (globalThis as Record<string, unknown>).URL = originalURL;
+      (globalThis as Record<string, unknown>).chrome = originalChrome;
+      Date.now = originalDateNow;
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  it("applies a rolling cooldown in full mode before the observed receipt request window is exceeded", async () => {
+    const isolatedFactory = new Function(
+      `return (${__test__.extractOperationsInPage.toString()});`,
+    ) as () => (input: {
+      windowFromIso?: string;
+      sessionId?: string | null;
+      parseStrategy?: string | null;
+    }) => Promise<Record<string, unknown>>;
+    const isolatedExtractor = isolatedFactory();
+
+    const originalWindow = (globalThis as Record<string, unknown>).window;
+    const originalDocument = (globalThis as Record<string, unknown>).document;
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    const originalFetch = (globalThis as Record<string, unknown>).fetch;
+    const originalURL = (globalThis as Record<string, unknown>).URL;
+    const originalDateNow = Date.now;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalChrome = (globalThis as Record<string, unknown>).chrome;
+
+    let nowMs = Date.parse("2026-03-10T00:00:00.000Z");
+    const requestTimes: number[] = [];
+    const operationsPayload = Array.from({ length: 71 }, (_, index) => ({
+      id: `op-${index + 1}`,
+      authorizationId: `auth-${index + 1}`,
+      operationTime: { milliseconds: Date.parse("2026-03-09T12:00:00.000Z") - index * 60000 },
+      type: "Debit",
+      status: "OK",
+      amount: { value: 100 + index, currency: { strCode: "RUB" } },
+      accountAmount: { value: 100 + index, currency: { strCode: "RUB" } },
+      description: `Receipt ${index + 1}`,
+      documents: ["ShoppingReceipt"],
+    }));
+
+    (globalThis as Record<string, unknown>).window = {
+      location: {
+        href: "https://www.tbank.ru/mybank/operations/",
+        origin: "https://www.tbank.ru",
+      },
+    };
+    (globalThis as Record<string, unknown>).document = {
+      body: { innerText: "Operations" },
+      querySelectorAll: vi.fn().mockReturnValue([]),
+    };
+    (globalThis as Record<string, unknown>).performance = {
+      getEntriesByType: vi.fn().mockImplementation((type: string) => {
+        if (type !== "resource") return [];
+        return [
+          {
+            name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2",
+          },
+        ];
+      }),
+    };
+    (globalThis as Record<string, unknown>).URL = URL;
+    (globalThis as Record<string, unknown>).chrome = {
+      runtime: {
+        sendMessage: vi.fn(),
+      },
+    };
+    Date.now = () => nowMs;
+    globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+      nowMs += delay ?? 0;
+      callback();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockImplementation(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === "/api/common/v1/operations") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: operationsPayload }),
+          };
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          requestTimes.push(nowMs);
+          const operationId = url.searchParams.get("operationId") ?? "unknown";
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resultCode: "OK",
+              trackingId: `${operationId}-track`,
+              payload: {
+                receipt: {
+                  items: [
+                    {
+                      name: `${operationId}-item`,
+                      sum: 100,
+                      quantity: 1,
+                    },
+                  ],
+                },
+              },
+            }),
+          };
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => null,
+        };
+      });
+
+    try {
+      const result = await isolatedExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        sessionId: "abc",
+        parseStrategy: "full",
+      });
+
+      expect(requestTimes).toHaveLength(71);
+      expect(requestTimes[0]).toBe(Date.parse("2026-03-10T00:00:00.000Z"));
+      expect(requestTimes[69]).toBe(Date.parse("2026-03-10T00:04:36.000Z"));
+      expect(requestTimes[70]).toBe(Date.parse("2026-03-10T00:10:05.000Z"));
+      expect(result).toMatchObject({
+        debug: {
+          receipt_enrichment: {
+            parse_strategy: "full",
+            base_pause_between_receipts_ms: 4000,
+            rate_limit_response_count: 0,
+            rate_limited_count: 0,
+            success_count: 71,
+            window_limit: 70,
+            window_ms: 600000,
+            window_cooldown_count: 1,
+            window_cooldown_total_ms: 325000,
           },
         },
       });

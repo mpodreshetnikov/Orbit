@@ -17,6 +17,10 @@ export interface BackgroundMessage {
   phase?: string;
   progress_percent?: number;
   parsed_transactions_count?: number;
+  estimated_total_ms?: number;
+  estimated_remaining_ms?: number;
+  estimated_receipt_request_count?: number;
+  estimate_updated_at?: string;
   batch_id?: string;
   windowFrom?: string;
   origin?: "source_page_overlay" | "popup" | "automation";
@@ -48,6 +52,10 @@ type ActiveImportRunSnapshot = {
   phase: string | null;
   progress_percent: number;
   parsed_transactions_count: number | null;
+  estimated_total_ms: number | null;
+  estimated_remaining_ms: number | null;
+  estimated_receipt_request_count: number | null;
+  estimate_updated_at: string | null;
   batch_id: string | null;
   error: string | null;
 };
@@ -183,6 +191,22 @@ function buildActiveRunSnapshot(
       Number.isFinite(payload.parsed_transactions_count)
         ? payload.parsed_transactions_count
         : (current?.parsed_transactions_count ?? null),
+    estimated_total_ms:
+      typeof payload.estimated_total_ms === "number" && Number.isFinite(payload.estimated_total_ms)
+        ? payload.estimated_total_ms
+        : (current?.estimated_total_ms ?? null),
+    estimated_remaining_ms:
+      typeof payload.estimated_remaining_ms === "number" &&
+      Number.isFinite(payload.estimated_remaining_ms)
+        ? payload.estimated_remaining_ms
+        : (current?.estimated_remaining_ms ?? null),
+    estimated_receipt_request_count:
+      typeof payload.estimated_receipt_request_count === "number" &&
+      Number.isFinite(payload.estimated_receipt_request_count)
+        ? payload.estimated_receipt_request_count
+        : (current?.estimated_receipt_request_count ?? null),
+    estimate_updated_at:
+      toTrimmedString(payload.estimate_updated_at) ?? current?.estimate_updated_at ?? null,
     batch_id: toTrimmedString(payload.batch_id) ?? current?.batch_id ?? null,
     error: toTrimmedString(payload.error) ?? current?.error ?? null,
   };
@@ -222,6 +246,18 @@ export async function routeBackgroundMessage(
     }
     if (typeof message.parsed_transactions_count === "number") {
       payload.parsed_transactions_count = message.parsed_transactions_count;
+    }
+    if (typeof message.estimated_total_ms === "number") {
+      payload.estimated_total_ms = message.estimated_total_ms;
+    }
+    if (typeof message.estimated_remaining_ms === "number") {
+      payload.estimated_remaining_ms = message.estimated_remaining_ms;
+    }
+    if (typeof message.estimated_receipt_request_count === "number") {
+      payload.estimated_receipt_request_count = message.estimated_receipt_request_count;
+    }
+    if (typeof message.estimate_updated_at === "string") {
+      payload.estimate_updated_at = message.estimate_updated_at;
     }
     if (typeof message.batch_id === "string") payload.batch_id = message.batch_id;
 
@@ -294,6 +330,10 @@ export async function routeBackgroundMessage(
           phase: "starting",
           progress_percent: 2,
           parsed_transactions_count: null,
+          estimated_total_ms: null,
+          estimated_remaining_ms: null,
+          estimated_receipt_request_count: null,
+          estimate_updated_at: null,
           batch_id: session.batch_id,
           error: null,
         }),
@@ -402,6 +442,7 @@ export async function routeBackgroundMessage(
           response.report_url = buildReportUrl(appOrigin, batchId);
         }
       }
+      await deps.sessionStore.setSession(null);
       return response;
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Unknown import error";
@@ -409,6 +450,7 @@ export async function routeBackgroundMessage(
       if (!message.debug?.parse_only) {
         await tryCompleteSessionAsFailed(session, deps.importRunnerDeps.callEdge);
       }
+      await deps.sessionStore.setSession(null);
       if (run) {
         emitDebug("run_failed", {
           error_message: messageText,

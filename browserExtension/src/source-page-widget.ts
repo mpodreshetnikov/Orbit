@@ -9,12 +9,17 @@ interface SourcePageWidgetDeps {
   runtimeSendMessage: RuntimeSendMessage;
   addRuntimeListener: (listener: RuntimeMessageListener) => void;
   removeRuntimeListener: (listener: RuntimeMessageListener) => void;
+  runtimeConnect: () => {
+    postMessage: (message: Record<string, unknown>) => void;
+    disconnect: () => void;
+  } | null;
 }
 
 type WidgetSession = Record<string, unknown> & {
   session_id?: string;
   source?: string;
   app_origin?: string;
+  show_source_page_widget?: boolean;
 };
 
 type WidgetActiveRun = Record<string, unknown> & {
@@ -31,6 +36,7 @@ interface WidgetElements {
   statusText: HTMLDivElement;
   sessionText: HTMLDivElement;
   parsedCountText: HTMLDivElement;
+  estimateText: HTMLDivElement;
   progressText: HTMLSpanElement;
   progressTrack: HTMLDivElement;
   runButton: HTMLButtonElement;
@@ -47,9 +53,14 @@ interface WidgetState {
   parsedTransactionsCount: number | null;
   phase: string | null;
   batchId: string | null;
+  estimatedTotalMs: number | null;
+  estimatedRemainingMs: number | null;
+  estimatedReceiptRequestCount: number | null;
+  estimateUpdatedAtMs: number | null;
 }
 
 const ROOT_ID = "orbit-money-import-widget-root";
+const KEEPALIVE_PING_MS = 20_000;
 
 function clampProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -82,6 +93,59 @@ function readMessageText(payload: Record<string, unknown>, key: string): string 
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function readFiniteNumber(payload: Record<string, unknown>, key: string): number | null {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function shouldShowWidgetForSession(session: WidgetSession | null): boolean {
+  return session?.source === "tbank_web" && session?.show_source_page_widget === true;
+}
+
+function formatDurationTimer(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatReceiptRequestCountSuffix(receiptRequestCount: number | null): string {
+  return typeof receiptRequestCount === "number"
+    ? ` | Receipt detail requests: ${receiptRequestCount}`
+    : "";
+}
+
+function formatFullModeEstimateText(state: WidgetState): string {
+  const requestCountSuffix = formatReceiptRequestCountSuffix(state.estimatedReceiptRequestCount);
+  const estimatedRemainingMs =
+    typeof state.estimatedRemainingMs === "number" ? state.estimatedRemainingMs : null;
+  const estimateUpdatedAtMs =
+    typeof state.estimateUpdatedAtMs === "number" ? state.estimateUpdatedAtMs : null;
+
+  if (state.batchId && !state.running) {
+    return "Full mode ETA: completed";
+  }
+
+  if (state.running && estimatedRemainingMs !== null && estimateUpdatedAtMs !== null) {
+    const elapsedMs = Date.now() - estimateUpdatedAtMs;
+    const remainingMs = Math.max(0, estimatedRemainingMs - elapsedMs);
+    if (remainingMs > 0) {
+      return `Full mode ETA: ${formatDurationTimer(remainingMs)}${requestCountSuffix}`;
+    }
+    return (
+      "Full mode status: waiting for T-Bank cooldown or pending detail response" +
+      requestCountSuffix
+    );
+  }
+
+  return "Full mode ETA appears after T-Bank counts transactions in the selected range";
 }
 
 function createStyleElement(): HTMLStyleElement {
@@ -221,6 +285,10 @@ function createElements(): WidgetElements {
   parsedCountText.className = "meta";
   panel.appendChild(parsedCountText);
 
+  const estimateText = document.createElement("div");
+  estimateText.className = "meta";
+  panel.appendChild(estimateText);
+
   const progressWrap = document.createElement("div");
   progressWrap.className = "progress-wrap";
   const progressLabel = document.createElement("div");
@@ -271,6 +339,7 @@ function createElements(): WidgetElements {
     statusText,
     sessionText,
     parsedCountText,
+    estimateText,
     progressText,
     progressTrack: progressFill,
     runButton,
@@ -303,6 +372,10 @@ function defaultDeps(): SourcePageWidgetDeps {
       if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
       chrome.runtime.onMessage.removeListener(listener);
     },
+    runtimeConnect: () => {
+      if (typeof chrome === "undefined" || !chrome.runtime?.connect) return null;
+      return chrome.runtime.connect({ name: "money-import-source-widget" });
+    },
   };
 }
 
@@ -315,6 +388,9 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   let elements: WidgetElements | null = null;
   let mounted = false;
   let runtimeListener: RuntimeMessageListener | null = null;
+  let renderIntervalId: number | null = null;
+  let keepAliveIntervalId: number | null = null;
+  let keepAlivePort: ReturnType<SourcePageWidgetDeps["runtimeConnect"]> | null = null;
   let state: WidgetState = {
     session: null,
     running: false,
@@ -323,6 +399,10 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     parsedTransactionsCount: null,
     phase: null,
     batchId: null,
+    estimatedTotalMs: null,
+    estimatedRemainingMs: null,
+    estimatedReceiptRequestCount: null,
+    estimateUpdatedAtMs: null,
   };
 
   const render = () => {
@@ -348,6 +428,15 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
         ? `Parsed transactions: ${state.parsedTransactionsCount}`
         : "Parsed transactions: -";
     elements.parsedCountText.textContent = parsedCountText;
+
+    const parseStrategy = readMessageText(state.session ?? {}, "parse_strategy");
+    if (parseStrategy === "full") {
+      elements.estimateText.textContent = formatFullModeEstimateText(state);
+      elements.estimateText.style.display = "block";
+    } else {
+      elements.estimateText.style.display = "none";
+      elements.estimateText.textContent = "";
+    }
 
     const phaseText = formatPhase(state.phase);
     elements.progressText.textContent = `${phaseText} ${state.progressPercent}%`;
@@ -383,6 +472,10 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
       phase: "starting",
       progressPercent: Math.max(state.progressPercent, 2),
       batchId: null,
+      estimatedTotalMs: null,
+      estimatedRemainingMs: null,
+      estimatedReceiptRequestCount: null,
+      estimateUpdatedAtMs: null,
     };
     render();
 
@@ -407,6 +500,16 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   };
 
   const applySession = (session: WidgetSession | null) => {
+    if (!shouldShowWidgetForSession(session)) {
+      state = {
+        ...state,
+        session: null,
+      };
+      if (mounted) {
+        unmount();
+      }
+      return;
+    }
     state = { ...state, session };
     render();
   };
@@ -425,6 +528,18 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
         typeof activeRun.parsed_transactions_count === "number"
           ? activeRun.parsed_transactions_count
           : state.parsedTransactionsCount,
+      estimatedTotalMs: readFiniteNumber(activeRun, "estimated_total_ms") ?? state.estimatedTotalMs,
+      estimatedRemainingMs:
+        readFiniteNumber(activeRun, "estimated_remaining_ms") ?? state.estimatedRemainingMs,
+      estimatedReceiptRequestCount:
+        readFiniteNumber(activeRun, "estimated_receipt_request_count") ??
+        state.estimatedReceiptRequestCount,
+      estimateUpdatedAtMs: (() => {
+        const rawEstimateUpdatedAt = readMessageText(activeRun, "estimate_updated_at");
+        if (!rawEstimateUpdatedAt) return state.estimateUpdatedAtMs;
+        const parsed = new Date(rawEstimateUpdatedAt).getTime();
+        return Number.isFinite(parsed) ? parsed : state.estimateUpdatedAtMs;
+      })(),
       phase: readMessageText(activeRun, "phase") ?? state.phase,
       batchId: readMessageText(activeRun, "batch_id") ?? state.batchId,
     };
@@ -459,6 +574,18 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
           typeof message.parsed_transactions_count === "number"
             ? message.parsed_transactions_count
             : state.parsedTransactionsCount,
+        estimatedTotalMs: readFiniteNumber(message, "estimated_total_ms") ?? state.estimatedTotalMs,
+        estimatedRemainingMs:
+          readFiniteNumber(message, "estimated_remaining_ms") ?? state.estimatedRemainingMs,
+        estimatedReceiptRequestCount:
+          readFiniteNumber(message, "estimated_receipt_request_count") ??
+          state.estimatedReceiptRequestCount,
+        estimateUpdatedAtMs: (() => {
+          const rawEstimateUpdatedAt = readMessageText(message, "estimate_updated_at");
+          if (!rawEstimateUpdatedAt) return state.estimateUpdatedAtMs;
+          const parsed = new Date(rawEstimateUpdatedAt).getTime();
+          return Number.isFinite(parsed) ? parsed : state.estimateUpdatedAtMs;
+        })(),
       };
       render();
       return;
@@ -472,6 +599,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
         phase: readMessageText(message, "phase") ?? "completed",
         progressPercent: 100,
         batchId: readMessageText(message, "batch_id"),
+        estimatedRemainingMs: 0,
       };
       render();
       return;
@@ -507,6 +635,29 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     );
   };
 
+  const startKeepAlive = () => {
+    keepAlivePort = deps.runtimeConnect();
+    if (!keepAlivePort) return;
+
+    const sendKeepAlive = () => {
+      keepAlivePort?.postMessage({
+        type: "MONEY_IMPORT_KEEPALIVE",
+      });
+    };
+
+    sendKeepAlive();
+    keepAliveIntervalId = window.setInterval(sendKeepAlive, KEEPALIVE_PING_MS);
+  };
+
+  const stopKeepAlive = () => {
+    if (keepAliveIntervalId !== null) {
+      window.clearInterval(keepAliveIntervalId);
+    }
+    keepAliveIntervalId = null;
+    keepAlivePort?.disconnect();
+    keepAlivePort = null;
+  };
+
   const mount = () => {
     if (mounted) {
       render();
@@ -520,6 +671,10 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
 
     runtimeListener = (message) => handleRuntimeMessage(message);
     deps.addRuntimeListener(runtimeListener);
+    startKeepAlive();
+    renderIntervalId = window.setInterval(() => {
+      render();
+    }, 1000);
     mounted = true;
     requestSession();
     render();
@@ -531,6 +686,11 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
       deps.removeRuntimeListener(runtimeListener);
     }
     runtimeListener = null;
+    if (renderIntervalId !== null) {
+      window.clearInterval(renderIntervalId);
+    }
+    renderIntervalId = null;
+    stopKeepAlive();
     elements?.host.remove();
     elements = null;
     mounted = false;

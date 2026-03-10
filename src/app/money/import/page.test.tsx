@@ -501,6 +501,7 @@ describe("MoneyImportPage", () => {
           session: expect.objectContaining({
             app_origin: window.location.origin,
             default_account_id: "acc-tbank",
+            show_source_page_widget: true,
           }),
         }),
         "*",
@@ -1023,6 +1024,7 @@ describe("MoneyImportPage", () => {
           type: "MONEY_IMPORT_START_SESSION",
           session: expect.objectContaining({
             default_account_id: "acc-2",
+            show_source_page_widget: true,
           }),
         }),
         "*",

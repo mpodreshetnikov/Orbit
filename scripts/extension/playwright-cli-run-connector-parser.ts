@@ -5,7 +5,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import process from "node:process";
 import { spawn } from "node:child_process";
-import { chromium, type BrowserContext, type Page } from "@playwright/test";
+import { chromium, type BrowserContext, type Page, type Worker } from "@playwright/test";
 import { writeAnalysisArtifacts } from "./analyze-tbank-debug-artifact";
 import {
   resolveManualAuthAssessment,
@@ -19,6 +19,7 @@ interface CliArgs {
   artifactRoot: string;
   sessionName: string;
   parseOnly: boolean;
+  parseStrategy: "fast" | "full";
   keepOpen: boolean;
   waitForManualSeconds: number;
   sessionId?: string;
@@ -108,6 +109,7 @@ function parseArgs(argv: string[]): CliArgs {
     artifactRoot: path.resolve(process.cwd(), ".tmp", "scraper-debug", preset.sourceKey),
     sessionName: "default",
     parseOnly: true,
+    parseStrategy: "fast",
     keepOpen: false,
     waitForManualSeconds: 0,
     sourceId,
@@ -142,6 +144,14 @@ function parseArgs(argv: string[]): CliArgs {
     }
     if (token === "--full-run") {
       parsed.parseOnly = false;
+      continue;
+    }
+    if (token === "--parse-strategy" && argv[index + 1]) {
+      const parseStrategyInput = argv[index + 1].trim().toLowerCase();
+      if (parseStrategyInput === "fast" || parseStrategyInput === "full") {
+        parsed.parseStrategy = parseStrategyInput;
+      }
+      index += 1;
       continue;
     }
     if (token === "--keep-open") {
@@ -394,6 +404,72 @@ async function resolveExtensionId(context: BrowserContext): Promise<string> {
   return extensionId;
 }
 
+function findExtensionWorker(context: BrowserContext, extensionId?: string): Worker | null {
+  return (
+    context.serviceWorkers().find((worker) => {
+      if (!worker.url().startsWith("chrome-extension://")) return false;
+      if (!extensionId) return true;
+      return parseExtensionId(worker.url()) === extensionId;
+    }) ?? null
+  );
+}
+
+async function waitForExtensionWorker(
+  context: BrowserContext,
+  extensionId?: string,
+  timeoutMs = 15000,
+): Promise<Worker> {
+  const existing = findExtensionWorker(context, extensionId);
+  if (existing) return existing;
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const remaining = Math.max(250, deadline - Date.now());
+    const worker = await context
+      .waitForEvent("serviceworker", { timeout: Math.min(1000, remaining) })
+      .catch(() => null);
+    if (worker && worker.url().startsWith("chrome-extension://")) {
+      if (!extensionId || parseExtensionId(worker.url()) === extensionId) {
+        return worker;
+      }
+    }
+    const nextExisting = findExtensionWorker(context, extensionId);
+    if (nextExisting) return nextExisting;
+  }
+
+  throw new Error("Unable to resolve extension service worker. Verify extension loaded correctly.");
+}
+
+async function refreshExtensionRuntime(context: BrowserContext): Promise<string> {
+  const extensionId = await resolveExtensionId(context);
+  const worker = await waitForExtensionWorker(context, extensionId);
+  process.stdout.write(
+    `[debug-runner] Reloading extension runtime for fresh code (${extensionId})...\n`,
+  );
+  await worker.evaluate(() => chrome.runtime.reload());
+
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const nextWorker = findExtensionWorker(context, extensionId);
+    if (!nextWorker) continue;
+    const runtimeInfo = await nextWorker
+      .evaluate(() => ({
+        id: chrome.runtime.id,
+        version: chrome.runtime.getManifest().version,
+      }))
+      .catch(() => null);
+    if (runtimeInfo?.id === extensionId) {
+      process.stdout.write(
+        `[debug-runner] Extension runtime ready after reload (version ${runtimeInfo.version}).\n`,
+      );
+      return extensionId;
+    }
+  }
+
+  throw new Error(`Timed out waiting for extension runtime reload (${extensionId}).`);
+}
+
 async function sendRuntimeMessage<T>(
   extensionPage: Page,
   message: Record<string, unknown>,
@@ -560,6 +636,8 @@ async function main(): Promise<void> {
   }
   context.on("page", attachCapture);
 
+  const extensionId = await refreshExtensionRuntime(context);
+
   const page = context.pages()[0] ?? (await context.newPage());
   await page.goto(args.targetUrl, { waitUntil: "domcontentloaded" });
 
@@ -594,7 +672,6 @@ async function main(): Promise<void> {
     await waitForManualLogin(args.targetUrl, args.waitForManualSeconds);
   }
 
-  const extensionId = await resolveExtensionId(context);
   const extensionPage = await context.newPage();
   await extensionPage.goto(`chrome-extension://${extensionId}/popup.html`, {
     waitUntil: "domcontentloaded",
@@ -622,6 +699,7 @@ async function main(): Promise<void> {
       last_imported_at: args.windowFrom,
       payer_person_id: args.payerPersonId ?? null,
       expires_at: args.expiresAt ?? null,
+      parse_strategy: args.parseStrategy,
     },
   });
 
@@ -665,6 +743,7 @@ async function main(): Promise<void> {
       tab_url_contains: args.tabUrlContains,
       window_from: args.windowFrom,
       parse_only: args.parseOnly,
+      parse_strategy: args.parseStrategy,
       extension_id: extensionId,
       source_tab_id: sourceTab.id,
       source_tab_url: sourceTab.url,
@@ -696,18 +775,28 @@ async function main(): Promise<void> {
   await writeJson("parse-output.json", parseOutput);
   await writeJson("network-captures.json", networkCaptures);
   await writeJson("summary.json", summary);
-  if (args.autoReport) {
-    await writeAnalysisArtifacts(
-      artifactPayload as Record<string, unknown>,
-      artifactDir,
-      artifactDir,
-      {
-        maxRows: Number.MAX_SAFE_INTEGER,
-      },
-    );
-  }
+  const analysisArtifacts = args.autoReport
+    ? await writeAnalysisArtifacts(
+        artifactPayload as Record<string, unknown>,
+        artifactDir,
+        artifactDir,
+        {
+          maxRows: Number.MAX_SAFE_INTEGER,
+        },
+      )
+    : null;
 
   process.stdout.write(`[debug-runner] Artifacts written to: ${artifactDir}\n`);
+  if (analysisArtifacts?.diagnostics.categories.includes("AUTH_BLOCKED")) {
+    process.stdout.write(
+      [
+        "[debug-runner] Manual authorization is required.",
+        "Ask a human to authorize in the opened T-Bank browser, then rerun.",
+        "Use --wait-for-manual 5 or --wait-for-manual 10 so the runner pauses for auth instead of continuing immediately.",
+      ].join(" "),
+    );
+    process.stdout.write("\n");
+  }
 
   if (!args.keepOpen) {
     await extensionPage.close().catch(() => {});

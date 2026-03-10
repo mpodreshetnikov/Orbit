@@ -152,6 +152,10 @@ describe("background-router", () => {
           phase: "parse_fetching_ranges",
           progress_percent: 32,
           parsed_transactions_count: 7,
+          estimated_total_ms: 753000,
+          estimated_remaining_ms: 741000,
+          estimated_receipt_request_count: 108,
+          estimate_updated_at: "2026-03-10T00:00:00.000Z",
         } as never,
         deps,
         { senderTabId: 777 },
@@ -164,6 +168,10 @@ describe("background-router", () => {
         phase: "parse_fetching_ranges",
         progress_percent: 32,
         parsed_transactions_count: 7,
+        estimated_total_ms: 753000,
+        estimated_remaining_ms: 741000,
+        estimated_receipt_request_count: 108,
+        estimate_updated_at: "2026-03-10T00:00:00.000Z",
       }),
     );
     expect(deps.importRunnerDeps.broadcastToSourceTab).toHaveBeenCalledWith(
@@ -172,6 +180,8 @@ describe("background-router", () => {
         type: "MONEY_IMPORT_PROGRESS",
         phase: "parse_fetching_ranges",
         progress_percent: 32,
+        estimated_total_ms: 753000,
+        estimated_remaining_ms: 741000,
       }),
     );
   });
@@ -295,6 +305,7 @@ describe("background-router", () => {
 
     expect(response.ok).toBe(true);
     expect((response as { debug_run_id?: string }).debug_run_id).toBeTruthy();
+    expect(deps.sessionStore.setSession).toHaveBeenCalledWith(null);
 
     const lastRun = await routeBackgroundMessage({ type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" }, deps);
     expect((lastRun as { run?: { run?: { status?: string } } }).run?.run?.status).toBe("ok");
@@ -368,6 +379,7 @@ describe("background-router", () => {
     expect(exportResponse.ok).toBe(true);
     expect(typeof exportResponse.bundle?.exported_at).toBe("string");
     expect(exportResponse.bundle?.run?.run?.status).toBe("ok");
+    expect(deps.sessionStore.setSession).toHaveBeenCalledWith(null);
   });
 
   it("broadcasts progress events to source tab when run is started from source page overlay", async () => {
@@ -568,6 +580,7 @@ describe("background-router", () => {
       edge_host: "abc.supabase.co",
       edge_transport: "network",
     });
+    expect(deps.sessionStore.setSession).toHaveBeenCalledWith(null);
   });
 
   it("rejects duplicate import runs while a session run is already in flight", async () => {
