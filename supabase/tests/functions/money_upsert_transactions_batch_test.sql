@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(13);
 
 SELECT has_function(
   'public',
@@ -183,74 +183,46 @@ SELECT is(
   'line item inserted only for row providing line_item payload'
 );
 
+CREATE TEMP TABLE _replay_result AS
+SELECT public.money_upsert_transactions_batch(
+  '99999999-9999-9999-9999-999999999999'::uuid,
+  '77777777-7777-7777-7777-777777777777'::uuid,
+  '[
+    {
+      "account_id":"88888888-8888-8888-8888-888888888888",
+      "source":"tbank",
+      "external_id":"ext-1",
+      "posted_at":"2026-02-01T10:00:00Z",
+      "amount":100,
+      "currency":"RUB",
+      "transaction_type":"expense",
+      "status":"posted",
+      "merchant_name":"Coffee Shop Replay",
+      "source_comment":"SOURCE COFFEE UPDATED",
+      "dedupe_hash":"hash-ext-1"
+    },
+    {
+      "account_id":"88888888-8888-8888-8888-888888888888",
+      "source":"tbank",
+      "posted_at":"2026-02-01T11:00:00Z",
+      "amount":200,
+      "currency":"RUB",
+      "transaction_type":"expense",
+      "status":"posted",
+      "merchant_name":"Grocery Replay",
+      "dedupe_hash":"hash-2"
+    }
+  ]'::jsonb
+) AS payload;
+
 SELECT is(
-  (
-    public.money_upsert_transactions_batch(
-      '99999999-9999-9999-9999-999999999999'::uuid,
-      '77777777-7777-7777-7777-777777777777'::uuid,
-      '[
-        {
-          "account_id":"88888888-8888-8888-8888-888888888888",
-          "source":"tbank",
-          "external_id":"ext-1",
-          "posted_at":"2026-02-01T10:00:00Z",
-          "amount":100,
-          "currency":"RUB",
-          "transaction_type":"expense",
-          "status":"posted",
-          "merchant_name":"Coffee Shop",
-          "dedupe_hash":"hash-ext-1"
-        },
-        {
-          "account_id":"88888888-8888-8888-8888-888888888888",
-          "source":"tbank",
-          "posted_at":"2026-02-01T11:00:00Z",
-          "amount":200,
-          "currency":"RUB",
-          "transaction_type":"expense",
-          "status":"posted",
-          "merchant_name":"Grocery",
-          "dedupe_hash":"hash-2"
-        }
-      ]'::jsonb
-    )->>'inserted'
-  )::int,
+  ((SELECT payload FROM _replay_result)->>'inserted')::int,
   0,
   'replaying same rows does not insert duplicates'
 );
 
 SELECT is(
-  (
-    public.money_upsert_transactions_batch(
-      '99999999-9999-9999-9999-999999999999'::uuid,
-      '77777777-7777-7777-7777-777777777777'::uuid,
-      '[
-        {
-          "account_id":"88888888-8888-8888-8888-888888888888",
-          "source":"tbank",
-          "external_id":"ext-1",
-          "posted_at":"2026-02-01T10:00:00Z",
-          "amount":100,
-          "currency":"RUB",
-          "transaction_type":"expense",
-          "status":"posted",
-          "merchant_name":"Coffee Shop",
-          "dedupe_hash":"hash-ext-1"
-        },
-        {
-          "account_id":"88888888-8888-8888-8888-888888888888",
-          "source":"tbank",
-          "posted_at":"2026-02-01T11:00:00Z",
-          "amount":200,
-          "currency":"RUB",
-          "transaction_type":"expense",
-          "status":"posted",
-          "merchant_name":"Grocery",
-          "dedupe_hash":"hash-2"
-        }
-      ]'::jsonb
-    )->>'skipped'
-  )::int,
+  ((SELECT payload FROM _replay_result)->>'skipped')::int,
   2,
   'replaying same rows marks both as skipped'
 );
@@ -259,6 +231,22 @@ SELECT is(
   (SELECT count(*) FROM public.money_transactions WHERE payer_person_id = '77777777-7777-7777-7777-777777777777'),
   2::bigint,
   'replay keeps transaction count stable'
+);
+
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'merchant_name', merchant_name,
+      'source_comment', source_comment
+    )
+    FROM public.money_transactions
+    WHERE external_id = 'ext-1'
+  ),
+  jsonb_build_object(
+    'merchant_name', 'Coffee Shop Replay',
+    'source_comment', 'SOURCE COFFEE UPDATED'
+  ),
+  'replaying same rows updates the existing transaction payload'
 );
 
 SELECT * FROM finish();

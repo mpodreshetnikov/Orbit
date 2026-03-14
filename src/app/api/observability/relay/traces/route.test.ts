@@ -68,7 +68,7 @@ describe("POST /api/observability/relay/traces", () => {
     expect(payload.error).toContain("Expected payload shape");
   });
 
-  it("returns 502 when OTLP forwarding fails", async () => {
+  it("returns 202 when OTLP forwarding fails", async () => {
     forwardTracesToOtlpMock.mockRejectedValueOnce(new Error("otlp down"));
     const { POST } = await import("./route");
     const response = await POST(
@@ -94,8 +94,12 @@ describe("POST /api/observability/relay/traces", () => {
       }),
     );
 
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({ error: "otlp down" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      degraded: true,
+      accepted: 1,
+    });
   });
 
   it("returns 200 for valid span batch", async () => {

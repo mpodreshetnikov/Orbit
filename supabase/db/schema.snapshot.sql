@@ -358,7 +358,79 @@ CREATE TABLE "public"."money_categories" (
     "archived_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "category_kind" "public"."money_category_kind" DEFAULT 'custom'::"public"."money_category_kind" NOT NULL,
+    "system_key" "text",
+    "canonical_category_id" "uuid" NOT NULL,
+    "sort_order" integer DEFAULT 0 NOT NULL,
+    "created_by" "uuid",
     CONSTRAINT "money_categories_depth_check" CHECK ((("depth" >= 1) AND ("depth" <= 4)))
+);
+
+
+--
+-- Name: money_category_rule_run_steps; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_category_rule_run_steps" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "rule_run_id" "uuid" NOT NULL,
+    "rule_id" "uuid",
+    "rule_name" "text",
+    "rule_kind" "public"."money_rule_kind",
+    "sort_order" integer NOT NULL,
+    "matched" boolean DEFAULT false NOT NULL,
+    "changed_category" boolean DEFAULT false NOT NULL,
+    "previous_category_id" "uuid",
+    "next_category_id" "uuid",
+    "decision_reason" "text" NOT NULL,
+    "debug_payload" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+--
+-- Name: money_category_rule_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_category_rule_runs" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "triggered_by_user_id" "uuid",
+    "person_id" "uuid" NOT NULL,
+    "trigger_source" "text" NOT NULL,
+    "line_item_id" "uuid" NOT NULL,
+    "transaction_id" "uuid" NOT NULL,
+    "starting_category_id" "uuid",
+    "final_category_id" "uuid",
+    "saved" boolean DEFAULT false NOT NULL,
+    "llm_tokens_prompt" integer,
+    "llm_tokens_completion" integer,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+--
+-- Name: money_category_rules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_category_rules" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "person_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "description" "text",
+    "enabled" boolean DEFAULT true NOT NULL,
+    "sort_order" integer NOT NULL,
+    "rule_kind" "public"."money_rule_kind" NOT NULL,
+    "target_category_id" "uuid",
+    "match_mode" "text" DEFAULT 'all'::"text" NOT NULL,
+    "scope_filter" "text" DEFAULT 'all_line_items'::"text" NOT NULL,
+    "filters" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "config" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "stop_processing" boolean DEFAULT false NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "money_category_rules_match_mode_check" CHECK (("match_mode" = ANY (ARRAY['all'::"text", 'any'::"text"]))),
+    CONSTRAINT "money_category_rules_scope_filter_check" CHECK (("scope_filter" = ANY (ARRAY['all_line_items'::"text", 'uncategorized_only'::"text", 'custom_only'::"text", 'canonical_only'::"text", 'manual_unlocked_only'::"text"])))
 );
 
 
@@ -481,7 +553,24 @@ CREATE TABLE "public"."money_line_items" (
     "raw_payload" "jsonb",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "import_hash" "text"
+    "import_hash" "text",
+    "category_locked_by_user" boolean DEFAULT false NOT NULL,
+    "last_category_rule_id" "uuid",
+    "last_category_rule_run_id" "uuid",
+    "category_assigned_at" timestamp with time zone
+);
+
+
+--
+-- Name: money_mcc_canonical_category_map; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_mcc_canonical_category_map" (
+    "mcc" "text" NOT NULL,
+    "canonical_system_key" "text" NOT NULL,
+    "canonical_category_id" "uuid",
+    "description" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );
 
 
@@ -518,6 +607,23 @@ CREATE TABLE "public"."money_transaction_brands" (
     "base_text_color" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+--
+-- Name: money_transaction_edit_audits; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_transaction_edit_audits" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "transaction_id" "uuid" NOT NULL,
+    "entity_kind" "text" NOT NULL,
+    "entity_id" "uuid" NOT NULL,
+    "before_snapshot" "jsonb" NOT NULL,
+    "after_snapshot" "jsonb" NOT NULL,
+    "edited_by_auth_user_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "money_transaction_edit_audits_entity_kind_check" CHECK (("entity_kind" = ANY (ARRAY['transaction'::"text", 'line_item'::"text"])))
 );
 
 
@@ -979,6 +1085,30 @@ ALTER TABLE ONLY "public"."money_categories"
 
 
 --
+-- Name: money_category_rule_run_steps money_category_rule_run_steps_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_run_steps"
+    ADD CONSTRAINT "money_category_rule_run_steps_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_category_rule_runs money_category_rule_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_runs"
+    ADD CONSTRAINT "money_category_rule_runs_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_category_rules money_category_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rules"
+    ADD CONSTRAINT "money_category_rules_pkey" PRIMARY KEY ("id");
+
+
+--
 -- Name: money_import_batch_brand_resolutions money_import_batch_brand_resolutions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1027,6 +1157,14 @@ ALTER TABLE ONLY "public"."money_line_items"
 
 
 --
+-- Name: money_mcc_canonical_category_map money_mcc_canonical_category_map_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_mcc_canonical_category_map"
+    ADD CONSTRAINT "money_mcc_canonical_category_map_pkey" PRIMARY KEY ("mcc");
+
+
+--
 -- Name: money_transaction_brand_aliases money_transaction_brand_aliases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1048,6 +1186,14 @@ ALTER TABLE ONLY "public"."money_transaction_brands"
 
 ALTER TABLE ONLY "public"."money_transaction_brands"
     ADD CONSTRAINT "money_transaction_brands_slug_key" UNIQUE ("slug");
+
+
+--
+-- Name: money_transaction_edit_audits money_transaction_edit_audits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transaction_edit_audits"
+    ADD CONSTRAINT "money_transaction_edit_audits_pkey" PRIMARY KEY ("id");
 
 
 --
@@ -1548,6 +1694,13 @@ CREATE UNIQUE INDEX "idx_money_cards_account_last4" ON "public"."money_cards" US
 
 
 --
+-- Name: idx_money_categories_canonical_category_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_categories_canonical_category_id" ON "public"."money_categories" USING "btree" ("canonical_category_id");
+
+
+--
 -- Name: idx_money_categories_depth; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1555,10 +1708,59 @@ CREATE INDEX "idx_money_categories_depth" ON "public"."money_categories" USING "
 
 
 --
+-- Name: idx_money_categories_kind_sort_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_categories_kind_sort_order" ON "public"."money_categories" USING "btree" ("category_kind", "sort_order", "name_en");
+
+
+--
 -- Name: idx_money_categories_parent_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX "idx_money_categories_parent_id" ON "public"."money_categories" USING "btree" ("parent_id");
+
+
+--
+-- Name: idx_money_categories_system_key_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_categories_system_key_unique" ON "public"."money_categories" USING "btree" ("system_key") WHERE ("system_key" IS NOT NULL);
+
+
+--
+-- Name: idx_money_category_rule_run_steps_run_sort_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_category_rule_run_steps_run_sort_order" ON "public"."money_category_rule_run_steps" USING "btree" ("rule_run_id", "sort_order", "created_at", "id");
+
+
+--
+-- Name: idx_money_category_rule_runs_line_item_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_category_rule_runs_line_item_created_at" ON "public"."money_category_rule_runs" USING "btree" ("line_item_id", "created_at" DESC);
+
+
+--
+-- Name: idx_money_category_rule_runs_person_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_category_rule_runs_person_created_at" ON "public"."money_category_rule_runs" USING "btree" ("person_id", "created_at" DESC);
+
+
+--
+-- Name: idx_money_category_rules_person_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_category_rules_person_enabled" ON "public"."money_category_rules" USING "btree" ("person_id", "enabled", "sort_order");
+
+
+--
+-- Name: idx_money_category_rules_person_sort_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_category_rules_person_sort_order" ON "public"."money_category_rules" USING "btree" ("person_id", "sort_order");
 
 
 --
@@ -1695,6 +1897,20 @@ CREATE UNIQUE INDEX "idx_money_transaction_brand_aliases_source_key" ON "public"
 
 
 --
+-- Name: idx_money_transaction_edit_audits_entity; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transaction_edit_audits_entity" ON "public"."money_transaction_edit_audits" USING "btree" ("entity_kind", "entity_id", "created_at" DESC);
+
+
+--
+-- Name: idx_money_transaction_edit_audits_transaction_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transaction_edit_audits_transaction_created_at" ON "public"."money_transaction_edit_audits" USING "btree" ("transaction_id", "created_at" DESC);
+
+
+--
 -- Name: idx_money_transactions_account_posted_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1720,6 +1936,13 @@ CREATE INDEX "idx_money_transactions_card_id" ON "public"."money_transactions" U
 --
 
 CREATE UNIQUE INDEX "idx_money_transactions_dedupe_hash" ON "public"."money_transactions" USING "btree" ("dedupe_hash");
+
+
+--
+-- Name: idx_money_transactions_payer_feed_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transactions_payer_feed_order" ON "public"."money_transactions" USING "btree" ("payer_person_id", "posted_at" DESC, "created_at" DESC, "id" DESC);
 
 
 --
@@ -1940,6 +2163,10 @@ CREATE INDEX "idx_record_observations_record_id" ON "public"."record_observation
 
 
 --
+-- Name: money_line_items audit_money_line_items_edits; Type: TRIGGER; Schema: public; Owner: -
+----
+-- Name: money_transactions audit_money_transactions_edits; Type: TRIGGER; Schema: public; Owner: -
+----
 -- Name: checkup_completions checkup_completion_after_delete_trigger; Type: TRIGGER; Schema: public; Owner: -
 ----
 -- Name: checkup_completions checkup_completion_after_insert_trigger; Type: TRIGGER; Schema: public; Owner: -
@@ -1949,6 +2176,10 @@ CREATE INDEX "idx_record_observations_record_id" ON "public"."record_observation
 -- Name: checkup_items checkup_item_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
 ----
 -- Name: checkup_items checkup_item_set_next_due_insert; Type: TRIGGER; Schema: public; Owner: -
+----
+-- Name: money_categories enforce_money_categories_invariants; Type: TRIGGER; Schema: public; Owner: -
+----
+-- Name: money_categories prevent_money_categories_delete; Type: TRIGGER; Schema: public; Owner: -
 ----
 -- Name: body_site_catalog update_body_site_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
 ----
@@ -1975,6 +2206,8 @@ CREATE INDEX "idx_record_observations_record_id" ON "public"."record_observation
 -- Name: money_cards update_money_cards_updated_at; Type: TRIGGER; Schema: public; Owner: -
 ----
 -- Name: money_categories update_money_categories_updated_at; Type: TRIGGER; Schema: public; Owner: -
+----
+-- Name: money_category_rules update_money_category_rules_updated_at; Type: TRIGGER; Schema: public; Owner: -
 ----
 -- Name: money_import_batch_brand_resolutions update_money_import_batch_brand_resolutions_updated_at; Type: TRIGGER; Schema: public; Owner: -
 ----
@@ -2174,11 +2407,131 @@ ALTER TABLE ONLY "public"."money_cards"
 
 
 --
+-- Name: money_categories money_categories_canonical_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_categories"
+    ADD CONSTRAINT "money_categories_canonical_category_id_fkey" FOREIGN KEY ("canonical_category_id") REFERENCES "public"."money_categories"("id") ON DELETE RESTRICT;
+
+
+--
+-- Name: money_categories money_categories_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_categories"
+    ADD CONSTRAINT "money_categories_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "auth"."users"("id") ON DELETE SET NULL;
+
+
+--
 -- Name: money_categories money_categories_parent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY "public"."money_categories"
     ADD CONSTRAINT "money_categories_parent_id_fkey" FOREIGN KEY ("parent_id") REFERENCES "public"."money_categories"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rule_run_steps money_category_rule_run_steps_next_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_run_steps"
+    ADD CONSTRAINT "money_category_rule_run_steps_next_category_id_fkey" FOREIGN KEY ("next_category_id") REFERENCES "public"."money_categories"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rule_run_steps money_category_rule_run_steps_previous_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_run_steps"
+    ADD CONSTRAINT "money_category_rule_run_steps_previous_category_id_fkey" FOREIGN KEY ("previous_category_id") REFERENCES "public"."money_categories"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rule_run_steps money_category_rule_run_steps_rule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_run_steps"
+    ADD CONSTRAINT "money_category_rule_run_steps_rule_id_fkey" FOREIGN KEY ("rule_id") REFERENCES "public"."money_category_rules"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rule_run_steps money_category_rule_run_steps_rule_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_run_steps"
+    ADD CONSTRAINT "money_category_rule_run_steps_rule_run_id_fkey" FOREIGN KEY ("rule_run_id") REFERENCES "public"."money_category_rule_runs"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_category_rule_runs money_category_rule_runs_final_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_runs"
+    ADD CONSTRAINT "money_category_rule_runs_final_category_id_fkey" FOREIGN KEY ("final_category_id") REFERENCES "public"."money_categories"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rule_runs money_category_rule_runs_line_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_runs"
+    ADD CONSTRAINT "money_category_rule_runs_line_item_id_fkey" FOREIGN KEY ("line_item_id") REFERENCES "public"."money_line_items"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_category_rule_runs money_category_rule_runs_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_runs"
+    ADD CONSTRAINT "money_category_rule_runs_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_category_rule_runs money_category_rule_runs_starting_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_runs"
+    ADD CONSTRAINT "money_category_rule_runs_starting_category_id_fkey" FOREIGN KEY ("starting_category_id") REFERENCES "public"."money_categories"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rule_runs money_category_rule_runs_transaction_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_runs"
+    ADD CONSTRAINT "money_category_rule_runs_transaction_id_fkey" FOREIGN KEY ("transaction_id") REFERENCES "public"."money_transactions"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_category_rule_runs money_category_rule_runs_triggered_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rule_runs"
+    ADD CONSTRAINT "money_category_rule_runs_triggered_by_user_id_fkey" FOREIGN KEY ("triggered_by_user_id") REFERENCES "auth"."users"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rules money_category_rules_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rules"
+    ADD CONSTRAINT "money_category_rules_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "auth"."users"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_category_rules money_category_rules_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rules"
+    ADD CONSTRAINT "money_category_rules_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_category_rules money_category_rules_target_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_category_rules"
+    ADD CONSTRAINT "money_category_rules_target_category_id_fkey" FOREIGN KEY ("target_category_id") REFERENCES "public"."money_categories"("id") ON DELETE SET NULL;
 
 
 --
@@ -2286,6 +2639,22 @@ ALTER TABLE ONLY "public"."money_line_items"
 
 
 --
+-- Name: money_line_items money_line_items_last_category_rule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_line_items"
+    ADD CONSTRAINT "money_line_items_last_category_rule_id_fkey" FOREIGN KEY ("last_category_rule_id") REFERENCES "public"."money_category_rules"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_line_items money_line_items_last_category_rule_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_line_items"
+    ADD CONSTRAINT "money_line_items_last_category_rule_run_id_fkey" FOREIGN KEY ("last_category_rule_run_id") REFERENCES "public"."money_category_rule_runs"("id") ON DELETE SET NULL;
+
+
+--
 -- Name: money_line_items money_line_items_related_line_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2302,11 +2671,35 @@ ALTER TABLE ONLY "public"."money_line_items"
 
 
 --
+-- Name: money_mcc_canonical_category_map money_mcc_canonical_category_map_canonical_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_mcc_canonical_category_map"
+    ADD CONSTRAINT "money_mcc_canonical_category_map_canonical_category_id_fkey" FOREIGN KEY ("canonical_category_id") REFERENCES "public"."money_categories"("id") ON DELETE SET NULL;
+
+
+--
 -- Name: money_transaction_brand_aliases money_transaction_brand_aliases_brand_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY "public"."money_transaction_brand_aliases"
     ADD CONSTRAINT "money_transaction_brand_aliases_brand_id_fkey" FOREIGN KEY ("brand_id") REFERENCES "public"."money_transaction_brands"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_transaction_edit_audits money_transaction_edit_audits_edited_by_auth_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transaction_edit_audits"
+    ADD CONSTRAINT "money_transaction_edit_audits_edited_by_auth_user_id_fkey" FOREIGN KEY ("edited_by_auth_user_id") REFERENCES "auth"."users"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_transaction_edit_audits money_transaction_edit_audits_transaction_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transaction_edit_audits"
+    ADD CONSTRAINT "money_transaction_edit_audits_transaction_id_fkey" FOREIGN KEY ("transaction_id") REFERENCES "public"."money_transactions"("id") ON DELETE CASCADE;
 
 
 --

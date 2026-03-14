@@ -15,6 +15,8 @@ BEGIN;
 \i types/med_dose_event_status.sql
 \i types/med_inventory_transaction_type.sql
 \i types/med_intake_advice_type.sql
+\i types/money_category_kind.sql
+\i types/money_rule_kind.sql
 \i types/money_transaction_type.sql
 \i types/money_transaction_status.sql
 \i types/money_line_status.sql
@@ -84,14 +86,36 @@ BEGIN;
 \i functions/update_regimen_inventory.sql
 
 -- Money functions
+\i functions/money_seed_canonical_categories.sql
+\i functions/money_seed_category_rule_mappings.sql
+\i functions/money_categories_enforce_invariants.sql
+\i functions/money_categories_prevent_delete.sql
+\i functions/money_get_category_rule_context.sql
+\i functions/money_evaluate_category_rule_filter.sql
+\i functions/money_run_category_rule_pipeline_internal.sql
+\i functions/money_preview_category_rule_pipeline.sql
+\i functions/money_apply_category_rule_pipeline.sql
+\i functions/money_apply_category_rule_pipeline_for_transaction.sql
+\i functions/money_apply_category_rule_pipeline_for_date_range.sql
+\i functions/money_get_category_rule_debug.sql
 \i functions/get_money_merchant_default_categories.sql
+\i functions/money_list_transactions_feed.sql
+\i functions/money_transaction_feed_summary.sql
+\i functions/money_write_transaction_edit_audit.sql
 \i functions/money_upsert_transactions_batch.sql
 \i functions/money_reassign_card_account.sql
+\i functions/money_normalize_transfer_text.sql
+\i functions/money_person_self_transfer_variants.sql
+\i functions/money_transfer_self_aliases_set_normalized_alias.sql
+\i functions/money_budget_targets_enforce_invariants.sql
+\i functions/money_resolve_fx_rate.sql
+\i functions/money_get_budget_report.sql
 
 -- Cron entry point functions
 \i functions/run_med_event_generation_for_all_users.sql
+\i functions/run_money_fx_sync_http.sql
 \i functions/run_notifications_cron_http.sql
 
-\echo '=== Phase 1 Complete: 9 types, 40 functions ==='
+\echo '=== Phase 1 Complete: 9 types, 41 functions ==='
 
 COMMIT;

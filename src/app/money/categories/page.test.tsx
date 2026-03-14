@@ -105,6 +105,43 @@ vi.mock("@/components/ui/alert-dialog", () => ({
   ),
 }));
 
+vi.mock("@/components/ui/select", async () => {
+  const React = await import("react");
+  const SelectContext = React.createContext<{
+    value?: string;
+    onValueChange?: (value: string) => void;
+  }>({});
+
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      children,
+    }: {
+      value?: string;
+      onValueChange?: (value: string) => void;
+      children: React.ReactNode;
+    }) => (
+      <SelectContext.Provider value={{ value, onValueChange }}>{children}</SelectContext.Provider>
+    ),
+    SelectTrigger: ({ children }: { children: React.ReactNode }) => (
+      <div role="combobox" aria-controls="mock-listbox" aria-expanded={false}>
+        {children}
+      </div>
+    ),
+    SelectValue: ({ placeholder }: { placeholder?: string }) => <span>{placeholder ?? ""}</span>,
+    SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => {
+      const ctx = React.useContext(SelectContext);
+      return (
+        <button type="button" onClick={() => ctx.onValueChange?.(value)}>
+          {children}
+        </button>
+      );
+    },
+  };
+});
+
 vi.mock("@/components/tree-view", () => ({
   TreeView: ({
     data,
@@ -154,8 +191,13 @@ function makeCategory(overrides: Partial<MoneyCategory> = {}): MoneyCategory {
   return {
     id: "cat-1",
     parent_id: null,
+    canonical_category_id: "canon-food",
+    category_kind: "custom",
+    system_key: null,
+    sort_order: 0,
+    created_by: null,
     depth: 1,
-    name_ru: "Продукты",
+    name_ru: "РџСЂРѕРґСѓРєС‚С‹",
     name_en: "Groceries",
     slug: "groceries",
     archived_at: null,
@@ -172,41 +214,21 @@ function buildTree(categories: MoneyCategory[]) {
     list.push(category);
     byParent.set(category.parent_id, list);
   });
-  type TreeNode = {
-    id: string;
-    parent_id: string | null;
-    depth: number;
-    name_en: string;
-    name_ru: string;
-    slug: string;
-    children: TreeNode[];
-  };
+  type TreeNode = MoneyCategory & { children: TreeNode[] };
   const mapNode = (category: MoneyCategory): TreeNode => ({
-    id: category.id,
-    parent_id: category.parent_id,
-    depth: category.depth,
-    name_en: category.name_en,
-    name_ru: category.name_ru,
-    slug: category.slug,
+    ...category,
     children: (byParent.get(category.id) ?? []).map((c) => mapNode(c)),
   });
   return (byParent.get(null) ?? []).map(mapNode);
 }
 
 function flattenTree(
-  nodes: Array<{
-    id: string;
-    depth: number;
-    name_en: string;
-    children: Array<{ id: string; depth: number; name_en: string; children: unknown[] }>;
-  }>,
+  nodes: Array<MoneyCategory & { children: Array<MoneyCategory & { children: unknown[] }> }>,
 ) {
-  const result: Array<{ id: string; depth: number; name_en: string }> = [];
-  const visit = (node: { id: string; depth: number; name_en: string; children: unknown[] }) => {
-    result.push({ id: node.id, depth: node.depth, name_en: node.name_en });
-    node.children.forEach((child) =>
-      visit(child as { id: string; depth: number; name_en: string; children: unknown[] }),
-    );
+  const result: Array<MoneyCategory & { children: unknown[] }> = [];
+  const visit = (node: MoneyCategory & { children: unknown[] }) => {
+    result.push(node);
+    node.children.forEach((child) => visit(child as MoneyCategory & { children: unknown[] }));
   };
   nodes.forEach(visit);
   return result;
@@ -284,30 +306,53 @@ describe("MoneyCategoriesPage", () => {
     expect(createMutateAsync).not.toHaveBeenCalled();
   });
 
-  it("creates a root category from dialog input", async () => {
-    setupCategoriesData([]);
+  it("creates a root custom category within the selected canonical branch", async () => {
+    const canonical = makeCategory({
+      id: "canon-transport",
+      canonical_category_id: "canon-transport",
+      category_kind: "canonical",
+      system_key: "transport",
+      sort_order: 1,
+      name_en: "Transport",
+      name_ru: "Transport RU",
+      slug: "canonical-transport",
+    });
+    setupCategoriesData([canonical]);
     render(<MoneyCategoriesPage />);
     const user = userEvent.setup();
 
     await user.click(screen.getAllByRole("button", { name: "money.addCategory" })[0]);
+    await user.click(screen.getByRole("button", { name: "Transport" }));
     const textboxes = screen.getAllByRole("textbox");
-    await user.type(textboxes[0], "Transport");
-    await user.type(textboxes[1], "Транспорт");
-    await user.type(textboxes[2], "transport");
+    await user.type(textboxes[0], "Metro");
+    await user.type(textboxes[1], "Metro RU");
+    await user.type(textboxes[2], "metro");
     await user.click(screen.getAllByRole("button", { name: "common.save" })[0]);
 
     await waitFor(() => {
       expect(createMutateAsync).toHaveBeenCalledWith({
         parent_id: null,
+        canonical_category_id: "canon-transport",
+        category_kind: "custom",
         depth: 1,
-        name_en: "Transport",
-        name_ru: "Транспорт",
-        slug: "transport",
+        name_en: "Metro",
+        name_ru: "Metro RU",
+        slug: "metro",
       });
     });
   });
 
   it("creates a child category from tree action with incremented depth", async () => {
+    const canonical = makeCategory({
+      id: "canon-food",
+      canonical_category_id: "canon-food",
+      category_kind: "canonical",
+      system_key: "food",
+      sort_order: 1,
+      name_en: "Food",
+      name_ru: "Food RU",
+      slug: "canonical-food",
+    });
     const root = makeCategory({
       id: "root",
       depth: 1,
@@ -315,12 +360,12 @@ describe("MoneyCategoriesPage", () => {
       name_ru: "Root",
       slug: "root",
     });
-    setupCategoriesData([root]);
+    setupCategoriesData([canonical, root]);
     render(<MoneyCategoriesPage />);
     const user = userEvent.setup();
 
     const addButtons = screen.getAllByRole("button", { name: "money.addCategory" });
-    await user.click(addButtons[1]);
+    await user.click(addButtons[2]);
 
     const textboxes = screen.getAllByRole("textbox");
     await user.type(textboxes[0], "Child");
@@ -331,6 +376,8 @@ describe("MoneyCategoriesPage", () => {
     await waitFor(() => {
       expect(createMutateAsync).toHaveBeenCalledWith({
         parent_id: "root",
+        canonical_category_id: "canon-food",
+        category_kind: "custom",
         depth: 2,
         name_en: "Child",
         name_ru: "Child RU",
@@ -340,6 +387,16 @@ describe("MoneyCategoriesPage", () => {
   });
 
   it("updates an existing category via edit action", async () => {
+    const canonical = makeCategory({
+      id: "canon-food",
+      canonical_category_id: "canon-food",
+      category_kind: "canonical",
+      system_key: "food",
+      sort_order: 1,
+      name_en: "Food",
+      name_ru: "Food RU",
+      slug: "canonical-food",
+    });
     const root = makeCategory({
       id: "root",
       depth: 1,
@@ -347,7 +404,7 @@ describe("MoneyCategoriesPage", () => {
       name_ru: "Root",
       slug: "root",
     });
-    setupCategoriesData([root]);
+    setupCategoriesData([canonical, root]);
     render(<MoneyCategoriesPage />);
     const user = userEvent.setup();
 
@@ -368,6 +425,7 @@ describe("MoneyCategoriesPage", () => {
         id: "root",
         updates: {
           parent_id: null,
+          canonical_category_id: "canon-food",
           depth: 1,
           name_en: "Updated Root",
           name_ru: "Updated Root RU",
@@ -405,14 +463,48 @@ describe("MoneyCategoriesPage", () => {
     expect(screen.getByText("Ghost node")).toBeInTheDocument();
   });
 
+  it("renders canonical rows as locked branch roots", () => {
+    const canonical = makeCategory({
+      id: "canon-food",
+      canonical_category_id: "canon-food",
+      category_kind: "canonical",
+      system_key: "food",
+      sort_order: 1,
+      name_en: "Food",
+      name_ru: "Food RU",
+      slug: "canonical-food",
+    });
+    const custom = makeCategory({
+      id: "custom-groceries",
+      canonical_category_id: "canon-food",
+      category_kind: "custom",
+      system_key: null,
+      name_en: "Groceries",
+      name_ru: "Groceries RU",
+      slug: "groceries",
+    });
+    setupCategoriesData([canonical, custom]);
+
+    render(<MoneyCategoriesPage />);
+
+    expect(screen.getByText("money.categoryCanonical")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "common.edit" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "common.delete" })).toHaveLength(1);
+  });
+
   it("blocks deleting a category that has children", async () => {
-    const root = makeCategory({ id: "root", name_en: "Root", name_ru: "Корень", slug: "root" });
+    const root = makeCategory({
+      id: "root",
+      name_en: "Root",
+      name_ru: "РљРѕСЂРµРЅСЊ",
+      slug: "root",
+    });
     const child = makeCategory({
       id: "child",
       parent_id: "root",
       depth: 2,
       name_en: "Child",
-      name_ru: "Дочерний",
+      name_ru: "Р”РѕС‡РµСЂРЅРёР№",
       slug: "child",
     });
     setupCategoriesData([root, child]);
@@ -433,13 +525,18 @@ describe("MoneyCategoriesPage", () => {
   });
 
   it("deletes a leaf category after confirmation", async () => {
-    const root = makeCategory({ id: "root", name_en: "Root", name_ru: "Корень", slug: "root" });
+    const root = makeCategory({
+      id: "root",
+      name_en: "Root",
+      name_ru: "РљРѕСЂРµРЅСЊ",
+      slug: "root",
+    });
     const child = makeCategory({
       id: "child",
       parent_id: "root",
       depth: 2,
       name_en: "Child",
-      name_ru: "Дочерний",
+      name_ru: "Р”РѕС‡РµСЂРЅРёР№",
       slug: "child",
     });
     setupCategoriesData([root, child]);

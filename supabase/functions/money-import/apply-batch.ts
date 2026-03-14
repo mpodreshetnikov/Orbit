@@ -137,6 +137,8 @@ export async function applyBatchAction(
   let filteredOutOfRangeCount = 0;
   let filteredInvalidDateCount = 0;
   const rowResults: Array<Record<string, unknown>> = [];
+  const insertedLineItemIds: string[] = [];
+  let categoryPipelineMeta: Record<string, unknown> | null = null;
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
     const storedRow = rowsRaw[rowIndex];
@@ -326,6 +328,10 @@ export async function applyBatchAction(
             message: lineMessage,
             line_item_id: lineRes.lineItemId,
           });
+
+          if (lineRes.inserted && lineRes.lineItemId) {
+            insertedLineItemIds.push(lineRes.lineItemId);
+          }
         } catch (lineError) {
           const lineMessage =
             lineError instanceof Error ? lineError.message : "Line item import failed";
@@ -386,6 +392,40 @@ export async function applyBatchAction(
     }
   }
 
+  if (insertedLineItemIds.length > 0 && deps.repository.applyCategoryRulePipeline) {
+    categoryPipelineMeta = {
+      status: "applied",
+      line_item_count: insertedLineItemIds.length,
+    };
+    try {
+      await deps.repository.applyCategoryRulePipeline(
+        insertedLineItemIds,
+        payerPersonId,
+        "import_auto",
+      );
+    } catch (error) {
+      categoryPipelineMeta = {
+        status: "failed",
+        line_item_count: insertedLineItemIds.length,
+        error_message: error instanceof Error ? error.message : "Unknown category pipeline error",
+      };
+      deps.telemetry?.warn("money_import_apply_batch_category_pipeline_failed", {
+        line_item_count: insertedLineItemIds.length,
+        error_message: error instanceof Error ? error.message : "Unknown category pipeline error",
+      });
+    }
+  }
+
+  const mergedMeta = mergeRangeMeta(batch.meta, null, {
+    parsedRowCount: 0,
+    inRangeRowCount,
+    filteredOutOfRangeCount,
+    filteredInvalidDateCount,
+  });
+  if (categoryPipelineMeta) {
+    mergedMeta.category_pipeline = categoryPipelineMeta;
+  }
+
   const patch: Record<string, unknown> = {
     parsed_transactions_count: rowsRaw.length,
     inserted_count: insertedCount,
@@ -393,12 +433,7 @@ export async function applyBatchAction(
     error_count: errorCount,
     status: "completed",
     completed_at: (deps.now ?? (() => new Date()))().toISOString(),
-    meta: mergeRangeMeta(batch.meta, null, {
-      parsedRowCount: 0,
-      inRangeRowCount,
-      filteredOutOfRangeCount,
-      filteredInvalidDateCount,
-    }),
+    meta: mergedMeta,
   };
   const parsedThrough =
     normalizeText(batch.parsed_through_at) ??

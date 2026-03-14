@@ -155,18 +155,20 @@ describe("POST /api/observability/relay", () => {
     });
   });
 
-  it("returns 502 when otlp forwarding fails with non-error values", async () => {
+  it("returns 202 when otlp forwarding fails with non-error values", async () => {
     forwardLogsToOtlpMock.mockRejectedValueOnce("boom");
     const { POST } = await import("./route");
     const response = await POST(relayRequest(JSON.stringify({ events: [validLogEvent()] })));
 
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({ error: "Unknown OTLP forwarding error" });
-    expect(loggerMocks.error).toHaveBeenCalledWith("observability_relay_otlp_forward_failed", {
-      error: {
-        name: "OtlpForwardError",
-        message: "Unknown OTLP forwarding error",
-      },
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      degraded: true,
+      accepted: 1,
+    });
+    expect(loggerMocks.warn).toHaveBeenCalledWith("observability_relay_otlp_forward_failed", {
+      error_name: "OtlpForwardError",
+      error_message: "Unknown OTLP forwarding error",
     });
   });
 

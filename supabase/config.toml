@@ -378,8 +378,13 @@ deno_version = 2
 
 [edge_runtime.secrets]
 OPENROUTER_API_KEY = "env(OPENROUTER_API_KEY)"
+FXRATESAPI_KEY = "env(FXRATESAPI_KEY)"
+FXRATESAPI_URL = "env(FXRATESAPI_URL)"
 HEALTH_STRUCTURE_PARSER_MODE = "env(HEALTH_STRUCTURE_PARSER_MODE)"
 OPENROUTER_HEALTH_STRUCTURE_TIMEOUT_MS = "env(OPENROUTER_HEALTH_STRUCTURE_TIMEOUT_MS)"
+OPENROUTER_MONEY_CATEGORIZE_MODEL = "env(OPENROUTER_MONEY_CATEGORIZE_MODEL)"
+OPENROUTER_MONEY_CATEGORIZE_BATCH_SIZE = "env(OPENROUTER_MONEY_CATEGORIZE_BATCH_SIZE)"
+OPENROUTER_MONEY_CATEGORIZE_TIMEOUT_MS = "env(OPENROUTER_MONEY_CATEGORIZE_TIMEOUT_MS)"
 WHO_ICD_CLIENT_ID = "env(WHO_ICD_CLIENT_ID)"
 WHO_ICD_CLIENT_SECRET = "env(WHO_ICD_CLIENT_SECRET)"
 VAPID_PUBLIC_KEY = "env(VAPID_PUBLIC_KEY)"
@@ -401,6 +406,10 @@ verify_jwt = false
 [functions.health-structure]
 verify_jwt = false
 [functions.icd-lookup]
+verify_jwt = false
+[functions.money-categorize]
+verify_jwt = false
+[functions.money-fx-sync]
 verify_jwt = false
 [functions.money-import]
 verify_jwt = false

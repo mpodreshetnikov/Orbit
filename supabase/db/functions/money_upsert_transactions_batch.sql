@@ -21,6 +21,7 @@ AS $$
 DECLARE
   r jsonb;
   tx_id uuid;
+  tx_inserted boolean;
   inserted_count int := 0;
   skipped_count int := 0;
   li jsonb;
@@ -36,6 +37,7 @@ BEGIN
   FOR r IN SELECT * FROM jsonb_array_elements(p_rows)
   LOOP
     tx_id := NULL;
+    tx_inserted := false;
     row_status := 'skipped';
     row_message := NULL;
     IF r->'external_id' IS NOT NULL AND (r->>'external_id') <> '' THEN
@@ -94,8 +96,33 @@ BEGIN
         r->'raw_payload',
         NULLIF(trim(r->>'dedupe_hash'), '')
       )
-      ON CONFLICT (source, external_id) WHERE (external_id IS NOT NULL) DO NOTHING
-      RETURNING id INTO tx_id;
+      ON CONFLICT (source, external_id) WHERE (external_id IS NOT NULL) DO UPDATE
+      SET
+        payer_person_id = EXCLUDED.payer_person_id,
+        account_id = EXCLUDED.account_id,
+        card_id = EXCLUDED.card_id,
+        posted_at = EXCLUDED.posted_at,
+        amount = EXCLUDED.amount,
+        currency = EXCLUDED.currency,
+        transaction_type = EXCLUDED.transaction_type,
+        status = EXCLUDED.status,
+        merchant_name = EXCLUDED.merchant_name,
+        mcc = EXCLUDED.mcc,
+        comment = EXCLUDED.comment,
+        source_comment = EXCLUDED.source_comment,
+        cashback_amount = EXCLUDED.cashback_amount,
+        cashback_currency = EXCLUDED.cashback_currency,
+        operation_icon_url = EXCLUDED.operation_icon_url,
+        source_category_id = EXCLUDED.source_category_id,
+        source_category_name = EXCLUDED.source_category_name,
+        brand_id = EXCLUDED.brand_id,
+        receipt_request_key = EXCLUDED.receipt_request_key,
+        receipt_enrichment_status = EXCLUDED.receipt_enrichment_status,
+        is_transfer = EXCLUDED.is_transfer,
+        transfer_group_id = EXCLUDED.transfer_group_id,
+        raw_payload = EXCLUDED.raw_payload,
+        dedupe_hash = EXCLUDED.dedupe_hash
+      RETURNING id, (xmax = 0) INTO tx_id, tx_inserted;
     ELSE
       IF r->>'dedupe_hash' IS NULL OR trim(r->>'dedupe_hash') = '' THEN
         skipped_count := skipped_count + 1;
@@ -160,15 +187,46 @@ BEGIN
         r->'raw_payload',
         trim(r->>'dedupe_hash')
       )
-      ON CONFLICT (dedupe_hash) DO NOTHING
-      RETURNING id INTO tx_id;
+      ON CONFLICT (dedupe_hash) DO UPDATE
+      SET
+        payer_person_id = EXCLUDED.payer_person_id,
+        account_id = EXCLUDED.account_id,
+        card_id = EXCLUDED.card_id,
+        source = EXCLUDED.source,
+        posted_at = EXCLUDED.posted_at,
+        amount = EXCLUDED.amount,
+        currency = EXCLUDED.currency,
+        transaction_type = EXCLUDED.transaction_type,
+        status = EXCLUDED.status,
+        merchant_name = EXCLUDED.merchant_name,
+        mcc = EXCLUDED.mcc,
+        comment = EXCLUDED.comment,
+        source_comment = EXCLUDED.source_comment,
+        cashback_amount = EXCLUDED.cashback_amount,
+        cashback_currency = EXCLUDED.cashback_currency,
+        operation_icon_url = EXCLUDED.operation_icon_url,
+        source_category_id = EXCLUDED.source_category_id,
+        source_category_name = EXCLUDED.source_category_name,
+        brand_id = EXCLUDED.brand_id,
+        receipt_request_key = EXCLUDED.receipt_request_key,
+        receipt_enrichment_status = EXCLUDED.receipt_enrichment_status,
+        is_transfer = EXCLUDED.is_transfer,
+        transfer_group_id = EXCLUDED.transfer_group_id,
+        raw_payload = EXCLUDED.raw_payload
+      RETURNING id, (xmax = 0) INTO tx_id, tx_inserted;
     END IF;
 
     IF tx_id IS NOT NULL THEN
-      inserted_count := inserted_count + 1;
-      row_status := 'inserted';
+      IF tx_inserted THEN
+        inserted_count := inserted_count + 1;
+        row_status := 'inserted';
+      ELSE
+        skipped_count := skipped_count + 1;
+        row_status := 'skipped';
+        row_message := 'Duplicate';
+      END IF;
       li := r->'line_item';
-      IF li IS NOT NULL THEN
+      IF tx_inserted AND li IS NOT NULL THEN
         INSERT INTO public.money_line_items (
           transaction_id,
           title,
@@ -189,10 +247,6 @@ BEGIN
           li->'raw_payload'
         );
       END IF;
-    ELSE
-      skipped_count := skipped_count + 1;
-      row_status := 'skipped';
-      row_message := 'Duplicate';
     END IF;
     row_results := array_append(row_results, jsonb_build_object('idx', row_idx, 'status', row_status, 'message', row_message));
     row_idx := row_idx + 1;

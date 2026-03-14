@@ -13,8 +13,9 @@ function normalizePath(filePath) {
 }
 
 function isSrcEntry(key) {
-  const normalized = normalizePath(key);
-  return normalized.includes("/src/") || normalized.startsWith("src/");
+  const relativePath = path.isAbsolute(key) ? path.relative(REPO_ROOT, key) : key;
+  const normalized = normalizePath(relativePath);
+  return normalized.startsWith("src/");
 }
 
 function pct(covered, total) {

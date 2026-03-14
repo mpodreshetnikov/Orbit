@@ -664,46 +664,61 @@ END $$;
 -- ============================================================================
 DO $$
 DECLARE
-  v_cat_food uuid := '40000001-0000-4000-8000-000000000001';
+  v_can_income uuid;
+  v_can_housing uuid;
+  v_can_food uuid;
+  v_can_transport uuid;
+  v_can_health uuid;
+  v_can_utilities uuid;
+  v_can_shopping uuid;
+  v_can_entertainment uuid;
   v_cat_groceries uuid := '40000001-0000-4000-8000-000000000002';
   v_cat_restaurants uuid := '40000001-0000-4000-8000-000000000003';
-  v_cat_transport uuid := '40000001-0000-4000-8000-000000000004';
   v_cat_taxi uuid := '40000001-0000-4000-8000-000000000005';
-  v_cat_public_transport uuid := '40000001-0000-4000-8000-000000000006';
-  v_cat_shopping uuid := '40000001-0000-4000-8000-000000000007';
-  v_cat_entertainment uuid := '40000001-0000-4000-8000-000000000008';
-  v_cat_housing uuid := '40000001-0000-4000-8000-000000000009';
   v_cat_rent uuid := '40000001-0000-4000-8000-00000000000a';
-  v_cat_utilities uuid := '40000001-0000-4000-8000-00000000000b';
-  v_cat_income uuid := '40000001-0000-4000-8000-00000000000c';
   v_cat_salary uuid := '40000001-0000-4000-8000-00000000000d';
   v_cat_freelance uuid := '40000001-0000-4000-8000-00000000000e';
-  v_cat_health uuid := '40000001-0000-4000-8000-00000000000f';
   v_cat_pharmacy uuid := '40000001-0000-4000-8000-000000000010';
 BEGIN
-  -- Top-level categories (depth 1)
-  INSERT INTO public.money_categories (id, parent_id, depth, name_ru, name_en, slug) VALUES
-    (v_cat_food,          NULL, 1, 'Еда и напитки',  'Food & Dining',   'food-dining'),
-    (v_cat_transport,     NULL, 1, 'Транспорт',       'Transport',       'transport'),
-    (v_cat_shopping,      NULL, 1, 'Покупки',         'Shopping',        'shopping'),
-    (v_cat_entertainment, NULL, 1, 'Развлечения',     'Entertainment',   'entertainment'),
-    (v_cat_housing,       NULL, 1, 'Жильё',           'Housing',         'housing'),
-    (v_cat_income,        NULL, 1, 'Доход',           'Income',          'income'),
-    (v_cat_health,        NULL, 1, 'Здоровье',        'Health',          'health')
-  ON CONFLICT (id) DO NOTHING;
+  SELECT id INTO v_can_income FROM public.money_categories WHERE system_key = 'income';
+  SELECT id INTO v_can_housing FROM public.money_categories WHERE system_key = 'housing';
+  SELECT id INTO v_can_food FROM public.money_categories WHERE system_key = 'food';
+  SELECT id INTO v_can_transport FROM public.money_categories WHERE system_key = 'transport';
+  SELECT id INTO v_can_health FROM public.money_categories WHERE system_key = 'health';
+  SELECT id INTO v_can_utilities FROM public.money_categories WHERE system_key = 'utilities';
+  SELECT id INTO v_can_shopping FROM public.money_categories WHERE system_key = 'shopping';
+  SELECT id INTO v_can_entertainment FROM public.money_categories WHERE system_key = 'entertainment';
 
-  -- Sub-categories (depth 2)
-  INSERT INTO public.money_categories (id, parent_id, depth, name_ru, name_en, slug) VALUES
-    (v_cat_groceries,        v_cat_food,      2, 'Продукты',               'Groceries',         'groceries'),
-    (v_cat_restaurants,      v_cat_food,      2, 'Рестораны и кафе',       'Restaurants',       'restaurants'),
-    (v_cat_taxi,             v_cat_transport, 2, 'Такси',                  'Taxi',              'taxi'),
-    (v_cat_public_transport, v_cat_transport, 2, 'Общественный транспорт', 'Public Transport',  'public-transport'),
-    (v_cat_rent,             v_cat_housing,   2, 'Аренда',                 'Rent',              'rent'),
-    (v_cat_utilities,        v_cat_housing,   2, 'Коммунальные услуги',    'Utilities',         'utilities'),
-    (v_cat_salary,           v_cat_income,    2, 'Зарплата',               'Salary',            'salary'),
-    (v_cat_freelance,        v_cat_income,    2, 'Фриланс',               'Freelance',         'freelance'),
-    (v_cat_pharmacy,         v_cat_health,    2, 'Аптека',                 'Pharmacy',          'pharmacy')
-  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.money_categories (
+    id,
+    parent_id,
+    canonical_category_id,
+    category_kind,
+    depth,
+    name_ru,
+    name_en,
+    slug
+  ) VALUES
+    (v_cat_groceries,   NULL, v_can_food,      'custom', 1, 'Продукты',         'Groceries',   'groceries'),
+    (v_cat_restaurants, NULL, v_can_food,      'custom', 1, 'Рестораны и кафе', 'Restaurants', 'restaurants'),
+    (v_cat_taxi,        NULL, v_can_transport, 'custom', 1, 'Такси',            'Taxi',        'taxi'),
+    (v_cat_rent,        NULL, v_can_housing,   'custom', 1, 'Аренда',           'Rent',        'rent'),
+    (v_cat_salary,      NULL, v_can_income,    'custom', 1, 'Зарплата',         'Salary',      'salary'),
+    (v_cat_freelance,   NULL, v_can_income,    'custom', 1, 'Фриланс',          'Freelance',   'freelance'),
+    (v_cat_pharmacy,    NULL, v_can_health,    'custom', 1, 'Аптека',           'Pharmacy',    'pharmacy')
+  ON CONFLICT (id) DO UPDATE
+  SET
+    parent_id = EXCLUDED.parent_id,
+    canonical_category_id = EXCLUDED.canonical_category_id,
+    category_kind = 'custom',
+    system_key = NULL,
+    sort_order = 0,
+    created_by = NULL,
+    depth = EXCLUDED.depth,
+    name_ru = EXCLUDED.name_ru,
+    name_en = EXCLUDED.name_en,
+    slug = EXCLUDED.slug,
+    archived_at = NULL;
 END $$;
 
 -- ============================================================================
@@ -749,11 +764,11 @@ DECLARE
   v_cat_restaurants uuid := '40000001-0000-4000-8000-000000000003';
   v_cat_taxi uuid := '40000001-0000-4000-8000-000000000005';
   v_cat_rent uuid := '40000001-0000-4000-8000-00000000000a';
-  v_cat_utilities uuid := '40000001-0000-4000-8000-00000000000b';
+  v_cat_utilities uuid;
   v_cat_salary uuid := '40000001-0000-4000-8000-00000000000d';
   v_cat_freelance uuid := '40000001-0000-4000-8000-00000000000e';
-  v_cat_shopping uuid := '40000001-0000-4000-8000-000000000007';
-  v_cat_entertainment uuid := '40000001-0000-4000-8000-000000000008';
+  v_cat_shopping uuid;
+  v_cat_entertainment uuid;
   v_cat_pharmacy uuid := '40000001-0000-4000-8000-000000000010';
   -- transaction IDs
   v_tx1 uuid := '42000001-0000-4000-8000-000000000001';
@@ -787,6 +802,9 @@ DECLARE
 BEGIN
   SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
   SELECT id INTO v_kate_person_id FROM public.persons WHERE name = 'Kate' LIMIT 1;
+  SELECT id INTO v_cat_utilities FROM public.money_categories WHERE system_key = 'utilities';
+  SELECT id INTO v_cat_shopping FROM public.money_categories WHERE system_key = 'shopping';
+  SELECT id INTO v_cat_entertainment FROM public.money_categories WHERE system_key = 'entertainment';
 
   IF v_max_person_id IS NULL THEN RETURN; END IF;
 

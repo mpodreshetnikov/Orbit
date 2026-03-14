@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 import { useTranslations } from "next-intl";
 import {
   FileText,
@@ -14,6 +16,8 @@ import {
   Tags,
   ArrowRightLeft,
   Upload,
+  Workflow,
+  ChartNoAxesColumn,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -65,6 +69,11 @@ const healthLinks = [
 
 const moneyLinks = [
   {
+    href: "/money/reports",
+    icon: ChartNoAxesColumn,
+    labelKey: "money.reports",
+  },
+  {
     href: "/money/transactions",
     icon: ArrowRightLeft,
     labelKey: "money.transactions",
@@ -83,6 +92,11 @@ const moneyLinks = [
     href: "/money/categories",
     icon: Tags,
     labelKey: "money.categories",
+  },
+  {
+    href: "/money/rules",
+    icon: Workflow,
+    labelKey: "money.rules",
   },
 ];
 

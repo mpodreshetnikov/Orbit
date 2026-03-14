@@ -6,14 +6,17 @@ This repository contains `docs/PLANS.md`, and this document is maintained in acc
 
 ## Purpose / Big Picture
 
-After this change, the money domain always contains a built-in canonical category set that cannot be deleted and is present in every environment after migrations run. Users can add their own custom categories under those built-in categories, create an ordered categorization pipeline made of normal rules and smart rules, and apply that pipeline to imported or manually edited line items.
+After this change, the money domain always contains a built-in canonical category set that cannot be deleted and is present in every environment after migrations run. Users can add their own custom categories under those built-in categories, create person-specific ordered categorization pipelines made of normal rules and smart rules, and apply those pipelines to imported or manually edited line items.
 
-Success is observable in four ways. First, the Categories screen always shows the seeded built-in categories and does not allow deleting them. Second, every imported line item is automatically sent through the rule pipeline as part of import completion. Third, the Rules screen lets the user build an ordered list of rules with filters and rerun that pipeline for one line item, one transaction, or a date-range batch of transactions. Fourth, a line-item debug view shows which rules ran, which rules were skipped by filters, which rule changed the category, and what final category was saved.
+Success is observable in four ways. First, the Categories screen always shows the seeded built-in categories and does not allow deleting them. Second, every imported line item is automatically sent through the rule pipeline for that transaction's payer person as part of import completion. Third, the Rules screen lets the user manage a rule list for a selected person and rerun that person's pipeline for one line item, one transaction, or a date-range batch of transactions. Fourth, a line-item debug view shows which person's rules ran, which rules were skipped by filters, which rule changed the category, and what final category was saved.
 
 ## Progress
 
 - [x] (2026-03-10T00:00:00Z) Read `docs/PLANS.md`, money architecture docs, current money schema, and existing categories UI to anchor this plan in the current repository.
 - [x] (2026-03-10T00:20:00Z) Draft the target design for canonical categories, custom categories, ordered rule evaluation, smart rules, and debug tooling.
+- [x] (2026-03-10T14:45:00Z) Moved this plan from `docs/exec-plans/todo/` to `docs/exec-plans/in-progress/` and started implementation with repository context gathering, DB/UI surface mapping, and quality workflow setup.
+- [x] (2026-03-10T18:20:00Z) Implemented canonical categories, deterministic rule-pipeline SQL/RPCs, import-time automatic rule application, and the Categories/Rules/transaction debug UI surfaces with focused tests.
+- [x] (2026-03-10T19:35:00Z) Added the `money-categorize` LLM orchestration service and edge-function entrypoint, routed web replay actions through it when LLM rules are enabled, and switched import auto-apply to the same orchestration path for LLM-capable rule sets.
 - [ ] Implement the schema, seed data, RPCs, Edge workflow, UI, and validation steps described below.
 
 ## Surprises & Discoveries
@@ -27,6 +30,9 @@ Success is observable in four ways. First, the Categories screen always shows th
 - Observation: the repository already has one narrow smart-categorization primitive based on historical merchant usage.
   Evidence: `supabase/db/functions/get_money_merchant_default_categories.sql` returns the most-used category per merchant for a payer.
 
+- Observation: the Edge Function-side generated database types lagged the new money rule tables even after the SQL implementation was added, so new repository code had to use explicit untyped admin-client calls for those fresh relations until artifacts are refreshed again in the validation stage.
+  Evidence: `supabase/functions/money-categorize/repository.ts` and `supabase/functions/money-import/repository.ts` now cast the admin client for `money_category_rules`, `money_category_rule_runs`, `money_category_rule_run_steps`, and the built-in mapping tables because the current `_shared/database.types.ts` surface does not yet include them.
+
 ## Decision Log
 
 - Decision: keep one category table, but explicitly mark rows as either `canonical` or `custom`.
@@ -39,6 +45,10 @@ Success is observable in four ways. First, the Categories screen always shows th
 
 - Decision: keep the built-in canonical taxonomy flat at one level instead of shipping a built-in parent-child tree.
   Rationale: the user explicitly does not want a default tree. A flat shipped taxonomy makes built-in mapping simpler, reduces debate about parent semantics, and still leaves room for user-defined custom children under any built-in category.
+  Date/Author: 2026-03-10 / Codex
+
+- Decision: scope categorization rules per person instead of keeping one global rule list.
+  Rationale: different people can have different merchants, naming patterns, and category preferences. Per-person rule lists avoid cross-person rule interference and make import-time automatic runs deterministic because each transaction already has `payer_person_id`.
   Date/Author: 2026-03-10 / Codex
 
 - Decision: model the categorization system as an ordered pipeline where each rule can either no-op or overwrite the current category, and the last applied rule wins.
@@ -65,7 +75,7 @@ The durable ledger rows are `money_transactions` and `money_line_items`. A trans
 
 In this plan, "canonical category" means a built-in category shipped by the product and present in every environment. It is not deletable and is used by smart rules such as MCC mapping. "Custom category" means a user-created category stored in the same tree, still visible in reports, but always attached to one canonical branch. "Rule pipeline" means the ordered list of enabled rules evaluated from top to bottom against a candidate line item. "Filter" means the conditions that decide whether a rule is allowed to run for that line item. "Smart rule" means a rule whose target category is computed automatically instead of being hard-coded by the user.
 
-The current repository does not yet have a money rules table, a rule runner, or a line-item pipeline-debug surface. This plan introduces them without changing the core intent of the current ledger model. It also makes pipeline execution an automatic part of import completion, with explicit replay entry points for one line item, one transaction, or a date-range batch of transactions selected by the user.
+The current repository does not yet have a money rules table, a rule runner, or a line-item pipeline-debug surface. This plan introduces them without changing the core intent of the current ledger model. It also makes pipeline execution an automatic part of import completion, with explicit replay entry points for one line item, one transaction, or a date-range batch of transactions selected by the user. Rules are not global: each rule belongs to one person, and automatic or manual runs resolve the active rule list from the line item's transaction payer person unless the replay UI explicitly asks the user to choose a person-scoped batch.
 
 ## Default Canonical Taxonomy
 
@@ -129,6 +139,7 @@ Transaction-level inputs:
 - account source and account kind through `money_accounts`
 - `money_transactions.payer_person_id`
 - `money_transactions.is_transfer`
+- the effective rule owner person for the current run
 
 Line-item-level inputs:
 
@@ -217,15 +228,15 @@ This rule maps `source_category_id` or `source_category_name` from the import so
 
 `merchant_history`
 
-This rule uses the user's own previously confirmed line items to infer the most likely canonical category for the current merchant and optionally normalized line-item title. It should only learn from manual assignments and from rules the user has explicitly accepted, not from low-confidence LLM outputs. The existing `get_money_merchant_default_categories` function is the starting point, but it must be expanded from "top category per merchant" to canonical-category suggestions usable by the pipeline.
+This rule uses the person's own previously confirmed line items to infer the most likely canonical category for the current merchant and optionally normalized line-item title. It should only learn from manual assignments and from rules that person has explicitly accepted, not from low-confidence LLM outputs. The existing `get_money_merchant_default_categories` function is the starting point, but it must be expanded from "top category per merchant" to canonical-category suggestions usable by the pipeline.
 
 `line_item_history`
 
-This rule matches normalized line-item title plus canonical branch or merchant context against previously confirmed assignments. It is useful for repetitive receipts where the same item names recur.
+This rule matches normalized line-item title plus canonical branch or merchant context against previously confirmed assignments for the same person. It is useful for repetitive receipts where the same item names recur.
 
 `llm_categorization`
 
-This rule sends the transaction context, line-item context, the user prompt, and the list of available category candidates to the LLM. Candidate categories include all built-in canonical categories plus any custom categories available to the user. The LLM must return either one existing category id from the provided candidate list or an explicit `no_change` result. It must never invent a category id. The system prompt should require deterministic JSON output and should include short category descriptions and an instruction to prefer a matching custom category when the user's custom taxonomy is more precise than the built-in categories.
+This rule sends the transaction context, line-item context, the user prompt, and the list of available category candidates to the LLM. Candidate categories include all built-in canonical categories plus any custom categories available in the active person's category space. The LLM must return either one existing category id from the provided candidate list or an explicit `no_change` result. It must never invent a category id. The system prompt should require deterministic JSON output and should include short category descriptions and an instruction to prefer a matching custom category when that person's custom taxonomy is more precise than the built-in categories.
 
 `fallback_uncategorized`
 
@@ -286,6 +297,7 @@ Extend `public.money_line_items` with:
 Create `public.money_category_rules` with fields:
 
 - `id uuid pk`
+- `person_id uuid not null references public.persons(id) on delete cascade`
 - `name text`
 - `description text null`
 - `enabled boolean`
@@ -301,10 +313,13 @@ Create `public.money_category_rules` with fields:
 - `created_at timestamptz`
 - `updated_at timestamptz`
 
+Add a unique ordering invariant so that `sort_order` is unique per `person_id`, not globally.
+
 Create `public.money_category_rule_runs` with fields:
 
 - `id uuid pk`
 - `triggered_by_user_id uuid null`
+- `person_id uuid not null references public.persons(id) on delete cascade`
 - `trigger_source text not null` such as `import_auto`, `single_line_item_replay`, `single_transaction_replay`, `date_range_replay`, `single_preview`, `background_repair`
 - `line_item_id uuid not null`
 - `transaction_id uuid not null`
@@ -337,18 +352,20 @@ Create mapping tables:
 Add or update database functions under `supabase/db/functions/`:
 
 - `money_seed_canonical_categories()`
-- `money_preview_category_rule_pipeline(p_line_item_id uuid, p_rule_ids uuid[] default null)`
-- `money_apply_category_rule_pipeline(p_line_item_ids uuid[], p_force_overwrite_locked boolean default false, p_trigger_source text default 'manual_replay')`
-- `money_apply_category_rule_pipeline_for_transaction(p_transaction_id uuid, p_force_overwrite_locked boolean default false)`
-- `money_apply_category_rule_pipeline_for_date_range(p_from date, p_to date, p_force_overwrite_locked boolean default false)`
+- `money_preview_category_rule_pipeline(p_line_item_id uuid, p_person_id uuid default null, p_rule_ids uuid[] default null)`
+- `money_apply_category_rule_pipeline(p_line_item_ids uuid[], p_person_id uuid default null, p_force_overwrite_locked boolean default false, p_trigger_source text default 'manual_replay')`
+- `money_apply_category_rule_pipeline_for_transaction(p_transaction_id uuid, p_person_id uuid default null, p_force_overwrite_locked boolean default false)`
+- `money_apply_category_rule_pipeline_for_date_range(p_person_id uuid, p_from date, p_to date, p_force_overwrite_locked boolean default false)`
 - `money_get_category_rule_debug(p_line_item_id uuid, p_limit int default 20)`
 - a helper function that resolves rule input payload for one line item, including transaction and account fields
+
+These functions should default `p_person_id` from `money_transactions.payer_person_id` when replaying a single line item or transaction and should require an explicit `p_person_id` for date-range replay so the batch is unambiguous.
 
 Add a dedicated Edge Function:
 
 - `supabase/functions/money-categorize/index.ts`
 
-This function owns LLM-backed rule execution, bulk orchestration, and persistence of debug traces for runs that include `llm_categorization`. Deterministic preview and apply paths may stay inside DB RPCs when no LLM rule is in the active rule set. It must support the same execution scopes as deterministic runs: one line item, one transaction, import-created line items, and date-range batch replay.
+This function owns LLM-backed rule execution, bulk orchestration, and persistence of debug traces for runs that include `llm_categorization`. Deterministic preview and apply paths may stay inside DB RPCs when no LLM rule is in the active rule set. It must support the same execution scopes as deterministic runs: one line item, one transaction, import-created line items, and date-range batch replay. Every invocation must carry the active `person_id`, and the function must only load that person's enabled rules and that person's historical-learning context.
 
 Update TypeScript types:
 
@@ -373,7 +390,7 @@ At the end of this milestone, a clean local database reset shows the built-in ca
 
 ### Milestone 2: Deterministic rule engine
 
-Create `money_category_rules`, rule-run history tables, and the deterministic pipeline RPCs. Implement direct rules, filter evaluation, ordered execution, `stop_processing`, line-item category locking behavior, and explicit replay scopes for one line item, one transaction, and a user-selected date-range batch of transactions. Wire the rule engine into transaction detail actions so a user can re-run rules without involving the LLM.
+Create `money_category_rules`, rule-run history tables, and the deterministic pipeline RPCs. Implement direct rules, filter evaluation, ordered execution, `stop_processing`, line-item category locking behavior, person ownership of rules, and explicit replay scopes for one line item, one transaction, and a user-selected date-range batch of transactions. Wire the rule engine into transaction detail actions so a user can re-run rules without involving the LLM.
 
 At the end of this milestone, a user can create text- and metadata-based rules, order them, preview them, apply them, and inspect step-by-step debug output for deterministic runs.
 
@@ -385,13 +402,13 @@ At the end of this milestone, the pipeline can mix normal rules with named smart
 
 ### Milestone 4: Management and debug UI
 
-Add a Rules screen at `src/app/money/rules/page.tsx` and supporting components under `src/components/money/`. The screen needs CRUD, ordering, enable/disable, preview/test on sample line items, templates for the common direct rules, and replay actions for one line item, one transaction, and a date-range batch. Extend transaction and line-item views with a debug drawer or side panel that shows the latest pipeline run and allows opening prior runs.
+Add a Rules screen at `src/app/money/rules/page.tsx` and supporting components under `src/components/money/`. The screen needs a person selector, CRUD, ordering, enable/disable, preview/test on sample line items, templates for the common direct rules, and replay actions for one line item, one transaction, and a date-range batch. Extend transaction and line-item views with a debug drawer or side panel that shows the latest pipeline run and allows opening prior runs.
 
 At the end of this milestone, the full feature is usable from the web app without SQL access.
 
 ### Milestone 5: Automatic execution and acceptance
 
-Trigger categorization automatically for every newly imported line item after import confirmation, while respecting manual locks. Deterministic-only active pipelines may run fully in DB RPCs; pipelines that include `llm_categorization` must route through the Edge orchestrator. Add e2e coverage for the happy paths: built-in categories present, custom category creation, direct rule application, smart rule mapping, import-time auto-apply, replay by scope, and line-item debug visibility. Document the final behavior in money design docs if the implementation reveals constraints that future contributors must know.
+Trigger categorization automatically for every newly imported line item after import confirmation, while respecting manual locks. Automatic runs must use the rule set owned by the transaction's `payer_person_id`. Deterministic-only active pipelines may run fully in DB RPCs; pipelines that include `llm_categorization` must route through the Edge orchestrator. Add e2e coverage for the happy paths: built-in categories present, custom category creation, direct rule application, smart rule mapping, import-time auto-apply, replay by scope, person-specific rule isolation, and line-item debug visibility. Document the final behavior in money design docs if the implementation reveals constraints that future contributors must know.
 
 At the end of this milestone, imported line items are categorized through the rule pipeline by default, and the user can prove what happened for any individual line item.
 
@@ -410,7 +427,7 @@ From repository root `c:\Users\dev\Documents\Coding\Orbit`, implement the featur
 9. Add debug entry points to transaction detail and line-item UI.
 10. Add the `money-categorize` Edge Function and its tests if the active rule set contains `llm_categorization`.
 11. Wire import completion to run the pipeline automatically for every new imported line item.
-12. Add replay actions for one line item, one transaction, and date-range transaction batches.
+12. Add replay actions for one line item, one transaction, and date-range transaction batches, all scoped to a selected person.
 13. Run validation commands and capture final outputs in this plan.
 
 Commands to run during implementation:
@@ -431,8 +448,8 @@ Expected observable checkpoints:
 - After creating a direct rule and applying it to a sample line item, the line item category changes and the debug history shows the rule step.
 - After enabling an MCC or source-category smart rule, importing a matching transaction produces a canonical category without the user hard-coding a target category in that rule.
 - After importing a transaction with line items, each imported line item has a recorded pipeline run without requiring a manual replay step.
-- After replaying rules for a single transaction or a date-range batch, each affected line item gets a new debug run with the correct `trigger_source`.
-- After enabling an LLM rule with a prompt that allows `no_change`, the debug log clearly shows whether the model selected a category from the provided canonical or custom candidate set or intentionally left the line item unchanged.
+- After replaying rules for a single transaction or a date-range batch, each affected line item gets a new debug run with the correct `trigger_source` and `person_id`.
+- After enabling an LLM rule with a prompt that allows `no_change`, the debug log clearly shows whether the model selected a category from the provided canonical or custom candidate set for that person or intentionally left the line item unchanged.
 
 ## Validation and Acceptance
 
@@ -444,6 +461,7 @@ Database acceptance:
 - canonical categories cannot be deleted
 - custom categories cannot exist without an owning canonical category
 - direct rules evaluate filters correctly for `all` and `any`
+- rule ownership is per person and one person's rules never execute for another person's transaction unless explicitly requested in a controlled admin or debug path
 - rule runs and rule steps are persisted with readable reasons
 - manual locks prevent overwrite unless force re-run is requested
 - every imported line item receives an automatic pipeline run
@@ -452,7 +470,7 @@ Database acceptance:
 Web acceptance:
 
 - `src/app/money/categories/page.tsx` shows canonical rows as locked and custom rows as editable
-- `src/app/money/rules/page.tsx` supports create, edit, delete, enable, disable, reorder, preview, apply, and replay by scope
+- `src/app/money/rules/page.tsx` supports selecting a person and then create, edit, delete, enable, disable, reorder, preview, apply, and replay by scope for that person's rules
 - transaction detail shows the current category, assignment source, lock state, and a debug panel with pipeline history
 
 Smart-rule acceptance:
@@ -460,11 +478,12 @@ Smart-rule acceptance:
 - MCC mapping sets the expected canonical category for a known MCC fixture
 - source-category mapping sets the expected canonical category for a known imported source-category fixture
 - merchant history suggests a canonical category after at least one confirmed prior assignment
+- merchant history and line-item history only learn from and apply to the same person
 - LLM rule returns either a category from the provided canonical and custom candidate list or `no_change`, never an invented id
 
 Suggested automated tests:
 
-- pgTAP tests for canonical seed repair, undeletable canonical rows, flat built-in taxonomy invariants, built-in mapping seeds, import-time auto-apply, replay scopes, and deterministic rule evaluation
+- pgTAP tests for canonical seed repair, undeletable canonical rows, flat built-in taxonomy invariants, built-in mapping seeds, import-time auto-apply, replay scopes, person-scoped rule isolation, and deterministic rule evaluation
 - Vitest tests for hooks and rules UI components
 - Edge Function tests for `money-categorize`
 - Playwright flow covering categories setup, rule creation, pipeline apply, and debug inspection
@@ -485,7 +504,7 @@ Add concise evidence here as implementation proceeds. At minimum capture:
 - the built-in MCC and source-category mapping seed result after `db-reset`
 - one deterministic rule preview transcript
 - one persisted debug transcript showing multiple pipeline steps
-- one replay transcript for a transaction and one for a date-range batch
+- one replay transcript for a transaction and one for a date-range batch, both showing person scope
 - one LLM debug payload example with `no_change` and one with a category selection
 
 ## Interfaces and Dependencies
@@ -504,7 +523,7 @@ In `src/hooks/use-money-categories.ts`, extend `MoneyCategoryTreeNode` and fetch
 
 In `src/hooks/use-money-category-rules.ts`, expose hooks for:
 
-- listing rules
+- listing rules for a person
 - creating and updating rules
 - deleting rules
 - reordering rules
@@ -535,3 +554,5 @@ The implementation should reuse existing money transaction and line-item queries
 Created on 2026-03-10 to capture the requested feature for undeletable canonical money categories, user custom categories, ordered categorization rules, smart rules, and line-item pipeline debugging.
 
 Updated on 2026-03-10 to reflect three product decisions: automatic pipeline execution for every imported line item with replay scopes for line item, transaction, and date-range batch; a flat one-level built-in category taxonomy instead of a built-in tree; and LLM categorization using both canonical and custom category candidates.
+
+Updated on 2026-03-10 again to scope rules per person instead of globally, with automatic import-time runs using `payer_person_id` and replay actions preserving person isolation.

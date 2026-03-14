@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-const DEV_EMAIL = process.env.E2E_DEV_EMAIL ?? "dev@example.com";
+const DEV_EMAIL = process.env.E2E_DEV_EMAIL_MONEY_IMPORT ?? "e2e-money-import@example.com";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];

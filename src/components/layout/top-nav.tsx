@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Heart,
@@ -14,6 +14,7 @@ import {
   Wallet,
   CreditCard,
   Tags,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -110,6 +111,12 @@ export function TopNav() {
                         <Link href="/money/categories?new=1" className="flex items-center gap-2">
                           <Tags className="h-4 w-4" />
                           {t("money.addCategory")}
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href="/money/rules" className="flex items-center gap-2">
+                          <Workflow className="h-4 w-4" />
+                          {t("money.rules")}
                         </Link>
                       </DropdownMenuItem>
                     </>

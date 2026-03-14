@@ -16,7 +16,8 @@
 coverage
 .playwright-cli
 /test-results
-.codex-dev.log
+*.log
+*.pid
 
 # next.js
 .next

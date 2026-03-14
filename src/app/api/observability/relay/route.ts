@@ -130,13 +130,18 @@ export async function POST(request: Request) {
     await forwardLogsToOtlp(validation.value);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown OTLP forwarding error";
-    logger.error("observability_relay_otlp_forward_failed", {
-      error: {
-        name: "OtlpForwardError",
-        message,
-      },
+    logger.warn("observability_relay_otlp_forward_failed", {
+      error_name: "OtlpForwardError",
+      error_message: message,
     });
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json(
+      {
+        ok: false,
+        degraded: true,
+        accepted: validation.value.length,
+      },
+      { status: 202 },
+    );
   }
 
   logger.info("observability_relay_forwarded", {

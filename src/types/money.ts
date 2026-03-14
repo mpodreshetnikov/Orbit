@@ -13,10 +13,132 @@ export type MoneyTransactionType =
   | "adjustment";
 
 export type MoneyTransactionStatus = "posted" | "pending" | "cancelled";
+export type MoneyTransferFilter = "all" | "only" | "exclude";
+export type MoneyAmountSignFilter = "all" | "income" | "expense";
+export type MoneyTransactionDatePreset = "7d" | "30d" | "3m" | "1y" | "all" | "custom";
 
 export type MoneyLineStatus = "final" | "returned" | "cancelled";
 
 export type MoneyAssignmentMethod = "import" | "rule" | "llm" | "manual";
+
+export type MoneyCategoryKind = "canonical" | "custom";
+export type MoneyCategoryRuleKind =
+  | "direct"
+  | "mcc_map"
+  | "source_category_map"
+  | "llm_categorization"
+  | "fallback_uncategorized";
+
+export type MoneyCategoryRuleMatchMode = "all" | "any";
+export type MoneyCategoryRuleScopeFilter =
+  | "all_line_items"
+  | "uncategorized_only"
+  | "custom_only"
+  | "canonical_only"
+  | "manual_unlocked_only";
+
+export type MoneyCategoryRuleFilterOperator =
+  | "contains"
+  | "not_contains"
+  | "equals"
+  | "starts_with"
+  | "regex"
+  | "contains_any_in_set"
+  | "equals_any_in_set"
+  | "in_set"
+  | "range"
+  | "is_empty"
+  | "is_not_empty";
+
+export interface MoneyCategoryRuleFilter {
+  field: string;
+  operator: MoneyCategoryRuleFilterOperator;
+  value?: string | number | boolean | null;
+  values?: string[];
+  min?: number | null;
+  max?: number | null;
+}
+
+export interface MoneyCategoryRule {
+  id: string;
+  person_id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  sort_order: number;
+  rule_kind: MoneyCategoryRuleKind;
+  target_category_id: string | null;
+  match_mode: MoneyCategoryRuleMatchMode;
+  scope_filter: MoneyCategoryRuleScopeFilter;
+  filters: MoneyCategoryRuleFilter[];
+  config: Record<string, unknown>;
+  stop_processing: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMoneyCategoryRuleInput {
+  person_id: string;
+  name: string;
+  description?: string | null;
+  enabled?: boolean;
+  sort_order: number;
+  rule_kind: MoneyCategoryRuleKind;
+  target_category_id?: string | null;
+  match_mode?: MoneyCategoryRuleMatchMode;
+  scope_filter?: MoneyCategoryRuleScopeFilter;
+  filters?: MoneyCategoryRuleFilter[];
+  config?: Record<string, unknown>;
+  stop_processing?: boolean;
+}
+
+export interface UpdateMoneyCategoryRuleInput {
+  name?: string;
+  description?: string | null;
+  enabled?: boolean;
+  sort_order?: number;
+  rule_kind?: MoneyCategoryRuleKind;
+  target_category_id?: string | null;
+  match_mode?: MoneyCategoryRuleMatchMode;
+  scope_filter?: MoneyCategoryRuleScopeFilter;
+  filters?: MoneyCategoryRuleFilter[];
+  config?: Record<string, unknown>;
+  stop_processing?: boolean;
+}
+
+export interface MoneyCategoryRuleRunStep {
+  id: string | null;
+  rule_id: string;
+  rule_name: string | null;
+  rule_kind: MoneyCategoryRuleKind;
+  sort_order: number;
+  matched: boolean;
+  changed_category: boolean;
+  previous_category_id: string | null;
+  next_category_id: string | null;
+  decision_reason: string;
+  debug_payload: Record<string, unknown>;
+  created_at?: string | null;
+}
+
+export interface MoneyCategoryRuleRun {
+  id: string | null;
+  triggered_by_user_id: string | null;
+  person_id: string;
+  trigger_source: string;
+  line_item_id: string;
+  line_item_title: string | null;
+  transaction_id: string;
+  merchant_name: string | null;
+  starting_category_id: string | null;
+  final_category_id: string | null;
+  saved: boolean;
+  llm_tokens_prompt: number | null;
+  llm_tokens_completion: number | null;
+  created_at?: string | null;
+  steps: MoneyCategoryRuleRunStep[];
+}
 
 export const MONEY_ACCOUNT_KINDS: MoneyAccountKind[] = ["card", "debit", "credit", "cash"];
 
@@ -43,6 +165,24 @@ export const MONEY_ASSIGNMENT_METHODS: MoneyAssignmentMethod[] = [
   "llm",
   "manual",
 ];
+
+export const MONEY_CATEGORY_RULE_KINDS: MoneyCategoryRuleKind[] = [
+  "direct",
+  "mcc_map",
+  "source_category_map",
+  "llm_categorization",
+  "fallback_uncategorized",
+];
+
+export const MONEY_CATEGORY_RULE_SCOPE_FILTERS: MoneyCategoryRuleScopeFilter[] = [
+  "all_line_items",
+  "uncategorized_only",
+  "custom_only",
+  "canonical_only",
+  "manual_unlocked_only",
+];
+
+export const MONEY_CATEGORY_RULE_MATCH_MODES: MoneyCategoryRuleMatchMode[] = ["all", "any"];
 
 export const MONEY_CURRENCIES = ["RUB", "USD"] as const;
 export type MoneyCurrency = (typeof MONEY_CURRENCIES)[number];
@@ -118,6 +258,11 @@ export interface UpdateMoneyCardInput {
 export interface MoneyCategory {
   id: string;
   parent_id: string | null;
+  canonical_category_id: string;
+  category_kind: MoneyCategoryKind;
+  system_key: string | null;
+  sort_order: number;
+  created_by: string | null;
   depth: number;
   name_ru: string;
   name_en: string;
@@ -129,6 +274,8 @@ export interface MoneyCategory {
 
 export interface CreateMoneyCategoryInput {
   parent_id?: string | null;
+  canonical_category_id: string;
+  category_kind?: Extract<MoneyCategoryKind, "custom">;
   depth: number;
   name_ru: string;
   name_en: string;
@@ -137,6 +284,8 @@ export interface CreateMoneyCategoryInput {
 
 export interface UpdateMoneyCategoryInput {
   parent_id?: string | null;
+  canonical_category_id?: string;
+  category_kind?: MoneyCategoryKind;
   depth?: number;
   name_ru?: string;
   name_en?: string;
@@ -289,11 +438,16 @@ export interface MoneyLineItem {
   assignment_rule_id: string | null;
   assignment_confidence: number | null;
   raw_payload: Record<string, unknown> | null;
+  category_locked_by_user?: boolean;
+  last_category_rule_id?: string | null;
+  last_category_rule_run_id?: string | null;
+  category_assigned_at?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface CreateMoneyLineItemInput {
+  id?: string;
   transaction_id?: string;
   title: string;
   amount: number;
@@ -307,6 +461,10 @@ export interface CreateMoneyLineItemInput {
   assignment_rule_id?: string | null;
   assignment_confidence?: number | null;
   raw_payload?: Record<string, unknown> | null;
+  category_locked_by_user?: boolean;
+  last_category_rule_id?: string | null;
+  last_category_rule_run_id?: string | null;
+  category_assigned_at?: string | null;
 }
 
 export interface UpdateMoneyLineItemInput {
@@ -321,8 +479,131 @@ export interface UpdateMoneyLineItemInput {
   assignment_method?: MoneyAssignmentMethod;
   assignment_rule_id?: string | null;
   assignment_confidence?: number | null;
+  category_locked_by_user?: boolean;
 }
 
 export interface MoneyTransactionDetail extends MoneyTransaction {
   line_items: MoneyLineItem[];
+}
+
+export interface MoneyTransactionFeedFilters {
+  query?: string;
+  accountIds?: string[];
+  transactionTypes?: MoneyTransactionType[];
+  statuses?: MoneyTransactionStatus[];
+  categoryIds?: string[];
+  transferFilter?: MoneyTransferFilter;
+  amountSign?: MoneyAmountSignFilter;
+  preset?: MoneyTransactionDatePreset;
+  from?: string | null;
+  to?: string | null;
+}
+
+export interface MoneyTransactionFeedItem extends MoneyTransaction {
+  money_cards: MoneyTransactionCard | null;
+  money_transaction_brands: MoneyTransactionBrand | null;
+  line_item_titles: string[];
+  category_ids: string[];
+  line_item_count: number;
+}
+
+export interface MoneyTransactionFeedPage {
+  items: MoneyTransactionFeedItem[];
+  nextOffset: number | null;
+}
+
+export interface MoneyTransactionFeedSummary {
+  totalCount: number;
+  totalPositiveAmount: number;
+  totalNegativeAmount: number;
+}
+
+export interface MoneyTransactionEditAudit {
+  id: string;
+  transaction_id: string;
+  entity_kind: "transaction" | "line_item";
+  entity_id: string;
+  edited_by_auth_user_id: string | null;
+  before_snapshot: Record<string, unknown> | null;
+  after_snapshot: Record<string, unknown> | null;
+  created_at: string;
+}
+
+// ============================================================================
+// money_reports
+// ============================================================================
+
+export type MoneyBudgetChartMode = "expenses" | "income" | "net";
+
+export interface MoneyBudgetTarget {
+  id: string;
+  person_id: string;
+  category_id: string;
+  month_start: string;
+  target_amount: number;
+  currency: MoneyCurrency | string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MoneyTransferSelfAlias {
+  id: string;
+  person_id: string;
+  alias: string;
+  normalized_alias: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MoneyBudgetFxStatus {
+  mode: "ok" | "approximate" | "missing";
+  approximated_dates: string[];
+  missing_pairs: string[];
+  message: string | null;
+  is_blocking: boolean;
+}
+
+export interface MoneyBudgetTrendPoint {
+  date: string;
+  income: number;
+  expenses: number;
+  net: number;
+}
+
+export interface MoneyBudgetSummary {
+  actual_income: number;
+  actual_expenses: number;
+  actual_net: number;
+  target_income: number;
+  target_expenses: number;
+  target_net: number;
+  variance_net: number;
+}
+
+export interface MoneyBudgetCategoryNode {
+  id: string;
+  parent_id: string | null;
+  canonical_category_id: string | null;
+  depth: number;
+  name_en: string;
+  name_ru: string;
+  slug: string | null;
+  archived_at: string | null;
+  is_uncategorized: boolean;
+  actual_income: number;
+  actual_expenses: number;
+  actual_net: number;
+  target_amount: number;
+  variance_amount: number;
+  target: MoneyBudgetTarget | null;
+  children: MoneyBudgetCategoryNode[];
+}
+
+export interface MoneyBudgetReport {
+  month_start: string;
+  currency: MoneyCurrency | string;
+  summary: MoneyBudgetSummary;
+  categories: MoneyBudgetCategoryNode[];
+  trend: MoneyBudgetTrendPoint[];
+  fx_status: MoneyBudgetFxStatus;
 }

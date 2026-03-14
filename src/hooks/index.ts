@@ -27,5 +27,8 @@ export * from "./use-icd-lookup";
 export * from "./use-money-accounts";
 export * from "./use-money-cards";
 export * from "./use-money-categories";
+export * from "./use-money-category-rules";
+export * from "./use-money-category-debug";
 export * from "./use-money-transactions";
 export * from "./use-money-merchant-default-categories";
+export * from "./use-money-reports";

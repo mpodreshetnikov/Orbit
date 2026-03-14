@@ -154,6 +154,25 @@ describe("updateSession", () => {
     expect(redirectedUrl.searchParams.get("redirect")).toBe("/health/records");
   });
 
+  it("redirects unauthenticated protected routes to dev login in auto bypass mode", async () => {
+    vi.stubEnv("DEV_AUTH_BYPASS_ENABLED", "1");
+    vi.stubEnv("DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED", "1");
+    vi.stubEnv("DEV_AUTH_BYPASS_DEFAULT_EMAIL", "dev@example.com");
+    const { request } = createRequest("/health/records");
+    createSupabase({
+      user: null,
+    });
+
+    const { updateSession } = await import("./supabase-middleware");
+    const response = await updateSession(request);
+
+    expect(response).toEqual(expect.objectContaining({ kind: "redirect" }));
+    const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
+    expect(redirectedUrl.pathname).toBe("/auth/dev-login");
+    expect(redirectedUrl.searchParams.get("email")).toBe("dev@example.com");
+    expect(redirectedUrl.searchParams.get("next")).toBe("/health/records");
+  });
+
   it("redirects protected route to access denied when user is not allowlisted", async () => {
     const { request } = createRequest("/health");
     createSupabase({
@@ -182,6 +201,25 @@ describe("updateSession", () => {
     expect(response).toEqual(expect.objectContaining({ kind: "redirect" }));
     const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
     expect(redirectedUrl.pathname).toBe("/health");
+  });
+
+  it("redirects unauthenticated login route to dev login in auto bypass mode", async () => {
+    vi.stubEnv("DEV_AUTH_BYPASS_ENABLED", "1");
+    vi.stubEnv("DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED", "1");
+    vi.stubEnv("DEV_AUTH_BYPASS_DEFAULT_EMAIL", "dev@example.com");
+    const { request } = createRequest("/login?redirect=/money/import");
+    createSupabase({
+      user: null,
+    });
+
+    const { updateSession } = await import("./supabase-middleware");
+    const response = await updateSession(request);
+
+    expect(response).toEqual(expect.objectContaining({ kind: "redirect" }));
+    const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
+    expect(redirectedUrl.pathname).toBe("/auth/dev-login");
+    expect(redirectedUrl.searchParams.get("email")).toBe("dev@example.com");
+    expect(redirectedUrl.searchParams.get("next")).toBe("/money/import");
   });
 
   it("keeps login user on page when not allowlisted and applies cookie setAll", async () => {

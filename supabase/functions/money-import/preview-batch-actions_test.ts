@@ -453,6 +453,54 @@ Deno.test("applyBatchAction records duplicate transactions and line item failure
   );
 });
 
+Deno.test("applyBatchAction preserves invalid-date preview rows as errors", async () => {
+  const { repository, state } = createRepositoryMock({
+    batch: {
+      id: "batch-1",
+      status: "pending",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      import_type: "file",
+      parsed_transactions_count: 1,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+    },
+    batchRows: [
+      {
+        id: "row-invalid-date",
+        row_kind: "transaction",
+        status: "error",
+        message: "Invalid posted_at for selected import range",
+        payload: txRow({
+          external_id: "bad-date",
+          posted_at: "bad-date",
+        }),
+      },
+    ],
+  });
+
+  const payload = await assertJsonResponse<{
+    inserted: number;
+    skipped: number;
+    error_count: number;
+    row_results: Array<{ status: string; message?: string | null }>;
+  }>(
+    await applyBatchAction({ batch_id: "batch-1" }, userAuth, {
+      repository,
+      now: () => new Date("2026-01-31T23:59:59.000Z"),
+    }),
+    200,
+  );
+
+  assertEquals(payload.inserted, 0);
+  assertEquals(payload.skipped, 0);
+  assertEquals(payload.error_count, 1);
+  assertEquals(payload.row_results[0]?.status, "error");
+  assertEquals(payload.row_results[0]?.message, "Invalid posted_at for selected import range");
+  assertEquals(state.reportRows.filter((row) => row.row_kind === "transaction").length, 1);
+});
+
 Deno.test("discardBatchAction marks preview batch discarded", async () => {
   const { repository, state } = createRepositoryMock({
     batch: {

@@ -13,6 +13,7 @@ ALTER TABLE public.allowed_users ENABLE ROW LEVEL SECURITY;
 -- Policy: Allow any authenticated user to read the allowlist
 -- The actual authorization check is done in middleware using the query results
 -- This is safe because knowing who's in the allowlist doesn't expose sensitive data
+DROP POLICY IF EXISTS "Authenticated users can read allowed_users" ON public.allowed_users;
 CREATE POLICY "Authenticated users can read allowed_users"
   ON public.allowed_users
   FOR SELECT

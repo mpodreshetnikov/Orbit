@@ -34,6 +34,20 @@ SELECT cron.schedule(
 );
 
 -- ============================================================================
+-- Job: money-fx-sync-daily
+-- Call money-fx-sync Edge Function via pg_net
+-- Runs daily at 00:05
+-- ============================================================================
+SELECT cron.unschedule('money-fx-sync-daily')
+WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'money-fx-sync-daily');
+
+SELECT cron.schedule(
+  'money-fx-sync-daily',
+  '5 0 * * *',
+  $$SELECT public.run_money_fx_sync_http()$$
+);
+
+-- ============================================================================
 -- Job: delete-job-run-details
 -- Delete old pg_cron run history to keep only the last 7 days
 -- Runs daily at 00:00

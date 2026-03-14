@@ -12,6 +12,8 @@ import {
   toIsoOrNull,
   toNumberOrNull,
 } from "./normalize.ts";
+import { createDefaultMoneyCategorizeDeps } from "../money-categorize/deps.ts";
+import { applyMoneyCategoryRulePipelineService } from "../money-categorize/service.ts";
 import type {
   BatchBrandResolutionInput,
   BrandResolutionAction,
@@ -98,6 +100,12 @@ export interface MoneyImportRepository {
   insertReportRow(payload: Record<string, unknown>): Promise<string>;
   listReportRowsByBatch(batchId: string): Promise<Record<string, unknown>[]>;
   deleteReportRowsByBatch(batchId: string): Promise<void>;
+  applyCategoryRulePipeline?(
+    lineItemIds: string[],
+    personId: string,
+    triggerSource: string,
+    forceOverwriteLocked?: boolean,
+  ): Promise<Record<string, unknown>>;
 }
 
 export interface MoneyImportRepositoryConfig {
@@ -105,6 +113,12 @@ export interface MoneyImportRepositoryConfig {
   supabaseAnonKey?: string;
   supabaseServiceRoleKey?: string;
   createClientFn?: typeof createClient;
+  moneyCategorizeRunner?: (input: {
+    lineItemIds: string[];
+    personId: string;
+    triggerSource: string;
+    forceOverwriteLocked?: boolean;
+  }) => Promise<Record<string, unknown>>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -186,6 +200,13 @@ interface IndexedBrandCatalog {
   brandIdsByLogoFileName: Map<string, Set<string>>;
 }
 
+interface UntypedRuleExistsQuery extends PromiseLike<{
+  data: Record<string, unknown>[] | null;
+  error: { message?: string } | null;
+}> {
+  eq(column: string, value: unknown): UntypedRuleExistsQuery;
+}
+
 function addBrandIdToIndex(
   index: Map<string, Set<string>>,
   key: string | null,
@@ -216,6 +237,27 @@ export function createSupabaseMoneyImportRepository(
   const supabaseAnonKey = config.supabaseAnonKey ?? safeEnvGet("SUPABASE_ANON_KEY");
   const supabaseServiceRoleKey =
     config.supabaseServiceRoleKey ?? safeEnvGet("SUPABASE_SERVICE_ROLE_KEY");
+  const moneyCategorizeRunner =
+    config.moneyCategorizeRunner ??
+    (async (input: {
+      lineItemIds: string[];
+      personId: string;
+      triggerSource: string;
+      forceOverwriteLocked?: boolean;
+    }) => {
+      const deps = createDefaultMoneyCategorizeDeps();
+      const result = await applyMoneyCategoryRulePipelineService(
+        {
+          lineItemIds: input.lineItemIds,
+          personId: input.personId,
+          triggerSource: input.triggerSource,
+          forceOverwriteLocked: input.forceOverwriteLocked ?? false,
+          triggeredByUserId: null,
+        },
+        deps,
+      );
+      return result as unknown as Record<string, unknown>;
+    });
 
   let adminClient: SupabaseClient<Database> | null = null;
   let brandCatalogCache: IndexedBrandCatalog | null = null;
@@ -246,6 +288,46 @@ export function createSupabaseMoneyImportRepository(
 
   function invalidateBrandCatalogCache(): void {
     brandCatalogCache = null;
+  }
+
+  async function callAdminRpc(
+    functionName: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const client = getAdminClient() as unknown as {
+      rpc: (
+        name: string,
+        args: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>;
+    };
+
+    const { data, error } = await client.rpc(functionName, params);
+    if (error) {
+      throw new Error(error.message || `Failed to call ${functionName}`);
+    }
+    return (data as Record<string, unknown> | null) ?? {};
+  }
+
+  async function hasEnabledLlmCategoryRules(personId: string): Promise<boolean> {
+    const client = getAdminClient() as unknown as {
+      from: (table: string) => {
+        select: (columns: string) => {
+          eq: (column: string, value: unknown) => UntypedRuleExistsQuery;
+        };
+      };
+    };
+    const { data, error } = await client
+      .from("money_category_rules")
+      .select("id")
+      .eq("person_id", personId)
+      .eq("enabled", true)
+      .eq("rule_kind", "llm_categorization");
+
+    if (error) {
+      throw new Error(error.message || "Failed to query money category rules");
+    }
+
+    return (data ?? []).length > 0;
   }
 
   async function authenticateAllowedUser(token: string): Promise<UserAuthContext | null> {
@@ -1386,6 +1468,18 @@ export function createSupabaseMoneyImportRepository(
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 
+    const { error: updateError } = await getAdminClient()
+      .from("money_transactions")
+      .update(
+        buildTransactionUpdatePayload(
+          row,
+        ) as Database["public"]["Tables"]["money_transactions"]["Update"],
+      )
+      .eq("id", existingId);
+    if (updateError) {
+      throw new Error(updateError.message || "Failed to update duplicate transaction");
+    }
+
     return { transactionId: existingId, inserted: false };
   }
 
@@ -1479,6 +1573,33 @@ export function createSupabaseMoneyImportRepository(
     }
   }
 
+  async function applyCategoryRulePipeline(
+    lineItemIds: string[],
+    personId: string,
+    triggerSource: string,
+    forceOverwriteLocked = false,
+  ): Promise<Record<string, unknown>> {
+    if (lineItemIds.length === 0) {
+      return { runs: [], count: 0 };
+    }
+
+    if (await hasEnabledLlmCategoryRules(personId)) {
+      return await moneyCategorizeRunner({
+        lineItemIds,
+        personId,
+        triggerSource,
+        forceOverwriteLocked,
+      });
+    }
+
+    return await callAdminRpc("money_apply_category_rule_pipeline", {
+      p_line_item_ids: lineItemIds,
+      p_person_id: personId,
+      p_force_overwrite_locked: forceOverwriteLocked,
+      p_trigger_source: triggerSource,
+    });
+  }
+
   return {
     authenticateAllowedUser,
     getSessionByToken,
@@ -1508,5 +1629,6 @@ export function createSupabaseMoneyImportRepository(
     insertReportRow,
     listReportRowsByBatch,
     deleteReportRowsByBatch,
+    applyCategoryRulePipeline,
   };
 }

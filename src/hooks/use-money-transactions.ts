@@ -1,21 +1,29 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import type {
-  MoneyTransaction,
-  MoneyTransactionDetail,
-  MoneyTransactionCard,
-  MoneyTransactionBrand,
-  MoneyLineItem,
-  CreateMoneyTransactionInput,
-  UpdateMoneyTransactionInput,
   CreateMoneyLineItemInput,
+  CreateMoneyTransactionInput,
+  MoneyLineItem,
+  MoneyTransaction,
+  MoneyTransactionBrand,
+  MoneyTransactionCard,
+  MoneyTransactionDetail,
+  MoneyTransactionEditAudit,
+  MoneyTransactionFeedFilters,
+  MoneyTransactionFeedItem,
+  MoneyTransactionFeedPage,
+  MoneyTransactionFeedSummary,
+  UpdateMoneyTransactionInput,
 } from "@/types";
 import type { Database, Json } from "@/types/database";
 
 type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
 type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Insert"];
+type MoneyLineItemUpdate = Database["public"]["Tables"]["money_line_items"]["Update"];
+
+const MONEY_TRANSACTION_FEED_PAGE_SIZE = 50;
 
 export interface MoneyTransactionsFilters {
   accountId?: string | null;
@@ -34,6 +42,34 @@ function mapDetailRow(row: Record<string, unknown>): MoneyTransactionDetail {
   return {
     ...(tx as unknown as MoneyTransaction),
     line_items: lineItemsRaw,
+  };
+}
+
+function normalizeFeedItem(item: Record<string, unknown>): MoneyTransactionFeedItem {
+  const rawLineItems = Array.isArray(item.line_items)
+    ? (item.line_items as Array<Record<string, unknown>>)
+    : [];
+  const lineItemTitles = Array.isArray(item.line_item_titles)
+    ? (item.line_item_titles as string[])
+    : rawLineItems
+        .map((lineItem) => (typeof lineItem.title === "string" ? lineItem.title : null))
+        .filter((title): title is string => Boolean(title));
+  const moneyCards =
+    item.money_cards !== undefined
+      ? ((item.money_cards as MoneyTransactionCard | null) ?? null)
+      : item.card_last4 || item.card_label || item.card_id
+        ? {
+            id: String(item.card_id ?? ""),
+            last4: typeof item.card_last4 === "string" ? item.card_last4 : "",
+            card_label: typeof item.card_label === "string" ? item.card_label : null,
+          }
+        : undefined;
+
+  return {
+    ...(item as unknown as MoneyTransactionFeedItem),
+    ...(moneyCards !== undefined ? { money_cards: moneyCards } : {}),
+    line_item_titles: lineItemTitles,
+    category_ids: Array.isArray(item.category_ids) ? (item.category_ids as string[]) : [],
   };
 }
 
@@ -111,6 +147,147 @@ export function useMoneyTransaction(id: string | null) {
   });
 }
 
+async function fetchMoneyTransactionFeedPage({
+  payerPersonId,
+  filters,
+  pageParam,
+}: {
+  payerPersonId: string;
+  filters: MoneyTransactionFeedFilters;
+  pageParam: number;
+}): Promise<MoneyTransactionFeedPage> {
+  const supabase = createClient() as ReturnType<typeof createClient> & {
+    rpc: (
+      fn: "money_list_transactions_feed",
+      args: Record<string, unknown>,
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+  const { data, error } = await supabase.rpc("money_list_transactions_feed", {
+    p_payer_person_id: payerPersonId,
+    p_search: filters.query?.trim() || null,
+    p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
+    p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
+    p_statuses: filters.statuses?.length ? filters.statuses : null,
+    p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
+    p_transfer_filter: filters.transferFilter ?? "all",
+    p_amount_sign: filters.amountSign ?? "all",
+    p_from: filters.from ?? null,
+    p_to: filters.to ?? null,
+    p_offset: pageParam,
+    p_limit: MONEY_TRANSACTION_FEED_PAGE_SIZE,
+  });
+
+  if (error) throw new Error(error.message);
+
+  const items = Array.isArray(data)
+    ? data.map((item: unknown) => normalizeFeedItem(item as Record<string, unknown>))
+    : [];
+
+  return {
+    items,
+    nextOffset: items.length === MONEY_TRANSACTION_FEED_PAGE_SIZE ? pageParam + items.length : null,
+  };
+}
+
+async function fetchMoneyTransactionFeedSummary(
+  payerPersonId: string,
+  filters: MoneyTransactionFeedFilters,
+): Promise<MoneyTransactionFeedSummary> {
+  const supabase = createClient() as ReturnType<typeof createClient> & {
+    rpc: (
+      fn: "money_transaction_feed_summary",
+      args: Record<string, unknown>,
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+  const { data, error } = await supabase.rpc("money_transaction_feed_summary", {
+    p_payer_person_id: payerPersonId,
+    p_search: filters.query?.trim() || null,
+    p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
+    p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
+    p_statuses: filters.statuses?.length ? filters.statuses : null,
+    p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
+    p_transfer_filter: filters.transferFilter ?? "all",
+    p_amount_sign: filters.amountSign ?? "all",
+    p_from: filters.from ?? null,
+    p_to: filters.to ?? null,
+  });
+
+  if (error) throw new Error(error.message);
+
+  const row = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
+
+  return {
+    totalCount: Number(row?.total_count ?? 0),
+    totalPositiveAmount: Number(row?.total_positive_amount ?? 0),
+    totalNegativeAmount: Number(row?.total_negative_amount ?? 0),
+  };
+}
+
+export function useInfiniteMoneyTransactionFeed(
+  payerPersonId: string | null,
+  filters: MoneyTransactionFeedFilters = {},
+) {
+  return useInfiniteQuery({
+    queryKey: ["money-transaction-feed", payerPersonId, filters],
+    queryFn: ({ pageParam }) =>
+      fetchMoneyTransactionFeedPage({
+        payerPersonId: payerPersonId!,
+        filters,
+        pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextOffset,
+    enabled: !!payerPersonId,
+  });
+}
+
+export function useMoneyTransactionFeedSummary(
+  payerPersonId: string | null,
+  filters: MoneyTransactionFeedFilters = {},
+) {
+  return useQuery({
+    queryKey: ["money-transaction-feed-summary", payerPersonId, filters],
+    queryFn: () => fetchMoneyTransactionFeedSummary(payerPersonId!, filters),
+    enabled: !!payerPersonId,
+  });
+}
+
+async function fetchMoneyTransactionEditAudits(
+  transactionId: string,
+): Promise<MoneyTransactionEditAudit[]> {
+  const supabase = createClient() as ReturnType<typeof createClient> & {
+    from: (relation: "money_transaction_edit_audits") => {
+      select: (columns: string) => {
+        eq: (
+          column: string,
+          value: string,
+        ) => {
+          order: (
+            column: string,
+            options: { ascending: boolean },
+          ) => Promise<{ data: unknown; error: { message: string } | null }>;
+        };
+      };
+    };
+  };
+  const { data, error } = await supabase
+    .from("money_transaction_edit_audits")
+    .select("*")
+    .eq("transaction_id", transactionId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as MoneyTransactionEditAudit[];
+}
+
+export function useMoneyTransactionEditAudits(transactionId: string | null) {
+  return useQuery({
+    queryKey: ["money-transaction-edit-audits", transactionId],
+    queryFn: () => fetchMoneyTransactionEditAudits(transactionId!),
+    enabled: !!transactionId,
+  });
+}
+
 function ensureLineItems(
   lineItems: CreateMoneyLineItemInput[],
   fallback: CreateMoneyLineItemInput,
@@ -119,6 +296,31 @@ function ensureLineItems(
     return [fallback];
   }
   return lineItems;
+}
+
+function toLineItemMutationPayload(
+  item: CreateMoneyLineItemInput,
+  transactionId: string,
+): MoneyLineItemInsert & MoneyLineItemUpdate {
+  return {
+    transaction_id: transactionId,
+    title: item.title,
+    amount: item.amount,
+    quantity: item.quantity ?? null,
+    unit: item.unit ?? null,
+    line_status: item.line_status ?? "final",
+    related_line_item_id: item.related_line_item_id ?? null,
+    category_id: item.category_id ?? null,
+    beneficiary_person_id: item.beneficiary_person_id ?? null,
+    assignment_method: item.assignment_method ?? "manual",
+    assignment_rule_id: item.assignment_rule_id ?? null,
+    assignment_confidence: item.assignment_confidence ?? null,
+    category_locked_by_user: item.category_locked_by_user ?? false,
+    raw_payload: toJsonOrNull(item.raw_payload) ?? null,
+    last_category_rule_id: item.last_category_rule_id ?? null,
+    last_category_rule_run_id: item.last_category_rule_run_id ?? null,
+    category_assigned_at: item.category_assigned_at ?? null,
+  };
 }
 
 async function createMoneyTransactionWithLines({
@@ -170,21 +372,9 @@ async function createMoneyTransactionWithLines({
     assignment_method: "manual",
   };
 
-  const items: MoneyLineItemInsert[] = ensureLineItems(lineItems, fallbackItem).map((item) => ({
-    transaction_id: tx.id,
-    title: item.title,
-    amount: item.amount,
-    quantity: item.quantity ?? null,
-    unit: item.unit ?? null,
-    line_status: item.line_status ?? "final",
-    related_line_item_id: item.related_line_item_id ?? null,
-    category_id: item.category_id ?? null,
-    beneficiary_person_id: item.beneficiary_person_id ?? null,
-    assignment_method: item.assignment_method ?? "manual",
-    assignment_rule_id: item.assignment_rule_id ?? null,
-    assignment_confidence: item.assignment_confidence ?? null,
-    raw_payload: toJsonOrNull(item.raw_payload) ?? null,
-  }));
+  const items: MoneyLineItemInsert[] = ensureLineItems(lineItems, fallbackItem).map((item) =>
+    toLineItemMutationPayload(item, tx.id),
+  );
 
   const { data: lines, error: lineError } = await supabase
     .from("money_line_items")
@@ -206,6 +396,9 @@ export function useCreateMoneyTransaction() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({
         queryKey: ["money-transactions", data.payer_person_id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["money-transaction-feed", data.payer_person_id],
       });
     },
   });
@@ -238,39 +431,70 @@ async function updateMoneyTransactionWithLines({
     assignment_method: "manual",
   };
 
-  const items: MoneyLineItemInsert[] = ensureLineItems(lineItems, fallbackItem).map((item) => ({
-    transaction_id: id,
-    title: item.title,
-    amount: item.amount,
-    quantity: item.quantity ?? null,
-    unit: item.unit ?? null,
-    line_status: item.line_status ?? "final",
-    related_line_item_id: item.related_line_item_id ?? null,
-    category_id: item.category_id ?? null,
-    beneficiary_person_id: item.beneficiary_person_id ?? null,
-    assignment_method: item.assignment_method ?? "manual",
-    assignment_rule_id: item.assignment_rule_id ?? null,
-    assignment_confidence: item.assignment_confidence ?? null,
-    raw_payload: toJsonOrNull(item.raw_payload) ?? null,
-  }));
-
-  const { error: deleteError } = await supabase
+  const items = ensureLineItems(lineItems, fallbackItem);
+  const { data: currentLineRows, error: currentLineError } = await supabase
     .from("money_line_items")
-    .delete()
+    .select("id")
     .eq("transaction_id", id);
 
-  if (deleteError) throw new Error(deleteError.message);
+  if (currentLineError) throw new Error(currentLineError.message);
 
-  const { data: lines, error: lineError } = await supabase
-    .from("money_line_items")
-    .insert(items)
-    .select();
+  const currentLineIds = new Set((currentLineRows ?? []).map((row) => row.id));
+  const submittedExistingIds = new Set(
+    items.map((item) => item.id).filter((value): value is string => Boolean(value)),
+  );
+  const removedLineIds = [...currentLineIds].filter((lineId) => !submittedExistingIds.has(lineId));
 
-  if (lineError) throw new Error(lineError.message);
+  if (removedLineIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("money_line_items")
+      .delete()
+      .in("id", removedLineIds);
+
+    if (deleteError) throw new Error(deleteError.message);
+  }
+
+  const updatedLineMap = new Map<string, MoneyLineItem>();
+  const newItems = items.filter((item) => !item.id || !currentLineIds.has(item.id));
+
+  for (const item of items) {
+    if (!item.id || !currentLineIds.has(item.id)) {
+      continue;
+    }
+
+    const { data: updatedLine, error: updateLineError } = await supabase
+      .from("money_line_items")
+      .update(toLineItemMutationPayload(item, id))
+      .eq("id", item.id)
+      .select()
+      .single();
+
+    if (updateLineError) throw new Error(updateLineError.message);
+    updatedLineMap.set(item.id, updatedLine as MoneyLineItem);
+  }
+
+  let insertedLines: MoneyLineItem[] = [];
+  if (newItems.length > 0) {
+    const { data: insertedLineRows, error: lineError } = await supabase
+      .from("money_line_items")
+      .insert(newItems.map((item) => toLineItemMutationPayload(item, id)))
+      .select();
+
+    if (lineError) throw new Error(lineError.message);
+    insertedLines = (insertedLineRows ?? []) as MoneyLineItem[];
+  }
+
+  const insertedLineQueue = [...insertedLines];
+  const lines = items.map((item) => {
+    if (item.id && updatedLineMap.has(item.id)) {
+      return updatedLineMap.get(item.id)!;
+    }
+    return insertedLineQueue.shift() as MoneyLineItem;
+  });
 
   return {
     ...(tx as MoneyTransaction),
-    line_items: (lines || []) as MoneyLineItem[],
+    line_items: lines,
   };
 }
 
@@ -283,7 +507,13 @@ export function useUpdateMoneyTransaction() {
         queryKey: ["money-transaction", data.id],
       });
       queryClient.invalidateQueries({
+        queryKey: ["money-transaction-edit-audits", data.id],
+      });
+      queryClient.invalidateQueries({
         queryKey: ["money-transactions", data.payer_person_id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["money-transaction-feed", data.payer_person_id],
       });
     },
   });
@@ -308,6 +538,9 @@ export function useDeleteMoneyTransaction() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: ["money-transactions", variables.payerPersonId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["money-transaction-feed", variables.payerPersonId],
       });
     },
   });

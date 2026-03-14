@@ -799,41 +799,293 @@ export type Database = {
       money_categories: {
         Row: {
           archived_at: string | null
+          canonical_category_id: string
+          category_kind: Database["public"]["Enums"]["money_category_kind"]
           created_at: string
+          created_by: string | null
           depth: number
           id: string
           name_en: string
           name_ru: string
           parent_id: string | null
           slug: string
+          sort_order: number
+          system_key: string | null
           updated_at: string
         }
         Insert: {
           archived_at?: string | null
+          canonical_category_id: string
+          category_kind?: Database["public"]["Enums"]["money_category_kind"]
           created_at?: string
+          created_by?: string | null
           depth: number
           id?: string
           name_en: string
           name_ru: string
           parent_id?: string | null
           slug: string
+          sort_order?: number
+          system_key?: string | null
           updated_at?: string
         }
         Update: {
           archived_at?: string | null
+          canonical_category_id?: string
+          category_kind?: Database["public"]["Enums"]["money_category_kind"]
           created_at?: string
+          created_by?: string | null
           depth?: number
           id?: string
           name_en?: string
           name_ru?: string
           parent_id?: string | null
           slug?: string
+          sort_order?: number
+          system_key?: string | null
           updated_at?: string
         }
         Relationships: [
           {
+            foreignKeyName: "money_categories_canonical_category_id_fkey"
+            columns: ["canonical_category_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "money_categories_parent_id_fkey"
             columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_category_rule_run_steps: {
+        Row: {
+          changed_category: boolean
+          created_at: string
+          debug_payload: Json
+          decision_reason: string
+          id: string
+          matched: boolean
+          next_category_id: string | null
+          previous_category_id: string | null
+          rule_id: string | null
+          rule_kind: Database["public"]["Enums"]["money_rule_kind"] | null
+          rule_name: string | null
+          rule_run_id: string
+          sort_order: number
+        }
+        Insert: {
+          changed_category?: boolean
+          created_at?: string
+          debug_payload?: Json
+          decision_reason: string
+          id?: string
+          matched?: boolean
+          next_category_id?: string | null
+          previous_category_id?: string | null
+          rule_id?: string | null
+          rule_kind?: Database["public"]["Enums"]["money_rule_kind"] | null
+          rule_name?: string | null
+          rule_run_id: string
+          sort_order: number
+        }
+        Update: {
+          changed_category?: boolean
+          created_at?: string
+          debug_payload?: Json
+          decision_reason?: string
+          id?: string
+          matched?: boolean
+          next_category_id?: string | null
+          previous_category_id?: string | null
+          rule_id?: string | null
+          rule_kind?: Database["public"]["Enums"]["money_rule_kind"] | null
+          rule_name?: string | null
+          rule_run_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_category_rule_run_steps_next_category_id_fkey"
+            columns: ["next_category_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rule_run_steps_previous_category_id_fkey"
+            columns: ["previous_category_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rule_run_steps_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "money_category_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rule_run_steps_rule_run_id_fkey"
+            columns: ["rule_run_id"]
+            isOneToOne: false
+            referencedRelation: "money_category_rule_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_category_rule_runs: {
+        Row: {
+          created_at: string
+          final_category_id: string | null
+          id: string
+          line_item_id: string
+          llm_tokens_completion: number | null
+          llm_tokens_prompt: number | null
+          person_id: string
+          saved: boolean
+          starting_category_id: string | null
+          transaction_id: string
+          trigger_source: string
+          triggered_by_user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          final_category_id?: string | null
+          id?: string
+          line_item_id: string
+          llm_tokens_completion?: number | null
+          llm_tokens_prompt?: number | null
+          person_id: string
+          saved?: boolean
+          starting_category_id?: string | null
+          transaction_id: string
+          trigger_source: string
+          triggered_by_user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          final_category_id?: string | null
+          id?: string
+          line_item_id?: string
+          llm_tokens_completion?: number | null
+          llm_tokens_prompt?: number | null
+          person_id?: string
+          saved?: boolean
+          starting_category_id?: string | null
+          transaction_id?: string
+          trigger_source?: string
+          triggered_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_category_rule_runs_final_category_id_fkey"
+            columns: ["final_category_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rule_runs_line_item_id_fkey"
+            columns: ["line_item_id"]
+            isOneToOne: false
+            referencedRelation: "money_line_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rule_runs_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rule_runs_starting_category_id_fkey"
+            columns: ["starting_category_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rule_runs_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "money_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_category_rules: {
+        Row: {
+          config: Json
+          created_at: string
+          created_by: string | null
+          description: string | null
+          enabled: boolean
+          filters: Json
+          id: string
+          match_mode: string
+          name: string
+          person_id: string
+          rule_kind: Database["public"]["Enums"]["money_rule_kind"]
+          scope_filter: string
+          sort_order: number
+          stop_processing: boolean
+          target_category_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          enabled?: boolean
+          filters?: Json
+          id?: string
+          match_mode?: string
+          name: string
+          person_id: string
+          rule_kind: Database["public"]["Enums"]["money_rule_kind"]
+          scope_filter?: string
+          sort_order: number
+          stop_processing?: boolean
+          target_category_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          enabled?: boolean
+          filters?: Json
+          id?: string
+          match_mode?: string
+          name?: string
+          person_id?: string
+          rule_kind?: Database["public"]["Enums"]["money_rule_kind"]
+          scope_filter?: string
+          sort_order?: number
+          stop_processing?: boolean
+          target_category_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_category_rules_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_category_rules_target_category_id_fkey"
+            columns: ["target_category_id"]
             isOneToOne: false
             referencedRelation: "money_categories"
             referencedColumns: ["id"]
@@ -1147,10 +1399,14 @@ export type Database = {
           assignment_method: Database["public"]["Enums"]["money_assignment_method"]
           assignment_rule_id: string | null
           beneficiary_person_id: string | null
+          category_assigned_at: string | null
           category_id: string | null
+          category_locked_by_user: boolean
           created_at: string
           id: string
           import_hash: string | null
+          last_category_rule_id: string | null
+          last_category_rule_run_id: string | null
           line_status: Database["public"]["Enums"]["money_line_status"]
           quantity: number | null
           raw_payload: Json | null
@@ -1166,10 +1422,14 @@ export type Database = {
           assignment_method?: Database["public"]["Enums"]["money_assignment_method"]
           assignment_rule_id?: string | null
           beneficiary_person_id?: string | null
+          category_assigned_at?: string | null
           category_id?: string | null
+          category_locked_by_user?: boolean
           created_at?: string
           id?: string
           import_hash?: string | null
+          last_category_rule_id?: string | null
+          last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]
           quantity?: number | null
           raw_payload?: Json | null
@@ -1185,10 +1445,14 @@ export type Database = {
           assignment_method?: Database["public"]["Enums"]["money_assignment_method"]
           assignment_rule_id?: string | null
           beneficiary_person_id?: string | null
+          category_assigned_at?: string | null
           category_id?: string | null
+          category_locked_by_user?: boolean
           created_at?: string
           id?: string
           import_hash?: string | null
+          last_category_rule_id?: string | null
+          last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]
           quantity?: number | null
           raw_payload?: Json | null
@@ -1214,6 +1478,20 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "money_line_items_last_category_rule_id_fkey"
+            columns: ["last_category_rule_id"]
+            isOneToOne: false
+            referencedRelation: "money_category_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_line_items_last_category_rule_run_id_fkey"
+            columns: ["last_category_rule_run_id"]
+            isOneToOne: false
+            referencedRelation: "money_category_rule_runs"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "money_line_items_related_line_item_id_fkey"
             columns: ["related_line_item_id"]
             isOneToOne: false
@@ -1225,6 +1503,38 @@ export type Database = {
             columns: ["transaction_id"]
             isOneToOne: false
             referencedRelation: "money_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_mcc_canonical_category_map: {
+        Row: {
+          canonical_category_id: string | null
+          canonical_system_key: string
+          created_at: string
+          description: string | null
+          mcc: string
+        }
+        Insert: {
+          canonical_category_id?: string | null
+          canonical_system_key: string
+          created_at?: string
+          description?: string | null
+          mcc: string
+        }
+        Update: {
+          canonical_category_id?: string | null
+          canonical_system_key?: string
+          created_at?: string
+          description?: string | null
+          mcc?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_mcc_canonical_category_map_canonical_category_id_fkey"
+            columns: ["canonical_category_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
             referencedColumns: ["id"]
           },
         ]
@@ -1314,6 +1624,47 @@ export type Database = {
           website_url?: string | null
         }
         Relationships: []
+      }
+      money_transaction_edit_audits: {
+        Row: {
+          after_snapshot: Json
+          before_snapshot: Json
+          created_at: string
+          edited_by_auth_user_id: string | null
+          entity_id: string
+          entity_kind: string
+          id: string
+          transaction_id: string
+        }
+        Insert: {
+          after_snapshot: Json
+          before_snapshot: Json
+          created_at?: string
+          edited_by_auth_user_id?: string | null
+          entity_id: string
+          entity_kind: string
+          id?: string
+          transaction_id: string
+        }
+        Update: {
+          after_snapshot?: Json
+          before_snapshot?: Json
+          created_at?: string
+          edited_by_auth_user_id?: string | null
+          entity_id?: string
+          entity_kind?: string
+          id?: string
+          transaction_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_transaction_edit_audits_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "money_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       money_transactions: {
         Row: {
@@ -2176,6 +2527,111 @@ export type Database = {
         Args: { p_dose_event_id: string; p_note?: string; p_taken_at?: string }
         Returns: undefined
       }
+      money_apply_category_rule_pipeline: {
+        Args: {
+          p_force_overwrite_locked?: boolean
+          p_line_item_ids: string[]
+          p_person_id?: string
+          p_trigger_source?: string
+        }
+        Returns: Json
+      }
+      money_apply_category_rule_pipeline_for_date_range: {
+        Args: {
+          p_force_overwrite_locked?: boolean
+          p_from: string
+          p_person_id: string
+          p_to: string
+        }
+        Returns: Json
+      }
+      money_apply_category_rule_pipeline_for_transaction: {
+        Args: {
+          p_force_overwrite_locked?: boolean
+          p_person_id?: string
+          p_transaction_id: string
+        }
+        Returns: Json
+      }
+      money_evaluate_category_rule_filter: {
+        Args: {
+          p_context: Json
+          p_current_canonical_system_key: string
+          p_current_category_id: string
+          p_filter: Json
+        }
+        Returns: boolean
+      }
+      money_get_category_rule_context: {
+        Args: { p_line_item_id: string; p_person_id?: string }
+        Returns: Json
+      }
+      money_get_category_rule_debug: {
+        Args: { p_limit?: number; p_line_item_id: string }
+        Returns: Json
+      }
+      money_list_transactions_feed: {
+        Args: {
+          p_account_ids?: string[]
+          p_amount_sign?: string
+          p_category_ids?: string[]
+          p_from?: string
+          p_limit?: number
+          p_offset?: number
+          p_payer_person_id: string
+          p_search?: string
+          p_statuses?: Database["public"]["Enums"]["money_transaction_status"][]
+          p_to?: string
+          p_transaction_types?: Database["public"]["Enums"]["money_transaction_type"][]
+          p_transfer_filter?: string
+        }
+        Returns: {
+          account_id: string
+          account_kind: string
+          account_label: string
+          amount: number
+          brand_id: string
+          card_id: string
+          card_label: string
+          card_last4: string
+          cashback_amount: number
+          cashback_currency: string
+          category_ids: string[]
+          comment: string
+          created_at: string
+          currency: string
+          external_id: string
+          id: string
+          is_transfer: boolean
+          line_item_count: number
+          line_item_titles: string[]
+          line_items: Json
+          merchant_name: string
+          money_cards: Json
+          operation_icon_url: string
+          payer_person_id: string
+          posted_at: string
+          raw_payload: Json
+          receipt_enrichment_status: string
+          receipt_request_key: string
+          source: string
+          source_category_id: string
+          source_category_name: string
+          source_comment: string
+          status: Database["public"]["Enums"]["money_transaction_status"]
+          total_count: number
+          transaction_type: Database["public"]["Enums"]["money_transaction_type"]
+          transfer_group_id: string
+        }[]
+      }
+      money_preview_category_rule_pipeline: {
+        Args: {
+          p_line_item_id: string
+          p_person_id?: string
+          p_rule_ids?: string[]
+        }
+        Returns: Json
+      }
       money_reassign_card_account: {
         Args: { p_card_id: string; p_target_account_id: string }
         Returns: {
@@ -2184,6 +2640,19 @@ export type Database = {
           resulting_card_id: string
         }[]
       }
+      money_run_category_rule_pipeline_internal: {
+        Args: {
+          p_force_overwrite_locked?: boolean
+          p_line_item_id: string
+          p_person_id?: string
+          p_rule_ids?: string[]
+          p_save?: boolean
+          p_trigger_source?: string
+        }
+        Returns: Json
+      }
+      money_seed_canonical_categories: { Args: never; Returns: undefined }
+      money_seed_category_rule_mappings: { Args: never; Returns: undefined }
       money_upsert_transactions_batch: {
         Args: { p_batch_id: string; p_payer_person_id: string; p_rows: Json }
         Returns: Json
@@ -2313,7 +2782,13 @@ export type Database = {
         | "unit"
         | "suppository"
       money_assignment_method: "import" | "rule" | "llm" | "manual"
+      money_category_kind: "canonical" | "custom"
       money_line_status: "final" | "returned" | "cancelled"
+      money_rule_kind:
+        | "direct"
+        | "mcc_map"
+        | "llm_categorization"
+        | "fallback_uncategorized"
       money_transaction_status: "posted" | "pending" | "cancelled"
       money_transaction_type:
         | "expense"
@@ -2524,7 +2999,14 @@ export const Constants = {
         "suppository",
       ],
       money_assignment_method: ["import", "rule", "llm", "manual"],
+      money_category_kind: ["canonical", "custom"],
       money_line_status: ["final", "returned", "cancelled"],
+      money_rule_kind: [
+        "direct",
+        "mcc_map",
+        "llm_categorization",
+        "fallback_uncategorized",
+      ],
       money_transaction_status: ["posted", "pending", "cancelled"],
       money_transaction_type: [
         "expense",

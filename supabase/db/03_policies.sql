@@ -51,10 +51,18 @@ BEGIN;
 \i policies/money_transaction_brand_aliases.sql
 \i policies/money_transactions.sql
 \i policies/money_line_items.sql
+\i policies/money_transaction_edit_audits.sql
+\i policies/money_category_rules.sql
+\i policies/money_category_rule_runs.sql
+\i policies/money_category_rule_run_steps.sql
+\i policies/money_mcc_canonical_category_map.sql
 \i policies/money_import_batches.sql
 \i policies/money_import_sessions.sql
 \i policies/money_import_batch_rows.sql
 \i policies/money_import_batch_brand_resolutions.sql
+\i policies/money_budget_targets.sql
+\i policies/money_transfer_self_aliases.sql
+\i policies/money_fx_rates.sql
 
 -- ============================================================================
 -- Checkups

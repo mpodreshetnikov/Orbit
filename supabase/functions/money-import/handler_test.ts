@@ -180,6 +180,91 @@ Deno.test("money-import handler returns 401 for missing auth on protected action
 });
 
 Deno.test(
+  "money-import handler runs get_existing_transaction_states for authenticated users",
+  async () => {
+    const handler = createMoneyImportHandler({
+      repository: {
+        ...createRepositoryMock(),
+        getExistingTransactionStates: async () => [
+          {
+            transaction_id: "tx-1",
+            exists: true,
+            fulfilled: true,
+            has_only_synthetic_line_items: false,
+            has_real_line_items: true,
+            receipt_enrichment_status: "ok",
+          },
+        ],
+      },
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{
+      states: Array<Record<string, unknown>>;
+    }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer user-token",
+          },
+          body: JSON.stringify({
+            action: "get_existing_transaction_states",
+            source: "tbank_web",
+            payer_person_id: "person-1",
+            candidates: [{ external_id: "ext-1", dedupe_hash: "hash-1" }],
+          }),
+        }),
+      ),
+      200,
+    );
+
+    assertEquals(payload.states, [
+      {
+        transaction_id: "tx-1",
+        exists: true,
+        fulfilled: true,
+        has_only_synthetic_line_items: false,
+        has_real_line_items: true,
+        receipt_enrichment_status: "ok",
+      },
+    ]);
+  },
+);
+
+Deno.test(
+  "money-import handler returns validation errors for get_existing_transaction_states",
+  async () => {
+    const handler = createMoneyImportHandler({
+      repository: createRepositoryMock(),
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{ error: string }>(
+      await handler(
+        new Request("http://localhost/functions/v1/money-import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer user-token",
+          },
+          body: JSON.stringify({
+            action: "get_existing_transaction_states",
+            source: "",
+            payer_person_id: "person-1",
+            candidates: [],
+          }),
+        }),
+      ),
+      400,
+    );
+
+    assertEquals(payload.error, "source and payer_person_id are required");
+  },
+);
+
+Deno.test(
   "money-import handler runs create_session, preview_rows, apply_batch, discard_batch, and update_brand_resolution happy paths",
   async () => {
     const handler = createMoneyImportHandler({

@@ -1,12 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import type { Database } from "@/types/database";
+import { getDevAuthBypassAutoLoginEmail, isDevAuthBypassEnabled } from "@/lib/dev-auth-bypass";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function isDevAuthBypassEnabled(): boolean {
-  return process.env.NODE_ENV !== "production" && process.env.DEV_AUTH_BYPASS_ENABLED === "1";
-}
 
 function sanitizeNextPath(next: string | null): string {
   if (next && next.startsWith("/") && !next.startsWith("//")) {
@@ -32,8 +29,8 @@ export async function GET(request: NextRequest) {
   }
 
   const requestUrl = new URL(request.url);
-  const rawEmail = requestUrl.searchParams.get("email") ?? "";
-  const email = rawEmail.trim().toLowerCase();
+  const rawEmail = requestUrl.searchParams.get("email");
+  const email = (rawEmail ?? getDevAuthBypassAutoLoginEmail() ?? "").trim().toLowerCase();
   const nextPath = sanitizeNextPath(requestUrl.searchParams.get("next"));
 
   if (!EMAIL_REGEX.test(email)) {

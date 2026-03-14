@@ -132,9 +132,16 @@ NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED=1
 SUPABASE_SERVICE_ROLE_KEY=<your-local-service-role-key>
 ```
 
-2. Ensure local stack is running (`dev-ready` from `AGENTS.md`).
-3. Open `/login`.
-4. In **Local dev sign in**, enter any email and continue.
+2. For the `just dev start bypass` workflow, the local runtime also enables:
+
+```env
+DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED=1
+DEV_AUTH_BYPASS_DEFAULT_EMAIL=dev@example.com
+```
+
+3. Ensure local stack is running (`dev-ready` from `AGENTS.md`) or start the full bypass runtime with `just dev start bypass`.
+4. In `just dev start bypass` mode, opening the app signs in automatically as the default local user (`Max`) and skips the auth page entirely.
+5. If you need a different local user, call `/auth/dev-login?email=<email>&next=<path>` directly.
 
 How it works:
 

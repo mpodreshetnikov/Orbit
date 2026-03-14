@@ -14,7 +14,8 @@ if (!recordId) {
   process.exit(1);
 }
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+const supabaseUrl =
+  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
 const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const jwt = process.env.HEALTH_STRUCTURE_JWT;
 const email = process.env.HEALTH_STRUCTURE_EMAIL;
@@ -42,7 +43,7 @@ async function main() {
   const token = await getToken();
   if (!token) {
     console.error(
-      "Set HEALTH_STRUCTURE_JWT (Bearer token) or HEALTH_STRUCTURE_EMAIL + HEALTH_STRUCTURE_PASSWORD (and SUPABASE_ANON_KEY) in env."
+      "Set HEALTH_STRUCTURE_JWT (Bearer token) or HEALTH_STRUCTURE_EMAIL + HEALTH_STRUCTURE_PASSWORD (and SUPABASE_ANON_KEY) in env.",
     );
     process.exit(1);
   }
@@ -70,7 +71,10 @@ async function main() {
   } else {
     console.log("No raw_llm_response in payload. Keys:", Object.keys(payload));
   }
-  console.log("structured_data.observations.length:", payload.structured_data?.observations?.length ?? 0);
+  console.log(
+    "structured_data.observations.length:",
+    payload.structured_data?.observations?.length ?? 0,
+  );
   console.log("structured_data.findings.length:", payload.structured_data?.findings?.length ?? 0);
 }
 

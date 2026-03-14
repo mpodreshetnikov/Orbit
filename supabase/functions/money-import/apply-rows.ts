@@ -176,6 +176,8 @@ export async function applyRowsAction(
   let firstNoAccountWarningSent = false;
   const rowResults: Array<Record<string, unknown>> = [];
   const accountResolutionCache = new Map<string, string>();
+  const insertedLineItemIds: string[] = [];
+  let categoryPipelineMeta: Record<string, unknown> | null = null;
 
   const registerFailureSignature = (
     message: string,
@@ -375,6 +377,10 @@ export async function applyRowsAction(
             message: lineMessage,
             line_item_id: lineRes.lineItemId,
           });
+
+          if (lineRes.inserted && lineRes.lineItemId) {
+            insertedLineItemIds.push(lineRes.lineItemId);
+          }
         } catch (lineError) {
           const lineMessage =
             lineError instanceof Error ? lineError.message : "Line item import failed";
@@ -453,6 +459,30 @@ export async function applyRowsAction(
     }
   }
 
+  if (insertedLineItemIds.length > 0 && deps.repository.applyCategoryRulePipeline) {
+    categoryPipelineMeta = {
+      status: "applied",
+      line_item_count: insertedLineItemIds.length,
+    };
+    try {
+      await deps.repository.applyCategoryRulePipeline(
+        insertedLineItemIds,
+        payerPersonId,
+        "import_auto",
+      );
+    } catch (error) {
+      categoryPipelineMeta = {
+        status: "failed",
+        line_item_count: insertedLineItemIds.length,
+        error_message: error instanceof Error ? error.message : "Unknown category pipeline error",
+      };
+      deps.telemetry?.warn("money_import_apply_rows_category_pipeline_failed", {
+        line_item_count: insertedLineItemIds.length,
+        error_message: error instanceof Error ? error.message : "Unknown category pipeline error",
+      });
+    }
+  }
+
   const topErrorMessage =
     Array.from(errorMessageCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
@@ -481,17 +511,22 @@ export async function applyRowsAction(
           .sort()[0] ?? null)
       : null);
 
+  const mergedMeta = mergeRangeMeta(batchBefore.meta, body.meta, {
+    parsedRowCount: rowsRaw.length,
+    inRangeRowCount,
+    filteredOutOfRangeCount,
+    filteredInvalidDateCount,
+  });
+  if (categoryPipelineMeta) {
+    mergedMeta.category_pipeline = categoryPipelineMeta;
+  }
+
   const patch: Record<string, unknown> = {
     parsed_transactions_count: parsedTransactionsCount,
     inserted_count: nextInserted,
     skipped_count: nextSkipped,
     error_count: nextError,
-    meta: mergeRangeMeta(batchBefore.meta, body.meta, {
-      parsedRowCount: rowsRaw.length,
-      inRangeRowCount,
-      filteredOutOfRangeCount,
-      filteredInvalidDateCount,
-    }),
+    meta: mergedMeta,
   };
 
   const isSessionFlow = Boolean(sessionId);
@@ -527,7 +562,7 @@ export async function applyRowsAction(
     };
     if (windowFromInput) sessionPatch.window_from = windowFromInput;
     if (windowToInput) sessionPatch.window_to = windowToInput;
-    sessionPatch.meta = mergeRangeMeta(
+    const sessionMeta = mergeRangeMeta(
       auth.mode === "session" ? auth.session.meta : null,
       body.meta,
       {
@@ -537,6 +572,10 @@ export async function applyRowsAction(
         filteredInvalidDateCount,
       },
     );
+    if (categoryPipelineMeta) {
+      sessionMeta.category_pipeline = categoryPipelineMeta;
+    }
+    sessionPatch.meta = sessionMeta;
     await deps.repository.updateImportSession(sessionId, sessionPatch);
   }
   deps.telemetry?.info("money_import_apply_rows_completed", {

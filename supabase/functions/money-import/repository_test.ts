@@ -8,6 +8,12 @@ function createRepositoryWithClients(clients: {
   anonClient?: Record<string, unknown>;
   adminClient?: Record<string, unknown>;
   createClientFn?: typeof createClient;
+  moneyCategorizeRunner?: (input: {
+    lineItemIds: string[];
+    personId: string;
+    triggerSource: string;
+    forceOverwriteLocked?: boolean;
+  }) => Promise<Record<string, unknown>>;
 }): MoneyImportRepository {
   const createClientFn =
     clients.createClientFn ??
@@ -21,6 +27,7 @@ function createRepositoryWithClients(clients: {
     supabaseAnonKey: "anon-key",
     supabaseServiceRoleKey: "service-key",
     createClientFn,
+    moneyCategorizeRunner: clients.moneyCategorizeRunner,
   });
 }
 
@@ -138,6 +145,67 @@ Deno.test("repository createImportSession throws on insert error", async () => {
     "insert failed",
   );
 });
+
+Deno.test(
+  "repository applyCategoryRulePipeline uses money-categorize runner when enabled LLM rules exist",
+  async () => {
+    const runnerCalls: Array<{
+      lineItemIds: string[];
+      personId: string;
+      triggerSource: string;
+      forceOverwriteLocked?: boolean;
+    }> = [];
+    let rpcCalls = 0;
+
+    const repository = createRepositoryWithClients({
+      moneyCategorizeRunner: async (input) => {
+        runnerCalls.push(input);
+        return { runs: [], count: 0 };
+      },
+      adminClient: {
+        from: (table: string) => {
+          if (table === "money_category_rules") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    eq: async () => ({
+                      data: [{ id: "rule-llm" }],
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+        rpc: async () => {
+          rpcCalls += 1;
+          return { data: { runs: [], count: 0 }, error: null };
+        },
+      },
+    });
+
+    await repository.applyCategoryRulePipeline?.(
+      ["line-1", "line-2"],
+      "person-1",
+      "import_auto",
+      true,
+    );
+
+    assertEquals(runnerCalls, [
+      {
+        lineItemIds: ["line-1", "line-2"],
+        personId: "person-1",
+        triggerSource: "import_auto",
+        forceOverwriteLocked: true,
+      },
+    ]);
+    assertEquals(rpcCalls, 0);
+  },
+);
 
 Deno.test(
   "repository getExistingTransactionStates distinguishes fulfilled and synthetic-only matches",
@@ -429,9 +497,10 @@ Deno.test(
 );
 
 Deno.test(
-  "repository insertOrResolveTransaction handles inserted and duplicate paths",
+  "repository insertOrResolveTransaction handles inserted and duplicate-update paths",
   async () => {
     let insertCalls = 0;
+    const updatedTransactions: Array<{ id: string; payload: Record<string, unknown> }> = [];
     const repository = createRepositoryWithClients({
       adminClient: {
         from: (table: string) => {
@@ -457,6 +526,13 @@ Deno.test(
                   }),
                 }),
               }),
+              update: (payload: Record<string, unknown>) => ({
+                eq: (column: string, value: string) => {
+                  assertEquals(column, "id");
+                  updatedTransactions.push({ id: value, payload });
+                  return Promise.resolve({ error: null });
+                },
+              }),
             };
           }
           throw new Error(`Unexpected table ${table}`);
@@ -478,6 +554,9 @@ Deno.test(
 
     const duplicate = await repository.insertOrResolveTransaction(row, "person-1");
     assertEquals(duplicate, { transactionId: "tx-existing", inserted: false });
+    assertEquals(updatedTransactions.length, 1);
+    assertEquals(updatedTransactions[0]?.id, "tx-existing");
+    assertEquals(updatedTransactions[0]?.payload.external_id, "ext-1");
   },
 );
 
@@ -964,6 +1043,9 @@ Deno.test(
                   return { data: null, error: { code: "23505", message: "dup" } };
                 },
               }),
+            }),
+            update: () => ({
+              eq: async () => ({ error: null }),
             }),
             select: () => ({
               limit: () => ({

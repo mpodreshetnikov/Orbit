@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -28,7 +29,6 @@ import {
 import { TreeView, type TreeDataItem, type TreeRenderItemParams } from "@/components/tree-view";
 import {
   buildMoneyCategoryTree,
-  flattenMoneyCategoryTree,
   useCreateMoneyCategory,
   useDeleteMoneyCategory,
   useMoneyCategories,
@@ -54,10 +54,17 @@ export default function MoneyCategoriesPage() {
   const [nameEn, setNameEn] = useState("");
   const [nameRu, setNameRu] = useState("");
   const [slug, setSlug] = useState("");
+  const [canonicalCategoryId, setCanonicalCategoryId] = useState<string | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
 
   const tree = useMemo(() => buildMoneyCategoryTree(categories || []), [categories]);
-  const flattened = useMemo(() => flattenMoneyCategoryTree(tree), [tree]);
+  const canonicalCategories = useMemo(
+    () =>
+      (categories || [])
+        .filter((category) => category.category_kind === "canonical")
+        .sort((a, b) => a.sort_order - b.sort_order || a.name_en.localeCompare(b.name_en)),
+    [categories],
+  );
 
   const categoryById = useMemo(() => {
     const map = new Map<string, MoneyCategory>();
@@ -81,6 +88,7 @@ export default function MoneyCategoriesPage() {
     setNameEn("");
     setNameRu("");
     setSlug("");
+    setCanonicalCategoryId(null);
     setParentId(null);
     setDialogOpen(true);
   }, []);
@@ -92,17 +100,21 @@ export default function MoneyCategoriesPage() {
   }, [searchParams, openNew]);
 
   const openEdit = useCallback((category: MoneyCategory) => {
+    if (category.category_kind === "canonical") {
+      return;
+    }
     setEditing(category);
     setNameEn(category.name_en);
     setNameRu(category.name_ru);
     setSlug(category.slug);
+    setCanonicalCategoryId(category.canonical_category_id);
     setParentId(category.parent_id);
     setDialogOpen(true);
   }, []);
 
   const openNewWithParent = useCallback(
     (parentCategory: MoneyCategory) => {
-      if (parentCategory.depth >= 4) {
+      if (parentCategory.category_kind === "custom" && parentCategory.depth >= 4) {
         toast.error(t("money.categoryDepthLimit"));
         return;
       }
@@ -110,7 +122,12 @@ export default function MoneyCategoriesPage() {
       setNameEn("");
       setNameRu("");
       setSlug("");
-      setParentId(parentCategory.id);
+      setCanonicalCategoryId(
+        parentCategory.category_kind === "canonical"
+          ? parentCategory.id
+          : parentCategory.canonical_category_id,
+      );
+      setParentId(parentCategory.category_kind === "canonical" ? null : parentCategory.id);
       setDialogOpen(true);
     },
     [t],
@@ -120,11 +137,21 @@ export default function MoneyCategoriesPage() {
     (params: TreeRenderItemParams) => {
       const category = categoryById.get(params.item.id);
       if (!category) return <span className="text-sm truncate">{params.item.name}</span>;
-      const canAddChild = category.depth < 4;
+      const isCanonical = category.category_kind === "canonical";
+      const canAddChild = isCanonical || category.depth < 4;
       return (
         <div className="flex flex-1 items-center min-w-0 w-full relative pr-[7.5rem]">
           <div className="min-w-0 flex-1">
-            <span className="text-sm font-medium truncate block text-left">{category.name_en}</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-sm font-medium truncate block text-left">
+                {category.name_en}
+              </span>
+              {isCanonical ? (
+                <Badge variant="outline" className="shrink-0">
+                  {t("money.categoryCanonical")}
+                </Badge>
+              ) : null}
+            </div>
             <span className="text-xs text-muted-foreground truncate block text-left">
               {category.name_ru}
             </span>
@@ -156,42 +183,46 @@ export default function MoneyCategoriesPage() {
                 <Plus className="h-4 w-4" />
               </span>
             )}
-            <span
-              role="button"
-              tabIndex={0}
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "icon" }),
-                "h-8 w-8 cursor-pointer",
-              )}
-              onClick={() => openEdit(category)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  openEdit(category);
-                }
-              }}
-              aria-label={t("common.edit")}
-            >
-              <Pencil className="h-4 w-4" />
-            </span>
-            <span
-              role="button"
-              tabIndex={0}
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "icon" }),
-                "h-8 w-8 cursor-pointer text-destructive hover:bg-destructive/15 hover:text-destructive",
-              )}
-              onClick={() => setDeleteTarget(category)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setDeleteTarget(category);
-                }
-              }}
-              aria-label={t("common.delete")}
-            >
-              <Trash2 className="h-4 w-4" />
-            </span>
+            {!isCanonical ? (
+              <>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "icon" }),
+                    "h-8 w-8 cursor-pointer",
+                  )}
+                  onClick={() => openEdit(category)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openEdit(category);
+                    }
+                  }}
+                  aria-label={t("common.edit")}
+                >
+                  <Pencil className="h-4 w-4" />
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "icon" }),
+                    "h-8 w-8 cursor-pointer text-destructive hover:bg-destructive/15 hover:text-destructive",
+                  )}
+                  onClick={() => setDeleteTarget(category)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setDeleteTarget(category);
+                    }
+                  }}
+                  aria-label={t("common.delete")}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </span>
+              </>
+            ) : null}
           </div>
         </div>
       );
@@ -200,12 +231,26 @@ export default function MoneyCategoriesPage() {
   );
 
   const handleSave = async () => {
-    if (!nameEn.trim() || !nameRu.trim() || !slug.trim()) {
+    if (!nameEn.trim() || !nameRu.trim() || !slug.trim() || !canonicalCategoryId) {
       toast.error(t("money.validationCategoryRequired"));
       return;
     }
 
-    const parent = (categories || []).find((c) => c.id === parentId) || null;
+    const canonical = (categories || []).find(
+      (category) => category.id === canonicalCategoryId && category.category_kind === "canonical",
+    );
+    if (!canonical) {
+      toast.error(t("money.validationCategoryRequired"));
+      return;
+    }
+
+    const parent =
+      (categories || []).find(
+        (category) =>
+          category.id === parentId &&
+          category.category_kind === "custom" &&
+          category.canonical_category_id === canonical.id,
+      ) || null;
     const depth = parent ? parent.depth + 1 : 1;
 
     if (depth > 4) {
@@ -217,7 +262,8 @@ export default function MoneyCategoriesPage() {
       await updateMutation.mutateAsync({
         id: editing.id,
         updates: {
-          parent_id: parentId,
+          parent_id: parent?.id ?? null,
+          canonical_category_id: canonical.id,
           depth,
           name_en: nameEn.trim(),
           name_ru: nameRu.trim(),
@@ -226,7 +272,9 @@ export default function MoneyCategoriesPage() {
       });
     } else {
       await createMutation.mutateAsync({
-        parent_id: parentId,
+        parent_id: parent?.id ?? null,
+        canonical_category_id: canonical.id,
+        category_kind: "custom",
         depth,
         name_en: nameEn.trim(),
         name_ru: nameRu.trim(),
@@ -238,7 +286,7 @@ export default function MoneyCategoriesPage() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleteTarget.category_kind === "canonical") return;
     const hasChildren = (categories || []).some((cat) => cat.parent_id === deleteTarget.id);
     if (hasChildren) {
       toast.error(t("money.cannotDeleteCategory"));
@@ -249,7 +297,19 @@ export default function MoneyCategoriesPage() {
     setDeleteTarget(null);
   };
 
-  const parentOptions = flattened.filter((cat) => cat.depth < 4 && cat.id !== editing?.id);
+  const parentOptions = useMemo(
+    () =>
+      (categories || [])
+        .filter(
+          (category) =>
+            category.category_kind === "custom" &&
+            category.depth < 4 &&
+            category.id !== editing?.id &&
+            category.canonical_category_id === canonicalCategoryId,
+        )
+        .sort((a, b) => a.depth - b.depth || a.name_en.localeCompare(b.name_en)),
+    [categories, canonicalCategoryId, editing?.id],
+  );
 
   return (
     <div className="space-y-4">
@@ -298,6 +358,29 @@ export default function MoneyCategoriesPage() {
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.categorySlug")}</label>
               <Input value={slug} onChange={(e) => setSlug(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">{t("money.categoryCanonicalBranch")}</label>
+              <Select
+                value={canonicalCategoryId ?? "none"}
+                onValueChange={(value) => {
+                  const nextCanonicalId = value === "none" ? null : value;
+                  setCanonicalCategoryId(nextCanonicalId);
+                  setParentId(null);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t("money.categorySelectCanonical")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t("money.categorySelectCanonical")}</SelectItem>
+                  {canonicalCategories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.name_en}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.categoryParent")}</label>

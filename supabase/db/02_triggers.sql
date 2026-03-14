@@ -29,12 +29,22 @@ BEGIN;
 \i triggers/update_notification_routing_updated_at.sql
 \i triggers/update_money_accounts_updated_at.sql
 \i triggers/update_money_cards_updated_at.sql
+\i triggers/enforce_money_categories_invariants.sql
+\i triggers/prevent_money_categories_delete.sql
 \i triggers/update_money_categories_updated_at.sql
 \i triggers/update_money_transaction_brands_updated_at.sql
 \i triggers/update_money_transaction_brand_aliases_updated_at.sql
 \i triggers/update_money_import_batch_brand_resolutions_updated_at.sql
 \i triggers/update_money_transactions_updated_at.sql
 \i triggers/update_money_line_items_updated_at.sql
+\i triggers/update_money_budget_targets_updated_at.sql
+\i triggers/enforce_money_budget_targets_invariants.sql
+\i triggers/update_money_transfer_self_aliases_updated_at.sql
+\i triggers/set_money_transfer_self_aliases_normalized_alias.sql
+\i triggers/update_money_fx_rates_updated_at.sql
+\i triggers/audit_money_transactions_edits.sql
+\i triggers/audit_money_line_items_edits.sql
+\i triggers/update_money_category_rules_updated_at.sql
 
 -- ============================================================================
 -- Checkup triggers

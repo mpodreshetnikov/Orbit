@@ -59,14 +59,80 @@
       "supabase/tests/functions/mark_dose_taken_test.sql",
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
     ],
+    "supabase/db/functions/money_categories_enforce_invariants.sql": [
+      "supabase/tests/functions/money_canonical_categories_test.sql"
+    ],
+    "supabase/db/functions/money_categories_prevent_delete.sql": [
+      "supabase/tests/functions/money_canonical_categories_test.sql"
+    ],
+    "supabase/db/functions/money_apply_category_rule_pipeline.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_apply_category_rule_pipeline_for_date_range.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_apply_category_rule_pipeline_for_transaction.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_budget_targets_enforce_invariants.sql": [
+      "supabase/tests/functions/money_budget_reporting_test.sql"
+    ],
+    "supabase/db/functions/money_evaluate_category_rule_filter.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_get_budget_report.sql": [
+      "supabase/tests/functions/money_budget_reporting_test.sql"
+    ],
+    "supabase/db/functions/money_get_category_rule_context.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_get_category_rule_debug.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_list_transactions_feed.sql": [
+      "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
+    ],
+    "supabase/db/functions/money_normalize_transfer_text.sql": [
+      "supabase/tests/functions/money_budget_reporting_test.sql"
+    ],
+    "supabase/db/functions/money_person_self_transfer_variants.sql": [
+      "supabase/tests/functions/money_budget_reporting_test.sql"
+    ],
+    "supabase/db/functions/money_transaction_feed_summary.sql": [
+      "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
+    ],
+    "supabase/db/functions/money_preview_category_rule_pipeline.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_resolve_fx_rate.sql": [
+      "supabase/tests/functions/money_budget_reporting_test.sql"
+    ],
+    "supabase/db/functions/money_run_category_rule_pipeline_internal.sql": [
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_seed_canonical_categories.sql": [
+      "supabase/tests/functions/money_canonical_categories_test.sql"
+    ],
+    "supabase/db/functions/money_seed_category_rule_mappings.sql": [
+      "supabase/tests/functions/money_seed_category_rule_mappings_test.sql"
+    ],
     "supabase/db/functions/money_upsert_transactions_batch.sql": [
       "supabase/tests/functions/money_upsert_transactions_batch_test.sql"
     ],
     "supabase/db/functions/money_reassign_card_account.sql": [
       "supabase/tests/functions/money_reassign_card_account_test.sql"
     ],
+    "supabase/db/functions/money_transfer_self_aliases_set_normalized_alias.sql": [
+      "supabase/tests/functions/money_budget_reporting_test.sql"
+    ],
+    "supabase/db/functions/money_write_transaction_edit_audit.sql": [
+      "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
+    ],
     "supabase/db/functions/run_med_event_generation_for_all_users.sql": [
       "supabase/tests/functions/medication_generation_cleanup_test.sql"
+    ],
+    "supabase/db/functions/run_money_fx_sync_http.sql": [
+      "supabase/tests/functions/run_money_fx_sync_http_test.sql"
     ],
     "supabase/db/functions/search_medical_records.sql": [
       "supabase/tests/functions/record_query_functions_test.sql"
@@ -133,11 +199,29 @@
     "supabase/db/policies/money_categories.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
     ],
+    "supabase/db/policies/money_category_rules.sql": [
+      "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_category_rule_runs.sql": [
+      "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_category_rule_run_steps.sql": [
+      "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_budget_targets.sql": [
+      "supabase/tests/policies/money_budget_reporting_rls_test.sql"
+    ],
+    "supabase/db/policies/money_fx_rates.sql": [
+      "supabase/tests/policies/money_budget_reporting_rls_test.sql"
+    ],
     "supabase/db/policies/money_transaction_brands.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
     ],
     "supabase/db/policies/money_transaction_brand_aliases.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_transaction_edit_audits.sql": [
+      "supabase/tests/policies/money_transaction_edit_audits_rls_test.sql"
     ],
     "supabase/db/policies/money_import_batch_rows.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
@@ -153,6 +237,12 @@
     ],
     "supabase/db/policies/money_line_items.sql": [
       "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_mcc_canonical_category_map.sql": [
+      "supabase/tests/policies/money_domain_rls_access_test.sql"
+    ],
+    "supabase/db/policies/money_transfer_self_aliases.sql": [
+      "supabase/tests/policies/money_budget_reporting_rls_test.sql"
     ],
     "supabase/db/policies/money_transactions.sql": [
       "supabase/tests/policies/money_transactions_rls_test.sql"

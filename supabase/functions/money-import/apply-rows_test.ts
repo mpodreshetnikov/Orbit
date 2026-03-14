@@ -20,12 +20,19 @@ interface ApplyRowsRepoState {
     row: CanonicalTransactionRowInput;
     defaultAccountId: string | null;
   }>;
+  appliedCategoryPipelineCalls: Array<{
+    lineItemIds: string[];
+    personId: string;
+    triggerSource: string;
+    forceOverwriteLocked: boolean;
+  }>;
 }
 
 function createRepositoryMock(
   options: {
     batchBefore?: Record<string, unknown> | null;
     updateBatchError?: string | null;
+    applyCategoryRulePipelineError?: string | null;
   } = {},
 ): { repository: MoneyImportRepository; state: ApplyRowsRepoState } {
   const state: ApplyRowsRepoState = {
@@ -37,6 +44,7 @@ function createRepositoryMock(
     repairedTransactions: [],
     resolvedCardRows: [],
     resolvedAccountRows: [],
+    appliedCategoryPipelineCalls: [],
   };
 
   let txCounter = 0;
@@ -134,6 +142,23 @@ function createRepositoryMock(
     insertReportRow: async (payload) => {
       state.reportRows.push(payload);
       return `report-${state.reportRows.length}`;
+    },
+    applyCategoryRulePipeline: async (
+      lineItemIds: string[],
+      personId: string,
+      triggerSource: string,
+      forceOverwriteLocked = false,
+    ) => {
+      if (options.applyCategoryRulePipelineError) {
+        throw new Error(options.applyCategoryRulePipelineError);
+      }
+      state.appliedCategoryPipelineCalls.push({
+        lineItemIds,
+        personId,
+        triggerSource,
+        forceOverwriteLocked,
+      });
+      return { runs: [] };
     },
   };
 
@@ -345,6 +370,10 @@ Deno.test(
     assertEquals(state.batchUpdates.length, 1);
     assertEquals(state.batchUpdates[0].patch.status, "completed");
     assertEquals(state.resolvedCardRows.length > 0, true);
+    assertEquals(state.appliedCategoryPipelineCalls.length, 1);
+    assertEquals(state.appliedCategoryPipelineCalls[0].personId, "person-1");
+    assertEquals(state.appliedCategoryPipelineCalls[0].triggerSource, "import_auto");
+    assertEquals(state.appliedCategoryPipelineCalls[0].lineItemIds, ["line-1", "line-2"]);
     const firstTxRow = state.reportRows.find((row) => row.row_kind === "transaction");
     assertEquals((firstTxRow?.payload as Record<string, unknown>).card_id, "card-1");
   },
@@ -387,6 +416,7 @@ Deno.test(
     assertEquals(payload.error_count, 0);
     assertEquals(state.repairedTransactions.length, 1);
     assertEquals(state.repairedTransactions[0].transactionId, "tx-synth");
+    assertEquals(state.appliedCategoryPipelineCalls[0]?.lineItemIds, ["line-1", "line-2"]);
     assertEquals(payload.row_results[0].line_results?.[0]?.status, "inserted");
     assertEquals(payload.row_results[0].line_results?.[1]?.status, "inserted");
   },
@@ -439,6 +469,57 @@ Deno.test("applyRowsAction emits row error aggregation telemetry", async () => {
   );
   assertEquals(noAccountWarn?.attrs?.source, "tbank");
   assertEquals(noAccountWarn?.attrs?.row_index, 0);
+});
+
+Deno.test("applyRowsAction persists category pipeline failures into batch meta", async () => {
+  const { repository, state } = createRepositoryMock({
+    applyCategoryRulePipelineError: "category pipeline exploded",
+  });
+  const { telemetry, warnEvents } = createTelemetryMock();
+
+  await assertJsonResponse(
+    await applyRowsAction(
+      {
+        payer_person_id: "person-1",
+        source: "tbank_web",
+        rows: [
+          txRow({
+            external_id: "ok-with-category-pipeline-failure",
+            line_items: [{ title: "ok" }],
+          }),
+        ],
+      },
+      userAuth,
+      { repository, telemetry },
+    ),
+    200,
+  );
+
+  assertEquals(state.batchUpdates.length, 1);
+  assertEquals(
+    (
+      (state.batchUpdates[0].patch.meta as Record<string, unknown>).category_pipeline as Record<
+        string,
+        unknown
+      >
+    ).status,
+    "failed",
+  );
+  assertEquals(
+    (
+      (state.batchUpdates[0].patch.meta as Record<string, unknown>).category_pipeline as Record<
+        string,
+        unknown
+      >
+    ).error_message,
+    "category pipeline exploded",
+  );
+  assertEquals(
+    warnEvents.some(
+      (event) => event.message === "money_import_apply_rows_category_pipeline_failed",
+    ),
+    true,
+  );
 });
 
 Deno.test("applyRowsAction runs session flow and keeps batch status running", async () => {

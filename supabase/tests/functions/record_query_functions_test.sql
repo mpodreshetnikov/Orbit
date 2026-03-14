@@ -176,8 +176,27 @@ VALUES (
   'normal'
 );
 
-INSERT INTO public.money_categories (id, depth, name_ru, name_en, slug)
-VALUES ('eeeeeeee-0000-0000-0000-000000000000', 1, 'Продукты', 'Groceries', 'groceries-root');
+INSERT INTO public.money_categories (
+  id,
+  parent_id,
+  canonical_category_id,
+  category_kind,
+  depth,
+  name_ru,
+  name_en,
+  slug
+)
+SELECT
+  'eeeeeeee-0000-0000-0000-000000000000',
+  NULL,
+  canonical.id,
+  'custom',
+  1,
+  'Продукты',
+  'Groceries',
+  'groceries-root'
+FROM public.money_categories AS canonical
+WHERE canonical.system_key = 'food';
 
 INSERT INTO public.money_accounts (id, owner_person_id, source, account_kind, account_label, currency)
 VALUES (

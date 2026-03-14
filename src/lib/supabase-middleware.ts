@@ -1,6 +1,20 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/types/database";
+import { getDevAuthBypassAutoLoginEmail } from "@/lib/dev-auth-bypass";
+
+function redirectToDevLogin(request: NextRequest, nextPath: string) {
+  const autoLoginEmail = getDevAuthBypassAutoLoginEmail();
+  if (!autoLoginEmail) {
+    return null;
+  }
+
+  const url = request.nextUrl.clone();
+  url.pathname = "/auth/dev-login";
+  url.searchParams.set("email", autoLoginEmail);
+  url.searchParams.set("next", nextPath);
+  return NextResponse.redirect(url);
+}
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -43,6 +57,11 @@ export async function updateSession(request: NextRequest) {
   if (!isPublicRoute) {
     // If not authenticated, redirect to login
     if (!user) {
+      const devLoginRedirect = redirectToDevLogin(request, pathname);
+      if (devLoginRedirect) {
+        return devLoginRedirect;
+      }
+
       const url = request.nextUrl.clone();
       url.pathname = "/login";
       url.searchParams.set("redirect", pathname);
@@ -61,6 +80,14 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/access-denied";
       return NextResponse.redirect(url);
+    }
+  }
+
+  if (pathname === "/login" && !user) {
+    const redirectTo = request.nextUrl.searchParams.get("redirect") || "/health";
+    const devLoginRedirect = redirectToDevLogin(request, redirectTo);
+    if (devLoginRedirect) {
+      return devLoginRedirect;
     }
   }
 

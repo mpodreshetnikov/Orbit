@@ -58,14 +58,24 @@ export interface MoneyTransactionFormValues {
 }
 
 interface LineItemState {
+  id?: string;
   key: string;
   title: string;
   amount: string;
   quantity: string;
   unit: string;
   line_status: MoneyLineStatus;
+  related_line_item_id: string | null;
   category_id: string | null;
+  category_locked_by_user: boolean;
   beneficiary_person_id: string | null;
+  assignment_method: CreateMoneyLineItemInput["assignment_method"];
+  assignment_rule_id: string | null;
+  assignment_confidence: number | null;
+  raw_payload: Record<string, unknown> | null;
+  last_category_rule_id: string | null;
+  last_category_rule_run_id: string | null;
+  category_assigned_at: string | null;
 }
 
 interface MoneyTransactionFormProps {
@@ -107,8 +117,17 @@ function defaultLineItem(seed?: Partial<LineItemState>): LineItemState {
     quantity: "",
     unit: "",
     line_status: "final",
+    related_line_item_id: null,
     category_id: null,
+    category_locked_by_user: false,
     beneficiary_person_id: null,
+    assignment_method: "manual",
+    assignment_rule_id: null,
+    assignment_confidence: null,
+    raw_payload: null,
+    last_category_rule_id: null,
+    last_category_rule_run_id: null,
+    category_assigned_at: null,
     ...seed,
   };
 }
@@ -156,13 +175,23 @@ export function MoneyTransactionForm({
     if (initialLineItems && initialLineItems.length > 0) {
       return initialLineItems.map((item) =>
         defaultLineItem({
+          id: item.id,
           title: item.title,
           amount: String(item.amount),
           quantity: item.quantity != null ? String(item.quantity) : "",
           unit: item.unit ?? "",
           line_status: item.line_status,
+          related_line_item_id: item.related_line_item_id,
           category_id: item.category_id,
+          category_locked_by_user: item.category_locked_by_user ?? false,
           beneficiary_person_id: item.beneficiary_person_id,
+          assignment_method: item.assignment_method,
+          assignment_rule_id: item.assignment_rule_id,
+          assignment_confidence: item.assignment_confidence,
+          raw_payload: item.raw_payload,
+          last_category_rule_id: item.last_category_rule_id ?? null,
+          last_category_rule_run_id: item.last_category_rule_run_id ?? null,
+          category_assigned_at: item.category_assigned_at ?? null,
         }),
       );
     }
@@ -217,6 +246,21 @@ export function MoneyTransactionForm({
     );
   };
 
+  const buildManualCategoryChange = (
+    item: LineItemState,
+    categoryId: string | null,
+  ): Partial<LineItemState> => ({
+    category_id: categoryId,
+    category_locked_by_user: categoryId !== null,
+    assignment_method: "manual",
+    assignment_rule_id: null,
+    assignment_confidence: null,
+    last_category_rule_id: null,
+    last_category_rule_run_id: null,
+    category_assigned_at: categoryId ? new Date().toISOString() : null,
+    raw_payload: item.raw_payload,
+  });
+
   const defaultLineItemValues = useMemo(
     () => ({
       quantity: "1",
@@ -224,6 +268,7 @@ export function MoneyTransactionForm({
       category_id: (merchantName.trim() ? merchantDefaultCategoryId[merchantName.trim()] : null) as
         | string
         | null,
+      category_locked_by_user: false,
       beneficiary_person_id: selectedPersonId ?? null,
     }),
     [defaultUnit, merchantName, merchantDefaultCategoryId, selectedPersonId],
@@ -236,6 +281,7 @@ export function MoneyTransactionForm({
         quantity: defaultLineItemValues.quantity,
         unit: defaultLineItemValues.unit,
         category_id: defaultLineItemValues.category_id,
+        category_locked_by_user: defaultLineItemValues.category_locked_by_user,
         beneficiary_person_id: defaultLineItemValues.beneficiary_person_id,
       }),
     ]);
@@ -254,18 +300,26 @@ export function MoneyTransactionForm({
       quantity: "1",
       unit: defaultUnit,
       category_id: defaultCategory ?? null,
+      category_locked_by_user: false,
       beneficiary_person_id: selectedPersonId ?? null,
     });
   }, [mode, lineItems, merchantName, merchantDefaultCategoryId, selectedPersonId, defaultUnit]);
 
-  // When merchant changes, set all line items' category to the default for that merchant
+  // When merchant changes, only fill blank unlocked categories with the merchant default.
   const prevMerchantRef = useRef(merchantName);
   useEffect(() => {
     if (prevMerchantRef.current === merchantName) return;
     prevMerchantRef.current = merchantName;
     const trimmed = merchantName.trim();
     const defaultCat = trimmed ? (merchantDefaultCategoryId[trimmed] ?? null) : null;
-    setLineItems((items) => items.map((item) => ({ ...item, category_id: defaultCat })));
+    if (!defaultCat) return;
+    setLineItems((items) =>
+      items.map((item) => ({
+        ...item,
+        category_id:
+          item.category_id || item.category_locked_by_user ? item.category_id : defaultCat,
+      })),
+    );
   }, [merchantName, merchantDefaultCategoryId]);
 
   const handleRemoveLineItem = (key: string) => {
@@ -290,14 +344,23 @@ export function MoneyTransactionForm({
     const lineItemsPayload = lineItems
       .filter((item) => item.title.trim() || item.amount.trim())
       .map<CreateMoneyLineItemInput>((item) => ({
+        id: item.id,
         title: item.title.trim() || merchantName.trim() || "Manual item",
         amount: Number.isFinite(parseFloat(item.amount)) ? parseFloat(item.amount) : 0,
         quantity: Number.isFinite(parseFloat(item.quantity)) ? parseFloat(item.quantity) : null,
         unit: item.unit.trim() || null,
         line_status: item.line_status,
+        related_line_item_id: item.related_line_item_id,
         category_id: item.category_id ?? null,
         beneficiary_person_id: item.beneficiary_person_id ?? null,
-        assignment_method: "manual",
+        assignment_method: item.assignment_method ?? "manual",
+        assignment_rule_id: item.assignment_rule_id,
+        assignment_confidence: item.assignment_confidence,
+        raw_payload: item.raw_payload,
+        category_locked_by_user: item.category_locked_by_user,
+        last_category_rule_id: item.last_category_rule_id,
+        last_category_rule_run_id: item.last_category_rule_run_id,
+        category_assigned_at: item.category_assigned_at,
       }));
 
     const isoPostedAt = new Date(postedAt).toISOString();
@@ -467,7 +530,7 @@ export function MoneyTransactionForm({
                           if (defaultCat) {
                             setLineItems((items) =>
                               items.map((item) =>
-                                item.category_id
+                                item.category_id || item.category_locked_by_user
                                   ? item
                                   : {
                                       ...item,
@@ -651,9 +714,10 @@ export function MoneyTransactionForm({
                               <CommandItem
                                 value={t("money.categoryUnassigned")}
                                 onSelect={() => {
-                                  handleLineItemChange(item.key, {
-                                    category_id: null,
-                                  });
+                                  handleLineItemChange(
+                                    item.key,
+                                    buildManualCategoryChange(item, null),
+                                  );
                                   setOpenCategoryKey(null);
                                 }}
                               >
@@ -664,9 +728,10 @@ export function MoneyTransactionForm({
                                   key={category.id}
                                   value={`${category.name_en} ${category.name_ru}`}
                                   onSelect={() => {
-                                    handleLineItemChange(item.key, {
-                                      category_id: category.id,
-                                    });
+                                    handleLineItemChange(
+                                      item.key,
+                                      buildManualCategoryChange(item, category.id),
+                                    );
                                     setOpenCategoryKey(null);
                                   }}
                                 >

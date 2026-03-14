@@ -8,11 +8,33 @@ export interface MoneyCategoryTreeNode extends MoneyCategory {
   children: MoneyCategoryTreeNode[];
 }
 
+function getMoneyCategoryKind(category: Partial<MoneyCategory>): MoneyCategory["category_kind"] {
+  return category.category_kind ?? "custom";
+}
+
+function getMoneyCategorySortOrder(category: Partial<MoneyCategory>): number {
+  return category.sort_order ?? 0;
+}
+
+function compareMoneyCategories(a: Partial<MoneyCategory>, b: Partial<MoneyCategory>): number {
+  const kindCompare =
+    getMoneyCategoryKind(a) === getMoneyCategoryKind(b)
+      ? 0
+      : getMoneyCategoryKind(a) === "canonical"
+        ? -1
+        : 1;
+  if (kindCompare !== 0) return kindCompare;
+  if (getMoneyCategorySortOrder(a) !== getMoneyCategorySortOrder(b)) {
+    return getMoneyCategorySortOrder(a) - getMoneyCategorySortOrder(b);
+  }
+  if ((a.depth ?? 0) !== (b.depth ?? 0)) {
+    return (a.depth ?? 0) - (b.depth ?? 0);
+  }
+  return (a.name_en ?? "").localeCompare(b.name_en ?? "");
+}
+
 export function sortMoneyCategories(categories: MoneyCategory[]): MoneyCategory[] {
-  return [...categories].sort((a, b) => {
-    if (a.depth !== b.depth) return a.depth - b.depth;
-    return a.name_en.localeCompare(b.name_en);
-  });
+  return [...categories].sort(compareMoneyCategories);
 }
 
 export function buildMoneyCategoryTree(categories: MoneyCategory[]): MoneyCategoryTreeNode[] {
@@ -23,16 +45,23 @@ export function buildMoneyCategoryTree(categories: MoneyCategory[]): MoneyCatego
   nodes.forEach((node) => {
     if (node.parent_id && nodes.has(node.parent_id)) {
       nodes.get(node.parent_id)!.children.push(node);
+      return;
+    }
+
+    if (
+      getMoneyCategoryKind(node) === "custom" &&
+      node.canonical_category_id &&
+      node.canonical_category_id !== node.id &&
+      nodes.has(node.canonical_category_id)
+    ) {
+      nodes.get(node.canonical_category_id)!.children.push(node);
     } else {
       roots.push(node);
     }
   });
 
   const sortNode = (list: MoneyCategoryTreeNode[]) => {
-    list.sort((a, b) => {
-      if (a.depth !== b.depth) return a.depth - b.depth;
-      return a.name_en.localeCompare(b.name_en);
-    });
+    list.sort(compareMoneyCategories);
     list.forEach((n) => sortNode(n.children));
   };
   sortNode(roots);
@@ -57,6 +86,8 @@ async function fetchMoneyCategories(): Promise<MoneyCategory[]> {
   const { data, error } = await supabase
     .from("money_categories")
     .select("*")
+    .order("category_kind", { ascending: true })
+    .order("sort_order", { ascending: true })
     .order("depth", { ascending: true })
     .order("name_en", { ascending: true });
 
@@ -77,6 +108,8 @@ async function createMoneyCategory(input: CreateMoneyCategoryInput): Promise<Mon
     .from("money_categories")
     .insert({
       parent_id: input.parent_id ?? null,
+      canonical_category_id: input.canonical_category_id,
+      category_kind: input.category_kind ?? "custom",
       depth: input.depth,
       name_ru: input.name_ru,
       name_en: input.name_en,

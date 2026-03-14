@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-const DEV_EMAIL = process.env.E2E_DEV_EMAIL ?? "dev@example.com";
+const DEV_EMAIL = process.env.E2E_DEV_EMAIL_HEALTH_STRUCTURE ?? "e2e-health-structure@example.com";
 const E2E_FORCE_STRUCTURE_FAIL_MARKER = "[E2E_FORCE_STRUCTURE_FAIL]";
 
 function requiredEnv(name: string): string {

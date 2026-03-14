@@ -206,6 +206,10 @@ function configureDevAuthBypassEnv() {
 
   process.env.DEV_AUTH_BYPASS_ENABLED = "1";
   process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS_ENABLED = "1";
+  process.env.DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED = "1";
+  if (!process.env.DEV_AUTH_BYPASS_DEFAULT_EMAIL) {
+    process.env.DEV_AUTH_BYPASS_DEFAULT_EMAIL = "dev@example.com";
+  }
 
   const runtimeEnv = readSupabaseRuntimeEnv();
   if (runtimeEnv) {
@@ -228,6 +232,7 @@ function configureDevAuthBypassEnv() {
   }
 
   logInfo("Dev auth bypass enabled for this session.");
+  logInfo(`Auto-login default user: ${process.env.DEV_AUTH_BYPASS_DEFAULT_EMAIL}.`);
   return 0;
 }
 

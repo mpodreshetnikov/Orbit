@@ -17,6 +17,8 @@ import {
   CreditCard,
   Tags,
   Upload,
+  Workflow,
+  ChartNoAxesColumn,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -78,6 +80,11 @@ const healthLinks = [
 
 const moneyLinks = [
   {
+    href: "/money/reports",
+    icon: ChartNoAxesColumn,
+    labelKey: "money.reports",
+  },
+  {
     href: "/money/transactions",
     icon: ArrowRightLeft,
     labelKey: "money.transactions",
@@ -96,6 +103,11 @@ const moneyLinks = [
     href: "/money/categories",
     icon: Tags,
     labelKey: "money.categories",
+  },
+  {
+    href: "/money/rules",
+    icon: Workflow,
+    labelKey: "money.rules",
   },
 ];
 

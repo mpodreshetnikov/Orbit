@@ -8,6 +8,8 @@ const webPort = parsedBaseUrl.port || "3000";
 export default defineConfig({
   testDir: ".",
   timeout: 90_000,
+  // The suite runs against `next dev`, which is not stable under parallel browser workers here.
+  workers: 1,
   expect: {
     timeout: 15_000,
   },

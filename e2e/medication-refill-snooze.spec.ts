@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-const DEV_EMAIL = process.env.E2E_DEV_EMAIL ?? "dev@example.com";
+const DEV_EMAIL = process.env.E2E_DEV_EMAIL_MEDICATION ?? "e2e-medication@example.com";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -26,10 +26,25 @@ function createAdminClient() {
 async function resolveDevPerson() {
   const admin = createAdminClient();
   const users = await admin.auth.admin.listUsers();
-  const devUser = users.data.users.find((user) => user.email === DEV_EMAIL);
+  let devUser = users.data.users.find((user) => user.email === DEV_EMAIL);
 
   if (!devUser?.id) {
-    throw new Error(`Could not find dev auth user for ${DEV_EMAIL}`);
+    const { data, error } = await admin.auth.admin.createUser({
+      email: DEV_EMAIL,
+      email_confirm: true,
+    });
+    if (error || !data.user?.id) {
+      throw new Error(`Could not create dev auth user for ${DEV_EMAIL}: ${error?.message}`);
+    }
+    devUser = data.user;
+  }
+
+  const { error: allowlistError } = await admin
+    .from("allowed_users")
+    .upsert({ auth_user_id: devUser.id, email: DEV_EMAIL }, { onConflict: "email" });
+
+  if (allowlistError) {
+    throw new Error(`Could not allowlist ${DEV_EMAIL}: ${allowlistError.message}`);
   }
 
   const { data: person, error } = await admin
@@ -37,13 +52,33 @@ async function resolveDevPerson() {
     .select("id")
     .eq("auth_user_id", devUser.id)
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (error || !person?.id) {
-    throw new Error(`Could not resolve person for ${DEV_EMAIL}: ${error?.message ?? "missing"}`);
+  if (error) {
+    throw new Error(`Could not resolve person for ${DEV_EMAIL}: ${error.message}`);
   }
 
-  return { admin, personId: person.id };
+  if (person?.id) {
+    return { admin, personId: person.id };
+  }
+
+  const { data: createdPerson, error: createPersonError } = await admin
+    .from("persons")
+    .insert({
+      auth_user_id: devUser.id,
+      kind: "human",
+      name: "E2E Medication User",
+    })
+    .select("id")
+    .single();
+
+  if (createPersonError || !createdPerson?.id) {
+    throw new Error(
+      `Could not create person for ${DEV_EMAIL}: ${createPersonError?.message ?? "missing"}`,
+    );
+  }
+
+  return { admin, personId: createdPerson.id };
 }
 
 async function createLowStockRegimen() {

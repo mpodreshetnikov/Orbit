@@ -52,6 +52,52 @@ describe("use-money-categories", () => {
     expect(flattenMoneyCategoryTree(tree).map((c) => c.id)).toEqual(["root", "child-a", "child-b"]);
   });
 
+  it("groups custom root categories beneath their canonical branch", async () => {
+    const { buildMoneyCategoryTree, flattenMoneyCategoryTree } =
+      await import("./use-money-categories");
+
+    const tree = buildMoneyCategoryTree([
+      {
+        id: "canon-transport",
+        parent_id: null,
+        canonical_category_id: "canon-transport",
+        category_kind: "canonical",
+        system_key: "transport",
+        sort_order: 1,
+        depth: 1,
+        name_en: "Transport",
+      },
+      {
+        id: "canon-food",
+        parent_id: null,
+        canonical_category_id: "canon-food",
+        category_kind: "canonical",
+        system_key: "food",
+        sort_order: 2,
+        depth: 1,
+        name_en: "Food",
+      },
+      {
+        id: "custom-groceries",
+        parent_id: null,
+        canonical_category_id: "canon-food",
+        category_kind: "custom",
+        system_key: null,
+        sort_order: 0,
+        depth: 1,
+        name_en: "Groceries",
+      },
+    ] as MoneyCategory[]);
+
+    expect(tree.map((node) => node.id)).toEqual(["canon-transport", "canon-food"]);
+    expect(tree[1]?.children.map((node) => node.id)).toEqual(["custom-groceries"]);
+    expect(flattenMoneyCategoryTree(tree).map((node) => node.id)).toEqual([
+      "canon-transport",
+      "canon-food",
+      "custom-groceries",
+    ]);
+  });
+
   it("loads categories", async () => {
     const data = [
       {
@@ -71,6 +117,8 @@ describe("use-money-categories", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(data);
+    expect(builder.order).toHaveBeenCalledWith("category_kind", { ascending: true });
+    expect(builder.order).toHaveBeenCalledWith("sort_order", { ascending: true });
     expect(builder.order).toHaveBeenCalledWith("depth", { ascending: true });
     expect(builder.order).toHaveBeenCalledWith("name_en", { ascending: true });
   });
@@ -108,6 +156,7 @@ describe("use-money-categories", () => {
     await act(async () => {
       await result.current.mutateAsync({
         parent_id: null,
+        canonical_category_id: "canon-food",
         depth: 0,
         name_ru: "Еда",
         name_en: "Food",

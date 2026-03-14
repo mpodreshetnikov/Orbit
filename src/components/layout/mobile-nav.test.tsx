@@ -138,10 +138,12 @@ describe("MobileNav", () => {
 
     render(<MobileNav />);
 
+    expect(screen.getByText("money.reports")).toBeInTheDocument();
     expect(screen.getByText("money.transactions")).toBeInTheDocument();
     expect(screen.getByText("money.import")).toBeInTheDocument();
     expect(screen.getByText("money.accounts")).toBeInTheDocument();
     expect(screen.getByText("money.categories")).toBeInTheDocument();
+    expect(screen.getByText("money.rules")).toBeInTheDocument();
 
     expect(screen.getByText("money.addTransaction")).toBeInTheDocument();
     expect(screen.getByText("money.addAccount")).toBeInTheDocument();
