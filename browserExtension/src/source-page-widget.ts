@@ -1,3 +1,5 @@
+import { shouldShowMoneyImportSourcePageWidget } from "./money-import-sources.js";
+
 type RuntimeSendMessage = (
   message: Record<string, unknown>,
   callback?: (response: Record<string, unknown> | undefined) => void,
@@ -70,7 +72,7 @@ function clampProgress(value: number): number {
 function formatPhase(phase: string | null): string {
   if (!phase) return "Idle";
   if (phase === "starting") return "Starting import";
-  if (phase === "parse_preparing_tab") return "Preparing T-Bank tab";
+  if (phase === "parse_preparing_tab") return "Preparing bank tab";
   if (phase === "parse_loading_operations_page") return "Opening operations page";
   if (phase === "parse_extracting_page_data") return "Starting page extraction";
   if (phase === "parse_discovering_endpoints") return "Discovering bank endpoints";
@@ -98,10 +100,6 @@ function readMessageText(payload: Record<string, unknown>, key: string): string 
 function readFiniteNumber(payload: Record<string, unknown>, key: string): number | null {
   const value = payload[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function shouldShowWidgetForSession(session: WidgetSession | null): boolean {
-  return session?.source === "tbank_web" && session?.show_source_page_widget === true;
 }
 
 function formatDurationTimer(durationMs: number): string {
@@ -140,12 +138,12 @@ function formatFullModeEstimateText(state: WidgetState): string {
       return `Full mode ETA: ${formatDurationTimer(remainingMs)}${requestCountSuffix}`;
     }
     return (
-      "Full mode status: waiting for T-Bank cooldown or pending detail response" +
+      "Full mode status: waiting for source cooldown or pending detail response" +
       requestCountSuffix
     );
   }
 
-  return "Full mode ETA appears after T-Bank counts transactions in the selected range";
+  return "Full mode ETA appears after the bank counts transactions in the selected range";
 }
 
 function createStyleElement(): HTMLStyleElement {
@@ -500,7 +498,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   };
 
   const applySession = (session: WidgetSession | null) => {
-    if (!shouldShowWidgetForSession(session)) {
+    if (!shouldShowMoneyImportSourcePageWidget(session)) {
       state = {
         ...state,
         session: null,

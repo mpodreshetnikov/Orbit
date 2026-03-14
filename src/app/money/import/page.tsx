@@ -15,13 +15,16 @@ import {
   normalizeExtensionRelease,
   type ExtensionRelease,
 } from "@/lib/import/extension-release";
-import type {
-  BatchTransactionRow,
-  CanonicalTransactionRow,
-  MoneyImportParseStrategy,
-  MoneyImportPreviewResult,
-  MoneyImportSessionCreateResult,
-  MoneyImportSessionStatus,
+import {
+  MONEY_ACCOUNT_SOURCES,
+  type BatchTransactionRow,
+  type CanonicalTransactionRow,
+  type MoneyAccountSource,
+  type MoneyImportConnector,
+  type MoneyImportParseStrategy,
+  type MoneyImportPreviewResult,
+  type MoneyImportSessionCreateResult,
+  type MoneyImportSessionStatus,
 } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,6 +44,7 @@ import { Label } from "@/components/ui/label";
 
 import "@/lib/import/connectors/tbank-csv";
 import "@/lib/import/connectors/tbank-web";
+import "@/lib/import/connectors/alfa-web";
 
 const TBANK_ICON_URL =
   "https://cdn.tbank.ru/static/pfa-multimedia/images/ae288629-59d7-4eb6-b074-8bb0549a43b6.svg";
@@ -51,6 +55,10 @@ const EXTENSION_ID = process.env.NEXT_PUBLIC_EXTENSION_ID ?? "";
 const DEFAULT_ACCOUNT_STORAGE_PREFIX = "money-import-default-account";
 const DEFAULT_TBANK_PARSE_STRATEGY: MoneyImportParseStrategy = "full";
 const EXTENSION_PING_TIMEOUT_MS = 500;
+const CONNECTOR_ACCOUNT_SOURCE_BY_SOURCE_ID: Record<string, MoneyAccountSource> = {
+  tbank_web: "tbank",
+  alfa_web: "alfa",
+};
 
 type ExtensionPingResult = {
   active: boolean;
@@ -59,7 +67,23 @@ type ExtensionPingResult = {
 };
 
 function connectorSourceToAccountSource(sourceId: string): string {
-  return sourceId === "tbank_web" ? "tbank" : sourceId;
+  return CONNECTOR_ACCOUNT_SOURCE_BY_SOURCE_ID[sourceId] ?? sourceId;
+}
+
+function formatAccountSourceTranslationKey(source: string): `money.accountSource${string}` {
+  return `money.accountSource${source.charAt(0).toUpperCase()}${source.slice(1)}`;
+}
+
+function resolveConnectorSourceLabel(
+  t: ReturnType<typeof useTranslations>,
+  connector: MoneyImportConnector | null | undefined,
+): string {
+  if (!connector) return "";
+  const accountSource = connectorSourceToAccountSource(connector.sourceId);
+  if ((MONEY_ACCOUNT_SOURCES as readonly string[]).includes(accountSource)) {
+    return t(formatAccountSourceTranslationKey(accountSource));
+  }
+  return connector.displayName;
 }
 
 function buildDefaultAccountStorageKey(personId: string, sourceId: string): string {
@@ -411,6 +435,10 @@ export default function MoneyImportPage() {
   const selectedConnector = useMemo(
     () => connectors.find((c) => c.sourceId === selectedSourceId),
     [connectors, selectedSourceId],
+  );
+  const selectedConnectorSourceLabel = useMemo(
+    () => resolveConnectorSourceLabel(t, selectedConnector),
+    [selectedConnector, t],
   );
 
   const isFileConnector = selectedConnector?.kind === "file";
@@ -993,7 +1021,9 @@ export default function MoneyImportPage() {
   const handleStartExtensionImport = useCallback(async () => {
     if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "extension") return;
     if (sourceAccounts.length === 0) {
-      setExtensionStatusMessage(t("money.importNoAccounts"));
+      setExtensionStatusMessage(
+        t("money.importNoSourceAccounts", { source: selectedConnectorSourceLabel }),
+      );
       return;
     }
     const selectedDefaultExtensionAccountId =
@@ -1079,6 +1109,7 @@ export default function MoneyImportPage() {
     loadExtensionImportContext,
     selectedPersonId,
     selectedConnector,
+    selectedConnectorSourceLabel,
     sendSessionToExtension,
     sourceAccounts,
     t,
@@ -1219,10 +1250,14 @@ export default function MoneyImportPage() {
                 {sourceAccounts.length === 0 ? (
                   <div className="space-y-2">
                     <p className="text-sm text-muted-foreground flex items-center gap-2">
-                      {t("money.importNoAccounts")}
+                      {t("money.importNoSourceAccounts", {
+                        source: selectedConnectorSourceLabel,
+                      })}
                       <span
                         className="inline-flex text-muted-foreground cursor-help"
-                        title={t("money.importNoAccountsTooltip")}
+                        title={t("money.importNoSourceAccountsTooltip", {
+                          source: selectedConnectorSourceLabel,
+                        })}
                       >
                         <HelpCircle className="h-4 w-4" />
                       </span>
@@ -1235,7 +1270,9 @@ export default function MoneyImportPage() {
                       onClick={handleCreateSourceAccount}
                     >
                       <Plus className="h-4 w-4" />
-                      {t("money.importCreateTbankAccount")}
+                      {t("money.importCreateSourceAccount", {
+                        source: selectedConnectorSourceLabel,
+                      })}
                     </Button>
                   </div>
                 ) : (
@@ -1355,10 +1392,14 @@ export default function MoneyImportPage() {
             {sourceAccounts.length === 0 && (
               <div className="space-y-2 rounded-md border p-3">
                 <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  {t("money.importNoAccounts")}
+                  {t("money.importNoSourceAccounts", {
+                    source: selectedConnectorSourceLabel,
+                  })}
                   <span
                     className="inline-flex text-muted-foreground cursor-help"
-                    title={t("money.importNoAccountsTooltip")}
+                    title={t("money.importNoSourceAccountsTooltip", {
+                      source: selectedConnectorSourceLabel,
+                    })}
                   >
                     <HelpCircle className="h-4 w-4" />
                   </span>
@@ -1371,7 +1412,9 @@ export default function MoneyImportPage() {
                   onClick={handleCreateSourceAccount}
                 >
                   <Plus className="h-4 w-4" />
-                  {t("money.importCreateTbankAccount")}
+                  {t("money.importCreateSourceAccount", {
+                    source: selectedConnectorSourceLabel,
+                  })}
                 </Button>
               </div>
             )}
@@ -1565,9 +1608,21 @@ export default function MoneyImportPage() {
                   </div>
                 )}
                 <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
-                  <li>{t("money.importExtensionStep1")}</li>
-                  <li>{t("money.importExtensionStep2")}</li>
-                  <li>{t("money.importExtensionStep3")}</li>
+                  <li>
+                    {t("money.importExtensionSourceStep1", {
+                      source: selectedConnectorSourceLabel,
+                    })}
+                  </li>
+                  <li>
+                    {t("money.importExtensionSourceStep2", {
+                      source: selectedConnectorSourceLabel,
+                    })}
+                  </li>
+                  <li>
+                    {t("money.importExtensionSourceStep3", {
+                      source: selectedConnectorSourceLabel,
+                    })}
+                  </li>
                 </ol>
                 <Button
                   className="gap-2"

@@ -363,7 +363,9 @@ export default function MoneyAccountsPage() {
               <label className="text-sm font-medium">{t("money.accountSource")}</label>
               <Select
                 value={
-                  MONEY_ACCOUNT_SOURCES.includes(source as "manual" | "tbank") ? source : "manual"
+                  MONEY_ACCOUNT_SOURCES.includes(source as (typeof MONEY_ACCOUNT_SOURCES)[number])
+                    ? source
+                    : "manual"
                 }
                 onValueChange={setSource}
               >

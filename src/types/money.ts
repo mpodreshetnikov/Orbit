@@ -188,7 +188,7 @@ export const MONEY_CURRENCIES = ["RUB", "USD"] as const;
 export type MoneyCurrency = (typeof MONEY_CURRENCIES)[number];
 
 /** Known account sources for import/display. Use "manual" for hand-entered accounts. */
-export const MONEY_ACCOUNT_SOURCES = ["manual", "tbank"] as const;
+export const MONEY_ACCOUNT_SOURCES = ["manual", "tbank", "alfa"] as const;
 export type MoneyAccountSource = (typeof MONEY_ACCOUNT_SOURCES)[number];
 
 // ============================================================================

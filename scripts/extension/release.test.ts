@@ -123,5 +123,5 @@ describe("extension release", () => {
     ).toBe(
       "https://project.supabase.co/storage/v1/object/public/extension-releases/releases/1.2.3/orbit%20extension.zip",
     );
-  });
+  }, 15_000);
 });

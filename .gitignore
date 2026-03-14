@@ -32,6 +32,7 @@ browserExtension/dist
 *.pem
 .temp*
 .tmp*
+.temp
 
 # debug
 npm-debug.log*

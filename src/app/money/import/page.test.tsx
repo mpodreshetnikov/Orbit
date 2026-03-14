@@ -222,8 +222,8 @@ describe("MoneyImportPage", () => {
     const file = new File(["date,amount"], "bank.csv", { type: "text/csv" });
     fireEvent.change(fileInput, { target: { files: [file] } });
 
-    expect(await screen.findByText("money.importNoAccounts")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "money.importCreateTbankAccount" }));
+    expect(await screen.findByText("money.importNoSourceAccounts")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "money.importCreateSourceAccount" }));
 
     await waitFor(() => {
       expect(createAccountMutateAsync).toHaveBeenCalledWith({
@@ -864,7 +864,7 @@ describe("MoneyImportPage", () => {
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
       await user.click(
-        await screen.findByRole("button", { name: "money.importCreateTbankAccount" }),
+        await screen.findByRole("button", { name: "money.importCreateSourceAccount" }),
       );
 
       await waitFor(() => {
@@ -873,6 +873,48 @@ describe("MoneyImportPage", () => {
           source: "tbank",
           account_kind: "debit",
           account_label: "TBank extension",
+          currency: "RUB",
+        });
+      });
+    } finally {
+      postMessageSpy.mockRestore();
+    }
+  });
+
+  it("creates alfa account source for alfa_web connector account creation", async () => {
+    connectorsState = [
+      {
+        sourceId: "alfa_web",
+        displayName: "Alfa Bank Web",
+        kind: "extension",
+      },
+    ];
+
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string };
+      if (payload.type === "MONEY_IMPORT_PING") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+          }),
+        );
+      }
+    });
+
+    try {
+      render(<MoneyImportPage />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /Alfa Bank Web/ }));
+      await user.click(
+        await screen.findByRole("button", { name: "money.importCreateSourceAccount" }),
+      );
+
+      await waitFor(() => {
+        expect(createAccountMutateAsync).toHaveBeenCalledWith({
+          owner_person_id: "person-1",
+          source: "alfa",
+          account_kind: "debit",
+          account_label: "Alfa Bank Web",
           currency: "RUB",
         });
       });
@@ -907,7 +949,7 @@ describe("MoneyImportPage", () => {
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
       const startButton = await screen.findByRole("button", { name: "money.importStartImport" });
       expect(startButton).toBeDisabled();
-      expect(await screen.findByText("money.importNoAccounts")).toBeInTheDocument();
+      expect(await screen.findByText("money.importNoSourceAccounts")).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       await user.click(startButton);

@@ -1,12 +1,17 @@
 import "./connectors/tbank-web.js";
+import "./connectors/alfa-web.js";
 import { getConnector } from "./connectors/registry.js";
 import { APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
 import { routeBackgroundMessage, type BackgroundMessage } from "./core/background-router.js";
 import { createImportDebugStore } from "./core/import-debug.js";
 import { createExtensionLogger } from "./core/observability.js";
 import { createSessionStore } from "./core/session-store.js";
-
-const TBANK_SOURCE_PAGE_PATTERNS = ["https://www.tbank.ru/*", "https://*.tbank.ru/*"] as const;
+import {
+  getAllMoneyImportSourcePagePatterns,
+  getMoneyImportSourcePagePatterns,
+  matchesKnownMoneyImportSourcePageUrl,
+  shouldShowMoneyImportSourcePageWidget,
+} from "./money-import-sources.js";
 
 async function broadcastToAppTabs(message: Record<string, unknown>): Promise<void> {
   if (!Array.isArray(APP_ORIGIN_PATTERNS) || APP_ORIGIN_PATTERNS.length === 0) {
@@ -33,29 +38,7 @@ function resolveSourceId(session: Record<string, unknown> | null): string | null
 }
 
 function resolveSourcePagePatterns(sourceId: string | null): string[] {
-  if (sourceId === "tbank_web") return [...TBANK_SOURCE_PAGE_PATTERNS];
-  return [];
-}
-
-function shouldShowSourcePageWidget(session: Record<string, unknown> | null): boolean {
-  return resolveSourceId(session) === "tbank_web" && session?.show_source_page_widget === true;
-}
-
-function matchesKnownSourcePageUrl(url: string | undefined): boolean {
-  return matchesSourcePageUrl("tbank_web", url);
-}
-
-function matchesSourcePageUrl(sourceId: string | null, url: string | undefined): boolean {
-  if (!url || !sourceId) return false;
-  try {
-    const parsed = new URL(url);
-    if (sourceId === "tbank_web") {
-      return /(^|\.)tbank\.ru$/i.test(parsed.hostname);
-    }
-    return false;
-  } catch {
-    return false;
-  }
+  return getMoneyImportSourcePagePatterns(sourceId);
 }
 
 async function injectSourcePageWidget(tabId: number): Promise<void> {
@@ -80,10 +63,10 @@ async function syncSourcePageWidgetForSession(
   opts?: { tabId?: number; tabUrl?: string },
 ): Promise<void> {
   const sourceId = resolveSourceId(session);
-  const showWidget = shouldShowSourcePageWidget(session);
+  const showWidget = shouldShowMoneyImportSourcePageWidget(session);
 
   if (typeof opts?.tabId === "number") {
-    if (!matchesKnownSourcePageUrl(opts.tabUrl)) return;
+    if (!matchesKnownMoneyImportSourcePageUrl(opts.tabUrl)) return;
     if (showWidget && sourceId) {
       await injectSourcePageWidget(opts.tabId).catch(() => undefined);
       await sendSessionToSourcePageTab(opts.tabId, session).catch(() => undefined);
@@ -95,7 +78,7 @@ async function syncSourcePageWidgetForSession(
 
   const patterns = showWidget
     ? resolveSourcePagePatterns(sourceId)
-    : [...TBANK_SOURCE_PAGE_PATTERNS];
+    : getAllMoneyImportSourcePagePatterns();
   if (patterns.length === 0) return;
 
   const tabs = await chrome.tabs.query({ url: patterns });

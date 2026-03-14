@@ -5,7 +5,13 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import process from "node:process";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chromium, type BrowserContext, type Page, type Worker } from "@playwright/test";
+import {
+  getMoneyImportSourcePreset,
+  normalizeMoneyImportSourceIdInput,
+  sanitizeMoneyImportSourceKey,
+} from "./money-import-sources";
 import { writeAnalysisArtifacts } from "./analyze-tbank-debug-artifact";
 import {
   resolveManualAuthAssessment,
@@ -38,14 +44,6 @@ interface CliArgs {
   expiresAt?: string;
 }
 
-interface SourcePreset {
-  sourceKey: string;
-  targetUrl: string;
-  tabUrlPatterns: string[];
-  tabUrlContains: string;
-  apiUrlRegex: string;
-}
-
 interface ApiCapture {
   timestamp: string;
   method: string;
@@ -62,36 +60,195 @@ interface TabReference {
   url: string | null;
 }
 
+const IN_PAGE_ROUTER_FALLBACK_SOURCE = String.raw`(async (payload) => {
+  const globalWindow = window;
+  if (!globalWindow.__moneyImportDebugHarness) {
+    const moduleUrl = (relativePath) => new URL(relativePath, window.location.href).toString();
+    await Promise.all([
+      import(moduleUrl("./connectors/tbank-web.js")),
+      import(moduleUrl("./connectors/alfa-web.js")),
+    ]);
+    const [
+      { runImportSession, tryCompleteSessionAsFailed },
+      { createImportDebugStore },
+      { createSessionStore },
+      { getConnector },
+    ] = await Promise.all([
+      import(moduleUrl("./core/import-runner.js")),
+      import(moduleUrl("./core/import-debug.js")),
+      import(moduleUrl("./core/session-store.js")),
+      import(moduleUrl("./connectors/registry.js")),
+    ]);
+
+    const callEdge = async (functionUrl, token, edgePayload) => {
+      const response = await fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + token,
+        },
+        body: JSON.stringify(edgePayload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const responseError =
+          typeof data.error === "string" && data.error.trim().length > 0 ? data.error : null;
+        throw Object.assign(
+          new Error(
+            responseError
+              ? "Edge request failed (" + String(edgePayload.action ?? "unknown") + ") status " + response.status + ": " + responseError
+              : "Edge request failed (" + String(edgePayload.action ?? "unknown") + ") status " + response.status,
+          ),
+          {
+            code: "EDGE_HTTP_ERROR",
+            action: typeof edgePayload.action === "string" ? edgePayload.action : "unknown",
+            function_host: (() => {
+              try {
+                return new URL(functionUrl).host;
+              } catch {
+                return null;
+              }
+            })(),
+            function_path: (() => {
+              try {
+                return new URL(functionUrl).pathname;
+              } catch {
+                return null;
+              }
+            })(),
+            http_status: response.status,
+            response_error: responseError,
+            transport: "http",
+          },
+        );
+      }
+      return data;
+    };
+
+    const sessionStore = createSessionStore(chrome.storage.local);
+    const debugStore = createImportDebugStore();
+    const importRunnerDeps = {
+      getConnector,
+      callEdge,
+      broadcastToAppTabs: async () => undefined,
+      nowIso: () => new Date().toISOString(),
+    };
+
+    globalWindow.__moneyImportDebugHarness = {
+      handleMessage: async (message) => {
+        if (message.type === "MONEY_IMPORT_START_SESSION") {
+          const session =
+            message.session && typeof message.session === "object" ? message.session : null;
+          await sessionStore.setSession(session);
+          return { ok: true };
+        }
+
+        if (message.type === "MONEY_IMPORT_RUN") {
+          const session = await sessionStore.getSession();
+          if (!session) {
+            throw new Error("No active import session");
+          }
+
+          const debugEnabled = Boolean(
+            message.debug &&
+              typeof message.debug === "object" &&
+              message.debug.enabled,
+          );
+          const debug = debugEnabled
+            ? debugStore.startRun({
+                debug_run_id:
+                  message.debug && typeof message.debug === "object"
+                    ? message.debug.debug_run_id
+                    : undefined,
+                session_id: typeof session.session_id === "string" ? session.session_id : null,
+                batch_id: typeof session.batch_id === "string" ? session.batch_id : null,
+                source: typeof session.source === "string" ? session.source : null,
+                tab_id:
+                  message.debug && typeof message.debug === "object"
+                    ? (message.debug.tab_id ?? null)
+                    : null,
+                window_from:
+                  typeof message.windowFrom === "string"
+                    ? message.windowFrom
+                    : typeof session.last_imported_at === "string"
+                      ? session.last_imported_at
+                      : null,
+              })
+            : null;
+
+          const emit = (event, attrs) => {
+            if (!debug) return;
+            debugStore.append(debug.debug_run_id, { event, attrs });
+          };
+
+          try {
+            const result = await runImportSession(
+              session,
+              typeof message.windowFrom === "string" ? message.windowFrom : undefined,
+              importRunnerDeps,
+              {
+                enabled: Boolean(debug),
+                parseOnly: Boolean(
+                  message.debug &&
+                    typeof message.debug === "object" &&
+                    message.debug.parse_only,
+                ),
+                tabId:
+                  message.debug && typeof message.debug === "object"
+                    ? message.debug.tab_id ?? undefined
+                    : undefined,
+                debugRunId: debug ? debug.debug_run_id : undefined,
+                emit,
+              },
+            );
+            if (debug) {
+              debugStore.finish(debug.debug_run_id, "ok");
+            }
+            await sessionStore.setSession(null);
+            return {
+              ok: true,
+              result,
+              debug_run_id: debug ? debug.debug_run_id : null,
+            };
+          } catch (error) {
+            const messageText = error instanceof Error ? error.message : "Unknown import error";
+            if (
+              !(
+                message.debug &&
+                typeof message.debug === "object" &&
+                message.debug.parse_only
+              )
+            ) {
+              await tryCompleteSessionAsFailed(session, callEdge);
+            }
+            await sessionStore.setSession(null);
+            if (debug) {
+              emit("run_failed", { error_message: messageText });
+              debugStore.finish(debug.debug_run_id, "error", messageText);
+            }
+            throw error;
+          }
+        }
+
+        if (message.type === "MONEY_IMPORT_DEBUG_GET_LAST_RUN") {
+          return {
+            ok: true,
+            run: debugStore.getLastRunSummary(),
+          };
+        }
+
+        throw new Error("Unsupported fallback message type: " + String(message.type));
+      },
+    };
+  }
+
+  return globalWindow.__moneyImportDebugHarness.handleMessage(payload);
+})`;
+
 function getArgValue(argv: string[], key: string): string | undefined {
   const index = argv.findIndex((token) => token === key);
   if (index === -1) return undefined;
   return argv[index + 1];
-}
-
-function sanitizeSourceKey(sourceId: string): string {
-  const normalized = sourceId.trim().toLowerCase();
-  const withoutSuffix = normalized.replace(/_web$/, "").replace(/-web$/, "");
-  return withoutSuffix.replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "source";
-}
-
-function getSourcePreset(sourceId: string): SourcePreset {
-  if (sourceId === "tbank_web") {
-    return {
-      sourceKey: "tbank",
-      targetUrl: "https://www.tbank.ru/mybank/operations/",
-      tabUrlPatterns: ["https://www.tbank.ru/*", "https://*.tbank.ru/*"],
-      tabUrlContains: "/mybank/operations",
-      apiUrlRegex: "https://(?:www\\.)?tbank\\.ru/api/common/v1/",
-    };
-  }
-
-  return {
-    sourceKey: sanitizeSourceKey(sourceId),
-    targetUrl: "",
-    tabUrlPatterns: [],
-    tabUrlContains: "",
-    apiUrlRegex: "",
-  };
 }
 
 function parseCsv(value: string): string[] {
@@ -102,12 +259,12 @@ function parseCsv(value: string): string[] {
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const sourceId = (getArgValue(argv, "--source") ?? "tbank_web").trim();
-  const preset = getSourcePreset(sourceId);
+  const sourceId = normalizeMoneyImportSourceIdInput(getArgValue(argv, "--source") ?? "tbank_web");
+  const preset = getMoneyImportSourcePreset(sourceId);
   const defaults: CliArgs = {
     windowFrom: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
     artifactRoot: path.resolve(process.cwd(), ".tmp", "scraper-debug", preset.sourceKey),
-    sessionName: "default",
+    sessionName: preset.sourceKey,
     parseOnly: true,
     parseStrategy: "fast",
     keepOpen: false,
@@ -187,7 +344,7 @@ function parseArgs(argv: string[]): CliArgs {
       continue;
     }
     if (token === "--source" && argv[index + 1]) {
-      parsed.sourceId = argv[index + 1].trim();
+      parsed.sourceId = normalizeMoneyImportSourceIdInput(argv[index + 1]);
       index += 1;
       continue;
     }
@@ -240,8 +397,8 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  parsed.sourceId = parsed.sourceId.trim();
-  parsed.sourceKey = parsed.sourceKey.trim() || sanitizeSourceKey(parsed.sourceId);
+  parsed.sourceId = normalizeMoneyImportSourceIdInput(parsed.sourceId);
+  parsed.sourceKey = parsed.sourceKey.trim() || sanitizeMoneyImportSourceKey(parsed.sourceId);
   parsed.tabUrlPatterns = Array.from(
     new Set(
       parsed.tabUrlPatterns
@@ -381,6 +538,32 @@ function parseExtensionId(workerUrl: string): string | null {
   return match?.[1] ?? null;
 }
 
+function deriveExtensionIdFromKey(key: string): string | null {
+  const normalizedKey = key.trim();
+  if (!normalizedKey) return null;
+
+  try {
+    const derBytes = Buffer.from(normalizedKey, "base64");
+    const hash = createHash("sha256").update(derBytes).digest();
+    const alphabet = "abcdefghijklmnop";
+    return Array.from(hash.subarray(0, 16))
+      .flatMap((byte) => [alphabet[(byte >> 4) & 0x0f], alphabet[byte & 0x0f]])
+      .join("");
+  } catch {
+    return null;
+  }
+}
+
+async function deriveExtensionIdFromManifest(): Promise<string | null> {
+  try {
+    const manifestRaw = await fs.readFile(path.join(EXTENSION_DIST_DIR, "manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as { key?: unknown };
+    return typeof manifest.key === "string" ? deriveExtensionIdFromKey(manifest.key) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveExtensionId(context: BrowserContext): Promise<string> {
   const existingWorker = context
     .serviceWorkers()
@@ -441,47 +624,69 @@ async function waitForExtensionWorker(
 }
 
 async function refreshExtensionRuntime(context: BrowserContext): Promise<string> {
-  const extensionId = await resolveExtensionId(context);
-  const worker = await waitForExtensionWorker(context, extensionId);
-  process.stdout.write(
-    `[debug-runner] Reloading extension runtime for fresh code (${extensionId})...\n`,
-  );
-  await worker.evaluate(() => chrome.runtime.reload());
-
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const nextWorker = findExtensionWorker(context, extensionId);
-    if (!nextWorker) continue;
-    const runtimeInfo = await nextWorker
-      .evaluate(() => ({
-        id: chrome.runtime.id,
-        version: chrome.runtime.getManifest().version,
-      }))
-      .catch(() => null);
-    if (runtimeInfo?.id === extensionId) {
-      process.stdout.write(
-        `[debug-runner] Extension runtime ready after reload (version ${runtimeInfo.version}).\n`,
-      );
-      return extensionId;
-    }
+  const resolvedExtensionId = await resolveExtensionId(context).catch(() => null);
+  const manifestExtensionId = await deriveExtensionIdFromManifest();
+  const extensionId = resolvedExtensionId ?? manifestExtensionId;
+  if (!extensionId) {
+    throw new Error("Unable to resolve extension id. Verify extension build and manifest key.");
   }
 
-  throw new Error(`Timed out waiting for extension runtime reload (${extensionId}).`);
+  await waitForExtensionWorker(context, extensionId).catch(() => null);
+  process.stdout.write(`[debug-runner] Extension runtime ready (${extensionId}).\n`);
+  return extensionId;
 }
 
 async function sendRuntimeMessage<T>(
   extensionPage: Page,
   message: Record<string, unknown>,
 ): Promise<T> {
-  return extensionPage.evaluate(
+  const runtimeResponse = (await extensionPage.evaluate(
     (payload) =>
-      new Promise((resolve) => {
+      new Promise<{
+        ok: boolean;
+        response?: unknown;
+        timedOut?: boolean;
+        lastError?: string | null;
+      }>((resolve) => {
+        const timer = window.setTimeout(() => {
+          resolve({
+            ok: false,
+            timedOut: true,
+            lastError: chrome.runtime.lastError?.message ?? null,
+          });
+        }, 5000);
+
         chrome.runtime.sendMessage(payload, (response) => {
-          resolve(response);
+          window.clearTimeout(timer);
+          resolve({
+            ok: true,
+            response,
+            lastError: chrome.runtime.lastError?.message ?? null,
+          });
         });
       }),
     message,
+  )) as {
+    ok: boolean;
+    response?: T;
+    timedOut?: boolean;
+    lastError?: string | null;
+  };
+
+  if (runtimeResponse.ok && !runtimeResponse.lastError) {
+    return runtimeResponse.response as T;
+  }
+
+  process.stdout.write(
+    `[debug-runner] Runtime messaging unavailable for ${String(message.type)}; falling back to in-page router execution.\n`,
+  );
+
+  return extensionPage.evaluate(
+    ({ payload, source }) => {
+      const factory = (0, eval)(source) as (message: Record<string, unknown>) => Promise<T>;
+      return factory(payload);
+    },
+    { payload: message, source: IN_PAGE_ROUTER_FALLBACK_SOURCE },
   ) as Promise<T>;
 }
 
@@ -597,6 +802,7 @@ async function main(): Promise<void> {
 
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
+    ignoreDefaultArgs: ["--disable-extensions"],
     args: [
       `--disable-extensions-except=${EXTENSION_DIST_DIR}`,
       `--load-extension=${EXTENSION_DIST_DIR}`,
@@ -638,11 +844,12 @@ async function main(): Promise<void> {
 
   const extensionId = await refreshExtensionRuntime(context);
 
-  const page = context.pages()[0] ?? (await context.newPage());
-  await page.goto(args.targetUrl, { waitUntil: "domcontentloaded" });
+  const sourcePage = await context.newPage();
+  await sourcePage.goto(args.targetUrl, { waitUntil: "domcontentloaded" });
+  await sourcePage.bringToFront().catch(() => undefined);
 
   const manualAuthAssessment = await assessManualAuthRequirement(
-    page,
+    sourcePage,
     args.targetUrl,
     args.tabUrlContains,
   );
@@ -681,6 +888,7 @@ async function main(): Promise<void> {
   if (typeof sourceTab.id !== "number") {
     throw new Error("Unable to resolve source tab id for debug run.");
   }
+  await sourcePage.bringToFront().catch(() => undefined);
 
   const runId = `dbg_${Date.now().toString(36)}`;
   const batchId = args.batchId ?? `dbg_batch_${Date.now().toString(36)}`;

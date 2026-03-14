@@ -35,7 +35,7 @@ describe("source-page-widget", () => {
           ok: true,
           session: {
             session_id: "session-1",
-            source: "tbank_web",
+            source: "alfa_web",
             app_origin: "http://localhost:3000",
             show_source_page_widget: true,
           },
@@ -194,7 +194,7 @@ describe("source-page-widget", () => {
     widget.mount();
 
     expect(getShadowText()).toContain(
-      "Full mode ETA appears after T-Bank counts transactions in the selected range",
+      "Full mode ETA appears after the bank counts transactions in the selected range",
     );
 
     widget.handleRuntimeMessage({
@@ -351,7 +351,7 @@ describe("source-page-widget", () => {
       type: "MONEY_IMPORT_SESSION_UPDATED",
       session: {
         session_id: "session-2",
-        source: "tbank_web",
+        source: "alfa_web",
         show_source_page_widget: true,
       },
     });
@@ -374,7 +374,7 @@ describe("source-page-widget", () => {
             ok: true,
             session: {
               session_id: "session-1",
-              source: "tbank_web",
+              source: "alfa_web",
               app_origin: "http://localhost:3000",
               batch_id: "batch-123",
               show_source_page_widget: true,

@@ -15,6 +15,8 @@ import {
   shouldIgnoreWatchEvent,
   unique,
 } from "./build-lib";
+import { listMoneyImportSourceDefinitions } from "./money-import-sources";
+import { buildSourcePageWidgetInpageBundle } from "./esbuild-widget";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..", "..");
@@ -26,7 +28,9 @@ const localEnvPath = path.join(rootDir, ".env.local");
 const stableExtensionKey =
   "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz84ynCFIwpvsQIcklAzf+8sVWXeZZocN8LTt6iEmtA8ZwHV0klI115PyOy4LlaEFEIp7YpwrfT5MaU+m9rbuCnhmOsK46omDGqM2eUnP4v3YGU3pMmyGcXvU6FGAIlelUlzkqKl5OzCnLdZKpJnVZSG2dcfCRINyp9MMI3209vgrqeqpmnCEMbr8JpMZ/+aAQLlMfOIIyYMcdP9Kr2DKbAZrm41lepCJOYdSGfy+HpO9Q1UB+XhSOq386hyhkK5LC3cfTGjlNApTHr3fzrMS/s04R/ACAR1BElRu8e32J2nOOtGm0LVW0XD9o53p1bok6nMtLawS4FUmWOPU7MdgrwIDAQAB";
 
-const EXTENSION_ALLOWED_HOST_PATTERNS = ["https://www.tbank.ru/*", "https://*.tbank.ru/*"];
+const EXTENSION_ALLOWED_HOST_PATTERNS = listMoneyImportSourceDefinitions().flatMap(
+  (source) => source.tabUrlPatterns,
+);
 
 function resolveSupabaseHostPattern(
   env: Record<string, string | undefined>,
@@ -105,29 +109,7 @@ function runViteBuild(): Promise<void> {
 }
 
 function runEsbuildSourcePageWidgetInpageBundle(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const esbuildBin = path.join(rootDir, "node_modules", "esbuild", "bin", "esbuild");
-    const entry = path.join(extensionDir, "src", "source-page-widget-inpage.ts");
-    const outfile = path.join(distDir, "source-page-widget.inpage.js");
-    const child = spawn(
-      process.execPath,
-      [
-        esbuildBin,
-        entry,
-        "--bundle",
-        "--format=iife",
-        "--platform=browser",
-        "--target=es2020",
-        `--outfile=${outfile}`,
-      ],
-      { cwd: rootDir, stdio: "inherit" },
-    );
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`esbuild widget bundle exited with code ${code}`));
-    });
-    child.on("error", reject);
-  });
+  return buildSourcePageWidgetInpageBundle({ extensionDir, distDir });
 }
 
 async function build(mode: string): Promise<void> {

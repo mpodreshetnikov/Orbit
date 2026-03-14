@@ -35,7 +35,7 @@ describe("background-router", () => {
     await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_PING" }, deps)).resolves.toEqual({
       ok: true,
       extension_id: "unit-test",
-      extension_version: "0.1.1",
+      extension_version: "0.1.2",
     });
     await expect(routeBackgroundMessage({ type: "UNKNOWN" }, deps)).resolves.toEqual({
       ok: false,

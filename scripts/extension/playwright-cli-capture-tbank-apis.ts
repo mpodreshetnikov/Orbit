@@ -5,18 +5,17 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import process from "node:process";
 import { chromium, type Page } from "@playwright/test";
+import {
+  getMoneyImportSourcePreset,
+  normalizeMoneyImportSourceIdInput,
+  sanitizeMoneyImportSourceKey,
+} from "./money-import-sources";
 
 interface CliArgs {
   artifactRoot: string;
   sessionName: string;
   waitSeconds: number;
   sourceId: string;
-  sourceKey: string;
-  targetUrl: string;
-  apiUrlRegex: string;
-}
-
-interface SourcePreset {
   sourceKey: string;
   targetUrl: string;
   apiUrlRegex: string;
@@ -39,34 +38,12 @@ function getArgValue(argv: string[], key: string): string | undefined {
   return argv[index + 1];
 }
 
-function sanitizeSourceKey(sourceId: string): string {
-  const normalized = sourceId.trim().toLowerCase();
-  const withoutSuffix = normalized.replace(/_web$/, "").replace(/-web$/, "");
-  return withoutSuffix.replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "source";
-}
-
-function getSourcePreset(sourceId: string): SourcePreset {
-  if (sourceId === "tbank_web") {
-    return {
-      sourceKey: "tbank",
-      targetUrl: "https://www.tbank.ru/mybank/operations/",
-      apiUrlRegex: "https://(?:www\\.)?tbank\\.ru/api/common/v1/",
-    };
-  }
-
-  return {
-    sourceKey: sanitizeSourceKey(sourceId),
-    targetUrl: "",
-    apiUrlRegex: "",
-  };
-}
-
 function parseArgs(argv: string[]): CliArgs {
-  const sourceId = (getArgValue(argv, "--source") ?? "tbank_web").trim();
-  const preset = getSourcePreset(sourceId);
+  const sourceId = normalizeMoneyImportSourceIdInput(getArgValue(argv, "--source") ?? "tbank_web");
+  const preset = getMoneyImportSourcePreset(sourceId);
   const parsed: CliArgs = {
     artifactRoot: path.resolve(process.cwd(), ".tmp", "scraper-debug", preset.sourceKey),
-    sessionName: "api-capture",
+    sessionName: `${preset.sourceKey}-api-capture`,
     waitSeconds: 0,
     sourceId,
     sourceKey: preset.sourceKey,
@@ -97,7 +74,7 @@ function parseArgs(argv: string[]): CliArgs {
       continue;
     }
     if (token === "--source" && argv[index + 1]) {
-      parsed.sourceId = argv[index + 1].trim();
+      parsed.sourceId = normalizeMoneyImportSourceIdInput(argv[index + 1]);
       index += 1;
       continue;
     }
@@ -117,8 +94,8 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  parsed.sourceId = parsed.sourceId.trim();
-  parsed.sourceKey = parsed.sourceKey.trim() || sanitizeSourceKey(parsed.sourceId);
+  parsed.sourceId = normalizeMoneyImportSourceIdInput(parsed.sourceId);
+  parsed.sourceKey = parsed.sourceKey.trim() || sanitizeMoneyImportSourceKey(parsed.sourceId);
   if (!artifactRootOverridden) {
     parsed.artifactRoot = path.resolve(process.cwd(), ".tmp", "scraper-debug", parsed.sourceKey);
   }
@@ -201,6 +178,7 @@ async function main(): Promise<void> {
 
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
+    ignoreDefaultArgs: ["--disable-extensions"],
   });
 
   const captures: ApiCaptureEntry[] = [];

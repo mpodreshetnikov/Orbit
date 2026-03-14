@@ -63,6 +63,7 @@ export function randomSessionToken(): string {
 
 export function normalizeSourceForTransactions(source: string): string {
   if (source === "tbank_web") return "tbank";
+  if (source === "alfa_web") return "alfa";
   return source;
 }
 
