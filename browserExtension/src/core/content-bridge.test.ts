@@ -6,7 +6,7 @@ import { createContentBridge } from "./content-bridge.js";
 describe("content-bridge", () => {
   it("relays ping from window to runtime and sends pong", () => {
     const runtimeSendMessage = vi.fn((_message, callback) => {
-      callback?.({ ok: true });
+      callback?.({ ok: true, extension_id: "unit-test", extension_version: "0.1.1" });
     });
     const windowPostMessage = vi.fn();
     const bridge = createContentBridge({
@@ -34,6 +34,8 @@ describe("content-bridge", () => {
         source: "orbit-extension",
         type: "MONEY_IMPORT_PONG",
         ts: 123,
+        extension_id: "unit-test",
+        extension_version: "0.1.1",
       },
       "*",
     );

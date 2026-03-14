@@ -12,17 +12,42 @@
 Notes:
 
 - GitHub Actions jobs run in environment `production`.
-- Deploy jobs are gated by `secrets-scan` and `quality-and-db-artifacts`.
+- Deploy jobs are gated by `secrets-scan` and `quality-gates`.
 - Configure GitHub Actions Vercel values:
   - Secrets: `VERCEL_TOKEN`
   - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
 - Configure GitHub Actions Supabase values:
   - Secrets: `SUPABASE_ACCESS_TOKEN`, `SUPABASEDBPASS`
   - Variables: `SUPABASE_PROJECT_REF`
+- Configure GitHub Actions extension release values:
+  - Secret: `SUPABASE_PRODUCTION_SERVICE_ROLE_KEY`
+  - Variables: `SUPABASE_PROJECT_REF` and either `NEXT_PUBLIC_APP_ORIGIN` or `NEXT_PUBLIC_APP_ORIGINS`
 - Disable Vercel's automatic Git deploy integration if you want GitHub Actions to be the only deployment trigger.
 - Command execution policy (including avoiding `npm run` for project workflows) is canonical in `docs/QUALITY.md`.
 - MCP setup instructions are in `mcp/README.md`.
 - Observability stack setup (local LGTM + cloud + MCP queries) is in `docs/observability/README.md`.
+
+## Chrome Extension Release Operations
+
+- Release source of truth: `browserExtension/manifest.json` `version`.
+- Public storage contract:
+  - bucket: `extension-releases`
+  - artifact path: `releases/<version>/orbit-extension-<version>.zip`
+  - latest metadata path: `latest.json`
+- CI flow:
+  - `quality-gates` fails if packaged extension files change without a manifest version bump.
+  - `extension-release-bundle` runs when the manifest version changes and uploads the versioned ZIP + `latest.json` as a workflow artifact.
+  - `publish-extension-release` runs only on `main` and uploads the prepared bundle to Supabase Storage.
+- Local/manual operator flow:
+  - run `extension-release-build`
+  - inspect `.artifacts/extension-release/`
+  - run `extension-release-publish`
+- Required env for manual release commands:
+  - `NEXT_PUBLIC_APP_ORIGIN` or `NEXT_PUBLIC_APP_ORIGINS`
+  - `NEXT_PUBLIC_SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+- The production website reads the published metadata through `/api/extension-release/latest` and redirects downloads through `/api/extension-release/latest/download`.
+- Consumer Chrome cannot be silently installed from an arbitrary website. The supported production UX is one-click download plus manual Chrome Developer Mode installation/update steps.
 
 ## Triage Checklist
 

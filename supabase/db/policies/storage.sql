@@ -1,3 +1,33 @@
+-- Idempotent storage bucket definitions.
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'medical-attachments',
+  'medical-attachments',
+  false,
+  20971520,
+  ARRAY['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'application/pdf']
+)
+ON CONFLICT (id) DO UPDATE
+SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'extension-releases',
+  'extension-releases',
+  true,
+  52428800,
+  ARRAY['application/zip', 'application/json']
+)
+ON CONFLICT (id) DO UPDATE
+SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
+
 -- Policies for storage.objects (medical-attachments bucket)
 
 DROP POLICY IF EXISTS "storage_medical_attachments_insert" ON storage.objects;

@@ -79,6 +79,19 @@ Every behavior change must update tests in the same change set.
 - Keep `supabase/tests/coverage-map.json` current when DB object naming does not map cleanly to pgTAP test file names.
 - If no automated test change is required, include an explicit rationale in PR evidence (`why-no-test-change` note).
 
+## Extension Release Policy
+
+`browserExtension/manifest.json` `version` is the canonical Chrome extension release version.
+
+- When packaged extension surfaces change, the same change set must bump `browserExtension/manifest.json` `version`.
+- Packaged extension surfaces are:
+  - `browserExtension/**`
+  - `scripts/extension/**`
+  - `vite.config.extension.ts`
+- CI enforces the rule with `extension-release-check-version`.
+- When the manifest version changes, build the release bundle with `extension-release-build`.
+- Production publication uses `extension-release-publish` and updates the public `extension-releases` bucket metadata consumed by the web app.
+
 ## Change-Type Check Matrix
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.

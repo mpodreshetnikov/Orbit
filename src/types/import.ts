@@ -157,6 +157,9 @@ export interface MoneyFileImportConnector extends MoneyImportConnectorBase {
 /** Extension connector contract (parsing is done in extension) */
 export interface MoneyExtensionImportConnector extends MoneyImportConnectorBase {
   kind: "extension";
+  release?: {
+    latestDownloadUrl?: string;
+  };
 }
 
 export type MoneyImportConnector = MoneyFileImportConnector | MoneyExtensionImportConnector;

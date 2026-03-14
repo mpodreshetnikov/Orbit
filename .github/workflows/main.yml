@@ -38,6 +38,10 @@ jobs:
   quality-gates:
     name: Quality Gates
     runs-on: ubuntu-latest
+    outputs:
+      extension_impact: ${{ steps.impact.outputs.extensionImpact }}
+      extension_version_changed: ${{ steps.extension-version-policy.outputs.versionChanged }}
+      extension_next_version: ${{ steps.extension-version-policy.outputs.nextVersion }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,6 +82,36 @@ jobs:
           fi
 
           node scripts/just/change-impact.cjs --from "$FROM" --to "$TO" --format github-output --output-file "$GITHUB_OUTPUT"
+      - name: Detect extension release policy
+        id: extension-version-policy
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="$(node -p "require('./browserExtension/manifest.json').version")"
+            {
+              echo "versionChanged=true"
+              echo "requiresVersionBump=false"
+              echo "previousVersion=$VERSION"
+              echo "nextVersion=$VERSION"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            FROM="${{ github.event.pull_request.base.sha }}"
+            TO="${{ github.event.pull_request.head.sha }}"
+          else
+            FROM="${{ github.event.before }}"
+            TO="${{ github.sha }}"
+          fi
+
+          npx tsx scripts/extension/release.ts check-version-bump --from "$FROM" --to "$TO" --format github-output --output-file "$GITHUB_OUTPUT"
+      - name: Enforce extension manifest version bump
+        if: steps.extension-version-policy.outputs.requiresVersionBump == 'true'
+        shell: bash
+        run: |
+          echo "Extension release surfaces changed without a browserExtension/manifest.json version bump."
+          exit 1
       - name: Run quality (format, lint, typecheck)
         run: just quality
       - name: Restore Supabase Docker image cache
@@ -163,8 +197,71 @@ jobs:
       - name: Test and coverage
         run: just test-unit-coverage && just coverage-check
 
-  deploy-vercel-production:
+  extension-release-bundle:
     needs: [secrets-scan, quality-gates]
+    if: needs.quality-gates.outputs.extension_version_changed == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    name: Extension Release Bundle
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_APP_ORIGIN: ${{ vars.NEXT_PUBLIC_APP_ORIGIN }}
+      NEXT_PUBLIC_APP_ORIGINS: ${{ vars.NEXT_PUBLIC_APP_ORIGINS }}
+      NEXT_PUBLIC_SUPABASE_URL: https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@just
+      - name: Install dependencies
+        run: npm ci
+      - name: Skip extension bundle when manifest version is unchanged
+        if: needs.quality-gates.outputs.extension_version_changed != 'true'
+        run: echo "Extension manifest version unchanged; skipping release bundle build."
+      - name: Build versioned extension release bundle
+        if: needs.quality-gates.outputs.extension_version_changed == 'true'
+        run: just extension-release-build
+      - name: Upload extension release artifact
+        if: needs.quality-gates.outputs.extension_version_changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-extension-release-${{ needs.quality-gates.outputs.extension_next_version }}
+          path: .artifacts/extension-release
+          if-no-files-found: error
+
+  publish-extension-release:
+    needs: [secrets-scan, quality-gates, extension-release-bundle]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Publish Extension Release
+    environment: production
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_APP_ORIGIN: ${{ vars.NEXT_PUBLIC_APP_ORIGIN }}
+      NEXT_PUBLIC_APP_ORIGINS: ${{ vars.NEXT_PUBLIC_APP_ORIGINS }}
+      NEXT_PUBLIC_SUPABASE_URL: https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@just
+      - name: Install dependencies
+        run: npm ci
+      - name: Skip extension release publish when manifest version is unchanged
+        if: needs.quality-gates.outputs.extension_version_changed != 'true'
+        run: echo "Extension manifest version unchanged; skipping release publish."
+      - name: Download extension release artifact
+        if: needs.quality-gates.outputs.extension_version_changed == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: chrome-extension-release-${{ needs.quality-gates.outputs.extension_next_version }}
+          path: .artifacts/extension-release
+      - name: Publish extension release to Supabase Storage
+        if: needs.quality-gates.outputs.extension_version_changed == 'true'
+        run: just extension-release-publish
+
+  deploy-vercel-production:
+    needs: [secrets-scan, quality-gates, publish-extension-release]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -188,7 +285,7 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
-    needs: [secrets-scan, quality-gates]
+    needs: [secrets-scan, quality-gates, publish-extension-release]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production

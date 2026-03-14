@@ -13,6 +13,9 @@ const tbankWebConnector = {
   kind: "extension" as const,
   websiteUrl: "https://www.tbank.ru/mybank/",
   guideUrl: "https://www.tbank.ru/mybank/",
+  release: {
+    latestDownloadUrl: "/api/extension-release/latest/download",
+  },
 };
 
 registerConnector(tbankWebConnector);

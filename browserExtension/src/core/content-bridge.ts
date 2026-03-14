@@ -3,7 +3,15 @@ const BRIDGE_SOURCE = "orbit-extension";
 
 type RuntimeSendMessage = (
   message: Record<string, unknown>,
-  callback?: (response: { ok?: boolean } | undefined) => void,
+  callback?: (
+    response:
+      | {
+          ok?: boolean;
+          extension_id?: string;
+          extension_version?: string;
+        }
+      | undefined,
+  ) => void,
 ) => void;
 
 type WindowPostMessage = (message: Record<string, unknown>, targetOrigin: string) => void;
@@ -23,12 +31,18 @@ export function createContentBridge(deps: ContentBridgeDeps) {
     if (!data || data.source !== WEBAPP_SOURCE) return;
 
     if (data.type === "MONEY_IMPORT_PING") {
-      deps.runtimeSendMessage({ type: "MONEY_IMPORT_PING" }, () => {
+      deps.runtimeSendMessage({ type: "MONEY_IMPORT_PING" }, (response) => {
         deps.windowPostMessage(
           {
             source: BRIDGE_SOURCE,
             type: "MONEY_IMPORT_PONG",
             ts: nowMs(),
+            extension_id:
+              typeof response?.extension_id === "string" ? response.extension_id : undefined,
+            extension_version:
+              typeof response?.extension_version === "string"
+                ? response.extension_version
+                : undefined,
           },
           "*",
         );

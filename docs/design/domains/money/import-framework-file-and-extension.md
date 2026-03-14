@@ -67,6 +67,23 @@ Document the end-to-end import architecture including connector parsing, extensi
 4. Every apply operation should emit row-level result statuses for traceability.
 5. Extension and web connectors must keep source IDs aligned.
 
+## Production Extension Install And Update Behavior
+
+- Development/local (`localhost`, `127.0.0.1`) keeps the existing dev-install instructions.
+- Production install/update metadata is published in Supabase Storage bucket `extension-releases` and served via:
+  - `GET /api/extension-release/latest`
+  - `GET /api/extension-release/latest/download`
+- Extension bridge ping/pong includes runtime identity:
+  - `extension_id`
+  - `extension_version`
+- Money import production UX for extension connectors:
+  - shows a direct download CTA for the latest published ZIP
+  - shows manual Chrome installation/update steps (Developer mode + extract ZIP + Load unpacked)
+  - shows installed version and latest available version when the extension is detected
+  - shows a soft update prompt when installed version is older than the published version
+  - keeps import non-blocking; outdated extension warns but does not prevent starting import
+- Automatic silent install is not supported for consumer Chrome from the website. The supported flow is download + manual install/update.
+
 ## Anti-Patterns To Avoid
 
 - Source-specific persistence logic bypassing canonical shape.

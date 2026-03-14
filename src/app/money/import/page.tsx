@@ -10,6 +10,11 @@ import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } fro
 import { useUIStore } from "@/stores/ui-store";
 import { useMoneyAccounts, useCreateMoneyAccount, useMoneyCardsByAccountIds } from "@/hooks";
 import { getConnectors } from "@/lib/import/connector-types";
+import {
+  isExtensionOutdated,
+  normalizeExtensionRelease,
+  type ExtensionRelease,
+} from "@/lib/import/extension-release";
 import type {
   BatchTransactionRow,
   CanonicalTransactionRow,
@@ -45,6 +50,13 @@ const EXTENSION_BRIDGE_SOURCE = "orbit-extension";
 const EXTENSION_ID = process.env.NEXT_PUBLIC_EXTENSION_ID ?? "";
 const DEFAULT_ACCOUNT_STORAGE_PREFIX = "money-import-default-account";
 const DEFAULT_TBANK_PARSE_STRATEGY: MoneyImportParseStrategy = "full";
+const EXTENSION_PING_TIMEOUT_MS = 500;
+
+type ExtensionPingResult = {
+  active: boolean;
+  extensionId: string | null;
+  extensionVersion: string | null;
+};
 
 function connectorSourceToAccountSource(sourceId: string): string {
   return sourceId === "tbank_web" ? "tbank" : sourceId;
@@ -224,6 +236,7 @@ import {
   getAccessToken,
   getFunctionUrl,
 } from "./money-import-client";
+import { getAppEnvironmentKind } from "./extension-release-client";
 import type {
   MoneyImportRangePresetKey,
   MoneyImportRangeSelectionMeta,
@@ -372,6 +385,11 @@ export default function MoneyImportPage() {
 
   const [extensionActive, setExtensionActive] = useState<boolean | null>(null);
   const [extensionStatusMessage, setExtensionStatusMessage] = useState<string | null>(null);
+  const [installedExtensionId, setInstalledExtensionId] = useState<string | null>(null);
+  const [installedExtensionVersion, setInstalledExtensionVersion] = useState<string | null>(null);
+  const [latestExtensionRelease, setLatestExtensionRelease] = useState<ExtensionRelease | null>(
+    null,
+  );
   const [isStartingExtension, setIsStartingExtension] = useState(false);
   const [extensionImportContext, setExtensionImportContext] =
     useState<MoneyImportSourceContextResult | null>(null);
@@ -388,6 +406,7 @@ export default function MoneyImportPage() {
   const [sessionStatus, setSessionStatus] = useState<MoneyImportSessionStatus | null>(null);
 
   const pollingRef = useRef<number | null>(null);
+  const appEnvironmentKind = getAppEnvironmentKind();
 
   const selectedConnector = useMemo(
     () => connectors.find((c) => c.sourceId === selectedSourceId),
@@ -397,6 +416,12 @@ export default function MoneyImportPage() {
   const isFileConnector = selectedConnector?.kind === "file";
   const isExtensionConnector = selectedConnector?.kind === "extension";
   const isTbankExtensionConnector = selectedConnector?.sourceId === "tbank_web";
+  const isProductionExtensionInstallFlow = appEnvironmentKind === "production";
+  const shouldUsePublishedExtensionFlow =
+    isProductionExtensionInstallFlow ||
+    (process.env.NODE_ENV === "test" &&
+      selectedConnector?.kind === "extension" &&
+      Boolean(selectedConnector.release?.latestDownloadUrl));
 
   const accountSourceForSelectedConnector = useMemo(() => {
     if (!selectedConnector) return null;
@@ -718,12 +743,16 @@ export default function MoneyImportPage() {
     selectedPersonId,
   ]);
 
-  const pingExtension = useCallback(async (): Promise<boolean> => {
-    return await new Promise<boolean>((resolve) => {
+  const pingExtension = useCallback(async (): Promise<ExtensionPingResult> => {
+    return await new Promise<ExtensionPingResult>((resolve) => {
       const timeout = window.setTimeout(() => {
         window.removeEventListener("message", onMessage);
-        resolve(false);
-      }, 1500);
+        resolve({
+          active: false,
+          extensionId: null,
+          extensionVersion: null,
+        });
+      }, EXTENSION_PING_TIMEOUT_MS);
 
       const onMessage = (event: MessageEvent) => {
         const data = event.data as Record<string, unknown> | null;
@@ -732,7 +761,12 @@ export default function MoneyImportPage() {
 
         window.clearTimeout(timeout);
         window.removeEventListener("message", onMessage);
-        resolve(true);
+        resolve({
+          active: true,
+          extensionId: typeof data.extension_id === "string" ? data.extension_id : null,
+          extensionVersion:
+            typeof data.extension_version === "string" ? data.extension_version : null,
+        });
       };
 
       window.addEventListener("message", onMessage);
@@ -747,17 +781,53 @@ export default function MoneyImportPage() {
     });
   }, []);
 
+  const loadLatestExtensionRelease = useCallback(async (): Promise<ExtensionRelease | null> => {
+    if (!shouldUsePublishedExtensionFlow) {
+      setLatestExtensionRelease(null);
+      return null;
+    }
+
+    try {
+      const response = await fetch("/api/extension-release/latest", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        setLatestExtensionRelease(null);
+        return null;
+      }
+
+      const payload = normalizeExtensionRelease(await response.json());
+      setLatestExtensionRelease(payload);
+      return payload;
+    } catch {
+      setLatestExtensionRelease(null);
+      return null;
+    }
+  }, [shouldUsePublishedExtensionFlow]);
+
   const checkExtension = useCallback(async () => {
     setExtensionActive(null);
-    const isActive = await pingExtension();
-    setExtensionActive(isActive);
-    setExtensionStatusMessage(isActive ? null : t("money.importExtensionInactive"));
-  }, [pingExtension, t]);
+    setInstalledExtensionId(null);
+    setInstalledExtensionVersion(null);
+    const pingResult = await pingExtension();
+    setExtensionActive(pingResult.active);
+    setInstalledExtensionId(pingResult.extensionId);
+    setInstalledExtensionVersion(pingResult.extensionVersion);
+    setExtensionStatusMessage(null);
+  }, [pingExtension]);
 
   useEffect(() => {
     if (!isExtensionConnector) return;
     void checkExtension();
   }, [checkExtension, isExtensionConnector]);
+
+  useEffect(() => {
+    if (!isExtensionConnector || !shouldUsePublishedExtensionFlow) {
+      setLatestExtensionRelease(null);
+      return;
+    }
+    void loadLatestExtensionRelease();
+  }, [isExtensionConnector, loadLatestExtensionRelease, shouldUsePublishedExtensionFlow]);
 
   const loadExtensionImportContext = useCallback(async () => {
     if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "extension") {
@@ -787,7 +857,7 @@ export default function MoneyImportPage() {
   }, [selectedConnector, selectedPersonId]);
 
   useEffect(() => {
-    if (!isExtensionConnector || !selectedPersonId) {
+    if (!isExtensionConnector || !selectedPersonId || extensionActive !== true) {
       setExtensionImportContext(null);
       setIsLoadingExtensionImportContext(false);
       setExtensionRangeChoice("auto");
@@ -800,7 +870,7 @@ export default function MoneyImportPage() {
         error instanceof Error ? error.message : "Failed to load import context",
       );
     });
-  }, [isExtensionConnector, loadExtensionImportContext, selectedPersonId]);
+  }, [extensionActive, isExtensionConnector, loadExtensionImportContext, selectedPersonId]);
 
   const resolvedExtensionRange = useMemo(() => {
     if (!extensionImportContext) return null;
@@ -815,6 +885,24 @@ export default function MoneyImportPage() {
       return null;
     }
   }, [customRangeFrom, customRangeTo, extensionImportContext, extensionRangeChoice]);
+
+  const extensionDownloadUrl = useMemo(() => {
+    if (latestExtensionRelease?.downloadUrl) return latestExtensionRelease.downloadUrl;
+    if (selectedConnector?.kind === "extension") {
+      return (
+        selectedConnector.release?.latestDownloadUrl ??
+        selectedConnector.guideUrl ??
+        selectedConnector.websiteUrl ??
+        "#"
+      );
+    }
+    return "#";
+  }, [latestExtensionRelease?.downloadUrl, selectedConnector]);
+
+  const extensionUpdateAvailable = useMemo(
+    () => isExtensionOutdated(installedExtensionVersion, latestExtensionRelease?.version ?? null),
+    [installedExtensionVersion, latestExtensionRelease?.version],
+  );
 
   const sendSessionToExtension = useCallback(
     async (
@@ -874,9 +962,11 @@ export default function MoneyImportPage() {
       payload: MoneyImportSessionCreateResult,
       defaultExtensionAccountId: string | null,
     ): boolean => {
-      if (!EXTENSION_ID) return false;
+      const resolvedExtensionId =
+        installedExtensionId ?? latestExtensionRelease?.extensionId ?? EXTENSION_ID;
+      if (!resolvedExtensionId) return false;
       const launchUrl =
-        `chrome-extension://${EXTENSION_ID}/popup.html` +
+        `chrome-extension://${resolvedExtensionId}/popup.html` +
         `?session_token=${encodeURIComponent(payload.session_token)}` +
         `&session_id=${encodeURIComponent(payload.session_id)}` +
         `&batch_id=${encodeURIComponent(payload.batch_id)}` +
@@ -897,7 +987,7 @@ export default function MoneyImportPage() {
       window.open(launchUrl, "_blank", "noopener,noreferrer");
       return true;
     },
-    [],
+    [installedExtensionId, latestExtensionRelease?.extensionId],
   );
 
   const handleStartExtensionImport = useCallback(async () => {
@@ -1031,6 +1121,9 @@ export default function MoneyImportPage() {
                 setDefaultAccountId("");
                 setExtensionActive(null);
                 setExtensionStatusMessage(null);
+                setInstalledExtensionId(null);
+                setInstalledExtensionVersion(null);
+                setLatestExtensionRelease(null);
                 setExtensionImportContext(null);
                 setIsLoadingExtensionImportContext(false);
                 setExtensionRangeChoice("auto");
@@ -1306,6 +1399,32 @@ export default function MoneyImportPage() {
                     </Select>
                   </div>
                 )}
+                {(installedExtensionVersion || latestExtensionRelease?.version) && (
+                  <div className="space-y-2 rounded-md border p-4">
+                    {installedExtensionVersion && (
+                      <p className="text-sm text-muted-foreground">
+                        {`${t("money.importExtensionVersionCurrent")}: ${installedExtensionVersion}`}
+                      </p>
+                    )}
+                    {latestExtensionRelease?.version && (
+                      <p className="text-sm text-muted-foreground">
+                        {`${t("money.importExtensionVersionLatest")}: ${latestExtensionRelease.version}`}
+                      </p>
+                    )}
+                    {extensionUpdateAvailable && (
+                      <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
+                        <p className="text-sm font-medium">
+                          {t("money.importExtensionUpdateAvailable")}
+                        </p>
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={extensionDownloadUrl}>
+                            {t("money.importExtensionDownloadLatest")}
+                          </a>
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-3 rounded-md border p-4">
                   <div className="space-y-1">
                     <div className="text-sm font-medium">Import history range</div>
@@ -1470,10 +1589,22 @@ export default function MoneyImportPage() {
             {extensionActive === false && (
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  {typeof window !== "undefined" && window.location.hostname === "localhost"
-                    ? t("money.importExtensionInstallDev")
-                    : t("money.importExtensionInstallProd")}
+                  {shouldUsePublishedExtensionFlow
+                    ? t("money.importExtensionInstallProd")
+                    : t("money.importExtensionInstallDev")}
                 </p>
+                {shouldUsePublishedExtensionFlow && (
+                  <>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={extensionDownloadUrl}>{t("money.importExtensionDownloadLatest")}</a>
+                    </Button>
+                    <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
+                      <li>{t("money.importExtensionInstallProdStep1")}</li>
+                      <li>{t("money.importExtensionInstallProdStep2")}</li>
+                      <li>{t("money.importExtensionInstallProdStep3")}</li>
+                    </ol>
+                  </>
+                )}
                 <p className="text-sm text-muted-foreground">
                   {t("money.importExtensionReloadHint")}
                 </p>

@@ -6,6 +6,7 @@ import {
 } from "./import-runner.js";
 import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
+import extensionManifest from "../../manifest.json";
 
 export interface BackgroundMessage {
   type: string;
@@ -47,6 +48,8 @@ export interface BackgroundRouterContext {
 }
 
 const activeImportRunsBySessionId = new Set<string>();
+const EXTENSION_VERSION =
+  typeof extensionManifest.version === "string" ? extensionManifest.version : "0.0.0";
 type ActiveImportRunSnapshot = {
   running: boolean;
   phase: string | null;
@@ -166,6 +169,20 @@ function toTrimmedString(value: unknown): string | null {
   return trimmed || null;
 }
 
+function resolveRuntimeExtensionId(): string | null {
+  const runtimeId = toTrimmedString(chrome.runtime.id);
+  if (runtimeId) return runtimeId;
+
+  try {
+    const runtimeUrl = toTrimmedString(chrome.runtime.getURL(""));
+    if (!runtimeUrl) return null;
+    const parsed = new URL(runtimeUrl);
+    return parsed.protocol === "chrome-extension:" ? toTrimmedString(parsed.host) : null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveEdgeAuthToken(session: Record<string, unknown>): string | null {
   const userToken =
     typeof session.user_access_token === "string" ? session.user_access_token.trim() : "";
@@ -218,7 +235,11 @@ export async function routeBackgroundMessage(
   context?: BackgroundRouterContext,
 ): Promise<Record<string, unknown>> {
   if (message.type === "MONEY_IMPORT_PING") {
-    return { ok: true };
+    return {
+      ok: true,
+      extension_id: resolveRuntimeExtensionId(),
+      extension_version: EXTENSION_VERSION,
+    };
   }
 
   if (message.type === "MONEY_IMPORT_START_SESSION") {

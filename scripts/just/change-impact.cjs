@@ -36,8 +36,11 @@ function classifyChangedFiles(changedFiles) {
     (filePath) =>
       filePath.startsWith("src/") || filePath.startsWith("shared/") || filePath.startsWith("e2e/"),
   );
-  const extensionImpact = normalizedChangedFiles.some((filePath) =>
-    filePath.startsWith("browserExtension/"),
+  const extensionImpact = normalizedChangedFiles.some(
+    (filePath) =>
+      filePath.startsWith("browserExtension/") ||
+      filePath.startsWith("scripts/extension/") ||
+      filePath === "vite.config.extension.ts",
   );
   const functionsImpact = normalizedChangedFiles.some((filePath) =>
     filePath.startsWith("supabase/functions/"),

@@ -32,6 +32,18 @@ extension-dev-watch:
 extension-build-production:
   npx tsx scripts/extension/build.ts --mode=production
 
+# Build the versioned production extension release bundle.
+extension-release-build artifact_dir='.artifacts/extension-release' published_at='':
+  if ("{{published_at}}" -eq "") { npx tsx scripts/extension/release.ts build-artifact --output-dir "{{artifact_dir}}" } else { npx tsx scripts/extension/release.ts build-artifact --output-dir "{{artifact_dir}}" --published-at "{{published_at}}" }
+
+# Publish the prepared production extension release bundle to Supabase Storage.
+extension-release-publish artifact_dir='.artifacts/extension-release':
+  npx tsx scripts/extension/release.ts publish --artifact-dir "{{artifact_dir}}"
+
+# Check whether extension changes in a git range require a manifest version bump.
+extension-release-check-version from to:
+  npx tsx scripts/extension/release.ts check-version-bump --from "{{from}}" --to "{{to}}"
+
 # Money-import live debug: run extension scraper for any source (auto-detects auth).
 # Agent note: if an auth gate appears, ask a human to pass it; do not stop. Use a short --wait-for-manual <seconds> (e.g. 5–10) to quickly see if a human is needed without waiting long (run the script directly to pass it).
 extension-debug-live source='tbank_web' wait='':

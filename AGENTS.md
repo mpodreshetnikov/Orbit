@@ -18,6 +18,9 @@ Use these command IDs in plans, PRs, and handoffs:
 - `extension-debug-live-full`: `just extension-debug-live-full [source_id] [wait_seconds]` (money-import live debug full run with edge apply/complete. **On auth gate: ask human to pass it; do not stop.** Optional short `wait_seconds` to probe for auth without waiting long.)
 - `extension-debug-analyze`: `just extension-debug-analyze [source_id] [artifact_dir_or_file]` (source-parameterized analyzer with machine diagnostics; defaults to latest artifact when path omitted)
 - `extension-debug-report`: `just extension-debug-report [source_id] [artifact_dir_or_file]` (source-parameterized human-readable report + CSV preview; defaults to latest artifact when path omitted)
+- `extension-release-build`: `just extension-release-build [artifact_dir] [published_at]` (build production extension ZIP + `latest.json` release metadata under `.artifacts/extension-release` by default)
+- `extension-release-publish`: `just extension-release-publish [artifact_dir]` (upload prepared production extension release bundle to Supabase Storage; requires release env vars/secrets)
+- `extension-release-check-version`: `just extension-release-check-version <from> <to>` (fail CI/manual checks when packaged extension files change without a manifest version bump; canonical policy in `docs/QUALITY.md`)
 - `obs-up`: `just obs-up` (start local Grafana LGTM stack)
 - `obs-down`: `just obs-down` (stop local Grafana LGTM stack)
 - `format-check`: `just quality-format-check`
