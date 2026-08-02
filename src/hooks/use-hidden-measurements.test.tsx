@@ -37,13 +37,21 @@ function prefsRow(hidden: Record<string, string[]>) {
  * Stateful fake: an upsert updates the row that later reads return, so a
  * refetch after a mutation sees what was actually written. A static fake would
  * always replay the original row and make the optimistic path untestable.
+ *
+ * With `rowExists: false` the user has never saved a preference, so reads
+ * return no row until the first upsert creates one.
  */
-function createSupabaseClient(hidden: Record<string, string[]>) {
+function createSupabaseClient(
+  hidden: Record<string, string[]>,
+  { rowExists = true }: { rowExists?: boolean } = {},
+) {
   const result = { data: prefsRow(hidden), error: null };
+  let created = rowExists;
   const builder = createQueryBuilder(result) as ReturnType<typeof createQueryBuilder> & {
-    upsert?: ReturnType<typeof vi.fn>;
+    upsert: ReturnType<typeof vi.fn>;
   };
   builder.upsert = vi.fn((payload: Record<string, unknown>) => {
+    created = true;
     if (payload.hidden_measurement_codes !== undefined) {
       result.data = {
         ...result.data,
@@ -52,6 +60,9 @@ function createSupabaseClient(hidden: Record<string, string[]>) {
     }
     return builder;
   });
+  builder.maybeSingle = vi.fn(async () =>
+    created ? { data: result.data, error: null } : { data: null, error: null },
+  );
   return {
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }),
@@ -59,6 +70,11 @@ function createSupabaseClient(hidden: Record<string, string[]>) {
     from: vi.fn(() => builder),
     __builder: builder,
   };
+}
+
+/** A user who has never saved any preference row. */
+function createSupabaseClientWithoutRow() {
+  return createSupabaseClient({}, { rowExists: false });
 }
 
 describe("use-hidden-measurements", () => {
@@ -156,6 +172,53 @@ describe("use-hidden-measurements", () => {
     await waitFor(() =>
       expect(supabase.__builder.upsert).toHaveBeenLastCalledWith(
         { auth_user_id: "user-1", hidden_measurement_codes: { "person-1": ["height", "bmi"] } },
+        { onConflict: "auth_user_id" },
+      ),
+    );
+  });
+
+  it("accumulates rapid toggles when no preferences row exists yet", async () => {
+    // Regression: with no cached row there is nothing to patch optimistically,
+    // so toggles used to each compute from {} and overwrite one another.
+    const supabase = createSupabaseClientWithoutRow();
+    createClientMock.mockReturnValue(supabase);
+
+    const { useHiddenMeasurements } = await import("./use-hidden-measurements");
+    const { result } = renderHookWithQueryClient(() => useHiddenMeasurements("person-1"));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      result.current.toggleHidden("height");
+      result.current.toggleHidden("bmi");
+    });
+
+    await waitFor(() =>
+      expect(supabase.__builder.upsert).toHaveBeenLastCalledWith(
+        { auth_user_id: "user-1", hidden_measurement_codes: { "person-1": ["height", "bmi"] } },
+        { onConflict: "auth_user_id" },
+      ),
+    );
+    expect([...result.current.hiddenCodes].sort()).toEqual(["bmi", "height"]);
+  });
+
+  it("toggles a code back off on a rapid double-click with no preferences row", async () => {
+    const supabase = createSupabaseClientWithoutRow();
+    createClientMock.mockReturnValue(supabase);
+
+    const { useHiddenMeasurements } = await import("./use-hidden-measurements");
+    const { result } = renderHookWithQueryClient(() => useHiddenMeasurements("person-1"));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      result.current.toggleHidden("height");
+      result.current.toggleHidden("height");
+    });
+
+    await waitFor(() =>
+      expect(supabase.__builder.upsert).toHaveBeenLastCalledWith(
+        { auth_user_id: "user-1", hidden_measurement_codes: {} },
         { onConflict: "auth_user_id" },
       ),
     );

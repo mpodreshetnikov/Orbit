@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import {
@@ -10,7 +10,6 @@ import {
   type HiddenMeasurementCodes,
 } from "@/lib/measurement-visibility";
 import { useUserPreferences, USER_PREFERENCES_QUERY_KEY } from "./use-user-preferences";
-import type { UserPreferences } from "@/types";
 
 async function persistHiddenMeasurementCodes(
   hidden: HiddenMeasurementCodes,
@@ -38,22 +37,40 @@ async function persistHiddenMeasurementCodes(
 /**
  * Hidden measurement types for one person, plus a toggle.
  *
- * The optimistic cache write in `onMutate` is a correctness requirement, not
- * polish: the whole jsonb blob is read-modify-written, so without it a second
- * toggle fired before the first settles would read pre-toggle state and drop
- * the earlier change.
+ * The whole jsonb blob is read-modify-written, so each toggle must build on the
+ * result of the previous one rather than on whatever the server last returned.
+ * `pendingHidden` holds that locally-known-latest map: it is set synchronously
+ * on every toggle and only cleared once the last in-flight write has settled
+ * and the refetch behind it has landed. Without it, a second toggle fired
+ * before the first settles would read pre-toggle state and drop the earlier
+ * change -- including on the very first write, where there is no cached
+ * preferences row to patch at all.
+ *
+ * It also doubles as the optimistic UI: `hiddenCodes` reads through it, so the
+ * card disappears on click rather than after the round trip.
  *
  * This deliberately does not reuse `useUpdateUserPreferences` -- that hook is
  * shared with the settings and medications pages, which should not inherit
  * optimistic behavior.
+ *
+ * Note this makes concurrent toggles safe within one tab only. Two tabs, or
+ * responses arriving out of order, can still lose a write, because the upsert
+ * replaces the document rather than merging server-side.
  */
 export function useHiddenMeasurements(personId: string | null) {
   const queryClient = useQueryClient();
   const { data: preferences, isLoading } = useUserPreferences();
+  const [pendingHidden, setPendingHidden] = useState<HiddenMeasurementCodes | null>(null);
+  const inFlight = useRef(0);
+  // Mirrors pendingHidden, but updated synchronously: two toggles fired in the
+  // same tick share one `toggleHidden` closure and would otherwise both compute
+  // from the same pre-toggle base, so the second would overwrite the first.
+  const pendingRef = useRef<HiddenMeasurementCodes | null>(null);
 
+  const serverHidden = preferences?.hidden_measurement_codes;
   const allHidden = useMemo(
-    () => preferences?.hidden_measurement_codes ?? {},
-    [preferences?.hidden_measurement_codes],
+    () => pendingHidden ?? serverHidden ?? {},
+    [pendingHidden, serverHidden],
   );
 
   const hiddenCodes = useMemo(
@@ -63,28 +80,20 @@ export function useHiddenMeasurements(personId: string | null) {
 
   const mutation = useMutation({
     mutationFn: persistHiddenMeasurementCodes,
-    onMutate: async (next: HiddenMeasurementCodes) => {
-      await queryClient.cancelQueries({ queryKey: [USER_PREFERENCES_QUERY_KEY] });
-      const previous = queryClient.getQueryData<UserPreferences | null>([
-        USER_PREFERENCES_QUERY_KEY,
-      ]);
-      // No cached row yet (first ever preference write): nothing to patch, so
-      // this one toggle falls back to invalidation latency.
-      if (previous) {
-        queryClient.setQueryData<UserPreferences>([USER_PREFERENCES_QUERY_KEY], {
-          ...previous,
-          hidden_measurement_codes: next,
-        });
-      }
-      return { previous };
+    onError: () => {
+      // Drop the optimistic overlay so the list falls back to server state.
+      pendingRef.current = null;
+      setPendingHidden(null);
     },
-    onError: (_error, _next, context) => {
-      if (context?.previous !== undefined) {
-        queryClient.setQueryData([USER_PREFERENCES_QUERY_KEY], context.previous);
+    onSettled: async () => {
+      inFlight.current -= 1;
+      // Await the refetch before clearing, so the list never flashes back to
+      // the pre-toggle value in the gap between clearing and the row landing.
+      await queryClient.invalidateQueries({ queryKey: [USER_PREFERENCES_QUERY_KEY] });
+      if (inFlight.current === 0) {
+        pendingRef.current = null;
+        setPendingHidden(null);
       }
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: [USER_PREFERENCES_QUERY_KEY] });
     },
   });
 
@@ -92,9 +101,14 @@ export function useHiddenMeasurements(personId: string | null) {
   const toggleHidden = useCallback(
     (code: string) => {
       if (!personId) return;
-      mutate(toggleHiddenCode(allHidden, personId, code));
+      const base = pendingRef.current ?? serverHidden ?? {};
+      const next = toggleHiddenCode(base, personId, code);
+      pendingRef.current = next;
+      setPendingHidden(next);
+      inFlight.current += 1;
+      mutate(next);
     },
-    [allHidden, mutate, personId],
+    [mutate, personId, serverHidden],
   );
 
   return {
