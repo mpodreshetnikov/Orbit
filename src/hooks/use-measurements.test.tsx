@@ -98,6 +98,60 @@ describe("use-measurements", () => {
     expect(result.current.data?.[0].history.map((h) => h.id)).toEqual(["m-2", "m-1"]);
   });
 
+  it("orders left/right pairs together using the catalog sort_order", async () => {
+    const limb = (code: string, name_en: string, sort_order: number) => ({
+      code,
+      name_ru: name_en,
+      name_en,
+      unit_ru: "см",
+      unit_en: "cm",
+      category: "limbs",
+      sort_order,
+    });
+
+    // Fed in scrambled; sorting by name alone would put every "Left ..." first.
+    const builder = createQueryBuilder({
+      data: [
+        measurementRow({
+          id: "m-1",
+          catalog_id: "cat-calf-l",
+          measurement_catalog: limb("calf_left", "Left calf", 7),
+        }),
+        measurementRow({
+          id: "m-2",
+          catalog_id: "cat-bicep-r",
+          measurement_catalog: limb("bicep_right", "Right bicep", 2),
+        }),
+        measurementRow({
+          id: "m-3",
+          catalog_id: "cat-bicep-l",
+          measurement_catalog: limb("bicep_left", "Left bicep", 1),
+        }),
+        measurementRow({
+          id: "m-4",
+          catalog_id: "cat-calf-r",
+          measurement_catalog: limb("calf_right", "Right calf", 8),
+        }),
+      ],
+      error: null,
+    });
+    createClientMock.mockReturnValue({
+      from: vi.fn(() => builder),
+    });
+
+    const { usePersonMeasurements } = await import("./use-measurements");
+    const { result } = renderHookWithQueryClient(() => usePersonMeasurements("p1"));
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.map((m) => m.code)).toEqual([
+      "bicep_left",
+      "bicep_right",
+      "calf_left",
+      "calf_right",
+    ]);
+    expect(result.current.data?.[0].sort_order).toBe(1);
+  });
+
   it("returns empty list when no measurements exist", async () => {
     const builder = createQueryBuilder({
       data: [],

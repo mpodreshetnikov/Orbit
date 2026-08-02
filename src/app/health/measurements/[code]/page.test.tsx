@@ -106,6 +106,7 @@ function measurement(overrides: Partial<MeasurementSummary> = {}): MeasurementSu
     unit_ru: "кг",
     unit_en: "kg",
     category: "basic",
+    sort_order: 1,
     latest_value: 73,
     latest_date: "2026-02-22T09:00:00.000Z",
     measurement_count: 2,

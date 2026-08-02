@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { sortByMeasurementOrder } from "@/lib/measurement-order";
 import type {
   MeasurementCatalog,
   CreateMeasurementCatalogInput,
@@ -34,7 +35,9 @@ async function fetchMeasurementCatalog(search?: string): Promise<MeasurementCata
     throw new Error(error.message);
   }
 
-  return (data || []) as MeasurementCatalog[];
+  // Re-sort client-side: the server ordering ties for rows created through the
+  // catalog admin UI, which default sort_order to 0.
+  return sortByMeasurementOrder((data || []) as MeasurementCatalog[]);
 }
 
 export function useMeasurementCatalog(search?: string) {

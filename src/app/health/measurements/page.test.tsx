@@ -48,6 +48,7 @@ function makeMeasurement(overrides: Partial<MeasurementSummary> = {}): Measureme
     unit_ru: "кг",
     unit_en: "kg",
     category: "basic",
+    sort_order: 1,
     latest_value: 70.2,
     latest_date: "2026-01-02",
     measurement_count: 2,
