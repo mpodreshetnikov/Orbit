@@ -7,7 +7,11 @@ import MeasurementsPage from "./page";
 
 const hookMocks = vi.hoisted(() => ({
   usePersonMeasurements: vi.fn(),
+  useHiddenMeasurements: vi.fn(),
 }));
+
+const toggleHidden = vi.fn();
+let hiddenCodesState = new Set<string>();
 
 let selectedPersonIdState: string | null = "person-1";
 
@@ -22,6 +26,7 @@ vi.mock("@/stores/ui-store", () => ({
 
 vi.mock("@/hooks", () => ({
   usePersonMeasurements: (...args: unknown[]) => hookMocks.usePersonMeasurements(...args),
+  useHiddenMeasurements: (...args: unknown[]) => hookMocks.useHiddenMeasurements(...args),
 }));
 
 vi.mock("@/lib/date-locale", () => ({
@@ -76,6 +81,15 @@ describe("MeasurementsPage", () => {
   beforeEach(() => {
     selectedPersonIdState = "person-1";
     document.documentElement.lang = "en";
+    toggleHidden.mockReset();
+    hiddenCodesState = new Set<string>();
+    hookMocks.useHiddenMeasurements.mockReset();
+    hookMocks.useHiddenMeasurements.mockImplementation(() => ({
+      hiddenCodes: hiddenCodesState,
+      toggleHidden,
+      isLoading: false,
+      isToggling: false,
+    }));
   });
 
   it("renders person prompt when no person is selected", () => {
@@ -140,5 +154,128 @@ describe("MeasurementsPage", () => {
     await user.click(screen.getByRole("tab", { name: "measurements.tableView" }));
     expect(screen.getByText("measurements.value")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Weight" }).length).toBeGreaterThan(0);
+  });
+
+  describe("hidden measurements", () => {
+    const weight = makeMeasurement();
+    const height = makeMeasurement({
+      code: "height",
+      catalog_id: "cat-2",
+      name_en: "Height",
+      name_ru: "Рост",
+      unit_en: "cm",
+      unit_ru: "см",
+      sort_order: 2,
+      history: [
+        {
+          id: "h-1",
+          value: 180,
+          measured_at: "2026-01-01T10:00:00.000Z",
+          notes: null,
+          created_at: "2026-01-01T10:00:00.000Z",
+        },
+      ],
+      measurement_count: 1,
+    });
+
+    function renderWith(data = [weight, height]) {
+      hookMocks.usePersonMeasurements.mockReturnValue({ data, isLoading: false, error: null });
+      return render(<MeasurementsPage />);
+    }
+
+    it("omits hidden measurements from the card view", () => {
+      hiddenCodesState = new Set(["height"]);
+      renderWith();
+
+      expect(screen.getByText("Weight")).toBeInTheDocument();
+      expect(screen.queryByText("Height")).not.toBeInTheDocument();
+    });
+
+    it("omits hidden measurements from the table view too", async () => {
+      hiddenCodesState = new Set(["height"]);
+      renderWith();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("tab", { name: "measurements.tableView" }));
+
+      expect(screen.getAllByRole("link", { name: "Weight" }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole("link", { name: "Height" })).not.toBeInTheDocument();
+    });
+
+    it("reveals hidden measurements via the toggle and flips its label", async () => {
+      hiddenCodesState = new Set(["height"]);
+      renderWith();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: /measurements\.showHidden/ }));
+
+      expect(screen.getByText("Height")).toBeInTheDocument();
+      expect(screen.getByText("measurements.hiddenBadge")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /measurements\.hideHidden/ })).toBeInTheDocument();
+    });
+
+    it("does not render the toggle when nothing is hidden", () => {
+      renderWith();
+
+      expect(
+        screen.queryByRole("button", { name: /measurements\.showHidden/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("ignores a hidden code with no matching measurement", () => {
+      // The catalog row was deleted after being hidden: counting hiddenCodes
+      // instead of present measurements would show a toggle revealing nothing.
+      hiddenCodesState = new Set(["gone"]);
+      renderWith();
+
+      expect(
+        screen.queryByRole("button", { name: /measurements\.showHidden/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Weight")).toBeInTheDocument();
+      expect(screen.getByText("Height")).toBeInTheDocument();
+    });
+
+    it("hides without navigating to the detail page", async () => {
+      renderWith([weight]);
+      const user = userEvent.setup();
+
+      let navigated = false;
+      const listener = (event: MouseEvent) => {
+        if (!event.defaultPrevented) navigated = true;
+      };
+      document.addEventListener("click", listener);
+
+      await user.click(screen.getByRole("button", { name: "measurements.hide" }));
+
+      document.removeEventListener("click", listener);
+      expect(toggleHidden).toHaveBeenCalledWith("weight");
+      expect(navigated).toBe(false);
+    });
+
+    it("shows the all-hidden state with a reveal action", async () => {
+      hiddenCodesState = new Set(["weight", "height"]);
+      renderWith();
+      const user = userEvent.setup();
+
+      expect(screen.getByText("measurements.allHidden")).toBeInTheDocument();
+      expect(screen.queryByText("measurements.noData")).not.toBeInTheDocument();
+
+      await user.click(screen.getAllByRole("button", { name: /measurements\.showHidden/ })[0]);
+      expect(screen.getByText("Weight")).toBeInTheDocument();
+    });
+
+    it("re-hides revealed measurements after switching person", async () => {
+      hiddenCodesState = new Set(["height"]);
+      const view = renderWith();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: /measurements\.showHidden/ }));
+      expect(screen.getByText("Height")).toBeInTheDocument();
+
+      selectedPersonIdState = "person-2";
+      view.rerender(<MeasurementsPage />);
+
+      expect(screen.queryByText("Height")).not.toBeInTheDocument();
+    });
   });
 });

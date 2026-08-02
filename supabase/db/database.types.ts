@@ -2237,6 +2237,7 @@ export type Database = {
           checkup_notification_time: string
           checkup_notification_timezone: string | null
           created_at: string
+          hidden_measurement_codes: Json
           overdue_reminder_interval_minutes: number
           updated_at: string
         }
@@ -2245,6 +2246,7 @@ export type Database = {
           checkup_notification_time?: string
           checkup_notification_timezone?: string | null
           created_at?: string
+          hidden_measurement_codes?: Json
           overdue_reminder_interval_minutes?: number
           updated_at?: string
         }
@@ -2253,6 +2255,7 @@ export type Database = {
           checkup_notification_time?: string
           checkup_notification_timezone?: string | null
           created_at?: string
+          hidden_measurement_codes?: Json
           overdue_reminder_interval_minutes?: number
           updated_at?: string
         }

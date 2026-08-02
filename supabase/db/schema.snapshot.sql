@@ -1,6 +1,6 @@
 --
 -- PostgreSQL database dump
---
+--
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.1
 
@@ -843,7 +843,8 @@ CREATE TABLE "public"."user_preferences" (
     "checkup_notification_timezone" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "overdue_reminder_interval_minutes" integer DEFAULT 30 NOT NULL
+    "overdue_reminder_interval_minutes" integer DEFAULT 30 NOT NULL,
+    "hidden_measurement_codes" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL
 );
 
 
@@ -860,7 +861,7 @@ ALTER TABLE ONLY "public"."db_deploy_log" ALTER COLUMN "id" SET DEFAULT "nextval
 
 --
 -- PostgreSQL database dump
---
+--
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.1
 
