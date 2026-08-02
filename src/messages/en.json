@@ -993,6 +993,8 @@
     "category": "Category",
     "measurements": "measurements",
     "latestValue": "Latest Value",
+    "lastRecorded": "Last recorded",
+    "noPreviousValue": "No previous value",
     "trend": "Trend",
     "stable": "Stable",
     "totalMeasurements": "Total Measurements",

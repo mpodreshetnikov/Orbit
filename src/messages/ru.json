@@ -993,6 +993,8 @@
     "category": "Категория",
     "measurements": "измерений",
     "latestValue": "Последнее значение",
+    "lastRecorded": "Последняя запись",
+    "noPreviousValue": "Нет предыдущего значения",
     "trend": "Динамика",
     "stable": "Стабильно",
     "totalMeasurements": "Всего измерений",

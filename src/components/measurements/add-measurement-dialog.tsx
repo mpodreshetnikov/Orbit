@@ -27,7 +27,8 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { useMeasurementCatalog, useCreateMeasurement } from "@/hooks";
+import { useDateFnsLocale } from "@/lib/date-locale";
+import { useMeasurementCatalog, useCreateMeasurement, useSingleMeasurementHistory } from "@/hooks";
 import type { MeasurementCategory, MeasurementCatalog } from "@/types";
 import { MEASUREMENT_CATEGORY_LABELS } from "@/types";
 
@@ -45,6 +46,7 @@ export function AddMeasurementDialog({
   preselectedCode,
 }: AddMeasurementDialogProps) {
   const t = useTranslations();
+  const dateFnsLocale = useDateFnsLocale();
   const [locale, setLocale] = useState("en");
   const [catalogId, setCatalogId] = useState("");
   const [value, setValue] = useState("");
@@ -130,6 +132,15 @@ export function AddMeasurementDialog({
 
   const selectedCatalogItem = catalog?.find((c) => c.id === catalogId);
   const displayUnit = locale === "ru" ? selectedCatalogItem?.unit_ru : selectedCatalogItem?.unit_en;
+
+  // Last recorded value for the selected type, shown as a read-only reference.
+  // Gated on `open` because this dialog stays mounted in the top and mobile
+  // navs as a global quick-add, and would otherwise fetch on every page.
+  const { data: lastRecorded, isLoading: lastRecordedLoading } = useSingleMeasurementHistory(
+    open ? personId : null,
+    open ? (selectedCatalogItem?.code ?? null) : null,
+  );
+  const hasLastRecorded = !!lastRecorded && lastRecorded.measurement_count > 0;
   const selectedDisplayName = selectedCatalogItem
     ? locale === "ru"
       ? selectedCatalogItem.name_ru
@@ -300,6 +311,27 @@ export function AddMeasurementDialog({
                   </div>
                 )}
               </div>
+              {selectedCatalogItem &&
+                (lastRecordedLoading ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                ) : hasLastRecorded ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("measurements.lastRecorded")}:{" "}
+                    <span className="font-medium text-foreground">
+                      {lastRecorded.latest_value.toFixed(
+                        lastRecorded.latest_value % 1 === 0 ? 0 : 1,
+                      )}
+                      {displayUnit ? ` ${displayUnit}` : ""}
+                    </span>{" "}
+                    {format(new Date(lastRecorded.latest_date), "d MMM yyyy", {
+                      locale: dateFnsLocale,
+                    })}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {t("measurements.noPreviousValue")}
+                  </p>
+                ))}
             </div>
 
             {/* Date/time input */}
