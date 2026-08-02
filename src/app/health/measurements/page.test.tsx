@@ -44,6 +44,22 @@ vi.mock("@/components/measurements/add-measurement-dialog", () => ({
     open ? <div>add-measurement-dialog</div> : null,
 }));
 
+vi.mock("@/components/measurements/measurement-visibility-dialog", () => ({
+  MeasurementVisibilityDialog: ({
+    open,
+    measurements,
+  }: {
+    open?: boolean;
+    measurements?: { code: string }[];
+  }) =>
+    open ? (
+      <div>
+        measurement-visibility-dialog
+        <span data-testid="dialog-codes">{(measurements ?? []).map((m) => m.code).join(",")}</span>
+      </div>
+    ) : null,
+}));
+
 function makeMeasurement(overrides: Partial<MeasurementSummary> = {}): MeasurementSummary {
   return {
     code: "weight",
@@ -202,57 +218,47 @@ describe("MeasurementsPage", () => {
       expect(screen.queryByRole("link", { name: "Height" })).not.toBeInTheDocument();
     });
 
-    it("reveals hidden measurements via the toggle and flips its label", async () => {
+    it("puts no hide control on the cards themselves", () => {
+      renderWith();
+
+      expect(screen.queryByRole("button", { name: "measurements.hide" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "measurements.unhide" })).not.toBeInTheDocument();
+    });
+
+    it("opens the visibility dialog from the header control", async () => {
       hiddenCodesState = new Set(["height"]);
       renderWith();
       const user = userEvent.setup();
 
-      await user.click(screen.getByRole("button", { name: /measurements\.showHidden/ }));
+      await user.click(screen.getByRole("button", { name: /measurements\.manageVisibility/ }));
 
-      expect(screen.getByText("Height")).toBeInTheDocument();
-      expect(screen.getByText("measurements.hiddenBadge")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /measurements\.hideHidden/ })).toBeInTheDocument();
+      expect(screen.getByText("measurement-visibility-dialog")).toBeInTheDocument();
     });
 
-    it("does not render the toggle when nothing is hidden", () => {
-      renderWith();
+    it("summarises the hidden count next to the control, and only when non-zero", () => {
+      hiddenCodesState = new Set(["height"]);
+      const view = renderWith();
+      expect(screen.getByText(/measurements\.hiddenSummary/)).toBeInTheDocument();
+      view.unmount();
 
-      expect(
-        screen.queryByRole("button", { name: /measurements\.showHidden/ }),
-      ).not.toBeInTheDocument();
+      hiddenCodesState = new Set();
+      renderWith();
+      expect(screen.queryByText(/measurements\.hiddenSummary/)).not.toBeInTheDocument();
     });
 
     it("ignores a hidden code with no matching measurement", () => {
       // The catalog row was deleted after being hidden: counting hiddenCodes
-      // instead of present measurements would show a toggle revealing nothing.
+      // instead of present measurements would claim something is hidden that
+      // could never have appeared in this list.
       hiddenCodesState = new Set(["gone"]);
       renderWith();
 
-      expect(
-        screen.queryByRole("button", { name: /measurements\.showHidden/ }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/measurements\.hiddenSummary/)).not.toBeInTheDocument();
       expect(screen.getByText("Weight")).toBeInTheDocument();
       expect(screen.getByText("Height")).toBeInTheDocument();
     });
 
-    it("hides without navigating to the detail page", async () => {
-      renderWith([weight]);
-      const user = userEvent.setup();
-
-      let navigated = false;
-      const listener = (event: MouseEvent) => {
-        if (!event.defaultPrevented) navigated = true;
-      };
-      document.addEventListener("click", listener);
-
-      await user.click(screen.getByRole("button", { name: "measurements.hide" }));
-
-      document.removeEventListener("click", listener);
-      expect(toggleHidden).toHaveBeenCalledWith("weight");
-      expect(navigated).toBe(false);
-    });
-
-    it("shows the all-hidden state with a reveal action", async () => {
+    it("shows the all-hidden state with a way back to the dialog", async () => {
       hiddenCodesState = new Set(["weight", "height"]);
       renderWith();
       const user = userEvent.setup();
@@ -260,22 +266,21 @@ describe("MeasurementsPage", () => {
       expect(screen.getByText("measurements.allHidden")).toBeInTheDocument();
       expect(screen.queryByText("measurements.noData")).not.toBeInTheDocument();
 
-      await user.click(screen.getAllByRole("button", { name: /measurements\.showHidden/ })[0]);
-      expect(screen.getByText("Weight")).toBeInTheDocument();
+      await user.click(
+        screen.getAllByRole("button", { name: /measurements\.manageVisibility/ })[1],
+      );
+      expect(screen.getByText("measurement-visibility-dialog")).toBeInTheDocument();
     });
 
-    it("re-hides revealed measurements after switching person", async () => {
+    it("passes every measurement to the dialog, hidden ones included", async () => {
       hiddenCodesState = new Set(["height"]);
-      const view = renderWith();
+      renderWith();
       const user = userEvent.setup();
 
-      await user.click(screen.getByRole("button", { name: /measurements\.showHidden/ }));
-      expect(screen.getByText("Height")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /measurements\.manageVisibility/ }));
 
-      selectedPersonIdState = "person-2";
-      view.rerender(<MeasurementsPage />);
-
-      expect(screen.queryByText("Height")).not.toBeInTheDocument();
+      // The dialog is where you unhide, so it must list hidden entries too.
+      expect(screen.getByTestId("dialog-codes")).toHaveTextContent("weight,height");
     });
   });
 });

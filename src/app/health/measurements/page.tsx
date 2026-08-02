@@ -15,8 +15,8 @@ import {
   Minus,
   Loader2,
   Plus,
-  Eye,
   EyeOff,
+  SlidersHorizontal,
 } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -24,12 +24,12 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
 import { usePersonMeasurements, useHiddenMeasurements } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { MeasurementSummary, MeasurementCategory } from "@/types";
 import { MEASUREMENT_CATEGORY_LABELS } from "@/types";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
+import { MeasurementVisibilityDialog } from "@/components/measurements/measurement-visibility-dialog";
 
 // Mini sparkline chart for cards (fixed size so Recharts gets valid dimensions)
 const MINI_CHART_WIDTH = 64;
@@ -86,13 +86,9 @@ function TrendIndicator({ history }: { history: { value: number }[] }) {
 function MeasurementCard({
   measurement,
   locale,
-  isHidden,
-  onToggleHidden,
 }: {
   measurement: MeasurementSummary;
   locale: string;
-  isHidden: boolean;
-  onToggleHidden: (code: string) => void;
 }) {
   const t = useTranslations();
   const dateLocale = useDateFnsLocale();
@@ -109,46 +105,16 @@ function MeasurementCard({
       href={`/health/measurements/${encodeURIComponent(measurement.code)}`}
       className="tap-target block"
     >
-      <Card
-        className={cn(
-          "hover:shadow-md transition-shadow cursor-pointer",
-          isHidden && "opacity-60 border-dashed",
-        )}
-      >
+      <Card className="hover:shadow-md transition-shadow cursor-pointer">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
               <h3 className="font-medium truncate text-sm sm:text-base">{displayName}</h3>
-              <div className="flex items-center gap-1 mt-1 flex-wrap">
-                <Badge variant="outline" className="text-[10px] sm:text-xs px-1.5 py-0">
-                  {t(`measurements.categories.${measurement.category}`)}
-                </Badge>
-                {isHidden && (
-                  <Badge variant="secondary" className="text-[10px] sm:text-xs px-1.5 py-0">
-                    {t("measurements.hiddenBadge")}
-                  </Badge>
-                )}
-              </div>
+              <Badge variant="outline" className="text-[10px] sm:text-xs mt-1 px-1.5 py-0">
+                {t(`measurements.categories.${measurement.category}`)}
+              </Badge>
             </div>
-            <div className="flex items-start gap-1 shrink-0">
-              <MiniChart data={chartData} />
-              {/* The whole card is a <Link>; both calls are needed to keep this
-                  button from navigating to the detail page. */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                aria-label={t(isHidden ? "measurements.unhide" : "measurements.hide")}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onToggleHidden(measurement.code);
-                }}
-              >
-                {isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-              </Button>
-            </div>
+            <MiniChart data={chartData} />
           </div>
 
           <div className="mt-2 sm:mt-3 flex items-end justify-between">
@@ -281,7 +247,7 @@ export default function MeasurementsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [showHidden, setShowHidden] = useState(false);
+  const [visibilityDialogOpen, setVisibilityDialogOpen] = useState(false);
   const [locale, setLocale] = useState("en");
 
   // Get locale from document
@@ -306,15 +272,9 @@ export default function MeasurementsPage() {
 
   const { hiddenCodes, toggleHidden } = useHiddenMeasurements(selectedPersonId);
 
-  // Reset the reveal when switching person, so one person's revealed list does
-  // not carry over into the next person's.
-  useEffect(() => {
-    setShowHidden(false);
-  }, [selectedPersonId]);
-
   // Count from the measurements actually present, not from hiddenCodes: a
-  // hidden code whose catalog row was later deleted matches nothing, and would
-  // otherwise show a "Show hidden (1)" toggle that reveals nothing.
+  // hidden code whose catalog row was later deleted matches nothing and should
+  // not be counted against a list it can never appear in.
   const hiddenCount = useMemo(
     () => (measurements ?? []).filter((m) => hiddenCodes.has(m.code)).length,
     [measurements, hiddenCodes],
@@ -322,8 +282,8 @@ export default function MeasurementsPage() {
 
   // Filter once, above the card/table split, so the two views cannot drift.
   const visibleMeasurements = useMemo(
-    () => (measurements ?? []).filter((m) => showHidden || !hiddenCodes.has(m.code)),
-    [measurements, hiddenCodes, showHidden],
+    () => (measurements ?? []).filter((m) => !hiddenCodes.has(m.code)),
+    [measurements, hiddenCodes],
   );
 
   // Group measurements by category for card view
@@ -383,22 +343,21 @@ export default function MeasurementsPage() {
               </TabsList>
             </Tabs>
 
-            {hiddenCount > 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="gap-1.5 shrink-0"
-                onClick={() => setShowHidden((prev) => !prev)}
-              >
-                {showHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                <span className="truncate">
-                  {t(showHidden ? "measurements.hideHidden" : "measurements.showHidden", {
-                    count: hiddenCount,
-                  })}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 shrink-0"
+              onClick={() => setVisibilityDialogOpen(true)}
+              aria-label={t("measurements.manageVisibility")}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              {hiddenCount > 0 && (
+                <span className="truncate text-xs text-muted-foreground">
+                  {t("measurements.hiddenSummary", { count: hiddenCount })}
                 </span>
-              </Button>
-            )}
+              )}
+            </Button>
           </div>
         </div>
 
@@ -468,9 +427,13 @@ export default function MeasurementsPage() {
                 <CardContent className="py-12 text-center">
                   <EyeOff className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                   <p className="text-muted-foreground">{t("measurements.allHidden")}</p>
-                  <Button onClick={() => setShowHidden(true)} variant="outline" className="mt-4">
-                    <Eye className="h-4 w-4 mr-2" />
-                    {t("measurements.showHidden", { count: hiddenCount })}
+                  <Button
+                    onClick={() => setVisibilityDialogOpen(true)}
+                    variant="outline"
+                    className="mt-4"
+                  >
+                    <SlidersHorizontal className="h-4 w-4 mr-2" />
+                    {t("measurements.manageVisibility")}
                   </Button>
                 </CardContent>
               </Card>
@@ -487,13 +450,7 @@ export default function MeasurementsPage() {
                       </h2>
                       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {items.map((m) => (
-                          <MeasurementCard
-                            key={m.code}
-                            measurement={m}
-                            locale={locale}
-                            isHidden={hiddenCodes.has(m.code)}
-                            onToggleHidden={toggleHidden}
-                          />
+                          <MeasurementCard key={m.code} measurement={m} locale={locale} />
                         ))}
                       </div>
                     </div>
@@ -512,6 +469,16 @@ export default function MeasurementsPage() {
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
         personId={selectedPersonId}
+      />
+
+      {/* Which measurement types show up in the list */}
+      <MeasurementVisibilityDialog
+        open={visibilityDialogOpen}
+        onOpenChange={setVisibilityDialogOpen}
+        measurements={measurements ?? []}
+        hiddenCodes={hiddenCodes}
+        onToggle={toggleHidden}
+        locale={locale}
       />
     </>
   );

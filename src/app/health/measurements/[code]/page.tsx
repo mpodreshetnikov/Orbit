@@ -17,8 +17,6 @@ import {
   Trash2,
   Edit2,
   Plus,
-  Eye,
-  EyeOff,
 } from "lucide-react";
 import {
   LineChart,
@@ -248,7 +246,7 @@ export default function MeasurementDetailPage({ params }: { params: Promise<{ co
 
   const deleteMutation = useDeleteMeasurement();
 
-  const { hiddenCodes, toggleHidden } = useHiddenMeasurements(selectedPersonId);
+  const { hiddenCodes } = useHiddenMeasurements(selectedPersonId);
   const isHidden = hiddenCodes.has(decodedCode);
 
   const displayName = locale === "ru" ? measurement?.name_ru : measurement?.name_en;
@@ -324,19 +322,6 @@ export default function MeasurementDetailPage({ params }: { params: Promise<{ co
               {displayName || decodedCode}
             </h1>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 sm:h-9 sm:w-9 shrink-0 text-muted-foreground hover:text-foreground"
-            aria-label={t(isHidden ? "measurements.unhide" : "measurements.hide")}
-            onClick={() => toggleHidden(decodedCode)}
-          >
-            {isHidden ? (
-              <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
-            ) : (
-              <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" />
-            )}
-          </Button>
           <Button
             onClick={() => setAddDialogOpen(true)}
             size="sm"
