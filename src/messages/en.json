@@ -1013,7 +1013,37 @@
       "body": "Body",
       "limbs": "Limbs",
       "vital": "Body Composition"
-    }
+    },
+    "bodyView": "Body",
+    "wholeBody": "Whole body",
+    "otherMeasurements": "Other",
+    "noValueYet": "Add",
+    "modelMale": "Male",
+    "modelFemale": "Female",
+    "bodyViewEmptyHint": "Tap any part of the body to record your first measurement.",
+    "bodyRegions": {
+      "neck": "Neck",
+      "shoulders": "Shoulders",
+      "chest": "Chest",
+      "waist": "Waist",
+      "hips": "Hips",
+      "bicepLeft": "Left bicep",
+      "bicepRight": "Right bicep",
+      "forearmLeft": "Left forearm",
+      "forearmRight": "Right forearm",
+      "thighLeft": "Left thigh",
+      "thighRight": "Right thigh",
+      "calfLeft": "Left calf",
+      "calfRight": "Right calf"
+    },
+    "a11y": {
+      "rising": "rising",
+      "falling": "falling",
+      "unchanged": "unchanged",
+      "noValueAdd": "no value yet, add a measurement"
+    },
+    "sideRight": "Right",
+    "sideLeft": "Left"
   },
   "findings": {
     "title": "Findings",

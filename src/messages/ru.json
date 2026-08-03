@@ -1013,7 +1013,37 @@
       "body": "Тело",
       "limbs": "Конечности",
       "vital": "Состав тела"
-    }
+    },
+    "bodyView": "Тело",
+    "wholeBody": "Всё тело",
+    "otherMeasurements": "Другие",
+    "noValueYet": "Добавить",
+    "modelMale": "Муж.",
+    "modelFemale": "Жен.",
+    "bodyViewEmptyHint": "Нажмите на любую часть тела, чтобы записать первое измерение.",
+    "bodyRegions": {
+      "neck": "Шея",
+      "shoulders": "Плечи",
+      "chest": "Грудь",
+      "waist": "Талия",
+      "hips": "Бёдра",
+      "bicepLeft": "Левый бицепс",
+      "bicepRight": "Правый бицепс",
+      "forearmLeft": "Левое предплечье",
+      "forearmRight": "Правое предплечье",
+      "thighLeft": "Левое бедро",
+      "thighRight": "Правое бедро",
+      "calfLeft": "Левая икра",
+      "calfRight": "Правая икра"
+    },
+    "a11y": {
+      "rising": "рост",
+      "falling": "снижение",
+      "unchanged": "без изменений",
+      "noValueAdd": "нет значения, добавить измерение"
+    },
+    "sideRight": "Правая",
+    "sideLeft": "Левая"
   },
   "findings": {
     "title": "Находки",

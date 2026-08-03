@@ -7,6 +7,7 @@ import MeasurementsPage from "./page";
 
 const hookMocks = vi.hoisted(() => ({
   usePersonMeasurements: vi.fn(),
+  usePersons: vi.fn(),
   useHiddenMeasurements: vi.fn(),
 }));
 
@@ -26,6 +27,7 @@ vi.mock("@/stores/ui-store", () => ({
 
 vi.mock("@/hooks", () => ({
   usePersonMeasurements: (...args: unknown[]) => hookMocks.usePersonMeasurements(...args),
+  usePersons: () => hookMocks.usePersons(),
   useHiddenMeasurements: (...args: unknown[]) => hookMocks.useHiddenMeasurements(...args),
 }));
 
@@ -42,6 +44,23 @@ vi.mock("recharts", () => ({
 vi.mock("@/components/measurements/add-measurement-dialog", () => ({
   AddMeasurementDialog: ({ open }: { open?: boolean }) =>
     open ? <div>add-measurement-dialog</div> : null,
+}));
+
+// The body view has its own test; here we only care that the tab reaches it
+// with the data the page already fetched.
+vi.mock("@/components/measurements/body-map", () => ({
+  BodyMeasurementsView: ({
+    measurements,
+    hiddenCodes,
+  }: {
+    measurements: MeasurementSummary[];
+    hiddenCodes?: Set<string>;
+  }) => (
+    <div>
+      body-view:{measurements.length}
+      <span data-testid="body-hidden">{[...(hiddenCodes ?? [])].join(",")}</span>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/measurements/measurement-visibility-dialog", () => ({
@@ -93,10 +112,27 @@ function makeMeasurement(overrides: Partial<MeasurementSummary> = {}): Measureme
   };
 }
 
+function makePerson(kind: "human" | "pet") {
+  return {
+    id: "person-1",
+    name: kind === "pet" ? "Milo" : "Sam",
+    kind,
+    species: kind === "pet" ? "cat" : null,
+    breed: null,
+    sex: null,
+    birthday: null,
+    notes: null,
+    auth_user_id: null,
+    created_at: "2026-01-01",
+    updated_at: "2026-01-01",
+  };
+}
+
 describe("MeasurementsPage", () => {
   beforeEach(() => {
     selectedPersonIdState = "person-1";
     document.documentElement.lang = "en";
+    hookMocks.usePersons.mockReturnValue({ data: [makePerson("human")] });
     toggleHidden.mockReset();
     hiddenCodesState = new Set<string>();
     hookMocks.useHiddenMeasurements.mockReset();
@@ -170,6 +206,103 @@ describe("MeasurementsPage", () => {
     await user.click(screen.getByRole("tab", { name: "measurements.tableView" }));
     expect(screen.getByText("measurements.value")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Weight" }).length).toBeGreaterThan(0);
+  });
+
+  it("switches to the body view with the measurements it already fetched", async () => {
+    hookMocks.usePersonMeasurements.mockReturnValue({
+      data: [makeMeasurement()],
+      isLoading: false,
+      error: null,
+    });
+
+    render(<MeasurementsPage />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("tab", { name: "measurements.bodyView" }));
+    expect(screen.getByText("body-view:1")).toBeInTheDocument();
+  });
+
+  it("shows the body view even with no measurements, so a site can be seeded", async () => {
+    hookMocks.usePersonMeasurements.mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    });
+
+    render(<MeasurementsPage />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("tab", { name: "measurements.bodyView" }));
+    expect(screen.getByText("body-view:0")).toBeInTheDocument();
+    expect(screen.queryByText("measurements.noData")).not.toBeInTheDocument();
+  });
+
+  it("hides the search box in the body view and clears a stale term", async () => {
+    hookMocks.usePersonMeasurements.mockReturnValue({
+      data: [makeMeasurement()],
+      isLoading: false,
+      error: null,
+    });
+
+    render(<MeasurementsPage />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByPlaceholderText("measurements.searchPlaceholder"), "bicep");
+    await user.click(screen.getByRole("tab", { name: "measurements.bodyView" }));
+    expect(screen.queryByPlaceholderText("measurements.searchPlaceholder")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "measurements.cardsView" }));
+    expect(screen.getByPlaceholderText("measurements.searchPlaceholder")).toHaveValue("");
+  });
+
+  describe("pets", () => {
+    beforeEach(() => {
+      hookMocks.usePersonMeasurements.mockReturnValue({
+        data: [makeMeasurement()],
+        isLoading: false,
+        error: null,
+      });
+    });
+
+    it("hides the body view — a human silhouette is meaningless for a pet", () => {
+      hookMocks.usePersons.mockReturnValue({ data: [makePerson("pet")] });
+
+      render(<MeasurementsPage />);
+
+      expect(screen.queryByRole("tab", { name: "measurements.bodyView" })).not.toBeInTheDocument();
+    });
+
+    it("still offers cards and table, since measurements are not human-only", () => {
+      hookMocks.usePersons.mockReturnValue({ data: [makePerson("pet")] });
+
+      render(<MeasurementsPage />);
+
+      expect(screen.getByRole("tab", { name: "measurements.cardsView" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "measurements.tableView" })).toBeInTheDocument();
+      expect(screen.getByText("Weight")).toBeInTheDocument();
+    });
+
+    it("offers the body view for a human", () => {
+      render(<MeasurementsPage />);
+      expect(screen.getByRole("tab", { name: "measurements.bodyView" })).toBeInTheDocument();
+    });
+
+    it("falls back to cards when the person switches to a pet mid-view", async () => {
+      const user = userEvent.setup();
+      const view = render(<MeasurementsPage />);
+
+      await user.click(screen.getByRole("tab", { name: "measurements.bodyView" }));
+      expect(screen.getByText("body-view:1")).toBeInTheDocument();
+
+      hookMocks.usePersons.mockReturnValue({ data: [makePerson("pet")] });
+      view.rerender(<MeasurementsPage />);
+
+      expect(screen.queryByText(/body-view/)).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "measurements.cardsView" })).toHaveAttribute(
+        "data-state",
+        "active",
+      );
+    });
   });
 
   describe("hidden measurements", () => {
@@ -270,6 +403,20 @@ describe("MeasurementsPage", () => {
         screen.getAllByRole("button", { name: /measurements\.manageVisibility/ })[1],
       );
       expect(screen.getByText("measurement-visibility-dialog")).toBeInTheDocument();
+    });
+
+    it("gives the body view the filtered list and the hidden codes", async () => {
+      hiddenCodesState = new Set(["height"]);
+      renderWith();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("tab", { name: "measurements.bodyView" }));
+
+      // Filtered list: weight survives, height does not.
+      expect(screen.getByText("body-view:1")).toBeInTheDocument();
+      // And the codes themselves, since the body's region list is not
+      // data-driven and cannot infer the hiding from the list alone.
+      expect(screen.getByTestId("body-hidden")).toHaveTextContent("height");
     });
 
     it("passes every measurement to the dialog, hidden ones included", async () => {

@@ -8,6 +8,7 @@ import { useDateFnsLocale } from "@/lib/date-locale";
 import {
   Search,
   LayoutGrid,
+  PersonStanding,
   Table as TableIcon,
   Ruler,
   TrendingUp,
@@ -24,12 +25,16 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { usePersonMeasurements, useHiddenMeasurements } from "@/hooks";
+import { usePersonMeasurements, usePersons, useHiddenMeasurements } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { MeasurementSummary, MeasurementCategory } from "@/types";
 import { MEASUREMENT_CATEGORY_LABELS } from "@/types";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
+import { BodyMeasurementsView } from "@/components/measurements/body-map";
 import { MeasurementVisibilityDialog } from "@/components/measurements/measurement-visibility-dialog";
+import { getMeasurementTrend } from "@/lib/measurement-trend";
+
+type ViewMode = "cards" | "table" | "body";
 
 // Mini sparkline chart for cards (fixed size so Recharts gets valid dimensions)
 const MINI_CHART_WIDTH = 64;
@@ -63,19 +68,17 @@ function MiniChart({ data }: { data: { value: number; date: string }[] }) {
 
 // Trend indicator
 function TrendIndicator({ history }: { history: { value: number }[] }) {
-  if (history.length < 2) {
+  const trend = getMeasurementTrend(history);
+
+  if (trend === null) {
     return null;
   }
 
-  const latest = history[history.length - 1].value;
-  const previous = history[history.length - 2].value;
-  const diff = ((latest - previous) / previous) * 100;
-
-  if (Math.abs(diff) < 1) {
+  if (trend === "flat") {
     return <Minus className="h-4 w-4 text-muted-foreground" />;
   }
 
-  if (diff > 0) {
+  if (trend === "up") {
     return <TrendingUp className="h-4 w-4 text-orange-500" />;
   }
 
@@ -245,7 +248,7 @@ export default function MeasurementsPage() {
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [visibilityDialogOpen, setVisibilityDialogOpen] = useState(false);
   const [locale, setLocale] = useState("en");
@@ -270,6 +273,24 @@ export default function MeasurementsPage() {
     error,
   } = usePersonMeasurements(selectedPersonId, debouncedSearch);
 
+  // The body map is a human silhouette, so it is meaningless for a pet —
+  // offering to record a dog's bicep is worse than not offering at all. Cards
+  // and Table stay available: nothing restricts measurements to humans, and
+  // weight or height read perfectly well for an animal.
+  const { data: persons } = usePersons();
+  const isPet = useMemo(
+    () => persons?.find((person) => person.id === selectedPersonId)?.kind === "pet",
+    [persons, selectedPersonId],
+  );
+
+  // Switching to a pet while the body view is open would otherwise strand the
+  // user on a silhouette whose tab no longer exists.
+  useEffect(() => {
+    if (isPet) {
+      setViewMode((current) => (current === "body" ? "cards" : current));
+    }
+  }, [isPet]);
+
   const { hiddenCodes, toggleHidden } = useHiddenMeasurements(selectedPersonId);
 
   // Count from the measurements actually present, not from hiddenCodes: a
@@ -280,7 +301,8 @@ export default function MeasurementsPage() {
     [measurements, hiddenCodes],
   );
 
-  // Filter once, above the card/table split, so the two views cannot drift.
+  // Filter once, above the card/table split, so the views cannot drift. The
+  // body view joins them: a site the user hid should leave the map too.
   const visibleMeasurements = useMemo(
     () => (measurements ?? []).filter((m) => !hiddenCodes.has(m.code)),
     [measurements, hiddenCodes],
@@ -330,7 +352,18 @@ export default function MeasurementsPage() {
 
           {/* View toggle - scrollable on mobile */}
           <div className="flex items-center justify-between gap-2">
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "cards" | "table")}>
+            <Tabs
+              value={viewMode}
+              onValueChange={(v) => {
+                const next = v as ViewMode;
+                // The body view has no search box, so a term left over from
+                // another view would silently hide regions.
+                if (next === "body") {
+                  setSearch("");
+                }
+                setViewMode(next);
+              }}
+            >
               <TabsList className="h-9">
                 <TabsTrigger value="cards" className="gap-1.5 px-2 sm:px-3">
                   <LayoutGrid className="h-4 w-4" />
@@ -340,6 +373,12 @@ export default function MeasurementsPage() {
                   <TableIcon className="h-4 w-4" />
                   <span className="hidden sm:inline">{t("measurements.tableView")}</span>
                 </TabsTrigger>
+                {!isPet && (
+                  <TabsTrigger value="body" className="gap-1.5 px-2 sm:px-3">
+                    <PersonStanding className="h-4 w-4" />
+                    <span className="hidden sm:inline">{t("measurements.bodyView")}</span>
+                  </TabsTrigger>
+                )}
               </TabsList>
             </Tabs>
 
@@ -361,16 +400,19 @@ export default function MeasurementsPage() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("measurements.searchPlaceholder")}
-            className="pl-9"
-          />
-        </div>
+        {/* Search — filters the summary list, which would silently blank out
+            regions on the body, so it is hidden there. */}
+        {viewMode !== "body" && (
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("measurements.searchPlaceholder")}
+              className="pl-9"
+            />
+          </div>
+        )}
 
         {/* No person selected */}
         {!selectedPersonId && (
@@ -401,7 +443,18 @@ export default function MeasurementsPage() {
         {/* Content */}
         {selectedPersonId && !isLoading && measurements && (
           <>
-            {measurements.length === 0 ? (
+            {viewMode === "body" && !isPet ? (
+              /* Ahead of the empty and all-hidden cards on purpose: the body
+                 renders with nothing recorded, because tapping a bare region
+                 is how a site gets seeded. It takes the filtered list and the
+                 hidden codes so a site the user hid leaves the map too. */
+              <BodyMeasurementsView
+                personId={selectedPersonId}
+                measurements={visibleMeasurements}
+                hiddenCodes={hiddenCodes}
+                locale={locale}
+              />
+            ) : measurements.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center">
                   <Ruler className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
