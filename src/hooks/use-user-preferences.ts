@@ -2,9 +2,11 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { normalizeHiddenMeasurementCodes } from "@/lib/measurement-visibility";
 import type { UserPreferences, UpdateUserPreferencesInput } from "@/types";
 
-const QUERY_KEY = "user-preferences";
+export const USER_PREFERENCES_QUERY_KEY = "user-preferences";
+const QUERY_KEY = USER_PREFERENCES_QUERY_KEY;
 
 async function fetchUserPreferences(): Promise<UserPreferences | null> {
   const supabase = createClient();
@@ -27,6 +29,7 @@ async function fetchUserPreferences(): Promise<UserPreferences | null> {
     checkup_notification_time: data.checkup_notification_time as string,
     checkup_notification_timezone: (data.checkup_notification_timezone as string | null) ?? null,
     overdue_reminder_interval_minutes: (data.overdue_reminder_interval_minutes as number) ?? 30,
+    hidden_measurement_codes: normalizeHiddenMeasurementCodes(data.hidden_measurement_codes),
     created_at: data.created_at as string,
     updated_at: data.updated_at as string,
   };
@@ -53,6 +56,8 @@ async function updateUserPreferences(input: UpdateUserPreferencesInput): Promise
     payload.checkup_notification_timezone = input.checkup_notification_timezone;
   if (input.overdue_reminder_interval_minutes !== undefined)
     payload.overdue_reminder_interval_minutes = input.overdue_reminder_interval_minutes;
+  if (input.hidden_measurement_codes !== undefined)
+    payload.hidden_measurement_codes = input.hidden_measurement_codes;
 
   const { data, error } = await supabase
     .from("user_preferences")
@@ -67,6 +72,7 @@ async function updateUserPreferences(input: UpdateUserPreferencesInput): Promise
     checkup_notification_time: data.checkup_notification_time as string,
     checkup_notification_timezone: (data.checkup_notification_timezone as string | null) ?? null,
     overdue_reminder_interval_minutes: (data.overdue_reminder_interval_minutes as number) ?? 30,
+    hidden_measurement_codes: normalizeHiddenMeasurementCodes(data.hidden_measurement_codes),
     created_at: data.created_at as string,
     updated_at: data.updated_at as string,
   };

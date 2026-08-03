@@ -51,6 +51,7 @@ export interface MeasurementSummary {
   unit_ru: string;
   unit_en: string;
   category: MeasurementCategory;
+  sort_order: number;
   latest_value: number;
   latest_date: string;
   measurement_count: number;

@@ -7,8 +7,12 @@ import type { MeasurementSummary } from "@/types";
 const hookMocks = vi.hoisted(() => ({
   useSingleMeasurementHistory: vi.fn(),
   useDeleteMeasurement: vi.fn(),
+  useHiddenMeasurements: vi.fn(),
   useUIStore: vi.fn(),
 }));
+
+const toggleHidden = vi.fn();
+let hiddenCodesState = new Set<string>();
 
 const routerMock = {
   back: vi.fn(),
@@ -37,6 +41,7 @@ vi.mock("@/hooks", () => ({
   useSingleMeasurementHistory: (...args: unknown[]) =>
     hookMocks.useSingleMeasurementHistory(...args),
   useDeleteMeasurement: (...args: unknown[]) => hookMocks.useDeleteMeasurement(...args),
+  useHiddenMeasurements: (...args: unknown[]) => hookMocks.useHiddenMeasurements(...args),
 }));
 
 vi.mock("@/stores/ui-store", () => ({
@@ -106,6 +111,7 @@ function measurement(overrides: Partial<MeasurementSummary> = {}): MeasurementSu
     unit_ru: "кг",
     unit_en: "kg",
     category: "basic",
+    sort_order: 1,
     latest_value: 73,
     latest_date: "2026-02-22T09:00:00.000Z",
     measurement_count: 2,
@@ -135,6 +141,15 @@ describe("MeasurementDetailPage", () => {
     deleteMutateAsync.mockReset();
     deleteMutateAsync.mockResolvedValue(undefined);
     uiState.selectedPersonId = "person-1";
+    toggleHidden.mockReset();
+    hiddenCodesState = new Set<string>();
+    hookMocks.useHiddenMeasurements.mockReset();
+    hookMocks.useHiddenMeasurements.mockImplementation(() => ({
+      hiddenCodes: hiddenCodesState,
+      toggleHidden,
+      isLoading: false,
+      isToggling: false,
+    }));
 
     hookMocks.useSingleMeasurementHistory.mockReturnValue({
       data: measurement(),

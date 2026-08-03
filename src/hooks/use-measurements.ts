@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { sortByMeasurementOrder } from "@/lib/measurement-order";
 import type {
   Measurement,
   MeasurementSummary,
@@ -109,6 +110,7 @@ async function fetchPersonMeasurements(
         unit_ru: catalog.unit_ru,
         unit_en: catalog.unit_en,
         category: normalizeMeasurementCategory(catalog.category),
+        sort_order: catalog.sort_order,
         latest_value: row.value,
         latest_date: row.measured_at,
         measurement_count: 1,
@@ -136,22 +138,9 @@ async function fetchPersonMeasurements(
     });
   }
 
-  // Sort by category order, then by name
-  const categoryOrder: Record<MeasurementCategory, number> = {
-    basic: 0,
-    body: 1,
-    limbs: 2,
-    vital: 3,
-  };
-
-  summaries.sort((a, b) => {
-    const catA = categoryOrder[a.category] ?? 99;
-    const catB = categoryOrder[b.category] ?? 99;
-    if (catA !== catB) return catA - catB;
-    return a.name_en.localeCompare(b.name_en);
-  });
-
-  return summaries;
+  // Sort by category, then by the catalog's sort_order so left/right pairs of
+  // the same body part stay next to each other.
+  return sortByMeasurementOrder(summaries);
 }
 
 export function usePersonMeasurements(personId: string | null, search?: string) {
@@ -206,6 +195,7 @@ async function fetchSingleMeasurementHistory(
       unit_ru: catalogData.unit_ru,
       unit_en: catalogData.unit_en,
       category: normalizeMeasurementCategory(catalogData.category),
+      sort_order: catalogData.sort_order,
       latest_value: 0,
       latest_date: "",
       measurement_count: 0,
@@ -234,6 +224,7 @@ async function fetchSingleMeasurementHistory(
     unit_ru: catalogData.unit_ru,
     unit_en: catalogData.unit_en,
     category: normalizeMeasurementCategory(catalogData.category),
+    sort_order: catalogData.sort_order,
     latest_value: latest.value,
     latest_date: latest.measured_at,
     measurement_count: data.length,

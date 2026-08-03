@@ -40,7 +40,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useSingleMeasurementHistory, useDeleteMeasurement } from "@/hooks";
+import { useSingleMeasurementHistory, useDeleteMeasurement, useHiddenMeasurements } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { MeasurementHistoryPoint } from "@/types";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
@@ -246,6 +246,9 @@ export default function MeasurementDetailPage({ params }: { params: Promise<{ co
 
   const deleteMutation = useDeleteMeasurement();
 
+  const { hiddenCodes } = useHiddenMeasurements(selectedPersonId);
+  const isHidden = hiddenCodes.has(decodedCode);
+
   const displayName = locale === "ru" ? measurement?.name_ru : measurement?.name_en;
   const displayUnit = locale === "ru" ? measurement?.unit_ru : measurement?.unit_en;
 
@@ -309,6 +312,11 @@ export default function MeasurementDetailPage({ params }: { params: Promise<{ co
               <Badge variant="outline" className="text-xs">
                 {decodedCode}
               </Badge>
+              {isHidden && (
+                <Badge variant="secondary" className="text-xs">
+                  {t("measurements.hiddenBadge")}
+                </Badge>
+              )}
             </div>
             <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">
               {displayName || decodedCode}

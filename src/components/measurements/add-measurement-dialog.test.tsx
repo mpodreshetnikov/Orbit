@@ -8,6 +8,7 @@ import { AddMeasurementDialog } from "./add-measurement-dialog";
 const hookMocks = vi.hoisted(() => ({
   useMeasurementCatalog: vi.fn(),
   useCreateMeasurement: vi.fn(),
+  useSingleMeasurementHistory: vi.fn(),
 }));
 
 const createMutateAsync = vi.fn();
@@ -19,6 +20,12 @@ vi.mock("next-intl", () => ({
 vi.mock("@/hooks", () => ({
   useMeasurementCatalog: (...args: unknown[]) => hookMocks.useMeasurementCatalog(...args),
   useCreateMeasurement: (...args: unknown[]) => hookMocks.useCreateMeasurement(...args),
+  useSingleMeasurementHistory: (...args: unknown[]) =>
+    hookMocks.useSingleMeasurementHistory(...args),
+}));
+
+vi.mock("@/lib/date-locale", () => ({
+  useDateFnsLocale: () => undefined,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -109,6 +116,8 @@ describe("AddMeasurementDialog", () => {
       mutateAsync: createMutateAsync,
       isPending: false,
     });
+    hookMocks.useSingleMeasurementHistory.mockReset();
+    hookMocks.useSingleMeasurementHistory.mockReturnValue({ data: null, isLoading: false });
   });
 
   it("creates measurement for selected catalog entry", async () => {
@@ -159,5 +168,100 @@ describe("AddMeasurementDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
     expect(createMutateAsync).not.toHaveBeenCalled();
+  });
+
+  describe("last recorded hint", () => {
+    function historyFor(latest_value: number, measurement_count = 3) {
+      return {
+        data: {
+          code: "weight",
+          catalog_id: "cat-1",
+          name_ru: "Вес",
+          name_en: "Weight",
+          unit_ru: "кг",
+          unit_en: "kg",
+          category: "basic" as const,
+          sort_order: 1,
+          latest_value,
+          latest_date: "2026-02-22T09:00:00.000Z",
+          measurement_count,
+          history: [],
+        },
+        isLoading: false,
+      };
+    }
+
+    it("shows nothing until a type is selected", () => {
+      hookMocks.useSingleMeasurementHistory.mockReturnValue(historyFor(72.5));
+      render(<AddMeasurementDialog open onOpenChange={vi.fn()} personId="person-1" />);
+
+      expect(screen.queryByText(/measurements\.lastRecorded/)).not.toBeInTheDocument();
+      expect(screen.queryByText("measurements.noPreviousValue")).not.toBeInTheDocument();
+    });
+
+    it("shows the last recorded value and date once a type is selected", async () => {
+      hookMocks.useSingleMeasurementHistory.mockReturnValue(historyFor(72.5));
+      const user = userEvent.setup();
+      render(<AddMeasurementDialog open onOpenChange={vi.fn()} personId="person-1" />);
+
+      await user.click(screen.getByRole("button", { name: /Weight/ }));
+
+      expect(screen.getByText(/measurements\.lastRecorded/)).toBeInTheDocument();
+      expect(screen.getByText(/72\.5 kg/)).toBeInTheDocument();
+      expect(screen.getByText(/22 Feb 2026/)).toBeInTheDocument();
+    });
+
+    it("renders whole numbers without a decimal", async () => {
+      hookMocks.useSingleMeasurementHistory.mockReturnValue(historyFor(70));
+      const user = userEvent.setup();
+      render(<AddMeasurementDialog open onOpenChange={vi.fn()} personId="person-1" />);
+
+      await user.click(screen.getByRole("button", { name: /Weight/ }));
+
+      expect(screen.getByText(/70 kg/)).toBeInTheDocument();
+      expect(screen.queryByText(/70\.0 kg/)).not.toBeInTheDocument();
+    });
+
+    it("falls back to an empty-state line when nothing was ever recorded", async () => {
+      hookMocks.useSingleMeasurementHistory.mockReturnValue(historyFor(0, 0));
+      const user = userEvent.setup();
+      render(<AddMeasurementDialog open onOpenChange={vi.fn()} personId="person-1" />);
+
+      await user.click(screen.getByRole("button", { name: /Weight/ }));
+
+      expect(screen.getByText("measurements.noPreviousValue")).toBeInTheDocument();
+    });
+
+    it("never prefills the value input", async () => {
+      hookMocks.useSingleMeasurementHistory.mockReturnValue(historyFor(72.5));
+      const user = userEvent.setup();
+      render(<AddMeasurementDialog open onOpenChange={vi.fn()} personId="person-1" />);
+
+      await user.click(screen.getByRole("button", { name: /Weight/ }));
+
+      expect(screen.getByText(/72\.5 kg/)).toBeInTheDocument();
+      expect(screen.getByLabelText("measurements.value")).toHaveValue(null);
+    });
+
+    it("does not query while the dialog is closed", () => {
+      render(
+        <AddMeasurementDialog
+          open={false}
+          onOpenChange={vi.fn()}
+          personId="person-1"
+          preselectedCode="weight"
+        />,
+      );
+
+      expect(hookMocks.useSingleMeasurementHistory).toHaveBeenCalledWith(null, null);
+    });
+
+    it("still lists every catalog entry in the dropdown", () => {
+      hookMocks.useSingleMeasurementHistory.mockReturnValue(historyFor(72.5));
+      render(<AddMeasurementDialog open onOpenChange={vi.fn()} personId="person-1" />);
+
+      expect(screen.getByRole("button", { name: /Weight/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Blood pressure/ })).toBeInTheDocument();
+    });
   });
 });

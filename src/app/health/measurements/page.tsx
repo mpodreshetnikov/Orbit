@@ -15,6 +15,8 @@ import {
   Minus,
   Loader2,
   Plus,
+  EyeOff,
+  SlidersHorizontal,
 } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -22,11 +24,12 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { usePersonMeasurements } from "@/hooks";
+import { usePersonMeasurements, useHiddenMeasurements } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import type { MeasurementSummary, MeasurementCategory } from "@/types";
 import { MEASUREMENT_CATEGORY_LABELS } from "@/types";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
+import { MeasurementVisibilityDialog } from "@/components/measurements/measurement-visibility-dialog";
 
 // Mini sparkline chart for cards (fixed size so Recharts gets valid dimensions)
 const MINI_CHART_WIDTH = 64;
@@ -244,6 +247,7 @@ export default function MeasurementsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [visibilityDialogOpen, setVisibilityDialogOpen] = useState(false);
   const [locale, setLocale] = useState("en");
 
   // Get locale from document
@@ -266,6 +270,22 @@ export default function MeasurementsPage() {
     error,
   } = usePersonMeasurements(selectedPersonId, debouncedSearch);
 
+  const { hiddenCodes, toggleHidden } = useHiddenMeasurements(selectedPersonId);
+
+  // Count from the measurements actually present, not from hiddenCodes: a
+  // hidden code whose catalog row was later deleted matches nothing and should
+  // not be counted against a list it can never appear in.
+  const hiddenCount = useMemo(
+    () => (measurements ?? []).filter((m) => hiddenCodes.has(m.code)).length,
+    [measurements, hiddenCodes],
+  );
+
+  // Filter once, above the card/table split, so the two views cannot drift.
+  const visibleMeasurements = useMemo(
+    () => (measurements ?? []).filter((m) => !hiddenCodes.has(m.code)),
+    [measurements, hiddenCodes],
+  );
+
   // Group measurements by category for card view
   const groupedMeasurements = useMemo((): Record<MeasurementCategory, MeasurementSummary[]> => {
     const groups: Record<MeasurementCategory, MeasurementSummary[]> = {
@@ -275,16 +295,14 @@ export default function MeasurementsPage() {
       vital: [],
     };
 
-    if (!measurements) return groups;
-
-    for (const m of measurements) {
+    for (const m of visibleMeasurements) {
       if (groups[m.category]) {
         groups[m.category].push(m);
       }
     }
 
     return groups;
-  }, [measurements]);
+  }, [visibleMeasurements]);
 
   return (
     <>
@@ -324,6 +342,22 @@ export default function MeasurementsPage() {
                 </TabsTrigger>
               </TabsList>
             </Tabs>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 shrink-0"
+              onClick={() => setVisibilityDialogOpen(true)}
+              aria-label={t("measurements.manageVisibility")}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              {hiddenCount > 0 && (
+                <span className="truncate text-xs text-muted-foreground">
+                  {t("measurements.hiddenSummary", { count: hiddenCount })}
+                </span>
+              )}
+            </Button>
           </div>
         </div>
 
@@ -386,6 +420,23 @@ export default function MeasurementsPage() {
                   )}
                 </CardContent>
               </Card>
+            ) : visibleMeasurements.length === 0 ? (
+              /* Everything that matched is hidden. Without this the grouped
+                 view would render nothing at all below the search box. */
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <EyeOff className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">{t("measurements.allHidden")}</p>
+                  <Button
+                    onClick={() => setVisibilityDialogOpen(true)}
+                    variant="outline"
+                    className="mt-4"
+                  >
+                    <SlidersHorizontal className="h-4 w-4 mr-2" />
+                    {t("measurements.manageVisibility")}
+                  </Button>
+                </CardContent>
+              </Card>
             ) : viewMode === "cards" ? (
               <div className="space-y-8">
                 {Object.entries(groupedMeasurements).map(([category, items]) => {
@@ -407,7 +458,7 @@ export default function MeasurementsPage() {
                 })}
               </div>
             ) : (
-              <MeasurementsTable measurements={measurements} locale={locale} />
+              <MeasurementsTable measurements={visibleMeasurements} locale={locale} />
             )}
           </>
         )}
@@ -418,6 +469,16 @@ export default function MeasurementsPage() {
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
         personId={selectedPersonId}
+      />
+
+      {/* Which measurement types show up in the list */}
+      <MeasurementVisibilityDialog
+        open={visibilityDialogOpen}
+        onOpenChange={setVisibilityDialogOpen}
+        measurements={measurements ?? []}
+        hiddenCodes={hiddenCodes}
+        onToggle={toggleHidden}
+        locale={locale}
       />
     </>
   );

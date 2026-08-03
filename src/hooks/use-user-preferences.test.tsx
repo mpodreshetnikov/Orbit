@@ -78,7 +78,29 @@ describe("use-user-preferences", () => {
     const { result } = renderHookWithQueryClient(() => useUserPreferences());
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual(row);
+    expect(result.current.data).toEqual({ ...row, hidden_measurement_codes: {} });
+  });
+
+  it("normalizes hidden measurement codes from the jsonb column", async () => {
+    const supabase = createSupabaseClient({
+      prefsData: {
+        auth_user_id: "user-1",
+        checkup_notification_time: "09:00:00",
+        checkup_notification_timezone: null,
+        overdue_reminder_interval_minutes: 30,
+        // Deliberately malformed: a hand-edited row must not break the page.
+        hidden_measurement_codes: { "person-1": ["height", 7], "person-2": "bmi" },
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+      },
+    });
+    createClientMock.mockReturnValue(supabase);
+
+    const { useUserPreferences } = await import("./use-user-preferences");
+    const { result } = renderHookWithQueryClient(() => useUserPreferences());
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.hidden_measurement_codes).toEqual({ "person-1": ["height"] });
   });
 
   it("returns query error from preferences fetch", async () => {
@@ -132,6 +154,70 @@ describe("use-user-preferences", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["user-preferences"],
     });
+  });
+
+  it("leaves hidden measurement codes alone when saving other preferences", async () => {
+    // The payload is built field-by-field, so a settings-page save must not
+    // clobber the hidden list written by the measurements page.
+    const supabase = createSupabaseClient({
+      prefsData: {
+        auth_user_id: "user-1",
+        checkup_notification_time: "08:30:00",
+        checkup_notification_timezone: "UTC",
+        overdue_reminder_interval_minutes: 15,
+        hidden_measurement_codes: { "person-1": ["height"] },
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+      },
+    });
+    createClientMock.mockReturnValue(supabase);
+
+    const { useUpdateUserPreferences } = await import("./use-user-preferences");
+    const { result } = renderHookWithQueryClient(() => useUpdateUserPreferences());
+
+    await act(async () => {
+      await result.current.mutateAsync({ checkup_notification_time: "08:30:00" });
+    });
+
+    const builder = (supabase.from as ReturnType<typeof vi.fn>).mock.results[0].value as ReturnType<
+      typeof createQueryBuilder
+    >;
+    expect(builder.upsert).toHaveBeenCalledWith(
+      { auth_user_id: "user-1", checkup_notification_time: "08:30:00" },
+      { onConflict: "auth_user_id" },
+    );
+  });
+
+  it("writes hidden measurement codes when they are supplied", async () => {
+    const supabase = createSupabaseClient({
+      prefsData: {
+        auth_user_id: "user-1",
+        checkup_notification_time: "09:00:00",
+        checkup_notification_timezone: null,
+        overdue_reminder_interval_minutes: 30,
+        hidden_measurement_codes: { "person-1": ["height"] },
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+      },
+    });
+    createClientMock.mockReturnValue(supabase);
+
+    const { useUpdateUserPreferences } = await import("./use-user-preferences");
+    const { result } = renderHookWithQueryClient(() => useUpdateUserPreferences());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        hidden_measurement_codes: { "person-1": ["height"] },
+      });
+    });
+
+    const builder = (supabase.from as ReturnType<typeof vi.fn>).mock.results[0].value as ReturnType<
+      typeof createQueryBuilder
+    >;
+    expect(builder.upsert).toHaveBeenCalledWith(
+      { auth_user_id: "user-1", hidden_measurement_codes: { "person-1": ["height"] } },
+      { onConflict: "auth_user_id" },
+    );
   });
 
   it("throws on update when user is unauthenticated", async () => {

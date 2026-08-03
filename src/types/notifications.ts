@@ -1,3 +1,5 @@
+import type { HiddenMeasurementCodes } from "@/lib/measurement-visibility";
+
 // ============================================================================
 // User preferences (notification time, timezone)
 // ============================================================================
@@ -8,6 +10,8 @@ export interface UserPreferences {
   checkup_notification_timezone: string | null; // IANA e.g. "Europe/Moscow"
   /** Notify for overdue medication doses every this many minutes within the same day. Default 30. */
   overdue_reminder_interval_minutes: number;
+  /** Measurement catalog codes hidden from the measurements list, keyed by person id. */
+  hidden_measurement_codes: HiddenMeasurementCodes;
   created_at: string;
   updated_at: string;
 }
@@ -16,6 +20,7 @@ export interface UpdateUserPreferencesInput {
   checkup_notification_time?: string;
   checkup_notification_timezone?: string | null;
   overdue_reminder_interval_minutes?: number | null;
+  hidden_measurement_codes?: HiddenMeasurementCodes;
 }
 
 // ============================================================================
