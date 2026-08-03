@@ -222,11 +222,11 @@ describe("BodyMeasurementsView", () => {
       expect(container.querySelector(`svg[aria-label="${expected}"]`)).toBeInTheDocument();
     });
 
-    it("lets the fallback be overridden", async () => {
-      const user = userEvent.setup();
-      const { container } = renderView([], { sex: null });
-      await user.click(screen.getByRole("tab", { name: "measurements.modelFemale" }));
-      expect(container.querySelector('svg[aria-label="body-map-female"]')).toBeInTheDocument();
+    // The model says who is being measured, so it comes from the profile and
+    // is not something to flip on this page.
+    it("offers no way to switch model on the page", () => {
+      renderView([], { sex: "female" });
+      expect(screen.queryByRole("tab", { name: /model/i })).not.toBeInTheDocument();
     });
   });
 

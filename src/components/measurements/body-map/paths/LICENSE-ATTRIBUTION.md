@@ -48,13 +48,24 @@ one-off manual step, only needed if the artwork itself should change.
    `{ slug, color, path: { left, right, common } }` records. The silhouette is
    the first long `d="…"` attribute in `components/SvgMaleWrapper.tsx` /
    `components/SvgFemaleWrapper.tsx` (the second is the back view).
-3. `viewBox` values are read from those same wrappers: male front
-   `0 0 724 1448`, female front `-50 -40 734 1538`.
+3. **Do not copy upstream's `viewBox`.** Those boxes carry a lot of empty
+   space — the male silhouette starts 11.3% of the way down `0 0 724 1448`
+   and the female 8.3% down `-50 -40 734 1538` — which renders as a gap
+   between the side header and the head. Fit the box to the artwork instead:
+   take the bounding box of the silhouette plus every region path, and pad it
+   by 6 units on each side. Today that yields male `42 158 646 1201` and
+   female `-6 82 655 1357`.
 4. Apply the slug → region mapping and the viewer/anatomical side swap
    described above, then re-emit both files.
 
+Nothing downstream needs adjusting when the box changes: anchors are stored
+as absolute coordinates and converted through `parseViewBox`, so label
+positions and the container's aspect ratio follow on their own.
+
 Run `just test-unit-web` afterwards — `regions.test.ts` fails if any region
-loses its paths or its anchor, or if the side swap is reversed.
+loses its paths or its anchor, if the side swap is reversed, or if the
+`viewBox` reverts to upstream's padded one. Update the expected boxes in that
+test when the artwork itself legitimately changes.
 
 ## Upstream licence
 

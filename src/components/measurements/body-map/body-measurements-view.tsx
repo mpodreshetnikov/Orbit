@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePersons } from "@/hooks";
 import { getMeasurementTrend, type MeasurementTrend } from "@/lib/measurement-trend";
 import { cn } from "@/lib/utils";
@@ -20,7 +19,6 @@ import {
   REGION_TO_CODE,
   WHOLE_BODY_CODES,
   getBodyModelForSex,
-  type BodyModel,
 } from "./regions";
 
 interface BodyMeasurementsViewProps {
@@ -125,14 +123,15 @@ export function BodyMeasurementsView({
   const t = useTranslations();
   const { data: persons } = usePersons();
   const [addCode, setAddCode] = useState<string | null>(null);
-  const [modelOverride, setModelOverride] = useState<BodyModel | null>(null);
 
   const person = useMemo(
     () => persons?.find((candidate) => candidate.id === personId) ?? null,
     [persons, personId],
   );
 
-  const model = modelOverride ?? getBodyModelForSex(person?.sex);
+  // Taken from the person's profile, with no override on the page: the model
+  // describes who is being measured, not a preference about this view.
+  const model = getBodyModelForSex(person?.sex);
 
   // The page hides the Body tab for pets; this keeps the component honest on
   // its own, so a pet's id reaching it never renders a human silhouette.
@@ -230,20 +229,7 @@ export function BodyMeasurementsView({
   return (
     <>
       <div className="grid gap-4 lg:grid-cols-[3fr_1fr] lg:gap-6">
-        <div className="space-y-3">
-          <div className="flex items-center justify-end">
-            <Tabs value={model} onValueChange={(value) => setModelOverride(value as BodyModel)}>
-              <TabsList className="h-9">
-                <TabsTrigger value="male" className="px-3 text-xs">
-                  {t("measurements.modelMale")}
-                </TabsTrigger>
-                <TabsTrigger value="female" className="px-3 text-xs">
-                  {t("measurements.modelFemale")}
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-
+        <div>
           {/* Capping the width caps the body's height too, since the panel is
               driven by the artwork's aspect ratio (roughly 1:2). Nothing sits
               beside the body any more, so this is purely about keeping it a

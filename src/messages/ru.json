@@ -1018,8 +1018,6 @@
     "wholeBody": "Всё тело",
     "otherMeasurements": "Другие",
     "noValueYet": "Добавить",
-    "modelMale": "Муж.",
-    "modelFemale": "Жен.",
     "bodyViewEmptyHint": "Нажмите на любую часть тела, чтобы записать первое измерение.",
     "bodyRegions": {
       "neck": "Шея",

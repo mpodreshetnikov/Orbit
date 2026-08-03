@@ -1018,8 +1018,6 @@
     "wholeBody": "Whole body",
     "otherMeasurements": "Other",
     "noValueYet": "Add",
-    "modelMale": "Male",
-    "modelFemale": "Female",
     "bodyViewEmptyHint": "Tap any part of the body to record your first measurement.",
     "bodyRegions": {
       "neck": "Neck",

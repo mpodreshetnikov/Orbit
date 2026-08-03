@@ -76,6 +76,21 @@ describe.each(MODELS)("artwork: %s", (model) => {
     expect(height).toBeGreaterThan(0);
   });
 
+  // The viewBox is fitted to the artwork, not copied from upstream. Upstream's
+  // boxes leave the body starting ~11% (male) and ~8% (female) down, which
+  // renders as a gap between the side header and the head. Every other
+  // assertion here is about relative position, so all of them would still pass
+  // with the loose box -- this is the only thing standing between a
+  // regeneration and that whitespace coming back. See the "Regenerating"
+  // section of paths/LICENSE-ATTRIBUTION.md.
+  it("uses the fitted viewBox, not upstream's padded one", () => {
+    const upstream = { male: "0 0 724 1448", female: "-50 -40 734 1538" };
+    const fitted = { male: "42 158 646 1201", female: "-6 82 655 1357" };
+
+    expect(artwork.viewBox).not.toBe(upstream[model]);
+    expect(artwork.viewBox).toBe(fitted[model]);
+  });
+
   it("has paths for every region", () => {
     for (const regionId of BODY_REGION_IDS) {
       const paths = artwork.regionPaths[regionId];
