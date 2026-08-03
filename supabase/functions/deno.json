@@ -1,9 +1,9 @@
 {
   "imports": {
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.91.1",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.91.1",
     "std/assert/assert-equals": "https://deno.land/std@0.220.0/assert/assert_equals.ts",
     "std/encoding/base64": "https://deno.land/std@0.220.0/encoding/base64.ts",
-    "web-push": "https://esm.sh/web-push@3.6.7"
+    "web-push": "npm:web-push@3.6.7"
   },
   "compilerOptions": {
     "lib": ["deno.ns", "dom", "esnext"],
