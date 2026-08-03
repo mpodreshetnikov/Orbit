@@ -306,3 +306,77 @@ async function assertRejectsWithMessage(
 
   assertEquals((caught as Error | null)?.message, message);
 }
+
+function captureLog() {
+  const lines: string[] = [];
+  return {
+    lines,
+    log: {
+      log: (...args: unknown[]) => lines.push(args.map(String).join(" ")),
+      error: () => {},
+    },
+  };
+}
+
+function okResponse(payload: unknown): Response {
+  return new Response(
+    JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }),
+    {
+      status: 200,
+    },
+  );
+}
+
+const PATIENT_PAYLOAD = {
+  record_type: "lab",
+  title: "CBC",
+  summary: "Iron deficiency anaemia suspected",
+  keywords: ["anaemia"],
+  record_date: "2026-01-05",
+  observations: [
+    { obs_name: "Гемоглобин", value: "97", unit: "g/L", status: "low", confidence: 0.9 },
+  ],
+  findings: [],
+  conditions: [{ name: "Anaemia", icd_code: "D50.9", source_anchor: "Hb 97" }],
+  findings_to_resolve: [],
+  conditions_to_resolve: [],
+  checkups_to_complete: [],
+};
+
+Deno.test("callOpenRouterParse never writes patient data to logs by default", async () => {
+  const captured = captureLog();
+  await callOpenRouterParse("Hb 97 g/L", emptyContext, {
+    fetchFn: async () => okResponse(PATIENT_PAYLOAD),
+    apiKey: "k",
+    log: captured.log,
+  });
+
+  const all = captured.lines.join("\n");
+  // Shape is logged...
+  assertEquals(all.includes("health_structure_llm_shape"), true);
+  assertEquals(all.includes('"normalized_observations_count":1'), true);
+  // ...but nothing identifying is.
+  assertEquals(all.includes("raw_response"), false);
+  assertEquals(all.includes("Гемоглобин"), false);
+  assertEquals(all.includes("Anaemia"), false);
+  assertEquals(all.includes("D50.9"), false);
+  assertEquals(all.includes("Iron deficiency"), false);
+  assertEquals(all.includes("97"), false);
+});
+
+Deno.test(
+  "callOpenRouterParse logs the raw payload only behind the explicit debug flag",
+  async () => {
+    const captured = captureLog();
+    await callOpenRouterParse("Hb 97 g/L", emptyContext, {
+      fetchFn: async () => okResponse(PATIENT_PAYLOAD),
+      apiKey: "k",
+      log: captured.log,
+      debugRawPayload: true,
+    });
+
+    const all = captured.lines.join("\n");
+    assertEquals(all.includes("health_structure_llm_raw_payload"), true);
+    assertEquals(all.includes("Anaemia"), true);
+  },
+);

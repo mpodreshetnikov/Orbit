@@ -1,8 +1,4 @@
-import {
-  findBodySiteCatalogEntry,
-  findCatalogEntry,
-  findFindingTypeCatalogEntry,
-} from "./catalog.ts";
+import { resolveBodySite, resolveFindingType, resolveObservation } from "./catalog.ts";
 import {
   processConditionsToResolve,
   processExtractedConditions,
@@ -83,13 +79,17 @@ function buildObservationRows(
   let unresolvedCatalogCount = 0;
 
   for (const obs of structured.observations) {
-    const catalogEntry = findCatalogEntry(obs.obs_code, observationCatalog);
+    // Resolve from the printed label as well as the model's code. The model's code is a hint;
+    // an unmatched one used to leave catalog_id null, which set is_applied false, which silently
+    // excluded the value from the patient's history with no signal anywhere in the UI.
+    const resolution = resolveObservation(obs.obs_code, obs.obs_name, observationCatalog);
+    const catalogEntry = resolution.kind === "resolved" ? resolution.entry : null;
     const obsName = asString(obs.obs_name) ?? catalogEntry?.name_en ?? catalogEntry?.name_ru;
     if (!obsName) {
       droppedInvalidCount += 1;
       continue;
     }
-    if (obs.obs_code && !catalogEntry) {
+    if (!catalogEntry) {
       unresolvedCatalogCount += 1;
     }
 
@@ -108,7 +108,9 @@ function buildObservationRows(
     rows.push({
       record_id: recordId,
       catalog_id: catalogEntry?.id ?? null,
-      obs_code: obs.obs_code,
+      // Store the resolved code, never the model's guess. A code that resolved to nothing is
+      // stored as null so downstream lookups and the review UI agree on what "unmatched" means.
+      obs_code: catalogEntry?.obs_code ?? null,
       obs_name: obsName,
       value_numeric: obs.value_numeric,
       value_text: obs.value,
@@ -143,8 +145,14 @@ function buildFindingRows(
   let unresolvedCatalogCount = 0;
 
   for (const item of structured.findings) {
-    const findingTypeEntry = findFindingTypeCatalogEntry(item.finding_code, findingTypeCatalog);
-    const bodySiteEntry = findBodySiteCatalogEntry(item.site_code, bodySiteCatalog);
+    const findingResolution = resolveFindingType(
+      item.finding_code,
+      item.finding_type_text,
+      findingTypeCatalog,
+    );
+    const siteResolution = resolveBodySite(item.site_code, item.body_site_text, bodySiteCatalog);
+    const findingTypeEntry = findingResolution.kind === "resolved" ? findingResolution.entry : null;
+    const bodySiteEntry = siteResolution.kind === "resolved" ? siteResolution.entry : null;
     const sourceAnchor = asString(item.source_anchor);
     const findingTypeText =
       asString(item.finding_type_text) ?? findingTypeEntry?.name_en ?? findingTypeEntry?.name_ru;
@@ -153,7 +161,7 @@ function buildFindingRows(
       droppedInvalidCount += 1;
       continue;
     }
-    if ((item.finding_code && !findingTypeEntry) || (item.site_code && !bodySiteEntry)) {
+    if (!findingTypeEntry || (item.body_site_text && !bodySiteEntry)) {
       unresolvedCatalogCount += 1;
     }
 
@@ -161,10 +169,10 @@ function buildFindingRows(
       person_id: personId,
       record_id: recordId,
       finding_type_id: findingTypeEntry?.id ?? null,
-      finding_code: item.finding_code,
+      finding_code: findingTypeEntry?.finding_code ?? null,
       finding_type_text: findingTypeText,
       body_site_id: bodySiteEntry?.id ?? null,
-      site_code: item.site_code,
+      site_code: bodySiteEntry?.site_code ?? null,
       body_site_text: item.body_site_text,
       size_mm: item.size_mm,
       count: item.count || 1,
@@ -281,7 +289,9 @@ export async function runHealthStructureService(
       title: structuredData.title,
       record_type: structuredData.record_type,
       record_date: structuredData.record_date,
-      notes: structuredData.summary,
+      // `notes` is user-editable and deliberately not written here. It previously received the
+      // same text as llm_summary, so re-running structuring silently overwrote whatever the user
+      // had typed.
       llm_summary: structuredData.summary,
       llm_keywords: structuredData.keywords,
       llm_suggested_checkup_completions: checkupSuggestions,

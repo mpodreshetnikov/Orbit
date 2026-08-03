@@ -163,9 +163,9 @@ Deno.test("runHealthOcrService succeeds with multi-page OCR and updates record",
   const openRouter = createOpenRouterMock(async () => {
     callIndex += 1;
     if (callIndex === 1) {
-      return { ocr_text: "First page text", suggested_title: " Blood panel " };
+      return { ocr_text: "First page text", suggested_title: " Blood panel ", truncated: false };
     }
-    return { ocr_text: "Second page text", suggested_title: "ignored" };
+    return { ocr_text: "Second page text", suggested_title: "ignored", truncated: false };
   });
 
   const result = await runHealthOcrService(
@@ -190,6 +190,7 @@ Deno.test("runHealthOcrService returns error when no attachments exist", async (
   const openRouter = createOpenRouterMock(async () => ({
     ocr_text: "unused",
     suggested_title: "unused",
+    truncated: false,
   }));
 
   const result = await runHealthOcrService(
@@ -248,6 +249,7 @@ Deno.test(
     const openRouter = createOpenRouterMock(async () => ({
       ocr_text: "usable text",
       suggested_title: "Title",
+      truncated: false,
     }));
 
     const result = await runHealthOcrService(
@@ -293,6 +295,7 @@ Deno.test(
     const openRouter = createOpenRouterMock(async () => ({
       ocr_text: "usable text",
       suggested_title: "Title",
+      truncated: false,
     }));
 
     const result = await runHealthOcrService(
@@ -315,6 +318,7 @@ Deno.test("runHealthOcrService returns auth and guard errors before marking fail
   const openRouter = createOpenRouterMock(async () => ({
     ocr_text: "unused",
     suggested_title: "unused",
+    truncated: false,
   }));
 
   const unauthorizedResult = await runHealthOcrService(
@@ -356,6 +360,7 @@ Deno.test("runHealthOcrService handles missing record and updateRecordFailure er
   const openRouter = createOpenRouterMock(async () => ({
     ocr_text: "unused",
     suggested_title: "unused",
+    truncated: false,
   }));
 
   const missingRecordResult = await runHealthOcrService(

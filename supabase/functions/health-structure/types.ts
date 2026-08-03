@@ -21,6 +21,12 @@ export interface ExtractedObservation {
   ref_range_high: number | null;
   status: "normal" | "low" | "high" | "critical_low" | "critical_high" | "unknown" | null;
   confidence: number;
+  /**
+   * Verbatim snippet from the document evidencing this value. Optional for backward
+   * compatibility with the pre-staged parser; the extraction stage always sets it and drops
+   * observations whose anchor cannot be found in the document text.
+   */
+  source_anchor?: string | null;
 }
 
 export interface ExtractedFinding {

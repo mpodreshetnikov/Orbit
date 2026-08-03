@@ -31,6 +31,7 @@ function createOpenRouterMock(): OpenRouterOcrClient {
     callVisionOcrSingle: async () => ({
       ocr_text: "text",
       suggested_title: "title",
+      truncated: false,
     }),
   };
 }

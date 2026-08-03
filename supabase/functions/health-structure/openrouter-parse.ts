@@ -34,6 +34,13 @@ export interface OpenRouterParseDeps {
   model?: string;
   timeoutMs?: number;
   log?: Pick<Console, "log" | "error">;
+  /**
+   * Local-debugging escape hatch. When true, the model's raw answer is written to logs.
+   * That answer contains patient data — diagnoses, lab values, ICD codes — so this must
+   * never be enabled in production. Defaults to off; see HEALTH_STRUCTURE_DEBUG_RAW_PAYLOAD
+   * in deps.ts.
+   */
+  debugRawPayload?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -260,6 +267,45 @@ function buildPrompt(ocrText: string, context: OpenRouterParseContext): string {
   ].join("\n\n");
 }
 
+/**
+ * Emit the shape of an extraction, never its content.
+ *
+ * Counts and lengths are safe to log; observation names, values, diagnoses and the raw model
+ * answer are not — they are patient data. Anything added here must stay non-identifying.
+ */
+function logExtractionShape(
+  contentText: string,
+  rawObservationCount: number,
+  rawFindingCount: number,
+  structured: StructuredDataWithEntities,
+  deps: OpenRouterParseDeps,
+): void {
+  const log = deps.log ?? console;
+  log.log(
+    JSON.stringify({
+      health_structure_llm_shape: true,
+      response_length: contentText.length,
+      raw_observations_count: rawObservationCount,
+      raw_findings_count: rawFindingCount,
+      normalized_observations_count: structured.observations.length,
+      normalized_findings_count: structured.findings.length,
+      normalized_conditions_count: structured.conditions.length,
+      dropped_observations_count: Math.max(0, rawObservationCount - structured.observations.length),
+      dropped_findings_count: Math.max(0, rawFindingCount - structured.findings.length),
+    }),
+  );
+
+  if (deps.debugRawPayload) {
+    log.log(
+      JSON.stringify({
+        health_structure_llm_raw_payload: true,
+        warning: "contains patient data; must never be enabled in production",
+        raw_response: contentText,
+      }),
+    );
+  }
+}
+
 export async function callOpenRouterParse(
   ocrText: string,
   context: OpenRouterParseContext,
@@ -328,20 +374,7 @@ export async function callOpenRouterParse(
     const rawObs = raw ? asArray(raw.observations) : [];
     const rawFindings = raw ? asArray(raw.findings) : [];
     const structured = parseStructuredFromLlmContent(contentText);
-    console.log(
-      JSON.stringify({
-        health_structure_llm_debug: true,
-        response_length: contentText.length,
-        raw_response: contentText,
-        raw_observations_count: rawObs.length,
-        raw_findings_count: rawFindings.length,
-        normalized_observations_count: structured.observations.length,
-        normalized_findings_count: structured.findings.length,
-        raw_observation_names: rawObs
-          .slice(0, 20)
-          .map((o) => asString(asObject(o).obs_name) ?? "(missing)"),
-      }),
-    );
+    logExtractionShape(contentText, rawObs.length, rawFindings.length, structured, deps);
     return structured;
   } catch (error) {
     if ((error as { name?: string }).name === "AbortError") {

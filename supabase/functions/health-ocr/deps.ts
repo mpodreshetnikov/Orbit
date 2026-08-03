@@ -10,6 +10,13 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_OCR_ERROR_LENGTH = 500;
 const DEFAULT_TITLE = "Медицинский документ";
 
+function numberFromEnv(name: string): number | undefined {
+  const raw = Deno.env.get(name);
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function createDefaultHealthOcrDeps() {
   return {
     config: {
@@ -36,6 +43,10 @@ export function createDefaultHealthOcrDeps() {
           fetchFn: globalThis.fetch,
           apiKey: OPENROUTER_API_KEY,
           referer: SUPABASE_URL || "http://localhost:3000",
+          model: Deno.env.get("OPENROUTER_HEALTH_OCR_MODEL") ?? undefined,
+          timeoutMs: numberFromEnv("OPENROUTER_HEALTH_OCR_TIMEOUT_MS"),
+          maxTokens: numberFromEnv("OPENROUTER_HEALTH_OCR_MAX_TOKENS"),
+          log: console,
         })
       : null,
     log: console,

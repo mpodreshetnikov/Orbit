@@ -265,7 +265,10 @@ export function ObservationRow({
 }) {
   const t = useTranslations();
   const isCustom = !observation.obs_code;
-  const isUnapplied = isCustom && !observation.is_applied;
+  // Any unapplied observation must be visible as such. Gating this on isCustom meant a row that
+  // carried a code the catalogue did not recognise rendered as a normal applied observation,
+  // offered no Apply control, and was then excluded from every history query — silent loss.
+  const isUnapplied = !observation.is_applied;
 
   return (
     <div
@@ -999,12 +1002,13 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const handleSave = async (activate: boolean) => {
     if (!title.trim()) return;
 
-    // Remove unapplied custom observations so they are not persisted with the record
-    const unappliedCustom = observations?.filter((obs) => !obs.obs_code && !obs.is_applied) ?? [];
+    // Drop observations the user left unapplied rather than persisting rows that would be
+    // filtered out of history anyway. The predicate must match the one the row renders with
+    // (is_applied alone); keying it on obs_code too meant coded-but-unresolved rows escaped the
+    // cleanup, were saved, and then never appeared anywhere.
+    const unapplied = observations?.filter((obs) => !obs.is_applied) ?? [];
     await Promise.all(
-      unappliedCustom.map((obs) =>
-        deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id }),
-      ),
+      unapplied.map((obs) => deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id })),
     );
 
     await updateMutation.mutateAsync({

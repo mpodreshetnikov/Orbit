@@ -1,0 +1,242 @@
+import { buildStagePrompt } from "./prompt.ts";
+import { callStageJson } from "./client.ts";
+import { asArray, asNullableString, asNumber, asObject, asString } from "./normalize.ts";
+import {
+  EMPTY_RECONCILE,
+  emptyUsage,
+  type ExtractResult,
+  type PatientStateContext,
+  type ReconcileResult,
+  type StageContext,
+  type StageResult,
+} from "./types.ts";
+
+const SYSTEM_PROMPT = [
+  "You reconcile newly extracted clinical entities against a patient's existing record.",
+  "You only match, or decline to match. You never introduce entities of your own.",
+  "Output valid JSON only.",
+].join(" ");
+
+export const RECONCILE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["findings_to_resolve", "conditions_to_resolve", "checkups_to_complete"],
+  properties: {
+    findings_to_resolve: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["finding_type_text", "reason", "confidence"],
+        properties: {
+          finding_code: { type: ["string", "null"] },
+          finding_type_text: { type: "string" },
+          site_code: { type: ["string", "null"] },
+          body_site_text: { type: ["string", "null"] },
+          reason: { type: "string" },
+          source_anchor: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
+    conditions_to_resolve: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["condition_id", "reason", "confidence"],
+        properties: {
+          condition_id: {
+            type: "string",
+            description: "Must be one of the supplied existing condition ids.",
+          },
+          reason: { type: "string" },
+          source_anchor: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
+    checkups_to_complete: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["checkup_item_id", "reason"],
+        properties: {
+          checkup_item_id: {
+            type: "string",
+            description: "Must be one of the supplied checkup item ids.",
+          },
+          reason: { type: "string" },
+          suggested_done_at: { type: ["string", "null"], pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+        },
+      },
+    },
+  },
+};
+
+/** True when there is nothing on the patient's record to reconcile against. */
+export function hasNothingToReconcile(patient: PatientStateContext): boolean {
+  return (
+    patient.existingConditions.length === 0 &&
+    patient.existingFindings.length === 0 &&
+    patient.checkupItems.length === 0
+  );
+}
+
+function buildExtractedSummary(extracted: ExtractResult, recordDate: string | null): string {
+  // Anchors are included as evidence but the document itself is not: this stage matches what
+  // extraction already committed to, and must not be able to introduce document content.
+  return JSON.stringify({
+    record_date: recordDate,
+    observations: extracted.observations.map((item) => ({
+      name: item.obs_name,
+      code: item.obs_code,
+      value: item.value,
+      unit: item.unit,
+      status: item.status,
+    })),
+    findings: extracted.findings.map((item) => ({
+      code: item.finding_code,
+      text: item.finding_type_text,
+      site_code: item.site_code,
+      site_text: item.body_site_text,
+      anchor: item.source_anchor,
+    })),
+    conditions: extracted.conditions.map((item) => ({
+      name: item.name,
+      icd_code: item.icd_code,
+      status: item.status,
+      anchor: item.source_anchor,
+    })),
+  });
+}
+
+function buildPatientState(patient: PatientStateContext): string {
+  return JSON.stringify({
+    existing_conditions: patient.existingConditions.map((item) => ({
+      id: item.id,
+      name: item.name,
+      code: item.code,
+      status: item.current_status,
+    })),
+    existing_findings: patient.existingFindings.map((item) => ({
+      finding_code: item.finding_code,
+      finding_type_text: item.finding_type_text,
+      site_code: item.site_code,
+      body_site_text: item.body_site_text,
+    })),
+    checkup_items: patient.checkupItems.map((item) => ({
+      id: item.id,
+      title: item.title,
+      next_due_at: item.next_due_at,
+    })),
+  });
+}
+
+/**
+ * Stage D — reconcile extracted entities against the patient's existing record.
+ *
+ * Receives the entities stage B produced and the patient's current state. It deliberately does
+ * **not** receive the document text: this is a matching problem, and withholding the document
+ * means the stage can only match what extraction already found, or decline. Skipped entirely
+ * when the patient has nothing to reconcile against, which saves a request outright.
+ */
+export async function runReconcileStage(
+  extracted: ExtractResult,
+  recordDate: string | null,
+  patient: PatientStateContext,
+  ctx: StageContext,
+): Promise<StageResult<ReconcileResult>> {
+  if (hasNothingToReconcile(patient)) {
+    return { value: EMPTY_RECONCILE, usage: emptyUsage(), finishReason: null, rejected: [] };
+  }
+
+  const userPrompt = buildStagePrompt({
+    instructions: [
+      "Compare the newly extracted entities against the patient's existing record.",
+      "Report which existing findings this document shows to have resolved, which existing conditions it shows to have resolved, and which scheduled checkups it completes.",
+      "Only reference ids that appear in the patient record below. Never invent an id.",
+      "Only report a resolution when the extracted entities positively support it. Absence of a mention is not evidence of resolution.",
+      "When nothing matches, return empty arrays. Empty is the correct and expected answer in most cases.",
+    ],
+    schema: RECONCILE_SCHEMA,
+    variable: [
+      {
+        label: "EXTRACTED_ENTITIES",
+        content: buildExtractedSummary(extracted, recordDate),
+        untrusted: false,
+      },
+      { label: "PATIENT_RECORD", content: buildPatientState(patient), untrusted: false },
+    ],
+  });
+
+  const result = await callStageJson(
+    SYSTEM_PROMPT,
+    userPrompt,
+    RECONCILE_SCHEMA,
+    "health_state_reconciliation",
+    ctx,
+  );
+
+  const rejected: StageResult<ReconcileResult>["rejected"] = [];
+  const knownConditionIds = new Set(patient.existingConditions.map((item) => item.id));
+  const knownCheckupIds = new Set(patient.checkupItems.map((item) => item.id));
+
+  const findingsToResolve = asArray(result.parsed.findings_to_resolve).map((item) => {
+    const obj = asObject(item);
+    return {
+      finding_code: asNullableString(obj.finding_code),
+      finding_type_text: asString(obj.finding_type_text, ""),
+      site_code: asNullableString(obj.site_code),
+      body_site_text: asNullableString(obj.body_site_text),
+      reason: asString(obj.reason, ""),
+      source_anchor: asString(obj.source_anchor, ""),
+      confidence: asNumber(obj.confidence) ?? 0,
+    };
+  });
+
+  // Ids are checked against what we supplied rather than trusted. A model-invented id would
+  // otherwise silently address a row belonging to someone else, or nothing at all.
+  const conditionsToResolve = [];
+  for (const item of asArray(result.parsed.conditions_to_resolve)) {
+    const obj = asObject(item);
+    const conditionId = asString(obj.condition_id, "");
+    if (!knownConditionIds.has(conditionId)) {
+      rejected.push({ entityKind: "condition_to_resolve", reason: "unknown condition id" });
+      continue;
+    }
+    conditionsToResolve.push({
+      condition_id: conditionId,
+      reason: asString(obj.reason, ""),
+      source_anchor: asString(obj.source_anchor, ""),
+      confidence: asNumber(obj.confidence) ?? 0,
+    });
+  }
+
+  const checkupsToComplete = [];
+  for (const item of asArray(result.parsed.checkups_to_complete)) {
+    const obj = asObject(item);
+    const checkupItemId = asString(obj.checkup_item_id, "");
+    if (!knownCheckupIds.has(checkupItemId)) {
+      rejected.push({ entityKind: "checkup_to_complete", reason: "unknown checkup item id" });
+      continue;
+    }
+    checkupsToComplete.push({
+      checkup_item_id: checkupItemId,
+      reason: asString(obj.reason, ""),
+      suggested_done_at: asString(obj.suggested_done_at, ""),
+    });
+  }
+
+  return {
+    value: {
+      findings_to_resolve: findingsToResolve,
+      conditions_to_resolve: conditionsToResolve,
+      checkups_to_complete: checkupsToComplete,
+    },
+    usage: result.usage,
+    finishReason: result.finishReason,
+    rejected,
+  };
+}

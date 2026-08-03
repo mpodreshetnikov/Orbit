@@ -1,3 +1,12 @@
+import { extractContentText, parseJsonObject } from "../_shared/llm-json.ts";
+import {
+  DEFAULT_MAX_ATTEMPTS,
+  isRetryableStatus,
+  parseRetryAfterMs,
+  RetryableLlmError,
+  withLlmRetry,
+} from "../_shared/llm-retry.ts";
+
 export interface OcrAttachmentPayload {
   url: string;
   mimeType: string;
@@ -6,6 +15,12 @@ export interface OcrAttachmentPayload {
 export interface OcrResult {
   ocr_text: string;
   suggested_title: string;
+  /**
+   * True when the model hit its completion budget before finishing the page, so `ocr_text` is
+   * the beginning of the document rather than all of it. Callers must not treat a truncated
+   * page as a complete transcription — everything downstream reads it as the whole document.
+   */
+  truncated: boolean;
 }
 
 export interface OpenRouterOcrClient {
@@ -20,6 +35,14 @@ interface CreateOpenRouterOcrClientDeps {
   apiKey: string;
   referer: string;
   timeoutMs?: number;
+  model?: string;
+  maxTokens?: number;
+  maxAttempts?: number;
+  /** Injected so tests do not actually wait. */
+  sleepFn?: (ms: number) => Promise<void>;
+  /** Injected so backoff jitter is deterministic under test. */
+  jitterFn?: () => number;
+  log?: Pick<Console, "log" | "warn" | "error">;
 }
 
 type OpenRouterUserContentPart =
@@ -37,31 +60,50 @@ type OpenRouterUserContentPart =
     };
 
 const DEFAULT_TIMEOUT_MS = 55_000;
+const DEFAULT_MODEL = "openai/gpt-5.2:nitro";
+const DEFAULT_MAX_TOKENS = 12_000;
 const DEFAULT_FALLBACK_TITLE = "Медицинский документ";
 
-function createSystemPrompt(requestTitle: boolean): string {
-  if (!requestTitle) {
-    return [
-      "You are an OCR assistant for medical documents.",
-      "Extract all readable text exactly and return JSON with fields:",
-      "- ocr_text (string)",
-      '- suggested_title ("")',
-    ].join("\n");
-  }
+export const TRUNCATED_ERROR_MESSAGE = "OpenRouter OCR response was truncated before completion";
 
-  return [
+/**
+ * The transcription contract, sent as a strict schema rather than described in prose.
+ *
+ * `json_object` only asks for *some* JSON; the model remains free to invent field names, and a
+ * missing `ocr_text` then reads as an empty page. A strict schema makes both fields mandatory.
+ */
+const OCR_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ocr_text", "suggested_title"],
+  properties: {
+    ocr_text: { type: "string" },
+    suggested_title: { type: "string" },
+  },
+} as const;
+
+function createSystemPrompt(requestTitle: boolean): string {
+  const lines = [
     "You are an OCR assistant for medical documents.",
-    "Extract all readable text exactly and suggest a short title.",
-    "Return JSON with fields:",
-    "- ocr_text (string)",
-    "- suggested_title (short string)",
-  ].join("\n");
+    "Transcribe every readable character exactly as printed, in the document's own language.",
+    "Preserve numbers, units and reference ranges character for character — they are lab values and a changed digit is a changed diagnosis.",
+    "Do not translate, correct, summarise, reorder or complete anything. Transcribe only what is visible.",
+    "Where text is illegible, write [нрзб] rather than guessing at it.",
+  ];
+  lines.push(
+    requestTitle
+      ? "Also suggest a short title for the document."
+      : "Return an empty string for suggested_title.",
+  );
+  return lines.join("\n");
 }
 
 export function createOpenRouterOcrClient(
   deps: CreateOpenRouterOcrClientDeps,
 ): OpenRouterOcrClient {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const model = deps.model ?? DEFAULT_MODEL;
+  const baseMaxTokens = deps.maxTokens ?? DEFAULT_MAX_TOKENS;
 
   function buildAttachmentContentPart(attachment: OcrAttachmentPayload): OpenRouterUserContentPart {
     if (attachment.mimeType.startsWith("image/")) {
@@ -86,69 +128,127 @@ export function createOpenRouterOcrClient(
 
   return {
     async callVisionOcrSingle(attachment, options) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      // Built before the retry loop so an unsupported MIME type fails once rather than three times.
+      const attachmentPart = buildAttachmentContentPart(attachment);
+      const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 
-      try {
-        const response = await deps.fetchFn("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            Authorization: `Bearer ${deps.apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": deps.referer,
-          },
-          body: JSON.stringify({
-            model: "openai/gpt-5.2:nitro",
-            messages: [
-              { role: "system", content: createSystemPrompt(options.requestTitle) },
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text: options.requestTitle
-                      ? "Extract all text and suggest a short document title."
-                      : "Extract all text from this document.",
-                  },
-                  buildAttachmentContentPart(attachment),
-                ],
+      const outcome = await withLlmRetry(
+        async (attempt) => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+          try {
+            const response = await deps.fetchFn("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              signal: controller.signal,
+              headers: {
+                Authorization: `Bearer ${deps.apiKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer": deps.referer,
               },
-            ],
-            temperature: 0.1,
-            max_tokens: 12000,
-            response_format: { type: "json_object" },
-          }),
-        });
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: "system", content: createSystemPrompt(options.requestTitle) },
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: options.requestTitle
+                          ? "Transcribe this document and suggest a short title."
+                          : "Transcribe this document.",
+                      },
+                      attachmentPart,
+                    ],
+                  },
+                ],
+                temperature: 0,
+                // A page that overran its budget gets a larger one, otherwise the retry
+                // reproduces the same truncation at the same point.
+                max_tokens: baseMaxTokens * Math.pow(2, attempt),
+                // Without this, OpenRouter may route to a provider that ignores response_format
+                // and returns prose, which surfaces as an unreproducible parse failure.
+                provider: { require_parameters: true },
+                response_format: {
+                  type: "json_schema",
+                  json_schema: {
+                    name: "health_ocr_transcription",
+                    strict: true,
+                    schema: OCR_SCHEMA,
+                  },
+                },
+              }),
+            });
 
-        clearTimeout(timeoutId);
+            if (!response.ok) {
+              const message = `OpenRouter API error: ${response.status}`;
+              if (isRetryableStatus(response.status)) {
+                throw new RetryableLlmError(
+                  message,
+                  parseRetryAfterMs(response.headers.get("retry-after"), Date.now()),
+                );
+              }
+              // The provider's body can quote the request, which for OCR includes the image.
+              throw new Error(message);
+            }
 
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`OpenRouter API error: ${error}`);
-        }
+            const payload = (await response.json()) as {
+              choices?: Array<{ finish_reason?: string; message?: Record<string, unknown> }>;
+            };
+            const choice = payload.choices?.[0];
+            const contentText = extractContentText(choice?.message ?? {});
+            if (!contentText) throw new Error("No response from OpenRouter");
 
-        const payload = (await response.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-        const content = payload.choices?.[0]?.message?.content;
-        if (!content) throw new Error("No response from OpenRouter");
+            const parsed = parseJsonObject(contentText);
+            const ocrText = typeof parsed.ocr_text === "string" ? parsed.ocr_text : "";
+            const suggestedTitle =
+              typeof parsed.suggested_title === "string" ? parsed.suggested_title.trim() : "";
+            const result: OcrResult = {
+              ocr_text: ocrText,
+              suggested_title: suggestedTitle || DEFAULT_FALLBACK_TITLE,
+              truncated: choice?.finish_reason === "length",
+            };
 
-        const parsed = JSON.parse(content) as { ocr_text?: string; suggested_title?: string };
-        const suggestedTitle =
-          typeof parsed.suggested_title === "string" ? parsed.suggested_title.trim() : "";
+            // Retried for the larger budget, not because the answer was malformed. Once the
+            // attempts are spent, the partial transcription is returned rather than thrown: the
+            // caller substitutes an empty string for a failure, so throwing loses the page whole,
+            // while a page read as far as it got still yields real values.
+            if (result.truncated) {
+              if (attempt < maxAttempts - 1) {
+                throw new RetryableLlmError(TRUNCATED_ERROR_MESSAGE);
+              }
+              deps.log?.warn?.(
+                JSON.stringify({
+                  health_ocr_truncated: true,
+                  // Length only — the text itself is the patient's document.
+                  ocr_chars: result.ocr_text.length,
+                }),
+              );
+            }
 
-        return {
-          ocr_text: parsed.ocr_text || "",
-          suggested_title: suggestedTitle || DEFAULT_FALLBACK_TITLE,
-        };
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if ((error as { name?: string }).name === "AbortError") {
-          throw new Error("OpenRouter request timed out");
-        }
-        throw error;
-      }
+            return result;
+          } catch (error) {
+            if ((error as { name?: string }).name === "AbortError") {
+              throw new RetryableLlmError("OpenRouter request timed out");
+            }
+            if (error instanceof TypeError) {
+              throw new RetryableLlmError(`OpenRouter request failed: ${error.message}`);
+            }
+            throw error;
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        },
+        {
+          maxAttempts: deps.maxAttempts,
+          sleepFn: deps.sleepFn,
+          jitterFn: deps.jitterFn,
+          log: deps.log,
+        },
+      );
+
+      return outcome.value;
     },
   };
 }

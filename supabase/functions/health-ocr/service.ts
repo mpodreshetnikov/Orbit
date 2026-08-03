@@ -175,12 +175,24 @@ export async function runHealthOcrService(
         if (index === 0) {
           suggestedTitle = selectSuggestedTitle(result.suggested_title, suggestedTitle);
         }
+        if (result.truncated) {
+          // The page was transcribed only as far as the completion budget allowed. Everything
+          // downstream reads this text as the whole document, so the shortfall has to be visible.
+          log.log(
+            JSON.stringify({
+              health_ocr_truncated: true,
+              // Length only — the transcription itself is the patient's document.
+              ocr_chars: result.ocr_text.length,
+            }),
+          );
+        }
         await pageSpan?.end({
           status: "ok",
           attrs: {
             attachment_mime_type: attachment.mime_type,
             ocr_input_type: ocrInputType,
             ocr_chars: result.ocr_text.length,
+            ocr_truncated: result.truncated,
           },
         });
       } catch (error) {

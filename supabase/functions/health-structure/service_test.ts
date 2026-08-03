@@ -444,10 +444,17 @@ Deno.test("runHealthStructureService applies catalog/checkup fallback mappings",
   );
 
   assertEquals(result.status, 200);
+  // The observation catalogue is empty here, so nothing can resolve it.
   assertEquals(state.observationRows[0].catalog_id, null);
   assertEquals(state.observationRows[0].is_applied, false);
-  assertEquals(state.findingRows[0].finding_type_id, null);
-  assertEquals(state.findingRows[0].body_site_id, null);
+  assertEquals(state.observationRows[0].obs_code, null);
+  // The finding and body site carry a bogus code but a real printed label, so label-based
+  // resolution rescues them. Previously the bogus code left both unmapped.
+  assertEquals(state.findingRows[0].finding_type_id, "ft-1");
+  assertEquals(state.findingRows[0].body_site_id, "bs-1");
+  // The stored code is the resolved one, never the model's guess.
+  assertEquals(state.findingRows[0].finding_code, "F1");
+  assertEquals(state.findingRows[0].site_code, "LUNG");
   assertEquals(state.findingRows[0].count, 1);
   assertEquals(state.findingRows[0].finding_date, "2026-01-05");
 
@@ -494,7 +501,13 @@ Deno.test(
             { ...structuredData.observations[0], obs_code: null, obs_name: "   " },
           ],
           findings: [
-            { ...structuredData.findings[0], finding_code: "UNKNOWN", site_code: "UNKNOWN" },
+            {
+              ...structuredData.findings[0],
+              finding_code: "UNKNOWN",
+              finding_type_text: "Entirely absent from the catalogue",
+              site_code: "UNKNOWN",
+              body_site_text: "Also absent",
+            },
             {
               ...structuredData.findings[0],
               finding_code: null,
