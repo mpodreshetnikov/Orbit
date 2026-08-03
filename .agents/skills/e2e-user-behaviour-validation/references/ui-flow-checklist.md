@@ -30,3 +30,4 @@ Verify changed UI behavior quickly with reproducible browser steps.
 - Actions performed.
 - Expected vs actual result.
 - Snapshot file names if captured.
+- Screenshots for reviewer handoff — capture and deliver them per the `change-review-screenshots` skill.

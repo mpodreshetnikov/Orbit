@@ -178,6 +178,8 @@ For changed flows, verify:
 
 Use route and flow-specific evidence (screenshots, logs, notes).
 
+Visual evidence is mandatory at handoff: every change set that touches a user-visible surface must deliver screenshots of the delivered result with the final response, and change sets with no visible surface must say so explicitly with a reason. Capture, naming, and delivery rules live in the `change-review-screenshots` skill (`.agents/skills/change-review-screenshots`).
+
 ### 5. Delivery governance checks
 
 Validate that:
