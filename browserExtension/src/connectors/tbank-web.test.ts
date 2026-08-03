@@ -133,11 +133,23 @@ describe("tbank-web connector", () => {
     const originalChrome = (globalThis as Record<string, unknown>).chrome;
 
     const fetchCalls: string[] = [];
+    // Anchored to the run, not to fixed dates. The connector splits
+    // [windowFrom, now] into 14-day chunks (buildOperationRanges, nowMs =
+    // Date.now()) and requests each one; this mock answers every chunk with the
+    // same payload, so the out-of-range operation is skipped once per chunk.
+    // With a hardcoded 2026-03-01 window that count grew by one every fortnight
+    // of real time and had already reached 13 against an expected 2. A window
+    // shorter than one chunk keeps it at a single range.
+    const DAY = 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const windowFromIso = new Date(nowMs - 7 * DAY).toISOString();
+    const inRangeMs = nowMs - 2 * DAY;
+    const outOfRangeMs = nowMs - 30 * DAY;
     const operationsPayload = [
       {
         id: "op-fulfilled",
         authorizationId: "auth-fulfilled",
-        operationTime: { milliseconds: Date.parse("2026-03-08T09:00:00.000Z") },
+        operationTime: { milliseconds: inRangeMs },
         type: "Debit",
         status: "OK",
         amount: { value: 100, currency: { strCode: "RUB" } },
@@ -148,7 +160,7 @@ describe("tbank-web connector", () => {
       {
         id: "op-incomplete",
         authorizationId: "auth-incomplete",
-        operationTime: { milliseconds: Date.parse("2026-03-08T08:00:00.000Z") },
+        operationTime: { milliseconds: inRangeMs - 60 * 60 * 1000 },
         type: "Debit",
         status: "OK",
         amount: { value: 200, currency: { strCode: "RUB" } },
@@ -159,7 +171,7 @@ describe("tbank-web connector", () => {
       {
         id: "op-old",
         authorizationId: "auth-old",
-        operationTime: { milliseconds: Date.parse("2026-02-01T08:00:00.000Z") },
+        operationTime: { milliseconds: outOfRangeMs },
         type: "Debit",
         status: "OK",
         amount: { value: 300, currency: { strCode: "RUB" } },
@@ -279,7 +291,7 @@ describe("tbank-web connector", () => {
 
     try {
       const result = await isolatedExtractor({
-        windowFromIso: "2026-03-01T00:00:00.000Z",
+        windowFromIso,
         sessionId: "abc",
         sourceId: "tbank_web",
         payerPersonId: "person-1",

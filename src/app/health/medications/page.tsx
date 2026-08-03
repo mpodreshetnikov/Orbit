@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import {
   Select,
   SelectContent,
@@ -207,13 +208,13 @@ export default function MedicationsPage() {
                 {t("medications.overdueReminderInterval")}
               </label>
               <div className="flex items-center gap-2">
-                <Input
+                <NumberInput
                   id="overdue-interval-popup"
-                  type="number"
-                  min={1}
-                  max={1440}
+                  integer
                   value={overdueIntervalMinutes}
-                  onChange={(e) => setOverdueIntervalMinutes(Number(e.target.value) || 30)}
+                  onValueChange={(n) => {
+                    if (n !== null) setOverdueIntervalMinutes(n);
+                  }}
                   onBlur={handleSaveOverdueInterval}
                   className="w-24"
                 />

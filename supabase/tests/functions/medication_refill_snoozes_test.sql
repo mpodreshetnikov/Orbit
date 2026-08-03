@@ -67,14 +67,17 @@ SELECT is(
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '66666666-6666-6666-6666-666666666666', true);
 
+-- Must stay in the future relative to the run: a snooze whose date has passed
+-- no longer suppresses digests, so a hardcoded date silently rots the
+-- "skips caregiver while snoozed" assertion below into a failure once it lapses.
 SELECT public.set_medication_refill_snooze(
   '88888888-8888-8888-8888-888888888888',
-  '2026-04-05'::date
+  (CURRENT_DATE + 30)
 );
 
 SELECT is(
   public.get_medication_refill_snooze('88888888-8888-8888-8888-888888888888'),
-  '2026-04-05'::date,
+  (CURRENT_DATE + 30),
   'get_medication_refill_snooze returns the saved date for the current recipient'
 );
 

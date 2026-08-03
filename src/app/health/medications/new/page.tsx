@@ -11,7 +11,7 @@ import { useCreateRegimen, useAddOneTimeDoseToRegimen } from "@/hooks";
 import { regenerateMedicationEvents, getClientTimezone } from "@/lib/medication-events";
 import { useUIStore } from "@/stores/ui-store";
 import type { CreateMedRegimenInput, AddOneTimeToExistingPayload } from "@/types/regimen";
-import { isAddOneTimeToExistingPayload } from "@/types/regimen";
+import { isAddOneTimeToExistingPayload, toPositiveAmount } from "@/types/regimen";
 import type { MedicationKind } from "@/types";
 
 export default function NewMedicationPage() {
@@ -52,7 +52,7 @@ export default function NewMedicationPage() {
       const parsedDueAt = dueAt ? new Date(dueAt) : null;
       if (!parsedDueAt || Number.isNaN(parsedDueAt.getTime())) return;
 
-      const amount = Math.max(1, Number(data.dose_definition?.intake?.amount ?? 1) || 1);
+      const amount = toPositiveAmount(data.dose_definition?.intake?.amount);
       const regimen = await createMutation.mutateAsync({ ...data, notes: null });
       await addOneTimeDoseMutation.mutateAsync({
         person_id: selectedPersonId,

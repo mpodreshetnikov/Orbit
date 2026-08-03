@@ -24,6 +24,25 @@ const EXTENSION_VERSIONED_SURFACE_PATTERNS = [
   /^vite\.config\.extension\.ts$/,
 ] as const;
 
+/**
+ * Test and spec files live inside the surfaces above but are never packaged
+ * into the extension bundle, so changing one cannot alter what users receive.
+ * Requiring a release version bump for them mints a new extension release for
+ * a test-only edit — and, because a version change also triggers the release
+ * bundle job, turns a test fix into a publish.
+ */
+const EXTENSION_NON_PACKAGED_PATTERNS = [
+  /\.(test|spec)\.[cm]?[jt]sx?$/,
+  /(^|\/)__tests__\//,
+  // This file is the release tooling itself: it reads the manifest, zips
+  // browserExtension/dist and uploads the result. It cannot change what goes
+  // into that bundle — only build.ts, build-lib.ts and esbuild-widget.ts can —
+  // so a change here does not alter what users receive. Without this, editing
+  // the version policy would require a version bump to land the change, which
+  // is circular. The rest of scripts/extension/ stays governed.
+  /^scripts\/extension\/release\.ts$/,
+] as const;
+
 export interface ExtensionReleaseMetadata {
   version: string;
   published_at: string;
@@ -66,6 +85,7 @@ export function normalizeRepoPath(filePath: string): string {
 
 export function isExtensionVersionedSurface(filePath: string): boolean {
   const normalized = normalizeRepoPath(filePath);
+  if (EXTENSION_NON_PACKAGED_PATTERNS.some((pattern) => pattern.test(normalized))) return false;
   return EXTENSION_VERSIONED_SURFACE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 

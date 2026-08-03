@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/dialog";
 import type { MedDoseEvent, MedDoseEventWithRegimen } from "@/types/regimen";
 import type { MedicationUnit } from "@/types";
-import { getPlannedIntakeAmount, getPlannedIntakeUnit } from "@/types/regimen";
+import { getPlannedIntakeAmount, getPlannedIntakeUnit, toPositiveAmount } from "@/types/regimen";
+import { NumberInput } from "@/components/ui/number-input";
 import { getUnitLabel } from "./medication-units";
 
 function toDatetimeLocal(iso: string): string {
@@ -76,7 +77,9 @@ export function EditIntakeDialog({
     const at = fromDatetimeLocal(takenAt);
     if (!at) return;
     const amount =
-      event.status === "taken" ? Math.max(1, Math.floor(Number(amountTaken)) || 1) : undefined;
+      event.status === "taken"
+        ? toPositiveAmount(amountTaken, getPlannedIntakeAmount(event.planned_intake))
+        : undefined;
     await onSubmit({
       takenAt: at,
       amountTaken: amount,
@@ -114,13 +117,10 @@ export function EditIntakeDialog({
             <div className="space-y-2">
               <Label htmlFor="edit-intake-amount">{t("medications.editIntakeAmount")}</Label>
               <div className="flex items-center gap-2">
-                <Input
+                <NumberInput
                   id="edit-intake-amount"
-                  type="number"
-                  min={1}
-                  step={1}
                   value={amountTaken}
-                  onChange={(e) => setAmountTaken(e.target.value)}
+                  onValueChange={(_n, raw) => setAmountTaken(raw)}
                   className="w-24"
                 />
                 <span className="text-sm text-muted-foreground">

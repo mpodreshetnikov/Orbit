@@ -43,6 +43,26 @@ jobs:
       extension_version_changed: ${{ steps.extension-version-policy.outputs.versionChanged }}
       extension_next_version: ${{ steps.extension-version-policy.outputs.nextVersion }}
     steps:
+      # This job runs the full Supabase stack, a Next production build, the
+      # extension build, Playwright + e2e, and a multi-GB Docker image export on
+      # one standard runner (~14 GB free). It has hit "no space left on device"
+      # exporting images, and `supabase db reset` has failed restarting
+      # containers. Reclaiming the preinstalled toolchains nothing here uses
+      # buys roughly 20-30 GB. `df` is printed so a future disk failure is
+      # diagnosable from the log rather than inferred.
+      - name: Free disk space
+        shell: bash
+        run: |
+          echo "Before:"
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL || true
+          echo "After:"
+          df -h /
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -177,7 +197,19 @@ jobs:
             while IFS= read -r image; do
               [[ -n "$image" ]] || continue
               image_hash="$(printf '%s' "$image" | sha256sum | cut -d' ' -f1)"
-              docker save "$image" | gzip -1 > ".cache/docker/supabase-images/${image_hash}.tar.gz"
+              if ! docker save "$image" | gzip -1 > ".cache/docker/supabase-images/${image_hash}.tar.gz"; then
+                # Populating this cache only speeds up later runs — it is not a
+                # quality gate, and it runs after every real check has passed.
+                # Letting it fail the job (usually because the runner filled up
+                # while exporting several GB of images) reports a red build for
+                # green code, and also skips "Test and coverage" below.
+                # Drop the partial bundle so the save step is skipped rather
+                # than caching an incomplete set, and free the disk again.
+                echo "::warning::Supabase image cache not populated: failed to bundle ${image}"
+                rm -f .cache/docker/supabase-images/*.tar.gz
+                ready=false
+                break
+              fi
               ready=true
             done < .cache/docker/supabase-images.txt
 
