@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(39);
+SELECT plan(41);
 
 SELECT has_function('public', 'generate_med_dose_events_for_person_ids', ARRAY['uuid[]', 'text', 'integer']);
 SELECT has_function('public', 'generate_med_dose_events_for_horizon', ARRAY['uuid', 'text', 'integer']);
@@ -196,6 +196,22 @@ SELECT
   ),
   jsonb_build_object('type', 'ongoing', 'start_date', v.tomorrow_utc::text),
   jsonb_build_object('intake', jsonb_build_object('amount', 2, 'unit', 'capsule'), 'active', '[]'::jsonb)
+FROM _vars v;
+
+-- daily_times regimen with fractional slot amounts (half / one-and-a-half pills).
+INSERT INTO public.med_regimens (id, person_id, custom_name, status, schedule, duration, dose_definition)
+SELECT
+  '40000000-0000-0000-0000-000000000002',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1',
+  'Matrix Daily Times Fractional Amounts',
+  'active',
+  jsonb_build_object(
+    'mode', 'daily_times',
+    'times', jsonb_build_array('08:00', '20:00'),
+    'amounts', jsonb_build_array(0.5, 1.5)
+  ),
+  jsonb_build_object('type', 'ongoing', 'start_date', v.tomorrow_utc::text),
+  jsonb_build_object('intake', jsonb_build_object('amount', 2, 'unit', 'pill'), 'active', '[]'::jsonb)
 FROM _vars v;
 
 -- days_of_week regimens.
@@ -440,6 +456,27 @@ SELECT ok(
       AND (planned_intake->'intake'->>'amount')::numeric = 3
   ),
   'daily_times uses explicit slot amount when provided'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.med_dose_events
+    WHERE regimen_id = '40000000-0000-0000-0000-000000000002'
+      AND to_char(scheduled_at AT TIME ZONE 'UTC', 'HH24:MI') = '08:00'
+      AND (planned_intake->'intake'->>'amount')::numeric = 0.5
+  ),
+  'daily_times preserves a fractional half-dose slot amount'
+);
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.med_dose_events
+    WHERE regimen_id = '40000000-0000-0000-0000-000000000002'
+      AND to_char(scheduled_at AT TIME ZONE 'UTC', 'HH24:MI') = '20:00'
+      AND (planned_intake->'intake'->>'amount')::numeric = 1.5
+  ),
+  'daily_times preserves a fractional one-and-a-half-dose slot amount'
 );
 
 SELECT ok(

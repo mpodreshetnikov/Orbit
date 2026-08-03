@@ -81,6 +81,23 @@ describe("EditIntakeDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("keeps a fractional amount instead of truncating it", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(<EditIntakeDialog open onOpenChange={vi.fn()} event={event()} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("medications.editIntakeAmount"), {
+      target: { value: "0.5" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ amountTaken: 0.5 }));
+    });
+  });
+
   it("submits skipped intake without amount", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);

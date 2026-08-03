@@ -241,6 +241,63 @@ describe("MedicationForm", () => {
     });
   });
 
+  it("submits a fractional one-time dose", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="create"
+        personId="person-1"
+        defaultKind="one_time"
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("medications.namePlaceholder"), {
+      target: { value: "Aspirin" },
+    });
+    fireEvent.change(screen.getByLabelText("medications.scheduledAt"), {
+      target: { value: "2026-03-01T10:15" },
+    });
+    fireEvent.change(screen.getByLabelText("medications.oneTimeAmount"), {
+      target: { value: "0.5" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "common.add" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dose_definition: { intake: { amount: 0.5, unit: "pill" }, active: [] },
+        }),
+      );
+    });
+  });
+
+  it("submits a fractional daily dose entered with a decimal comma", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(<MedicationForm mode="create" personId="person-1" onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("medications.name"), { target: { value: "Aspirin" } });
+    fireEvent.change(screen.getByLabelText("medications.amountPerIntake"), {
+      target: { value: "1,5" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "common.add" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dose_definition: { intake: { amount: 1.5, unit: "pill" }, active: [] },
+          schedule: expect.objectContaining({ mode: "daily_times", amounts: [1.5] }),
+        }),
+      );
+    });
+  });
+
   it("blocks submit for regular regimen when for-days duration is invalid", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
@@ -274,9 +331,10 @@ describe("MedicationForm", () => {
     });
     await user.click(screen.getByRole("button", { name: "medications.everyXHours" }));
 
-    const scheduleInputs = screen.getAllByRole("spinbutton");
-    fireEvent.change(scheduleInputs[0], { target: { value: "8" } });
-    fireEvent.change(scheduleInputs[1], { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("medications.hours"), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText("medications.amountPerIntake"), {
+      target: { value: "2" },
+    });
 
     await user.click(screen.getByRole("button", { name: "medications.intakeAdviceCustom" }));
     fireEvent.change(screen.getByPlaceholderText("medications.intakeAdviceCustom"), {
@@ -285,9 +343,12 @@ describe("MedicationForm", () => {
 
     await user.click(screen.getByLabelText("medications.inventoryEnabled"));
 
-    const allNumberInputs = screen.getAllByRole("spinbutton");
-    fireEvent.change(allNumberInputs[2], { target: { value: "50" } });
-    fireEvent.change(allNumberInputs[3], { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText(/medications\.inventoryCurrent/), {
+      target: { value: "50" },
+    });
+    fireEvent.change(screen.getByLabelText(/medications\.inventoryRefillThreshold/), {
+      target: { value: "10" },
+    });
 
     fireEvent.change(screen.getByPlaceholderText("medications.notesPlaceholder"), {
       target: { value: "long-term regimen" },

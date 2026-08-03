@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -67,13 +67,12 @@ export function RefillDialog({ open, onOpenChange, regimen, onSubmit }: RefillDi
           <div className="space-y-2">
             <Label htmlFor="refillAmount">{t("medications.refillAmountLabel")}</Label>
             <div className="flex items-center gap-2">
-              <Input
+              <NumberInput
                 id="refillAmount"
-                type="number"
-                step={1}
+                allowNegative
                 placeholder="+5 or -3"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onValueChange={(_n, raw) => setAmount(raw)}
                 className="w-24"
               />
               {regimen && (

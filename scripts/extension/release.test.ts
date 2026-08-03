@@ -102,6 +102,57 @@ describe("extension release", () => {
     ).toBe(false);
   });
 
+  it("does not require a version bump for test files inside the surfaces", () => {
+    // Tests live under the surfaces but are never packaged, so editing one
+    // cannot change what users receive. Requiring a bump for them mints a
+    // release — and triggers the release bundle job — for a test-only edit.
+    for (const changed of [
+      "browserExtension/src/connectors/tbank-web.test.ts",
+      "browserExtension/src/core/background-router.test.ts",
+      "browserExtension/popup-src/helpers.test.ts",
+      "scripts/extension/release.test.ts",
+      "browserExtension/src/__tests__/anything.ts",
+    ]) {
+      expect(
+        shouldRequireExtensionVersionBump({ changedFiles: [changed], versionChanged: false }),
+      ).toBe(false);
+    }
+
+    // A packaged file alongside a test still requires the bump.
+    expect(
+      shouldRequireExtensionVersionBump({
+        changedFiles: [
+          "browserExtension/src/connectors/tbank-web.test.ts",
+          "browserExtension/src/connectors/tbank-web.ts",
+        ],
+        versionChanged: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not require a version bump for the release tooling itself", () => {
+    // release.ts zips and uploads browserExtension/dist; it cannot change what
+    // goes into that bundle, so it is not a packaged surface. Governing it also
+    // makes the version policy circular: changing the policy would need a bump.
+    expect(
+      shouldRequireExtensionVersionBump({
+        changedFiles: ["scripts/extension/release.ts"],
+        versionChanged: false,
+      }),
+    ).toBe(false);
+
+    // The build scripts that do shape the bundle stay governed.
+    for (const changed of [
+      "scripts/extension/build.ts",
+      "scripts/extension/build-lib.ts",
+      "scripts/extension/esbuild-widget.ts",
+    ]) {
+      expect(
+        shouldRequireExtensionVersionBump({ changedFiles: [changed], versionChanged: false }),
+      ).toBe(true);
+    }
+  });
+
   it("builds public download URLs and zip archives for release artifacts", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "extension-release-archive-test-"));
     const sourceDir = path.join(tempDir, "source");

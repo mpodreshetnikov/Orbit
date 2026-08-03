@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import extensionManifest from "../../manifest.json";
 import { createImportDebugStore } from "./import-debug.js";
 import { routeBackgroundMessage } from "./background-router.js";
 
@@ -35,7 +36,9 @@ describe("background-router", () => {
     await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_PING" }, deps)).resolves.toEqual({
       ok: true,
       extension_id: "unit-test",
-      extension_version: "0.1.2",
+      // Read from the manifest, which is what the router reports. Duplicating
+      // the literal here means every release version bump breaks this test.
+      extension_version: extensionManifest.version,
     });
     await expect(routeBackgroundMessage({ type: "UNKNOWN" }, deps)).resolves.toEqual({
       ok: false,

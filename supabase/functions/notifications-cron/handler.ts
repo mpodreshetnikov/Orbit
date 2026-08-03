@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+// @ts-types="./web-push.d.ts"
 import webpush from "web-push";
 import { corsHeaders } from "../_shared/cors.ts";
 import type { Database } from "../_shared/database.types.ts";

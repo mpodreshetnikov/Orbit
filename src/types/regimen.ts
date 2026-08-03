@@ -240,6 +240,16 @@ export interface MedInventoryTransaction {
 // Helpers
 // ============================================================================
 
+/**
+ * Coerce to a usable intake amount, falling back when the value is missing,
+ * zero or negative. Fractional doses (0.5, 1.5) are preserved — use this
+ * instead of `Math.max(1, …)`, which silently rounds half-pill doses up to 1.
+ */
+export function toPositiveAmount(value: unknown, fallback = 1): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export function getPlannedIntakeAmount(planned: PlannedIntake | null): number {
   return Number(planned?.intake?.amount ?? 1);
 }

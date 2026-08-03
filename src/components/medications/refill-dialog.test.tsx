@@ -42,7 +42,7 @@ describe("RefillDialog", () => {
         onSubmit={onSubmit}
       />,
     );
-    expect(screen.getByLabelText("medications.refillAmountLabel")).toHaveValue(1);
+    expect(screen.getByLabelText("medications.refillAmountLabel")).toHaveValue("1");
   });
 
   it("does not submit invalid amounts or null regimen", async () => {

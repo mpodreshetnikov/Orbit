@@ -814,10 +814,17 @@ describe("MoneyImportPage", () => {
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
       await user.click(await screen.findByRole("button", { name: "Custom" }));
 
+      // datetime-local inputs are local time. The page serialises them with
+      // `new Date(value).toISOString()`, so the expected UTC below is derived
+      // the same way rather than hardcoded — a fixed "Z" value silently pinned
+      // this spec to a UTC+7 machine and failed everywhere else, CI included.
+      const customFromLocal = "2026-02-01T10:00";
+      const customToLocal = "2026-02-15T21:30";
+
       await user.clear(screen.getByLabelText("From"));
-      await user.type(screen.getByLabelText("From"), "2026-02-01T10:00");
+      await user.type(screen.getByLabelText("From"), customFromLocal);
       await user.clear(screen.getByLabelText("To"));
-      await user.type(screen.getByLabelText("To"), "2026-02-15T21:30");
+      await user.type(screen.getByLabelText("To"), customToLocal);
 
       const startImportButton = await screen.findByRole("button", {
         name: "money.importStartImport",
@@ -830,8 +837,12 @@ describe("MoneyImportPage", () => {
       await waitFor(() => {
         const createSessionCall = String(fetchMock.mock.calls[1]?.[1]?.body ?? "");
         expect(createSessionCall).toContain('"selection_mode":"custom"');
-        expect(createSessionCall).toContain('"window_from":"2026-02-01T03:00:00.000Z"');
-        expect(createSessionCall).toContain('"window_to":"2026-02-15T14:30:00.000Z"');
+        expect(createSessionCall).toContain(
+          `"window_from":"${new Date(customFromLocal).toISOString()}"`,
+        );
+        expect(createSessionCall).toContain(
+          `"window_to":"${new Date(customToLocal).toISOString()}"`,
+        );
         expect(createSessionCall).toContain('"prompted_for_history":true');
       });
     } finally {

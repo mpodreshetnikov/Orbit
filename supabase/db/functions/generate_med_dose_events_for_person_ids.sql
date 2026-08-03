@@ -102,7 +102,7 @@ BEGIN
       v_every := (v_schedule->'interval'->>'every')::int;
       IF v_every IS NOT NULL AND v_every > 0 THEN
         v_slot_amount := (v_schedule->'amount')::text::numeric;
-        IF v_slot_amount IS NULL OR v_slot_amount < 1 THEN
+        IF v_slot_amount IS NULL OR v_slot_amount <= 0 THEN
           v_slot_amount := (v_planned_intake->'intake'->>'amount')::numeric;
         END IF;
         IF v_slot_amount IS NULL THEN v_slot_amount := 1; END IF;
@@ -155,7 +155,7 @@ BEGIN
         FOR v_slot IN SELECT t.ordinality::int AS idx, t.elem AS slot_time FROM jsonb_array_elements_text(v_times) WITH ORDINALITY AS t(elem, ordinality)
         LOOP
           v_slot_amount := (v_schedule->'amounts'->(v_slot.idx - 1))::text::numeric;
-          IF v_slot_amount IS NULL OR v_slot_amount < 1 THEN
+          IF v_slot_amount IS NULL OR v_slot_amount <= 0 THEN
             v_slot_amount := (v_planned_intake->'intake'->>'amount')::numeric;
           END IF;
           IF v_slot_amount IS NULL THEN v_slot_amount := 1; END IF;
@@ -184,7 +184,7 @@ BEGIN
           FOR v_slot IN SELECT t.ordinality::int AS idx, t.elem AS slot_time FROM jsonb_array_elements_text(v_times) WITH ORDINALITY AS t(elem, ordinality)
           LOOP
             v_slot_amount := (v_schedule->'amounts'->(v_slot.idx - 1))::text::numeric;
-            IF v_slot_amount IS NULL OR v_slot_amount < 1 THEN
+            IF v_slot_amount IS NULL OR v_slot_amount <= 0 THEN
               v_slot_amount := (v_planned_intake->'intake'->>'amount')::numeric;
             END IF;
             IF v_slot_amount IS NULL THEN v_slot_amount := 1; END IF;
@@ -215,7 +215,7 @@ BEGIN
             FOR v_slot IN SELECT t.ordinality::int AS idx, t.elem AS slot_time FROM jsonb_array_elements_text(v_times) WITH ORDINALITY AS t(elem, ordinality)
             LOOP
               v_slot_amount := (v_schedule->'amounts'->(v_slot.idx - 1))::text::numeric;
-              IF v_slot_amount IS NULL OR v_slot_amount < 1 THEN
+              IF v_slot_amount IS NULL OR v_slot_amount <= 0 THEN
                 v_slot_amount := (v_planned_intake->'intake'->>'amount')::numeric;
               END IF;
               IF v_slot_amount IS NULL THEN v_slot_amount := 1; END IF;

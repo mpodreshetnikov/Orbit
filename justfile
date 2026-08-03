@@ -33,8 +33,13 @@ extension-build-production:
   npx tsx scripts/extension/build.ts --mode=production
 
 # Build the versioned production extension release bundle.
+# The conditional is a just interpolation, not shell: just resolves it before the
+# recipe runs, so the command line is valid under both sh and PowerShell. This
+# previously used PowerShell's `if (…) { … } else { … }`, which is a syntax error
+# under sh and so failed on Linux CI. Passing an empty --published-at is not an
+# option — the CLI rejects a blank value — so the flag has to be omitted entirely.
 extension-release-build artifact_dir='.artifacts/extension-release' published_at='':
-  if ("{{published_at}}" -eq "") { npx tsx scripts/extension/release.ts build-artifact --output-dir "{{artifact_dir}}" } else { npx tsx scripts/extension/release.ts build-artifact --output-dir "{{artifact_dir}}" --published-at "{{published_at}}" }
+  npx tsx scripts/extension/release.ts build-artifact --output-dir "{{artifact_dir}}" {{ if published_at == '' { '' } else { '--published-at "' + published_at + '"' } }}
 
 # Publish the prepared production extension release bundle to Supabase Storage.
 extension-release-publish artifact_dir='.artifacts/extension-release':

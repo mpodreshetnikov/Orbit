@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { MedRegimen } from "@/types/regimen";
-import { getPlannedIntakeAmount } from "@/types/regimen";
+import { getPlannedIntakeAmount, toPositiveAmount } from "@/types/regimen";
 import { getUnitLabel } from "./medication-units";
 
 export interface LogIntakeDialogSubmitInput {
@@ -37,7 +37,9 @@ interface LogIntakeDialogProps {
 
 export function LogIntakeDialog({ open, onOpenChange, regimen, onSubmit }: LogIntakeDialogProps) {
   const t = useTranslations();
-  const defaultAmount = regimen ? Math.max(1, getPlannedIntakeAmount(regimen.dose_definition)) : 1;
+  const defaultAmount = regimen
+    ? toPositiveAmount(getPlannedIntakeAmount(regimen.dose_definition))
+    : 1;
   const [amount, setAmount] = useState(() => defaultAmount);
   const [skipped, setSkipped] = useState(false);
   const [note, setNote] = useState("");
@@ -45,12 +47,12 @@ export function LogIntakeDialog({ open, onOpenChange, regimen, onSubmit }: LogIn
 
   useEffect(() => {
     if (open && regimen) {
-      setAmount(Math.max(1, getPlannedIntakeAmount(regimen.dose_definition)));
+      setAmount(toPositiveAmount(getPlannedIntakeAmount(regimen.dose_definition)));
     }
   }, [open, regimen]);
 
   const reset = () => {
-    setAmount(regimen ? Math.max(1, getPlannedIntakeAmount(regimen.dose_definition)) : 1);
+    setAmount(regimen ? toPositiveAmount(getPlannedIntakeAmount(regimen.dose_definition)) : 1);
     setSkipped(false);
     setNote("");
   };
@@ -104,13 +106,12 @@ export function LogIntakeDialog({ open, onOpenChange, regimen, onSubmit }: LogIn
                 )}
               </Label>
               <div className="flex items-center gap-2">
-                <Input
+                <NumberInput
                   id="amount"
-                  type="number"
-                  min={0.1}
-                  step={0.5}
                   value={amount}
-                  onChange={(e) => setAmount(Number(e.target.value) || 1)}
+                  onValueChange={(n) => {
+                    if (n !== null) setAmount(n);
+                  }}
                   className="w-24"
                 />
                 {regimen && (

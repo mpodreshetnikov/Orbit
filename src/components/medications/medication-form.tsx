@@ -9,6 +9,7 @@ import { useRegimens } from "@/hooks/use-regimens";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -42,6 +43,7 @@ import type {
   RegimenInventory,
   AddOneTimeToExistingPayload,
 } from "@/types/regimen";
+import { toPositiveAmount } from "@/types/regimen";
 
 interface MedicationFormPropsBase {
   mode: "create" | "edit";
@@ -119,7 +121,7 @@ export function getInitialSchedule(
     return {
       mode: "interval_hours",
       interval: { every: s.interval?.every ?? 1 },
-      amount: Math.max(1, (s as { amount?: number }).amount ?? 1),
+      amount: toPositiveAmount((s as { amount?: number }).amount),
     };
   if (s.mode === "interval_days") {
     const sd = s as {
@@ -225,7 +227,7 @@ export function MedicationForm({
   const [scheduleError, setScheduleError] = useState("");
   const [basicErrorType, setBasicErrorType] = useState<"" | "name" | "scheduled_at">("");
   const [oneTimeAmount, setOneTimeAmount] = useState(() =>
-    Math.max(1, Number(initial?.dose_definition?.intake?.amount) || 1),
+    toPositiveAmount(initial?.dose_definition?.intake?.amount),
   );
   const [scheduledAt, setScheduledAt] = useState(() => {
     const due = (initial?.schedule as { mode?: string; due_at?: string })?.due_at;
@@ -305,7 +307,7 @@ export function MedicationForm({
           (onSubmit as (d: CreateMedRegimenInput | AddOneTimeToExistingPayload) => void)({
             addToRegimenId,
             scheduled_at: scheduledAtISO,
-            amount: Math.max(1, oneTimeAmount),
+            amount: toPositiveAmount(oneTimeAmount),
             unit,
             notes: notes.trim() || null,
           } as AddOneTimeToExistingPayload);
@@ -315,7 +317,7 @@ export function MedicationForm({
           person_id: personId,
           custom_name: trimmedName,
           intake_unit: unit,
-          dose_definition: buildDoseDefinition(Math.max(1, oneTimeAmount)),
+          dose_definition: buildDoseDefinition(toPositiveAmount(oneTimeAmount)),
           intake_advice_type: "none",
           intake_advice_text: null,
           schedule: { mode: "one_off", due_at: scheduledAtISO },
@@ -328,7 +330,7 @@ export function MedicationForm({
         const payload = {
           custom_name: name.trim(),
           intake_unit: unit,
-          dose_definition: buildDoseDefinition(Math.max(1, oneTimeAmount)),
+          dose_definition: buildDoseDefinition(toPositiveAmount(oneTimeAmount)),
           intake_advice_type: "none" as const,
           intake_advice_text: null as string | null,
           schedule: { mode: "one_off" as const, due_at: scheduledAtISO },
@@ -348,15 +350,13 @@ export function MedicationForm({
 
     const amount =
       schedule.mode === "daily_times" && schedule.amounts?.length
-        ? Math.max(1, schedule.amounts[0] ?? 1)
+        ? toPositiveAmount(schedule.amounts[0])
         : schedule.mode === "interval_hours"
-          ? Math.max(1, (schedule as { amount?: number }).amount ?? 1)
+          ? toPositiveAmount((schedule as { amount?: number }).amount)
           : schedule.mode === "interval_days" &&
               (schedule as { amounts?: number[] }).amounts?.length
-            ? Math.max(1, (schedule as { amounts: number[] }).amounts[0] ?? 1)
-            : schedule.mode === "days_of_week"
-              ? 1
-              : 1;
+            ? toPositiveAmount((schedule as { amounts: number[] }).amounts[0])
+            : 1;
 
     const durationToSubmit: MedDuration =
       duration.type === "for_days"
@@ -400,7 +400,7 @@ export function MedicationForm({
       const times = [...(prev.times ?? [])];
       const amounts = [...(prev.amounts ?? [])];
       if (field === "time") times[index] = value as string;
-      else amounts[index] = Math.max(1, value as number);
+      else amounts[index] = toPositiveAmount(value);
       return { ...prev, times, amounts };
     });
   };
@@ -408,7 +408,7 @@ export function MedicationForm({
   const addReminderTime = () => {
     setSchedule((prev) => {
       if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
-      const amount = Math.max(1, prev.amounts?.[0] ?? 1);
+      const amount = toPositiveAmount(prev.amounts?.[0]);
       return {
         ...prev,
         times: [...(prev.times ?? []), "08:00"],
@@ -669,13 +669,12 @@ export function MedicationForm({
               <div className="space-y-2">
                 <Label htmlFor="one-time-amount">{t("medications.oneTimeAmount")}</Label>
                 <div className="flex items-center gap-2">
-                  <Input
+                  <NumberInput
                     id="one-time-amount"
-                    type="number"
-                    min={1}
-                    step={1}
                     value={oneTimeAmount}
-                    onChange={(e) => setOneTimeAmount(Math.max(1, Number(e.target.value) || 1))}
+                    onValueChange={(n) => {
+                      if (n !== null) setOneTimeAmount(n);
+                    }}
                     className="w-24"
                   />
                   <span className="text-muted-foreground text-sm">{getUnitLabel(unit, t)}</span>
@@ -734,7 +733,7 @@ export function MedicationForm({
                       },
                       amount:
                         schedule.mode === "interval_hours"
-                          ? Math.max(1, (schedule as { amount?: number }).amount ?? 1)
+                          ? toPositiveAmount((schedule as { amount?: number }).amount)
                           : 1,
                     });
                   else if (v === "interval_days") {
@@ -783,12 +782,17 @@ export function MedicationForm({
               {(schedule.mode === "interval_hours" || schedule.mode === "interval_days") && (
                 <div className="space-y-2 mt-2">
                   <div className="flex gap-2 items-center flex-wrap">
-                    <Input
-                      type="number"
-                      min={1}
+                    <NumberInput
+                      integer
+                      aria-label={
+                        schedule.mode === "interval_hours"
+                          ? t("medications.hours")
+                          : t("medications.days")
+                      }
                       value={(schedule as { interval?: { every?: number } }).interval?.every ?? 1}
-                      onChange={(e) => {
-                        const every = Number(e.target.value) || 1;
+                      onValueChange={(n) => {
+                        if (n === null) return;
+                        const every = toPositiveAmount(n);
                         if (schedule.mode === "interval_hours")
                           setSchedule({
                             ...schedule,
@@ -814,17 +818,14 @@ export function MedicationForm({
                   {schedule.mode === "interval_hours" && (
                     <div className="flex gap-2 items-center">
                       <Label className="text-sm">{t("medications.amountPerIntake")}</Label>
-                      <Input
-                        type="number"
-                        min={1}
+                      <NumberInput
                         className="w-24"
-                        value={Math.max(1, (schedule as { amount?: number }).amount ?? 1)}
-                        onChange={(e) =>
-                          setSchedule({
-                            ...schedule,
-                            amount: Math.max(1, Number(e.target.value) || 1),
-                          })
-                        }
+                        aria-label={t("medications.amountPerIntake")}
+                        value={toPositiveAmount((schedule as { amount?: number }).amount)}
+                        onValueChange={(n) => {
+                          if (n === null) return;
+                          setSchedule({ ...schedule, amount: toPositiveAmount(n) });
+                        }}
                       />
                       <span className="text-sm text-muted-foreground">{getUnitLabel(unit, t)}</span>
                     </div>
@@ -945,18 +946,16 @@ export function MedicationForm({
             {duration.type === "for_days" && (
               <div className="space-y-2">
                 <Label htmlFor="med-days-count">{t("medications.daysFromStartCount")}</Label>
-                <Input
+                <NumberInput
                   id="med-days-count"
-                  type="number"
-                  min={1}
-                  required
+                  integer
                   aria-invalid={!!scheduleError}
                   aria-describedby={scheduleError ? "med-days-count-error" : undefined}
                   value={duration.days ?? ""}
-                  onChange={(e) => {
+                  onValueChange={(n) => {
                     setScheduleError("");
-                    const n = e.target.value ? Number(e.target.value) : undefined;
-                    setDuration({ type: "for_days", days: n ?? 1, start_date: startDate });
+                    if (n === null) return;
+                    setDuration({ type: "for_days", days: n, start_date: startDate });
                   }}
                 />
                 {scheduleError && (
@@ -984,9 +983,9 @@ export function MedicationForm({
                         className="min-w-8"
                         onClick={() => {
                           const nextSlots = getReminderSlotsForIntakesPerDay(num);
-                          const currentAmount =
-                            (schedule as { amounts?: number[] }).amounts?.[0] ?? 1;
-                          const amount = Math.max(1, Number(currentAmount) || 1);
+                          const amount = toPositiveAmount(
+                            (schedule as { amounts?: number[] }).amounts?.[0],
+                          );
                           if (schedule.mode === "daily_times") {
                             setSchedule({
                               mode: "daily_times",
@@ -1016,14 +1015,13 @@ export function MedicationForm({
                       className="min-w-[9rem] w-36 sm:w-28 shrink-0"
                     />
                     <div className="flex items-center gap-1.5">
-                      <Input
-                        type="number"
-                        min={1}
-                        step={1}
+                      <NumberInput
+                        aria-label={t("medications.amountPerIntake")}
                         value={slot.amount}
-                        onChange={(e) =>
-                          updateReminderTime(i, "amount", Math.max(1, Number(e.target.value) || 1))
-                        }
+                        onValueChange={(n) => {
+                          if (n === null) return;
+                          updateReminderTime(i, "amount", n);
+                        }}
                         className="w-20"
                       />
                       <span className="text-muted-foreground text-sm whitespace-nowrap">
@@ -1116,7 +1114,7 @@ export function MedicationForm({
                 )}
               >
                 <div className="space-y-2">
-                  <Label className="block">
+                  <Label className="block" htmlFor="inventory-current">
                     <span className="block">
                       {t("medications.inventoryCurrent")} ({getUnitLabel(unit, t)})
                     </span>
@@ -1124,15 +1122,14 @@ export function MedicationForm({
                       {t("common.optional")}
                     </span>
                   </Label>
-                  <Input
-                    type="number"
-                    min={0}
+                  <NumberInput
+                    id="inventory-current"
                     value={inventoryCurrent}
-                    onChange={(e) => setInventoryCurrent(e.target.value)}
+                    onValueChange={(_n, raw) => setInventoryCurrent(raw)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label className="block">
+                  <Label className="block" htmlFor="inventory-refill-threshold">
                     <span className="block">
                       {t("medications.inventoryRefillThreshold")} ({getUnitLabel(unit, t)})
                     </span>
@@ -1140,11 +1137,10 @@ export function MedicationForm({
                       {t("common.optional")}
                     </span>
                   </Label>
-                  <Input
-                    type="number"
-                    min={0}
+                  <NumberInput
+                    id="inventory-refill-threshold"
                     value={inventoryRefillThreshold}
-                    onChange={(e) => setInventoryRefillThreshold(e.target.value)}
+                    onValueChange={(_n, raw) => setInventoryRefillThreshold(raw)}
                   />
                 </div>
               </div>

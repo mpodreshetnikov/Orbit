@@ -4,6 +4,24 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MedDoseEvent, MedRegimen } from "@/types/regimen";
 
+/**
+ * The snooze date has to be in the future relative to the run. The page treats
+ * a lapsed snooze as inactive (`activeRefillSnoozeUntil` in page.tsx only keeps
+ * a value that is >= today), so it stops rendering the "snoozed until" label —
+ * a hardcoded date silently rots this spec into a failure once it passes.
+ *
+ * Derived here rather than inlined so the calendar mock and the assertions
+ * cannot drift apart. Local noon, formatted the same way the page does with
+ * date-fns `format(date, "yyyy-MM-dd")`.
+ */
+const snooze = vi.hoisted(() => {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + 30);
+  const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return { date, value };
+});
+
 const hookMocks = vi.hoisted(() => ({
   useRegimen: vi.fn(),
   useDoseEventsForRegimen: vi.fn(),
@@ -174,7 +192,7 @@ vi.mock("@/components/ui/popover", () => ({
 
 vi.mock("@/components/ui/calendar", () => ({
   Calendar: ({ onSelect }: { onSelect?: (date: Date | undefined) => void }) => (
-    <button type="button" onClick={() => onSelect?.(new Date("2026-04-25T12:00:00.000Z"))}>
+    <button type="button" onClick={() => onSelect?.(snooze.date)}>
       pick-refill-snooze-date
     </button>
   ),
@@ -489,14 +507,14 @@ describe("MedicationDetailPage", () => {
     await waitFor(() => {
       expect(setRefillSnoozeMutateAsync).toHaveBeenCalledWith({
         regimenId: "reg-1",
-        snoozeUntil: "2026-04-25",
+        snoozeUntil: snooze.value,
       });
     });
 
     view.unmount();
 
     hookMocks.useMedicationRefillSnooze.mockReturnValue({
-      data: "2026-04-25",
+      data: snooze.value,
       isLoading: false,
     });
 
