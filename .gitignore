@@ -61,3 +61,11 @@ mcp/.env
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# extraction eval corpus — image fixtures live in a private bucket, never in git history
+test/fixtures/extraction/**/*.png
+test/fixtures/extraction/**/*.jpg
+test/fixtures/extraction/**/*.jpeg
+test/fixtures/extraction/**/*.webp
+test/fixtures/extraction/**/*.heic
+test/fixtures/extraction/**/*.pdf
