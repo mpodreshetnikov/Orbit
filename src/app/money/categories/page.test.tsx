@@ -197,7 +197,7 @@ function makeCategory(overrides: Partial<MoneyCategory> = {}): MoneyCategory {
     sort_order: 0,
     created_by: null,
     depth: 1,
-    name_ru: "РџСЂРѕРґСѓРєС‚С‹",
+    name_ru: "Продукты",
     name_en: "Groceries",
     slug: "groceries",
     archived_at: null,
@@ -496,7 +496,7 @@ describe("MoneyCategoriesPage", () => {
     const root = makeCategory({
       id: "root",
       name_en: "Root",
-      name_ru: "РљРѕСЂРµРЅСЊ",
+      name_ru: "Корень",
       slug: "root",
     });
     const child = makeCategory({
@@ -504,7 +504,7 @@ describe("MoneyCategoriesPage", () => {
       parent_id: "root",
       depth: 2,
       name_en: "Child",
-      name_ru: "Р”РѕС‡РµСЂРЅРёР№",
+      name_ru: "Дочерний",
       slug: "child",
     });
     setupCategoriesData([root, child]);
@@ -528,7 +528,7 @@ describe("MoneyCategoriesPage", () => {
     const root = makeCategory({
       id: "root",
       name_en: "Root",
-      name_ru: "РљРѕСЂРµРЅСЊ",
+      name_ru: "Корень",
       slug: "root",
     });
     const child = makeCategory({
@@ -536,7 +536,7 @@ describe("MoneyCategoriesPage", () => {
       parent_id: "root",
       depth: 2,
       name_en: "Child",
-      name_ru: "Р”РѕС‡РµСЂРЅРёР№",
+      name_ru: "Дочерний",
       slug: "child",
     });
     setupCategoriesData([root, child]);

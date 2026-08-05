@@ -51,7 +51,7 @@
       "lastNotification": "Last notification sent",
       "testNotificationTitle": "Test Notification",
       "testNotificationBody": "This is a test notification from Family Superapp!",
-      "testNotificationBodyRich": "рќђ“рќђЎрќђўрќђ¬ рќђўрќђ¬ рќђљ рќђ­рќђћрќђ¬рќђ­ notification.\nTap Open or Settings to try actions.",
+      "testNotificationBodyRich": "𝐓𝐡𝐢𝐬 𝐢𝐬 𝐚 𝐭𝐞𝐬𝐭 notification.\nTap Open or Settings to try actions.",
       "notificationActionOpen": "Open",
       "notificationActionSettings": "Settings",
       "notificationActionDismiss": "Dismiss",
@@ -98,7 +98,7 @@
   },
   "languages": {
     "en": "English",
-    "ru": "Р СѓСЃСЃРєРёР№"
+    "ru": "Русский"
   },
   "person": {
     "select": "Select person",
@@ -535,8 +535,8 @@
     "importExtensionRecheck": "Recheck extension",
     "importExtensionActive": "Extension is active",
     "importExtensionInactive": "Extension is not active",
-    "importExtensionChecking": "Checking extensionвЂ¦",
-    "importExtensionInstallDev": "Load the extension from the dev build: run the build script, then in Chrome go to Extensions в†’ Developer mode в†’ Load unpacked and select the browserExtension output folder.",
+    "importExtensionChecking": "Checking extension…",
+    "importExtensionInstallDev": "Load the extension from the dev build: run the build script, then in Chrome go to Extensions → Developer mode → Load unpacked and select the browserExtension output folder.",
     "importExtensionInstallProd": "Download the latest production extension package and install it in Chrome.",
     "importExtensionDownloadLatest": "Download latest extension",
     "importExtensionInstallProdStep1": "Download the latest ZIP package from this page.",
@@ -688,7 +688,7 @@
       "uploadFiles": "Upload Files",
       "pasteText": "Paste Text",
       "pasteDescription": "Paste raw text from a medical document (e.g., copied from PDF, email, or another source). AI will immediately extract structured data from your text.",
-      "pasteTextPlaceholder": "Paste medical document text here...\n\nExample:\nPatient: John Doe\nDate: 2024-01-15\nTest: Complete Blood Count\nResults:\n- Hemoglobin: 14.2 g/dL\n- White Blood Cells: 7500/ВµL\n...",
+      "pasteTextPlaceholder": "Paste medical document text here...\n\nExample:\nPatient: John Doe\nDate: 2024-01-15\nTest: Complete Blood Count\nResults:\n- Hemoglobin: 14.2 g/dL\n- White Blood Cells: 7500/µL\n...",
       "proceedToReview": "Extract Data",
       "starting": "Starting",
       "queued": "Queued",
@@ -820,7 +820,7 @@
     "retryOcr": "Retry OCR",
     "timeout": "Processing timed out",
     "timeoutDescription": "Check your connection and use Retry OCR from the record.",
-    "failedTapToRetry": "Failed вЂ“ tap to retry"
+    "failedTapToRetry": "Failed – tap to retry"
   },
   "catalogs": {
     "title": "Catalogs",
@@ -1209,10 +1209,10 @@
     },
     "statusTips": {
       "title": "Status Guide",
-      "active": "Active вЂ” Current ongoing condition that requires attention. Will be prominently shown to the chatbot for health decisions.",
-      "suspected": "Suspected вЂ” Preliminary diagnosis that needs confirmation. Chatbot will consider it but with lower certainty.",
-      "resolved": "Resolved вЂ” Condition that was treated and is no longer present. Kept for medical history context.",
-      "history": "History вЂ” Past condition mentioned in records. Provides background context without implying current relevance."
+      "active": "Active — Current ongoing condition that requires attention. Will be prominently shown to the chatbot for health decisions.",
+      "suspected": "Suspected — Preliminary diagnosis that needs confirmation. Chatbot will consider it but with lower certainty.",
+      "resolved": "Resolved — Condition that was treated and is no longer present. Kept for medical history context.",
+      "history": "History — Past condition mentioned in records. Provides background context without implying current relevance."
     },
     "linkedCheckups": "Checkups linked to this condition",
     "linkedCheckupsEmpty": "No checkups linked to this condition",
@@ -1269,7 +1269,7 @@
     "nextDueFrom": "After completion, set next due from",
     "nextDueFromCompletion": "Completion date",
     "nextDueFromTarget": "Target (scheduled) date",
-    "nextDueFromHint": "e.g. target 1 Mar, complete 10 Mar в†’ next due 1 Apr (target) or 10 Apr (completion)",
+    "nextDueFromHint": "e.g. target 1 Mar, complete 10 Mar → next due 1 Apr (target) or 10 Apr (completion)",
     "anchorNextPeriod": "From today",
     "anchorFirstOfYear": "January 1st",
     "anchorFirstOfMonth": "1st of next month",
