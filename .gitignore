@@ -62,10 +62,13 @@ mcp/.env
 *.tsbuildinfo
 next-env.d.ts
 
-# extraction eval corpus — image fixtures live in a private bucket, never in git history
-test/fixtures/extraction/**/*.png
-test/fixtures/extraction/**/*.jpg
-test/fixtures/extraction/**/*.jpeg
-test/fixtures/extraction/**/*.webp
-test/fixtures/extraction/**/*.heic
-test/fixtures/extraction/**/*.pdf
+# Extraction eval corpus. Case directories may hold scans of real medical documents, which
+# belong in a private bucket and never in git history — once a blob is in a pack it cannot be
+# taken back. So this is default-deny: everything under cases/ is ignored, and only the three
+# reviewed text artefacts are allowed back in. An extension allowlist was tried first and got
+# this wrong — it missed `IMG_0001.JPG`, the default name from most cameras and scanners.
+test/fixtures/extraction/cases/**/*
+!test/fixtures/extraction/cases/**/
+!test/fixtures/extraction/cases/**/input.md
+!test/fixtures/extraction/cases/**/expected.json
+!test/fixtures/extraction/cases/**/meta.json

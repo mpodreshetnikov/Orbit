@@ -27,7 +27,7 @@ context (`CheckupItemForContext`, `supabase/functions/health-structure/types.ts:
 Every case uses it unless its `meta.json` overrides `patient_state.checkupItems`.
 
 Using one shared list across all cases is deliberate: it keeps `checkups_to_complete` scoring
-comparable case to case, and it means a case that *should not* complete any checkup is a real
+comparable case to case, and it means a case that _should not_ complete any checkup is a real
 negative — the model had 22 plausible candidates in front of it and picked none.
 
 Note that reconcile is skipped entirely when the patient has no history at all
@@ -62,7 +62,7 @@ are not reproduced here.
 
 ## Expected files encode the correct answer, not the current answer
 
-Where the pipeline is known to be wrong, `expected.json` states what the pipeline *should*
+Where the pipeline is known to be wrong, `expected.json` states what the pipeline _should_
 produce. A corpus that encodes current behaviour cannot detect a regression away from correct,
 only away from familiar.
 
@@ -96,6 +96,18 @@ depends on the fuzzy tier clearing `FUZZY_THRESHOLD` (`code-resolution.ts:24-36`
 
 ## Images are not committed
 
-`test/fixtures/extraction/**/*.{png,jpg,jpeg,webp,heic,pdf}` is gitignored. Image fixtures live in
-a private Supabase bucket and are pulled on demand. Keeping them out of git history means a
-redaction mistake stays fixable; once a file is in a pack, it is not.
+Case directories are **default-deny** in `.gitignore`: everything under `cases/` is ignored, and
+only `input.md`, `expected.json` and `meta.json` are allowed back in. Adding a new file type to a
+case therefore requires an explicit, reviewable `.gitignore` change.
+
+The first version of this rule was an extension allowlist, and it was wrong — it matched
+`input.jpg` but not `input.JPG`, which is the default name from most cameras and scanners. An
+allowlist has to anticipate every extension and every capitalisation of it; default-deny does not.
+
+Image fixtures live in a private Supabase bucket and are pulled on demand. Keeping them out of git
+history means a redaction mistake stays fixable; once a blob is in a pack, it is not.
+
+Also note `input.md` is exempt from Prettier (`.prettierignore`). It stands in for OCR output and
+must stay byte-exact — Prettier collapses the tab-delimited result tables to single spaces, which
+destroys the column structure the extractor reads value, unit and reference range from, and which
+Milestone 7 identifies as the origin of value-to-unit mispairing.
