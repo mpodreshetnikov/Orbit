@@ -9,16 +9,47 @@ Scored regression corpus for the health image recognition pipeline — Milestone
 test/fixtures/extraction/
   shared/
     checkup-items.json      # patient-state context shared by every case
+    catalogs.json           # pinned observation / finding-type / body-site catalogues
   cases/
     NNN-slug/
       input.md              # the ocr_text handed to health-structure
       expected.json         # hand-checked expected extraction
       meta.json             # language, kind, per-case context overrides
+  cassettes/
+    NNN-slug/               # recorded provider responses, one file per stage
 ```
 
-`health-structure` never sees the image — its input is the `ocr_text` string on the record.
-So the bulk of the corpus is text in, JSON out, and needs no image files at all. Only the few
-cases that exercise `health-ocr` carry an `input.png`, and those are gitignored (see below).
+`health-structure` never sees the image — its input is the `ocr_text` string on the record. So the
+bulk of the corpus is text in, JSON out, and needs no image files at all. Only the few cases that
+exercise `health-ocr` carry an `input.png`, and those are gitignored (see below).
+
+## Running it
+
+`just test-extraction` (see `docs/QUALITY.md` for the full policy). Replays cassettes by default —
+free, offline, deterministic. `--live` calls OpenRouter and costs money; `--record` implies
+`--live` and refreshes the recordings.
+
+**Cassettes have to be recorded once before replay works.** A fresh clone has none, so the first
+`just test-extraction` reports a cassette miss per case and exits non-zero. That is the intended
+behaviour: the alternative is silently falling back to a paid API call. Bootstrap with
+
+```
+OPENROUTER_API_KEY=... just test-extraction --record
+```
+
+then review and commit what lands under `cassettes/`.
+
+Cassettes are keyed on the whole request body, so editing a prompt, a catalogue entry or a case
+fixture correctly invalidates them — a recorded answer is only valid for the question that produced
+it. Re-record when that happens rather than loosening the key.
+
+### The catalogue snapshot
+
+`shared/catalogs.json` is pinned rather than fetched because the catalogue _is_ the extract stage's
+vocabulary and the table the deterministic resolver matches against. Fetching it live would let an
+unrelated catalogue edit move every score with nothing in the diff to explain it. Regenerate with
+`scripts/extraction-eval/dump-catalogs.ts` when the catalogue genuinely changes; ids in the
+snapshot are synthetic and positional, since nothing here scores the `*_id` columns.
 
 ## Shared checkup items
 

@@ -39,7 +39,7 @@ type ServiceResult = {
   payload: Record<string, unknown>;
 };
 
-type PersistRowsResult = {
+export type PersistRowsResult = {
   rows: Record<string, unknown>[];
   droppedInvalidCount: number;
   unresolvedCatalogCount: number;
@@ -51,7 +51,7 @@ function asString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function buildCheckupSuggestions(
+export function buildCheckupSuggestions(
   structured: StructuredDataWithEntities,
   checkupItems: HealthStructureParseContext["checkupItems"],
 ): Record<string, unknown>[] | null {
@@ -69,7 +69,7 @@ function buildCheckupSuggestions(
     });
 }
 
-function buildObservationRows(
+export function buildObservationRows(
   recordId: string,
   structured: StructuredDataWithEntities,
   observationCatalog: HealthStructureParseContext["observationCatalog"],
@@ -133,7 +133,7 @@ function buildObservationRows(
   return { rows, droppedInvalidCount, unresolvedCatalogCount };
 }
 
-function buildFindingRows(
+export function buildFindingRows(
   recordId: string,
   personId: string,
   structured: StructuredDataWithEntities,

@@ -158,6 +158,10 @@ test-unit-coverage:
 test-e2e:
   node scripts/just/run-e2e.cjs
 
+# Score extraction quality against the fixture corpus (replays recordings; --live to call the model).
+test-extraction *args:
+  npx tsx scripts/extraction-eval/run.ts {{args}}
+
 # Generate combined runtime + DB coverage report artifacts.
 coverage-report:
   node scripts/just/coverage-report.cjs

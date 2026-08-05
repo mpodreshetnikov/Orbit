@@ -33,6 +33,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `test-unit`: `just test-unit` (all fast runtime-split unit lanes)
 - `test-unit-coverage`: `just test-unit-coverage`
 - `test-e2e`: `just test-e2e` (Playwright end-to-end lane for real local product flows; includes extraction coverage and runs in deterministic no-external-LLM mode where applicable)
+- `test-extraction`: `just test-extraction` (scored extraction quality against the fixture corpus; replays recordings by default, does not gate CI)
 - `coverage-report`: `just coverage-report`
 - `coverage-check`: `just coverage-check`
 - `lint`: `just quality-lint`

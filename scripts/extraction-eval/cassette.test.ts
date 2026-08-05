@@ -1,0 +1,120 @@
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { cassetteKey, createCassetteFetch } from "./cassette";
+
+const dirs: string[] = [];
+
+async function tempDir(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), "cassette-"));
+  dirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+const REQUEST = {
+  model: "test-model",
+  messages: [{ role: "user", content: "Extract clinical entities from the document." }],
+};
+
+function post(body: unknown): RequestInit {
+  return { method: "POST", body: JSON.stringify(body) };
+}
+
+function liveFetchReturning(payload: unknown): typeof fetch {
+  return (async () =>
+    new Response(JSON.stringify(payload), { status: 200 })) as unknown as typeof fetch;
+}
+
+describe("cassetteKey", () => {
+  it("is stable for the same model and messages", () => {
+    expect(cassetteKey(REQUEST)).toBe(cassetteKey({ ...REQUEST }));
+  });
+
+  it("changes when the prompt changes", () => {
+    const other = { ...REQUEST, messages: [{ role: "user", content: "different" }] };
+    expect(cassetteKey(other)).not.toBe(cassetteKey(REQUEST));
+  });
+
+  it("changes when the model changes, so a recording is never reused across models", () => {
+    expect(cassetteKey({ ...REQUEST, model: "other-model" })).not.toBe(cassetteKey(REQUEST));
+  });
+});
+
+describe("createCassetteFetch", () => {
+  it("records a live response and replays it byte for byte", async () => {
+    const dir = await tempDir();
+    const payload = { choices: [{ message: { content: "{}" } }] };
+
+    const recorder = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning(payload),
+    });
+    await recorder.fetchFn("https://openrouter.ai/api/v1/chat/completions", post(REQUEST));
+    await recorder.flush();
+
+    const files = await readdir(dir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^extract-[0-9a-f]{16}\.json$/);
+
+    const replayer = await createCassetteFetch({
+      dir,
+      mode: "replay",
+      // Any live call here would be a bug: replay must never reach the network.
+      liveFetch: (() => {
+        throw new Error("replay must not call the network");
+      }) as unknown as typeof fetch,
+    });
+    const replayed = await replayer.fetchFn(
+      "https://openrouter.ai/api/v1/chat/completions",
+      post(REQUEST),
+    );
+    expect(replayed.status).toBe(200);
+    expect(await replayed.json()).toEqual(payload);
+  });
+
+  it("fails loudly on a miss instead of silently calling the provider", async () => {
+    const dir = await tempDir();
+    const replayer = await createCassetteFetch({ dir, mode: "replay" });
+    await expect(
+      replayer.fetchFn("https://openrouter.ai/api/v1/chat/completions", post(REQUEST)),
+    ).rejects.toThrow(/cassette miss[\s\S]*--record/);
+    expect(replayer.misses()).toHaveLength(1);
+  });
+
+  it("treats a changed prompt as a miss rather than replaying the old answer", async () => {
+    const dir = await tempDir();
+    const recorder = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning({ ok: true }),
+    });
+    await recorder.fetchFn("https://openrouter.ai/api/v1/chat/completions", post(REQUEST));
+    await recorder.flush();
+
+    const replayer = await createCassetteFetch({ dir, mode: "replay" });
+    await expect(
+      replayer.fetchFn(
+        "https://openrouter.ai/api/v1/chat/completions",
+        post({ ...REQUEST, messages: [{ role: "user", content: "reworded prompt" }] }),
+      ),
+    ).rejects.toThrow(/cassette miss/);
+  });
+
+  it("does not record a failed response", async () => {
+    const dir = await tempDir();
+    const recorder = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: (async () => new Response("nope", { status: 500 })) as unknown as typeof fetch,
+    });
+    await recorder.fetchFn("https://openrouter.ai/api/v1/chat/completions", post(REQUEST));
+    await recorder.flush();
+    expect(await readdir(dir)).toHaveLength(0);
+  });
+});
