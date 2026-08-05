@@ -60,6 +60,40 @@ Left verbatim:
 `person_id`, `schedule`, `why_text`, `why_links`, and `notes` are not fetched by the pipeline and
 are not reproduced here.
 
+## Existing conditions belong to the case, not to `shared/`
+
+Unlike checkup items, `patient_state.existingConditions` is set per case in `meta.json`. Conditions
+are what a document is asked to resolve, so they have to be chosen against that document's actual
+content — a shared list would be either trivially unresolvable everywhere or wrong somewhere.
+
+Each case should carry **one condition the document positively resolves** and **several it does
+not**, because resolution is the asymmetric risk here. A missed resolution leaves a stale entry
+someone can correct; a wrongful resolution silently closes a live condition in a patient's record.
+The reconcile stage is told as much — _"Absence of a mention is not evidence of resolution"_ and
+_"Empty is the correct and expected answer in most cases"_ (`stages/reconcile.ts:157-160`) — so the
+negatives are testing an instruction that already exists, not an aspiration.
+
+Pick negatives that are _tempting_, not merely unrelated. In case 001 the four negatives escalate:
+an unrelated condition (gastritis), a condition whose analytes are absent but adjacent to one that
+is present (iron-deficiency anaemia next to a normal B12), a condition whose usual lab markers are
+all in range but which is diagnosed by other means (NAFLD with normal ALT/AST/GGT), and a condition
+whose every marker is in range (dyslipidaemia). Only the last is genuinely arguable, and it is
+recorded in that case's `judgement_calls`.
+
+Note reconcile never sees the document — only extraction's output plus patient state
+(`stages/reconcile.ts:86-89`). It does receive observations with name, code, value, unit and
+status, which is what makes the B12 resolution reachable at all. If a case expects a resolution
+that depends on document prose rather than an extracted entity, that expectation is unreachable by
+construction and the case is wrong, not the pipeline.
+
+## Dates
+
+Where a document prints several dates, vary them. `record_date` is scored as an exact match, and a
+case where collection, registration and printing all fall on one day cannot tell a correct answer
+from a coincidence. Case 001 prints 06.03, 07.03 and 11.03; the expected value is the collection
+date, per classify's instruction that `record_date` is "the date the document describes, not the
+date it was scanned" (`stages/classify.ts:19-23`).
+
 ## Expected files encode the correct answer, not the current answer
 
 Where the pipeline is known to be wrong, `expected.json` states what the pipeline _should_

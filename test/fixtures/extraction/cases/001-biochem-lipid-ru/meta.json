@@ -1,16 +1,18 @@
 {
   "lang": "ru",
   "kind": "lab",
-  "source": "real report, de-identified; see notes",
+  "source": "real report, de-identified; see README.md",
   "notes": [
     "Partial report ('Промежуточный отчет') — biochemistry, lipid panel and one immunology",
     "assay. Deliberately does NOT contain a CBC, so checkup item ...0008 (ОАК) must stay",
     "uncompleted. That is the negative this case exists to catch.",
-    "Three dates are printed (забора / регистрации / печати) and all three are identical here,",
-    "so this case does not discriminate between them. Case 002 should vary them."
+    "The three printed dates deliberately differ: забора 06.03, регистрации 07.03, печати 11.03.",
+    "record_date must be the collection date, per the classify instruction that it is 'the date",
+    "the document describes, not the date it was scanned' (stages/classify.ts:19-23). Picking",
+    "either of the other two is a specific, detectable failure rather than a near miss."
   ],
   "what_this_case_exercises": [
-    "record_date from a header table rather than prose",
+    "record_date from a header table rather than prose, with three competing candidate dates",
     "two section headings (Биохимические / Липидограмма) feeding one flat observation list",
     "Cyrillic unit strings against a Latin-keyed accepted_units map",
     "Cyrillic 'В' in 'Витамин В12' against the Latin-'b' synonym list",
@@ -18,21 +20,91 @@
     "unitless ratio ('—') -> unit null",
     "four analytes absent from observation_catalog -> obs_code null, is_applied false",
     "'!' out-of-range markers on two rows, one of which is high-is-good (HDL)",
-    "trailing guidance prose that must not become observations, findings or conditions"
+    "trailing guidance prose that must not become observations, findings or conditions",
+    "one existing condition the document positively resolves, against four it does not"
   ],
+  "condition_reconciliation_intent": {
+    "must_resolve": [
+      "cond-...0001 Дефицит витамина B12 — the document carries Витамин В12 = 704 пг/мл against",
+      "a printed reference of 187–883, i.e. an in-range value for the exact analyte that defines",
+      "the condition. This is the one positive: reconcile sees observations (name, code, value,",
+      "unit, status) in its extracted summary (stages/reconcile.ts:90-97), so the evidence is",
+      "genuinely available to it."
+    ],
+    "must_not_resolve": [
+      "cond-...0002 Железодефицитная анемия — the near miss. Adjacent to B12 in a clinician's",
+      "mind, but this report contains no haemoglobin, no ferritin, no CBC at all. Resolving it",
+      "means generalising from one normal vitamin to a different deficiency.",
+      "cond-...0003 Неалкогольная жировая болезнь печени — АЛТ, АСТ and ГГТ are all in range,",
+      "which is the trap: normal liver enzymes do not resolve hepatic steatosis, which is an",
+      "imaging and histology diagnosis. Note УЗИ печени is checkup ...0002 and is NOT completed",
+      "by this document either.",
+      "cond-...0004 Дислипидемия — every lipid value sits inside its reference range, so this",
+      "looks resolvable. It is not: an in-range panel is evidence of control, not of resolution,",
+      "and the document states no resolution. See judgement_calls.",
+      "cond-...0005 Хронический гастрит — nothing in a biochemistry or lipid panel bears on it.",
+      "The plain 'absence of a mention is not evidence of resolution' case (reconcile.ts:159)."
+    ]
+  },
   "judgement_calls": [
     "checkup ...0004 'Глюкоза натощак' is scored as completed even though the report never",
     "says fasting. Glucose was drawn as part of a routine panel and that is how a person would",
     "read it. If the scorer disagrees in practice, this is the entry to revisit first.",
     "checkup ...0001 'Липидный профиль (детально)' and ...0003 'Общий холестерин' both complete",
-    "from the same panel; the detailed profile subsumes the single analyte."
+    "from the same panel; the detailed profile subsumes the single analyte.",
+    "Дислипидемия is the most arguable expectation in this case. A reviewer could reasonably",
+    "hold that a fully in-range lipid panel resolves it. Scored as unresolved because a single",
+    "in-range panel under management shows control rather than resolution, and because the",
+    "opposite reading makes the pipeline willing to close chronic conditions off one good day.",
+    "If this expectation is flipped, flip it deliberately and record it here."
   ],
   "known_pipeline_bugs_encoded": [
     "value_canonical for Витамин В12 is 519.552 pmol/L (704 pg/mL x 0.738), which is the CORRECT",
     "answer, not the answer the pipeline currently produces. See README.md 'Known divergence'."
   ],
   "patient_state": {
-    "existingConditions": [],
+    "existingConditions": [
+      {
+        "id": "00000000-0000-4000-9000-000000000001",
+        "name": "Дефицит витамина B12",
+        "code": "E53.8",
+        "current_status": "active",
+        "onset_date": "2025-09-12",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000002",
+        "name": "Железодефицитная анемия",
+        "code": "D50.9",
+        "current_status": "active",
+        "onset_date": "2025-09-12",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000003",
+        "name": "Неалкогольная жировая болезнь печени",
+        "code": "K76.0",
+        "current_status": "active",
+        "onset_date": "2024-11-03",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000004",
+        "name": "Дислипидемия",
+        "code": "E78.5",
+        "current_status": "active",
+        "onset_date": "2024-11-03",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000005",
+        "name": "Хронический гастрит",
+        "code": "K29.5",
+        "current_status": "active",
+        "onset_date": "2023-04-21",
+        "resolved_date": null
+      }
+    ],
     "existingFindings": []
   }
 }

@@ -174,7 +174,7 @@
   "findings": [],
   "conditions": [],
   "findings_to_resolve": [],
-  "conditions_to_resolve": [],
+  "conditions_to_resolve": [{ "condition_id": "00000000-0000-4000-9000-000000000001" }],
   "checkups_to_complete": [
     {
       "checkup_item_id": "00000000-0000-4000-8000-000000000001",
