@@ -1,0 +1,38 @@
+{
+  "lang": "ru",
+  "kind": "lab",
+  "source": "real report, de-identified; see notes",
+  "notes": [
+    "Partial report ('Промежуточный отчет') — biochemistry, lipid panel and one immunology",
+    "assay. Deliberately does NOT contain a CBC, so checkup item ...0008 (ОАК) must stay",
+    "uncompleted. That is the negative this case exists to catch.",
+    "Three dates are printed (забора / регистрации / печати) and all three are identical here,",
+    "so this case does not discriminate between them. Case 002 should vary them."
+  ],
+  "what_this_case_exercises": [
+    "record_date from a header table rather than prose",
+    "two section headings (Биохимические / Липидограмма) feeding one flat observation list",
+    "Cyrillic unit strings against a Latin-keyed accepted_units map",
+    "Cyrillic 'В' in 'Витамин В12' against the Latin-'b' synonym list",
+    "one-sided reference range ('<5.20') -> ref_range_low null",
+    "unitless ratio ('—') -> unit null",
+    "four analytes absent from observation_catalog -> obs_code null, is_applied false",
+    "'!' out-of-range markers on two rows, one of which is high-is-good (HDL)",
+    "trailing guidance prose that must not become observations, findings or conditions"
+  ],
+  "judgement_calls": [
+    "checkup ...0004 'Глюкоза натощак' is scored as completed even though the report never",
+    "says fasting. Glucose was drawn as part of a routine panel and that is how a person would",
+    "read it. If the scorer disagrees in practice, this is the entry to revisit first.",
+    "checkup ...0001 'Липидный профиль (детально)' and ...0003 'Общий холестерин' both complete",
+    "from the same panel; the detailed profile subsumes the single analyte."
+  ],
+  "known_pipeline_bugs_encoded": [
+    "value_canonical for Витамин В12 is 519.552 pmol/L (704 pg/mL x 0.738), which is the CORRECT",
+    "answer, not the answer the pipeline currently produces. See README.md 'Known divergence'."
+  ],
+  "patient_state": {
+    "existingConditions": [],
+    "existingFindings": []
+  }
+}

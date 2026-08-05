@@ -60,6 +60,40 @@ Left verbatim:
 `person_id`, `schedule`, `why_text`, `why_links`, and `notes` are not fetched by the pipeline and
 are not reproduced here.
 
+## Expected files encode the correct answer, not the current answer
+
+Where the pipeline is known to be wrong, `expected.json` states what the pipeline *should*
+produce. A corpus that encodes current behaviour cannot detect a regression away from correct,
+only away from familiar.
+
+### Known divergence: Cyrillic units never match `accepted_units`
+
+Unit canonicalisation is an exact string lookup — `getUnitConfig` reads
+`catalogEntry.accepted_units[unit]` (`health-structure/unit-conversion.ts:32-40`), where `unit`
+is whatever the model put in `unit_text`. The extract stage explicitly instructs the model to
+record units "exactly as printed, in the document's own language"
+(`stages/extract.ts:285`), and `accepted_units` is keyed in Latin (`U/L`, `mmol/L`, `pg/mL`).
+Nothing between the two normalises Cyrillic to Latin.
+
+So for a Russian report every lookup misses, `config` is null, and
+`convertValueWithConfig` returns the value unchanged (`unit-conversion.ts:47`) — while
+`convertToCanonical` still stamps `unit_canonical` with the catalogue's canonical unit
+(`:79`). The value is not converted but is relabelled as though it had been.
+
+For most analytes this is harmless arithmetic: `ммоль/л` and `mmol/L` are the same unit, so
+passing the value through unchanged happens to be right. **Витамин В12 is not harmless.** The
+report is in `пг/мл`; canonical is `pmol/L`; the factor is 0.738. Case 001 expects
+`519.552 pmol/L`. The pipeline today stores `704` labelled `pmol/L` — a 35% overstatement
+carrying a unit it was never converted into, and the same silent relabel applies to
+`ref_range_low_canonical` / `ref_range_high_canonical`.
+
+Case 001 will therefore fail on `unit canonicalisation` until either `accepted_units` gains
+Cyrillic keys or a normalisation step is added ahead of the lookup. That failure is the point.
+
+A second, smaller trap in the same case: the report writes `Витамин В12` with a Cyrillic `В`,
+while `synonyms_ru` holds `витамин b12` with a Latin `b`. Whether `vitamin_b12` resolves at all
+depends on the fuzzy tier clearing `FUZZY_THRESHOLD` (`code-resolution.ts:24-36`).
+
 ## Images are not committed
 
 `test/fixtures/extraction/**/*.{png,jpg,jpeg,webp,heic,pdf}` is gitignored. Image fixtures live in
