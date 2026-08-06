@@ -1,8 +1,8 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
-import { runClassifyStage } from "./classify.ts";
-import { runExtractStage } from "./extract.ts";
-import { hasNothingToReconcile, runReconcileStage } from "./reconcile.ts";
+import { CLASSIFY_SCHEMA, runClassifyStage } from "./classify.ts";
+import { EXTRACT_SCHEMA, runExtractStage } from "./extract.ts";
+import { hasNothingToReconcile, RECONCILE_SCHEMA, runReconcileStage } from "./reconcile.ts";
 import { runStagedParse } from "./index.ts";
 import { buildStagePrompt, fenceBlock } from "./prompt.ts";
 import { parseJsonObject, TRUNCATED_ERROR_MESSAGE } from "./client.ts";
@@ -534,6 +534,42 @@ Deno.test("stage requests pin provider parameters and use a strict json schema",
   assertEquals(responseFormat.type, "json_schema");
   assertEquals((responseFormat.json_schema as Record<string, unknown>).strict, true);
   assertEquals((body.reasoning as Record<string, unknown>).effort, "high");
+  // `temperature` must stay absent. Reasoning endpoints do not advertise it, and
+  // `require_parameters` above is all-or-nothing, so asking for it leaves OpenRouter with nothing
+  // to route to and every stage dies on a bare 404. Reinstating it as a determinism nicety would
+  // be an easy and completely silent regression — the value was never honoured anyway.
+  assertEquals("temperature" in body, false);
+});
+
+Deno.test("every stage schema satisfies strict json_schema mode", () => {
+  // Strict mode has no optional keys: `required` must name every key in `properties`, or the
+  // provider rejects the whole request with `invalid_json_schema`. Optionality is expressed as a
+  // required nullable instead. Nothing about a schema literal makes this visible on inspection,
+  // and the failure only appears against a real provider, so assert it here.
+  const violations: string[] = [];
+
+  const walk = (node: unknown, pathText: string): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => walk(item, `${pathText}[${index}]`));
+      return;
+    }
+    const schema = node as Record<string, unknown>;
+    const properties = schema.properties as Record<string, unknown> | undefined;
+    if (properties && typeof properties === "object") {
+      const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+      for (const name of Object.keys(properties)) {
+        if (!required.has(name)) violations.push(`${pathText}.${name}`);
+      }
+    }
+    for (const [name, child] of Object.entries(schema)) walk(child, `${pathText}.${name}`);
+  };
+
+  walk(CLASSIFY_SCHEMA, "classify");
+  walk(EXTRACT_SCHEMA, "extract");
+  walk(RECONCILE_SCHEMA, "reconcile");
+
+  assertEquals(violations, []);
 });
 
 Deno.test("one out-of-vocabulary enum no longer destroys the other entities", async () => {

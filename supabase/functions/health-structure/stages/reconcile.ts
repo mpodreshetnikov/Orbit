@@ -17,6 +17,7 @@ const SYSTEM_PROMPT = [
   "Output valid JSON only.",
 ].join(" ");
 
+/** Every key listed in `required` — see the note on `EXTRACT_SCHEMA` for why strict mode demands it. */
 export const RECONCILE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -27,7 +28,15 @@ export const RECONCILE_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["finding_type_text", "reason", "confidence"],
+        required: [
+          "finding_code",
+          "finding_type_text",
+          "site_code",
+          "body_site_text",
+          "reason",
+          "source_anchor",
+          "confidence",
+        ],
         properties: {
           finding_code: { type: ["string", "null"] },
           finding_type_text: { type: "string" },
@@ -44,7 +53,7 @@ export const RECONCILE_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["condition_id", "reason", "confidence"],
+        required: ["condition_id", "reason", "source_anchor", "confidence"],
         properties: {
           condition_id: {
             type: "string",
@@ -61,7 +70,7 @@ export const RECONCILE_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["checkup_item_id", "reason"],
+        required: ["checkup_item_id", "reason", "suggested_done_at"],
         properties: {
           checkup_item_id: {
             type: "string",

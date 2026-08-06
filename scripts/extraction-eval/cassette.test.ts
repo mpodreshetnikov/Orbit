@@ -1,8 +1,8 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cassetteKey, createCassetteFetch } from "./cassette";
+import { cassetteKey, createCassetteFetch, stripReasoning } from "./cassette";
 
 const dirs: string[] = [];
 
@@ -45,7 +45,65 @@ describe("cassetteKey", () => {
   });
 });
 
+describe("stripReasoning", () => {
+  const withReasoning = {
+    choices: [
+      {
+        finish_reason: "stop",
+        message: {
+          role: "assistant",
+          content: "{}",
+          reasoning: "first I considered…",
+          reasoning_details: [{ type: "reasoning.encrypted", data: "gAAAAAB…" }],
+        },
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 2 },
+  };
+
+  it("drops the reasoning trace, which no reader wants and secret scanners flag", () => {
+    const stripped = stripReasoning(withReasoning) as typeof withReasoning;
+    expect(stripped.choices[0].message).not.toHaveProperty("reasoning");
+    expect(stripped.choices[0].message).not.toHaveProperty("reasoning_details");
+    expect(JSON.stringify(stripped)).not.toContain("gAAAAAB");
+  });
+
+  it("keeps everything the stage client actually reads", () => {
+    const stripped = stripReasoning(withReasoning) as typeof withReasoning;
+    expect(stripped.choices[0].message.content).toBe("{}");
+    expect(stripped.choices[0].finish_reason).toBe("stop");
+    expect(stripped.usage).toEqual({ prompt_tokens: 10, completion_tokens: 2 });
+  });
+
+  it("passes through a payload with no choices rather than reshaping it", () => {
+    const error = { error: { message: "nope", code: 400 } };
+    expect(stripReasoning(error)).toEqual(error);
+  });
+});
+
 describe("createCassetteFetch", () => {
+  it("strips the reasoning trace before it reaches disk", async () => {
+    const dir = await tempDir();
+    const payload = {
+      choices: [
+        { message: { content: "{}", reasoning_details: [{ data: "gAAAAAB-secret-looking" }] } },
+      ],
+    };
+
+    const recorder = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning(payload),
+    });
+    await recorder.fetchFn("https://openrouter.ai/api/v1/chat/completions", post(REQUEST));
+    await recorder.flush();
+
+    const files = await readdir(dir);
+    const written = await readFile(path.join(dir, files[0]), "utf8");
+    expect(written).not.toContain("gAAAAAB-secret-looking");
+    expect(written).toContain('"content": "{}"');
+  });
+
   it("records a live response and replays it byte for byte", async () => {
     const dir = await tempDir();
     const payload = { choices: [{ message: { content: "{}" } }] };
