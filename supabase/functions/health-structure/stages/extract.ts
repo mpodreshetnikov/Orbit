@@ -36,6 +36,14 @@ const SYSTEM_PROMPT = [
   "Output valid JSON only.",
 ].join(" ");
 
+/**
+ * Strict `json_schema` mode requires `required` to list *every* key in `properties`; a schema that
+ * omits one is rejected outright with `invalid_json_schema`, so an "optional" field is expressed as
+ * a required nullable instead. Every field below that reads as optional is either nullable or an
+ * enum carrying a neutral member (`severity: "unknown"`, `laterality: "none"`), and the normalizers
+ * coerce nulls back to the same defaults they applied to absent keys — so requiring the key changes
+ * the wire shape, not the meaning.
+ */
 export const EXTRACT_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -46,7 +54,19 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["obs_name_text", "value", "source_anchor", "confidence"],
+        required: [
+          "obs_code",
+          "obs_name_text",
+          "value",
+          "value_numeric",
+          "unit_text",
+          "ref_range",
+          "ref_range_low",
+          "ref_range_high",
+          "status",
+          "source_anchor",
+          "confidence",
+        ],
         properties: {
           obs_code: {
             type: ["string", "null"],
@@ -79,7 +99,22 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["finding_type_text", "source_anchor", "confidence"],
+        required: [
+          "finding_code",
+          "finding_type_text",
+          "site_code",
+          "body_site_text",
+          "size_mm",
+          "count",
+          "severity",
+          "laterality",
+          "morphology",
+          "description",
+          "histology",
+          "finding_date",
+          "source_anchor",
+          "confidence",
+        ],
         properties: {
           finding_code: { type: ["string", "null"] },
           finding_type_text: { type: "string" },
@@ -103,7 +138,7 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["name", "status", "source_anchor", "confidence"],
+        required: ["name", "icd_code", "status", "source_anchor", "confidence"],
         properties: {
           name: { type: "string" },
           icd_code: { type: ["string", "null"] },
