@@ -75,16 +75,19 @@ export function renderMarkdown(summary: RunSummary): string {
   // one F1 hides exactly the error that matters.
   if (agg.wrongfulResolutions > 0) {
     lines.push(
-      `> **${agg.wrongfulResolutions} wrongful condition resolution(s).** These close a live ` +
-        `condition that the document does not support. Investigate before any other number here.`,
+      `> **${agg.wrongfulResolutions} wrongful resolution(s).** These close a live condition or ` +
+        `finding that the document does not support. Investigate before any other number here.`,
     );
     lines.push("");
     for (const id of agg.conditionsToResolve.falsePositives) {
-      lines.push(`> - \`${id}\``);
+      lines.push(`> - condition \`${id}\``);
+    }
+    for (const label of agg.findingsToResolve.falsePositives) {
+      lines.push(`> - finding \`${label}\``);
     }
     lines.push("");
   } else {
-    lines.push("> No wrongful condition resolutions.");
+    lines.push("> No wrongful resolutions.");
     lines.push("");
   }
 
@@ -100,6 +103,7 @@ export function renderMarkdown(summary: RunSummary): string {
         prRow("observations", agg.observations),
         prRow("findings", agg.findings),
         prRow("conditions", agg.conditions),
+        prRow("findings_to_resolve", agg.findingsToResolve),
         prRow("conditions_to_resolve", agg.conditionsToResolve),
         prRow("checkups_to_complete", agg.checkupsToComplete),
       ],
@@ -164,17 +168,28 @@ export function renderMarkdown(summary: RunSummary): string {
           prRow("observations", score.observations),
           prRow("findings", score.findings),
           prRow("conditions", score.conditions),
+          prRow("findings_to_resolve", score.findingsToResolve),
           prRow("conditions_to_resolve", score.conditionsToResolve),
           prRow("checkups_to_complete", score.checkupsToComplete),
         ],
       ),
     );
     lines.push("");
-    if (score.observations.falseNegatives.length > 0) {
-      lines.push(`- missed observations: ${score.observations.falseNegatives.join(", ")}`);
-    }
-    if (score.observations.falsePositives.length > 0) {
-      lines.push(`- invented observations: ${score.observations.falsePositives.join(", ")}`);
+    // Every scored set gets its misses printed, not just observations. A findings row reading
+    // 0 tp / 3 fp / 2 fn is unreadable on its own — the labels are what tell you whether the
+    // pipeline found the wrong things or found the right things and named them differently.
+    for (const [label, set] of [
+      ["observations", score.observations],
+      ["findings", score.findings],
+      ["conditions", score.conditions],
+      ["finding resolutions", score.findingsToResolve],
+    ] as const) {
+      if (set.falseNegatives.length > 0) {
+        lines.push(`- missed ${label}: ${set.falseNegatives.join(", ")}`);
+      }
+      if (set.falsePositives.length > 0) {
+        lines.push(`- invented ${label}: ${set.falsePositives.join(", ")}`);
+      }
     }
     if (result.diagnostics) {
       const d = result.diagnostics;

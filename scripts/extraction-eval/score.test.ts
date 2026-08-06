@@ -158,7 +158,70 @@ describe("scoreCase", () => {
   });
 });
 
+describe("findings_to_resolve", () => {
+  const stone = { finding_type_text: "конкремент", site_code: "kidney_right" };
+
+  it("scores a matching resolution as a true positive", () => {
+    const score = scoreCase(
+      "002",
+      snapshot({ findings_to_resolve: [stone] }),
+      snapshot({ findings_to_resolve: [stone] }),
+    );
+    expect(score.findingsToResolve.tp).toBe(1);
+    expect(score.findingsToResolve.fp).toBe(0);
+  });
+
+  it("treats the same finding on a different organ as wrong, not as a match", () => {
+    // The whole hazard: a document that clears one organ says nothing about the same finding
+    // elsewhere. Keying on the text alone would score this as a clean hit.
+    const score = scoreCase(
+      "002",
+      snapshot({ findings_to_resolve: [stone] }),
+      snapshot({
+        findings_to_resolve: [{ finding_type_text: "конкремент", site_code: "kidney_left" }],
+      }),
+    );
+    expect(score.findingsToResolve.tp).toBe(0);
+    expect(score.findingsToResolve.fp).toBe(1);
+    expect(score.findingsToResolve.fn).toBe(1);
+  });
+
+  it("falls back to the free-text site when no site code resolved", () => {
+    const uncoded = { finding_type_text: "конкремент", body_site_text: "Правая почка" };
+    const score = scoreCase(
+      "002",
+      snapshot({ findings_to_resolve: [uncoded] }),
+      snapshot({
+        findings_to_resolve: [{ finding_type_text: "конкремент", body_site_text: "правая почка " }],
+      }),
+    );
+    expect(score.findingsToResolve.tp).toBe(1);
+  });
+
+  it("folds homoglyphs in the type text like every other matched set", () => {
+    const score = scoreCase(
+      "002",
+      snapshot({ findings_to_resolve: [{ finding_type_text: "Полип", site_code: "gallbladder" }] }),
+      snapshot({ findings_to_resolve: [{ finding_type_text: "полип", site_code: "gallbladder" }] }),
+    );
+    expect(score.findingsToResolve.tp).toBe(1);
+  });
+});
+
 describe("aggregate", () => {
+  it("counts a wrongfully closed finding as a wrongful resolution", () => {
+    const score = scoreCase(
+      "002",
+      snapshot(),
+      snapshot({
+        findings_to_resolve: [{ finding_type_text: "полип", site_code: "gallbladder" }],
+      }),
+    );
+    const agg = aggregate([score]);
+    expect(agg.wrongfulResolutions).toBe(1);
+    expect(agg.findingsToResolve.falsePositives).toEqual(["полип @ gallbladder"]);
+  });
+
   it("surfaces wrongful resolutions as their own headline number", () => {
     const clean = scoreCase("a", snapshot(), snapshot());
     const dirty = scoreCase(

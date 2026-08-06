@@ -33,6 +33,21 @@ export interface ExpectedResolution {
   condition_id: string;
 }
 
+/**
+ * A finding the document shows to have resolved.
+ *
+ * Unlike a condition resolution this carries no id — the reconcile stage matches existing findings
+ * by text and site, so that pair is the only identity available (`stages/reconcile.ts:195-206`).
+ * Both halves are load-bearing: resolving the right finding type on the wrong organ is a wrongful
+ * closure, not a near miss, so `site_code` belongs in the match key rather than in a field check.
+ */
+export interface ExpectedFindingResolution {
+  finding_type_text: string;
+  finding_code?: string | null;
+  site_code?: string | null;
+  body_site_text?: string | null;
+}
+
 export interface ExpectedCheckup {
   checkup_item_id: string;
   suggested_done_at: string | null;
@@ -45,7 +60,7 @@ export interface CaseSnapshot {
   observations: ExpectedObservation[];
   findings: ExpectedFinding[];
   conditions: ExpectedCondition[];
-  findings_to_resolve: unknown[];
+  findings_to_resolve: ExpectedFindingResolution[];
   conditions_to_resolve: ExpectedResolution[];
   checkups_to_complete: ExpectedCheckup[];
 }

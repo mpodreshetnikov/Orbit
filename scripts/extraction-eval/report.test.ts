@@ -65,10 +65,37 @@ describe("renderMarkdown", () => {
     const markdown = renderMarkdown(
       summary({ cases: [{ caseId: "001", score }], aggregate: aggregate([score]) }),
     );
-    const warning = markdown.indexOf("wrongful condition resolution");
+    const warning = markdown.indexOf("wrongful resolution");
     const table = markdown.indexOf("## Aggregate");
     expect(warning).toBeGreaterThan(-1);
     expect(warning).toBeLessThan(table);
     expect(markdown).toContain("cond-gastritis");
+  });
+
+  it("leads with a wrongfully closed finding too, not only a condition", () => {
+    // A finding closed on evidence the document does not carry is the same class of harm as a
+    // condition closed the same way, so it has to reach the same banner.
+    const score = scoreCase(
+      "002",
+      snapshot(),
+      snapshot({
+        findings_to_resolve: [{ finding_type_text: "полип", site_code: "gallbladder" }],
+      }),
+    );
+    const markdown = renderMarkdown(
+      summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
+    );
+    const warning = markdown.indexOf("1 wrongful resolution(s)");
+    expect(warning).toBeGreaterThan(-1);
+    expect(warning).toBeLessThan(markdown.indexOf("## Aggregate"));
+    expect(markdown).toContain("finding `полип @ gallbladder`");
+  });
+
+  it("gives findings_to_resolve a row of its own so it cannot be silently unscored", () => {
+    const score = scoreCase("002", snapshot(), snapshot());
+    const markdown = renderMarkdown(
+      summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
+    );
+    expect(markdown).toContain("| findings_to_resolve |");
   });
 });

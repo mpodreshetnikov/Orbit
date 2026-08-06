@@ -7,6 +7,7 @@
 import type {
   CaseSnapshot,
   ExpectedCheckup,
+  ExpectedFindingResolution,
   ExpectedObservation,
   ExpectedResolution,
 } from "./types.ts";
@@ -112,6 +113,7 @@ export interface CaseScore {
   observationFields: FieldAccuracy[];
   findings: SetScore;
   conditions: SetScore;
+  findingsToResolve: SetScore;
   conditionsToResolve: SetScore;
   checkupsToComplete: SetScore;
   checkupDate: FieldAccuracy;
@@ -213,6 +215,22 @@ function resolutionKey(item: ExpectedResolution): KeyedItem {
   return { key: item.condition_id, label: item.condition_id };
 }
 
+/**
+ * Finding resolutions have no id, so the key is the type text plus the site.
+ *
+ * The site half is not decoration. "Resolve the stone" and "resolve the stone *in the right
+ * kidney*" are the same string until the organ is part of the key, and a document that clears one
+ * organ says nothing about the same finding elsewhere. Site falls back to the free-text body site
+ * when no code resolved, so an uncoded resolution still keys on something.
+ */
+function findingResolutionKey(item: ExpectedFindingResolution): KeyedItem {
+  const site = item.site_code ?? matchKey(item.body_site_text) ?? "";
+  return {
+    key: `${matchKey(item.finding_type_text)}@${site}`,
+    label: `${(item.finding_type_text ?? "").trim()}${site ? ` @ ${site}` : ""}`,
+  };
+}
+
 export function scoreCase(caseId: string, expected: CaseSnapshot, actual: CaseSnapshot): CaseScore {
   const checkupDateMismatches: FieldMismatch[] = [];
   let checkupDateCorrect = 0;
@@ -259,6 +277,10 @@ export function scoreCase(caseId: string, expected: CaseSnapshot, actual: CaseSn
       expected.conditions.map((c) => keyed(c.name)),
       actual.conditions.map((c) => keyed(c.name)),
     ),
+    findingsToResolve: scoreSet(
+      expected.findings_to_resolve.map(findingResolutionKey),
+      actual.findings_to_resolve.map(findingResolutionKey),
+    ),
     // Ids are opaque and already exact — no folding, and the label is the id itself.
     conditionsToResolve: scoreSet(
       expected.conditions_to_resolve.map(resolutionKey),
@@ -285,10 +307,15 @@ export interface Aggregate {
   observations: SetScore;
   findings: SetScore;
   conditions: SetScore;
+  findingsToResolve: SetScore;
   conditionsToResolve: SetScore;
   checkupsToComplete: SetScore;
   observationFields: FieldAccuracy[];
-  /** Wrongful condition closures across the whole run. The number to look at first. */
+  /**
+   * Wrongful closures across the whole run — findings and conditions both. The number to look at
+   * first. A wrongfully closed finding is the same class of harm as a wrongfully closed condition:
+   * a live row in someone's chart goes quiet with nothing to prompt a correction.
+   */
   wrongfulResolutions: number;
 }
 
@@ -324,6 +351,7 @@ export function aggregate(scores: CaseScore[]): Aggregate {
     };
   });
   const conditionsToResolve = sumSets(scores.map((s) => s.conditionsToResolve));
+  const findingsToResolve = sumSets(scores.map((s) => s.findingsToResolve));
   return {
     cases: scores.length,
     recordTypeAccuracy: ratio(scores.filter((s) => s.recordType.correct).length, scores.length),
@@ -331,9 +359,10 @@ export function aggregate(scores: CaseScore[]): Aggregate {
     observations: sumSets(scores.map((s) => s.observations)),
     findings: sumSets(scores.map((s) => s.findings)),
     conditions: sumSets(scores.map((s) => s.conditions)),
+    findingsToResolve,
     conditionsToResolve,
     checkupsToComplete: sumSets(scores.map((s) => s.checkupsToComplete)),
     observationFields: fields,
-    wrongfulResolutions: conditionsToResolve.fp,
+    wrongfulResolutions: conditionsToResolve.fp + findingsToResolve.fp,
   };
 }

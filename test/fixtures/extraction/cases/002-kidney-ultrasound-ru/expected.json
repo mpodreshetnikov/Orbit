@@ -1,0 +1,41 @@
+{
+  "record_type": "imaging",
+  "record_date": "2026-03-05",
+  "observations": [],
+  "findings": [
+    {
+      "finding_code": null,
+      "finding_type_text": "Избыточная подвижность правой почки",
+      "site_code": "kidney_right",
+      "body_site_text": "правая почка",
+      "size_mm": null,
+      "severity": "unknown",
+      "laterality": "right"
+    },
+    {
+      "finding_code": null,
+      "finding_type_text": "Единичные гиперсигналы почечного синуса без эхотени",
+      "site_code": "kidney",
+      "body_site_text": "почечный синус",
+      "size_mm": 2,
+      "severity": "unknown",
+      "laterality": "bilateral"
+    }
+  ],
+  "conditions": [],
+  "findings_to_resolve": [
+    {
+      "finding_code": "stone",
+      "finding_type_text": "конкремент",
+      "site_code": "kidney_right",
+      "body_site_text": "правая почка"
+    }
+  ],
+  "conditions_to_resolve": [],
+  "checkups_to_complete": [
+    {
+      "checkup_item_id": "00000000-0000-4000-8000-000000000020",
+      "suggested_done_at": "2026-03-05"
+    }
+  ]
+}

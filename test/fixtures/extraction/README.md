@@ -117,6 +117,15 @@ status, which is what makes the B12 resolution reachable at all. If a case expec
 that depends on document prose rather than an extracted entity, that expectation is unreachable by
 construction and the case is wrong, not the pipeline.
 
+**Case 002 deliberately breaks that last rule, once.** It expects a right-kidney stone to resolve on
+`Конкременты: нет`, which is prose and reaches no entity, so the expectation cannot pass today. It
+is kept anyway because the rule assumes the expectation was chosen badly, and here it was not: for
+findings, absence is the _only_ evidence that resolves anything, so applying the rule uniformly
+would mean no case may ever expect a finding resolution — i.e. quietly agreeing that
+`findings_to_resolve` does not work. "Expected files encode the correct answer, not the current
+answer" is the stronger principle and it wins here. If the gap is closed or the feature dropped,
+revisit this expectation first.
+
 ## Dates
 
 Where a document prints several dates, vary them. `record_date` is scored as an exact match, and a
@@ -158,6 +167,39 @@ Cyrillic keys or a normalisation step is added ahead of the lookup. That failure
 A second, smaller trap in the same case: the report writes `Витамин В12` with a Cyrillic `В`,
 while `synonyms_ru` holds `витамин b12` with a Latin `b`. Whether `vitamin_b12` resolves at all
 depends on the fuzzy tier clearing `FUZZY_THRESHOLD` (`code-resolution.ts:24-36`).
+
+### Known divergence: `finding_type_text` is scored exactly but specified nowhere
+
+The `findings` set is matched on `finding_type_text`. That works for observations because
+`obs_name` is anchored to the page — the extract stage says to record labels "exactly as printed"
+(`stages/extract.ts:285`) — but that instruction names `obs_name_text` and `unit_text` only.
+Nothing constrains how a finding is phrased, so the label is model-authored prose.
+
+Case 002 is where this stops being theoretical. The pipeline returned `избыточная подвижность` and
+`гиперсигналы` against expected `Избыточная подвижность правой почки` and `Единичные гиперсигналы
+почечного синуса без эхотени` — the same two findings, described more tersely — and scored 0 tp /
+3 fp / 2 fn. Read literally that says the pipeline found nothing right; in fact it found two of
+two, plus one real false positive (`бугристые контуры`, the contradiction trap the case sets).
+
+Resolving this means choosing what the pipeline guarantees, not editing a fixture: either anchor
+`finding_type_text` in the extract prompt so an exact answer exists, or stop matching findings on
+free text and key them on `site_code` plus something tolerant of phrasing. Until then
+`expected.json` keeps the descriptive labels and the score stays honest about disagreeing.
+
+### Known divergence: negative evidence cannot reach `findings_to_resolve`
+
+An explicit `Конкременты: нет` is the strongest resolution evidence a document can carry for a
+structural finding, and stage D never sees it.
+
+Extraction emits entities that are **present**. A statement of absence produces no entity, which is
+correct — inventing a `stone` finding from the word `Конкременты` is exactly the failure case 002
+exists to catch. But reconcile is then handed `buildExtractedSummary()` plus the patient record and
+deliberately _not_ the document text (`stages/reconcile.ts:96-121, 147-152`), so the absence has
+already been filtered out one stage before the stage that would act on it.
+
+The consequence: `findings_to_resolve` can essentially never fire on negative evidence, which is
+the only kind that resolves a structural finding. Case 002 expects the right-kidney stone to
+resolve and it does not — a real miss, but not one the model could have avoided.
 
 ## Images are not committed
 
