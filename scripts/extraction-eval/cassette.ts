@@ -6,7 +6,7 @@
  * stored payload is a complete substitute for a live call.
  */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type CassetteMode = "replay" | "record" | "live";
@@ -102,8 +102,15 @@ async function loadDir(dir: string): Promise<Map<string, CassetteEntry>> {
 
 export interface CassetteFetch {
   fetchFn: typeof fetch;
-  /** Called after a case completes; writes any newly recorded entries. */
-  flush: () => Promise<void>;
+  /**
+   * Called after a case completes; writes any newly recorded entries.
+   *
+   * Pass `prune` when the case ran to completion, which makes the written set authoritative and
+   * lets stale recordings be deleted. Never pass it after a failure: a case that died at reconcile
+   * recorded only classify and extract, and pruning on that would throw away a good reconcile
+   * cassette and turn one bad run into a corpus that no longer replays.
+   */
+  flush: (options?: { prune?: boolean }) => Promise<void>;
   misses: () => string[];
 }
 
@@ -153,7 +160,7 @@ export async function createCassetteFetch(options: {
   return {
     fetchFn,
     misses: () => misses,
-    flush: async () => {
+    flush: async (options?: { prune?: boolean }) => {
       if (recorded.size === 0) return;
       await mkdir(dir, { recursive: true });
       for (const entry of recorded.values()) {
@@ -162,6 +169,16 @@ export async function createCassetteFetch(options: {
           `${JSON.stringify(entry, null, 2)}\n`,
           "utf8",
         );
+      }
+      // A prompt or fixture edit changes the key, so re-recording adds a file rather than
+      // replacing one and the old recording is left behind unreachable. Nothing reads it and
+      // nothing reports it, so the directory silently fills with answers to questions no longer
+      // being asked. A completed record run knows every key its case needs, so anything else here
+      // is dead.
+      if (!options?.prune) return;
+      for (const [key, entry] of existing) {
+        if (recorded.has(key)) continue;
+        await rm(path.join(dir, `${entry.stage}-${entry.request_hash}.json`), { force: true });
       }
     },
   };

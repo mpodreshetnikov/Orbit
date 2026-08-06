@@ -87,6 +87,9 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
       dir: path.join(CASSETTES_ROOT, evalCase.id),
       mode,
     });
+    // Only a case that ran end to end has exercised every request it needs, so only then is the
+    // recorded set complete enough to prune against.
+    let completed = false;
     try {
       const { snapshot, diagnostics } = await runCasePipeline(evalCase.ocrText, evalCase.context, {
         fetchFn: cassette.fetchFn,
@@ -103,13 +106,14 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
         ),
         diagnostics,
       });
+      completed = true;
       process.stdout.write(`[extraction-eval] ${evalCase.id}: scored\n`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       results.push({ caseId: evalCase.id, error: message });
       process.stderr.write(`[extraction-eval] ${evalCase.id}: FAILED — ${message}\n`);
     } finally {
-      await cassette.flush();
+      await cassette.flush({ prune: completed });
     }
   }
 
