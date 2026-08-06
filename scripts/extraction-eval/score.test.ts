@@ -170,50 +170,92 @@ describe("finding fields", () => {
     laterality: "right",
   };
 
-  it("scores the deterministic half of a finding row, not just its presence", () => {
+  it("matches a finding the model named differently", () => {
+    // The reason the key is position and not prose. The document prints this finding twice —
+    // "избыточно подвижна правая" in the body, "Избыточная подвижность правой почки" in the
+    // ЗАКЛЮЧЕНИЕ — so keying on the label scored a correctly-found finding as a miss plus an
+    // invention. Same organ, same side: same finding.
     const score = scoreCase(
       "002",
       snapshot({ findings: [finding] }),
-      snapshot({ findings: [{ ...finding, site_code: "kidney_left", laterality: "left" }] }),
+      snapshot({ findings: [{ ...finding, finding_type_text: "избыточно подвижна" }] }),
       [],
     );
-    // The set still matches — same label — so without field scoring this read as a clean hit
-    // while the pipeline had put the finding on the wrong kidney.
     expect(score.findings).toMatchObject({ tp: 1, fp: 0, fn: 0 });
-    const site = score.findingFields.find((f) => f.field === "site_code");
-    expect(site).toMatchObject({ correct: 0, total: 1 });
-    expect(site?.mismatches[0]).toMatchObject({ expected: "kidney_right", actual: "kidney_left" });
-    expect(score.findingFields.find((f) => f.field === "laterality")?.accuracy).toBe(0);
+    // The disagreement is not lost — it reports as a field mismatch, which is what it is.
+    const label = score.findingFields.find((f) => f.field === "finding_type_text");
+    expect(label).toMatchObject({ correct: 0, total: 1 });
   });
 
   it("catches a wrongly resolved finding code", () => {
     // The finding-side twin of Холестерин ЛПВП → cholesterol_total: a null code is correct here
-    // and any resolved code is an invention.
+    // and any resolved code is an invention. Visible only because the code is a field, not the key.
     const score = scoreCase(
       "002",
       snapshot({ findings: [finding] }),
       snapshot({ findings: [{ ...finding, finding_code: "prolapse" }] }),
       [],
     );
+    expect(score.findings).toMatchObject({ tp: 1, fp: 0, fn: 0 });
     const code = score.findingFields.find((f) => f.field === "finding_code");
     expect(code).toMatchObject({ correct: 0, total: 1 });
     expect(code?.mismatches[0]).toMatchObject({ expected: null, actual: "prolapse" });
   });
 
-  it("does not compare finding_type_text, which is the match key", () => {
-    expect(score_fields_of()).not.toContain("finding_type_text");
-    function score_fields_of() {
-      return scoreCase("002", snapshot({ findings: [finding] }), snapshot(), []).findingFields.map(
-        (f) => f.field,
-      );
-    }
+  it("treats a finding put on the wrong organ as a different finding", () => {
+    const score = scoreCase(
+      "002",
+      snapshot({ findings: [finding] }),
+      snapshot({ findings: [{ ...finding, site_code: "kidney_left", laterality: "left" }] }),
+      [],
+    );
+    expect(score.findings).toMatchObject({ tp: 0, fp: 1, fn: 1 });
+  });
+
+  it("compares what a finding is, never where it is", () => {
+    const fields = scoreCase(
+      "002",
+      snapshot({ findings: [finding] }),
+      snapshot(),
+      [],
+    ).findingFields.map((f) => f.field);
+    // Site and laterality are the key; comparing them would score every matched row correct
+    // by construction.
+    expect(fields).not.toContain("site_code");
+    expect(fields).not.toContain("laterality");
+    expect(fields).toContain("finding_code");
+    expect(fields).toContain("finding_type_text");
   });
 
   it("leaves an unmatched finding out of the field totals", () => {
-    // Already counted as a recall miss; charging it again on six fields would swamp them.
+    // Already counted as a recall miss; charging it again on every field would swamp them.
     const score = scoreCase("002", snapshot({ findings: [finding] }), snapshot(), []);
     expect(score.findings).toMatchObject({ tp: 0, fn: 1 });
     expect(score.findingFields.every((f) => f.total === 0)).toBe(true);
+  });
+
+  it("reports two findings sharing an organ and side as ambiguous rather than pairing them", () => {
+    const other = { ...finding, finding_type_text: "киста", finding_code: "cyst" };
+    const score = scoreCase(
+      "002",
+      snapshot({ findings: [finding, other] }),
+      snapshot({ findings: [finding, other] }),
+      [],
+    );
+    expect(score.findingKeyCollisions).toEqual(["kidney_right@right"]);
+  });
+
+  it("keeps uncoded sites apart by their free text instead of collapsing them", () => {
+    const a = { ...finding, site_code: null, body_site_text: "правой почки" };
+    const b = { ...finding, site_code: null, body_site_text: "левой почки" };
+    const score = scoreCase(
+      "002",
+      snapshot({ findings: [a, b] }),
+      snapshot({ findings: [a, b] }),
+      [],
+    );
+    expect(score.findingKeyCollisions).toEqual([]);
+    expect(score.findings).toMatchObject({ tp: 2, fp: 0, fn: 0 });
   });
 });
 

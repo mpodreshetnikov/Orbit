@@ -5,16 +5,16 @@
   "findings": [
     {
       "finding_code": null,
-      "finding_type_text": "Избыточная подвижность правой почки",
+      "finding_type_text": "Избыточная подвижность",
       "site_code": "kidney_right",
-      "body_site_text": "правая почка",
+      "body_site_text": "правой почки",
       "size_mm": null,
       "severity": "unknown",
       "laterality": "right"
     },
     {
       "finding_code": null,
-      "finding_type_text": "Единичные гиперсигналы почечного синуса без эхотени",
+      "finding_type_text": "единичные гиперсигналы",
       "site_code": "kidney",
       "body_site_text": "почечный синус",
       "size_mm": 2,

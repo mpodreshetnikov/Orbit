@@ -120,6 +120,8 @@ export interface CaseScore {
   observationFields: FieldAccuracy[];
   findings: SetScore;
   findingFields: FieldAccuracy[];
+  /** Site+laterality keys claimed by more than one finding — pairing here is unreliable. */
+  findingKeyCollisions: string[];
   conditions: SetScore;
   findingsToResolve: SetScore;
   conditionsToResolve: SetScore;
@@ -189,22 +191,73 @@ const OBSERVATION_FIELDS: (keyof ExpectedObservation)[] = [
 ];
 
 /**
- * A finding's scored fields.
+ * A finding's scored fields — what it is, given where it is.
  *
- * `finding_type_text` is absent on purpose: it is the match key, so comparing it here would score
- * every matched row as correct by construction. Everything else on the row is the part the
- * deterministic half of the pipeline produces — code and site resolution, laterality, size — and
- * until this existed, none of it was compared to anything. Case 002 wrote `kidney_right`,
- * `bilateral` and `size_mm` into `expected.json` and the scorer read none of them.
+ * `site_code` and `laterality` are absent because they are the match key (see `findingKey`);
+ * comparing them would score every matched row correct by construction. Everything here is
+ * something the pipeline decides *about* a finding once it has located it, `finding_code` above
+ * all — that is the fuzzy resolver's output, and the whole reason it must not be the key.
  */
 const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
   "finding_code",
-  "site_code",
+  "finding_type_text",
   "body_site_text",
   "size_mm",
   "severity",
-  "laterality",
 ];
+
+/**
+ * A finding is identified by where it is, not by what it is called.
+ *
+ * `finding_type_text` cannot be a key. It is free prose in both directions: when a vocabulary
+ * entry matches, the model is asked for the catalogue spelling, and when none does, for the
+ * document's own words — but a document routinely prints the same finding twice in different
+ * words (case 002 has both "избыточно подвижна правая" in the body and "Избыточная подвижность
+ * правой почки" in the ЗАКЛЮЧЕНИЕ), so even "verbatim" does not pin down one string. Keying on it
+ * scored two correctly-found findings as two misses plus four inventions.
+ *
+ * `finding_code` cannot be a key either, for the opposite reason: it is the thing under test. As a
+ * key, a mis-resolution becomes an unmatched pair and you lose which code was wrong; as a field,
+ * it reports as `expected null, actual "prolapse"` — the shape that caught
+ * `Холестерин ЛПВП → cholesterol_total` on the observation side.
+ *
+ * Site and laterality are what remains: a resolved catalogue code and an enum, both derived from
+ * the document rather than from the model's phrasing, and both stable across rewordings. Site
+ * falls back to the free-text body site when nothing resolved, so uncoded sites stay distinct
+ * instead of collapsing into one null bucket.
+ */
+function findingKey(finding: ExpectedFinding): string {
+  const site = finding.site_code ?? matchKey(finding.body_site_text);
+  return `${site}@${finding.laterality ?? ""}`;
+}
+
+function findingLabel(finding: ExpectedFinding): string {
+  const site = finding.site_code ?? finding.body_site_text ?? "?";
+  const laterality =
+    finding.laterality && finding.laterality !== "none" ? `, ${finding.laterality}` : "";
+  return `${(finding.finding_type_text ?? "").trim()} @ ${site}${laterality}`;
+}
+
+/**
+ * Keys claimed by more than one finding on either side.
+ *
+ * Two findings of the same organ and laterality in one document — two cysts in one kidney — are
+ * indistinguishable under this key, and `scoreFields` would silently keep only the last. Rare, but
+ * it must be reported rather than quietly mispaired: a scorer that pairs the wrong two rows
+ * produces field mismatches that describe nothing real.
+ */
+function findingKeyCollisions(expected: ExpectedFinding[], actual: ExpectedFinding[]): string[] {
+  const collisions = new Set<string>();
+  for (const rows of [expected, actual]) {
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const key = findingKey(row);
+      if (seen.has(key)) collisions.add(key);
+      seen.add(key);
+    }
+  }
+  return [...collisions];
+}
 
 /**
  * Per-field accuracy over the rows both sides agree exist.
@@ -351,16 +404,17 @@ export function scoreCase(
       OBSERVATION_FIELDS,
     ),
     findings: scoreSet(
-      expected.findings.map((f) => keyed(f.finding_type_text)),
-      actual.findings.map((f) => keyed(f.finding_type_text)),
+      expected.findings.map((f) => ({ key: findingKey(f), label: findingLabel(f) })),
+      actual.findings.map((f) => ({ key: findingKey(f), label: findingLabel(f) })),
     ),
     findingFields: scoreFields(
       expected.findings,
       actual.findings,
-      (row) => matchKey(row.finding_type_text),
-      (row) => row.finding_type_text,
+      findingKey,
+      findingLabel,
       FINDING_FIELDS,
     ),
+    findingKeyCollisions: findingKeyCollisions(expected.findings, actual.findings),
     conditions: scoreSet(
       expected.conditions.map((c) => keyed(c.name)),
       actual.conditions.map((c) => keyed(c.name)),

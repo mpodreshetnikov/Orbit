@@ -213,6 +213,14 @@ export function renderMarkdown(summary: RunSummary): string {
         lines.push(`- invented ${label}: ${set.falsePositives.join(", ")}`);
       }
     }
+    // Findings are keyed on site+laterality, so two on the same organ and side are
+    // indistinguishable. Say so rather than let the pairing look authoritative.
+    if (score.findingKeyCollisions.length > 0) {
+      lines.push(
+        `- **ambiguous finding pairing**: ${score.findingKeyCollisions.join(", ")} — more than ` +
+          `one finding shares this site and laterality, so field comparisons on it are unreliable`,
+      );
+    }
     if (result.diagnostics) {
       const d = result.diagnostics;
       lines.push(

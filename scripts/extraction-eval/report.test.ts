@@ -113,7 +113,7 @@ describe("renderMarkdown", () => {
       summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
     );
     const section = markdown.slice(markdown.indexOf("## Finding fields"));
-    expect(section).toContain("| `site_code` | 0 | 0 | — |");
+    expect(section).toContain("| `finding_code` | 0 | 0 | — |");
     expect(section.slice(0, section.indexOf("## Cases"))).not.toContain("100.0%");
     expect(markdown).toContain("No finding matched on both sides");
   });
