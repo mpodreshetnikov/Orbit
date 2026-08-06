@@ -112,8 +112,22 @@ export async function processExtractedConditions(
   }
 }
 
-function matchExistingFinding(
-  toResolve: FindingToResolve,
+/**
+ * Which existing finding a resolution addresses, by code first and text last.
+ *
+ * Exported for the extraction eval, which has to score resolutions by the row they would actually
+ * close rather than by how they are worded. Anything that re-derives this precedence instead of
+ * calling it will disagree with production the moment the two drift.
+ *
+ * The parameter is the subset actually read, not the full `FindingToResolve`: a caller scoring a
+ * fixture has no `reason`, `source_anchor` or `confidence` to offer, and requiring them would mean
+ * inventing values that this function ignores.
+ */
+export function matchExistingFinding(
+  toResolve: Pick<
+    FindingToResolve,
+    "finding_code" | "site_code" | "finding_type_text" | "body_site_text"
+  >,
   existingFindings: ExistingFinding[],
 ): ExistingFinding | null {
   for (const finding of existingFindings) {

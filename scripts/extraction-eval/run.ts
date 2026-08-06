@@ -95,7 +95,12 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
       });
       results.push({
         caseId: evalCase.id,
-        score: scoreCase(evalCase.id, evalCase.expected, snapshot),
+        score: scoreCase(
+          evalCase.id,
+          evalCase.expected,
+          snapshot,
+          evalCase.context.existingFindings,
+        ),
         diagnostics,
       });
       process.stdout.write(`[extraction-eval] ${evalCase.id}: scored\n`);

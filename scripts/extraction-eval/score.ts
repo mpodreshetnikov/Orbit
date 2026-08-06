@@ -1,9 +1,15 @@
+// The import below reaches into supabase/functions, which runs on Deno. It is the production
+// finding matcher, deliberately called rather than re-implemented — see `findingResolutionKey`.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../../supabase/functions/_shared/deno.d.ts" />
 /**
  * Scoring for the extraction eval corpus.
  *
  * Pure by design — plain data in, plain data out, no filesystem and no process. Everything that
  * touches the world lives in run.ts, so this module can be unit-tested directly.
  */
+import { matchExistingFinding } from "../../supabase/functions/health-structure/resolution.ts";
+import type { ExistingFinding } from "../../supabase/functions/health-structure/types.ts";
 import type {
   CaseSnapshot,
   ExpectedCheckup,
@@ -216,22 +222,61 @@ function resolutionKey(item: ExpectedResolution): KeyedItem {
 }
 
 /**
- * Finding resolutions have no id, so the key is the type text plus the site.
+ * Finding resolutions have no id, so they are keyed by the row they would actually close.
  *
- * The site half is not decoration. "Resolve the stone" and "resolve the stone *in the right
- * kidney*" are the same string until the organ is part of the key, and a document that clears one
- * organ says nothing about the same finding elsewhere. Site falls back to the free-text body site
- * when no code resolved, so an uncoded resolution still keys on something.
+ * Not by how they are worded. Production resolves a finding by `finding_code` + `site_code`, then
+ * by `finding_code` alone, and only falls back to comparing type text and body-site text
+ * (`resolution.ts:matchExistingFinding`). Scoring on the text instead inverts the result in both
+ * directions: a wrong code carrying copied text scores as a hit while production closes a
+ * different row or nothing, and a right code phrased differently scores as a miss *and* an
+ * invention while production closes exactly the intended row.
+ *
+ * Re-deriving that precedence here would also be wrong, because expected and actual can land in
+ * different tiers — a coded resolution and an uncoded one that both close the same row would key
+ * differently. Calling the production matcher and keying on its answer is the only version that
+ * cannot drift.
+ *
+ * A resolution matching nothing keys on its own text, kept distinct from row keys, so several
+ * unmatched entries stay separable and still count as inventions.
  */
-function findingResolutionKey(item: ExpectedFindingResolution): KeyedItem {
+function findingResolutionKey(
+  item: ExpectedFindingResolution,
+  existingFindings: ExistingFinding[],
+): KeyedItem {
+  const matched = matchExistingFinding(
+    {
+      finding_code: item.finding_code ?? null,
+      site_code: item.site_code ?? null,
+      finding_type_text: item.finding_type_text ?? "",
+      body_site_text: item.body_site_text ?? null,
+    },
+    existingFindings,
+  );
+  if (matched) {
+    const site = matched.site_code ?? matchKey(matched.body_site_text);
+    return {
+      key: `row:${matched.finding_code ?? matchKey(matched.finding_type_text)}@${site}`,
+      label: `${matched.finding_type_text}${site ? ` @ ${site}` : ""}`,
+    };
+  }
   const site = item.site_code ?? matchKey(item.body_site_text) ?? "";
   return {
-    key: `${matchKey(item.finding_type_text)}@${site}`,
-    label: `${(item.finding_type_text ?? "").trim()}${site ? ` @ ${site}` : ""}`,
+    key: `unmatched:${matchKey(item.finding_type_text)}@${site}`,
+    label: `${(item.finding_type_text ?? "").trim()}${site ? ` @ ${site}` : ""} (closes nothing)`,
   };
 }
 
-export function scoreCase(caseId: string, expected: CaseSnapshot, actual: CaseSnapshot): CaseScore {
+/**
+ * `existingFindings` is the case's patient state, required rather than optional: without it every
+ * finding resolution keys as "closes nothing" and the dimension silently reports garbage — the
+ * exact failure mode that let `findings_to_resolve` go unscored in the first place.
+ */
+export function scoreCase(
+  caseId: string,
+  expected: CaseSnapshot,
+  actual: CaseSnapshot,
+  existingFindings: ExistingFinding[],
+): CaseScore {
   const checkupDateMismatches: FieldMismatch[] = [];
   let checkupDateCorrect = 0;
   let checkupDateTotal = 0;
@@ -278,8 +323,8 @@ export function scoreCase(caseId: string, expected: CaseSnapshot, actual: CaseSn
       actual.conditions.map((c) => keyed(c.name)),
     ),
     findingsToResolve: scoreSet(
-      expected.findings_to_resolve.map(findingResolutionKey),
-      actual.findings_to_resolve.map(findingResolutionKey),
+      expected.findings_to_resolve.map((item) => findingResolutionKey(item, existingFindings)),
+      actual.findings_to_resolve.map((item) => findingResolutionKey(item, existingFindings)),
     ),
     // Ids are opaque and already exact — no folding, and the label is the id itself.
     conditionsToResolve: scoreSet(

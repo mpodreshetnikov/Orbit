@@ -183,6 +183,8 @@ export function renderMarkdown(summary: RunSummary): string {
       ["findings", score.findings],
       ["conditions", score.conditions],
       ["finding resolutions", score.findingsToResolve],
+      ["condition resolutions", score.conditionsToResolve],
+      ["checkup completions", score.checkupsToComplete],
     ] as const) {
       if (set.falseNegatives.length > 0) {
         lines.push(`- missed ${label}: ${set.falseNegatives.join(", ")}`);

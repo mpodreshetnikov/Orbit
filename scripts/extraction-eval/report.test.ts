@@ -41,7 +41,7 @@ describe("renderMarkdown", () => {
   });
 
   it("says how many cases the numbers actually cover when some failed", () => {
-    const score = scoreCase("001", snapshot(), snapshot());
+    const score = scoreCase("001", snapshot(), snapshot(), []);
     const markdown = renderMarkdown(
       summary({
         cases: [
@@ -61,6 +61,7 @@ describe("renderMarkdown", () => {
       "001",
       snapshot(),
       snapshot({ conditions_to_resolve: [{ condition_id: "cond-gastritis" }] }),
+      [],
     );
     const markdown = renderMarkdown(
       summary({ cases: [{ caseId: "001", score }], aggregate: aggregate([score]) }),
@@ -79,8 +80,20 @@ describe("renderMarkdown", () => {
       "002",
       snapshot(),
       snapshot({
-        findings_to_resolve: [{ finding_type_text: "полип", site_code: "gallbladder" }],
+        findings_to_resolve: [
+          { finding_code: "polyp", finding_type_text: "полип", site_code: "gallbladder" },
+        ],
       }),
+      [
+        {
+          finding_code: "polyp",
+          finding_type_text: "полип",
+          site_code: "gallbladder",
+          body_site_text: "желчный пузырь",
+          finding_type_id: "ft-2",
+          body_site_id: "bs-2",
+        },
+      ],
     );
     const markdown = renderMarkdown(
       summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
@@ -92,7 +105,7 @@ describe("renderMarkdown", () => {
   });
 
   it("gives findings_to_resolve a row of its own so it cannot be silently unscored", () => {
-    const score = scoreCase("002", snapshot(), snapshot());
+    const score = scoreCase("002", snapshot(), snapshot(), []);
     const markdown = renderMarkdown(
       summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
     );
