@@ -13,6 +13,7 @@ import type { ExistingFinding } from "../../supabase/functions/health-structure/
 import type {
   CaseSnapshot,
   ExpectedCheckup,
+  ExpectedFinding,
   ExpectedFindingResolution,
   ExpectedObservation,
   ExpectedResolution,
@@ -118,6 +119,7 @@ export interface CaseScore {
   observations: SetScore;
   observationFields: FieldAccuracy[];
   findings: SetScore;
+  findingFields: FieldAccuracy[];
   conditions: SetScore;
   findingsToResolve: SetScore;
   conditionsToResolve: SetScore;
@@ -186,30 +188,58 @@ const OBSERVATION_FIELDS: (keyof ExpectedObservation)[] = [
   "unit_canonical",
 ];
 
-function scoreObservationFields(
-  expected: ExpectedObservation[],
-  actual: ExpectedObservation[],
+/**
+ * A finding's scored fields.
+ *
+ * `finding_type_text` is absent on purpose: it is the match key, so comparing it here would score
+ * every matched row as correct by construction. Everything else on the row is the part the
+ * deterministic half of the pipeline produces — code and site resolution, laterality, size — and
+ * until this existed, none of it was compared to anything. Case 002 wrote `kidney_right`,
+ * `bilateral` and `size_mm` into `expected.json` and the scorer read none of them.
+ */
+const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
+  "finding_code",
+  "site_code",
+  "body_site_text",
+  "size_mm",
+  "severity",
+  "laterality",
+];
+
+/**
+ * Per-field accuracy over the rows both sides agree exist.
+ *
+ * Only matched rows are scored. A row the model never produced is already counted as a recall
+ * miss; charging it again on every field would let one missed row swamp the field accuracies.
+ */
+function scoreFields<T>(
+  expected: T[],
+  actual: T[],
+  keyOf: (row: T) => string,
+  labelOf: (row: T) => string,
+  fields: (keyof T)[],
 ): FieldAccuracy[] {
-  const byKey = new Map(actual.map((row) => [matchKey(row.obs_name), row]));
-  return OBSERVATION_FIELDS.map((field) => {
+  const byKey = new Map(actual.map((row) => [keyOf(row), row]));
+  return fields.map((field) => {
     const mismatches: FieldMismatch[] = [];
     let correct = 0;
     let total = 0;
     for (const row of expected) {
-      const key = matchKey(row.obs_name);
-      const other = byKey.get(key);
-      // Only matched observations are scored per-field. An observation the model never produced
-      // is already counted as a recall miss; charging it again on nine fields would let one
-      // missed row swamp the field accuracies.
+      const other = byKey.get(keyOf(row));
       if (!other) continue;
       total += 1;
       if (valuesEqual(row[field], other[field])) {
         correct += 1;
       } else {
-        mismatches.push({ key: row.obs_name, field, expected: row[field], actual: other[field] });
+        mismatches.push({
+          key: labelOf(row),
+          field: String(field),
+          expected: row[field],
+          actual: other[field],
+        });
       }
     }
-    return { field, correct, total, accuracy: ratio(correct, total), mismatches };
+    return { field: String(field), correct, total, accuracy: ratio(correct, total), mismatches };
   });
 }
 
@@ -313,10 +343,23 @@ export function scoreCase(
       expected.observations.map((o) => keyed(o.obs_name)),
       actual.observations.map((o) => keyed(o.obs_name)),
     ),
-    observationFields: scoreObservationFields(expected.observations, actual.observations),
+    observationFields: scoreFields(
+      expected.observations,
+      actual.observations,
+      (row) => matchKey(row.obs_name),
+      (row) => row.obs_name,
+      OBSERVATION_FIELDS,
+    ),
     findings: scoreSet(
       expected.findings.map((f) => keyed(f.finding_type_text)),
       actual.findings.map((f) => keyed(f.finding_type_text)),
+    ),
+    findingFields: scoreFields(
+      expected.findings,
+      actual.findings,
+      (row) => matchKey(row.finding_type_text),
+      (row) => row.finding_type_text,
+      FINDING_FIELDS,
     ),
     conditions: scoreSet(
       expected.conditions.map((c) => keyed(c.name)),
@@ -356,6 +399,7 @@ export interface Aggregate {
   conditionsToResolve: SetScore;
   checkupsToComplete: SetScore;
   observationFields: FieldAccuracy[];
+  findingFields: FieldAccuracy[];
   /**
    * Wrongful closures across the whole run — findings and conditions both. The number to look at
    * first. A wrongfully closed finding is the same class of harm as a wrongfully closed condition:
@@ -382,19 +426,27 @@ function sumSets(scores: SetScore[]): SetScore {
   };
 }
 
-export function aggregate(scores: CaseScore[]): Aggregate {
-  const fields = OBSERVATION_FIELDS.map((field) => {
-    const per = scores.flatMap((s) => s.observationFields.filter((f) => f.field === field));
+function sumFields(
+  scores: CaseScore[],
+  pick: (score: CaseScore) => FieldAccuracy[],
+  fields: string[],
+): FieldAccuracy[] {
+  return fields.map((field) => {
+    const per = scores.flatMap((s) => pick(s).filter((f) => f.field === field));
     const correct = per.reduce((n, f) => n + f.correct, 0);
     const total = per.reduce((n, f) => n + f.total, 0);
     return {
-      field: String(field),
+      field,
       correct,
       total,
       accuracy: ratio(correct, total),
       mismatches: per.flatMap((f) => f.mismatches),
     };
   });
+}
+
+export function aggregate(scores: CaseScore[]): Aggregate {
+  const fields = sumFields(scores, (s) => s.observationFields, OBSERVATION_FIELDS.map(String));
   const conditionsToResolve = sumSets(scores.map((s) => s.conditionsToResolve));
   const findingsToResolve = sumSets(scores.map((s) => s.findingsToResolve));
   return {
@@ -408,6 +460,7 @@ export function aggregate(scores: CaseScore[]): Aggregate {
     conditionsToResolve,
     checkupsToComplete: sumSets(scores.map((s) => s.checkupsToComplete)),
     observationFields: fields,
+    findingFields: sumFields(scores, (s) => s.findingFields, FINDING_FIELDS.map(String)),
     wrongfulResolutions: conditionsToResolve.fp + findingsToResolve.fp,
   };
 }

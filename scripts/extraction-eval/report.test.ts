@@ -104,6 +104,20 @@ describe("renderMarkdown", () => {
     expect(markdown).toContain("finding `полип @ gallbladder`");
   });
 
+  it("renders an unscored field as a dash rather than a perfect column", () => {
+    // Case 002 hits this for real: when no finding label matches, every finding field sits at
+    // 0/0, and ratio() calls an empty denominator 1. Printing that as 100% claims the pipeline
+    // got right what it was never asked.
+    const score = scoreCase("002", snapshot(), snapshot(), []);
+    const markdown = renderMarkdown(
+      summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
+    );
+    const section = markdown.slice(markdown.indexOf("## Finding fields"));
+    expect(section).toContain("| `site_code` | 0 | 0 | — |");
+    expect(section.slice(0, section.indexOf("## Cases"))).not.toContain("100.0%");
+    expect(markdown).toContain("No finding matched on both sides");
+  });
+
   it("gives findings_to_resolve a row of its own so it cannot be silently unscored", () => {
     const score = scoreCase("002", snapshot(), snapshot(), []);
     const markdown = renderMarkdown(

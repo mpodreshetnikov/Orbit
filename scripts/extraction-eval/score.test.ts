@@ -159,6 +159,64 @@ describe("scoreCase", () => {
   });
 });
 
+describe("finding fields", () => {
+  const finding = {
+    finding_code: null,
+    finding_type_text: "Избыточная подвижность правой почки",
+    site_code: "kidney_right",
+    body_site_text: "правая почка",
+    size_mm: null,
+    severity: "unknown",
+    laterality: "right",
+  };
+
+  it("scores the deterministic half of a finding row, not just its presence", () => {
+    const score = scoreCase(
+      "002",
+      snapshot({ findings: [finding] }),
+      snapshot({ findings: [{ ...finding, site_code: "kidney_left", laterality: "left" }] }),
+      [],
+    );
+    // The set still matches — same label — so without field scoring this read as a clean hit
+    // while the pipeline had put the finding on the wrong kidney.
+    expect(score.findings).toMatchObject({ tp: 1, fp: 0, fn: 0 });
+    const site = score.findingFields.find((f) => f.field === "site_code");
+    expect(site).toMatchObject({ correct: 0, total: 1 });
+    expect(site?.mismatches[0]).toMatchObject({ expected: "kidney_right", actual: "kidney_left" });
+    expect(score.findingFields.find((f) => f.field === "laterality")?.accuracy).toBe(0);
+  });
+
+  it("catches a wrongly resolved finding code", () => {
+    // The finding-side twin of Холестерин ЛПВП → cholesterol_total: a null code is correct here
+    // and any resolved code is an invention.
+    const score = scoreCase(
+      "002",
+      snapshot({ findings: [finding] }),
+      snapshot({ findings: [{ ...finding, finding_code: "prolapse" }] }),
+      [],
+    );
+    const code = score.findingFields.find((f) => f.field === "finding_code");
+    expect(code).toMatchObject({ correct: 0, total: 1 });
+    expect(code?.mismatches[0]).toMatchObject({ expected: null, actual: "prolapse" });
+  });
+
+  it("does not compare finding_type_text, which is the match key", () => {
+    expect(score_fields_of()).not.toContain("finding_type_text");
+    function score_fields_of() {
+      return scoreCase("002", snapshot({ findings: [finding] }), snapshot(), []).findingFields.map(
+        (f) => f.field,
+      );
+    }
+  });
+
+  it("leaves an unmatched finding out of the field totals", () => {
+    // Already counted as a recall miss; charging it again on six fields would swamp them.
+    const score = scoreCase("002", snapshot({ findings: [finding] }), snapshot(), []);
+    expect(score.findings).toMatchObject({ tp: 0, fn: 1 });
+    expect(score.findingFields.every((f) => f.total === 0)).toBe(true);
+  });
+});
+
 describe("findings_to_resolve", () => {
   // Case 002's patient state: a right-kidney stone the document should close, and a gallbladder
   // polyp it must not touch.

@@ -1,5 +1,5 @@
 /** Rendering only — pure, so the shape of a report can be asserted without running an eval. */
-import type { Aggregate, CaseScore, SetScore } from "./score.ts";
+import type { Aggregate, CaseScore, FieldAccuracy, SetScore } from "./score.ts";
 import type { CaseDiagnostics } from "./types.ts";
 
 export interface CaseResult {
@@ -27,6 +27,54 @@ function prRow(label: string, score: SetScore): string {
 
 function table(headers: string[], rows: string[]): string[] {
   return [`| ${headers.join(" | ")} |`, `|${headers.map(() => "---").join("|")}|`, ...rows];
+}
+
+/**
+ * A field nothing was scored on reads `—`, never `100.0%`.
+ *
+ * `ratio()` returns 1 for an empty denominator, which is right for a set score and actively
+ * misleading here: a findings row whose labels never matched leaves every field at 0/0, and
+ * printing that as a perfect column claims the pipeline got right what it was never asked. Same
+ * trap the run-level "no cases scored" guard exists for, one level down.
+ */
+function fieldSection(title: string, noun: string, fields: FieldAccuracy[]): string[] {
+  const lines: string[] = [`## ${title} (matched rows only)`, ""];
+  lines.push(
+    ...table(
+      ["field", "correct", "total", "accuracy"],
+      fields.map(
+        (field) =>
+          `| \`${field.field}\` | ${field.correct} | ${field.total} | ${field.total === 0 ? "—" : pct(field.accuracy)} |`,
+      ),
+    ),
+  );
+  lines.push("");
+
+  if (fields.every((field) => field.total === 0)) {
+    lines.push(
+      `> No ${noun} matched on both sides, so nothing here was compared. Not a perfect score.`,
+    );
+    lines.push("");
+  }
+
+  const mismatches = fields.flatMap((field) => field.mismatches);
+  if (mismatches.length > 0) {
+    lines.push(`<details><summary>${title} mismatches</summary>`);
+    lines.push("");
+    lines.push(
+      ...table(
+        [noun, "field", "expected", "actual"],
+        mismatches.map(
+          (m) =>
+            `| ${m.key} | \`${m.field}\` | \`${JSON.stringify(m.expected)}\` | \`${JSON.stringify(m.actual)}\` |`,
+        ),
+      ),
+    );
+    lines.push("");
+    lines.push("</details>");
+    lines.push("");
+  }
+  return lines;
 }
 
 export function renderMarkdown(summary: RunSummary): string {
@@ -111,36 +159,8 @@ export function renderMarkdown(summary: RunSummary): string {
   );
   lines.push("");
 
-  lines.push("## Observation fields (matched rows only)");
-  lines.push("");
-  lines.push(
-    ...table(
-      ["field", "correct", "total", "accuracy"],
-      agg.observationFields.map(
-        (field) =>
-          `| \`${field.field}\` | ${field.correct} | ${field.total} | ${pct(field.accuracy)} |`,
-      ),
-    ),
-  );
-  lines.push("");
-
-  const mismatches = agg.observationFields.flatMap((field) => field.mismatches);
-  if (mismatches.length > 0) {
-    lines.push("<details><summary>Field mismatches</summary>");
-    lines.push("");
-    lines.push(
-      ...table(
-        ["observation", "field", "expected", "actual"],
-        mismatches.map(
-          (m) =>
-            `| ${m.key} | \`${m.field}\` | \`${JSON.stringify(m.expected)}\` | \`${JSON.stringify(m.actual)}\` |`,
-        ),
-      ),
-    );
-    lines.push("");
-    lines.push("</details>");
-    lines.push("");
-  }
+  lines.push(...fieldSection("Observation fields", "observation", agg.observationFields));
+  lines.push(...fieldSection("Finding fields", "finding", agg.findingFields));
 
   lines.push("## Cases");
   lines.push("");
