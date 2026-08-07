@@ -82,6 +82,61 @@ describe("stripReasoning", () => {
 });
 
 describe("createCassetteFetch", () => {
+  it("deletes recordings the case no longer asks for", async () => {
+    const dir = await tempDir();
+    // A previous recording under an old prompt. Editing a prompt changes the key, so a re-record
+    // adds a file instead of replacing one and this would otherwise sit here forever.
+    const recorder = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning({ choices: [{ message: { content: "{}" } }] }),
+    });
+    await recorder.fetchFn(
+      "https://openrouter.ai/api/v1/chat/completions",
+      post({ ...REQUEST, messages: [{ role: "user", content: "an older prompt" }] }),
+    );
+    await recorder.flush({ prune: true });
+    expect(await readdir(dir)).toHaveLength(1);
+
+    const rerecord = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning({ choices: [{ message: { content: "{}" } }] }),
+    });
+    await rerecord.fetchFn("https://openrouter.ai/api/v1/chat/completions", post(REQUEST));
+    await rerecord.flush({ prune: true });
+
+    const files = await readdir(dir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toContain(cassetteKey(REQUEST));
+  });
+
+  it("keeps every recording when the case did not finish", async () => {
+    // A case that dies at reconcile recorded only classify and extract. Pruning on that would
+    // delete a good reconcile cassette and turn one bad run into a corpus that cannot replay.
+    const dir = await tempDir();
+    const first = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning({ choices: [{ message: { content: "{}" } }] }),
+    });
+    await first.fetchFn(
+      "https://openrouter.ai/api/v1/chat/completions",
+      post({ ...REQUEST, messages: [{ role: "user", content: "reconcile-ish" }] }),
+    );
+    await first.flush({ prune: true });
+
+    const partial = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning({ choices: [{ message: { content: "{}" } }] }),
+    });
+    await partial.fetchFn("https://openrouter.ai/api/v1/chat/completions", post(REQUEST));
+    await partial.flush();
+
+    expect(await readdir(dir)).toHaveLength(2);
+  });
+
   it("strips the reasoning trace before it reaches disk", async () => {
     const dir = await tempDir();
     const payload = {

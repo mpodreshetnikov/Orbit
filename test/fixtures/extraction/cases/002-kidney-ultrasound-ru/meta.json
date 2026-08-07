@@ -1,0 +1,168 @@
+{
+  "lang": "ru",
+  "kind": "imaging",
+  "source": "real report, de-identified; see README.md",
+  "notes": [
+    "Renal ultrasound. Deliberately the structural opposite of case 001: no analytes at all, and",
+    "everything scored lives in findings, findings_to_resolve and the imaging half of the checkup",
+    "list. Case 001 scores findings 0/0/0 and conditions 0/0/0, which an empty set reports as",
+    "100% — three dimensions had never seen a single item before this case existed.",
+    "The document is overwhelmingly negative. Seven explicit statements of absence:",
+    "'Дополнительные образования: нет', 'Конкременты: нет', 'ЛС не расширена', 'Почечный синус не",
+    "изменен', 'без патологии', 'не увеличены', 'Нарушения уродинамики нет'. A pipeline that emits",
+    "a `stone` finding because the word Конкременты occurs puts a kidney stone in a patient's",
+    "chart. That is the single most consequential failure this corpus can catch, and nothing",
+    "tested it before."
+  ],
+  "what_this_case_exercises": [
+    "record_type imaging — the first non-lab case; classify's imaging example had never run",
+    "buildFindingRows end to end: finding_code and site_code resolution, laterality, size_mm",
+    "laterality right (избыточно подвижна правая) and bilateral (с обеих сторон)",
+    "parent vs child body site: a bilateral finding takes `kidney`, a one-sided one kidney_right",
+    "negation — seven explicit absences that must not become findings",
+    "an internally contradictory phrase ('Контуры ровные, четкие, бугристые') left verbatim",
+    "same-modality, different-organ checkup near miss: УЗИ почек completes, УЗИ печени and УЗИ",
+    "желчного пузыря must not — case 001's negatives were all cross-modality",
+    "a not-yet-due checkup completion: ...0020 is due 2027-03-01 and the document is 2026-03-05",
+    "date distractors of a new kind: a statute date (21.11.2011) and a date of birth against one",
+    "real study date, rather than case 001's three competing plausible dates",
+    "clinic letterhead interleaved mid-document rather than trailing, plus equipment model",
+    "strings (Mindray DC-80 EXP, C5-1E, L 12-3E) that read like values with units",
+    "an administrative ICD row (Z01.8, 'Открыто') that is coded but is not a clinical condition"
+  ],
+  "finding_reconciliation_intent": {
+    "must_resolve": [
+      "конкремент @ kidney_right — the corpus's first and only positive finding resolution.",
+      "The document states 'Конкременты: нет' for the same organ by the same modality, which is",
+      "explicit negative evidence rather than silence. Note that findings carry no id: reconcile",
+      "matches on text and site (stages/reconcile.ts:195-206), so the scorer keys on that pair."
+    ],
+    "must_not_resolve": [
+      "полип @ gallbladder — a renal scan does not image the gallbladder, so this document is",
+      "silent on it. The findings-side twin of case 001's Хронический гастрит negative:",
+      "'Absence of a mention is not evidence of resolution' (reconcile.ts:159)."
+    ]
+  },
+  "condition_reconciliation_intent": {
+    "must_resolve": [],
+    "must_not_resolve": [
+      "The same five conditions as case 001, reused deliberately so this document is scored",
+      "against a patient state it mostly has nothing to say about.",
+      "cond-...0003 Неалкогольная жировая болезнь печени is the sharp one. Case 001 could not",
+      "resolve it because liver enzymes do not settle hepatic steatosis — but here the modality is",
+      "finally right: NAFLD *is* an imaging diagnosis, and this *is* an abdominal ultrasound. It",
+      "is the wrong organ. A model reasoning 'imaging study, unremarkable, therefore the imaging",
+      "diagnosis resolves' fails exactly here, and nothing else in the corpus sets that trap.",
+      "The remaining four (B12 deficiency, iron-deficiency anaemia, dyslipidaemia, chronic",
+      "gastritis) are plain negatives: a renal ultrasound bears on none of them."
+    ]
+  },
+  "judgement_calls": [
+    "observations is expected EMPTY, and this is the most arguable expectation in the case. The",
+    "document carries numbers — kidney dimensions 9,5*4,2*4,4 см, parenchyma 1,4/1,5 см, mobility",
+    "3,6 см — and a model may well emit them as observations. Scored as wrong because an",
+    "observation row here is an analyte with a canonical unit and a reference range, and a",
+    "three-axis anatomical dimension is none of those: it has no catalogue code, no reference",
+    "interval, and does not fit one value_numeric. Anatomical measurement belongs on a finding's",
+    "size_mm. If this expectation is flipped, flip it deliberately and record it here.",
+    "Избыточная подвижность правой почки gets finding_code null, not `prolapse`. Пролапс is the",
+    "nearest catalogue entry and nephroptosis is arguably a renal prolapse, but coding it that way",
+    "rewards the resolver for a stretch. size_mm is null rather than 36: the 3,6 см is the",
+    "displacement of the organ, not the size of a lesion.",
+    "The bilateral hypersignals are expected as a finding with code null. 'без эхотени' is",
+    "precisely what distinguishes these from stones, so `calcification` and `stone` are both",
+    "wrong; the reading is deliberately conservative. A pipeline that omits them entirely is",
+    "making a defensible call too — this is the expectation most likely to produce a recall miss",
+    "that is not really a defect.",
+    "Z01.8 is NOT expected as a condition. It is an encounter code for 'other specified special",
+    "examination', i.e. a billing artefact of having had the scan, not something the patient has.",
+    "A reviewer could hold that any coded row with a status belongs in conditions; if so, flip it.",
+    "'Контуры ровные, четкие, бугристые' yields no finding. Smooth-and-clear contradicts lumpy in",
+    "one sentence, which is a template whose options were never deleted. Left verbatim because a",
+    "pipeline that manufactures a finding from the stray word is doing something worth seeing."
+  ],
+  "what_the_first_live_run_found": [
+    "Two results worth more than the scores, both recorded here rather than fixed in this change.",
+    "1. findings scores 0 tp / 3 fp / 2 fn, and that number is wrong about what happened. The",
+    "model returned 'избыточная подвижность', 'бугристые контуры' and 'гиперсигналы' — which is",
+    "two correct findings plus one genuine false positive, exactly the contours trap this case was",
+    "built to set. It scores as a total miss because the findings set is keyed on an exact",
+    "(homoglyph-folded) finding_type_text, and finding_type_text is the one scored field the",
+    "extract prompt never constrains: 'Record labels and units exactly as printed' names",
+    "obs_name_text and unit_text only (stages/extract.ts:285). obs_name is anchored to the page so",
+    "exact matching works there; a finding's label is model-authored prose, so it cannot. Either",
+    "the prompt has to anchor finding_type_text or the scorer has to stop matching it exactly —",
+    "a decision about what the pipeline guarantees, not a fixture edit, so expected.json keeps the",
+    "descriptive labels and the scores stay honest about disagreeing.",
+    "2. findings_to_resolve scores 0 tp / 1 fn, and unlike the above the miss is real — but it is",
+    "not a model failure, it is unreachable by construction. 'Конкременты: нет' is the strongest",
+    "resolution evidence a document can carry, and stage D never sees it: extraction emits only",
+    "entities that are PRESENT, so an explicit absence produces no entity, and reconcile is handed",
+    "buildExtractedSummary() plus the patient record and deliberately not the document text",
+    "(stages/reconcile.ts:96-121, 147-152). Negative evidence is filtered out one stage before the",
+    "stage that would act on it. findings_to_resolve therefore cannot fire on the only kind of",
+    "evidence that resolves a structural finding. This case is the reason that is now visible."
+  ],
+  "patient_state": {
+    "existingConditions": [
+      {
+        "id": "00000000-0000-4000-9000-000000000001",
+        "name": "Дефицит витамина B12",
+        "code": "E53.8",
+        "current_status": "active",
+        "onset_date": "2025-09-12",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000002",
+        "name": "Железодефицитная анемия",
+        "code": "D50.9",
+        "current_status": "active",
+        "onset_date": "2025-09-12",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000003",
+        "name": "Неалкогольная жировая болезнь печени",
+        "code": "K76.0",
+        "current_status": "active",
+        "onset_date": "2024-11-03",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000004",
+        "name": "Дислипидемия",
+        "code": "E78.5",
+        "current_status": "active",
+        "onset_date": "2024-11-03",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000005",
+        "name": "Хронический гастрит",
+        "code": "K29.5",
+        "current_status": "active",
+        "onset_date": "2023-04-21",
+        "resolved_date": null
+      }
+    ],
+    "existingFindings": [
+      {
+        "finding_code": "stone",
+        "finding_type_text": "конкремент",
+        "site_code": "kidney_right",
+        "body_site_text": "правая почка",
+        "finding_type_id": "00000000-0000-4000-b000-000000000001",
+        "body_site_id": "00000000-0000-4000-c000-000000000001"
+      },
+      {
+        "finding_code": "polyp",
+        "finding_type_text": "полип",
+        "site_code": "gallbladder",
+        "body_site_text": "желчный пузырь",
+        "finding_type_id": "00000000-0000-4000-b000-000000000002",
+        "body_site_id": "00000000-0000-4000-c000-000000000002"
+      }
+    ]
+  }
+}

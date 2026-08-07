@@ -101,7 +101,12 @@ export async function runCasePipeline(
       icd_code: condition.icd_code,
       status: condition.status,
     })),
-    findings_to_resolve: structured.findings_to_resolve,
+    findings_to_resolve: structured.findings_to_resolve.map((item) => ({
+      finding_type_text: item.finding_type_text,
+      finding_code: item.finding_code,
+      site_code: item.site_code,
+      body_site_text: item.body_site_text,
+    })),
     conditions_to_resolve: structured.conditions_to_resolve.map((item) => ({
       condition_id: item.condition_id,
     })),
