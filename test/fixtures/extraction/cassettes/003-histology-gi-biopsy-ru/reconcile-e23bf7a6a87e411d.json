@@ -1,0 +1,50 @@
+{
+  "request_hash": "e23bf7a6a87e411d",
+  "stage": "reconcile",
+  "model": "openai/gpt-5.2:nitro",
+  "response": {
+    "id": "gen-1786087620-GwHCPTo5z4tQVt0XA9AC",
+    "object": "chat.completion",
+    "created": 1786087620,
+    "model": "openai/gpt-5.2",
+    "provider": "OpenAI",
+    "system_fingerprint": null,
+    "service_tier": "default",
+    "choices": [
+      {
+        "index": 0,
+        "logprobs": null,
+        "finish_reason": "stop",
+        "native_finish_reason": "completed",
+        "message": {
+          "role": "assistant",
+          "content": "{\"findings_to_resolve\":[],\"conditions_to_resolve\":[],\"checkups_to_complete\":[]}",
+          "refusal": null
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 2542,
+      "completion_tokens": 126,
+      "total_tokens": 2668,
+      "cost": 0.006150375,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.0062125,
+        "upstream_inference_prompt_cost": 0.0044485,
+        "upstream_inference_completions_cost": 0.001764
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 94,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    }
+  }
+}
