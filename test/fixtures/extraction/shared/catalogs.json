@@ -139,7 +139,7 @@
       "synonyms_en": ["hba1c", "a1c"],
       "accepted_units": {
         "%": { "factor_to_canonical": 1 },
-        "mmol/mol": { "formula_to_canonical": "percent = (mmol_per_mol * 0.09148) + 2.152" }
+        "mmol/mol": { "formula_to_canonical": "(x * 0.09148) + 2.152" }
       }
     },
     {
@@ -576,7 +576,19 @@
       "finding_code": "inflammation",
       "name_ru": "Воспаление",
       "name_en": "Inflammation",
-      "synonyms_ru": ["воспаление", "воспалительный процесс", "воспалительные изменения"],
+      "synonyms_ru": [
+        "воспаление",
+        "воспалительный процесс",
+        "воспалительные изменения",
+        "гастрит",
+        "колит",
+        "эзофагит",
+        "дуоденит",
+        "цистит",
+        "панкреатит",
+        "бронхит",
+        "гепатит"
+      ],
       "synonyms_en": ["inflammation", "inflammatory changes"]
     },
     {

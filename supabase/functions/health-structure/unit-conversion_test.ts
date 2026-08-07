@@ -72,3 +72,94 @@ Deno.test(
     });
   },
 );
+
+Deno.test("a printed Cyrillic unit finds the catalogue's Latin key", () => {
+  const b12: ObservationCatalogItem = {
+    id: "obs-b12",
+    obs_code: "vitamin_b12",
+    name_ru: "Витамин B12",
+    name_en: "Vitamin B12",
+    canonical_unit: "pmol/L",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: { "pg/mL": { factor_to_canonical: 0.738 } },
+  };
+
+  // The defect in one line: `704 пг/мл` was stored as `704 pmol/L`. The lookup missed because the
+  // catalogue is keyed in Latin, the value passed through unconverted, and the canonical unit was
+  // stamped on anyway — so the number was 35% high and wearing a unit it was never converted into.
+  assertEquals(convertToCanonical(704, "пг/мл", b12), {
+    value_canonical: 519.552,
+    unit_canonical: "pmol/L",
+  });
+  // Printed forms vary in ways that carry no meaning.
+  assertEquals(convertToCanonical(704, "ПГ/МЛ", b12).value_canonical, 519.552);
+  assertEquals(convertToCanonical(704, "пг / мл", b12).value_canonical, 519.552);
+  // The Latin spelling the catalogue already accepted must keep working.
+  assertEquals(convertToCanonical(704, "pg/mL", b12).value_canonical, 519.552);
+  // A capitalisation the catalogue does not list is still the same unit.
+  assertEquals(convertToCanonical(704, "pg/ml", b12).value_canonical, 519.552);
+  // A unit that means something else is not converted, and not guessed at.
+  assertEquals(convertToCanonical(704, "нг/мл", b12).value_canonical, 704);
+});
+
+Deno.test("a unit with nothing to convert is folded but not altered", () => {
+  const hemoglobin: ObservationCatalogItem = {
+    id: "obs-hb",
+    obs_code: "hemoglobin",
+    name_ru: "Гемоглобин",
+    name_en: "Haemoglobin",
+    canonical_unit: "g/L",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: { "g/L": { factor_to_canonical: 1 }, "g/dL": { factor_to_canonical: 10 } },
+  };
+  assertEquals(convertToCanonical(140, "г/л", hemoglobin).value_canonical, 140);
+  // The case the silent failure was hiding: `г/дл` is a tenfold difference, not a spelling.
+  assertEquals(convertToCanonical(14, "г/дл", hemoglobin).value_canonical, 140);
+});
+
+Deno.test("a formula that cannot be evaluated keeps the value instead of deleting it", () => {
+  const entry: ObservationCatalogItem = {
+    id: "obs-hba1c",
+    obs_code: "hba1c",
+    name_ru: "HbA1c",
+    name_en: "HbA1c",
+    canonical_unit: "%",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: {
+      // The shape the catalogue actually shipped: a description of the conversion, not one the
+      // arithmetic-only evaluator can run. It never fired before, because no Russian document ever
+      // matched the Latin key; folding units makes it reachable, and returning null here would
+      // store no value at all — strictly worse than the unconverted number.
+      "mmol/mol": { formula_to_canonical: "percent = (mmol_per_mol * 0.09148) + 2.152" },
+    },
+  };
+  assertEquals(convertToCanonical(42, "ммоль/моль", entry).value_canonical, 42);
+
+  const fixed: ObservationCatalogItem = {
+    ...entry,
+    accepted_units: { "mmol/mol": { formula_to_canonical: "(x * 0.09148) + 2.152" } },
+  };
+  const converted = convertToCanonical(42, "ммоль/моль", fixed).value_canonical;
+  assertEquals(Number(converted?.toFixed(5)), 5.99416);
+});
+
+Deno.test("a folded unit converts the reference range with the value", () => {
+  const b12: ObservationCatalogItem = {
+    id: "obs-b12",
+    obs_code: "vitamin_b12",
+    name_ru: "Витамин B12",
+    name_en: "Vitamin B12",
+    canonical_unit: "pmol/L",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: { "pg/mL": { factor_to_canonical: 0.738 } },
+  };
+  // Both ends, or the value is judged against a range in a different unit.
+  assertEquals(convertRefRangeToCanonical(200, 900, "пг/мл", b12), {
+    ref_range_low_canonical: 147.6,
+    ref_range_high_canonical: 664.2,
+  });
+});

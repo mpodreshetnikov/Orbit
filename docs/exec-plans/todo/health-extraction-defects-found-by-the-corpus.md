@@ -24,7 +24,7 @@ You can see all of it working by running one command, `just test-extraction`, an
 
 - [x] Milestone 1 — Transport limits that match real documents (`max_tokens`, per-stage timeout).
 - [x] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
-- [ ] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
+- [x] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
 - [ ] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
 - [ ] Milestone 5 — Asserted absence: stop inventing it, start using it.
 - [ ] Milestone 6 — Corpus governance and the fixture-blind CI flag.
@@ -65,6 +65,15 @@ Record new findings here as work proceeds. The entries below are what the corpus
 
 - Observation: A change that touches only the corpus sets every CI impact flag to false.
   Evidence: `scripts/just/change-impact.cjs:28-57` computes `dbImpact`, `webImpact`, `extensionImpact`, `functionsImpact` and `docsOnly` from path prefixes. `test/fixtures/` matches none of them, and `isDocFile` does not classify it as a doc either, so a fixture-only change reports no impact at all. Any future gate hung on those flags would skip exactly the pull requests that edit the corpus.
+
+- Observation: The catalogue's one formula conversion cannot be evaluated, and unit folding makes it reachable.
+  Evidence: `hba1c` carries `formula_to_canonical` of `"percent = (mmol_per_mol * 0.09148) + 2.152"`, which describes the conversion rather than expressing it. `isSafeFormula` in `unit-conversion.ts` accepts only digits, `x` and arithmetic operators — correctly, since it evaluates the string — so `evaluateFormula` returned null on it every time. It had never fired, because the key is `mmol/mol` and no Russian document ever matched a Latin key. Folding `ммоль/моль` onto that key makes it reachable, and a null there stores no value at all — strictly worse than the unconverted number it would replace. Fixed on both sides: the migration rewrites it as `(x * 0.09148) + 2.152`, and `convertValueWithConfig` now falls back to the unconverted value rather than null, so the code no longer depends on the data being right.
+
+- Observation: A qualifier means the opposite thing in the observation catalogue and the finding catalogue, and one shared matcher cannot treat them alike.
+  Evidence: for an analyte, an unexplained qualifier changes identity — `Холестерин ЛПОНП` is not `Холестерин общий`, and `Билирубин прямой` and `Билирубин непрямой` are both distinct analytes from `Билирубин общий`, all three of which the corpus requires to stay uncoded. For a finding, a qualifier describes the same morphology — a `Хронический активный гастрит` is a gastritis is an inflammation, and `хронический` and `активный` say how long and how much, not what. A rule strict enough to keep `Билирубин прямой` uncoded also refuses `Хронический активный гастрит`. `resolveWithViews` therefore takes an explicit flag, set true for observations and false for finding types and body sites, rather than pretending one behaviour fits both.
+
+- Observation: A catalogue synonym edit does not invalidate the cassettes, contrary to what this plan assumed.
+  Evidence: `stages/extract.ts` builds its vocabulary from `code`, `ru` and `en` only — synonyms and `accepted_units` never reach the prompt, because they are used by the deterministic resolver downstream rather than by the model. A synonyms-only or units-only catalogue change therefore leaves the request messages byte-identical, and `cassetteKey` (which digests model and messages) does not move. Confirmed by replaying the corpus after regenerating the snapshot: three cases scored, zero cassette misses. Adding or renaming a catalogue _entry_ would still invalidate them.
 
 ## Decision Log
 
@@ -139,6 +148,41 @@ f1 came out 80.0%, 100.0%, 50.0% on three runs of the same document — a 50-poi
 changed between them. Observations fp ran 2, 2, 4; checkups f1 ran 0%, 100%, 100%. Any single-run
 reading of a Milestone 4 or 5 prompt change would have been noise. Nine dimensions did read `stable`,
 which is itself useful: those can be compared across single runs.
+
+### Milestone 3 — landed 2026-08-07
+
+Corpus effect, replay, aggregate observation fields: `obs_code` 13/14 -> 14/14, `is_applied`
+13/14 -> 14/14, `value_canonical` 13/14 -> 14/14, `unit_canonical` 12/14 -> 13/14. `Витамин В12`
+now stores `519.552 pmol/L` rather than `704`, and `Холестерин ЛПОНП` is uncoded and unapplied
+rather than filed under `cholesterol_total`. Wrongful resolutions unchanged at the replayed value.
+
+Unit folding landed as planned, plus case and whitespace insensitivity, plus a fold of the Cyrillic
+letters that are visually identical to Latin ones. The lookup stays exact after folding.
+
+The token-matching work did **not** land as the plan described it, and the plan's version would have
+been a regression. The plan proposed rejecting any candidate that cannot explain a query word of
+three characters or more. Measured against the real catalogue, that rule broke three labels that
+resolve correctly today — `Витамин В12`, `Железо сыворотки` — and left `Холестерин ЛПВП` and
+`Холестерин ЛПНП` unresolved, which the corpus requires to resolve to `hdl_c` and `ldl_c`. Only
+`ЛПОНП` is meant to stay uncoded. What shipped instead is a discriminating-token tier between
+whole-string synonym matching and fuzzy scoring: when exactly one catalogue entry answers to a word
+of the label, that entry wins. `лпвп` is a synonym of `hdl_c`, so the line resolves for the right
+reason rather than by out-scoring `холестерин`; `лпонп` belongs to nobody, so nothing resolves.
+
+Two smaller findings came out of building it, both recorded under Surprises.
+
+Migration `20260807120000_inflammation_synonyms_and_hba1c_formula.sql` adds the `-ит` synonyms and
+fixes the `hba1c` formula. It sets both columns rather than appending, so it is re-runnable. It has
+**not** been applied to any database — this environment has no Supabase credentials, and applying a
+migration to the live project is not this plan's call. The pinned corpus snapshot was updated by hand
+to exactly the values the migration produces, verified field by field against the previous snapshot:
+two semantic changes, nothing else.
+
+The `inflammation` half of this milestone is correct but its corpus expectation still fails, for a
+reason that belongs to Milestone 4. `Хронический активный гастрит` now resolves to `inflammation` in
+isolation, but the model never emits that finding: it emits `Helicobacter pylori (+)` into the
+stomach slot and displaces it. Case 003's `inflammation` finding-code expectation will pass when
+Milestone 4 stops a qualitative result becoming a finding, not before.
 
 ## Context and Orientation
 
