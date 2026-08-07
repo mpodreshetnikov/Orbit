@@ -26,7 +26,7 @@ You can see all of it working by running one command, `just test-extraction`, an
 - [x] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
 - [x] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
 - [x] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
-- [ ] Milestone 5 — Asserted absence: stop inventing it, start using it.
+- [x] Milestone 5 — Asserted absence: stop inventing it, start using it.
 - [ ] Milestone 6 — Corpus governance and the fixture-blind CI flag.
 
 ## Surprises & Discoveries
@@ -219,6 +219,46 @@ to resolve, because the catalogue lists every abbreviation for that enzyme and n
 a lab prints. The deterministic resolver exists so the pipeline does not depend on the model
 supplying codes, and it cannot do that job with a vocabulary missing the printed form. The full
 names are now in the migration alongside the `inflammation` ones.
+
+### Milestone 5 — landed 2026-08-07
+
+Both halves landed and both acceptance criteria are met. `findings_to_resolve` went from one false
+negative to one true positive, zero false positives — 100% on the dimension that had been
+structurally incapable of firing — and the wrongful-resolution banner still reports none. Case 002
+no longer emits `ЛС не расширена` as a finding, and its findings dimension reached 100% on the
+recording where its observations also did.
+
+Case 003 is the regression guard and it holds: `без признаков дисплазии`, `кишечная метаплазия не
+выявлена` and `атрофия не выявлена` now arrive as asserted absences rather than as findings, while
+the present dysplasia, polyp and inflammation are all still reported.
+
+The negation guard needed adjacency, not presence. The plan says "adjacent to the finding term" and
+that turns out to be load-bearing rather than a detail: case 002's legitimate `гиперсигналы` finding
+is anchored on `с обеих сторон единичные гиперсигналы 0,2 см, без эхотени`, where `без` negates the
+acoustic shadow and not the hypersignals. A rule rejecting any anchor containing a negation would
+have deleted a finding the corpus requires. The guard locates the finding term in the anchor and
+looks two words either side of it, which covers `не расширена`, `метаплазия не выявлена` and
+`без признаков дисплазии` alike. The same check runs in reverse on `asserted_absences`: an
+"absence" whose own evidence denies nothing is a presence in the wrong array, and admitting it would
+hand reconciliation grounds to close a finding the document reported as still there.
+
+One thing the plan did not anticipate. The first recording emitted the absence correctly —
+`{finding_code: "stone", site_code: "kidney", anchor: "Конкременты: нет"}` — and reconciliation
+still declined, because the existing finding is on `kidney_right` and the instruction told it to
+match sites strictly. That was too absolute: `Конкременты: нет` on a bilateral study means no stone
+in either kidney, so an absence asserted for a whole organ has to cover its parts. The instruction
+now says so, and says the reverse does not hold — an absence in one part is not evidence about
+another, and an absence in a different organ is not evidence at all. That asymmetry is what keeps
+the wrongful-resolution count at zero.
+
+**Measurement is incomplete, and this is the one place a reader should not trust a single number.**
+The `--repeat 3` run the plan calls for did not finish: the OpenRouter key hit its weekly spend
+limit partway through and returned `403 Key limit exceeded (weekly limit)` for the remaining runs.
+One full pass and parts of two others completed. What they show is `findings_to_resolve` f1 stable
+at 100% with zero false positives and zero false negatives across every pass that ran, which is the
+milestone's own criterion; the other dimensions moved as they always do on this corpus and should be
+re-measured with a full `--repeat 3` once the key resets. The committed cassettes were recorded
+before the limit was reached and replay clean.
 
 ## Context and Orientation
 

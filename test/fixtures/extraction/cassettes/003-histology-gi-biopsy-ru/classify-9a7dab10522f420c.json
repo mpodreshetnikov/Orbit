@@ -3,9 +3,9 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1786101928-Oieleu9luSRutxcrG7hQ",
+    "id": "gen-1786103294-2wVqSdhBb5ejagugDMj8",
     "object": "chat.completion",
-    "created": 1786101928,
+    "created": 1786103294,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -18,30 +18,30 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"lab\",\"title\":\"Гистологическое исследование биопсийного материала (биопсийное исследование)\",\"record_date\":\"2020-02-02\",\"summary\":\"Laboratory histology report of diagnostic biopsies from the ascending colon, sigmoid colon, and gastric antrum. Findings include a tubular adenoma of the ascending colon with low-grade epithelial dysplasia, a pedunculated hyperplastic polyp of the sigmoid colon without dysplasia, and moderate chronic active antral gastritis associated with Helicobacter pylori. ICD-10 code D12.2 is noted.\",\"keywords\":[\"histology\",\"biopsy\",\"ascending colon\",\"tubular adenoma\",\"low-grade dysplasia\",\"sigmoid colon\",\"hyperplastic polyp\",\"stomach antrum\",\"chronic active gastritis\",\"Helicobacter pylori\",\"ICD-10 D12.2\"]}",
+          "content": "{\"record_type\":\"lab\",\"title\":\"Гистологическое исследование биопсийного материала\",\"record_date\":\"2020-02-02\",\"summary\":\"Histology report for diagnostic biopsies from the ascending colon, sigmoid colon, and gastric antrum. Findings include a tubular adenoma of the ascending colon with low-grade epithelial dysplasia, a hyperplastic polyp of the sigmoid colon without dysplasia, and moderate chronic active antral gastritis associated with Helicobacter pylori.\",\"keywords\":[\"histology\",\"biopsy\",\"ascending colon\",\"tubular adenoma\",\"low-grade dysplasia\",\"sigmoid colon\",\"hyperplastic polyp\",\"gastric antrum\",\"chronic active gastritis\",\"Helicobacter pylori\",\"ICD-10 D12.2\"]}",
           "refusal": null
         }
       }
     ],
     "usage": {
       "prompt_tokens": 1497,
-      "completion_tokens": 333,
-      "total_tokens": 1830,
-      "cost": 0.0072089325,
+      "completion_tokens": 269,
+      "total_tokens": 1766,
+      "cost": 0.0043260525,
       "is_byok": false,
       "prompt_tokens_details": {
-        "cached_tokens": 0,
+        "cached_tokens": 1280,
         "cache_write_tokens": 0,
         "audio_tokens": 0,
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.00728175,
-        "upstream_inference_prompt_cost": 0.00261975,
-        "upstream_inference_completions_cost": 0.004662
+        "upstream_inference_cost": 0.00436975,
+        "upstream_inference_prompt_cost": 0.00060375,
+        "upstream_inference_completions_cost": 0.003766
       },
       "completion_tokens_details": {
-        "reasoning_tokens": 140,
+        "reasoning_tokens": 100,
         "image_tokens": 0,
         "audio_tokens": 0
       }

@@ -3,9 +3,9 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1786101831-Jju9B50NDHVhD0mJxUIn",
+    "id": "gen-1786103198-AGTRToq6rlhslKCSVcud",
     "object": "chat.completion",
-    "created": 1786101831,
+    "created": 1786103198,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -18,16 +18,16 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"lab\",\"title\":\"Промежуточный лабораторный отчет: биохимия, липидограмма, витамин B12\",\"record_date\":\"2026-03-06\",\"summary\":\"Laboratory report from a diagnostic center for a 25-year-old male, marked as an interim report with some analyses still in progress. It includes biochemical tests (bilirubin fractions, liver enzymes, GGT, glucose), a lipid profile with reference ranges and interpretive comments, and an immunology test for vitamin B12.\",\"keywords\":[\"laboratory report\",\"biochemistry\",\"lipid profile\",\"bilirubin\",\"ALT\",\"AST\",\"GGT\",\"glucose\",\"cholesterol\",\"LDL\",\"HDL\",\"vitamin B12\"]}",
+          "content": "{\"record_type\":\"lab\",\"title\":\"Промежуточный лабораторный отчет: биохимия, липидограмма, витамин B12\",\"record_date\":\"2026-03-06\",\"summary\":\"Промежуточный лабораторный отчет по биохимическим исследованиям, липидограмме и иммунологическому тесту (витамин B12) для пациента 25 лет (мужчина). В отчете отмечены отклонения по непрямому билирубину и холестерину ЛПВП, остальные представленные показатели с указанными референсами без отметок отклонений.\",\"keywords\":[\"лабораторный отчет\",\"биохимия крови\",\"липидограмма\",\"билирубин непрямой\",\"АЛТ\",\"АСТ\",\"глюкоза\",\"холестерин\",\"ЛПВП\",\"ЛПНП\",\"витамин B12\",\"промежуточный отчет\"]}",
           "refusal": null
         }
       }
     ],
     "usage": {
       "prompt_tokens": 1536,
-      "completion_tokens": 160,
-      "total_tokens": 1696,
-      "cost": 0.00487872,
+      "completion_tokens": 278,
+      "total_tokens": 1814,
+      "cost": 0.0065142,
       "is_byok": false,
       "prompt_tokens_details": {
         "cached_tokens": 0,
@@ -36,12 +36,12 @@
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.004928,
+        "upstream_inference_cost": 0.00658,
         "upstream_inference_prompt_cost": 0.002688,
-        "upstream_inference_completions_cost": 0.00224
+        "upstream_inference_completions_cost": 0.003892
       },
       "completion_tokens_details": {
-        "reasoning_tokens": 0,
+        "reasoning_tokens": 69,
         "image_tokens": 0,
         "audio_tokens": 0
       }

@@ -79,6 +79,24 @@ export interface ExtractResult {
   observations: ExtractedObservation[];
   findings: ExtractedFinding[];
   conditions: ExtractedCondition[];
+  /**
+   * Findings the document explicitly states are absent.
+   *
+   * Not a finding and never written to the chart. It exists so that reconciliation can see the one
+   * kind of evidence that closes an existing finding — `Конкременты: нет` says a previously
+   * recorded stone is gone, and extraction, which reports what is present, otherwise discards it.
+   */
+  asserted_absences: AssertedAbsence[];
+}
+
+/** A finding the document says is not there. Grounded like any other entity. */
+export interface AssertedAbsence {
+  finding_code: string | null;
+  finding_type_text: string;
+  site_code: string | null;
+  body_site_text: string | null;
+  source_anchor: string;
+  confidence: number;
 }
 
 export interface ReconcileResult {
