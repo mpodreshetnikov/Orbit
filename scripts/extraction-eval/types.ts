@@ -21,6 +21,7 @@ export interface ExpectedFinding {
   size_mm?: number | null;
   severity?: string | null;
   laterality?: string | null;
+  count?: number | null;
 }
 
 export interface ExpectedCondition {

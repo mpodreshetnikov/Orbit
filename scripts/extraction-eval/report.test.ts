@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMarkdown, type RunSummary } from "./report";
+import { renderMarkdown, renderVariance, type RunSummary } from "./report";
 import { aggregate, scoreCase } from "./score";
 import type { CaseSnapshot } from "./types";
 
@@ -124,5 +124,42 @@ describe("renderMarkdown", () => {
       summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
     );
     expect(markdown).toContain("| findings_to_resolve |");
+  });
+});
+
+describe("renderVariance", () => {
+  function runOf(observations: CaseSnapshot["observations"]) {
+    return aggregate([scoreCase("001", snapshot({ observations }), snapshot(), [])]);
+  }
+
+  const observation = {
+    obs_name: "Гемоглобин",
+    obs_code: "hemoglobin",
+    value_numeric: 97,
+    unit: "г/л",
+    ref_range_low: null,
+    ref_range_high: null,
+    status: null,
+    value_canonical: 97,
+    unit_canonical: "g/L",
+    is_applied: true,
+  };
+
+  it("renders nothing for a single run, because one run has no spread", () => {
+    expect(renderVariance([runOf([])])).toBe("");
+  });
+
+  it("marks a dimension that agreed across every run as stable", () => {
+    const variance = renderVariance([runOf([]), runOf([]), runOf([])]);
+    expect(variance).toContain("Variance across 3 runs");
+    expect(variance).toContain("stable");
+  });
+
+  it("prints the range and every run when a dimension disagreed", () => {
+    // Two runs that found different numbers of observations: the recall differs, so the f1 does.
+    const variance = renderVariance([runOf([]), runOf([observation])]);
+    expect(variance).toContain("observations fn");
+    // The individual runs are printed, not just a summary — the point is to show the disagreement.
+    expect(variance).toMatch(/observations fn \| 0\.5 \| 0\.0 – 1\.0 \| 0\.0, 1\.0/);
   });
 });

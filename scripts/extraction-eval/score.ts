@@ -180,7 +180,7 @@ export function scoreSet(expected: KeyedItem[], actual: KeyedItem[]): SetScore {
   };
 }
 
-const OBSERVATION_FIELDS: (keyof ExpectedObservation)[] = [
+export const OBSERVATION_FIELDS: (keyof ExpectedObservation)[] = [
   "obs_code",
   "is_applied",
   "value_numeric",
@@ -200,12 +200,19 @@ const OBSERVATION_FIELDS: (keyof ExpectedObservation)[] = [
  * something the pipeline decides *about* a finding once it has located it, `finding_code` above
  * all — that is the fuzzy resolver's output, and the whole reason it must not be the key.
  */
-const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
+export const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
   "finding_code",
   "finding_type_text",
   "body_site_text",
   "size_mm",
   "severity",
+  // How many of this finding the document describes. `service.ts` writes `item.count || 1`, so the
+  // value reaches the database, and until now nothing compared it. Case 003 is why it matters: its
+  // document prints "Количество фрагментов: 2", which is how many tissue fragments the pathologist
+  // received and emphatically not how many adenomas the patient has. Note the limit of the
+  // assertion — because the builder coerces a missing count to 1, expecting 1 cannot tell "the
+  // model said 1" from "the model said nothing". It catches 2, which is the failure mode.
+  "count",
 ];
 
 /**
@@ -217,7 +224,41 @@ const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
  * true positive. Case 003 is the first case with a non-empty condition set, and it advertised
  * `D12.2` as regression coverage that did not exist.
  */
-const CONDITION_FIELDS: (keyof ExpectedCondition)[] = ["icd_code", "status"];
+export const CONDITION_FIELDS: (keyof ExpectedCondition)[] = ["icd_code", "status"];
+
+/**
+ * Every key a fixture may carry, per collection, and why it is legitimate.
+ *
+ * Exported so `fixture-coverage.test.ts` can check the corpus against what this file actually
+ * reads, rather than against a second list that would drift out of agreement with it and quietly
+ * stop meaning anything. A key is legitimate for one of two reasons: it is scored as a field, or it
+ * is a match key — used to pair expected rows with actual ones, which is a real job even though it
+ * produces no accuracy number. Anything else in a fixture is written and never compared.
+ *
+ * Keep the match-key lists in agreement with the key functions below (`findingKey`, `checkupKey`,
+ * `resolutionKey`, `findingResolutionKey`) and with `keyed()`'s callers in `scoreCase`.
+ */
+export const SCORED_FIELDS: Record<string, readonly string[]> = {
+  observations: OBSERVATION_FIELDS.map(String),
+  findings: FINDING_FIELDS.map(String),
+  conditions: CONDITION_FIELDS.map(String),
+  findings_to_resolve: [],
+  conditions_to_resolve: [],
+  checkups_to_complete: ["suggested_done_at"],
+};
+
+export const MATCH_KEYS: Record<string, readonly string[]> = {
+  // Observations pair on the printed label.
+  observations: ["obs_name"],
+  // `findingKey` pairs on site and laterality; `site_code` falls back to `body_site_text`.
+  findings: ["site_code", "laterality"],
+  // Conditions pair on the name.
+  conditions: ["name"],
+  // `findingResolutionKey` runs the production matcher over all four of these.
+  findings_to_resolve: ["finding_type_text", "finding_code", "site_code", "body_site_text"],
+  conditions_to_resolve: ["condition_id"],
+  checkups_to_complete: ["checkup_item_id"],
+};
 
 /**
  * A finding is identified by where it is, not by what it is called.

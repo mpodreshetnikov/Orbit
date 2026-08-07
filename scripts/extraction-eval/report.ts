@@ -21,6 +21,90 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+/**
+ * Spread across repeated runs of the same corpus, so a change can be told apart from a resample.
+ *
+ * This exists because single runs of this corpus were being over-read. Five live runs of case 002
+ * disagreed on observations (0, 3, 3, 2, 3), findings (3, 3, 3, 4, 2), conditions (1, 2, 2, 0, 2)
+ * and anchor rejections (0, 0, 0, 3, 2) — only one dimension was stable across all five. Run-to-run
+ * variance is larger than most of the differences people were arguing about, so a single number
+ * moving proves nothing on its own.
+ *
+ * Min and max rather than a standard deviation: at the run counts anyone will actually use (3, 5),
+ * a standard deviation is a worse summary of three numbers than the three numbers' range, and it
+ * invites the false precision this section exists to prevent.
+ */
+export interface VarianceRow {
+  dimension: string;
+  values: number[];
+}
+
+function mean(values: number[]): number {
+  return values.length === 0 ? 0 : values.reduce((n, v) => n + v, 0) / values.length;
+}
+
+function varianceRow(row: VarianceRow, format: (value: number) => string): string {
+  const min = Math.min(...row.values);
+  const max = Math.max(...row.values);
+  const spread = min === max ? "stable" : `${format(min)} – ${format(max)}`;
+  return `| ${row.dimension} | ${format(mean(row.values))} | ${spread} | ${row.values.map(format).join(", ")} |`;
+}
+
+export function renderVariance(runs: Aggregate[]): string {
+  if (runs.length < 2) return "";
+  const sets: [string, (a: Aggregate) => SetScore][] = [
+    ["observations", (a) => a.observations],
+    ["findings", (a) => a.findings],
+    ["conditions", (a) => a.conditions],
+    ["findings_to_resolve", (a) => a.findingsToResolve],
+    ["conditions_to_resolve", (a) => a.conditionsToResolve],
+    ["checkups_to_complete", (a) => a.checkupsToComplete],
+  ];
+
+  const lines: string[] = [`## Variance across ${runs.length} runs`, ""];
+  lines.push(
+    ...table(
+      ["dimension", "mean", "spread", "runs"],
+      sets.flatMap(([label, pick]) => [
+        varianceRow({ dimension: `${label} f1`, values: runs.map((a) => pick(a).f1) }, (value) =>
+          pct(value),
+        ),
+        varianceRow({ dimension: `${label} tp`, values: runs.map((a) => pick(a).tp) }, (value) =>
+          value.toFixed(1),
+        ),
+        varianceRow({ dimension: `${label} fp`, values: runs.map((a) => pick(a).fp) }, (value) =>
+          value.toFixed(1),
+        ),
+        varianceRow({ dimension: `${label} fn`, values: runs.map((a) => pick(a).fn) }, (value) =>
+          value.toFixed(1),
+        ),
+      ]),
+    ),
+  );
+  lines.push("");
+  lines.push(
+    ...table(
+      ["dimension", "mean", "spread", "runs"],
+      [
+        varianceRow(
+          {
+            dimension: "wrongful resolutions",
+            values: runs.map((a) => a.wrongfulResolutions),
+          },
+          (value) => value.toFixed(1),
+        ),
+      ],
+    ),
+  );
+  lines.push("");
+  lines.push(
+    "> A dimension reading `stable` agreed across every run. Anything with a spread cannot be " +
+      "read off a single run — compare spreads, not single numbers.",
+  );
+  lines.push("");
+  return lines.join("\n");
+}
+
 function prRow(label: string, score: SetScore): string {
   return `| ${label} | ${score.tp} | ${score.fp} | ${score.fn} | ${pct(score.precision)} | ${pct(score.recall)} | ${pct(score.f1)} |`;
 }

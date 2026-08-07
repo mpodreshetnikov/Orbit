@@ -23,7 +23,7 @@ You can see all of it working by running one command, `just test-extraction`, an
 ## Progress
 
 - [x] Milestone 1 — Transport limits that match real documents (`max_tokens`, per-stage timeout).
-- [ ] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
+- [x] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
 - [ ] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
 - [ ] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
 - [ ] Milestone 5 — Asserted absence: stop inventing it, start using it.
@@ -105,6 +105,40 @@ carries each stage's JSON schema — is also outside the key. A schema change th
 text untouched will replay stale cassettes that cannot contain the new field, and the corpus will
 look healthy while measuring nothing. Milestone 5 adds `asserted_absences` to the extract schema and
 must re-record explicitly rather than trusting invalidation to happen on its own.
+
+### Milestone 2 — landed 2026-08-07
+
+Fixed all three items.
+
+`count` is now carried through `pipeline.ts`, declared on `ExpectedFinding`, and scored in
+`FINDING_FIELDS`. Case 002's two findings gained `count: 1`, as the plan required.
+
+`scripts/extraction-eval/fixture-coverage.test.ts` now fails the build when a fixture carries a key
+nothing reads. It imports the field arrays and a new `MATCH_KEYS` map from `score.ts` rather than
+restating them, so it cannot drift from the scorer. A third assertion covers the case that produced
+all three past regressions: a new array added to `CaseSnapshot` and to the fixtures must be declared
+in both maps or the suite fails. Verified by adding `"morphology": "tubular"` to case 002 — the
+suite failed naming `002-kidney-ultrasound-ru/expected.json -> findings[].morphology` — and passing
+again on removal.
+
+Worth recording: the coverage test found a live instance the moment it was written. Case 003 already
+carried `count: 1` on all three findings, inert, exactly the class the test exists to catch. It was
+scored in the same milestone rather than deleted, so the test's first find is also its first fix.
+
+`--repeat N` is in `run.ts`, with a `renderVariance` section in `report.ts` reporting mean, range and
+every individual run per dimension. It refuses a replay run and refuses `--record`, each with a
+message saying why: replaying N times reports a spread of zero that reads as stability, and
+recording keeps one answer per request so the cassettes would describe the last run while the report
+describes all of them. Failures are now counted across every pass rather than the rendered one, since
+a case that dies on run 2 of 3 is precisely what repeat runs exist to surface.
+
+Corpus score: unchanged except that `count` now appears in the finding-field table at 5/5.
+
+The live `--repeat 3 --case 002` run confirms the premise of the whole sequencing decision. Findings
+f1 came out 80.0%, 100.0%, 50.0% on three runs of the same document — a 50-point swing with nothing
+changed between them. Observations fp ran 2, 2, 4; checkups f1 ran 0%, 100%, 100%. Any single-run
+reading of a Milestone 4 or 5 prompt change would have been noise. Nine dimensions did read `stable`,
+which is itself useful: those can be compared across single runs.
 
 ## Context and Orientation
 
