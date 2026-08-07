@@ -13,6 +13,7 @@ import type { ExistingFinding } from "../../supabase/functions/health-structure/
 import type {
   CaseSnapshot,
   ExpectedCheckup,
+  ExpectedCondition,
   ExpectedFinding,
   ExpectedFindingResolution,
   ExpectedObservation,
@@ -123,6 +124,7 @@ export interface CaseScore {
   /** Site+laterality keys claimed by more than one finding — pairing here is unreliable. */
   findingKeyCollisions: string[];
   conditions: SetScore;
+  conditionFields: FieldAccuracy[];
   findingsToResolve: SetScore;
   conditionsToResolve: SetScore;
   checkupsToComplete: SetScore;
@@ -205,6 +207,17 @@ const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
   "size_mm",
   "severity",
 ];
+
+/**
+ * A condition's scored fields.
+ *
+ * `name` is absent because it is the match key. Both of these were carried into `CaseSnapshot`
+ * and into every `expected.json` and then compared against nothing: conditions were keyed on the
+ * name alone, so a condition returned with a null or wrong `icd_code` still scored as a clean
+ * true positive. Case 003 is the first case with a non-empty condition set, and it advertised
+ * `D12.2` as regression coverage that did not exist.
+ */
+const CONDITION_FIELDS: (keyof ExpectedCondition)[] = ["icd_code", "status"];
 
 /**
  * A finding is identified by where it is, not by what it is called.
@@ -419,6 +432,13 @@ export function scoreCase(
       expected.conditions.map((c) => keyed(c.name)),
       actual.conditions.map((c) => keyed(c.name)),
     ),
+    conditionFields: scoreFields(
+      expected.conditions,
+      actual.conditions,
+      (row) => matchKey(row.name),
+      (row) => row.name,
+      CONDITION_FIELDS,
+    ),
     findingsToResolve: scoreSet(
       expected.findings_to_resolve.map((item) => findingResolutionKey(item, existingFindings)),
       actual.findings_to_resolve.map((item) => findingResolutionKey(item, existingFindings)),
@@ -454,6 +474,7 @@ export interface Aggregate {
   checkupsToComplete: SetScore;
   observationFields: FieldAccuracy[];
   findingFields: FieldAccuracy[];
+  conditionFields: FieldAccuracy[];
   /**
    * Wrongful closures across the whole run — findings and conditions both. The number to look at
    * first. A wrongfully closed finding is the same class of harm as a wrongfully closed condition:
@@ -515,6 +536,7 @@ export function aggregate(scores: CaseScore[]): Aggregate {
     checkupsToComplete: sumSets(scores.map((s) => s.checkupsToComplete)),
     observationFields: fields,
     findingFields: sumFields(scores, (s) => s.findingFields, FINDING_FIELDS.map(String)),
+    conditionFields: sumFields(scores, (s) => s.conditionFields, CONDITION_FIELDS.map(String)),
     wrongfulResolutions: conditionsToResolve.fp + findingsToResolve.fp,
   };
 }

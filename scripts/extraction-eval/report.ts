@@ -161,6 +161,7 @@ export function renderMarkdown(summary: RunSummary): string {
 
   lines.push(...fieldSection("Observation fields", "observation", agg.observationFields));
   lines.push(...fieldSection("Finding fields", "finding", agg.findingFields));
+  lines.push(...fieldSection("Condition fields", "condition", agg.conditionFields));
 
   lines.push("## Cases");
   lines.push("");
