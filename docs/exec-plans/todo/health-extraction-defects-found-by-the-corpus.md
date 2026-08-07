@@ -22,7 +22,7 @@ You can see all of it working by running one command, `just test-extraction`, an
 
 ## Progress
 
-- [ ] Milestone 1 — Transport limits that match real documents (`max_tokens`, per-stage timeout).
+- [x] Milestone 1 — Transport limits that match real documents (`max_tokens`, per-stage timeout).
 - [ ] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
 - [ ] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
 - [ ] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
@@ -81,6 +81,30 @@ Record every decision that changes this plan, with the reason, so a reader resta
 ## Outcomes & Retrospective
 
 To be completed as milestones land. For each, record what was fixed, what the corpus score was before and after, and anything that turned out differently from what this plan assumed.
+
+### Milestone 1 — landed 2026-08-07
+
+Fixed: `stages/client.ts` now sends `max_tokens` (default 16,000, overridable per call via the new
+`StageContext.maxTokens`) and `DEFAULT_TIMEOUT_MS` is 120,000 rather than 60,000. Two Deno tests
+cover the default and the override; the request-shape test that guards `temperature`'s absence was
+left alone and a separate one added beside it.
+
+Corpus score: unchanged, as expected — this milestone touches transport only, not any answer.
+A live run of all three cases completed with `3 scored, 0 failed` and no timeout, which is the
+acceptance criterion. Replay before and after is byte-identical.
+
+Turned out differently: **this milestone does not invalidate the cassettes.** The plan assumed it
+would, because `cassetteKey`'s doc comment says it keys on "the full request body". It does not —
+it keys on `{ model, messages }` only (`scripts/extraction-eval/cassette.ts`). No re-record was
+needed. The comment has been corrected in place rather than the keying changed: excluding transport
+knobs from the key is the right behaviour, since they do not change the answer and keying on them
+would churn every recording whenever one was retuned.
+
+That correction exposed a sharper point worth carrying into Milestone 5: `response_format` — which
+carries each stage's JSON schema — is also outside the key. A schema change that leaves the prompt
+text untouched will replay stale cassettes that cannot contain the new field, and the corpus will
+look healthy while measuring nothing. Milestone 5 adds `asserted_absences` to the extract schema and
+must re-record explicitly rather than trusting invalidation to happen on its own.
 
 ## Context and Orientation
 

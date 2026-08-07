@@ -541,6 +541,34 @@ Deno.test("stage requests pin provider parameters and use a strict json schema",
   assertEquals("temperature" in body, false);
 });
 
+Deno.test(
+  "stage requests cap the output budget so the router reserves a realistic amount",
+  async () => {
+    const { bodies, fetchFn } = recordingFetch(() =>
+      jsonResponse({ observations: [], findings: [], conditions: [] }),
+    );
+
+    await runExtractStage("text", CATALOGS, { fetchFn, apiKey: "k", model: "m", effort: "high" });
+
+    // Omitting `max_tokens` makes OpenRouter reserve the model's full completion capacity (65,536
+    // tokens for the gpt-5.x family) against the account's remaining credit before dispatching, so
+    // an account with a small balance gets HTTP 402 on a call that would have cost a fraction of a
+    // cent. The failure is confusing rather than obvious, because a smaller request on the same key
+    // still returns 200. Dropping this field again would silently reintroduce that.
+    assertEquals(bodies[0].max_tokens, 16_000);
+  },
+);
+
+Deno.test("a stage honours an explicit output budget over the default", async () => {
+  const { bodies, fetchFn } = recordingFetch(() =>
+    jsonResponse({ observations: [], findings: [], conditions: [] }),
+  );
+
+  await runExtractStage("text", CATALOGS, { fetchFn, apiKey: "k", model: "m", maxTokens: 4_096 });
+
+  assertEquals(bodies[0].max_tokens, 4_096);
+});
+
 Deno.test("every stage schema satisfies strict json_schema mode", () => {
   // Strict mode has no optional keys: `required` must name every key in `properties`, or the
   // provider rejects the whole request with `invalid_json_schema`. Optionality is expressed as a

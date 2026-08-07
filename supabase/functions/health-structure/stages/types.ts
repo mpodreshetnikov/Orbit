@@ -26,6 +26,8 @@ export interface StageContext {
   fallbackModels?: string[];
   effort?: "low" | "medium" | "high";
   timeoutMs?: number;
+  /** Output budget for one call. Defaults in the client; see `DEFAULT_MAX_TOKENS` there. */
+  maxTokens?: number;
   maxAttempts?: number;
   log?: Pick<Console, "log" | "warn" | "error">;
   debugRawPayload?: boolean;

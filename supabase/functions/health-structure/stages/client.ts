@@ -11,7 +11,29 @@ import {
 } from "../../_shared/llm-retry.ts";
 import type { StageContext, StageUsage } from "./types.ts";
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * 60s was marginal for a real document: the three-specimen histology case in the eval corpus
+ * exceeded it once and then completed in 44s on the retry. Only `extract` carries a raised
+ * reasoning budget (see `stages/index.ts`), so extraction is the only slow stage — but a single
+ * default is simpler than a per-stage table, and `ctx.timeoutMs` already lets a deployment
+ * override it via `OPENROUTER_HEALTH_STRUCTURE_TIMEOUT_MS`.
+ */
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+/**
+ * Sent on every stage request so OpenRouter does not reserve the model's full output capacity.
+ *
+ * Without `max_tokens` the router reserves the model's maximum completion — 65,536 tokens for the
+ * gpt-5.x family — against the account's remaining credit *before* dispatching, and refuses with
+ * HTTP 402 ("You requested up to 65536 tokens, but can only afford …") whenever the balance is
+ * below that reservation, even though the real completion costs a fraction of a cent. A small
+ * request on the same key still succeeds, which makes the failure look like a routing bug.
+ *
+ * 16,000 is roughly four times the largest completion observed on the eval corpus (~4,000) and far
+ * below the reservation that trips the limit. Undersizing it is not silent: a truncated answer
+ * comes back with `finish_reason: "length"`, which is raised as `RetryableLlmError` below.
+ */
+const DEFAULT_MAX_TOKENS = 16_000;
 
 export { INVALID_JSON_ERROR_MESSAGE, parseJsonObject };
 export const TRUNCATED_ERROR_MESSAGE = "OpenRouter response was truncated before completion";
@@ -62,6 +84,9 @@ export async function callStageJson(
       try {
         const body: Record<string, unknown> = {
           model: ctx.model,
+          // Cap the output budget so the router reserves a realistic amount of credit rather than
+          // the model's full capacity. See DEFAULT_MAX_TOKENS.
+          max_tokens: ctx.maxTokens ?? DEFAULT_MAX_TOKENS,
           // No `temperature`. Reasoning endpoints (the gpt-5.x family this pipeline defaults to)
           // do not advertise it, and `require_parameters` below is all-or-nothing: asking for a
           // parameter no endpoint declares leaves OpenRouter with nothing to route to, and the
