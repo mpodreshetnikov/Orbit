@@ -1,0 +1,151 @@
+{
+  "lang": "ru",
+  "kind": "lab",
+  "source": "real report, de-identified; see README.md. Extended from one specimen to three.",
+  "notes": [
+    "Histopathology on three GI biopsy specimens. The first corpus case where finding codes are",
+    "expected to RESOLVE rather than stay null, and the first where the conditions dimension has",
+    "a true positive at all — cases 001 and 002 both expect `conditions: []`, so that set has",
+    "never scored a single item and an empty set reports as 100%.",
+    "The source document carried one specimen (ascending colon, tubular adenoma). Two more were",
+    "added — sigmoid and gastric antrum — because a single-specimen report cannot exercise site",
+    "discrimination, and because a document where SOME catalogue words are present and OTHERS are",
+    "negated is a far harder negation test than case 002, where every catalogue word was negated",
+    "uniformly. Here the model has to tell дисплазия (present, ascending colon) from дисплазия",
+    "(absent, sigmoid) inside one report."
+  ],
+  "what_this_case_exercises": [
+    "positive finding_code resolution, three times over: dysplasia, polyp, inflammation — the",
+    "resolver's success path, which no case has ever run. Both case 002 codes are null.",
+    "the coded branch of the new naming rule: finding_type_text must be the catalogue's spelling",
+    "(Дисплазия / Полип / Воспаление), not the document's wording. Case 002 only exercised the",
+    "uncoded branch, where the document's own words are copied.",
+    "a three-level body site tree: colon_ascending and colon_sigmoid are both children of colon,",
+    "so the pipeline must pick the segment and not collapse to the parent. Case 002's kidney tree",
+    "is one level and only one child was in play.",
+    "severity as something other than 'unknown' for the first time: mild (низкой степени) and",
+    "moderate (умеренной степени) in the same document.",
+    "conditions with a real ICD-10 code (D12.2) — the first true positive in that dimension, and",
+    "a deliberate contrast with case 002's Z01.8, which is an encounter code and expected absent.",
+    "three negations sitting beside three positives: 'без признаков дисплазии', 'кишечная",
+    "метаплазия не выявлена', 'атрофия не выявлена' — metaplasia and atrophy are both catalogue",
+    "entries, so declining them requires reading the negation rather than declining everything.",
+    "a lab result table printed with headers and no rows, which must yield no observations",
+    "a 2020 record_date, four years before every other case, against a 2020-02-11 print timestamp",
+    "and the same 21.11.2011 statute-date distractor case 002 carries",
+    "'Количество фрагментов' — a specimen count that is not a lesion count. See judgement_calls.",
+    "a checkup list where NOTHING matches: no case has yet expected zero completions out of 22"
+  ],
+  "finding_reconciliation_intent": {
+    "must_resolve": [],
+    "must_not_resolve": [
+      "полип @ colon_sigmoid — the sharpest negative in the corpus so far. This document FINDS a",
+      "polyp in the sigmoid, so the model has positive, matching evidence in front of it and must",
+      "still not report the existing one as resolved. Finding a thing is not resolving it. Case",
+      "002's finding negative rested on the document being silent; this one rests on the document",
+      "agreeing and the conclusion still being wrong.",
+      "эрозия @ stomach — the gastric biopsy describes inflammation and says nothing about a prior",
+      "erosion. Silence, the plain negative."
+    ]
+  },
+  "condition_reconciliation_intent": {
+    "must_resolve": [],
+    "must_not_resolve": [
+      "cond-...0005 Хронический гастрит — the document actively CONFIRMS it: 'Хронический активный",
+      "гастрит умеренной степени активности'. Every previous negative in the corpus was silence or",
+      "absence of evidence; this is evidence pointing the other way. A pipeline that treats 'this",
+      "condition appears in a new document' as a state change closes it here.",
+      "The other four (B12 deficiency, iron-deficiency anaemia, NAFLD, dyslipidaemia) are plain",
+      "negatives — a GI biopsy bears on none of them."
+    ]
+  },
+  "judgement_calls": [
+    "'Количество фрагментов: 2' is expected to produce count 1, not 2. It is the number of tissue",
+    "fragments the pathologist received, not the number of adenomas. A model that copies it into",
+    "count has misread the document, and this is the case's most likely single failure. Note the",
+    "builder coerces a missing count to 1 (service.ts:178, `item.count || 1`), so 1 is also what a",
+    "correct null becomes — the expectation cannot distinguish 'said 1' from 'said nothing', only",
+    "'said 2'. That is the assertion worth having.",
+    "Хронический активный гастрит is expected as BOTH a finding (inflammation @ stomach, from the",
+    "microscopic description) and a condition (from the ЗАКЛЮЧЕНИЕ, where it is stated as a",
+    "diagnosis). A reviewer could reasonably hold that this double-counts one clinical fact. It is",
+    "scored both ways because the two dimensions mean different things — the finding is the",
+    "morphology, the condition is the diagnosis — and because a document can legitimately support",
+    "both. If this is flipped, drop the condition and keep the finding.",
+    "The tubular adenoma is expected as `dysplasia`, not `polyp`. The catalogue has no adenoma",
+    "entry; the document's own words for object 1 never say полип, and дисплазия is stated",
+    "outright. Object 2 does say полип, which is why that one is coded polyp. A reviewer who",
+    "thinks an adenoma is always a polyp would code both the same and lose the distinction the",
+    "document actually draws.",
+    "record_type is expected as 'lab', not 'procedure'. The document is issued by a laboratory",
+    "reporting on a specimen, under a lab result-table header; the endoscopy that obtained the",
+    "tissue is not described anywhere in it. Arguable — 'procedure' would be the first use of that",
+    "record_type, so if it is flipped, flip it deliberately.",
+    "'Helicobacter pylori (+)' is expected to produce NO observation. It has no numeric value, no",
+    "unit and no reference range, and no catalogue entry; it is a qualitative microbiology result",
+    "sitting inside a histology narrative. If the pipeline should carry qualitative positives, that",
+    "is a schema question, not a fixture one."
+  ],
+  "patient_state": {
+    "existingConditions": [
+      {
+        "id": "00000000-0000-4000-9000-000000000001",
+        "name": "Дефицит витамина B12",
+        "code": "E53.8",
+        "current_status": "active",
+        "onset_date": "2025-09-12",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000002",
+        "name": "Железодефицитная анемия",
+        "code": "D50.9",
+        "current_status": "active",
+        "onset_date": "2025-09-12",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000003",
+        "name": "Неалкогольная жировая болезнь печени",
+        "code": "K76.0",
+        "current_status": "active",
+        "onset_date": "2024-11-03",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000004",
+        "name": "Дислипидемия",
+        "code": "E78.5",
+        "current_status": "active",
+        "onset_date": "2024-11-03",
+        "resolved_date": null
+      },
+      {
+        "id": "00000000-0000-4000-9000-000000000005",
+        "name": "Хронический гастрит",
+        "code": "K29.5",
+        "current_status": "active",
+        "onset_date": "2023-04-21",
+        "resolved_date": null
+      }
+    ],
+    "existingFindings": [
+      {
+        "finding_code": "polyp",
+        "finding_type_text": "полип",
+        "site_code": "colon_sigmoid",
+        "body_site_text": "сигмовидная кишка",
+        "finding_type_id": "00000000-0000-4000-b000-000000000002",
+        "body_site_id": "00000000-0000-4000-c000-000000000003"
+      },
+      {
+        "finding_code": "erosion",
+        "finding_type_text": "эрозия",
+        "site_code": "stomach",
+        "body_site_text": "желудок",
+        "finding_type_id": "00000000-0000-4000-b000-000000000003",
+        "body_site_id": "00000000-0000-4000-c000-000000000004"
+      }
+    ]
+  }
+}
