@@ -159,6 +159,50 @@ describe("scoreCase", () => {
   });
 });
 
+describe("condition fields", () => {
+  const condition = {
+    name: "Доброкачественное новообразование восходящей ободочной кишки",
+    icd_code: "D12.2",
+    status: "active",
+  };
+
+  it("catches a matched condition carrying the wrong ICD code", () => {
+    // Conditions were keyed on the name alone, so this scored as a clean true positive and case
+    // 003's D12.2 was advertised coverage that did not exist.
+    const score = scoreCase(
+      "003",
+      snapshot({ conditions: [condition] }),
+      snapshot({ conditions: [{ ...condition, icd_code: null }] }),
+      [],
+    );
+    expect(score.conditions).toMatchObject({ tp: 1, fp: 0, fn: 0 });
+    const icd = score.conditionFields.find((f) => f.field === "icd_code");
+    expect(icd).toMatchObject({ correct: 0, total: 1 });
+    expect(icd?.mismatches[0]).toMatchObject({ expected: "D12.2", actual: null });
+  });
+
+  it("catches a condition filed under the wrong status", () => {
+    const score = scoreCase(
+      "003",
+      snapshot({ conditions: [condition] }),
+      snapshot({ conditions: [{ ...condition, status: "resolved" }] }),
+      [],
+    );
+    expect(score.conditionFields.find((f) => f.field === "status")?.accuracy).toBe(0);
+  });
+
+  it("does not compare the name, which is the match key", () => {
+    const fields = scoreCase(
+      "003",
+      snapshot({ conditions: [condition] }),
+      snapshot(),
+      [],
+    ).conditionFields.map((f) => f.field);
+    expect(fields).not.toContain("name");
+    expect(fields).toEqual(["icd_code", "status"]);
+  });
+});
+
 describe("finding fields", () => {
   const finding = {
     finding_code: null,
