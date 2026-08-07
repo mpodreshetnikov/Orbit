@@ -27,7 +27,7 @@ You can see all of it working by running one command, `just test-extraction`, an
 - [x] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
 - [x] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
 - [x] Milestone 5 — Asserted absence: stop inventing it, start using it.
-- [ ] Milestone 6 — Corpus governance and the fixture-blind CI flag.
+- [x] Milestone 6 — Corpus governance and the fixture-blind CI flag.
 
 ## Surprises & Discoveries
 
@@ -259,6 +259,28 @@ at 100% with zero false positives and zero false negatives across every pass tha
 milestone's own criterion; the other dimensions moved as they always do on this corpus and should be
 re-measured with a full `--repeat 3` once the key resets. The committed cassettes were recorded
 before the limit was reached and replay clean.
+
+### Milestone 6 — landed 2026-08-07
+
+Both judgement calls in case 001 are decided and the reasoning is recorded in that case's
+`judgement_calls`, which now says DECIDED rather than arguable — so a reviewer can tell a known
+disagreement from a regression, which was the actual complaint.
+
+`Глюкоза натощак` stays expected as completed. The argument that settled it was in the document all
+along: the report never prints `натощак`, but it prints the glucose reference interval `4.10–5.90`,
+and that is the fasting interval — a non-fasting range runs to roughly 7.8. So this is not only the
+ordinary reading that a routine panel is drawn fasting; the document carries evidence. The pipeline
+does not currently make this completion, which is a miss on its side rather than a wrong expectation.
+
+`Дислипидемия` stays expected as unresolved. An in-range lipid panel in someone under management is
+evidence of control, not resolution, and the opposite reading makes the pipeline willing to close a
+chronic condition off one good day. That is the highest-harm error this corpus tracks. The live run
+that closed it is what made this pressing; runs since Milestone 4 no longer do.
+
+`fixturesImpact` added to `scripts/just/change-impact.cjs`, covering `test/fixtures/` and
+`scripts/extraction-eval/`, with four cases in the existing test file — including one asserting a
+corpus-only change is not `docsOnly`, since `docsOnly` is what a pipeline would use to skip work
+entirely and a fixture change alters what the pipeline is measured against.
 
 ## Context and Orientation
 

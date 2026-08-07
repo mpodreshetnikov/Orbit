@@ -45,6 +45,15 @@ function classifyChangedFiles(changedFiles) {
   const functionsImpact = normalizedChangedFiles.some((filePath) =>
     filePath.startsWith("supabase/functions/"),
   );
+  // The extraction corpus and the harness that scores it. Neither matched any flag above:
+  // `test/fixtures/` is not a source prefix and `isDocFile` does not claim it either, so a change
+  // touching only the corpus reported no impact at all. Nothing gates on these flags today, which
+  // is why nothing has broken -- but the first gate that does would skip exactly the pull requests
+  // that edit the corpus, which is the one change most able to move every score silently.
+  const fixturesImpact = normalizedChangedFiles.some(
+    (filePath) =>
+      filePath.startsWith("test/fixtures/") || filePath.startsWith("scripts/extraction-eval/"),
+  );
   const docsOnly = hasFiles && normalizedChangedFiles.every(isDocFile);
 
   return {
@@ -53,6 +62,7 @@ function classifyChangedFiles(changedFiles) {
     webImpact,
     extensionImpact,
     functionsImpact,
+    fixturesImpact,
     docsOnly,
   };
 }
@@ -168,6 +178,7 @@ function boolLines(impact) {
     `webImpact=${impact.webImpact}`,
     `extensionImpact=${impact.extensionImpact}`,
     `functionsImpact=${impact.functionsImpact}`,
+    `fixturesImpact=${impact.fixturesImpact}`,
     `docsOnly=${impact.docsOnly}`,
   ].join("\n");
 }
