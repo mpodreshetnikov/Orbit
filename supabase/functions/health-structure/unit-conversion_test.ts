@@ -142,8 +142,52 @@ Deno.test("a formula that cannot be evaluated keeps the value instead of deletin
     ...entry,
     accepted_units: { "mmol/mol": { formula_to_canonical: "(x * 0.09148) + 2.152" } },
   };
-  const converted = convertToCanonical(42, "ммоль/моль", fixed).value_canonical;
-  assertEquals(Number(converted?.toFixed(5)), 5.99416);
+  const converted = convertToCanonical(42, "ммоль/моль", fixed);
+  assertEquals(Number(converted.value_canonical?.toFixed(5)), 5.99416);
+  assertEquals(converted.unit_canonical, "%");
+});
+
+Deno.test("an unconverted value keeps the unit it was printed in", () => {
+  const entry: ObservationCatalogItem = {
+    id: "obs-hba1c",
+    obs_code: "hba1c",
+    name_ru: "HbA1c",
+    name_en: "HbA1c",
+    canonical_unit: "%",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: {
+      "mmol/mol": { formula_to_canonical: "percent = (mmol_per_mol * 0.09148) + 2.152" },
+    },
+  };
+  // The whole point of this module: a number that did not move must not be relabelled as though it
+  // had. Storing 42 as `42 %` is the same defect as storing `704 пг/мл` as `704 pmol/L` -- the
+  // value is true, the unit is a lie, and nothing in the row shows the difference.
+  assertEquals(convertToCanonical(42, "ммоль/моль", entry), {
+    value_canonical: 42,
+    unit_canonical: "ммоль/моль",
+  });
+
+  // Same rule when the catalogue simply does not list the printed unit at all.
+  const hemoglobin: ObservationCatalogItem = {
+    id: "obs-hb",
+    obs_code: "hemoglobin",
+    name_ru: "Гемоглобин",
+    name_en: "Haemoglobin",
+    canonical_unit: "g/L",
+    synonyms_ru: [],
+    synonyms_en: [],
+    accepted_units: { "g/L": { factor_to_canonical: 1 } },
+  };
+  assertEquals(convertToCanonical(8.7, "ммоль/л", hemoglobin), {
+    value_canonical: 8.7,
+    unit_canonical: "ммоль/л",
+  });
+  // And a unit it does list still reaches canonical.
+  assertEquals(convertToCanonical(140, "г/л", hemoglobin), {
+    value_canonical: 140,
+    unit_canonical: "g/L",
+  });
 });
 
 Deno.test("a folded unit converts the reference range with the value", () => {

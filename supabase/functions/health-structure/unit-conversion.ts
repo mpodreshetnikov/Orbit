@@ -155,6 +155,42 @@ export function convertValueWithConfig(
   return valueNumeric;
 }
 
+/**
+ * Convert, and say whether a conversion actually happened.
+ *
+ * The caller needs both halves. A value that was not converted has not reached the canonical unit,
+ * and labelling it as though it had is the defect this module was fixed for: `704 пг/мл` stored as
+ * `704 pmol/L` is wrong in exactly the way a reader cannot see. `convertValueWithConfig` alone
+ * cannot report this, because passing the value through unchanged is both what a 1:1 conversion
+ * does and what no conversion at all does.
+ */
+function convertWithOutcome(
+  valueNumeric: number | null,
+  config: UnitConfig | null,
+): { value: number | null; converted: boolean } {
+  if (!config) return { value: convertValueWithConfig(valueNumeric, config), converted: false };
+
+  if (
+    typeof config.factor_to_canonical === "number" &&
+    Number.isFinite(config.factor_to_canonical)
+  ) {
+    return { value: convertValueWithConfig(valueNumeric, config), converted: true };
+  }
+
+  if (typeof config.formula_to_canonical === "string" && config.formula_to_canonical.trim()) {
+    const evaluated =
+      valueNumeric === null || !Number.isFinite(valueNumeric)
+        ? null
+        : evaluateFormula(config.formula_to_canonical, valueNumeric);
+    // An unevaluable formula keeps the number, and therefore keeps the printed unit with it.
+    if (evaluated === null) return { value: valueNumeric, converted: false };
+    return { value: evaluated, converted: true };
+  }
+
+  // A config naming neither a factor nor a formula converts nothing.
+  return { value: convertValueWithConfig(valueNumeric, config), converted: false };
+}
+
 export function convertToCanonical(
   valueNumeric: number | null,
   unitInput: string | null,
@@ -168,10 +204,14 @@ export function convertToCanonical(
   }
 
   const config = getUnitConfig(catalogEntry, unitInput);
-  const valueCanonical = convertValueWithConfig(valueNumeric, config);
+  const outcome = convertWithOutcome(valueNumeric, config);
   return {
-    value_canonical: valueCanonical,
-    unit_canonical: catalogEntry.canonical_unit,
+    value_canonical: outcome.value,
+    // Only claim the canonical unit when the value actually reached it. Stamping it regardless is
+    // how `704 пг/мл` became `704 pmol/L`: the number never moved, the label said it had, and
+    // nothing in the row disclosed the difference. When no conversion applied, the printed unit is
+    // the honest answer — the value is still true, it is simply not canonical.
+    unit_canonical: outcome.converted ? catalogEntry.canonical_unit : normalizeText(unitInput),
   };
 }
 

@@ -1,0 +1,50 @@
+{
+  "request_hash": "7538848bc1b725d6",
+  "stage": "reconcile",
+  "model": "openai/gpt-5.2:nitro",
+  "response": {
+    "id": "gen-1786101919-rb70tKy64n10I61U76pv",
+    "object": "chat.completion",
+    "created": 1786101919,
+    "model": "openai/gpt-5.2",
+    "provider": "OpenAI",
+    "system_fingerprint": null,
+    "service_tier": "default",
+    "choices": [
+      {
+        "index": 0,
+        "logprobs": null,
+        "finish_reason": "stop",
+        "native_finish_reason": "completed",
+        "message": {
+          "role": "assistant",
+          "content": "{\"findings_to_resolve\":[],\"conditions_to_resolve\":[],\"checkups_to_complete\":[{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000020\",\"reason\":\"В документе описаны размеры почек, толщина паренхимы и находки по почечному синусу, что соответствует выполненному УЗИ почек.\",\"suggested_done_at\":\"2026-03-05\"}]}",
+          "refusal": null
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 2354,
+      "completion_tokens": 294,
+      "total_tokens": 2648,
+      "cost": 0.008153145,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.0082355,
+        "upstream_inference_prompt_cost": 0.0041195,
+        "upstream_inference_completions_cost": 0.004116
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 188,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    }
+  }
+}

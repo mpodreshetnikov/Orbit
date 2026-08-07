@@ -1,11 +1,11 @@
 {
-  "request_hash": "e23bf7a6a87e411d",
+  "request_hash": "c1557e3177597141",
   "stage": "reconcile",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1786087620-GwHCPTo5z4tQVt0XA9AC",
+    "id": "gen-1786101967-VRiBG6NGFzb5MylrZq7X",
     "object": "chat.completion",
-    "created": 1786087620,
+    "created": 1786101967,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -24,10 +24,10 @@
       }
     ],
     "usage": {
-      "prompt_tokens": 2542,
-      "completion_tokens": 126,
-      "total_tokens": 2668,
-      "cost": 0.006150375,
+      "prompt_tokens": 2400,
+      "completion_tokens": 91,
+      "total_tokens": 2491,
+      "cost": 0.00541926,
       "is_byok": false,
       "prompt_tokens_details": {
         "cached_tokens": 0,
@@ -36,12 +36,12 @@
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.0062125,
-        "upstream_inference_prompt_cost": 0.0044485,
-        "upstream_inference_completions_cost": 0.001764
+        "upstream_inference_cost": 0.005474,
+        "upstream_inference_prompt_cost": 0.0042,
+        "upstream_inference_completions_cost": 0.001274
       },
       "completion_tokens_details": {
-        "reasoning_tokens": 94,
+        "reasoning_tokens": 59,
         "image_tokens": 0,
         "audio_tokens": 0
       }

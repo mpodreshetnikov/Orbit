@@ -85,13 +85,19 @@ describe("fixture coverage", () => {
   });
 
   it("declares every collection the snapshot defines, so a new one cannot go unchecked", async () => {
-    const [{ snapshot }] = await loadFixtures();
-    // A new array added to CaseSnapshot and to the fixtures — the exact shape of all three past
-    // regressions — must force a decision here rather than sliding past unnoticed.
-    const arrays = Object.entries(snapshot)
-      .filter(([, value]) => Array.isArray(value))
-      .map(([key]) => key);
-    expect(arrays.filter((name) => !(name in SCORED_FIELDS))).toEqual([]);
-    expect(arrays.filter((name) => !(name in MATCH_KEYS))).toEqual([]);
+    const fixtures = await loadFixtures();
+    // Unioned across every case, not read off the first one. A new array introduced by a later case
+    // would otherwise be invisible here — and invisible to the key check above too, since that
+    // walks only the already-declared collections — which would rebuild the exact blind spot this
+    // file exists to close.
+    const arrays = new Set(
+      fixtures.flatMap(({ snapshot }) =>
+        Object.entries(snapshot)
+          .filter(([, value]) => Array.isArray(value))
+          .map(([key]) => key),
+      ),
+    );
+    expect([...arrays].filter((name) => !(name in SCORED_FIELDS))).toEqual([]);
+    expect([...arrays].filter((name) => !(name in MATCH_KEYS))).toEqual([]);
   });
 });

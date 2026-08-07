@@ -85,6 +85,47 @@ const DISCRIMINATING_TOKEN_MIN_LENGTH = 3;
 const TOKEN_MATCH_THRESHOLD = 0.5;
 
 /**
+ * Words that say which specimen was measured, not which analyte was measured in it.
+ *
+ * `Глюкоза крови`, `Глюкоза плазмы` and `Глюкоза венозной крови` are all glucose. Requiring the
+ * catalogue entry to account for `крови` would leave every one of them uncoded, because the entry
+ * is simply called `Глюкоза` — and these are among the most common ways a Russian lab prints the
+ * line, so the rule would fail far more often than it fired.
+ *
+ * Kept deliberately narrow, and deliberately not extended to grading or fraction words. `общий`,
+ * `прямой` and `непрямой` are *not* here and must not be added: `Билирубин прямой` is a different
+ * analyte from `Билирубин общий`, and treating that qualifier as noise is the mis-filing this
+ * module exists to prevent.
+ */
+const SPECIMEN_TOKENS = new Set([
+  "кровь",
+  "крови",
+  "плазма",
+  "плазмы",
+  "сыворотка",
+  "сыворотки",
+  "сыворотке",
+  "моча",
+  "мочи",
+  "моче",
+  "слюна",
+  "слюны",
+  "кал",
+  "кала",
+  "ликвор",
+  "ликвора",
+  "венозная",
+  "венозной",
+  "капиллярная",
+  "капиллярной",
+  "цельной",
+  "blood",
+  "serum",
+  "plasma",
+  "urine",
+]);
+
+/**
  * Fold the Cyrillic letters that are visually identical to Latin ones onto their Latin twins.
  *
  * Applied to both sides of every comparison, so it never changes the meaning of a match — it only
@@ -145,7 +186,9 @@ function hasUnexplainedToken<T>(normalizedQuery: string, view: CatalogView<T>): 
   const vocabulary = vocabularyTokens(view);
   return queryTokens.some(
     (token) =>
-      token.length >= DISCRIMINATING_TOKEN_MIN_LENGTH && !isTokenExplained(token, vocabulary),
+      token.length >= DISCRIMINATING_TOKEN_MIN_LENGTH &&
+      !SPECIMEN_TOKENS.has(token) &&
+      !isTokenExplained(token, vocabulary),
   );
 }
 

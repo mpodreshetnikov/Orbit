@@ -207,3 +207,20 @@ Deno.test("a named inflammation resolves through its diagnosis, however qualifie
 Deno.test("a finding the catalogue does not carry still stays uncoded", () => {
   assertEquals(findingCodeFor("Аденома"), null);
 });
+
+Deno.test("a word naming the specimen does not stop an analyte resolving", () => {
+  // `Глюкоза крови`, `Глюкоза плазмы` and `Глюкоза венозной крови` are all glucose, and are among
+  // the most common ways a Russian lab prints the line. A rule that required the catalogue entry to
+  // account for `крови` would leave all of them uncoded and would fire far more often than it
+  // helped.
+  assertEquals(observationCodeFor("Глюкоза крови"), "glucose");
+  assertEquals(observationCodeFor("Глюкоза плазмы"), "glucose");
+  assertEquals(observationCodeFor("Глюкоза венозной крови"), "glucose");
+  assertEquals(observationCodeFor("Гемоглобин крови"), "hemoglobin");
+  assertEquals(observationCodeFor("Железо сыворотки крови"), "serum_iron");
+
+  // The exemption covers specimens only. A fraction or a grade still changes which analyte it is,
+  // and folding those in would undo the whole point.
+  assertEquals(observationCodeFor("Холестерин ЛПОНП"), null);
+  assertEquals(observationCodeFor("Билирубин прямой"), null);
+});

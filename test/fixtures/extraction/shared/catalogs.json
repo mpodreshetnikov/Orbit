@@ -112,7 +112,14 @@
       "name_ru": "ГГТ (GGT)",
       "name_en": "GGT",
       "canonical_unit": "U/L",
-      "synonyms_ru": ["ггт", "ggt", "гамма-гт"],
+      "synonyms_ru": [
+        "ггт",
+        "ggt",
+        "гамма-гт",
+        "гамма-глутамилтранспептидаза",
+        "гамма-глутамилтрансфераза",
+        "гаммаглутамилтранспептидаза"
+      ],
       "synonyms_en": ["ggt", "gamma-gt"],
       "accepted_units": { "U/L": { "factor_to_canonical": 1 } }
     },

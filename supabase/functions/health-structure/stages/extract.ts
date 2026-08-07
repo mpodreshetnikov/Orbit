@@ -221,6 +221,47 @@ const EXAMPLES = [
       conditions: [],
     },
   },
+  // Demonstrates three things at once, and deliberately uses a document unlike any in the eval
+  // corpus — a thyroid report, where the corpus holds a lipid panel, a renal ultrasound and a GI
+  // biopsy. An example drawn from a corpus case would measure the model's memory of this prompt
+  // rather than its reading of the document. The gallbladder example above is off-corpus for the
+  // same reason.
+  //
+  //   1. `умеренно выраженная` is a grade, so severity is `moderate` rather than `unknown`.
+  //   2. The conclusion sentence is long; the condition `name` keeps only the diagnosis, and the
+  //      anatomy stays on the finding that carries it.
+  //   3. The serology line is a qualitative positive with no measured value, so it is omitted
+  //      entirely rather than becoming a finding sited to the thyroid.
+  {
+    input:
+      "УЗИ щитовидной железы: умеренно выраженная диффузная гиперплазия правой доли.\nАнтитела к ТПО: положительно.\nЗаключение: узловой зоб щитовидной железы с признаками аутоиммунного тиреоидита.",
+    output: {
+      observations: [],
+      findings: [
+        {
+          finding_code: "hypertrophy",
+          finding_type_text: "Гипертрофия",
+          site_code: null,
+          body_site_text: "правой доли щитовидной железы",
+          size_mm: null,
+          count: 1,
+          severity: "moderate",
+          laterality: "right",
+          source_anchor: "умеренно выраженная диффузная гиперплазия правой доли",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [
+        {
+          name: "Узловой зоб",
+          icd_code: null,
+          status: "active",
+          source_anchor: "узловой зоб щитовидной железы",
+          confidence: 0.85,
+        },
+      ],
+    },
+  },
 ];
 
 function buildVocabulary(catalogs: CatalogContext): string {
@@ -348,6 +389,9 @@ export async function runExtractStage(
       "A null code is always better than an invented one — codes are resolved downstream and a wrong code is worse than none.",
       "Name findings consistently. When you set a finding_code, copy that vocabulary entry's name into finding_type_text exactly as the vocabulary spells it. When finding_code is null, copy the words the document itself uses for the finding, verbatim.",
       "finding_type_text names the finding only. Put the anatomy in body_site_text — from 'полип желчного пузыря', the finding is 'полип' and the site is 'желчного пузыря'.",
+      "A finding is a structural change with a morphology and a place in the body. A qualitative result — a test reported as positive or negative, present or absent, detected or not detected, carrying no measured number — is neither a finding nor an observation. Omit it. A microbiology or serology line such as 'Streptococcus agalactiae (+)' is one of these: it names an organism rather than a structure, it has no site of its own, and filing it against the organ the sample came from also displaces the real finding there.",
+      "severity grades the finding, and Russian reports grade in words rather than numbers: 'слабая', 'лёгкая', 'низкой степени', 'минимальная', 'незначительная' mean mild; 'умеренная', 'умеренной степени', 'средней степени' mean moderate; 'выраженная', 'тяжёлая', 'высокой степени', 'резко выраженная' mean severe. Use unknown only when the document does not grade the finding at all.",
+      "A condition's name is the diagnosis and nothing else. Do not copy a conclusion sentence into it. The anatomy belongs to the finding that carries it, and the qualifiers — grade, activity, chronicity, cause — belong in their own fields or nowhere. From 'Узловой зоб щитовидной железы с признаками аутоиммунного тиреоидита', the condition name is 'Узловой зоб'.",
       "If a label is illegible or ambiguous, omit that entity entirely rather than guessing.",
     ],
     schema: EXTRACT_SCHEMA,

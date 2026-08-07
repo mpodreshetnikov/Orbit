@@ -32,7 +32,28 @@ set synonyms_ru = ARRAY[
 ]
 where finding_code = 'inflammation';
 
--- 2. `hba1c` shipped a conversion that cannot be evaluated, and it is now reachable.
+-- 2. `ggt` could not be reached from the analyte's own full name.
+--
+-- The catalogue lists `ГГТ (GGT)` with synonyms `ггт`, `ggt` and `гамма-гт` -- every abbreviation,
+-- and not the expanded name a lab actually prints. `Гамма-глутамилтранспептидаза` resolved only
+-- when the model happened to supply `obs_code` itself, and silently stopped resolving when it
+-- supplied null instead. The deterministic resolver exists precisely so the pipeline does not
+-- depend on that, and it cannot do its job with a vocabulary that omits the printed form.
+--
+-- Both spellings are in circulation for the same enzyme (`-пептидаза` and `-фераза`), so both are
+-- listed rather than relying on either being close enough to the other.
+update public.observation_catalog
+set synonyms_ru = ARRAY[
+  'ггт',
+  'ggt',
+  'гамма-гт',
+  'гамма-глутамилтранспептидаза',
+  'гамма-глутамилтрансфераза',
+  'гаммаглутамилтранспептидаза'
+]
+where obs_code = 'ggt';
+
+-- 3. `hba1c` shipped a conversion that cannot be evaluated, and it is now reachable.
 --
 -- `formula_to_canonical` held the string
 --   'percent = (mmol_per_mol * 0.09148) + 2.152'

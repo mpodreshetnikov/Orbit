@@ -25,7 +25,7 @@ You can see all of it working by running one command, `just test-extraction`, an
 - [x] Milestone 1 — Transport limits that match real documents (`max_tokens`, per-stage timeout).
 - [x] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
 - [x] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
-- [ ] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
+- [x] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
 - [ ] Milestone 5 — Asserted absence: stop inventing it, start using it.
 - [ ] Milestone 6 — Corpus governance and the fixture-blind CI flag.
 
@@ -183,6 +183,42 @@ reason that belongs to Milestone 4. `Хронический активный г�
 isolation, but the model never emits that finding: it emits `Helicobacter pylori (+)` into the
 stomach slot and displaces it. Case 003's `inflammation` finding-code expectation will pass when
 Milestone 4 stops a qualitative result becoming a finding, not before.
+
+### Milestone 4 — landed 2026-08-07
+
+All three acceptance criteria met, measured on re-recorded cassettes.
+
+`Helicobacter pylori (+)` no longer appears among case 003's invented findings. Severity field
+accuracy went 3/5 to 5/5 aggregate — the plan asked for one-of-three to three-of-three on case 003
+and got it. Condition names are now diagnoses rather than conclusion sentences: the false positives
+read `Тубулярная аденома` and `Гиперпластический полип` instead of the full sentences, and
+`Хронический активный гастрит` turned from a false negative into a true positive, taking case 003's
+conditions f1 from 33.3% to 66.7%.
+
+`finding_code` went 4/5 to 5/5, which is Milestone 3's `inflammation` synonym finally paying off.
+It could not before: the model was filing `Helicobacter pylori (+)` into the stomach slot and
+displacing the gastritis finding, so there was nothing there for the synonym to resolve. The two
+milestones had to land together for either to show.
+
+Worked examples deliberately avoid corpus content, per the plan's own rule — the new one is a
+thyroid report, where the corpus holds a lipid panel, a renal ultrasound and a GI biopsy. A first
+draft of this milestone used `Helicobacter pylori (+)` and case 003's adenoma sentence verbatim in
+the instructions, which would have measured the model's memory of its prompt rather than its reading
+of the document. Caught before recording.
+
+Not attributable to this milestone, and recorded so a later reader does not go looking: case 002's
+`body_site_text` (4/5 to 2/5) and `size_mm` (5/5 to 3/5) moved on the re-record. Both are resample
+noise on a document whose findings dimension the repeat runs already showed swinging between 80% and
+100% f1; nothing in this milestone touches anatomy or measurement. The `--repeat 3` run also had case
+003 fail once with `OpenRouter returned invalid JSON content` — the eval runs `maxAttempts: 1`
+deliberately, so a transient is reported rather than retried into a different sampled answer.
+
+A regression this milestone caused and fixed: the prompt change flipped the model from supplying
+`obs_code: "ggt"` to supplying null for the same row, and `Гамма-глутамилтранспептидаза` then failed
+to resolve, because the catalogue lists every abbreviation for that enzyme and not the expanded name
+a lab prints. The deterministic resolver exists so the pipeline does not depend on the model
+supplying codes, and it cannot do that job with a vocabulary missing the printed form. The full
+names are now in the migration alongside the `inflammation` ones.
 
 ## Context and Orientation
 

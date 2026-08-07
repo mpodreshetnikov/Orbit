@@ -1,0 +1,50 @@
+{
+  "request_hash": "77596a3569c42893",
+  "stage": "extract",
+  "model": "openai/gpt-5.2:nitro",
+  "response": {
+    "id": "gen-1786101928-ZPwzW0YacSgNpCytyKBA",
+    "object": "chat.completion",
+    "created": 1786101928,
+    "model": "openai/gpt-5.2",
+    "provider": "OpenAI",
+    "system_fingerprint": null,
+    "service_tier": "default",
+    "choices": [
+      {
+        "index": 0,
+        "logprobs": null,
+        "finish_reason": "stop",
+        "native_finish_reason": "completed",
+        "message": {
+          "role": "assistant",
+          "content": "{\"observations\":[],\"findings\":[{\"finding_code\":null,\"finding_type_text\":\"тубулярной аденомы\",\"site_code\":\"colon_ascending\",\"body_site_text\":\"восходящей ободочной толстой кишки\",\"size_mm\":null,\"count\":1,\"severity\":\"unknown\",\"laterality\":\"none\",\"morphology\":null,\"description\":\"Фрагмент тубулярной аденомы толстой кишки\",\"histology\":\"тубулярной аденомы\",\"finding_date\":null,\"source_anchor\":\"Фрагмент тубулярной аденомы толстой кишки\",\"confidence\":0.78},{\"finding_code\":\"dysplasia\",\"finding_type_text\":\"Дисплазия\",\"site_code\":\"colon_ascending\",\"body_site_text\":\"эпителия восходящей ободочной толстой кишки\",\"size_mm\":null,\"count\":1,\"severity\":\"mild\",\"laterality\":\"none\",\"morphology\":null,\"description\":\"дисплазией эпителия низкой степени (слабая дисплазия)\",\"histology\":null,\"finding_date\":null,\"source_anchor\":\"с дисплазией эпителия низкой степени\\n(слабая дисплазия)\",\"confidence\":0.87},{\"finding_code\":\"polyp\",\"finding_type_text\":\"Полип\",\"site_code\":\"colon_sigmoid\",\"body_site_text\":\"сигмовидной кишки\",\"size_mm\":6,\"count\":1,\"severity\":\"unknown\",\"laterality\":\"none\",\"morphology\":\"на ножке\",\"description\":\"Фрагмент слизистой оболочки с гиперпластическим полипом\",\"histology\":\"гиперпластическим\",\"finding_date\":null,\"source_anchor\":\"Фрагмент слизистой оболочки с гиперпластическим полипом на ножке размером 0,6 см\",\"confidence\":0.92},{\"finding_code\":\"inflammation\",\"finding_type_text\":\"Воспаление\",\"site_code\":\"stomach\",\"body_site_text\":\"антрального отдела желудка\",\"size_mm\":null,\"count\":1,\"severity\":\"moderate\",\"laterality\":\"none\",\"morphology\":null,\"description\":\"Хронический активный гастрит умеренной степени активности\",\"histology\":null,\"finding_date\":null,\"source_anchor\":\"Хронический активный гастрит умеренной степени активности.\",\"confidence\":0.9}],\"conditions\":[{\"name\":\"Тубулярная аденома\",\"icd_code\":null,\"status\":\"active\",\"source_anchor\":\"Тубулярная аденома восходящей ободочной толстой кишки\",\"confidence\":0.86},{\"name\":\"Гиперпластический полип\",\"icd_code\":null,\"status\":\"active\",\"source_anchor\":\"Гиперпластический полип сигмовидной кишки\",\"confidence\":0.86},{\"name\":\"Хронический активный гастрит\",\"icd_code\":null,\"status\":\"active\",\"source_anchor\":\"Хронический активный гастрит антрального отдела желудка\",\"confidence\":0.84},{\"name\":\"Доброкачественное новообразование восходящей ободочной кишки\",\"icd_code\":\"D12.2\",\"status\":\"active\",\"source_anchor\":\"МКБ-10: D12.2 Доброкачественное новообразование восходящей ободочной кишки.\",\"confidence\":0.93}]}",
+          "refusal": null
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 6235,
+      "completion_tokens": 2656,
+      "total_tokens": 8891,
+      "cost": 0.0402296895,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 4736,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.04063605,
+        "upstream_inference_prompt_cost": 0.00345205,
+        "upstream_inference_completions_cost": 0.037184
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 1952,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    }
+  }
+}
