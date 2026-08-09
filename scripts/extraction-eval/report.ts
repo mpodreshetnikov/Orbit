@@ -161,6 +161,67 @@ function fieldSection(title: string, noun: string, fields: FieldAccuracy[]): str
   return lines;
 }
 
+/**
+ * Money, or an honest blank.
+ *
+ * Four decimal places because a single case costs a few cents and rounding to two would print
+ * `$0.01` for everything and `$0.00` for the cheap ones. `—` rather than `$0.0000` when the price
+ * is unknown: a replayed cassette carries no price, and printing zero would quietly claim a live
+ * run was free.
+ */
+export function formatCost(costUsd: number | null | undefined): string {
+  return typeof costUsd === "number" && Number.isFinite(costUsd) ? `$${costUsd.toFixed(4)}` : "—";
+}
+
+/**
+ * Total spend across the cases that reported one, plus how many did not.
+ *
+ * The count matters: a total over two of three cases is not the run's cost, and saying so is the
+ * difference between a number someone can act on and one they will misread.
+ */
+export function totalCost(cases: CaseResult[]): {
+  total: number;
+  priced: number;
+  unpriced: number;
+} {
+  let total = 0;
+  let priced = 0;
+  let unpriced = 0;
+  for (const result of cases) {
+    const cost = result.diagnostics?.costUsd;
+    if (typeof cost === "number" && Number.isFinite(cost)) {
+      total += cost;
+      priced += 1;
+    } else if (result.diagnostics) {
+      unpriced += 1;
+    }
+  }
+  return { total, priced, unpriced };
+}
+
+/**
+ * What the run cost, and on a replay, whose cost it actually is.
+ *
+ * A replayed cassette carries the price of the call that *recorded* it, which is worth printing --
+ * it is what those answers cost to obtain -- but it is emphatically not what the replay cost, since
+ * replaying is free and offline. Saying "recorded" is the whole difference between a useful number
+ * and one someone will add to a budget by mistake.
+ */
+function costLine(cases: CaseResult[], mode: string): string {
+  const { total, priced, unpriced } = totalCost(cases);
+  if (priced === 0) {
+    return "- cost: — (no case reported a price)";
+  }
+  const caveat = unpriced > 0 ? ` · ${unpriced} case(s) unpriced and not included` : "";
+  if (mode === "replay") {
+    return (
+      `- cost: **${formatCost(total)}** to record these ${priced} cassette(s) — ` +
+      `replaying them is free${caveat}`
+    );
+  }
+  return `- **cost: ${formatCost(total)}** across ${priced} case(s)${caveat}`;
+}
+
 export function renderMarkdown(summary: RunSummary): string {
   const lines: string[] = [];
   const { aggregate: agg } = summary;
@@ -225,6 +286,7 @@ export function renderMarkdown(summary: RunSummary): string {
 
   lines.push("## Aggregate");
   lines.push("");
+  lines.push(costLine(summary.cases, summary.mode));
   lines.push(`- record_type: ${pct(agg.recordTypeAccuracy)}`);
   lines.push(`- record_date: ${pct(agg.recordDateAccuracy)}`);
   lines.push("");
@@ -309,7 +371,7 @@ export function renderMarkdown(summary: RunSummary): string {
     if (result.diagnostics) {
       const d = result.diagnostics;
       lines.push(
-        `- diagnostics: stages ${d.stagesRun.join("+") || "none"}, dropped ${d.droppedInvalidCount}, unresolved ${d.unresolvedCatalogCount}, rejected ${d.rejected.length}, tokens ${d.promptTokens ?? "?"}/${d.completionTokens ?? "?"}`,
+        `- diagnostics: stages ${d.stagesRun.join("+") || "none"}, dropped ${d.droppedInvalidCount}, unresolved ${d.unresolvedCatalogCount}, rejected ${d.rejected.length}, tokens ${d.promptTokens ?? "?"}/${d.completionTokens ?? "?"}, cost ${formatCost(d.costUsd)}`,
       );
     }
     lines.push("");

@@ -87,6 +87,11 @@ export async function callStageJson(
           // Cap the output budget so the router reserves a realistic amount of credit rather than
           // the model's full capacity. See DEFAULT_MAX_TOKENS.
           max_tokens: ctx.maxTokens ?? DEFAULT_MAX_TOKENS,
+          // Ask explicitly for usage accounting, so `usage.cost` is present rather than depending
+          // on an account default. The alternative is guessing an eval run's cost from a price list
+          // that varies with whichever provider the router happened to pick. Adds nothing to the
+          // bill and changes no other behaviour.
+          usage: { include: true },
           // No `temperature`. Reasoning endpoints (the gpt-5.x family this pipeline defaults to)
           // do not advertise it, and `require_parameters` below is all-or-nothing: asking for a
           // parameter no endpoint declares leaves OpenRouter with nothing to route to, and the
@@ -148,6 +153,9 @@ export async function callStageJson(
           usage: {
             promptTokens: asNumberOrNull(usageRaw.prompt_tokens),
             completionTokens: asNumberOrNull(usageRaw.completion_tokens),
+            // Null on a replayed cassette recorded before usage accounting was requested, and null
+            // on any provider that does not price the call. Null means "unknown", never "free".
+            costUsd: asNumberOrNull(usageRaw.cost),
           },
           finishReason,
         };

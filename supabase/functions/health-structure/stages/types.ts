@@ -39,6 +39,8 @@ export interface StageContext {
 export interface StageUsage {
   promptTokens: number | null;
   completionTokens: number | null;
+  /** What the router charged for this call, in USD. Null when unknown -- never assume zero. */
+  costUsd: number | null;
 }
 
 export interface StageRejection {
@@ -112,15 +114,17 @@ export const EMPTY_RECONCILE: ReconcileResult = {
 };
 
 export function emptyUsage(): StageUsage {
-  return { promptTokens: null, completionTokens: null };
+  return { promptTokens: null, completionTokens: null, costUsd: null };
 }
 
 export function sumUsage(parts: StageUsage[]): StageUsage {
   let prompt: number | null = null;
   let completion: number | null = null;
+  let cost: number | null = null;
   for (const part of parts) {
     if (part.promptTokens !== null) prompt = (prompt ?? 0) + part.promptTokens;
     if (part.completionTokens !== null) completion = (completion ?? 0) + part.completionTokens;
+    if (part.costUsd !== null) cost = (cost ?? 0) + part.costUsd;
   }
-  return { promptTokens: prompt, completionTokens: completion };
+  return { promptTokens: prompt, completionTokens: completion, costUsd: cost };
 }

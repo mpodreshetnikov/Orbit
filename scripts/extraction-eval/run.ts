@@ -18,9 +18,11 @@ import { loadCases } from "./corpus.ts";
 import { CASSETTES_ROOT, DEFAULT_OUT_DIR, REPO_ROOT } from "./paths.ts";
 import { runCasePipeline } from "./pipeline.ts";
 import {
+  formatCost,
   renderJson,
   renderMarkdown,
   renderVariance,
+  totalCost,
   type CaseResult,
   type RunSummary,
 } from "./report.ts";
@@ -92,6 +94,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     );
   }
   return parsed;
+}
+
+function table(headers: string[], rows: string[]): string[] {
+  return [`| ${headers.join(" | ")} |`, `|${headers.map(() => "---").join("|")}|`, ...rows];
 }
 
 export function resolveMode(args: Pick<ParsedArgs, "live" | "record">): CassetteMode {
@@ -175,7 +181,31 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
   const variance = renderVariance(
     passes.map((pass) => aggregate(pass.flatMap((result) => (result.score ? [result.score] : [])))),
   );
-  const markdown = variance ? `${renderMarkdown(summary)}\n${variance}` : renderMarkdown(summary);
+  // Across every pass, so a repeat run reports what the whole exercise cost rather than what its
+  // last third did. Printed even for a single pass, where it equals that pass's own total.
+  const spend = passes.map((pass) => totalCost(pass));
+  const grandTotal = spend.reduce((sum, entry) => sum + entry.total, 0);
+  const pricedRuns = spend.filter((entry) => entry.priced > 0).length;
+  const runCosts =
+    passes.length > 1
+      ? [
+          `## Cost`,
+          "",
+          ...table(
+            ["run", "cost"],
+            [
+              ...spend.map(
+                (entry, index) =>
+                  `| run ${index + 1} | ${formatCost(entry.priced > 0 ? entry.total : null)} |`,
+              ),
+              `| **total** | **${formatCost(pricedRuns > 0 ? grandTotal : null)}** |`,
+            ],
+          ),
+          "",
+        ].join("\n")
+      : "";
+
+  const markdown = [renderMarkdown(summary), variance, runCosts].filter(Boolean).join("\n");
   await mkdir(args.outDir, { recursive: true });
   await writeFile(path.join(args.outDir, "report.md"), markdown, "utf8");
   await writeFile(path.join(args.outDir, "report.json"), renderJson(summary), "utf8");

@@ -126,6 +126,7 @@ export async function runCasePipeline(
       unresolvedCatalogCount: observations.unresolvedCatalogCount + findings.unresolvedCatalogCount,
       promptTokens: outcome.usage.promptTokens,
       completionTokens: outcome.usage.completionTokens,
+      costUsd: outcome.usage.costUsd,
     },
   };
 }
