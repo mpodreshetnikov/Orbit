@@ -36,6 +36,14 @@ const SYSTEM_PROMPT = [
   "Output valid JSON only.",
 ].join(" ");
 
+/**
+ * Strict `json_schema` mode requires `required` to list *every* key in `properties`; a schema that
+ * omits one is rejected outright with `invalid_json_schema`, so an "optional" field is expressed as
+ * a required nullable instead. Every field below that reads as optional is either nullable or an
+ * enum carrying a neutral member (`severity: "unknown"`, `laterality: "none"`), and the normalizers
+ * coerce nulls back to the same defaults they applied to absent keys — so requiring the key changes
+ * the wire shape, not the meaning.
+ */
 export const EXTRACT_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -46,7 +54,19 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["obs_name_text", "value", "source_anchor", "confidence"],
+        required: [
+          "obs_code",
+          "obs_name_text",
+          "value",
+          "value_numeric",
+          "unit_text",
+          "ref_range",
+          "ref_range_low",
+          "ref_range_high",
+          "status",
+          "source_anchor",
+          "confidence",
+        ],
         properties: {
           obs_code: {
             type: ["string", "null"],
@@ -79,7 +99,22 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["finding_type_text", "source_anchor", "confidence"],
+        required: [
+          "finding_code",
+          "finding_type_text",
+          "site_code",
+          "body_site_text",
+          "size_mm",
+          "count",
+          "severity",
+          "laterality",
+          "morphology",
+          "description",
+          "histology",
+          "finding_date",
+          "source_anchor",
+          "confidence",
+        ],
         properties: {
           finding_code: { type: ["string", "null"] },
           finding_type_text: { type: "string" },
@@ -103,7 +138,7 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["name", "status", "source_anchor", "confidence"],
+        required: ["name", "icd_code", "status", "source_anchor", "confidence"],
         properties: {
           name: { type: "string" },
           icd_code: { type: ["string", "null"] },
@@ -139,6 +174,8 @@ const EXAMPLES = [
       conditions: [],
     },
   },
+  // Demonstrates the coded branch: `polyp` is in the vocabulary, so finding_type_text is the
+  // vocabulary's own spelling rather than the document's.
   {
     input: "Заключение: полип желчного пузыря 4 мм.",
     output: {
@@ -146,7 +183,7 @@ const EXAMPLES = [
       findings: [
         {
           finding_code: "polyp",
-          finding_type_text: "полип",
+          finding_type_text: "Полип",
           site_code: null,
           body_site_text: "желчного пузыря",
           size_mm: 4,
@@ -154,6 +191,30 @@ const EXAMPLES = [
           severity: "unknown",
           laterality: "none",
           source_anchor: "полип желчного пузыря 4 мм",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+    },
+  },
+  // Demonstrates the uncoded branch: nothing in the vocabulary means a kink, so the code stays
+  // null and finding_type_text is the document's own wording — not a paraphrase, and not the
+  // nearest vocabulary entry.
+  {
+    input: "УЗИ: перегиб в области тела желчного пузыря.",
+    output: {
+      observations: [],
+      findings: [
+        {
+          finding_code: null,
+          finding_type_text: "перегиб",
+          site_code: null,
+          body_site_text: "тела желчного пузыря",
+          size_mm: null,
+          count: null,
+          severity: "unknown",
+          laterality: "none",
+          source_anchor: "перегиб в области тела желчного пузыря",
           confidence: 0.9,
         },
       ],
@@ -285,6 +346,8 @@ export async function runExtractStage(
       "Record labels and units exactly as printed, in the document's own language, in obs_name_text and unit_text.",
       "Set obs_code, finding_code and site_code only when the vocabulary below contains a genuine match; otherwise use null.",
       "A null code is always better than an invented one — codes are resolved downstream and a wrong code is worse than none.",
+      "Name findings consistently. When you set a finding_code, copy that vocabulary entry's name into finding_type_text exactly as the vocabulary spells it. When finding_code is null, copy the words the document itself uses for the finding, verbatim.",
+      "finding_type_text names the finding only. Put the anatomy in body_site_text — from 'полип желчного пузыря', the finding is 'полип' and the site is 'желчного пузыря'.",
       "If a label is illegible or ambiguous, omit that entity entirely rather than guessing.",
     ],
     schema: EXTRACT_SCHEMA,

@@ -1,0 +1,144 @@
+{
+  "$comment": [
+    "Shared patient-state context for every extraction eval case.",
+    "Shape matches CheckupItemForContext (supabase/functions/health-structure/types.ts).",
+    "Mirrors the 22 active, dated checkup items from the production person's plan, but with",
+    "synthetic ids — reconcile only requires that checkup_item_id echoes back one of the ids",
+    "supplied here (stages/reconcile.ts:199-230), so production primary keys serve no purpose",
+    "in a committed fixture. See README.md in this directory for the sanitisation notes."
+  ],
+  "checkupItems": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "title": "Липидный профиль (детально)",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "title": "УЗИ печени",
+      "category": "imaging",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "title": "Общий холестерин",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004",
+      "title": "Глюкоза натощак",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000005",
+      "title": "АЛТ, АСТ, Билирубин, ГГТ",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "title": "Витамин B12",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000007",
+      "title": "Витамин D",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000008",
+      "title": "ОАК (Общий анализ крови)",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000009",
+      "title": "Общий анализ мочи",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000010",
+      "title": "УЗИ желчного пузыря",
+      "category": "imaging",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "title": "ЗППП скрининг (ВИЧ + другие при необходимости)",
+      "category": "lab",
+      "next_due_at": "2026-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "title": "Вакцинация от Гриппа",
+      "category": "vaccination",
+      "next_due_at": "2026-09-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "title": "Вакцинация COVID‑19",
+      "category": "vaccination",
+      "next_due_at": "2026-09-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000014",
+      "title": "Флюорография",
+      "category": "imaging",
+      "next_due_at": "2026-09-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000015",
+      "title": "Чистка зубов",
+      "category": "dental",
+      "next_due_at": "2026-09-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000016",
+      "title": "Внутриглазное давление",
+      "category": "lab",
+      "next_due_at": "2026-10-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "title": "Степень сухости глаз",
+      "category": "lab",
+      "next_due_at": "2026-10-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000018",
+      "title": "ИМТ (BMI)",
+      "category": "other",
+      "next_due_at": "2027-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000019",
+      "title": "Кровяное давление",
+      "category": "other",
+      "next_due_at": "2027-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000020",
+      "title": "УЗИ почек",
+      "category": "imaging",
+      "next_due_at": "2027-03-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "title": "Вакцинация от Клещевого энцефалита",
+      "category": "vaccination",
+      "next_due_at": "2028-04-01"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000022",
+      "title": "Вакцинация Td (стобняк, дифтерия)",
+      "category": "vaccination",
+      "next_due_at": "2035-11-01"
+    }
+  ]
+}

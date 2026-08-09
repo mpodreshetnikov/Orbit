@@ -62,7 +62,11 @@ export async function callStageJson(
       try {
         const body: Record<string, unknown> = {
           model: ctx.model,
-          temperature: 0,
+          // No `temperature`. Reasoning endpoints (the gpt-5.x family this pipeline defaults to)
+          // do not advertise it, and `require_parameters` below is all-or-nothing: asking for a
+          // parameter no endpoint declares leaves OpenRouter with nothing to route to, and the
+          // whole call fails with a bare 404 ("No endpoints found that can handle the requested
+          // parameters"). Nothing is lost — the routed provider ignored `temperature: 0` anyway.
           // Without this, OpenRouter may route to a provider that silently ignores
           // response_format and hands back prose, which surfaces as an unreproducible
           // "invalid JSON" failure.

@@ -24,6 +24,37 @@ Use the full command list in **AGENTS.md** and `just --list --unsorted`. For day
 - **`test-e2e`**: Playwright end-to-end validation lane for user-facing product flows (including extraction) against local Supabase. Extraction-related suites run in deterministic `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub` mode (no external LLM calls). Runner enforces this mode by restarting local Supabase when needed.
 - CI runs `test-e2e` when change impact includes web, DB, or Supabase Edge Functions surfaces.
 - **`quality`**: static checks only (format, lint, typecheck). No builds or tests.
+- **`test-extraction`**: scored extraction quality against the fixture corpus in `test/fixtures/extraction/`. See "Extraction quality" below. **Not a gate** — it is not part of `ci`, `ci-fast`, `check` or `coverage-check`, and it never runs on a pull request.
+
+## Extraction quality
+
+`test-extraction` measures how well `health-structure` turns document text into entities. It is a
+report, not a pass/fail gate.
+
+It is the deliberate opposite of `test-e2e`. That lane pins `HEALTH_STRUCTURE_PARSER_MODE=e2e_stub`
+so extraction flows never reach a model — it proves the plumbing works and says nothing about
+answer quality. `test-extraction` exercises the real prompts and the real deterministic
+post-processing, which is the only way to see quality at all.
+
+- **Default is replay.** Recorded provider responses live in `test/fixtures/extraction/cassettes/`,
+  so a normal run is free, offline and deterministic. Cassettes are keyed on the full request body:
+  change a prompt, a catalogue entry or a fixture and the recording correctly stops matching.
+- **`--live` calls OpenRouter** and costs money. **`--record`** implies `--live` and refreshes the
+  recordings. Both need `OPENROUTER_API_KEY`.
+- **It covers both halves of the pipeline** — the model stages via `runStagedParse`, and the
+  deterministic half via the row builders exported from `health-structure/service.ts` (code
+  resolution, `is_applied`, unit canonicalisation). Scoring only the stage output would miss every
+  defect that lives after it.
+- **Wrongful condition resolutions lead the report.** A missed resolution leaves a stale row a
+  person can correct; a wrongful one silently closes a live condition in a patient's record. That
+  asymmetry is never averaged into a single score.
+- **Scores are never gated on** unless `--fail-under` is passed explicitly. A non-zero exit means a
+  case failed to _run_, not that quality dropped.
+
+CI never runs this on pull requests, deliberately: a scored run costs money per commit. The
+`Extraction Eval` workflow is `workflow_dispatch` only — trigger it by hand from the Actions tab
+when you want a report. It needs an `OPENROUTER_API_KEY` repository secret for `live` mode;
+`cassette` mode needs no secret.
 
 `ci-fast` is never a substitute for final pre-push validation on non-doc changes; final validation must include coverage gates.
 

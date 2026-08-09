@@ -9,3 +9,8 @@ browserExtension/*.zip
 supabase/.temp/
 supabase/db/database.types.ts
 supabase/db/schema.snapshot.sql
+
+# Extraction eval inputs are fixture data, not source. They stand in for OCR output and must
+# stay byte-exact: Prettier collapses the tab-delimited result tables to single spaces, which
+# destroys the column structure the extractor has to read value, unit and reference range from.
+test/fixtures/extraction/cases/**/input.md

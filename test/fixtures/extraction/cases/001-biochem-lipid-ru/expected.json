@@ -1,0 +1,197 @@
+{
+  "record_type": "lab",
+  "record_date": "2026-03-06",
+  "observations": [
+    {
+      "obs_name": "Билирубин общий",
+      "obs_code": "bilirubin_total",
+      "value_numeric": 14.7,
+      "unit": "мкмоль/л",
+      "ref_range_low": 0.0,
+      "ref_range_high": 21.0,
+      "status": "normal",
+      "value_canonical": 14.7,
+      "unit_canonical": "umol/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Билирубин прямой",
+      "obs_code": null,
+      "value_numeric": 2.3,
+      "unit": "мкмоль/л",
+      "ref_range_low": 0.0,
+      "ref_range_high": 3.4,
+      "status": "normal",
+      "value_canonical": 2.3,
+      "unit_canonical": "мкмоль/л",
+      "is_applied": false
+    },
+    {
+      "obs_name": "Билирубин непрямой",
+      "obs_code": null,
+      "value_numeric": 12.4,
+      "unit": "мкмоль/л",
+      "ref_range_low": 3.4,
+      "ref_range_high": 11.9,
+      "status": "high",
+      "value_canonical": 12.4,
+      "unit_canonical": "мкмоль/л",
+      "is_applied": false
+    },
+    {
+      "obs_name": "Аланинаминотрансфераза (АЛТ)",
+      "obs_code": "alt",
+      "value_numeric": 10.2,
+      "unit": "Е/л",
+      "ref_range_low": 0.0,
+      "ref_range_high": 50.0,
+      "status": "normal",
+      "value_canonical": 10.2,
+      "unit_canonical": "U/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Аспартатаминотрансфераза (АСТ)",
+      "obs_code": "ast",
+      "value_numeric": 19.4,
+      "unit": "Е/л",
+      "ref_range_low": 0.0,
+      "ref_range_high": 50.0,
+      "status": "normal",
+      "value_canonical": 19.4,
+      "unit_canonical": "U/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Гамма-глутамилтранспептидаза",
+      "obs_code": "ggt",
+      "value_numeric": 21.7,
+      "unit": "Е/л",
+      "ref_range_low": 0.0,
+      "ref_range_high": 55.0,
+      "status": "normal",
+      "value_canonical": 21.7,
+      "unit_canonical": "U/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Глюкоза",
+      "obs_code": "glucose",
+      "value_numeric": 5.33,
+      "unit": "ммоль/л",
+      "ref_range_low": 4.1,
+      "ref_range_high": 5.9,
+      "status": "normal",
+      "value_canonical": 5.33,
+      "unit_canonical": "mmol/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Холестерин общий",
+      "obs_code": "cholesterol_total",
+      "value_numeric": 5.05,
+      "unit": "ммоль/л",
+      "ref_range_low": null,
+      "ref_range_high": 5.2,
+      "status": "normal",
+      "value_canonical": 5.05,
+      "unit_canonical": "mmol/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Триглицериды",
+      "obs_code": "triglycerides",
+      "value_numeric": 0.6,
+      "unit": "ммоль/л",
+      "ref_range_low": 0.0,
+      "ref_range_high": 1.7,
+      "status": "normal",
+      "value_canonical": 0.6,
+      "unit_canonical": "mmol/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Холестерин ЛПВП",
+      "obs_code": "hdl_c",
+      "value_numeric": 1.88,
+      "unit": "ммоль/л",
+      "ref_range_low": 0.76,
+      "ref_range_high": 1.79,
+      "status": "high",
+      "value_canonical": 1.88,
+      "unit_canonical": "mmol/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Холестерин ЛПОНП",
+      "obs_code": null,
+      "value_numeric": 0.28,
+      "unit": "ммоль/л",
+      "ref_range_low": 0.1,
+      "ref_range_high": 1.0,
+      "status": "normal",
+      "value_canonical": 0.28,
+      "unit_canonical": "ммоль/л",
+      "is_applied": false
+    },
+    {
+      "obs_name": "Холестерин ЛПНП",
+      "obs_code": "ldl_c",
+      "value_numeric": 2.9,
+      "unit": "ммоль/л",
+      "ref_range_low": 0.0,
+      "ref_range_high": 3.0,
+      "status": "normal",
+      "value_canonical": 2.9,
+      "unit_canonical": "mmol/L",
+      "is_applied": true
+    },
+    {
+      "obs_name": "Коэффициент атерогенности",
+      "obs_code": null,
+      "value_numeric": 1.69,
+      "unit": null,
+      "ref_range_low": 0.0,
+      "ref_range_high": 3.5,
+      "status": "normal",
+      "value_canonical": 1.69,
+      "unit_canonical": null,
+      "is_applied": false
+    },
+    {
+      "obs_name": "Витамин В12",
+      "obs_code": "vitamin_b12",
+      "value_numeric": 704.0,
+      "unit": "пг/мл",
+      "ref_range_low": 187.0,
+      "ref_range_high": 883.0,
+      "status": "normal",
+      "value_canonical": 519.552,
+      "unit_canonical": "pmol/L",
+      "is_applied": true
+    }
+  ],
+  "findings": [],
+  "conditions": [],
+  "findings_to_resolve": [],
+  "conditions_to_resolve": [{ "condition_id": "00000000-0000-4000-9000-000000000001" }],
+  "checkups_to_complete": [
+    {
+      "checkup_item_id": "00000000-0000-4000-8000-000000000001",
+      "suggested_done_at": "2026-03-06"
+    },
+    {
+      "checkup_item_id": "00000000-0000-4000-8000-000000000003",
+      "suggested_done_at": "2026-03-06"
+    },
+    {
+      "checkup_item_id": "00000000-0000-4000-8000-000000000004",
+      "suggested_done_at": "2026-03-06"
+    },
+    {
+      "checkup_item_id": "00000000-0000-4000-8000-000000000005",
+      "suggested_done_at": "2026-03-06"
+    },
+    { "checkup_item_id": "00000000-0000-4000-8000-000000000006", "suggested_done_at": "2026-03-06" }
+  ]
+}

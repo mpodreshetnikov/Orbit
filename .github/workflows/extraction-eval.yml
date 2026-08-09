@@ -1,0 +1,95 @@
+name: Extraction Eval
+
+# Manual only, on purpose. A scored run calls a paid provider, so this must never fire on a push
+# or a pull request. Trigger it from the Actions tab when you want a quality report.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "live calls OpenRouter and costs money; cassette replays committed recordings"
+        type: choice
+        options:
+          - live
+          - cassette
+        default: live
+      record:
+        description: "Refresh the committed cassettes from this run (live only; upload as artifact)"
+        type: boolean
+        default: false
+      model:
+        description: "Model override, e.g. openai/gpt-5.2:nitro. Blank uses the pipeline default."
+        type: string
+        default: ""
+      cases:
+        description: "Case filter, space separated (e.g. 001). Blank runs the whole corpus."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  extraction-eval:
+    name: Extraction Eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: taiki-e/install-action@just
+
+      - run: npm ci
+
+      - name: Guard live mode
+        if: inputs.mode == 'live'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [[ -z "${OPENROUTER_API_KEY}" ]]; then
+            echo "::error::live mode needs an OPENROUTER_API_KEY repository secret." >&2
+            echo "::error::Add it in Settings → Secrets → Actions, or re-run with mode=cassette." >&2
+            exit 1
+          fi
+
+      - name: Run extraction eval
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          ARGS=""
+          if [[ "${{ inputs.mode }}" == "live" ]]; then ARGS="${ARGS} --live"; fi
+          if [[ "${{ inputs.record }}" == "true" ]]; then ARGS="${ARGS} --record"; fi
+          if [[ -n "${{ inputs.model }}" ]]; then ARGS="${ARGS} --model ${{ inputs.model }}"; fi
+          for case_id in ${{ inputs.cases }}; do ARGS="${ARGS} --case ${case_id}"; done
+          just test-extraction ${ARGS}
+
+      - name: Publish report to the job summary
+        # Runs even when a case failed, because the report explains which and why.
+        if: always()
+        run: |
+          if [[ -f .artifacts/extraction-eval/report.md ]]; then
+            cat .artifacts/extraction-eval/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No report produced — the run failed before scoring." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extraction-eval-report
+          path: .artifacts/extraction-eval/
+          if-no-files-found: warn
+
+      - name: Upload refreshed cassettes
+        # Deliberately an artifact rather than a commit: recordings are corpus data and should be
+        # reviewed in a pull request, not pushed by a workflow.
+        if: always() && inputs.record
+        uses: actions/upload-artifact@v4
+        with:
+          name: extraction-eval-cassettes
+          path: test/fixtures/extraction/cassettes/
+          if-no-files-found: warn

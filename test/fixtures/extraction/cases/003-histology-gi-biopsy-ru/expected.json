@@ -1,0 +1,52 @@
+{
+  "record_type": "lab",
+  "record_date": "2020-02-02",
+  "observations": [],
+  "findings": [
+    {
+      "finding_code": "dysplasia",
+      "finding_type_text": "Дисплазия",
+      "site_code": "colon_ascending",
+      "body_site_text": "восходящей ободочной толстой кишки",
+      "size_mm": null,
+      "count": 1,
+      "severity": "mild",
+      "laterality": "none"
+    },
+    {
+      "finding_code": "polyp",
+      "finding_type_text": "Полип",
+      "site_code": "colon_sigmoid",
+      "body_site_text": "сигмовидной кишки",
+      "size_mm": 6,
+      "count": 1,
+      "severity": "unknown",
+      "laterality": "none"
+    },
+    {
+      "finding_code": "inflammation",
+      "finding_type_text": "Воспаление",
+      "site_code": "stomach",
+      "body_site_text": "антрального отдела желудка",
+      "size_mm": null,
+      "count": 1,
+      "severity": "moderate",
+      "laterality": "none"
+    }
+  ],
+  "conditions": [
+    {
+      "name": "Доброкачественное новообразование восходящей ободочной кишки",
+      "icd_code": "D12.2",
+      "status": "active"
+    },
+    {
+      "name": "Хронический активный гастрит",
+      "icd_code": null,
+      "status": "active"
+    }
+  ],
+  "findings_to_resolve": [],
+  "conditions_to_resolve": [],
+  "checkups_to_complete": []
+}
