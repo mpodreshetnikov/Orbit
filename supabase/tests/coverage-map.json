@@ -289,6 +289,7 @@
     ],
     "supabase/db/policies/user_preferences.sql": [
       "supabase/tests/policies/user_preferences_rls_test.sql"
-    ]
+    ],
+    "supabase/db/policies/mcp_oauth.sql": ["supabase/tests/policies/mcp_oauth_rls_test.sql"]
   }
 }

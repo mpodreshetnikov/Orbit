@@ -24,14 +24,23 @@ function createRequest(pathname: string) {
     const nextUrl: {
       pathname: string;
       searchParams: URLSearchParams;
+      search: string;
       clone: () => unknown;
       toString: () => string;
     } = {
       pathname: p,
       searchParams: new URLSearchParams(search),
+      // Mirrors NextURL: `search` is the serialized form of `searchParams`, and
+      // assigning to it replaces them wholesale.
+      get search() {
+        const serialized = nextUrl.searchParams.toString();
+        return serialized ? `?${serialized}` : "";
+      },
+      set search(value: string) {
+        nextUrl.searchParams = new URLSearchParams(value);
+      },
       clone: () => createNextUrl(nextUrl.pathname, nextUrl.searchParams.toString()),
-      toString: () =>
-        `https://app.test${nextUrl.pathname}${nextUrl.searchParams.toString() ? `?${nextUrl.searchParams.toString()}` : ""}`,
+      toString: () => `https://app.test${nextUrl.pathname}${nextUrl.search}`,
     };
     return nextUrl;
   };
@@ -152,6 +161,99 @@ describe("updateSession", () => {
     const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
     expect(redirectedUrl.pathname).toBe("/login");
     expect(redirectedUrl.searchParams.get("redirect")).toBe("/health/records");
+  });
+
+  it("preserves the query string when redirecting an unauthenticated user to login", async () => {
+    const { request } = createRequest(
+      "/oauth/authorize?client_id=mcp_abc&code_challenge=xyz&state=s1",
+    );
+    createSupabase({ user: null });
+
+    const { updateSession } = await import("./supabase-middleware");
+    await updateSession(request);
+
+    const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
+    expect(redirectedUrl.pathname).toBe("/login");
+    expect(redirectedUrl.searchParams.get("redirect")).toBe(
+      "/oauth/authorize?client_id=mcp_abc&code_challenge=xyz&state=s1",
+    );
+    // The inbound OAuth parameters must not leak onto /login itself.
+    expect(redirectedUrl.searchParams.get("client_id")).toBeNull();
+    expect(redirectedUrl.searchParams.get("state")).toBeNull();
+  });
+
+  it.each(["/api/mcp", "/api/oauth/token", "/.well-known/oauth-authorization-server"])(
+    "does not redirect bearer-authenticated route %s when unauthenticated",
+    async (pathname) => {
+      const { request } = createRequest(pathname);
+      createSupabase({ user: null });
+
+      const { updateSession } = await import("./supabase-middleware");
+      const response = await updateSession(request);
+
+      expect(response).toEqual(expect.objectContaining({ kind: "next" }));
+      expect(mockRefs.redirect).not.toHaveBeenCalled();
+      // These routes must not pay for a session round-trip either.
+      expect(mockRefs.createServerClient).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still gates /oauth/authorize behind login", async () => {
+    const { request } = createRequest("/oauth/authorize");
+    createSupabase({ user: null });
+
+    const { updateSession } = await import("./supabase-middleware");
+    const response = await updateSession(request);
+
+    expect(response).toEqual(expect.objectContaining({ kind: "redirect" }));
+  });
+
+  it("carries the query string into the dev login next parameter", async () => {
+    vi.stubEnv("DEV_AUTH_BYPASS_ENABLED", "1");
+    vi.stubEnv("DEV_AUTH_BYPASS_AUTO_LOGIN_ENABLED", "1");
+    vi.stubEnv("DEV_AUTH_BYPASS_DEFAULT_EMAIL", "dev@example.com");
+    const { request } = createRequest("/oauth/authorize?client_id=mcp_abc&state=s1");
+    createSupabase({ user: null });
+
+    const { updateSession } = await import("./supabase-middleware");
+    await updateSession(request);
+
+    const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
+    expect(redirectedUrl.pathname).toBe("/auth/dev-login");
+    expect(redirectedUrl.searchParams.get("next")).toBe(
+      "/oauth/authorize?client_id=mcp_abc&state=s1",
+    );
+    expect(redirectedUrl.searchParams.get("client_id")).toBeNull();
+  });
+
+  it("sends an allowlisted user on /login to their requested destination", async () => {
+    const { request } = createRequest("/login?redirect=%2Foauth%2Fauthorize%3Fclient_id%3Dmcp_abc");
+    createSupabase({
+      user: { id: "user-1", email: "u@example.com" },
+      allowedUser: { id: "allowed-1" },
+    });
+
+    const { updateSession } = await import("./supabase-middleware");
+    await updateSession(request);
+
+    const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
+    expect(redirectedUrl.pathname).toBe("/oauth/authorize");
+    expect(redirectedUrl.searchParams.get("client_id")).toBe("mcp_abc");
+  });
+
+  it("ignores an off-site redirect target on /login", async () => {
+    const { request } = createRequest("/login?redirect=%2F%2Fevil.example%2Fsteal");
+    createSupabase({
+      user: { id: "user-1", email: "u@example.com" },
+      allowedUser: { id: "allowed-1" },
+    });
+
+    const { updateSession } = await import("./supabase-middleware");
+    await updateSession(request);
+
+    const redirectedUrl = new URL((mockRefs.redirect.mock.calls[0] as [URL])[0].toString());
+    expect(redirectedUrl.host).toBe("app.test");
+    expect(redirectedUrl.pathname).toBe("/health");
   });
 
   it("redirects unauthenticated protected routes to dev login in auto bypass mode", async () => {

@@ -1,0 +1,11 @@
+# Known false positives, ignored by exact finding fingerprint
+# (commit:path:rule:line). Fingerprints are deliberately narrow: they suppress
+# one specific finding in one specific commit, and never a file, path or rule
+# across the repo, so real secrets are still caught everywhere.
+#
+# A hardcoded HMAC key in a unit test fixture. Not a credential -- it signs
+# nothing outside the test process -- but it had enough entropy to trip the
+# generic-api-key rule. The fixture was changed to a low-entropy value in a
+# later commit; this entry covers the original commit, which stays in the
+# branch history.
+a8e8229029b8d319e24d24a2136413f8c53849ad:src/lib/mcp/crypto.test.ts:generic-api-key:16

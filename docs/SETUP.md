@@ -27,6 +27,18 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 
 Get anon key from local Supabase status output after stack is up (for one-off commands, use `commands-list` from `AGENTS.md`).
 
+To work on the MCP connector locally, also add:
+
+```env
+MCP_SERVER_ENABLED=1
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key from supabase status>
+SUPABASE_JWT_SECRET=<JWT secret from supabase status>
+MCP_OAUTH_SIGNING_SECRET=<any 32+ random bytes, e.g. openssl rand -base64 32>
+```
+
+Without `MCP_SERVER_ENABLED=1` every MCP and OAuth route returns 404, which is the intended default.
+See `docs/design/domains/health/mcp-server.md` for how to connect a client.
+
 Observability env template:
 
 - Copy `.env.observability.example` values into your local env source as needed.
