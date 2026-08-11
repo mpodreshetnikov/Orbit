@@ -452,6 +452,61 @@ Stated plainly so nobody is surprised:
   ninety days and must be re-uploaded, or ad-hoc distribution with a provisioning profile that must
   be renewed yearly. Neither is free of maintenance.
 
+## Variant: Without A Paid Apple Developer Membership
+
+The plan above assumes the Apple Developer Program. A free Apple Account still signs apps in Xcode
+under what Apple calls a **Personal Team**, and a surprising amount of this feature survives on it —
+but not the part that makes it magical. Read this section before deciding, because the difference
+changes which milestones are reachable, not merely how polished the result is.
+
+What a Personal Team still gives you: the widget extension, the Live Activity layout, the pill in the
+Dynamic Island, and the interactive buttons via App Intents. None of those need an entitlement that
+has to be registered on the developer portal — `NSSupportsLiveActivities` is an `Info.plist` key, not
+a capability. It also gives you **local notifications**, which — unlike web push on iOS — _do_
+support action buttons through `UNNotificationAction`. That alone fixes the original complaint that
+an iPhone reminder has no "Taken" button, without any server involvement.
+
+What it takes away:
+
+- **All push.** Personal Teams cannot enable the Push Notifications capability, and push-to-start is
+  a push. This kills M4 outright, and with it the defining behaviour: a card that appears by itself
+  on a locked phone at 8am. It also kills remote updates and remote ending of an activity, so M6's
+  "dose taken in the browser makes the card disappear" cannot work either.
+- **Seven-day expiry.** A Personal Team provisioning profile dies after seven days and the app stops
+  launching until it is re-installed from Xcode. Tools like AltStore or SideStore automate the
+  refresh over Wi-Fi, but they need a computer on the same network at least weekly, and they do not
+  add the push entitlement.
+- **No TestFlight and no App Store.** Nobody else can install the app the easy way. Every additional
+  family member needs their own sideloading setup — which, for an app whose whole point is that a
+  partner also gets the reminder, is a real product limitation, not a developer inconvenience.
+- **Identifier quotas.** Ten App IDs per seven-day window, and the app plus its widget extension
+  consume two of them on every cycle.
+- **Probably no App Groups.** Capabilities whose identifiers must be registered on the portal are
+  generally unavailable to Personal Teams. Verify this in Xcode's Signing & Capabilities tab before
+  designing around it — it takes five minutes and the error message is explicit. If App Groups and
+  Keychain Sharing are both unavailable, the app and the widget cannot share credentials, and the
+  M5 design does not apply.
+
+The shape of the free variant, if you take it: a **local-only** app. It schedules
+`UNUserNotificationCenter` local notifications at dose times, with "Taken" and "Snooze 1 hour"
+buttons that work from the Lock Screen. When the app is opened it starts a Live Activity covering the
+day's upcoming doses, which lives for the eight-hour ceiling and carries the same two buttons. Since
+there is no shared-storage entitlement to rely on, declare the intents as foreground intents so that
+pressing a button opens the app and lets the existing web layer record the dose — less magical than
+the background action in M5, but it needs no entitlement at all. Dose data still comes from Supabase
+through the WebView; only the scheduling and the card are native.
+
+Honest summary of that variant: the card appears when you open the app, not when the dose is due, and
+it is yours alone. Whether that is worth building depends on whether the value is the Dynamic Island
+specifically or the buttons — if it is the buttons, note that a native local notification delivers
+them for free, and that is by far the cheapest win available here. If it is the card appearing on its
+own on a locked phone, there is no route to it without the membership.
+
+Milestone mapping for the free variant: M1 unchanged and still worth doing; M2 unchanged apart from
+the weekly re-signing; M3 unchanged; **M4 dropped entirely**; M5 reduced to foreground intents; M6
+reduced to the local-only lifecycle concerns (the eight-hour ceiling, batching several doses, and
+cancelling scheduled local notifications when a dose is resolved in the web UI).
+
 ## Progress
 
 - [ ] M1 — snooze action, one-hour default in _both_ the migration and
@@ -518,6 +573,11 @@ Stated plainly so nobody is surprised:
 - **Both `Authorization` and `apikey` headers on every native Supabase call.** The hosted Auth and
   PostgREST gateways reject a bearer-only request before looking at the token, so the publishable key
   is pushed into the native targets from the web layer rather than being a second thing to rotate.
+- **The paid membership is assumed, and the free-tier variant is documented rather than chosen.** A
+  Personal Team can render the card and its buttons but cannot push, so the card would only ever
+  appear after the user opens the app — which is not the requested behaviour. The variant section
+  records what remains reachable if the membership is declined, and notes that native local
+  notifications alone would recover the missing buttons on iOS at zero cost.
 
 ## Outcomes & Retrospective
 
