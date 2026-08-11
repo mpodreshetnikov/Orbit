@@ -155,6 +155,14 @@ Work:
   `supabase/migrations/20260203103000_notification_for_not_linked_persons.sql` (lines 626-708) and
   change only the default, so the person-prefix behaviour added by that migration is preserved.
   Update the `COMMENT ON FUNCTION` text to say sixty minutes.
+- **Update `supabase/db/functions/snooze_dose.sql` to the same new default.** This repository keeps a
+  second, idempotent copy of every function under `supabase/db/functions/`, aggregated by
+  `supabase/db/01_types_functions.sql` and applied by the deploy step that `db-run` and `db-reset`
+  perform _after_ the migrations. A migration alone is therefore silently reverted: the deploy
+  reloads the file's `CREATE OR REPLACE` with whatever default it still carries (today fifteen
+  minutes), and the pgTAP case below would keep observing fifteen. Both files must change together,
+  and the two bodies must stay identical apart from `SET search_path` (`public, pg_temp` in the
+  idempotent copy).
 - In the same migration, add `medication_snooze_minutes int NOT NULL DEFAULT 60` to
   `public.user_preferences`, with a `CHECK (medication_snooze_minutes BETWEEN 5 AND 1440)`.
 - Extend `src/types/notifications.ts`: add `medication_snooze_minutes: number` to `UserPreferences`
@@ -165,10 +173,20 @@ Work:
   `minutes` from the request, else from the caller's `medication_snooze_minutes`, else 60, and calls
   `supabase.rpc("snooze_dose", { p_dose_event_id: id, p_auth_user_id: user.id, p_minutes_from_now:
 minutes })` for each id.
+- Carry the resolved delay all the way to the button label, so the notification never promises a
+  delay it will not deliver. The medication digest payload gains a `snooze_minutes` field, filled
+  from the recipient's `medication_snooze_minutes` — the payload is assembled by
+  `public.get_medication_dose_reminder_payload_for_person` (idempotent copy in
+  `supabase/db/functions/`, so the same both-files rule applies), and passed through
+  `supabase/functions/notifications-cron/digest.ts` alongside the existing medication fields.
 - In `public/sw.js`, extend `NOTIFICATION_TYPE_HANDLERS.medication.getActions` to return both
-  `confirm` and `snooze`, add `snooze` labels to `MEDICATION_ACTION_LABELS` ("Snooze 1h" /
-  "Отложить на час"), and extend `onActionClick` so `snooze` posts to the new endpoint. Keep the
-  existing `confirm` path untouched.
+  `confirm` and `snooze`. `getActions` currently receives only `lang`; give it the notification
+  object too, so the snooze label is generated from `snooze_minutes` rather than hard-coded —
+  "Snooze 1h" / "Отложить на час" for sixty, "Snooze 30m" / "Отложить на 30 мин" otherwise, with the
+  same plural helper style already used for units. Store `snooze_minutes` in the handler's `getData`
+  output and have `onActionClick` post it explicitly as `minutes` to the new endpoint, so the label
+  the user read and the delay actually applied cannot diverge even if the preference changes between
+  send and tap. Keep the existing `confirm` path untouched.
 - Add the preference control to the notification section of `src/app/settings/page.tsx`, with
   strings in `src/messages/en.json` and `src/messages/ru.json`.
 
@@ -224,8 +242,10 @@ can be iterated without involving push.
 In Xcode, add a Widget Extension target named `MedicationActivity` with "Include Live Activity"
 checked, deployment target iOS 17.0 (17 rather than 16.1, because the interactive buttons in M5
 require App Intents). Add `NSSupportsLiveActivities` set to `YES` to the main app target's
-`Info.plist`. Create an App Group shared by both targets — it is needed in M5 to pass the auth token
-— named `group.<bundle id>`.
+`Info.plist`. Add two shared-storage capabilities to both targets while you are in the capabilities
+editor, because M5 needs both and they are separate entitlements: an **App Group** named
+`group.<bundle id>` for non-secret shared state, and **Keychain Sharing** with an access group named
+`<bundle id>.shared` for the auth tokens. Adding only the App Group is the mistake to avoid — see M5.
 
 Define the shared model in a Swift file that is a member of _both_ targets:
 
@@ -305,16 +325,38 @@ The `.p8` key, key id, team id and bundle id are new function secrets: `APNS_KEY
 `.env.observability.example`'s sibling env documentation — never commit the key itself; the
 pre-push secrets hook (`just secrets-preflight`) will catch it if anyone tries.
 
-Wire it into `push.ts`: for each user who has at least one `live_activity_tokens` row, medication
-digests are delivered as a push-to-start instead of a Web Push, so the same dose does not produce
-both a card and a banner. Non-medication digests, and users with no token, keep the current path
-untouched.
+Wiring this into the cron takes two changes, and the first is easy to miss. `handler.ts` builds its
+entire recipient list from one query — `supabase.from("push_subscriptions").select("auth_user_id")`
+— and returns `{ ok: true, processed: 0 }` immediately when that list is empty. A user who installs
+only the native iPhone app has a `live_activity_tokens` row and no `push_subscriptions` row, so
+under the current code the cron never even generates their digests. Change `handler.ts` to union the
+distinct `auth_user_id` values from both tables into `userIds`, and to treat "no subscriptions and
+no live-activity tokens" as the early-return condition. APNs delivery and the `mark-sent` bookkeeping
+that follows it belong in `handler.ts` next to the existing Web Push send, because `push.ts` holds
+only pure payload-shaping helpers and has no I/O; keep it that way and let `push.ts` gain a helper
+that splits a user's medication digests from the rest.
+
+The second change is which deliveries to suppress, and it must be per device, not per user. One
+account routinely has several: a native iPhone app, an Android Home Screen PWA, a desktop browser.
+Suppressing medication Web Push for every user who owns any live-activity token would silence the
+Android phone and the laptop as well, which is worse than the duplicate it prevents. Note also that
+the Capacitor `WKWebView` has no Push API, so the native app never registers a `push_subscriptions`
+row of its own and there is no shared identifier to join the two tables on. Suppress instead by
+endpoint host: when a user has at least one live-activity token, skip medication Web Push for
+subscriptions whose endpoint host is `web.push.apple.com` — the host Safari on iOS and macOS uses —
+and deliver normally to every other endpoint. The known imprecision is a user who also runs Safari
+Web Push on a Mac, who would lose the medication banner there; give `push_subscriptions` a
+`suppress_medication_push boolean not null default false` column and a per-device toggle in settings
+as the escape hatch, and state this tradeoff in the settings copy.
 
 Acceptance: `just test-unit-functions` passes, including new Deno tests for the JWT builder (assert
-header and claims decode correctly and the signature verifies against the public key) and for the
-routing decision in `push.ts` (assert a user with a live-activity token gets no medication Web Push).
-On a real device: create a dose due in two minutes, lock the phone, and watch the card appear on the
-Lock Screen by itself.
+header and claims decode correctly and the signature verifies against the public key), for the
+recipient union in `handler.ts` (assert a user with a live-activity token and zero push
+subscriptions still gets their digests generated and an APNs send attempted), and for the
+suppression rule (assert an Apple endpoint is skipped while an FCM endpoint on the same account
+still receives the medication Web Push). On a real device: create a dose due in two minutes, lock
+the phone, and watch the card appear on the Lock Screen by itself, with no duplicate banner on the
+same phone and the Android phone still buzzing.
 
 ### M5 — Buttons on the card
 
@@ -327,13 +369,31 @@ Dynamic Island presentations.
 
 The intents need credentials. The plan takes the shortest safe path: when the web app boots inside
 the Capacitor shell it calls the plugin with the Supabase session (`supabase.auth.getSession()` gives
-an access token and a refresh token), the plugin writes them to the Keychain with the App Group
-access group, and the intent reads them from there. If the access token is expired the intent first
-POSTs to `<SUPABASE_URL>/auth/v1/token?grant_type=refresh_token`, stores the new pair, and retries.
-With a valid bearer token the intent calls the Supabase RPC endpoints directly —
+an access token and a refresh token) and the plugin writes them to the Keychain, from where the
+intent reads them.
+
+Getting the sharing right needs one entitlement that M3 does not add. **An App Group is not a
+Keychain access group**; they are two separate entitlements, and passing the App Group identifier as
+`kSecAttrAccessGroup` fails with `errSecMissingEntitlement`. Add `keychain-access-groups` to the
+entitlements of _both_ the main app target and the widget/intent target, with the same group
+identifier (`$(AppIdentifierPrefix)<bundle id>.shared`), and store the tokens under that group. The
+App Group from M3 stays — it is still the right place for non-secret shared state such as the last
+known dose snapshot — but secrets go through the Keychain group.
+
+If the access token is expired the intent first POSTs to
+`<SUPABASE_URL>/auth/v1/token?grant_type=refresh_token`, stores the new pair, and retries. With a
+valid bearer token it calls the Supabase RPC endpoints directly —
 `POST <SUPABASE_URL>/rest/v1/rpc/mark_dose_taken` and `.../rpc/snooze_dose` — rather than the
 Next.js routes, because the Next.js routes authenticate by cookie and the native process has no
 cookie jar.
+
+Both the auth and PostgREST gateways require **two** headers, not one: `Authorization: Bearer
+<access token>` _and_ `apikey: <publishable/anon key>`. Omitting the `apikey` header makes every
+request fail with an API-key error before the bearer token is ever considered, which would leave
+both buttons silently broken. The publishable key is client-safe and already public in the web
+bundle as `NEXT_PUBLIC_SUPABASE_ANON_KEY`; ship it and `NEXT_PUBLIC_SUPABASE_URL` into the native
+targets the same way the plugin receives the session — pushed from the web layer on boot and cached
+in the App Group — so there is one source of truth and no second place to rotate.
 
 Note for the implementer: the two RPCs already exist and are `SECURITY DEFINER` with RLS-safe
 bodies, so calling them with a user bearer token is equivalent to what
@@ -394,14 +454,19 @@ Stated plainly so nobody is surprised:
 
 ## Progress
 
-- [ ] M1 — snooze action, one-hour default, `medication_snooze_minutes` preference
+- [ ] M1 — snooze action, one-hour default in _both_ the migration and
+      `supabase/db/functions/snooze_dose.sql`, `medication_snooze_minutes` preference
+- [ ] M1 — snooze label generated from the payload's `snooze_minutes`, not hard-coded
 - [ ] M1 — Android multi-action behaviour verified on a real device
 - [ ] M2 — Capacitor iOS shell installs and runs on a physical iPhone
 - [ ] M3 — widget extension renders all four Live Activity presentations
+- [ ] M3 — App Group _and_ Keychain Sharing entitlements on both targets
 - [ ] M4 — `live_activity_tokens` table, token registration, APNs JWT signer
+- [ ] M4 — `handler.ts` recipient list unions push subscribers with live-activity token owners
 - [ ] M4 — push-to-start delivers a card to a locked phone
-- [ ] M4 — medication Web Push suppressed for devices with a live-activity token
-- [ ] M5 — `MarkDoseTakenIntent` and `SnoozeDoseIntent` work with the app force-quit
+- [ ] M4 — medication Web Push suppressed per device (Apple endpoints only), other devices intact
+- [ ] M5 — `MarkDoseTakenIntent` and `SnoozeDoseIntent` work with the app force-quit, sending both
+      the `Authorization` and `apikey` headers
 - [ ] M6 — end-on-resolution, rate limiting, batching, multi-recipient, 410 pruning
 - [ ] M6 — `just ci-verify-local` green and the on-device matrix run recorded here
 
@@ -416,6 +481,18 @@ Stated plainly so nobody is surprised:
 - `snooze_dose` exists in two migrations; the later one
   (`20260203103000_notification_for_not_linked_persons.sql`) is authoritative and adds the person
   prefix. Copy from that one.
+- Functions live in _two_ places. Besides the migrations, `supabase/db/functions/` holds an
+  idempotent `CREATE OR REPLACE` per function, aggregated by `supabase/db/01_types_functions.sql` and
+  applied by the deploy step that runs after migrations in both `db-run` and `db-reset`. Change a
+  function in a migration only and the deploy quietly puts the old body back. `snooze_dose.sql` there
+  still carries `DEFAULT 15`.
+- `supabase/functions/notifications-cron/handler.ts` derives its whole recipient list from
+  `push_subscriptions` and returns `processed: 0` when that table is empty for everyone, so a
+  native-only iOS user would never have digests generated at all. Any new delivery channel has to be
+  unioned into that list, not just handled downstream in `push.ts`.
+- A Capacitor `WKWebView` has no Push API, so the native app cannot register a `push_subscriptions`
+  row and there is no shared key to join a device's Web Push subscription to its live-activity token.
+  Deduplication has to key off the endpoint host instead.
 
 ## Decision Log
 
@@ -430,9 +507,17 @@ Stated plainly so nobody is surprised:
   authenticate by cookie; the native process has no cookies. The RPCs are already the routes' only
   real work.
 - **Default snooze of sixty minutes, overridable per user.** Requested explicitly. The current
-  `snooze_dose` default of fifteen minutes stays reachable by passing the argument.
-- **Web Push and Live Activity are mutually exclusive per user for medication digests.** Otherwise
-  every dose produces two alerts on the same phone.
+  `snooze_dose` default of fifteen minutes stays reachable by passing the argument. Because the
+  preference is variable, the resolved value travels in the push payload and drives both the button
+  label and the value the button sends, so the label can never advertise a delay that is not applied.
+- **Web Push and Live Activity are mutually exclusive per device, not per user, for medication
+  digests.** A per-user rule would silence a user's Android phone and laptop the moment they installed
+  the iOS app. Suppression keys off the `web.push.apple.com` endpoint host, with a per-subscription
+  `suppress_medication_push` toggle as the escape hatch for anyone who genuinely uses Safari Web Push
+  on a Mac.
+- **Both `Authorization` and `apikey` headers on every native Supabase call.** The hosted Auth and
+  PostgREST gateways reject a bearer-only request before looking at the token, so the publishable key
+  is pushed into the native targets from the web layer rather than being a second thing to rotate.
 
 ## Outcomes & Retrospective
 
