@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, Loader2, ShieldCheck } from "lucide-react";
@@ -47,6 +47,21 @@ export function ConsentForm({
   consentToken,
 }: ConsentFormProps) {
   const [submitting, setSubmitting] = useState<"approve" | "deny" | null>(null);
+  const submittedRef = useRef(false);
+
+  // The buttons must stay enabled while the submission is in flight. Disabling
+  // the clicked button re-renders it as `disabled` before the browser runs the
+  // form's activation behaviour, and a disabled submit button does not submit
+  // its form -- the spinner would appear and no request would ever be sent.
+  // Double submits are blocked here instead, where the first submission has
+  // already been dispatched.
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    if (submittedRef.current) {
+      event.preventDefault();
+      return;
+    }
+    submittedRef.current = true;
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -83,7 +98,13 @@ export function ConsentForm({
             at any time from Settings.
           </p>
 
-          <form method="POST" action="/api/oauth/authorize/decision" className="space-y-3">
+          <form
+            method="POST"
+            action="/api/oauth/authorize/decision"
+            className="space-y-3"
+            onSubmit={handleSubmit}
+            aria-busy={submitting !== null}
+          >
             <input type="hidden" name="client_id" value={clientId} />
             <input type="hidden" name="redirect_uri" value={redirectUri} />
             <input type="hidden" name="scope" value={scopeValue} />
@@ -97,7 +118,7 @@ export function ConsentForm({
               name="decision"
               value="approve"
               className="w-full"
-              disabled={submitting !== null}
+              aria-disabled={submitting !== null}
               onClick={() => setSubmitting("approve")}
             >
               {submitting === "approve" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -109,7 +130,7 @@ export function ConsentForm({
               value="deny"
               variant="outline"
               className="w-full"
-              disabled={submitting !== null}
+              aria-disabled={submitting !== null}
               onClick={() => setSubmitting("deny")}
             >
               {submitting === "deny" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
