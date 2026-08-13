@@ -1,4 +1,4 @@
-import { applyMoneyDedupeHashes } from "@shared/lib/money/dedupe";
+import { applyMoneyDedupeHashes } from "../core/money-dedupe.js";
 import { registerConnector } from "./registry.js";
 import type { Connector, ConnectorParseInput, ConnectorParseOutput } from "./types.js";
 
