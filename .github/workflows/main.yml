@@ -244,11 +244,21 @@ jobs:
         if: steps.impact.outputs.tasksOnly != 'true'
         run: just test-unit-coverage && just coverage-check
 
+  # Restricted to push-on-main, and attached to the production environment, because the release
+  # bundle needs the production origins and they are defined at that environment's scope — every
+  # other job reading them (publish-extension-release, deploy-vercel-production, deploy-supabase)
+  # declares it. This job did not, so it read repository scope, got empty strings and failed.
+  #
+  # It is not enough to add the environment and keep running on pull_request: that event uses the
+  # workflow file from the PR branch, so any PR could add a step and read the environment's secrets.
+  # Pull requests lose nothing by skipping this: quality-gates already runs extension-build-production
+  # on every PR, and enforces the manifest version-bump rule; only the release packaging moves.
   extension-release-bundle:
     needs: [secrets-scan, quality-gates]
-    if: needs.quality-gates.outputs.extension_version_changed == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Extension Release Bundle
     runs-on: ubuntu-latest
+    environment: production
     env:
       NEXT_PUBLIC_APP_ORIGIN: ${{ vars.NEXT_PUBLIC_APP_ORIGIN }}
       NEXT_PUBLIC_APP_ORIGINS: ${{ vars.NEXT_PUBLIC_APP_ORIGINS }}
