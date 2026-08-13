@@ -114,6 +114,7 @@ function createRepositoryMock(
       state.deletedBatchIds.push(batchId);
     },
     findExistingTransactionId: async (row) => (row.external_id === "dup-tx" ? "tx-existing" : null),
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async (transactionId, _importHash) =>
       transactionId === "tx-existing" ? "line-existing" : null,
     repairExistingTransactionDetails: async () => ({

@@ -68,8 +68,15 @@ describe("tbank-csv connector", () => {
       ["c", "d"],
     ]);
 
-    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T12:30:05.000Z");
-    expect(parseTBankDate("01.02.2026")).toBe("2026-02-01T00:00:00.000Z");
+    // A statement prints Moscow local time, so the parsed instant must carry the +03:00 offset.
+    // Stamping "Z" on it, as this connector used to, shifted every operation three hours back and
+    // pushed anything after 21:00 into the previous UTC day, which is how the budget report cuts
+    // months.
+    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T12:30:05+03:00");
+    expect(parseTBankDate("01.02.2026")).toBe("2026-02-01T00:00:00+03:00");
+    expect(new Date(parseTBankDate("01.02.2026 23:30:00") as string).toISOString()).toBe(
+      "2026-02-01T20:30:00.000Z",
+    );
     expect(parseTBankDate("")).toBeNull();
     expect(parseTBankDate("2026-02-01")).toBeNull();
 
@@ -133,7 +140,7 @@ describe("tbank-csv connector", () => {
 
     expect(result.transactions[0]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-01T12:30:00.000Z",
+        posted_at: "2026-02-01T12:30:00+03:00",
         transaction_type: "expense",
         status: "posted",
         account_hint: "1234",
@@ -150,7 +157,7 @@ describe("tbank-csv connector", () => {
     );
     expect(result.transactions[1]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-02T00:00:00.000Z",
+        posted_at: "2026-02-02T00:00:00+03:00",
         currency: "RUB",
         transaction_type: "income",
         status: "pending",

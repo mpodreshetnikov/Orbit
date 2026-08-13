@@ -79,7 +79,14 @@ export interface MoneyImportRepository {
     payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]>;
-  findExistingTransactionId(row: CanonicalTransactionRowInput): Promise<string | null>;
+  findExistingTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<string | null>;
+  findAdoptableTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<{ id: string } | { ambiguous: true } | null>;
   findExistingLineItemId(transactionId: string, importHash: string): Promise<string | null>;
   repairExistingTransactionDetails(
     transactionId: string,
@@ -93,7 +100,7 @@ export interface MoneyImportRepository {
   insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
-  ): Promise<{ transactionId: string; inserted: boolean }>;
+  ): Promise<{ transactionId: string; inserted: boolean; adopted?: boolean }>;
   insertLineItemIfNew(
     transactionId: string,
     lineItem: ImportLineItemInput,
@@ -124,6 +131,16 @@ export interface MoneyImportRepositoryConfig {
     forceOverwriteLocked?: boolean;
   }) => Promise<Record<string, unknown>>;
 }
+
+/**
+ * How far apart the statement's timestamp and the API's timestamp may be and still be the same
+ * purchase. A statement distinguishes the operation date from the payment date, and those can sit a
+ * couple of days apart; 72 hours covers that with room to spare while staying far below the gap
+ * between two genuinely different purchases at the same merchant for the same amount.
+ */
+const ADOPTION_WINDOW_HOURS = 72;
+/** Amounts are compared to the kopek, not by equality of floating point values. */
+const ADOPTION_AMOUNT_TOLERANCE = 0.005;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === "object") return value as Record<string, unknown>;
@@ -557,19 +574,100 @@ export function createSupabaseMoneyImportRepository(
 
   async function findExistingTransactionId(
     row: CanonicalTransactionRowInput,
+    payerPersonId: string,
   ): Promise<string | null> {
-    let query = getAdminClient().from("money_transactions").select("id").limit(1);
+    // Both keys are scoped to the person, matching the unique indexes. Unscoped, one person's
+    // operation could be resolved as a duplicate of another's and silently overwritten.
     if (row.external_id) {
-      query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
-    } else if (row.dedupe_hash) {
-      query = query.eq("dedupe_hash", row.dedupe_hash);
-    } else {
-      return null;
+      const { data } = await getAdminClient()
+        .from("money_transactions")
+        .select("id")
+        .eq("payer_person_id", payerPersonId)
+        .eq("source", row.source ?? "manual")
+        .eq("external_id", row.external_id)
+        .limit(1)
+        .maybeSingle();
+      const id = data ? normalizeText((data as Record<string, unknown>).id) : null;
+      if (id) return id;
     }
 
-    const { data, error } = await query.maybeSingle();
+    if (row.dedupe_hash) {
+      const { data } = await getAdminClient()
+        .from("money_transactions")
+        .select("id")
+        .eq("payer_person_id", payerPersonId)
+        .eq("dedupe_hash", row.dedupe_hash)
+        .limit(1)
+        .maybeSingle();
+      const id = data ? normalizeText((data as Record<string, unknown>).id) : null;
+      if (id) return id;
+    }
+
+    return null;
+  }
+
+  /**
+   * Finds the statement transaction that an incoming API operation is the same purchase as.
+   *
+   * A row loaded from a CSV statement and the same operation seen by the extension never match on
+   * either key: the statement row has no external_id, and the two hashes are computed from different
+   * text — the bank's statement description on one side, the API's merchant name on the other. No
+   * change to the hash formula fixes that. What does match is what actually agrees: the person, the
+   * account, the amount to the kopek, and the instant within a tolerance.
+   *
+   * Returns `{ ambiguous: true }` rather than picking one when several candidates fit. Two identical
+   * purchases on the same day are rare but real, and merging them loses an operation for good.
+   */
+  async function findAdoptableTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<{ id: string } | { ambiguous: true } | null> {
+    const accountId = normalizeText(row.account_id);
+    const postedAtIso = toIsoOrNull(row.posted_at);
+    const amount = toNumberOrNull(row.amount);
+    if (!accountId || !postedAtIso || amount === null) return null;
+
+    const postedAtMs = new Date(postedAtIso).getTime();
+    const windowMs = ADOPTION_WINDOW_HOURS * 60 * 60 * 1000;
+
+    const { data, error } = await getAdminClient()
+      .from("money_transactions")
+      .select("id, posted_at, amount")
+      .eq("payer_person_id", payerPersonId)
+      .eq("account_id", accountId)
+      .is("external_id", null)
+      .gte("posted_at", new Date(postedAtMs - windowMs).toISOString())
+      .lte("posted_at", new Date(postedAtMs + windowMs).toISOString());
+
     if (error || !data) return null;
-    return normalizeText((data as Record<string, unknown>).id);
+
+    const candidates = (data as Array<Record<string, unknown>>).filter((candidate) => {
+      const candidateAmount = toNumberOrNull(candidate.amount);
+      if (candidateAmount === null) return false;
+      return Math.abs(candidateAmount - amount) < ADOPTION_AMOUNT_TOLERANCE;
+    });
+
+    if (candidates.length === 0) return null;
+    if (candidates.length > 1) return { ambiguous: true };
+
+    const id = normalizeText(candidates[0].id);
+    return id ? { id } : null;
+  }
+
+  async function adoptTransaction(
+    transactionId: string,
+    row: CanonicalTransactionRowInput,
+  ): Promise<void> {
+    const { error } = await getAdminClient()
+      .from("money_transactions")
+      .update({
+        external_id: row.external_id ?? null,
+        dedupe_hash: row.dedupe_hash ?? null,
+      } as Database["public"]["Tables"]["money_transactions"]["Update"])
+      .eq("id", transactionId);
+    if (error) {
+      throw new Error(error.message || "Failed to adopt existing statement transaction");
+    }
   }
 
   async function listLineItemsByTransactionIds(
@@ -588,7 +686,7 @@ export function createSupabaseMoneyImportRepository(
 
   async function getExistingTransactionStates(
     source: string,
-    _payerPersonId: string,
+    payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]> {
     if (candidates.length === 0) return [];
@@ -615,6 +713,7 @@ export function createSupabaseMoneyImportRepository(
       const { data } = await getAdminClient()
         .from("money_transactions")
         .select("id, source, external_id, dedupe_hash, receipt_enrichment_status")
+        .eq("payer_person_id", payerPersonId)
         .eq("source", normalizeSourceForTransactions(source))
         .in("external_id", externalIds);
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
@@ -627,6 +726,7 @@ export function createSupabaseMoneyImportRepository(
       const { data } = await getAdminClient()
         .from("money_transactions")
         .select("id, source, external_id, dedupe_hash, receipt_enrichment_status")
+        .eq("payer_person_id", payerPersonId)
         .in("dedupe_hash", dedupeHashes);
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
         const dedupeHash = normalizeText(row.dedupe_hash);
@@ -1511,10 +1611,49 @@ export function createSupabaseMoneyImportRepository(
     };
   }
 
+  async function updateExistingTransactionFields(
+    transactionId: string,
+    row: CanonicalTransactionRowInput,
+  ): Promise<void> {
+    const { error } = await getAdminClient()
+      .from("money_transactions")
+      .update(
+        buildTransactionUpdatePayload(
+          row,
+        ) as Database["public"]["Tables"]["money_transactions"]["Update"],
+      )
+      .eq("id", transactionId);
+    if (error) {
+      throw new Error(error.message || "Failed to update duplicate transaction");
+    }
+  }
+
   async function insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
-  ): Promise<{ transactionId: string; inserted: boolean }> {
+  ): Promise<{ transactionId: string; inserted: boolean; adopted?: boolean }> {
+    // Order matters: exact key, then hash, then adoption, then insert. Adoption has to be tried
+    // before the insert, because a statement transaction has no external_id — nothing about the
+    // incoming API row conflicts with it, so inserting first would simply create a second copy of
+    // the same purchase and double the reported spend.
+    const existingId = await findExistingTransactionId(row, payerPersonId);
+    if (existingId) {
+      await updateExistingTransactionFields(existingId, row);
+      return { transactionId: existingId, inserted: false };
+    }
+
+    if (row.external_id) {
+      const adoption = await findAdoptableTransactionId(row, payerPersonId);
+      if (adoption && "ambiguous" in adoption) {
+        throw new Error("Multiple statement transactions match this operation");
+      }
+      if (adoption) {
+        await adoptTransaction(adoption.id, row);
+        await updateExistingTransactionFields(adoption.id, row);
+        return { transactionId: adoption.id, inserted: false, adopted: true };
+      }
+    }
+
     const payload = buildTransactionInsertPayload(row, payerPersonId);
     const { data, error } = await getAdminClient()
       .from("money_transactions")
@@ -1533,24 +1672,14 @@ export function createSupabaseMoneyImportRepository(
       throw new Error((error as { message?: string })?.message || "Failed to insert transaction");
     }
 
-    const existingId = await findExistingTransactionId(row);
-    if (!existingId) {
+    // A concurrent import inserted the same row between the lookup above and this insert.
+    const concurrentId = await findExistingTransactionId(row, payerPersonId);
+    if (!concurrentId) {
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 
-    const { error: updateError } = await getAdminClient()
-      .from("money_transactions")
-      .update(
-        buildTransactionUpdatePayload(
-          row,
-        ) as Database["public"]["Tables"]["money_transactions"]["Update"],
-      )
-      .eq("id", existingId);
-    if (updateError) {
-      throw new Error(updateError.message || "Failed to update duplicate transaction");
-    }
-
-    return { transactionId: existingId, inserted: false };
+    await updateExistingTransactionFields(concurrentId, row);
+    return { transactionId: concurrentId, inserted: false };
   }
 
   async function insertLineItemIfNew(
@@ -1695,6 +1824,7 @@ export function createSupabaseMoneyImportRepository(
     updateBatchBrandResolutionSelection,
     getExistingTransactionStates,
     findExistingTransactionId,
+    findAdoptableTransactionId,
     findExistingLineItemId,
     repairExistingTransactionDetails,
     insertOrResolveTransaction,

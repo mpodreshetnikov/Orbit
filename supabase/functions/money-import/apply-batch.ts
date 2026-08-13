@@ -307,7 +307,11 @@ export async function applyBatchAction(
         ? "Existing line items were edited manually"
         : tx.inserted
           ? null
-          : "Duplicate transaction";
+          : tx.adopted
+            ? // Visible on the batch review screen, so the user can see that the operation was
+              // matched to a transaction the statement had already loaded rather than duplicated.
+              "Adopted an existing statement transaction"
+            : "Duplicate transaction";
       if (txStatus === "inserted") insertedCount += 1;
       if (txStatus === "skipped") skippedCount += 1;
 

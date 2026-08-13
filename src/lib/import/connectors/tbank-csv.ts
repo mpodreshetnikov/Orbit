@@ -3,7 +3,7 @@
  * Format: semicolon-delimited, double-quoted fields, Russian locale numbers.
  */
 
-import { buildDedupeHash } from "../dedupe";
+import { assignMoneyDedupeOccurrences, buildMoneyDedupeHash } from "@shared/lib/money/dedupe";
 import { registerConnector } from "../connector-types";
 import type { CanonicalTransactionRow, ImportParseResult } from "@/types";
 
@@ -58,6 +58,15 @@ export function parseCSV(text: string): string[][] {
   return rows;
 }
 
+/**
+ * T-Bank statements print Moscow local time. Moscow has been a fixed UTC+03:00 with no daylight
+ * saving since 2014, so the offset is safe to hard-code — it is not an approximation left to be
+ * fixed later. Appending "Z" instead, as this connector used to, moved every operation three hours
+ * back, which pushed anything after 21:00 into the previous calendar day; the budget report cuts
+ * months in UTC, so those operations landed in the wrong month.
+ */
+export const TBANK_STATEMENT_TIMEZONE_OFFSET = "+03:00";
+
 export function parseTBankDate(s: string): string | null {
   const t = s.trim();
   if (!t) return null;
@@ -66,12 +75,12 @@ export function parseTBankDate(s: string): string | null {
   let m = t.match(withTime);
   if (m) {
     const [, d, mo, y, h, min, sec] = m;
-    return `${y}-${mo}-${d}T${h}:${min}:${sec}.000Z`;
+    return `${y}-${mo}-${d}T${h}:${min}:${sec}${TBANK_STATEMENT_TIMEZONE_OFFSET}`;
   }
   m = t.match(dateOnly);
   if (m) {
     const [, d, mo, y] = m;
-    return `${y}-${mo}-${d}T00:00:00.000Z`;
+    return `${y}-${mo}-${d}T00:00:00${TBANK_STATEMENT_TIMEZONE_OFFSET}`;
   }
   return null;
 }
@@ -150,15 +159,6 @@ async function parse(file: File): Promise<ImportParseResult> {
       if (row[j] !== undefined) rawPayload[h] = row[j];
     });
 
-    const dedupe_hash = await buildDedupeHash(
-      SOURCE_ID,
-      postedAt,
-      amount,
-      currency,
-      merchantName,
-      accountHint || null,
-    );
-
     transactions.push({
       account_hint: accountHint || null,
       source: SOURCE_ID,
@@ -179,7 +179,7 @@ async function parse(file: File): Promise<ImportParseResult> {
       source_brand: null,
       is_transfer: transfer,
       raw_payload: rawPayload,
-      dedupe_hash,
+      dedupe_hash: "",
       line_items: [
         {
           title: merchantName || "T-Bank",
@@ -192,6 +192,22 @@ async function parse(file: File): Promise<ImportParseResult> {
         },
       ],
     });
+  }
+
+  // Hashing happens once the whole statement is parsed, because the occurrence of a row is its
+  // position among the rows that agree on every other hashed field — which is only known in full.
+  const dedupeInputs = assignMoneyDedupeOccurrences(
+    transactions.map((transaction) => ({
+      source: SOURCE_ID,
+      postedAtIso: transaction.posted_at,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      merchantName: transaction.merchant_name ?? null,
+      accountHint: transaction.account_hint ?? null,
+    })),
+  );
+  for (let index = 0; index < transactions.length; index++) {
+    transactions[index].dedupe_hash = await buildMoneyDedupeHash(dedupeInputs[index]);
   }
 
   return { transactions, errors: errors.length > 0 ? errors : undefined };

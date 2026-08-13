@@ -36,6 +36,8 @@ function createRepositoryMock(options: {
   storedRows: CanonicalTransactionRowInput[];
   /** Transactions that already exist; anything else is inserted as new. */
   existingTransactionIdByExternalId?: Record<string, string>;
+  /** Transactions the repository matched to an earlier statement row by natural key. */
+  adoptedTransactionIdByExternalId?: Record<string, string>;
   blockedByManualEdit?: boolean;
 }): { repository: MoneyImportRepository; state: ApplyBatchRepoState } {
   const state: ApplyBatchRepoState = {
@@ -94,9 +96,12 @@ function createRepositoryMock(options: {
     resolveAccountIdForRow: async () => "acc-1",
     resolveCardIdForRow: async () => "card-1",
     findExistingTransactionId: async () => null,
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async (row: CanonicalTransactionRowInput) => {
       const externalId = row.external_id ?? "";
+      const adoptedId = options.adoptedTransactionIdByExternalId?.[externalId];
+      if (adoptedId) return { transactionId: adoptedId, inserted: false, adopted: true };
       const existingId = existingByExternalId[externalId];
       if (existingId) return { transactionId: existingId, inserted: false };
       txCounter += 1;
@@ -300,4 +305,30 @@ Deno.test("applyBatchAction reports a receipt that cannot belong to the transact
   assertEquals(state.repairCalls.length, 0);
   assertEquals(state.insertedLineItems.length, 0);
   assertEquals(payload.error_count, 1);
+});
+
+Deno.test("applyBatchAction reports an adopted statement transaction", async () => {
+  // The scenario the whole plan exists for: a statement was loaded from CSV, then the extension
+  // sees the same purchase. One transaction, its placeholder replaced by the real receipt, and the
+  // batch review screen says what happened rather than showing a second copy.
+  const { repository, state } = createRepositoryMock({
+    storedRows: [
+      txRow({ external_id: "op-adopted", amount: -1000, line_items: realReceipt(-400, -600) }),
+    ],
+    adoptedTransactionIdByExternalId: { "op-adopted": "tx-from-statement" },
+  });
+
+  const payload = await assertJsonResponse<ApplyBatchResponse>(
+    await applyBatchAction({ batch_id: "batch-1" }, userAuth, { repository }),
+    200,
+  );
+
+  assertEquals(payload.row_results[0].status, "skipped");
+  assertEquals(payload.row_results[0].message, "Adopted an existing statement transaction");
+  assertEquals(payload.row_results[0].transaction_id, "tx-from-statement");
+  assertEquals(payload.inserted, 0);
+  // The statement placeholder is replaced, not joined by the receipt lines.
+  assertEquals(state.repairCalls.length, 1);
+  assertEquals(state.repairCalls[0].transactionId, "tx-from-statement");
+  assertEquals(state.insertedLineItems.length, 2);
 });

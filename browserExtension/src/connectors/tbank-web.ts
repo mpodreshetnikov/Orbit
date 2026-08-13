@@ -1,3 +1,4 @@
+import { applyMoneyDedupeHashes } from "@shared/lib/money/dedupe";
 import { registerConnector } from "./registry.js";
 import type {
   Connector,
@@ -436,15 +437,9 @@ function mapOperationRecordToRowWithReason(
           },
         },
       },
-      dedupe_hash: buildDedupeHash({
-        external_id: externalId,
-        posted_at: postedAt,
-        amount: signedAmount,
-        merchant_name: merchantName,
-        account_hint: accountHint,
-        operation_id: normalizeText(asObject(operation.operationId)?.value),
-        authorization_id: normalizeText(operation.authorizationId),
-      }),
+      // Filled by applyMoneyDedupeHashes once every row of this run exists: the hash carries an
+      // occurrence number, which is only knowable across the whole set.
+      dedupe_hash: null,
       line_items: buildLineItemsFromReceipt(shoppingReceipt, signedAmount, merchantName),
     },
   };
@@ -707,6 +702,15 @@ const connector: Connector = {
         debug: debugSummary,
       });
     }
+
+    // One formula for both extraction paths, and for the CSV connector too. The previous 32-bit
+    // FNV-1a gave eight hex digits: by the birthday bound a collision is more likely than not
+    // somewhere around 77 000 rows, and a collision here silently overwrites an unrelated
+    // transaction while reporting a harmless "skipped".
+    await applyMoneyDedupeHashes(rows, (row) => {
+      const rawPayload = asObject(row.raw_payload);
+      return normalizeText(rawPayload?.account_hint);
+    });
 
     return {
       rows,
@@ -2245,7 +2249,9 @@ function extractOperationsInPage(input: {
           all_details_captured: false,
           dom_snapshot: cleanText(node.textContent),
         },
-        dedupe_hash: `tbw_dom_${hashString(`${postedAt}|${title}|${amount}`)}`,
+        // Hashed together with the API rows by applyMoneyDedupeHashes after extraction returns,
+        // so this path is not left on a weaker formula than the one it falls back from.
+        dedupe_hash: null,
         line_items: [
           {
             title,
@@ -2343,15 +2349,6 @@ function extractOperationsInPage(input: {
       toMs(asObj(operation.debitingTime)?.milliseconds) ||
       toMs(operation.operationDateTime)
     );
-  }
-
-  function hashString(input: string): string {
-    let hash = 2166136261;
-    for (let i = 0; i < input.length; i += 1) {
-      hash ^= input.charCodeAt(i);
-      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-    }
-    return (hash >>> 0).toString(16).padStart(8, "0");
   }
 }
 
@@ -2712,27 +2709,4 @@ function buildLineItemsFromReceipt(
       raw_payload: { source: "fallback" },
     },
   ];
-}
-
-function hashString(input: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-function buildDedupeHash(row: JsonMap): string {
-  return `tbw_${hashString(
-    [
-      row.external_id || "",
-      row.operation_id || "",
-      row.authorization_id || "",
-      row.posted_at || "",
-      row.amount || "",
-      row.merchant_name || "",
-      row.account_hint || "",
-    ].join("|"),
-  )}`;
 }

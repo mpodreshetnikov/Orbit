@@ -40,6 +40,7 @@ function createRepositoryMock(
       throw new Error("unused");
     },
     findExistingTransactionId: async () => null,
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     repairExistingTransactionDetails: async () => ({
       replaced_synthetic_line_items: false,

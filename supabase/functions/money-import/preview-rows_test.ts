@@ -106,6 +106,7 @@ function createRepositoryMock(
     listBatchBrandResolutions: async () => [],
     updateBatchBrandResolutionSelection: async () => {},
     findExistingTransactionId: async (row) => (row.external_id === "dup-tx" ? "tx-dup" : null),
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     repairExistingTransactionDetails: async () => ({
       replaced_synthetic_line_items: false,

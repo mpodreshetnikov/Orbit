@@ -117,6 +117,7 @@ function createRepositoryMock(
       return "card-1";
     },
     findExistingTransactionId: async (row) => (row.external_id === "dup-tx" ? "tx-dup" : null),
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async (row) => {
       if (row.external_id === "dup-tx") {
