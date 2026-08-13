@@ -1,7 +1,7 @@
 # Extraction eval corpus
 
 Scored regression corpus for the health image recognition pipeline — Milestone 8 of
-`docs/exec-plans/todo/health-image-recognition-pipeline-hardening.md`.
+`docs/tasks/T-0006-health-image-recognition-pipeline-hardening.md`.
 
 ## Layout
 

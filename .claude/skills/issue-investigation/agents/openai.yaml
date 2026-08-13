@@ -1,0 +1,4 @@
+interface:
+  display_name: "Issue Investigation"
+  short_description: "Investigate bugs/incidents via logs, traces, metrics"
+  default_prompt: "Use $issue-investigation to run RCA for this bug or production issue using structured logs, traces, and metrics."

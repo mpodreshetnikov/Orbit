@@ -45,7 +45,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `functions-lock-check`: `just quality-check-supabase-functions-lock` (verify Supabase Edge Functions lockfile format compatibility)
 - `functions-lock-refresh`: `just supabase-functions-lock-refresh` (regenerate `supabase/functions/deno.lock` with runtime-compatible Deno)
 - `types`: `just quality-typecheck`
-- `quality`: `just quality` (all static checks: format, lint, typecheck; no builds, DB, or tests)
+- `quality`: `just quality` (all static checks: task registry, skill sync, format, lint, typecheck; no builds, DB, or tests)
+- `quality-tasks`: `just quality-tasks` (static checks for a change confined to `docs/tasks`: registry, skill sync, format; CI uses this instead of `quality` when nothing outside the registry changed)
 - `db-lint`: `just quality-db-lint` (local DB lint scoped to `public` schema, warnings fail)
 - `db-test`: `just quality-db-test` (pgTAP tests under `supabase/tests`)
 - `db-coverage-report`: `just db-coverage-report` (DB object to pgTAP mapping coverage report)
@@ -57,6 +58,10 @@ Use these command IDs in plans, PRs, and handoffs:
 - `ci`: `just ci-verify-local` (run after completing a task that changed code; see docs/QUALITY.md)
 - `ci-fast`: `just ci-verify-local-fast` (quick local gate: no Supabase, no coverage; use for fast feedback; use `ci` for full pre-push)
 - `check`: `just check` (full local quality gate)
+- `tasks-index`: `just tasks-index` (regenerate `docs/tasks/INDEX.md` from the task files)
+- `tasks-check`: `just tasks-check` (validate the task registry: front matter schema, ids, required sections, index freshness; included in `quality`)
+- `agent-skills-sync`: `just agent-skills-sync` (mirror `.agents/skills` into `.claude/skills`)
+- `agent-skills-check`: `just agent-skills-check` (fail when `.claude/skills` has drifted from `.agents/skills`; included in `quality`)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
 - `mcp-grafana-token-create`: `just mcp-grafana-token-create [service_account_id] [token_name]` (create a local Grafana service account token for MCP via Grafana API; auto-creates `mcp-local` when id is omitted)
 - `mcp-grafana-token-list`: `just mcp-grafana-token-list [service_account_id]` (list local Grafana service account token metadata via Grafana API; defaults to `mcp-local`)
@@ -87,7 +92,8 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 - Debug information in code: `docs/design/common/error-handling-and-observability.md`
 - Quality gates and PR checks: `docs/QUALITY.md`
 - Security and RLS expectations: `docs/SECURITY.md`
-- Multi-hour execution plans index: `docs/PLANS.md/`
+- Where work is tracked, and its schema and lifecycle: `docs/tasks/README.md`
+- How to write a multi-hour execution plan: `docs/PLANS.md`
 
 ## Documentation DRY Rules
 
@@ -95,10 +101,12 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 - Canonical policy must live in exactly one doc under `docs/`; other docs should link to it.
 - Use command IDs (for example `db-reset`, `lint`) in docs and plans; avoid copying full command strings outside `AGENTS.md` unless a command variant is genuinely different.
 
+## Task Registry
+
+All work — features, bugs, tech debt, chores, ideas, and the reasoning behind decisions — is tracked as one file per unit of work under `docs/tasks/`. Read `docs/tasks/INDEX.md` before starting a task and grep `docs/tasks/` for prior decisions on the subject. Schema and lifecycle are canonical in `docs/tasks/README.md`; the `task-registry` skill carries the workflow.
+
+Tech debt is a task with `kind: debt` and a required `exit` condition. There is no separate debt tracker.
+
 ## ExecPlans
 
-When writing complex features or significant refactors, use an ExecPlan (as described in `docs/PLANS.md`) from design to implementation.
-
-## TechDebt
-
-Track any know and resolved debt in `docs/exec-plans/tech-debt-tracker.md`.
+When writing complex features or significant refactors, use an ExecPlan (as described in `docs/PLANS.md`) from design to implementation. An ExecPlan is not a separate document type: it is a task with `depth: execplan`, living in `docs/tasks/` like everything else.

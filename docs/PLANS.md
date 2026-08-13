@@ -4,13 +4,11 @@ This document describes the requirements for an execution plan ("ExecPlan"), a d
 
 ## Where ExecPlans live
 
-ExecPlans live under `docs/exec-plans/`. Organize them by status using subfolders:
+ExecPlans live in the task registry under `docs/tasks/`, as a task with `depth: execplan`. They are not a separate document type and do not have their own directory: an ExecPlan is simply a task whose body is large enough to owe the full structure this document describes.
 
-- **done** — Plans that are finished. Move a plan here when all milestones are complete and outcomes are documented.
-- **in progress** — Plans currently being worked on. Keep a plan here from first commit until it is done.
-- **todo** — Plans not yet started (backlog, deferred, or future work). Put new or shelved plans here until work begins.
+A plan therefore carries the same YAML front matter as every other task, and its status is the task's `status` field — `open`, `in-progress`, `done`, and so on. Status is never expressed by moving the file between folders. `docs/tasks/INDEX.md` lists every plan with its current status.
 
-When you start working on a plan, move it from `todo/` to `in-progress/`. When you finish, move it from `in-progress/` to `done/`. See `docs/exec-plans/` for existing plans and any plan index referenced in this repo.
+This document remains canonical for **how to write** an ExecPlan body. `docs/tasks/README.md` is canonical for **where work lives**, the front matter schema, and the lifecycle. The registry validator (`tasks-check`) enforces that a task with `depth: execplan` carries the `Purpose / Big Picture`, `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` sections that this document makes non-negotiable.
 
 ## How to use ExecPlans and PLANS.md
 

@@ -15,6 +15,10 @@ function uniq(items) {
   return Array.from(new Set(items)).filter(Boolean);
 }
 
+function isTaskRegistryFile(filePath) {
+  return normalizePath(filePath).startsWith("docs/tasks/");
+}
+
 function isDocFile(filePath) {
   const normalized = normalizePath(filePath);
   return (
@@ -47,6 +51,13 @@ function classifyChangedFiles(changedFiles) {
   );
   const docsOnly = hasFiles && normalizedChangedFiles.every(isDocFile);
 
+  // A change confined to docs/tasks cannot affect any build, type, lint or test surface: the
+  // registry is prose and YAML front matter, and nothing under src, supabase, browserExtension or
+  // scripts reads it at build or test time. The only checks that can genuinely fail on it are the
+  // registry validator and the formatter, so CI runs those and skips the rest. Note this is
+  // strictly narrower than docsOnly, which also covers design docs and skill files.
+  const tasksOnly = hasFiles && normalizedChangedFiles.every(isTaskRegistryFile);
+
   return {
     changedFiles: normalizedChangedFiles,
     dbImpact,
@@ -54,6 +65,7 @@ function classifyChangedFiles(changedFiles) {
     extensionImpact,
     functionsImpact,
     docsOnly,
+    tasksOnly,
   };
 }
 
@@ -169,6 +181,7 @@ function boolLines(impact) {
     `extensionImpact=${impact.extensionImpact}`,
     `functionsImpact=${impact.functionsImpact}`,
     `docsOnly=${impact.docsOnly}`,
+    `tasksOnly=${impact.tasksOnly}`,
   ].join("\n");
 }
 
@@ -222,6 +235,7 @@ module.exports = {
   changedFilesFromRange,
   detectChangeImpact,
   isDocFile,
+  isTaskRegistryFile,
   normalizePath,
   parseArgs,
   parseGitStatusLine,

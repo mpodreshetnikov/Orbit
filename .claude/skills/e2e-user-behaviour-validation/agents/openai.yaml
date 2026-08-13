@@ -1,0 +1,4 @@
+interface:
+  display_name: "E2E User Behaviour Validation"
+  short_description: "Test and verify end-to-end user behaviour when changes affect it (playwright-cli + unit tests)"
+  default_prompt: "Use $e2e-user-behaviour-validation to test and verify this change's end-to-end user behaviour via playwright-cli UI checks and unit tests."

@@ -43,41 +43,15 @@ jobs:
       extension_version_changed: ${{ steps.extension-version-policy.outputs.versionChanged }}
       extension_next_version: ${{ steps.extension-version-policy.outputs.nextVersion }}
     steps:
-      # This job runs the full Supabase stack, a Next production build, the
-      # extension build, Playwright + e2e, and a multi-GB Docker image export on
-      # one standard runner (~14 GB free). It has hit "no space left on device"
-      # exporting images, and `supabase db reset` has failed restarting
-      # containers. Reclaiming the preinstalled toolchains nothing here uses
-      # buys roughly 20-30 GB. `df` is printed so a future disk failure is
-      # diagnosable from the log rather than inferred.
-      - name: Free disk space
-        shell: bash
-        run: |
-          echo "Before:"
-          df -h /
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL || true
-          echo "After:"
-          df -h /
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-      - uses: taiki-e/install-action@just
-      - name: Install dependencies
-        run: npm ci
+      # Impact detection runs before the heavy toolchain setup, so a change confined to the task
+      # registry can skip installing Deno and the Supabase CLI as well as the lanes that need them.
+      # change-impact.cjs uses only Node built-ins and git, so it runs before `npm ci`.
       - name: Detect change impact
         id: impact
         shell: bash
@@ -89,6 +63,7 @@ jobs:
               echo "extensionImpact=true"
               echo "functionsImpact=true"
               echo "docsOnly=false"
+              echo "tasksOnly=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -102,6 +77,38 @@ jobs:
           fi
 
           node scripts/just/change-impact.cjs --from "$FROM" --to "$TO" --format github-output --output-file "$GITHUB_OUTPUT"
+      # This job runs the full Supabase stack, a Next production build, the
+      # extension build, Playwright + e2e, and a multi-GB Docker image export on
+      # one standard runner (~14 GB free). It has hit "no space left on device"
+      # exporting images, and `supabase db reset` has failed restarting
+      # containers. Reclaiming the preinstalled toolchains nothing here uses
+      # buys roughly 20-30 GB. `df` is printed so a future disk failure is
+      # diagnosable from the log rather than inferred.
+      - name: Free disk space
+        if: steps.impact.outputs.tasksOnly != 'true'
+        shell: bash
+        run: |
+          echo "Before:"
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL || true
+          echo "After:"
+          df -h /
+      - uses: denoland/setup-deno@v2
+        if: steps.impact.outputs.tasksOnly != 'true'
+        with:
+          deno-version: v2.x
+      - uses: supabase/setup-cli@v1
+        if: steps.impact.outputs.tasksOnly != 'true'
+        with:
+          version: latest
+      - uses: taiki-e/install-action@just
+      - name: Install dependencies
+        run: npm ci
       - name: Detect extension release policy
         id: extension-version-policy
         shell: bash
@@ -132,7 +139,14 @@ jobs:
         run: |
           echo "Extension release surfaces changed without a browserExtension/manifest.json version bump."
           exit 1
+      # A change confined to docs/tasks gets the registry gate and the formatter only. Nothing under
+      # src, supabase, browserExtension or scripts reads the registry at build or test time, so the
+      # build, e2e and coverage lanes below cannot detect a fault the registry gate misses.
+      - name: Run quality (task registry only)
+        if: steps.impact.outputs.tasksOnly == 'true'
+        run: just quality-tasks
       - name: Run quality (format, lint, typecheck)
+        if: steps.impact.outputs.tasksOnly != 'true'
         run: just quality
       - name: Restore Supabase Docker image cache
         if: steps.impact.outputs.dbImpact == 'true'
@@ -176,7 +190,7 @@ jobs:
           SUPABASE_ALREADY_RUNNING: "1"
         run: node scripts/just/build-local-all.cjs --db-mode=always
       - name: Build (without DB lifecycle)
-        if: steps.impact.outputs.dbImpact != 'true'
+        if: steps.impact.outputs.dbImpact != 'true' && steps.impact.outputs.tasksOnly != 'true'
         run: node scripts/just/build-local-all.cjs --db-mode=skip
       - name: Install Playwright browser
         if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
@@ -227,6 +241,7 @@ jobs:
           path: .cache/docker/supabase-images
           key: ${{ steps.supabase-image-cache.outputs.cache-primary-key }}
       - name: Test and coverage
+        if: steps.impact.outputs.tasksOnly != 'true'
         run: just test-unit-coverage && just coverage-check
 
   extension-release-bundle:

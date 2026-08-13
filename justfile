@@ -120,8 +120,32 @@ quality-typecheck-supabase-functions: quality-check-supabase-functions-lock
 # Run aggregate type checks.
 quality-typecheck: quality-typecheck-web quality-typecheck-supabase-functions
 
-# All static quality checks: format, lint, typecheck (no builds, no DB, no tests).
-quality: quality-format-check quality-lint-parallel quality-typecheck
+# Regenerate the generated task board from the task files under docs/tasks.
+tasks-index:
+  node scripts/just/tasks-index.cjs
+
+# Validate the task registry: front matter schema, ids, required sections, index freshness.
+tasks-check:
+  node scripts/just/tasks-check.cjs
+
+# Mirror .agents/skills into .claude/skills so every client sees the same skills.
+agent-skills-sync:
+  node scripts/just/sync-agent-skills.cjs
+
+# Fail when .claude/skills has drifted from .agents/skills.
+agent-skills-check:
+  node scripts/just/sync-agent-skills.cjs --check
+
+# Static checks for a change confined to the task registry (docs/tasks).
+# Formatting is included because Prettier does format docs/**, so a task file can genuinely fail
+# `quality-format-check` — "run only the registry check" would let a malformed task file through.
+# Everything else in `quality` (lint, typecheck) reads no file under docs/tasks.
+quality-tasks: tasks-check agent-skills-check quality-format-check
+
+# All static quality checks: registry, skill sync, format, lint, typecheck (no builds, DB, tests).
+# The registry and skill checks run first because they finish in milliseconds, so a stale index or a
+# drifted skill mirror is reported before the slow lanes start.
+quality: tasks-check agent-skills-check quality-format-check quality-lint-parallel quality-typecheck
 
 # Run current smoke gate (web production build).
 quality-smoke-build: web-build-production
