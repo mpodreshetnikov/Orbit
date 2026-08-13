@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(7);
+SELECT plan(8);
 
 -- Defect: an uncompilable regex in one rule aborted categorisation for the whole batch, because the
 -- pattern was handed straight to `~` from inside a single CASE expression and the resulting
@@ -10,10 +10,23 @@ SELECT is(
     '{"line_item":{"title":"Latte"}}'::jsonb,
     NULL,
     NULL,
-    '{"field":"line_item_title","operator":"regex","value":"^lat"}'::jsonb
+    '{"field":"line_item_title","operator":"regex","value":"^Lat"}'::jsonb
   ),
   true,
   'a valid regex still matches'
+);
+
+-- The regex operator matches against the raw field value in both engines, so unlike `contains` it
+-- is case-sensitive. Pinned here because it is easy to assume otherwise.
+SELECT is(
+  public.money_evaluate_category_rule_filter(
+    '{"line_item":{"title":"Latte"}}'::jsonb,
+    NULL,
+    NULL,
+    '{"field":"line_item_title","operator":"regex","value":"^lat"}'::jsonb
+  ),
+  false,
+  'the regex operator is case-sensitive'
 );
 
 SELECT is(
