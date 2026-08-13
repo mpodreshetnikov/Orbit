@@ -1,6 +1,9 @@
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
+  buildBalancingLineItem,
   buildLineItemImportHash,
+  hasRealImportLineItems,
+  isSyntheticImportLineItem,
   jsonResponse,
   normalizeLineItems,
   normalizeSourceForTransactions,
@@ -276,8 +279,32 @@ export async function applyBatchAction(
       };
       const tx = await deps.repository.insertOrResolveTransaction(normalized, payerPersonId);
 
+      const lineItems = normalizeLineItems(normalized);
+
+      // Everything that can throw runs before the destructive repair. `buildBalancingLineItem`
+      // throws when the receipt does not match the operation; the repair deletes existing line
+      // items in a separate request with no database transaction around the chain, so an exception
+      // raised after it would leave the transaction with no composition at all — the row handler
+      // would record the error but could not bring the deleted rows back.
+      const balancingLineItem = buildBalancingLineItem(normalized, lineItems);
+
+      let blockedByManualEdit = false;
+      if (!tx.inserted && hasRealImportLineItems(lineItems)) {
+        const repair = await deps.repository.repairExistingTransactionDetails(
+          tx.transactionId,
+          normalized,
+        );
+        blockedByManualEdit = repair.blocked_by_manual_edit === true;
+      }
+
+      if (balancingLineItem) lineItems.push(balancingLineItem);
+
       const txStatus: RowStatus = tx.inserted ? "inserted" : "skipped";
-      const txMessage = tx.inserted ? null : "Duplicate transaction";
+      const txMessage = blockedByManualEdit
+        ? "Existing line items were edited manually"
+        : tx.inserted
+          ? null
+          : "Duplicate transaction";
       if (txStatus === "inserted") insertedCount += 1;
       if (txStatus === "skipped") skippedCount += 1;
 
@@ -294,7 +321,17 @@ export async function applyBatchAction(
         payload: normalized,
       });
 
-      const lineItems = normalizeLineItems(normalized);
+      if (blockedByManualEdit) {
+        rowResults.push({
+          idx: rowIndex,
+          status: txStatus,
+          message: txMessage,
+          transaction_id: tx.transactionId,
+          line_results: [],
+        });
+        continue;
+      }
+
       const lineResults: Array<Record<string, unknown>> = [];
       for (let lineIndex = 0; lineIndex < lineItems.length; lineIndex++) {
         const lineItem = lineItems[lineIndex];
@@ -305,6 +342,7 @@ export async function applyBatchAction(
             lineItem,
             importHash,
             normalized.amount,
+            isSyntheticImportLineItem(lineItem),
           );
           const lineStatus: RowStatus = lineRes.inserted ? "inserted" : "skipped";
           const lineMessage = lineRes.inserted ? null : "Duplicate line item";

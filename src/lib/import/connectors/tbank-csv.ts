@@ -185,6 +185,10 @@ async function parse(file: File): Promise<ImportParseResult> {
           title: merchantName || "T-Bank",
           amount,
           raw_payload: rawPayload,
+          // A statement carries no receipt composition, so this whole-amount row is a placeholder.
+          // Marking it explicitly is what lets a later extension import replace it with the real
+          // receipt instead of adding the receipt lines next to it.
+          is_placeholder: true,
         },
       ],
     });

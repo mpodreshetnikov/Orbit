@@ -174,4 +174,39 @@ describe("tbank-csv connector", () => {
     expect(result.transactions[1].line_items[0].title).toBe("T-Bank");
     expect(result.transactions[0].dedupe_hash).toEqual(expect.any(String));
   });
+
+  it("marks the whole-amount statement line as a placeholder", async () => {
+    const header = [
+      COL.DATE_OP,
+      COL.DATE_PAY,
+      COL.CARD,
+      COL.STATUS,
+      COL.AMOUNT_OP,
+      COL.CURRENCY_OP,
+      COL.CATEGORY,
+      COL.MCC,
+      COL.DESCRIPTION,
+    ].join(";");
+    const row = [
+      "01.02.2026 12:30:00",
+      "01.02.2026",
+      "**** 1234",
+      "OK",
+      "-120,50",
+      "RUB",
+      "Food",
+      "5812",
+      "Coffee",
+    ].join(";");
+
+    const file = new File([`${header}\n${row}\n`], "sample.csv", { type: "text/csv" });
+    const result = await tbankConnector.parse(file);
+
+    // A statement carries no receipt composition, so every line the CSV produces is a stand-in.
+    // The flag is what lets a later extension import replace it instead of adding lines beside it.
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0].line_items).toHaveLength(1);
+    expect(result.transactions[0].line_items[0].is_placeholder).toBe(true);
+    expect(result.transactions[0].line_items[0].amount).toBe(result.transactions[0].amount);
+  });
 });

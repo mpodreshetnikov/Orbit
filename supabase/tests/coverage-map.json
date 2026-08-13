@@ -89,6 +89,9 @@
     "supabase/db/functions/money_get_category_rule_debug.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
     ],
+    "supabase/db/functions/money_list_line_item_discrepancies.sql": [
+      "supabase/tests/functions/money_line_item_discrepancies_test.sql"
+    ],
     "supabase/db/functions/money_list_transactions_feed.sql": [
       "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
     ],

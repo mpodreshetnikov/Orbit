@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../_shared/database.types.ts";
 import {
+  BALANCING_LINE_ITEM_SOURCE,
   buildTransactionInsertPayload,
   extractAccountHintFromRow,
   hasOnlySyntheticImportLineItems,
@@ -86,6 +87,7 @@ export interface MoneyImportRepository {
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }>;
   insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
@@ -96,6 +98,7 @@ export interface MoneyImportRepository {
     lineItem: ImportLineItemInput,
     importHash: string,
     fallbackAmount: number,
+    isPlaceholder?: boolean,
   ): Promise<{ lineItemId: string | null; inserted: boolean }>;
   insertReportRow(payload: Record<string, unknown>): Promise<string>;
   listReportRowsByBatch(batchId: string): Promise<Record<string, unknown>[]>;
@@ -554,7 +557,9 @@ export function createSupabaseMoneyImportRepository(
     if (transactionIds.length === 0) return [];
     const { data, error } = await getAdminClient()
       .from("money_line_items")
-      .select("transaction_id, raw_payload")
+      .select(
+        "id, transaction_id, raw_payload, is_placeholder, category_locked_by_user, assignment_method",
+      )
       .in("transaction_id", transactionIds);
     if (error || !data) return [];
     return data as Array<Record<string, unknown>>;
@@ -635,6 +640,7 @@ export function createSupabaseMoneyImportRepository(
           row.raw_payload && typeof row.raw_payload === "object"
             ? (row.raw_payload as Record<string, unknown>)
             : null,
+        is_placeholder: row.is_placeholder === true,
       });
       lineItemsByTransactionId.set(transactionId, existing);
     }
@@ -1401,6 +1407,7 @@ export function createSupabaseMoneyImportRepository(
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }> {
     const existingLineItems = await listLineItemsByTransactionIds([transactionId]);
     const normalizedLineItems = existingLineItems.map((lineItem) => ({
@@ -1408,15 +1415,56 @@ export function createSupabaseMoneyImportRepository(
         lineItem.raw_payload && typeof lineItem.raw_payload === "object"
           ? (lineItem.raw_payload as Record<string, unknown>)
           : null,
+      is_placeholder: lineItem.is_placeholder === true,
     }));
     const hasOnlySyntheticLineItems = hasOnlySyntheticImportLineItems(normalizedLineItems);
     const hasRealLineItems = hasRealImportLineItems(normalizedLineItems);
 
-    if (hasOnlySyntheticLineItems) {
+    // A line item a human touched is never replaced by an import. The caller reports the row as
+    // skipped, so nothing about this transaction is applied — not the line items, not the header.
+    const blockedByManualEdit = existingLineItems.some(
+      (lineItem) =>
+        lineItem.category_locked_by_user === true ||
+        normalizeText(lineItem.assignment_method) === "manual",
+    );
+    if (blockedByManualEdit) {
+      return {
+        replaced_synthetic_line_items: false,
+        has_only_synthetic_line_items: hasOnlySyntheticLineItems,
+        has_real_line_items: hasRealLineItems,
+        blocked_by_manual_edit: true,
+      };
+    }
+
+    // Placeholders are removed unconditionally, not only when every line item is a placeholder.
+    // A transaction already damaged by the missing repair call carries a placeholder *next to* the
+    // real receipt lines, so the old "all line items are placeholders" condition was false for it
+    // and the placeholder would have stayed forever.
+    //
+    // Balancing lines are removed with them: they are derived from the previous receipt, and a
+    // changed receipt must not accumulate stale difference rows.
+    const replaceableIds = existingLineItems
+      .filter((lineItem) => {
+        const rawPayload =
+          lineItem.raw_payload && typeof lineItem.raw_payload === "object"
+            ? (lineItem.raw_payload as Record<string, unknown>)
+            : null;
+        const rawSource = normalizeText(rawPayload?.source)?.toLowerCase();
+        return (
+          lineItem.is_placeholder === true ||
+          rawSource === "fallback" ||
+          rawSource === "dom_fallback" ||
+          rawSource === BALANCING_LINE_ITEM_SOURCE
+        );
+      })
+      .map((lineItem) => normalizeText(lineItem.id))
+      .filter((value): value is string => Boolean(value));
+
+    if (replaceableIds.length > 0) {
       const { error: deleteError } = await getAdminClient()
         .from("money_line_items")
         .delete()
-        .eq("transaction_id", transactionId);
+        .in("id", replaceableIds);
       if (deleteError) {
         throw new Error(deleteError.message || "Failed to replace synthetic line items");
       }
@@ -1435,9 +1483,10 @@ export function createSupabaseMoneyImportRepository(
     }
 
     return {
-      replaced_synthetic_line_items: hasOnlySyntheticLineItems,
+      replaced_synthetic_line_items: replaceableIds.length > 0,
       has_only_synthetic_line_items: hasOnlySyntheticLineItems,
       has_real_line_items: hasRealLineItems,
+      blocked_by_manual_edit: false,
     };
   }
 
@@ -1488,6 +1537,7 @@ export function createSupabaseMoneyImportRepository(
     lineItem: ImportLineItemInput,
     importHash: string,
     fallbackAmount: number,
+    isPlaceholder = false,
   ): Promise<{ lineItemId: string | null; inserted: boolean }> {
     const payload = {
       transaction_id: transactionId,
@@ -1499,6 +1549,7 @@ export function createSupabaseMoneyImportRepository(
       assignment_method: "import" as const,
       raw_payload: asRecord(lineItem.raw_payload),
       import_hash: importHash,
+      is_placeholder: isPlaceholder,
     };
 
     const { data, error } = await getAdminClient()

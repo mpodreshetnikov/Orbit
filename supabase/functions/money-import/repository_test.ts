@@ -1872,3 +1872,128 @@ Deno.test(
     assertEquals(resolution, null);
   },
 );
+
+function createRepairRepository(existingLineItems: Array<Record<string, unknown>>): {
+  repository: MoneyImportRepository;
+  deletedIdBatches: string[][];
+  transactionUpdates: () => number;
+} {
+  const deletedIdBatches: string[][] = [];
+  let transactionUpdates = 0;
+
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table === "money_line_items") {
+          return {
+            select: () => ({
+              in: async () => ({ data: existingLineItems, error: null }),
+            }),
+            delete: () => ({
+              in: async (_column: string, values: string[]) => {
+                deletedIdBatches.push(values);
+                return { error: null };
+              },
+            }),
+          };
+        }
+        if (table === "money_transactions") {
+          return {
+            update: () => ({
+              eq: async () => {
+                transactionUpdates += 1;
+                return { error: null };
+              },
+            }),
+          };
+        }
+        throw new Error(`Unexpected table ${table}`);
+      },
+    },
+  });
+
+  return { repository, deletedIdBatches, transactionUpdates: () => transactionUpdates };
+}
+
+const repairRow: CanonicalTransactionRowInput = {
+  posted_at: "2026-03-05T10:00:00.000Z",
+  amount: -1000,
+  transaction_type: "expense",
+};
+
+Deno.test(
+  "repairExistingTransactionDetails removes a placeholder sitting next to real lines",
+  async () => {
+    // This is the shape left behind by the missing repair call: a placeholder and the real receipt
+    // lines side by side. The old "all line items are placeholders" condition was false here, so the
+    // placeholder survived forever and the amount was counted twice.
+    const { repository, deletedIdBatches } = createRepairRepository([
+      { id: "line-placeholder", raw_payload: null, is_placeholder: true },
+      { id: "line-real-1", raw_payload: { source: "receipt" } },
+      { id: "line-real-2", raw_payload: { source: "receipt" } },
+    ]);
+
+    const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+    assertEquals(result.blocked_by_manual_edit, false);
+    assertEquals(result.replaced_synthetic_line_items, true);
+    assertEquals(deletedIdBatches, [["line-placeholder"]]);
+  },
+);
+
+Deno.test("repairExistingTransactionDetails removes fallback and balancing lines", async () => {
+  const { repository, deletedIdBatches } = createRepairRepository([
+    { id: "line-fallback", raw_payload: { source: "fallback" } },
+    { id: "line-dom", raw_payload: { source: "dom_fallback" } },
+    { id: "line-balancing", raw_payload: { source: "balancing", delta: 60 } },
+    { id: "line-real", raw_payload: { source: "receipt" } },
+  ]);
+
+  await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+  assertEquals(deletedIdBatches, [["line-fallback", "line-dom", "line-balancing"]]);
+});
+
+Deno.test(
+  "repairExistingTransactionDetails refuses to touch manually edited line items",
+  async () => {
+    const { repository, deletedIdBatches } = createRepairRepository([
+      { id: "line-locked", raw_payload: null, is_placeholder: true, category_locked_by_user: true },
+      { id: "line-real", raw_payload: { source: "receipt" } },
+    ]);
+
+    const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+    assertEquals(result.blocked_by_manual_edit, true);
+    assertEquals(result.replaced_synthetic_line_items, false);
+    assertEquals(deletedIdBatches, []);
+  },
+);
+
+Deno.test("repairExistingTransactionDetails treats a manual assignment as an edit", async () => {
+  const { repository, deletedIdBatches } = createRepairRepository([
+    { id: "line-manual", raw_payload: { source: "fallback" }, assignment_method: "manual" },
+  ]);
+
+  const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+  assertEquals(result.blocked_by_manual_edit, true);
+  assertEquals(deletedIdBatches, []);
+});
+
+Deno.test(
+  "repairExistingTransactionDetails deletes nothing when there is nothing to replace",
+  async () => {
+    const { repository, deletedIdBatches, transactionUpdates } = createRepairRepository([
+      { id: "line-real", raw_payload: { source: "receipt" } },
+    ]);
+
+    const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+    assertEquals(result.replaced_synthetic_line_items, false);
+    assertEquals(result.has_real_line_items, true);
+    assertEquals(deletedIdBatches, []);
+    // The transaction header is still refreshed even when no line item had to be replaced.
+    assertEquals(transactionUpdates(), 1);
+  },
+);

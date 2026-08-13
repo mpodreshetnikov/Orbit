@@ -49,6 +49,11 @@ export interface ImportLineItem {
   quantity?: number | null;
   unit?: string | null;
   raw_payload?: Record<string, unknown> | null;
+  /**
+   * True when the line item is a whole-amount stand-in created because no receipt composition was
+   * available. A later import replaces it with the real receipt instead of adding lines next to it.
+   */
+  is_placeholder?: boolean;
 }
 
 export interface ImportSourceCategory {

@@ -131,6 +131,7 @@ function createRepositoryMock(
         replaced_synthetic_line_items: transactionId === "tx-synth",
         has_only_synthetic_line_items: transactionId === "tx-synth",
         has_real_line_items: transactionId !== "tx-synth",
+        blocked_by_manual_edit: false,
       };
     },
     insertLineItemIfNew: async (_transactionId, lineItem) => {
