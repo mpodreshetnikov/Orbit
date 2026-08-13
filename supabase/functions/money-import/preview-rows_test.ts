@@ -75,8 +75,15 @@ function createRepositoryMock(
     },
     getImportBatch: async (batchId) =>
       state.batch && state.batch.id === batchId ? state.batch : null,
-    getImportBatchForUser: async (batchId) =>
-      state.batch && state.batch.id === batchId ? state.batch : null,
+    // Models the real repository: a batch with an owner is invisible to anyone else, while an
+    // ownerless batch (a file import predating the column) stays reachable.
+    getImportBatchForUser: async (batchId, userId) => {
+      const batch = state.batch && state.batch.id === batchId ? state.batch : null;
+      if (!batch) return null;
+      const owner = batch.created_by_auth_user_id;
+      if (typeof owner === "string" && owner.length > 0 && owner !== userId) return null;
+      return batch;
+    },
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
       if (state.batch && state.batch.id === batchId) {
@@ -456,4 +463,41 @@ Deno.test("previewRowsAction keeps clearing on chunk zero when no attempt id is 
   await assertJsonResponse(await previewRowsAction(chunkBody(), userAuth, { repository }), 200);
   await assertJsonResponse(await previewRowsAction(chunkBody(), userAuth, { repository }), 200);
   assertEquals(state.deletedReportRowsCount, 2);
+});
+
+Deno.test("previewRowsAction refuses an existing batch that belongs to another user", async () => {
+  // preview_rows accepts ordinary user authentication and takes batch_id straight from the body, so
+  // without this check another allowed user could name a visible batch and have its parsed rows,
+  // brand resolutions and counters cleared.
+  const { repository, state } = createRepositoryMock({
+    batch: {
+      id: "batch-1",
+      status: "running",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      meta: null,
+      created_by_auth_user_id: "someone-else",
+    },
+  });
+
+  const payload = await assertJsonResponse<{ error: string }>(
+    await previewRowsAction(
+      {
+        payer_person_id: "person-1",
+        source: "tbank_web",
+        import_type: "file",
+        batch_id: "batch-1",
+        rows: [txRow({ external_id: "ok-1" })],
+      },
+      userAuth,
+      { repository },
+    ),
+    404,
+  );
+
+  assertEquals(payload.error, "Batch not found");
+  assertEquals(state.deletedReportRowsCount, 0);
+  assertEquals(state.reportRows.length, 0);
 });

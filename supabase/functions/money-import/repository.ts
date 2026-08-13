@@ -630,11 +630,17 @@ export function createSupabaseMoneyImportRepository(
     const postedAtMs = new Date(postedAtIso).getTime();
     const windowMs = ADOPTION_WINDOW_HOURS * 60 * 60 * 1000;
 
+    // Restricted to the same source, so a manually entered transaction is never adopted. A manual
+    // row also has no external_id, sits on the same account and can easily carry the same amount on
+    // the same day, and adoption overwrites the transaction's fields and identity — merging a
+    // hand-entered operation into a bank one would be unrecoverable.
     const { data, error } = await getAdminClient()
       .from("money_transactions")
       .select("id, posted_at, amount")
       .eq("payer_person_id", payerPersonId)
       .eq("account_id", accountId)
+      // Compared raw, exactly as findExistingTransactionId does and as the insert payload stores it.
+      .eq("source", row.source ?? "manual")
       .is("external_id", null)
       .gte("posted_at", new Date(postedAtMs - windowMs).toISOString())
       .lte("posted_at", new Date(postedAtMs + windowMs).toISOString());

@@ -2282,3 +2282,16 @@ Deno.test(
     assertEquals(insertCalls, 1);
   },
 );
+
+Deno.test("findAdoptableTransactionId never adopts a transaction from another source", async () => {
+  // A manually entered transaction also has no external id, sits on the same account and can carry
+  // the same amount on the same day. Adoption overwrites the transaction's fields and identity, so
+  // merging a hand-entered operation into a bank one would be unrecoverable.
+  const { repository, queries } = createAdoptionRepository([
+    { id: "tx-manual", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+  ]);
+
+  await repository.findAdoptableTransactionId(adoptionRow, "person-1");
+
+  assertEquals((queries.at(-1) ?? {})["eq:source"], "tbank");
+});

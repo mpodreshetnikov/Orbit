@@ -1949,10 +1949,10 @@ CREATE INDEX "idx_money_transactions_card_id" ON "public"."money_transactions" U
 
 
 --
--- Name: idx_money_transactions_dedupe_hash; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_money_transactions_adoption_candidates; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX "idx_money_transactions_dedupe_hash" ON "public"."money_transactions" USING "btree" ("dedupe_hash");
+CREATE INDEX "idx_money_transactions_adoption_candidates" ON "public"."money_transactions" USING "btree" ("payer_person_id", "account_id", "posted_at") WHERE ("external_id" IS NULL);
 
 
 --
@@ -1984,10 +1984,17 @@ CREATE INDEX "idx_money_transactions_posted_at" ON "public"."money_transactions"
 
 
 --
--- Name: idx_money_transactions_source_external_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_money_transactions_person_dedupe_hash; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX "idx_money_transactions_source_external_id" ON "public"."money_transactions" USING "btree" ("source", "external_id") WHERE ("external_id" IS NOT NULL);
+CREATE UNIQUE INDEX "idx_money_transactions_person_dedupe_hash" ON "public"."money_transactions" USING "btree" ("payer_person_id", "dedupe_hash") WHERE ("dedupe_hash" IS NOT NULL);
+
+
+--
+-- Name: idx_money_transactions_person_source_external_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_transactions_person_source_external_id" ON "public"."money_transactions" USING "btree" ("payer_person_id", "source", "external_id") WHERE ("external_id" IS NOT NULL);
 
 
 --

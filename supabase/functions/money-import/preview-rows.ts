@@ -247,7 +247,14 @@ export async function previewRowsAction(
     }
   }
 
-  const batchBefore = await deps.repository.getImportBatch(batchId);
+  // The batch id can come straight from the request body, and this action accepts ordinary user
+  // authentication — so without an ownership check another allowed user could name someone else's
+  // batch and have its report rows, brand resolutions, counters and meta cleared. Same rule as
+  // apply, discard, remap and brand resolution; an ownerless batch stays reachable, as there.
+  const batchOwnerUserId = resolveBatchOwnerUserId(auth);
+  const batchBefore = batchOwnerUserId
+    ? await deps.repository.getImportBatchForUser(batchId, batchOwnerUserId)
+    : await deps.repository.getImportBatch(batchId);
   if (!batchBefore) {
     await actionSpan?.end({
       status: "error",
