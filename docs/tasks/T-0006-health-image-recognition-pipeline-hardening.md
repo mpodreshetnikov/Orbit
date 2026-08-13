@@ -1,12 +1,12 @@
 ---
 id: T-0006
 title: Fix and harden the medical image recognition pipeline
-status: in-progress
+status: open
 kind: bug
 priority: p1
 depth: execplan
 created: 2026-08-03
-updated: 2026-08-03
+updated: 2026-08-13
 owner: TBD
 tags: [health, extraction, ocr]
 ---
@@ -38,10 +38,13 @@ After this work, a user can photograph a two-page blood panel, review the extrac
 - [x] (2026-08-02) Milestone 4 — `_shared/llm-retry.ts` with backoff, jitter, `Retry-After`, truncation-as-retryable, non-retryable 4xx; `provider.require_parameters` and a `models` fallback array.
 - [x] (2026-08-03) Anchor grounding corrected to compare tokens rather than characters, after a test-quality audit found it silently dropping correctly-extracted values (see `Surprises & Discoveries` and `Decision Log`).
 - [x] (2026-08-03) `health-ocr` brought up to the transport and prompt standard of `health-structure`: retry with backoff, strict `json_schema` with `provider.require_parameters`, fenced-JSON recovery, array-content handling, truncation detection, and a transcription prompt that forbids the "helpful" rewriting that changes lab values. `parseJsonObject`/`extractContentText` moved to `_shared/llm-json.ts` so both functions share one implementation. This is the client-level half of Milestone 7; the queue and image preprocessing remain.
-- [ ] Milestone 5 — Record token usage and give structuring failures a durable error. (completed: per-record token usage is logged from the staged pipeline; remaining: the `structure_error` column and its UI surface.)
-- [ ] Milestone 6 — Fix the pre-review chart writes, the resolved-finding sentinel, and the missing idempotency guard.
-- [ ] Milestone 7 — Move OCR off the synchronous request path and preprocess images.
-- [ ] Milestone 8 — Build a scored extraction regression corpus and wire it into the quality gate.
+- [x] (2026-08-10) Milestone 8 — Scored extraction regression corpus shipped as `scripts/extraction-eval/` behind `just test-extraction`, registered in `AGENTS.md`, with three hand-checked Russian cases under `test/fixtures/extraction/cases/` and cassette replay for free offline runs. The D1 regression test landed alongside it (`stages/stages_test.ts`, "extract stage sends the catalogue codes, not a count"). Two deliberate reductions against this plan's scope, recorded in the `Decision Log`: the corpus is three cases rather than twenty to fifty, and the runner is a manual `workflow_dispatch` (`.github/workflows/extraction-eval.yml`) rather than a per-pull-request gate with a floor wired into `coverage-check`. The corpus immediately found fifteen extraction defects, which were handed off as [`T-0005`](./T-0005-health-extraction-defects-from-corpus.md).
+- [ ] Milestone 5 — Record token usage and give structuring failures a durable error. Three distinct pieces remain, and an earlier version of this line described the milestone as all but finished, which it is not. Re-verified 2026-08-13:
+  - Structuring-side token usage is **partly** done. `health-structure/deps.ts` emits a standalone `health_structure_stage_usage` log line carrying `prompt_tokens` and `completion_tokens`. The milestone asks for these as attributes on the existing `edge.health_structure.parse_llm` span (`service.ts:275`), which is a different thing: a loose log line is not correlated to the record's trace, so per-record cost cannot actually be read off it the way `money-categorize` allows. Moving it onto the span is what closes this.
+  - OCR-side token usage is **not started**. `grep -rn "usage\|prompt_tokens\|completion_tokens" supabase/functions/health-ocr/*.ts` returns nothing outside tests — `health-ocr` never reads provider usage at all. The `edge.health_ocr.page` span exists (`service.ts:149`) and carries no token attributes. Since OCR runs once per attachment and structuring once per record, this is the larger half of the per-record cost on a multi-page document, so skipping it would leave the milestone's stated outcome — cost visibility per record — unmet.
+  - The `structure_error` column and its UI surface are **not started**. `grep -rn "structure_error" supabase/ src/` returns nothing.
+- [ ] Milestone 6 — Fix the pre-review chart writes, the resolved-finding sentinel, and the missing idempotency guard. (Not started. Re-verified 2026-08-13: `service.ts:362` still calls `processExtractedConditions` during extraction, `resolution.ts:186-187` still writes the `size_mm: 0, count: 0` sentinel that `repository.ts:197` reads back, and no `resolution_status` or `processing_run_id` column exists in `supabase/migrations/`.)
+- [ ] Milestone 7 — Move OCR off the synchronous request path and preprocess images. (Not started. Re-verified 2026-08-13: `health-ocr/service.ts` has no downscale, greyscale or contrast step, the attachment loop is still sequential, and `use-background-ocr.ts:25` still carries the 120-second client `AbortController`.)
 
 ## Surprises & Discoveries
 
@@ -138,6 +141,18 @@ After this work, a user can photograph a two-page blood panel, review the extrac
   Rationale: Truncation was previously undetected — `finish_reason` was never read, so a page that overran `max_tokens: 12000` returned its opening as though it were the whole document, and structuring then extracted from a document missing its tail. Detection alone is not enough, because the obvious response makes things worse: `service.ts:186-201` catches a per-page OCR error and substitutes `""`, so throwing on truncation would discard the entire page instead of its tail. Retrying doubles the completion budget, which fixes the ordinary case; when even that fails, the text read so far is returned with `truncated: true` and logged. A partly-read page still yields real values, and a dropped one yields none.
   Date/Author: 2026-08-03, implementation.
 
+- Decision: Ship Milestone 8 as three hand-checked cases with a manual workflow, rather than twenty to fifty documents behind a CI floor.
+  Rationale: The milestone's purpose is to turn "extraction got worse" into a number, and three adversarial Russian cases — a biochemistry and lipid panel, a renal ultrasound, and a three-specimen histopathology report — already produced fifteen distinct, reproducible defects. Corpus authorship is the expensive part and it does not have to be finished before the harness starts paying. The CI floor was deliberately left off for a reason the corpus itself established: five live runs of one case disagreed on four of five dimensions, so a threshold on a single run would fail builds on resampling noise rather than on regressions. A gate needs the repeat-run support that `T-0005` Milestone 2 adds, so gating waits for it. `AGENTS.md` states plainly that the command does not gate CI, so the reduced scope is visible rather than implied.
+  Date/Author: 2026-08-10, Milestone 8 implementation. Recorded here 2026-08-13 while reconciling the registry against the tree.
+
+- Decision: Hand the corpus's findings to a successor task rather than extending this plan.
+  Rationale: Milestone 8 exists to find defects, and it found fifteen — all in extraction quality, all sharing one verification surface (`just test-extraction` and the corpus), none of them the transport, persistence and lifecycle defects this plan was written around. Folding them in would have grown a plan that is already seventeen defects across nine milestones and would have mixed two different kinds of work under one acceptance story. They became [`T-0005`](./T-0005-health-extraction-defects-from-corpus.md).
+  Date/Author: 2026-08-10, Milestone 8 handoff. Recorded here 2026-08-13.
+
+- Decision: Release this task from `in-progress` back to `open` rather than holding the claim.
+  Rationale: Milestone 8 was the last piece anyone worked; it landed 2026-08-10. Milestones 6 and 7 have not been touched since 2026-08-03, Milestone 5 has been half-done for the same span, and `owner` is `TBD`. An `in-progress` task nobody is working misreports the board to the next agent, which is the one thing the registry exists to prevent. The `Progress` section now splits what shipped from what remains, so the task can be picked up from the file alone.
+  Date/Author: 2026-08-13, registry reconciliation.
+
 - Decision: Refer to commands by their `AGENTS.md` command ID, showing the concrete command line alongside each ID once.
   Rationale: `AGENTS.md:91-95` asks docs and plans to use IDs so they survive changes to command implementations, while `docs/PLANS.md` requires this plan to be followable by someone holding only the working tree and this file. Pure IDs would satisfy the first and break the second. Showing `id -> command` once satisfies both, and names `AGENTS.md` as the tiebreaker if they drift. Raised in review of this plan.
   Date/Author: 2026-08-02, plan review.
@@ -151,6 +166,16 @@ Two defects turned out to be worse in combination than either was alone, which o
 Three deviations from the plan as written, each recorded in the `Decision Log`: trigram matching runs in TypeScript rather than via `pg_trgm`; validation is plain TypeScript rather than Zod; and the `record_extraction_issues` table is deferred, with rejections reported through telemetry in the interim.
 
 What remains is the work that needs a database or changes the client contract — the `structure_error` column, the chart-write reordering and idempotency lease, the queued OCR path with image preprocessing, and the scored regression corpus. Milestone 8 in particular is the one that turns all of this from "should be better" into a number, and none of the preceding milestones can be called verified without it.
+
+**2026-08-10 — Milestone 8 landed, and it immediately did its job.** `scripts/extraction-eval/` runs the real pipeline against hand-checked documents and scores the result; `just test-extraction` replays committed cassettes so the default run is free, offline and deterministic. Three cases shipped rather than the twenty to fifty this plan asked for, and the runner is manual rather than a CI gate — both reductions are argued in the `Decision Log`.
+
+The milestone's own claim, that none of the preceding milestones could be called verified without it, turned out to be exactly right, and not in the comfortable direction. The corpus found fifteen defects in the work Milestones 0 through 4 had already shipped. The sharpest: a vitamin B12 result printed `704 пг/мл` was being stored as `704 pmol/L` — 35% high, wearing a unit it had never been converted into — because every `accepted_units` key in the catalogue is Latin and no Russian document can match one. Unit conversion, in other words, had never fired on any real document this application processes, silently, in the direction that inflates a clinical value. Milestone 2's grounding work was correct and the deterministic resolver was correct; the data they were keyed against could not be reached. That is a class of defect no amount of unit testing surfaces and no reviewer had caught across two rounds of review.
+
+It also found that the harness had shipped the same bug three times: a field threaded from the pipeline into every `expected.json` and then compared by nothing — `findings_to_resolve`, then every finding field, then every condition field. All three were found by an outside reviewer rather than by the suite.
+
+Those fifteen defects are [`T-0005`](./T-0005-health-extraction-defects-from-corpus.md), which as of 2026-08-13 has all six of its milestones implemented and awaiting merge.
+
+**2026-08-13 — Released to `open`.** Milestones 6 and 7 have not been touched since 2026-08-03 and Milestone 5 remains half-done; the file now records what was re-verified against the tree on that date, with the greps that established it, so the remainder can be claimed without re-deriving state. The pipeline defects still outstanding are the ones with a data-integrity edge — conditions still reach the patient's chart before any human reviews them (D10), and the resolved-finding sentinel still collides with real zero values (D11) — so the priority stays `p1`.
 
 ## Context and Orientation
 
