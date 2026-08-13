@@ -74,6 +74,16 @@ function createRepositoryMock(
             error_count: 0,
           }
         : options.batchBefore,
+    getImportBatchForUser: async () =>
+      options.batchBefore === undefined
+        ? {
+            id: "batch-1",
+            parsed_transactions_count: 0,
+            inserted_count: 0,
+            skipped_count: 0,
+            error_count: 0,
+          }
+        : options.batchBefore,
     updateImportBatch: async (batchId, patch) => {
       if (options.updateBatchError) throw new Error(options.updateBatchError);
       state.batchUpdates.push({ batchId, patch });

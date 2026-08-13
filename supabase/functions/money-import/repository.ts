@@ -39,6 +39,7 @@ export interface MoneyImportRepository {
   updateImportSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   createImportBatch(payload: Record<string, unknown>): Promise<string>;
   getImportBatch(batchId: string): Promise<Record<string, unknown> | null>;
+  getImportBatchForUser(batchId: string, userId: string): Promise<Record<string, unknown> | null>;
   updateImportBatch(batchId: string, patch: Record<string, unknown>): Promise<void>;
   resolveAccountIdForRow(
     payerPersonId: string,
@@ -458,6 +459,26 @@ export function createSupabaseMoneyImportRepository(
 
     if (error || !data) return null;
     return data as Record<string, unknown>;
+  }
+
+  /**
+   * Loads a batch only if it belongs to the calling user.
+   *
+   * RLS in this project is allowlist-only, and these actions run under the service-role key, so
+   * ownership can be enforced nowhere but here. A batch created before the column existed and
+   * without a session carries no owner; it stays reachable by any allowed user, because refusing it
+   * would strand file imports that predate this change.
+   */
+  async function getImportBatchForUser(
+    batchId: string,
+    userId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const batch = await getImportBatch(batchId);
+    if (!batch) return null;
+
+    const owner = normalizeText(batch.created_by_auth_user_id);
+    if (owner && owner !== userId) return null;
+    return batch;
   }
 
   async function updateImportBatch(batchId: string, patch: Record<string, unknown>): Promise<void> {
@@ -1661,6 +1682,7 @@ export function createSupabaseMoneyImportRepository(
     updateImportSession,
     createImportBatch,
     getImportBatch,
+    getImportBatchForUser,
     updateImportBatch,
     resolveAccountIdForRow,
     resolveCardIdForRow,

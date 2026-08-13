@@ -75,6 +75,8 @@ function createRepositoryMock(
     },
     getImportBatch: async (batchId) =>
       state.batch && state.batch.id === batchId ? state.batch : null,
+    getImportBatchForUser: async (batchId) =>
+      state.batch && state.batch.id === batchId ? state.batch : null,
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
       if (state.batch && state.batch.id === batchId) {
@@ -362,3 +364,95 @@ Deno.test(
     assertEquals(state.session?.status, "running");
   },
 );
+
+Deno.test("previewRowsAction clears parsed rows once per preview attempt", async () => {
+  const { repository, state } = createRepositoryMock({ batch: null });
+
+  const previewAttemptId = "attempt-1";
+  const chunkBody = (chunkIndex: number, externalId: string) => ({
+    payer_person_id: "person-1",
+    source: "tbank_web",
+    import_type: "web_export",
+    batch_id: state.batch?.id ?? null,
+    chunk_index: chunkIndex,
+    chunk_count: 2,
+    row_offset: chunkIndex,
+    is_final_chunk: false,
+    total_row_count: 2,
+    preview_attempt_id: previewAttemptId,
+    rows: [txRow({ external_id: externalId })],
+  });
+
+  await assertJsonResponse(
+    await previewRowsAction(chunkBody(0, "chunk-0"), userAuth, { repository }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+
+  await assertJsonResponse(
+    await previewRowsAction(chunkBody(1, "chunk-1"), userAuth, { repository }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+
+  // Repeating chunk 0 within the same attempt — a retry, or a restarted background script — must
+  // not throw away what chunk 1 already delivered.
+  await assertJsonResponse(
+    await previewRowsAction(chunkBody(0, "chunk-0"), userAuth, { repository }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+});
+
+Deno.test("previewRowsAction clears parsed rows again for a new preview attempt", async () => {
+  const { repository, state } = createRepositoryMock({ batch: null });
+
+  const chunkBody = (previewAttemptId: string) => ({
+    payer_person_id: "person-1",
+    source: "tbank_web",
+    import_type: "web_export",
+    batch_id: state.batch?.id ?? null,
+    chunk_index: 0,
+    chunk_count: 2,
+    row_offset: 0,
+    is_final_chunk: false,
+    total_row_count: 2,
+    preview_attempt_id: previewAttemptId,
+    rows: [txRow({ external_id: "chunk-0" })],
+  });
+
+  await assertJsonResponse(
+    await previewRowsAction(chunkBody("attempt-1"), userAuth, { repository }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+
+  // A genuinely new run starts from scratch, which is what the clear exists for.
+  await assertJsonResponse(
+    await previewRowsAction(chunkBody("attempt-2"), userAuth, { repository }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 2);
+});
+
+Deno.test("previewRowsAction keeps clearing on chunk zero when no attempt id is sent", async () => {
+  // An older extension build sends no attempt id at all; behaviour there must not change.
+  const { repository, state } = createRepositoryMock({ batch: null });
+
+  const chunkBody = () => ({
+    payer_person_id: "person-1",
+    source: "tbank_web",
+    import_type: "web_export",
+    batch_id: state.batch?.id ?? null,
+    chunk_index: 0,
+    chunk_count: 2,
+    row_offset: 0,
+    is_final_chunk: false,
+    total_row_count: 2,
+    rows: [txRow({ external_id: "chunk-0" })],
+  });
+
+  await assertJsonResponse(await previewRowsAction(chunkBody(), userAuth, { repository }), 200);
+  await assertJsonResponse(await previewRowsAction(chunkBody(), userAuth, { repository }), 200);
+  assertEquals(state.deletedReportRowsCount, 2);
+});

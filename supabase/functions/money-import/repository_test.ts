@@ -1997,3 +1997,53 @@ Deno.test(
     assertEquals(transactionUpdates(), 1);
   },
 );
+
+Deno.test("getImportBatchForUser hides a batch owned by another user", async () => {
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        assertEquals(table, "money_import_batches");
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { id: "batch-1", created_by_auth_user_id: "user-other" },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      },
+    },
+  });
+
+  assertEquals(await repository.getImportBatchForUser("batch-1", "user-1"), null);
+  assertEquals((await repository.getImportBatchForUser("batch-1", "user-other"))?.id, "batch-1");
+});
+
+Deno.test(
+  "getImportBatchForUser still returns a batch that predates the owner column",
+  async () => {
+    // File imports created before the column existed carry no owner. Refusing them would strand
+    // batches that are otherwise perfectly usable, and every allowed user already sees the data.
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { id: "batch-legacy", created_by_auth_user_id: null },
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      },
+    });
+
+    assertEquals(
+      (await repository.getImportBatchForUser("batch-legacy", "user-1"))?.id,
+      "batch-legacy",
+    );
+  },
+);

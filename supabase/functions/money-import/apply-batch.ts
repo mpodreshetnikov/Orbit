@@ -72,7 +72,10 @@ export async function applyBatchAction(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const batch = await deps.repository.getImportBatch(batchId);
+  // Ownership can only be enforced here: RLS in this project is allowlist-only and this action
+  // runs under the service-role key. An unowned batch answers 404 rather than 403, so a caller
+  // cannot learn that someone else's batch exists.
+  const batch = await deps.repository.getImportBatchForUser(batchId, auth.userId);
   if (!batch) {
     await actionSpan?.end({
       status: "error",

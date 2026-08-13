@@ -1255,6 +1255,7 @@ export type Database = {
         Row: {
           completed_at: string | null
           created_at: string
+          created_by_auth_user_id: string | null
           error_count: number
           file_path: string | null
           id: string
@@ -1274,6 +1275,7 @@ export type Database = {
         Insert: {
           completed_at?: string | null
           created_at?: string
+          created_by_auth_user_id?: string | null
           error_count?: number
           file_path?: string | null
           id?: string
@@ -1293,6 +1295,7 @@ export type Database = {
         Update: {
           completed_at?: string | null
           created_at?: string
+          created_by_auth_user_id?: string | null
           error_count?: number
           file_path?: string | null
           id?: string

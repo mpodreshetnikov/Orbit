@@ -110,6 +110,7 @@ export async function createSessionAction(
   const batchId = await deps.repository.createImportBatch({
     source,
     payer_person_id: payerPersonId,
+    created_by_auth_user_id: auth.userId,
     import_type: "web_export",
     file_path: null,
     meta: body.meta ?? null,

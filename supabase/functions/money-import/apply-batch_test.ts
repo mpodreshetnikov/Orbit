@@ -68,6 +68,16 @@ function createRepositoryMock(options: {
       meta: null,
       parsed_through_at: null,
     }),
+    getImportBatchForUser: async () => ({
+      id: "batch-1",
+      status: "pending",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      window_from: null,
+      window_to: null,
+      meta: null,
+      parsed_through_at: null,
+    }),
     updateImportBatch: async (batchId: string, patch: Record<string, unknown>) => {
       state.batchUpdates.push({ batchId, patch });
     },

@@ -505,6 +505,7 @@ CREATE TABLE "public"."money_import_batches" (
     "skipped_count" integer DEFAULT 0 NOT NULL,
     "error_count" integer DEFAULT 0 NOT NULL,
     "completed_at" timestamp with time zone,
+    "created_by_auth_user_id" "uuid",
     CONSTRAINT "money_import_batches_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text", 'discarded'::"text"])))
 );
 
@@ -1812,6 +1813,13 @@ CREATE INDEX "idx_money_import_batch_rows_parent_row_id" ON "public"."money_impo
 --
 
 CREATE INDEX "idx_money_import_batches_created_at" ON "public"."money_import_batches" USING "btree" ("created_at");
+
+
+--
+-- Name: idx_money_import_batches_created_by; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_batches_created_by" ON "public"."money_import_batches" USING "btree" ("created_by_auth_user_id");
 
 
 --

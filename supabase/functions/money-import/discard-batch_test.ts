@@ -29,6 +29,7 @@ function createRepositoryMock(batch: Record<string, unknown> | null): {
       updateImportSession: async () => {},
       createImportBatch: async () => "batch-1",
       getImportBatch: async () => batch,
+      getImportBatchForUser: async () => batch,
       updateImportBatch: async (batchId, patch) => {
         updates.push({ batchId, patch });
       },
@@ -144,4 +145,18 @@ Deno.test("discardBatchAction marks pending batches discarded", async () => {
       },
     },
   ]);
+});
+
+Deno.test("discardBatchAction hides a batch that belongs to another user", async () => {
+  // The repository resolves ownership; the action must treat "not yours" exactly like "not there",
+  // so a caller cannot learn that someone else's batch exists.
+  const { repository, updates } = createRepositoryMock(null);
+
+  const payload = await assertJsonResponse<{ error: string }>(
+    await discardBatchAction({ batch_id: "someone-elses-batch" }, userAuth, { repository }),
+    404,
+  );
+
+  assertEquals(payload.error, "Batch not found");
+  assertEquals(updates, []);
 });

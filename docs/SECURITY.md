@@ -35,6 +35,10 @@ Common variables used by this repo:
   - `VAPID_PUBLIC_KEY`
   - `VAPID_PRIVATE_KEY`
   - `SUPABASE_SERVICE_ROLE_KEY`
+  - `MONEY_FX_SYNC_TOKEN` (bearer token `money-fx-sync` requires; the same value must exist as the
+    Supabase Vault secret `money_fx_sync_token`, which `public.run_money_fx_sync_http()` sends).
+    The function fails closed: with the variable unset it answers 401 to everything, including the
+    daily cron job, so set both before deploying.
 - GitHub Actions deploy pipeline (`.github/workflows/main.yml`):
   - Secrets: `VERCEL_TOKEN`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASS`
   - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `SUPABASE_PROJECT_REF`

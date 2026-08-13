@@ -243,6 +243,10 @@ export async function runImportSession(
     edge_path: edgeTarget.path,
   });
   const previewChunks = chunkPreviewRows(parseOutput.rows, PREVIEW_ROWS_CHUNK_SIZE);
+  // One id for the whole preview run. The server clears previously parsed rows only when this id
+  // changes, so repeating chunk 0 — a retry, or a restarted background script — no longer throws
+  // away everything the later chunks already delivered.
+  const previewAttemptId = crypto.randomUUID();
   let applyResult: Record<string, unknown>;
   try {
     let previewBatchId =
@@ -283,6 +287,7 @@ export async function runImportSession(
         row_offset: rowOffset,
         is_final_chunk: isFinalChunk,
         total_row_count: parseOutput.rows.length,
+        preview_attempt_id: previewAttemptId,
         rows: rowsChunk,
       });
 

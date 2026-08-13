@@ -55,6 +55,18 @@ function createRepositoryMock(
       parsed_through_at: null,
       status: "pending",
     }),
+    getImportBatchForUser: async () => ({
+      id: "batch-1",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      import_type: "file",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      parsed_through_at: null,
+      status: "pending",
+    }),
     updateImportBatch: async () => {},
     listReportRowsByBatch: async () => [
       {

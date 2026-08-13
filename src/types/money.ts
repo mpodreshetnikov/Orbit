@@ -25,7 +25,6 @@ export type MoneyCategoryKind = "canonical" | "custom";
 export type MoneyCategoryRuleKind =
   | "direct"
   | "mcc_map"
-  | "source_category_map"
   | "llm_categorization"
   | "fallback_uncategorized";
 
@@ -169,7 +168,6 @@ export const MONEY_ASSIGNMENT_METHODS: MoneyAssignmentMethod[] = [
 export const MONEY_CATEGORY_RULE_KINDS: MoneyCategoryRuleKind[] = [
   "direct",
   "mcc_map",
-  "source_category_map",
   "llm_categorization",
   "fallback_uncategorized",
 ];
