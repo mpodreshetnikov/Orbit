@@ -5,8 +5,8 @@
       "channel": "chromium",
       "headless": false,
       "args": [
-        "--disable-extensions-except=C:/Users/dev/Documents/Coding/Orbit/browserExtension/dist",
-        "--load-extension=C:/Users/dev/Documents/Coding/Orbit/browserExtension/dist"
+        "--disable-extensions-except=./browserExtension/dist",
+        "--load-extension=./browserExtension/dist"
       ]
     }
   }

@@ -13,9 +13,7 @@ describe("source-page-widget", () => {
   });
 
   function getWidgetShadowRoot(): ShadowRoot {
-    const host = document.getElementById(
-      "orbit-money-import-widget-root",
-    ) as HTMLDivElement | null;
+    const host = document.getElementById("orbit-money-import-widget-root") as HTMLDivElement | null;
     expect(host).not.toBeNull();
     expect(host?.shadowRoot).not.toBeNull();
     return host!.shadowRoot!;

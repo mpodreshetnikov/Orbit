@@ -78,7 +78,8 @@
     },
     "vercel": {
       "transport": "http",
-      "url": "https://mcp.vercel.com/<your-team-slug>/<your-project-slug>",
+      "enabled_env": "MCP_VERCEL_ENABLED",
+      "url_env": "MCP_VERCEL_URL",
       "auth_kind": "bearer",
       "auth_mode_env": "MCP_VERCEL_AUTH_MODE",
       "default_auth_mode": "oauth",

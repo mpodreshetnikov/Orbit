@@ -427,7 +427,7 @@ At the end of this milestone, imported line items are categorized through the ru
 
 ## Concrete Steps
 
-From repository root `c:\Users\dev\Documents\Coding\Orbit`, implement the feature in this order:
+From the repository root, implement the feature in this order:
 
 1. Add enum SQL files under `supabase/db/types/` and include them from `supabase/db/01_types_functions.sql`.
 2. Add a migration that extends `money_categories`, `money_line_items`, and creates the new rule and mapping tables.

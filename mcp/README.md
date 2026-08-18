@@ -25,8 +25,9 @@ This folder is the canonical source for MCP server definitions.
 - Supabase MCP generation is opt-in:
   - `MCP_SUPABASE_CLOUD_ENABLED=1` generates `supabase-cloud` pointing to hosted Supabase MCP endpoint.
   - `MCP_SUPABASE_LOCAL_ENABLED=1` generates `supabase-local` pointing to local Supabase MCP endpoint.
-- Vercel MCP is always generated as `vercel` and targets:
-  - `https://mcp.vercel.com/<your-team-slug>/<your-project-slug>`
+- Vercel MCP generation is opt-in, since the endpoint is specific to your own team and project:
+  - `MCP_VERCEL_ENABLED=1` generates `vercel` targeting `MCP_VERCEL_URL`.
+  - `MCP_VERCEL_URL` looks like `https://mcp.vercel.com/<your-team-slug>/<your-project-slug>`.
 - shadcn MCP is always generated as `shadcn` and runs `npx shadcn@latest mcp`.
 
 ## IDE Install Flow

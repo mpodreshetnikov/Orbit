@@ -100,7 +100,7 @@ Rebuild first — the browser loads the built output from `browserExtension/dist
 just extension-build-production
 ```
 
-Capture through your own `playwright-cli` session, which loads the extension via the `--load-extension` / `--disable-extensions-except` launch args in `.playwright/cli.config.json` (update the absolute paths there to your checkout):
+Capture through your own `playwright-cli` session, which loads the extension via the `--load-extension` / `--disable-extensions-except` launch args in `.playwright/cli.config.json` (paths there are relative to the repository root, so run the session from there):
 
 ```bash
 playwright-cli open http://127.0.0.1:3000/money/import
