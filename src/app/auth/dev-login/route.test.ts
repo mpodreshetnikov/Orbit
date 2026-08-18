@@ -77,10 +77,7 @@ describe("GET /auth/dev-login", () => {
       email: "dev@example.com",
       email_confirm: true,
     });
-    expect(upsert).toHaveBeenCalledWith(
-      { email: "dev@example.com" },
-      { onConflict: "email" },
-    );
+    expect(upsert).toHaveBeenCalledWith({ email: "dev@example.com" }, { onConflict: "email" });
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toContain("token_hash=hash-default");
     expect(response.headers.get("location")).toContain("next=%2Fmoney%2Ftransactions");
