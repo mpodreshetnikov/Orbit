@@ -22,12 +22,12 @@ You can see all of it working by running one command, `just test-extraction`, an
 
 ## Progress
 
-- [ ] Milestone 1 — Transport limits that match real documents (`max_tokens`, per-stage timeout).
-- [ ] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
-- [ ] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
-- [ ] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
-- [ ] Milestone 5 — Asserted absence: stop inventing it, start using it.
-- [ ] Milestone 6 — Corpus governance and the fixture-blind CI flag.
+- [x] Milestone 1 — Transport limits that match real documents (`max_tokens`, per-stage timeout).
+- [x] Milestone 2 — Make the harness able to audit itself (score `count`, fail on inert expected fields, support repeat runs).
+- [x] Milestone 3 — Deterministic resolution writes the right row (unit normalisation, discriminating-token penalty, catalogue synonyms).
+- [x] Milestone 4 — The extraction output contract (qualitative results, severity grading, condition naming).
+- [x] Milestone 5 — Asserted absence: stop inventing it, start using it.
+- [x] Milestone 6 — Corpus governance and the fixture-blind CI flag.
 
 ## Surprises & Discoveries
 
@@ -66,6 +66,15 @@ Record new findings here as work proceeds. The entries below are what the corpus
 - Observation: A change that touches only the corpus sets every CI impact flag to false.
   Evidence: `scripts/just/change-impact.cjs:28-57` computes `dbImpact`, `webImpact`, `extensionImpact`, `functionsImpact` and `docsOnly` from path prefixes. `test/fixtures/` matches none of them, and `isDocFile` does not classify it as a doc either, so a fixture-only change reports no impact at all. Any future gate hung on those flags would skip exactly the pull requests that edit the corpus.
 
+- Observation: The catalogue's one formula conversion cannot be evaluated, and unit folding makes it reachable.
+  Evidence: `hba1c` carries `formula_to_canonical` of `"percent = (mmol_per_mol * 0.09148) + 2.152"`, which describes the conversion rather than expressing it. `isSafeFormula` in `unit-conversion.ts` accepts only digits, `x` and arithmetic operators — correctly, since it evaluates the string — so `evaluateFormula` returned null on it every time. It had never fired, because the key is `mmol/mol` and no Russian document ever matched a Latin key. Folding `ммоль/моль` onto that key makes it reachable, and a null there stores no value at all — strictly worse than the unconverted number it would replace. Fixed on both sides: the migration rewrites it as `(x * 0.09148) + 2.152`, and `convertValueWithConfig` now falls back to the unconverted value rather than null, so the code no longer depends on the data being right.
+
+- Observation: A qualifier means the opposite thing in the observation catalogue and the finding catalogue, and one shared matcher cannot treat them alike.
+  Evidence: for an analyte, an unexplained qualifier changes identity — `Холестерин ЛПОНП` is not `Холестерин общий`, and `Билирубин прямой` and `Билирубин непрямой` are both distinct analytes from `Билирубин общий`, all three of which the corpus requires to stay uncoded. For a finding, a qualifier describes the same morphology — a `Хронический активный гастрит` is a gastritis is an inflammation, and `хронический` and `активный` say how long and how much, not what. A rule strict enough to keep `Билирубин прямой` uncoded also refuses `Хронический активный гастрит`. `resolveWithViews` therefore takes an explicit flag, set true for observations and false for finding types and body sites, rather than pretending one behaviour fits both.
+
+- Observation: A catalogue synonym edit does not invalidate the cassettes, contrary to what this plan assumed.
+  Evidence: `stages/extract.ts` builds its vocabulary from `code`, `ru` and `en` only — synonyms and `accepted_units` never reach the prompt, because they are used by the deterministic resolver downstream rather than by the model. A synonyms-only or units-only catalogue change therefore leaves the request messages byte-identical, and `cassetteKey` (which digests model and messages) does not move. Confirmed by replaying the corpus after regenerating the snapshot: three cases scored, zero cassette misses. Adding or renaming a catalogue _entry_ would still invalidate them.
+
 ## Decision Log
 
 Record every decision that changes this plan, with the reason, so a reader restarting from only this file understands why the shape is what it is.
@@ -81,6 +90,197 @@ Record every decision that changes this plan, with the reason, so a reader resta
 ## Outcomes & Retrospective
 
 To be completed as milestones land. For each, record what was fixed, what the corpus score was before and after, and anything that turned out differently from what this plan assumed.
+
+### Milestone 1 — landed 2026-08-07
+
+Fixed: `stages/client.ts` now sends `max_tokens` (default 16,000, overridable per call via the new
+`StageContext.maxTokens`) and `DEFAULT_TIMEOUT_MS` is 120,000 rather than 60,000. Two Deno tests
+cover the default and the override; the request-shape test that guards `temperature`'s absence was
+left alone and a separate one added beside it.
+
+Corpus score: unchanged, as expected — this milestone touches transport only, not any answer.
+A live run of all three cases completed with `3 scored, 0 failed` and no timeout, which is the
+acceptance criterion. Replay before and after is byte-identical.
+
+Turned out differently: **this milestone does not invalidate the cassettes.** The plan assumed it
+would, because `cassetteKey`'s doc comment says it keys on "the full request body". It does not —
+it keys on `{ model, messages }` only (`scripts/extraction-eval/cassette.ts`). No re-record was
+needed. The comment has been corrected in place rather than the keying changed: excluding transport
+knobs from the key is the right behaviour, since they do not change the answer and keying on them
+would churn every recording whenever one was retuned.
+
+That correction exposed a sharper point worth carrying into Milestone 5: `response_format` — which
+carries each stage's JSON schema — is also outside the key. A schema change that leaves the prompt
+text untouched will replay stale cassettes that cannot contain the new field, and the corpus will
+look healthy while measuring nothing. Milestone 5 adds `asserted_absences` to the extract schema and
+must re-record explicitly rather than trusting invalidation to happen on its own.
+
+### Milestone 2 — landed 2026-08-07
+
+Fixed all three items.
+
+`count` is now carried through `pipeline.ts`, declared on `ExpectedFinding`, and scored in
+`FINDING_FIELDS`. Case 002's two findings gained `count: 1`, as the plan required.
+
+`scripts/extraction-eval/fixture-coverage.test.ts` now fails the build when a fixture carries a key
+nothing reads. It imports the field arrays and a new `MATCH_KEYS` map from `score.ts` rather than
+restating them, so it cannot drift from the scorer. A third assertion covers the case that produced
+all three past regressions: a new array added to `CaseSnapshot` and to the fixtures must be declared
+in both maps or the suite fails. Verified by adding `"morphology": "tubular"` to case 002 — the
+suite failed naming `002-kidney-ultrasound-ru/expected.json -> findings[].morphology` — and passing
+again on removal.
+
+Worth recording: the coverage test found a live instance the moment it was written. Case 003 already
+carried `count: 1` on all three findings, inert, exactly the class the test exists to catch. It was
+scored in the same milestone rather than deleted, so the test's first find is also its first fix.
+
+`--repeat N` is in `run.ts`, with a `renderVariance` section in `report.ts` reporting mean, range and
+every individual run per dimension. It refuses a replay run and refuses `--record`, each with a
+message saying why: replaying N times reports a spread of zero that reads as stability, and
+recording keeps one answer per request so the cassettes would describe the last run while the report
+describes all of them. Failures are now counted across every pass rather than the rendered one, since
+a case that dies on run 2 of 3 is precisely what repeat runs exist to surface.
+
+Corpus score: unchanged except that `count` now appears in the finding-field table at 5/5.
+
+The live `--repeat 3 --case 002` run confirms the premise of the whole sequencing decision. Findings
+f1 came out 80.0%, 100.0%, 50.0% on three runs of the same document — a 50-point swing with nothing
+changed between them. Observations fp ran 2, 2, 4; checkups f1 ran 0%, 100%, 100%. Any single-run
+reading of a Milestone 4 or 5 prompt change would have been noise. Nine dimensions did read `stable`,
+which is itself useful: those can be compared across single runs.
+
+### Milestone 3 — landed 2026-08-07
+
+Corpus effect, replay, aggregate observation fields: `obs_code` 13/14 -> 14/14, `is_applied`
+13/14 -> 14/14, `value_canonical` 13/14 -> 14/14, `unit_canonical` 12/14 -> 13/14. `Витамин В12`
+now stores `519.552 pmol/L` rather than `704`, and `Холестерин ЛПОНП` is uncoded and unapplied
+rather than filed under `cholesterol_total`. Wrongful resolutions unchanged at the replayed value.
+
+Unit folding landed as planned, plus case and whitespace insensitivity, plus a fold of the Cyrillic
+letters that are visually identical to Latin ones. The lookup stays exact after folding.
+
+The token-matching work did **not** land as the plan described it, and the plan's version would have
+been a regression. The plan proposed rejecting any candidate that cannot explain a query word of
+three characters or more. Measured against the real catalogue, that rule broke three labels that
+resolve correctly today — `Витамин В12`, `Железо сыворотки` — and left `Холестерин ЛПВП` and
+`Холестерин ЛПНП` unresolved, which the corpus requires to resolve to `hdl_c` and `ldl_c`. Only
+`ЛПОНП` is meant to stay uncoded. What shipped instead is a discriminating-token tier between
+whole-string synonym matching and fuzzy scoring: when exactly one catalogue entry answers to a word
+of the label, that entry wins. `лпвп` is a synonym of `hdl_c`, so the line resolves for the right
+reason rather than by out-scoring `холестерин`; `лпонп` belongs to nobody, so nothing resolves.
+
+Two smaller findings came out of building it, both recorded under Surprises.
+
+Migration `20260807120000_inflammation_synonyms_and_hba1c_formula.sql` adds the `-ит` synonyms and
+fixes the `hba1c` formula. It sets both columns rather than appending, so it is re-runnable. It has
+**not** been applied to any database — this environment has no Supabase credentials, and applying a
+migration to the live project is not this plan's call. The pinned corpus snapshot was updated by hand
+to exactly the values the migration produces, verified field by field against the previous snapshot:
+two semantic changes, nothing else.
+
+The `inflammation` half of this milestone is correct but its corpus expectation still fails, for a
+reason that belongs to Milestone 4. `Хронический активный гастрит` now resolves to `inflammation` in
+isolation, but the model never emits that finding: it emits `Helicobacter pylori (+)` into the
+stomach slot and displaces it. Case 003's `inflammation` finding-code expectation will pass when
+Milestone 4 stops a qualitative result becoming a finding, not before.
+
+### Milestone 4 — landed 2026-08-07
+
+All three acceptance criteria met, measured on re-recorded cassettes.
+
+`Helicobacter pylori (+)` no longer appears among case 003's invented findings. Severity field
+accuracy went 3/5 to 5/5 aggregate — the plan asked for one-of-three to three-of-three on case 003
+and got it. Condition names are now diagnoses rather than conclusion sentences: the false positives
+read `Тубулярная аденома` and `Гиперпластический полип` instead of the full sentences, and
+`Хронический активный гастрит` turned from a false negative into a true positive, taking case 003's
+conditions f1 from 33.3% to 66.7%.
+
+`finding_code` went 4/5 to 5/5, which is Milestone 3's `inflammation` synonym finally paying off.
+It could not before: the model was filing `Helicobacter pylori (+)` into the stomach slot and
+displacing the gastritis finding, so there was nothing there for the synonym to resolve. The two
+milestones had to land together for either to show.
+
+Worked examples deliberately avoid corpus content, per the plan's own rule — the new one is a
+thyroid report, where the corpus holds a lipid panel, a renal ultrasound and a GI biopsy. A first
+draft of this milestone used `Helicobacter pylori (+)` and case 003's adenoma sentence verbatim in
+the instructions, which would have measured the model's memory of its prompt rather than its reading
+of the document. Caught before recording.
+
+Not attributable to this milestone, and recorded so a later reader does not go looking: case 002's
+`body_site_text` (4/5 to 2/5) and `size_mm` (5/5 to 3/5) moved on the re-record. Both are resample
+noise on a document whose findings dimension the repeat runs already showed swinging between 80% and
+100% f1; nothing in this milestone touches anatomy or measurement. The `--repeat 3` run also had case
+003 fail once with `OpenRouter returned invalid JSON content` — the eval runs `maxAttempts: 1`
+deliberately, so a transient is reported rather than retried into a different sampled answer.
+
+A regression this milestone caused and fixed: the prompt change flipped the model from supplying
+`obs_code: "ggt"` to supplying null for the same row, and `Гамма-глутамилтранспептидаза` then failed
+to resolve, because the catalogue lists every abbreviation for that enzyme and not the expanded name
+a lab prints. The deterministic resolver exists so the pipeline does not depend on the model
+supplying codes, and it cannot do that job with a vocabulary missing the printed form. The full
+names are now in the migration alongside the `inflammation` ones.
+
+### Milestone 5 — landed 2026-08-07
+
+Both halves landed and both acceptance criteria are met. `findings_to_resolve` went from one false
+negative to one true positive, zero false positives — 100% on the dimension that had been
+structurally incapable of firing — and the wrongful-resolution banner still reports none. Case 002
+no longer emits `ЛС не расширена` as a finding, and its findings dimension reached 100% on the
+recording where its observations also did.
+
+Case 003 is the regression guard and it holds: `без признаков дисплазии`, `кишечная метаплазия не
+выявлена` and `атрофия не выявлена` now arrive as asserted absences rather than as findings, while
+the present dysplasia, polyp and inflammation are all still reported.
+
+The negation guard needed adjacency, not presence. The plan says "adjacent to the finding term" and
+that turns out to be load-bearing rather than a detail: case 002's legitimate `гиперсигналы` finding
+is anchored on `с обеих сторон единичные гиперсигналы 0,2 см, без эхотени`, where `без` negates the
+acoustic shadow and not the hypersignals. A rule rejecting any anchor containing a negation would
+have deleted a finding the corpus requires. The guard locates the finding term in the anchor and
+looks two words either side of it, which covers `не расширена`, `метаплазия не выявлена` and
+`без признаков дисплазии` alike. The same check runs in reverse on `asserted_absences`: an
+"absence" whose own evidence denies nothing is a presence in the wrong array, and admitting it would
+hand reconciliation grounds to close a finding the document reported as still there.
+
+One thing the plan did not anticipate. The first recording emitted the absence correctly —
+`{finding_code: "stone", site_code: "kidney", anchor: "Конкременты: нет"}` — and reconciliation
+still declined, because the existing finding is on `kidney_right` and the instruction told it to
+match sites strictly. That was too absolute: `Конкременты: нет` on a bilateral study means no stone
+in either kidney, so an absence asserted for a whole organ has to cover its parts. The instruction
+now says so, and says the reverse does not hold — an absence in one part is not evidence about
+another, and an absence in a different organ is not evidence at all. That asymmetry is what keeps
+the wrongful-resolution count at zero.
+
+**Measurement is incomplete, and this is the one place a reader should not trust a single number.**
+The `--repeat 3` run the plan calls for did not finish: the OpenRouter key hit its weekly spend
+limit partway through and returned `403 Key limit exceeded (weekly limit)` for the remaining runs.
+One full pass and parts of two others completed. What they show is `findings_to_resolve` f1 stable
+at 100% with zero false positives and zero false negatives across every pass that ran, which is the
+milestone's own criterion; the other dimensions moved as they always do on this corpus and should be
+re-measured with a full `--repeat 3` once the key resets. The committed cassettes were recorded
+before the limit was reached and replay clean.
+
+### Milestone 6 — landed 2026-08-07
+
+Both judgement calls in case 001 are decided and the reasoning is recorded in that case's
+`judgement_calls`, which now says DECIDED rather than arguable — so a reviewer can tell a known
+disagreement from a regression, which was the actual complaint.
+
+`Глюкоза натощак` stays expected as completed. The argument that settled it was in the document all
+along: the report never prints `натощак`, but it prints the glucose reference interval `4.10–5.90`,
+and that is the fasting interval — a non-fasting range runs to roughly 7.8. So this is not only the
+ordinary reading that a routine panel is drawn fasting; the document carries evidence. The pipeline
+does not currently make this completion, which is a miss on its side rather than a wrong expectation.
+
+`Дислипидемия` stays expected as unresolved. An in-range lipid panel in someone under management is
+evidence of control, not resolution, and the opposite reading makes the pipeline willing to close a
+chronic condition off one good day. That is the highest-harm error this corpus tracks. The live run
+that closed it is what made this pressing; runs since Milestone 4 no longer do.
+
+`fixturesImpact` added to `scripts/just/change-impact.cjs`, covering `test/fixtures/` and
+`scripts/extraction-eval/`, with four cases in the existing test file — including one asserting a
+corpus-only change is not `docsOnly`, since `docsOnly` is what a pipeline would use to skip work
+entirely and a fixture change alters what the pipeline is measured against.
 
 ## Context and Orientation
 

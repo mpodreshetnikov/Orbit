@@ -21,6 +21,90 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+/**
+ * Spread across repeated runs of the same corpus, so a change can be told apart from a resample.
+ *
+ * This exists because single runs of this corpus were being over-read. Five live runs of case 002
+ * disagreed on observations (0, 3, 3, 2, 3), findings (3, 3, 3, 4, 2), conditions (1, 2, 2, 0, 2)
+ * and anchor rejections (0, 0, 0, 3, 2) — only one dimension was stable across all five. Run-to-run
+ * variance is larger than most of the differences people were arguing about, so a single number
+ * moving proves nothing on its own.
+ *
+ * Min and max rather than a standard deviation: at the run counts anyone will actually use (3, 5),
+ * a standard deviation is a worse summary of three numbers than the three numbers' range, and it
+ * invites the false precision this section exists to prevent.
+ */
+export interface VarianceRow {
+  dimension: string;
+  values: number[];
+}
+
+function mean(values: number[]): number {
+  return values.length === 0 ? 0 : values.reduce((n, v) => n + v, 0) / values.length;
+}
+
+function varianceRow(row: VarianceRow, format: (value: number) => string): string {
+  const min = Math.min(...row.values);
+  const max = Math.max(...row.values);
+  const spread = min === max ? "stable" : `${format(min)} – ${format(max)}`;
+  return `| ${row.dimension} | ${format(mean(row.values))} | ${spread} | ${row.values.map(format).join(", ")} |`;
+}
+
+export function renderVariance(runs: Aggregate[]): string {
+  if (runs.length < 2) return "";
+  const sets: [string, (a: Aggregate) => SetScore][] = [
+    ["observations", (a) => a.observations],
+    ["findings", (a) => a.findings],
+    ["conditions", (a) => a.conditions],
+    ["findings_to_resolve", (a) => a.findingsToResolve],
+    ["conditions_to_resolve", (a) => a.conditionsToResolve],
+    ["checkups_to_complete", (a) => a.checkupsToComplete],
+  ];
+
+  const lines: string[] = [`## Variance across ${runs.length} runs`, ""];
+  lines.push(
+    ...table(
+      ["dimension", "mean", "spread", "runs"],
+      sets.flatMap(([label, pick]) => [
+        varianceRow({ dimension: `${label} f1`, values: runs.map((a) => pick(a).f1) }, (value) =>
+          pct(value),
+        ),
+        varianceRow({ dimension: `${label} tp`, values: runs.map((a) => pick(a).tp) }, (value) =>
+          value.toFixed(1),
+        ),
+        varianceRow({ dimension: `${label} fp`, values: runs.map((a) => pick(a).fp) }, (value) =>
+          value.toFixed(1),
+        ),
+        varianceRow({ dimension: `${label} fn`, values: runs.map((a) => pick(a).fn) }, (value) =>
+          value.toFixed(1),
+        ),
+      ]),
+    ),
+  );
+  lines.push("");
+  lines.push(
+    ...table(
+      ["dimension", "mean", "spread", "runs"],
+      [
+        varianceRow(
+          {
+            dimension: "wrongful resolutions",
+            values: runs.map((a) => a.wrongfulResolutions),
+          },
+          (value) => value.toFixed(1),
+        ),
+      ],
+    ),
+  );
+  lines.push("");
+  lines.push(
+    "> A dimension reading `stable` agreed across every run. Anything with a spread cannot be " +
+      "read off a single run — compare spreads, not single numbers.",
+  );
+  lines.push("");
+  return lines.join("\n");
+}
+
 function prRow(label: string, score: SetScore): string {
   return `| ${label} | ${score.tp} | ${score.fp} | ${score.fn} | ${pct(score.precision)} | ${pct(score.recall)} | ${pct(score.f1)} |`;
 }
@@ -75,6 +159,67 @@ function fieldSection(title: string, noun: string, fields: FieldAccuracy[]): str
     lines.push("");
   }
   return lines;
+}
+
+/**
+ * Money, or an honest blank.
+ *
+ * Four decimal places because a single case costs a few cents and rounding to two would print
+ * `$0.01` for everything and `$0.00` for the cheap ones. `—` rather than `$0.0000` when the price
+ * is unknown: a replayed cassette carries no price, and printing zero would quietly claim a live
+ * run was free.
+ */
+export function formatCost(costUsd: number | null | undefined): string {
+  return typeof costUsd === "number" && Number.isFinite(costUsd) ? `$${costUsd.toFixed(4)}` : "—";
+}
+
+/**
+ * Total spend across the cases that reported one, plus how many did not.
+ *
+ * The count matters: a total over two of three cases is not the run's cost, and saying so is the
+ * difference between a number someone can act on and one they will misread.
+ */
+export function totalCost(cases: CaseResult[]): {
+  total: number;
+  priced: number;
+  unpriced: number;
+} {
+  let total = 0;
+  let priced = 0;
+  let unpriced = 0;
+  for (const result of cases) {
+    const cost = result.diagnostics?.costUsd;
+    if (typeof cost === "number" && Number.isFinite(cost)) {
+      total += cost;
+      priced += 1;
+    } else if (result.diagnostics) {
+      unpriced += 1;
+    }
+  }
+  return { total, priced, unpriced };
+}
+
+/**
+ * What the run cost, and on a replay, whose cost it actually is.
+ *
+ * A replayed cassette carries the price of the call that *recorded* it, which is worth printing --
+ * it is what those answers cost to obtain -- but it is emphatically not what the replay cost, since
+ * replaying is free and offline. Saying "recorded" is the whole difference between a useful number
+ * and one someone will add to a budget by mistake.
+ */
+function costLine(cases: CaseResult[], mode: string): string {
+  const { total, priced, unpriced } = totalCost(cases);
+  if (priced === 0) {
+    return "- cost: — (no case reported a price)";
+  }
+  const caveat = unpriced > 0 ? ` · ${unpriced} case(s) unpriced and not included` : "";
+  if (mode === "replay") {
+    return (
+      `- cost: **${formatCost(total)}** to record these ${priced} cassette(s) — ` +
+      `replaying them is free${caveat}`
+    );
+  }
+  return `- **cost: ${formatCost(total)}** across ${priced} case(s)${caveat}`;
 }
 
 export function renderMarkdown(summary: RunSummary): string {
@@ -141,6 +286,7 @@ export function renderMarkdown(summary: RunSummary): string {
 
   lines.push("## Aggregate");
   lines.push("");
+  lines.push(costLine(summary.cases, summary.mode));
   lines.push(`- record_type: ${pct(agg.recordTypeAccuracy)}`);
   lines.push(`- record_date: ${pct(agg.recordDateAccuracy)}`);
   lines.push("");
@@ -225,7 +371,7 @@ export function renderMarkdown(summary: RunSummary): string {
     if (result.diagnostics) {
       const d = result.diagnostics;
       lines.push(
-        `- diagnostics: stages ${d.stagesRun.join("+") || "none"}, dropped ${d.droppedInvalidCount}, unresolved ${d.unresolvedCatalogCount}, rejected ${d.rejected.length}, tokens ${d.promptTokens ?? "?"}/${d.completionTokens ?? "?"}`,
+        `- diagnostics: stages ${d.stagesRun.join("+") || "none"}, dropped ${d.droppedInvalidCount}, unresolved ${d.unresolvedCatalogCount}, rejected ${d.rejected.length}, tokens ${d.promptTokens ?? "?"}/${d.completionTokens ?? "?"}, cost ${formatCost(d.costUsd)}`,
       );
     }
     lines.push("");

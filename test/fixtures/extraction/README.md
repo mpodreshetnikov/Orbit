@@ -112,19 +112,28 @@ whose every marker is in range (dyslipidaemia). Only the last is genuinely argua
 recorded in that case's `judgement_calls`.
 
 Note reconcile never sees the document — only extraction's output plus patient state
-(`stages/reconcile.ts:86-89`). It does receive observations with name, code, value, unit and
+(`stages/reconcile.ts`). It does receive observations with name, code, value, unit and
 status, which is what makes the B12 resolution reachable at all. If a case expects a resolution
 that depends on document prose rather than an extracted entity, that expectation is unreachable by
 construction and the case is wrong, not the pipeline.
 
-**Case 002 deliberately breaks that last rule, once.** It expects a right-kidney stone to resolve on
-`Конкременты: нет`, which is prose and reaches no entity, so the expectation cannot pass today. It
-is kept anyway because the rule assumes the expectation was chosen badly, and here it was not: for
-findings, absence is the _only_ evidence that resolves anything, so applying the rule uniformly
-would mean no case may ever expect a finding resolution — i.e. quietly agreeing that
-`findings_to_resolve` does not work. "Expected files encode the correct answer, not the current
-answer" is the stronger principle and it wins here. If the gap is closed or the feature dropped,
-revisit this expectation first.
+**Case 002 used to break that last rule, and no longer does.** It expects a right-kidney stone to
+resolve on `Конкременты: нет`. That was prose reaching no entity, so the expectation could not pass,
+and it was kept anyway: for findings, absence is the _only_ evidence that resolves anything, so
+applying the rule uniformly would have meant no case may ever expect a finding resolution — quietly
+agreeing that `findings_to_resolve` does not work. "Expected files encode the correct answer, not the
+current answer" was the stronger principle and it won.
+
+That gap is now closed. Extraction emits `asserted_absences` — findings the document explicitly
+states are not present — and reconciliation receives them alongside the presences, so the
+expectation is reachable and passes. The rule above therefore applies without exception again: an
+expectation that cannot be reached means the case is wrong.
+
+Two things about that array are worth knowing before writing a case against it. It never becomes a
+row in anyone's chart; it exists solely so reconciliation can see that something already on the
+record has gone. And an absence asserted for a whole organ covers its parts — `site_code: "kidney"`
+resolves a finding recorded on `kidney_right`, which is what makes case 002 work, since the document
+says `Конкременты: нет` without naming a side. The reverse does not hold.
 
 ## Dates
 
