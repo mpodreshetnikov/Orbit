@@ -1,4 +1,4 @@
-import { isSessionUsable } from "./auth.ts";
+import { isSessionUsable, resolveBatchOwnerUserId } from "./auth.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
   buildReceiptPersistenceFields,
@@ -134,6 +134,7 @@ export async function applyRowsAction(
     batchId = await deps.repository.createImportBatch({
       source,
       payer_person_id: payerPersonId,
+      created_by_auth_user_id: resolveBatchOwnerUserId(auth),
       import_type: importType,
       file_path: normalizeText(body.file_path),
       meta: body.meta ?? null,

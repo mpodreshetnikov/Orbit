@@ -1255,6 +1255,7 @@ export type Database = {
         Row: {
           completed_at: string | null
           created_at: string
+          created_by_auth_user_id: string | null
           error_count: number
           file_path: string | null
           id: string
@@ -1274,6 +1275,7 @@ export type Database = {
         Insert: {
           completed_at?: string | null
           created_at?: string
+          created_by_auth_user_id?: string | null
           error_count?: number
           file_path?: string | null
           id?: string
@@ -1293,6 +1295,7 @@ export type Database = {
         Update: {
           completed_at?: string | null
           created_at?: string
+          created_by_auth_user_id?: string | null
           error_count?: number
           file_path?: string | null
           id?: string
@@ -1405,6 +1408,7 @@ export type Database = {
           created_at: string
           id: string
           import_hash: string | null
+          is_placeholder: boolean
           last_category_rule_id: string | null
           last_category_rule_run_id: string | null
           line_status: Database["public"]["Enums"]["money_line_status"]
@@ -1428,6 +1432,7 @@ export type Database = {
           created_at?: string
           id?: string
           import_hash?: string | null
+          is_placeholder?: boolean
           last_category_rule_id?: string | null
           last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]
@@ -1451,6 +1456,7 @@ export type Database = {
           created_at?: string
           id?: string
           import_hash?: string | null
+          is_placeholder?: boolean
           last_category_rule_id?: string | null
           last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]

@@ -40,7 +40,7 @@ export async function updateBrandResolutionAction(
     return jsonResponse({ error: "Brand resolution batch is missing" }, 400);
   }
 
-  const batch = await deps.repository.getImportBatch(batchId);
+  const batch = await deps.repository.getImportBatchForUser(batchId, auth.userId);
   if (!batch) {
     return jsonResponse({ error: "Batch not found" }, 404);
   }

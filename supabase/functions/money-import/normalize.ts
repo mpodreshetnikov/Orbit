@@ -359,6 +359,7 @@ export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLin
       title: row.merchant_name || "Imported",
       amount: row.amount,
       raw_payload: row.raw_payload ?? null,
+      is_placeholder: true,
     },
   ];
 }
@@ -366,6 +367,9 @@ export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLin
 export function isSyntheticImportLineItem(
   lineItem: ImportLineItemInput | null | undefined,
 ): boolean {
+  // The explicit flag is authoritative. The `raw_payload.source` check is kept so rows already
+  // stored before the flag existed keep being recognised.
+  if (lineItem?.is_placeholder === true) return true;
   const rawPayload = toObject(lineItem?.raw_payload);
   const source = normalizeText(rawPayload?.source)?.toLowerCase();
   return source === "fallback" || source === "dom_fallback";
@@ -384,6 +388,58 @@ export function hasOnlySyntheticImportLineItems(
   lineItems: Array<ImportLineItemInput | null | undefined>,
 ): boolean {
   return lineItems.length > 0 && lineItems.every((lineItem) => isSyntheticImportLineItem(lineItem));
+}
+
+/** Marker written into `raw_payload.source` of the balancing line item. */
+export const BALANCING_LINE_ITEM_SOURCE = "balancing";
+/** Differences at or below this are rounding noise and produce no balancing line. */
+export const BALANCING_TOLERANCE = 0.01;
+/** Above this share of the transaction amount the receipt belongs to a different operation. */
+export const BALANCING_MAX_SHARE = 0.5;
+/** Title of the balancing line item, shown to the user in the line item list. */
+export const BALANCING_LINE_ITEM_TITLE = "Прочее по операции";
+
+/**
+ * Builds the line item that makes the sum of line items equal the transaction amount.
+ *
+ * A receipt legitimately differs from the operation: tips, redeemed loyalty points, a partial
+ * refund, a delivery service fee. Rather than forbidding the difference in the database — which
+ * would also break manual editing — the difference is carried by an explicit line item, so the
+ * invariant "line items sum to the transaction amount" always holds.
+ *
+ * Returns null when the difference is rounding noise. Throws when the difference exceeds
+ * BALANCING_MAX_SHARE of the transaction amount, because that means the receipt belongs to another
+ * operation and the row must be reported as an error rather than silently "balanced".
+ */
+export function buildBalancingLineItem(
+  row: CanonicalTransactionRowInput,
+  lineItems: Array<ImportLineItemInput | null | undefined>,
+): ImportLineItemInput | null {
+  const transactionAmount = toNumberOrNull(row.amount);
+  if (transactionAmount === null) return null;
+
+  let lineItemsSum = 0;
+  for (const lineItem of lineItems) {
+    if (!lineItem) continue;
+    lineItemsSum += toNumberOrNull(lineItem.amount) ?? 0;
+  }
+
+  const delta = roundToCents(transactionAmount - lineItemsSum);
+  if (Math.abs(delta) < BALANCING_TOLERANCE) return null;
+
+  if (Math.abs(delta) > Math.abs(transactionAmount) * BALANCING_MAX_SHARE) {
+    throw new Error("Receipt total does not match transaction amount");
+  }
+
+  return {
+    title: BALANCING_LINE_ITEM_TITLE,
+    amount: delta,
+    raw_payload: { source: BALANCING_LINE_ITEM_SOURCE, delta },
+  };
+}
+
+function roundToCents(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 export function normalizeTransactionRow(

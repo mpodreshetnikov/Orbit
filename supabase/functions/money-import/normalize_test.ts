@@ -1,9 +1,14 @@
 import { assertEquals } from "std/assert/assert-equals";
 import {
+  buildBalancingLineItem,
   buildLineItemImportHash,
   buildTransactionInsertPayload,
   getBearerToken,
+  hasOnlySyntheticImportLineItems,
+  hasRealImportLineItems,
+  isSyntheticImportLineItem,
   jsonResponse,
+  normalizeLineItems,
   normalizeSourceForTransactions,
   normalizeText,
   normalizeTransactionRow,
@@ -11,6 +16,7 @@ import {
   toNumberOrNull,
   extractAccountHintFromRow,
 } from "./normalize.ts";
+import type { CanonicalTransactionRowInput } from "./types.ts";
 
 Deno.test("normalize helpers parse iso and numeric values", () => {
   assertEquals(toIsoOrNull("2026-01-01"), "2026-01-01T00:00:00.000Z");
@@ -360,4 +366,106 @@ Deno.test("jsonResponse and source normalization work", async () => {
 
   assertEquals(normalizeSourceForTransactions("tbank_web"), "tbank");
   assertEquals(normalizeSourceForTransactions("manual"), "manual");
+});
+
+Deno.test("isSyntheticImportLineItem recognises the explicit placeholder flag", () => {
+  // The extension marks its own fallbacks inside raw_payload.
+  assertEquals(isSyntheticImportLineItem({ raw_payload: { source: "fallback" } }), true);
+  assertEquals(isSyntheticImportLineItem({ raw_payload: { source: "dom_fallback" } }), true);
+
+  // The CSV import puts the raw statement row in raw_payload, which has no `source` key at all.
+  // Only the explicit flag identifies it.
+  assertEquals(
+    isSyntheticImportLineItem({
+      raw_payload: { "Дата операции": "05.03.2026 10:00:00" },
+      is_placeholder: true,
+    }),
+    true,
+  );
+  assertEquals(
+    isSyntheticImportLineItem({ raw_payload: { "Дата операции": "05.03.2026 10:00:00" } }),
+    false,
+  );
+
+  assertEquals(isSyntheticImportLineItem({ raw_payload: { source: "receipt" } }), false);
+  assertEquals(isSyntheticImportLineItem(null), false);
+});
+
+Deno.test("placeholder aggregates see flagged line items", () => {
+  const flagged = { title: "Whole amount", amount: -100, is_placeholder: true };
+  const real = { title: "Milk", amount: -40, raw_payload: { source: "receipt" } };
+
+  assertEquals(hasOnlySyntheticImportLineItems([flagged]), true);
+  assertEquals(hasOnlySyntheticImportLineItems([flagged, real]), false);
+  assertEquals(hasRealImportLineItems([flagged]), false);
+  assertEquals(hasRealImportLineItems([flagged, real]), true);
+});
+
+Deno.test("normalizeLineItems marks the synthesized whole-amount line as a placeholder", () => {
+  const row: CanonicalTransactionRowInput = {
+    posted_at: "2026-03-05T10:00:00.000Z",
+    amount: -1000,
+    transaction_type: "expense",
+    merchant_name: "Store",
+  };
+  const lineItems = normalizeLineItems(row);
+  assertEquals(lineItems.length, 1);
+  assertEquals(lineItems[0].is_placeholder, true);
+  assertEquals(lineItems[0].amount, -1000);
+
+  // A row that already carries a composition is returned untouched.
+  const withReceipt = normalizeLineItems({
+    ...row,
+    line_items: [{ title: "Milk", amount: -1000 }],
+  });
+  assertEquals(withReceipt[0].is_placeholder, undefined);
+});
+
+Deno.test("buildBalancingLineItem closes the gap between receipt and operation", () => {
+  const row: CanonicalTransactionRowInput = {
+    posted_at: "2026-03-05T10:00:00.000Z",
+    amount: 1000,
+    transaction_type: "income",
+  };
+
+  const balancing = buildBalancingLineItem(row, [
+    { title: "A", amount: 500 },
+    { title: "B", amount: 440 },
+  ]);
+  assertEquals(balancing?.amount, 60);
+  assertEquals((balancing?.raw_payload as Record<string, unknown>).source, "balancing");
+  assertEquals((balancing?.raw_payload as Record<string, unknown>).delta, 60);
+  assertEquals(balancing?.is_placeholder, undefined);
+});
+
+Deno.test("buildBalancingLineItem ignores rounding noise", () => {
+  const row: CanonicalTransactionRowInput = {
+    posted_at: "2026-03-05T10:00:00.000Z",
+    amount: -100.005,
+    transaction_type: "expense",
+  };
+  assertEquals(buildBalancingLineItem(row, [{ title: "A", amount: -100 }]), null);
+  assertEquals(
+    buildBalancingLineItem({ ...row, amount: -100 }, [{ title: "A", amount: -100 }]),
+    null,
+  );
+});
+
+Deno.test("buildBalancingLineItem rejects a receipt from a different operation", () => {
+  const row: CanonicalTransactionRowInput = {
+    posted_at: "2026-03-05T10:00:00.000Z",
+    amount: 1000,
+    transaction_type: "income",
+  };
+
+  let caught: unknown = null;
+  try {
+    buildBalancingLineItem(row, [{ title: "A", amount: 100 }]);
+  } catch (error) {
+    caught = error;
+  }
+  assertEquals(
+    caught instanceof Error ? caught.message : null,
+    "Receipt total does not match transaction amount",
+  );
 });

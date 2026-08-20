@@ -57,6 +57,20 @@ BEGIN
     FROM jsonb_array_elements_text(COALESCE(p_filter->'values', '[]'::jsonb)) AS value
   );
 
+  -- The regex operator is evaluated in its own block, because the pattern is user input handed
+  -- straight to `~`. A pattern that does not compile raises invalid_regular_expression, and from
+  -- inside the single CASE expression below that error would propagate out of
+  -- money_run_category_rule_pipeline_internal and abort categorisation for the whole batch instead
+  -- of failing the one rule that carries the broken pattern.
+  IF v_operator = 'regex' THEN
+    BEGIN
+      RETURN COALESCE(v_raw_value, '') ~ COALESCE(p_filter->>'value', '');
+    EXCEPTION
+      WHEN invalid_regular_expression THEN
+        RETURN false;
+    END;
+  END IF;
+
   RETURN CASE v_operator
     WHEN 'contains' THEN v_text_value IS NOT NULL AND v_filter_value IS NOT NULL
       AND POSITION(v_filter_value IN v_text_value) > 0
@@ -73,7 +87,7 @@ BEGIN
       END
     WHEN 'starts_with' THEN v_text_value IS NOT NULL AND v_filter_value IS NOT NULL
       AND v_text_value LIKE CONCAT(v_filter_value, '%')
-    WHEN 'regex' THEN COALESCE(v_raw_value, '') ~ COALESCE(p_filter->>'value', '')
+    -- 'regex' is handled above, in a block that can catch an uncompilable pattern.
     WHEN 'contains_any_in_set' THEN
       EXISTS (
         SELECT 1

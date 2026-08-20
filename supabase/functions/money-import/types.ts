@@ -16,6 +16,12 @@ export interface ImportLineItemInput {
   quantity?: number | null;
   unit?: string | null;
   raw_payload?: Record<string, unknown> | null;
+  /**
+   * True when this line item is a whole-amount stand-in created because the receipt composition
+   * could not be obtained. Persisted to `money_line_items.is_placeholder`, so a later import can
+   * replace it with the real receipt instead of adding lines next to it.
+   */
+  is_placeholder?: boolean;
 }
 
 export interface ExistingTransactionStateCandidate {

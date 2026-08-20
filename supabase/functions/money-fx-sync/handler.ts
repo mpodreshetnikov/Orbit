@@ -6,6 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const CBR_DAILY_URL = Deno.env.get("CBR_DAILY_URL") ?? "https://www.cbr.ru/scripts/XML_daily.asp";
 const CBR_DYNAMIC_URL =
   Deno.env.get("CBR_DYNAMIC_URL") ?? "https://www.cbr.ru/scripts/XML_dynamic.asp";
+const MONEY_FX_SYNC_TOKEN = Deno.env.get("MONEY_FX_SYNC_TOKEN");
 
 const USD_CURRENCY = "USD";
 const RUB_CURRENCY = "RUB";
@@ -24,6 +25,7 @@ interface MoneyFxSyncDeps {
   supabaseServiceRoleKey?: string;
   cbrDailyUrl?: string;
   cbrDynamicUrl?: string;
+  syncToken?: string | null;
   createClientFn?: typeof createClient;
   fetchFn?: typeof fetch;
   now?: () => Date;
@@ -99,6 +101,38 @@ function parseDateInput(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+function getBearerToken(req: Request): string | null {
+  const header = req.headers.get("Authorization") ?? req.headers.get("authorization");
+  if (!header) return null;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(hash))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Compares the presented token with the expected one without leaking their relationship through
+ * timing. Both are hashed first, so a timing difference on the fixed-length digests tells an
+ * attacker nothing about the token itself, and the digests are then compared without early exit.
+ */
+async function tokensMatch(presented: string, expected: string): Promise<boolean> {
+  const [presentedHash, expectedHash] = await Promise.all([
+    sha256Hex(presented),
+    sha256Hex(expected),
+  ]);
+  if (presentedHash.length !== expectedHash.length) return false;
+  let difference = 0;
+  for (let index = 0; index < presentedHash.length; index++) {
+    difference |= presentedHash.charCodeAt(index) ^ expectedHash.charCodeAt(index);
+  }
+  return difference === 0;
 }
 
 function addDays(dateValue: string, days: number): string {
@@ -296,6 +330,7 @@ export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
   const resolvedServiceRoleKey = deps.supabaseServiceRoleKey ?? SUPABASE_SERVICE_ROLE_KEY;
   const resolvedCbrDailyUrl = deps.cbrDailyUrl ?? CBR_DAILY_URL;
   const resolvedCbrDynamicUrl = deps.cbrDynamicUrl ?? CBR_DYNAMIC_URL;
+  const resolvedSyncToken = deps.syncToken ?? MONEY_FX_SYNC_TOKEN ?? null;
 
   return async function handleMoneyFxSyncRequest(req: Request): Promise<Response> {
     if (req.method === "OPTIONS") {
@@ -304,6 +339,22 @@ export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
 
     if (req.method !== "POST") {
       return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    // This function runs with `verify_jwt = false`, so it must check the bearer token itself.
+    // It accepts a body that chooses an arbitrarily long collection window and writes with the
+    // service-role key, so an unauthenticated caller could drive both. The check fails closed:
+    // without a configured token nothing is accepted, including the cron job.
+    if (!resolvedSyncToken) {
+      console.warn(
+        "money-fx-sync rejected a request because MONEY_FX_SYNC_TOKEN is not configured",
+      );
+      return jsonResponse({ error: "Unauthorized" }, 401);
+    }
+
+    const presentedToken = getBearerToken(req);
+    if (!presentedToken || !(await tokensMatch(presentedToken, resolvedSyncToken))) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     if (!resolvedSupabaseUrl || !resolvedServiceRoleKey) {

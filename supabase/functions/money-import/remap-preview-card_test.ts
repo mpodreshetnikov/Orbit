@@ -40,6 +40,7 @@ function createRepositoryMock(options: {
     updateImportSession: async () => {},
     createImportBatch: async () => "batch-1",
     getImportBatch: async () => options.batch ?? null,
+    getImportBatchForUser: async () => options.batch ?? null,
     updateImportBatch: async () => {},
     getExistingTransactionStates: async () => [],
     listReportRowsByBatch: async () => options.rows ?? [],
@@ -49,11 +50,13 @@ function createRepositoryMock(options: {
     },
     resolveCardIdForRow: async () => options.resultingCardId ?? null,
     findExistingTransactionId: async () => null,
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     repairExistingTransactionDetails: async () => ({
       replaced_synthetic_line_items: false,
       has_only_synthetic_line_items: false,
       has_real_line_items: false,
+      blocked_by_manual_edit: false,
     }),
     insertOrResolveTransaction: async () => {
       throw new Error("unused");

@@ -74,6 +74,16 @@ function createRepositoryMock(
             error_count: 0,
           }
         : options.batchBefore,
+    getImportBatchForUser: async () =>
+      options.batchBefore === undefined
+        ? {
+            id: "batch-1",
+            parsed_transactions_count: 0,
+            inserted_count: 0,
+            skipped_count: 0,
+            error_count: 0,
+          }
+        : options.batchBefore,
     updateImportBatch: async (batchId, patch) => {
       if (options.updateBatchError) throw new Error(options.updateBatchError);
       state.batchUpdates.push({ batchId, patch });
@@ -107,6 +117,7 @@ function createRepositoryMock(
       return "card-1";
     },
     findExistingTransactionId: async (row) => (row.external_id === "dup-tx" ? "tx-dup" : null),
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async (row) => {
       if (row.external_id === "dup-tx") {
@@ -131,6 +142,7 @@ function createRepositoryMock(
         replaced_synthetic_line_items: transactionId === "tx-synth",
         has_only_synthetic_line_items: transactionId === "tx-synth",
         has_real_line_items: transactionId !== "tx-synth",
+        blocked_by_manual_edit: false,
       };
     },
     insertLineItemIfNew: async (_transactionId, lineItem) => {

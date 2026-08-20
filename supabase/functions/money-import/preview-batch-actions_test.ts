@@ -66,6 +66,21 @@ function createRepositoryMock(
             error_count: 0,
           }
         : options.batch,
+    getImportBatchForUser: async () =>
+      options.batch === undefined
+        ? {
+            id: "batch-1",
+            status: "running",
+            payer_person_id: "person-1",
+            source: "tbank_web",
+            import_type: "file",
+            file_path: null,
+            parsed_transactions_count: 0,
+            inserted_count: 0,
+            skipped_count: 0,
+            error_count: 0,
+          }
+        : options.batch,
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
     },
@@ -99,12 +114,14 @@ function createRepositoryMock(
       state.deletedBatchIds.push(batchId);
     },
     findExistingTransactionId: async (row) => (row.external_id === "dup-tx" ? "tx-existing" : null),
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async (transactionId, _importHash) =>
       transactionId === "tx-existing" ? "line-existing" : null,
     repairExistingTransactionDetails: async () => ({
       replaced_synthetic_line_items: false,
       has_only_synthetic_line_items: false,
       has_real_line_items: false,
+      blocked_by_manual_edit: false,
     }),
     resolveAccountIdForRow: async (
       _payerPersonId: string,

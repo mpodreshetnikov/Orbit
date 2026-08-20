@@ -505,6 +505,7 @@ CREATE TABLE "public"."money_import_batches" (
     "skipped_count" integer DEFAULT 0 NOT NULL,
     "error_count" integer DEFAULT 0 NOT NULL,
     "completed_at" timestamp with time zone,
+    "created_by_auth_user_id" "uuid",
     CONSTRAINT "money_import_batches_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text", 'discarded'::"text"])))
 );
 
@@ -554,6 +555,7 @@ CREATE TABLE "public"."money_line_items" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "import_hash" "text",
+    "is_placeholder" boolean DEFAULT false NOT NULL,
     "category_locked_by_user" boolean DEFAULT false NOT NULL,
     "last_category_rule_id" "uuid",
     "last_category_rule_run_id" "uuid",
@@ -1814,6 +1816,13 @@ CREATE INDEX "idx_money_import_batches_created_at" ON "public"."money_import_bat
 
 
 --
+-- Name: idx_money_import_batches_created_by; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_batches_created_by" ON "public"."money_import_batches" USING "btree" ("created_by_auth_user_id");
+
+
+--
 -- Name: idx_money_import_batches_payer_person_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1867,6 +1876,13 @@ CREATE INDEX "idx_money_line_items_beneficiary_person_id" ON "public"."money_lin
 --
 
 CREATE INDEX "idx_money_line_items_category_id" ON "public"."money_line_items" USING "btree" ("category_id");
+
+
+--
+-- Name: idx_money_line_items_placeholder; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_line_items_placeholder" ON "public"."money_line_items" USING "btree" ("transaction_id") WHERE "is_placeholder";
 
 
 --
@@ -1933,10 +1949,10 @@ CREATE INDEX "idx_money_transactions_card_id" ON "public"."money_transactions" U
 
 
 --
--- Name: idx_money_transactions_dedupe_hash; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_money_transactions_adoption_candidates; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX "idx_money_transactions_dedupe_hash" ON "public"."money_transactions" USING "btree" ("dedupe_hash");
+CREATE INDEX "idx_money_transactions_adoption_candidates" ON "public"."money_transactions" USING "btree" ("payer_person_id", "account_id", "posted_at") WHERE ("external_id" IS NULL);
 
 
 --
@@ -1968,10 +1984,17 @@ CREATE INDEX "idx_money_transactions_posted_at" ON "public"."money_transactions"
 
 
 --
--- Name: idx_money_transactions_source_external_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_money_transactions_person_dedupe_hash; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX "idx_money_transactions_source_external_id" ON "public"."money_transactions" USING "btree" ("source", "external_id") WHERE ("external_id" IS NOT NULL);
+CREATE UNIQUE INDEX "idx_money_transactions_person_dedupe_hash" ON "public"."money_transactions" USING "btree" ("payer_person_id", "dedupe_hash") WHERE ("dedupe_hash" IS NOT NULL);
+
+
+--
+-- Name: idx_money_transactions_person_source_external_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_transactions_person_source_external_id" ON "public"."money_transactions" USING "btree" ("payer_person_id", "source", "external_id") WHERE ("external_id" IS NOT NULL);
 
 
 --

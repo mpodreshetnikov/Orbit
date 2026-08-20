@@ -424,7 +424,9 @@ describe("tbank-web connector", () => {
       base_text_color: "FFFFFF",
     });
     expect((row?.raw_payload as Record<string, unknown>)?.account_hint).toBe("6986");
-    expect(row?.dedupe_hash).toMatch(/^tbw_/);
+    // Hashing is a pass over the finished rows, because the hash carries an occurrence number that
+    // is only knowable across the whole set. The mapper therefore leaves the field empty.
+    expect(row?.dedupe_hash).toBeNull();
     expect(row?.line_items).toHaveLength(2);
     expect((row?.line_items as Array<Record<string, unknown>>)[0]?.title).toBe("Chicken roll");
     expect((row?.line_items as Array<Record<string, unknown>>)[1]?.amount).toBe(-658);
@@ -712,6 +714,8 @@ describe("tbank-web connector", () => {
     expect(result.rows[0]?.account_id).toBeNull();
     expect(result.rows[0]?.amount).toBe(-100);
     expect(result.rows[0]?.line_items).toHaveLength(1);
+    // Every row leaves parse with a full SHA-256, not the old 32-bit prefixed digest, and not empty.
+    expect(result.rows[0]?.dedupe_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("throws blocked reason from page extraction", async () => {

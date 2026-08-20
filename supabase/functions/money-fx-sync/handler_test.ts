@@ -55,6 +55,7 @@ Deno.test(
     const handler = createMoneyFxSyncHandler({
       supabaseUrl: "http://localhost:54321",
       supabaseServiceRoleKey: "service-role-key",
+      syncToken: "fx-sync-token",
       fetchFn: (input) => {
         const url = String(input);
         fetchCalls.push(url);
@@ -128,7 +129,7 @@ Deno.test(
       new Request("http://localhost/functions/v1/money-fx-sync", {
         method: "POST",
         headers: {
-          Authorization: "Bearer service-role-key",
+          Authorization: "Bearer fx-sync-token",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({}),
@@ -144,3 +145,48 @@ Deno.test(
     ]);
   },
 );
+
+function createAuthProbeHandler(syncToken: string | null) {
+  // Neither the Supabase client nor the network is reachable in these cases: the token check runs
+  // before either is touched, so any call to them would be a defect in the ordering.
+  return createMoneyFxSyncHandler({
+    supabaseUrl: "http://localhost:54321",
+    supabaseServiceRoleKey: "service-role-key",
+    syncToken,
+    fetchFn: () => {
+      throw new Error("money-fx-sync must not reach the network before authorizing the caller");
+    },
+    createClientFn: (() => {
+      throw new Error("money-fx-sync must not open a client before authorizing the caller");
+    }) as unknown as typeof createClient,
+  });
+}
+
+function authProbeRequest(headers: Record<string, string> = {}): Request {
+  return new Request("http://localhost/functions/v1/money-fx-sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ force_full_backfill: true }),
+  });
+}
+
+Deno.test("money-fx-sync rejects a request without an authorization header", async () => {
+  const response = await createAuthProbeHandler("fx-sync-token")(authProbeRequest());
+  assertEquals(response.status, 401);
+  assertEquals((await response.json()) as { error: string }, { error: "Unauthorized" });
+});
+
+Deno.test("money-fx-sync rejects a request with the wrong token", async () => {
+  const response = await createAuthProbeHandler("fx-sync-token")(
+    authProbeRequest({ Authorization: "Bearer wrong-token" }),
+  );
+  assertEquals(response.status, 401);
+});
+
+Deno.test("money-fx-sync fails closed when no token is configured", async () => {
+  // A missing secret must not degrade into "accept everyone" — that is the hole being closed.
+  const response = await createAuthProbeHandler(null)(
+    authProbeRequest({ Authorization: "Bearer anything" }),
+  );
+  assertEquals(response.status, 401);
+});

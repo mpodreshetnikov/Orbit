@@ -68,8 +68,15 @@ describe("tbank-csv connector", () => {
       ["c", "d"],
     ]);
 
-    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T12:30:05.000Z");
-    expect(parseTBankDate("01.02.2026")).toBe("2026-02-01T00:00:00.000Z");
+    // A statement prints Moscow local time, so the parsed instant must carry the +03:00 offset.
+    // Stamping "Z" on it, as this connector used to, shifted every operation three hours back and
+    // pushed anything after 21:00 into the previous UTC day, which is how the budget report cuts
+    // months.
+    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T12:30:05+03:00");
+    expect(parseTBankDate("01.02.2026")).toBe("2026-02-01T00:00:00+03:00");
+    expect(new Date(parseTBankDate("01.02.2026 23:30:00") as string).toISOString()).toBe(
+      "2026-02-01T20:30:00.000Z",
+    );
     expect(parseTBankDate("")).toBeNull();
     expect(parseTBankDate("2026-02-01")).toBeNull();
 
@@ -133,7 +140,7 @@ describe("tbank-csv connector", () => {
 
     expect(result.transactions[0]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-01T12:30:00.000Z",
+        posted_at: "2026-02-01T12:30:00+03:00",
         transaction_type: "expense",
         status: "posted",
         account_hint: "1234",
@@ -150,7 +157,7 @@ describe("tbank-csv connector", () => {
     );
     expect(result.transactions[1]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-02T00:00:00.000Z",
+        posted_at: "2026-02-02T00:00:00+03:00",
         currency: "RUB",
         transaction_type: "income",
         status: "pending",
@@ -173,5 +180,40 @@ describe("tbank-csv connector", () => {
     );
     expect(result.transactions[1].line_items[0].title).toBe("T-Bank");
     expect(result.transactions[0].dedupe_hash).toEqual(expect.any(String));
+  });
+
+  it("marks the whole-amount statement line as a placeholder", async () => {
+    const header = [
+      COL.DATE_OP,
+      COL.DATE_PAY,
+      COL.CARD,
+      COL.STATUS,
+      COL.AMOUNT_OP,
+      COL.CURRENCY_OP,
+      COL.CATEGORY,
+      COL.MCC,
+      COL.DESCRIPTION,
+    ].join(";");
+    const row = [
+      "01.02.2026 12:30:00",
+      "01.02.2026",
+      "**** 1234",
+      "OK",
+      "-120,50",
+      "RUB",
+      "Food",
+      "5812",
+      "Coffee",
+    ].join(";");
+
+    const file = new File([`${header}\n${row}\n`], "sample.csv", { type: "text/csv" });
+    const result = await tbankConnector.parse(file);
+
+    // A statement carries no receipt composition, so every line the CSV produces is a stand-in.
+    // The flag is what lets a later extension import replace it instead of adding lines beside it.
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0].line_items).toHaveLength(1);
+    expect(result.transactions[0].line_items[0].is_placeholder).toBe(true);
+    expect(result.transactions[0].line_items[0].amount).toBe(result.transactions[0].amount);
   });
 });

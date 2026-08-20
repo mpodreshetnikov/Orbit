@@ -55,6 +55,18 @@ function createRepositoryMock(
       parsed_through_at: null,
       status: "pending",
     }),
+    getImportBatchForUser: async () => ({
+      id: "batch-1",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      import_type: "file",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      parsed_through_at: null,
+      status: "pending",
+    }),
     updateImportBatch: async () => {},
     listReportRowsByBatch: async () => [
       {
@@ -79,12 +91,14 @@ function createRepositoryMock(
     resolveAccountIdForRow: async () => "acc-1",
     resolveCardIdForRow: async () => "card-target",
     findExistingTransactionId: async () => null,
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     getExistingTransactionStates: async () => [],
     repairExistingTransactionDetails: async () => ({
       replaced_synthetic_line_items: false,
       has_only_synthetic_line_items: false,
       has_real_line_items: false,
+      blocked_by_manual_edit: false,
     }),
     insertOrResolveTransaction: async () => ({ transactionId: "tx-1", inserted: true }),
     insertLineItemIfNew: async () => ({ lineItemId: "line-1", inserted: true }),

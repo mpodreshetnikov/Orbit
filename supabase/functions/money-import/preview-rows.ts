@@ -1,4 +1,4 @@
-import { isSessionUsable } from "./auth.ts";
+import { isSessionUsable, resolveBatchOwnerUserId } from "./auth.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
   buildReceiptPersistenceFields,
@@ -147,6 +147,7 @@ function readChunkState(
 function buildPreviewResetMeta(
   existingMetaInput: unknown,
   incomingMetaInput: unknown,
+  previewAttemptId: string | null,
 ): Record<string, unknown> {
   const incomingMeta = asRecord(incomingMetaInput);
   const existingMeta = asRecord(existingMetaInput);
@@ -155,6 +156,7 @@ function buildPreviewResetMeta(
 
   return {
     range_selection_meta: incomingRangeSelectionMeta ?? existingRangeSelectionMeta ?? null,
+    preview_attempt_id: previewAttemptId,
   };
 }
 
@@ -227,6 +229,7 @@ export async function previewRowsAction(
     batchId = await deps.repository.createImportBatch({
       source,
       payer_person_id: payerPersonId,
+      created_by_auth_user_id: resolveBatchOwnerUserId(auth),
       import_type: importType,
       file_path: normalizeText(body.file_path),
       meta: body.meta ?? null,
@@ -244,7 +247,14 @@ export async function previewRowsAction(
     }
   }
 
-  const batchBefore = await deps.repository.getImportBatch(batchId);
+  // The batch id can come straight from the request body, and this action accepts ordinary user
+  // authentication — so without an ownership check another allowed user could name someone else's
+  // batch and have its report rows, brand resolutions, counters and meta cleared. Same rule as
+  // apply, discard, remap and brand resolution; an ownerless batch stays reachable, as there.
+  const batchOwnerUserId = resolveBatchOwnerUserId(auth);
+  const batchBefore = batchOwnerUserId
+    ? await deps.repository.getImportBatchForUser(batchId, batchOwnerUserId)
+    : await deps.repository.getImportBatch(batchId);
   if (!batchBefore) {
     await actionSpan?.end({
       status: "error",
@@ -262,7 +272,17 @@ export async function previewRowsAction(
     return jsonResponse({ error: "Batch is not awaiting preview" }, 409);
   }
 
-  const shouldResetPreview = !chunkState.enabled || chunkState.chunkIndex === 0;
+  // Clearing on chunk 0 alone loses work: if the caller repeats chunk 0 after later chunks were
+  // already accepted — a retry, or a restarted background script — every row parsed so far is
+  // deleted and the counters go backwards. The caller therefore stamps one attempt id on the whole
+  // preview run, and the clear happens only when that id differs from the one recorded on the batch.
+  const previewAttemptId = normalizeText(body.preview_attempt_id);
+  const storedPreviewAttemptId = normalizeText(asRecord(batchBefore.meta)?.preview_attempt_id);
+  const isRepeatedPreviewAttempt =
+    previewAttemptId !== null && previewAttemptId === storedPreviewAttemptId;
+
+  const shouldResetPreview =
+    (!chunkState.enabled || chunkState.chunkIndex === 0) && !isRepeatedPreviewAttempt;
   if (shouldResetPreview) {
     await deps.repository.deleteReportRowsByBatch(batchId);
     if (deps.repository.deleteBatchBrandResolutionsByBatch) {
@@ -283,10 +303,14 @@ export async function previewRowsAction(
       ? toNonNegativeInteger(batchBefore.error_count, 0)
       : 0;
   const batchMetaBase = shouldResetPreview
-    ? buildPreviewResetMeta(batchBefore.meta, body.meta)
+    ? buildPreviewResetMeta(batchBefore.meta, body.meta, previewAttemptId)
     : batchBefore.meta;
   const sessionMetaBase = shouldResetPreview
-    ? buildPreviewResetMeta(auth.mode === "session" ? auth.session.meta : null, body.meta)
+    ? buildPreviewResetMeta(
+        auth.mode === "session" ? auth.session.meta : null,
+        body.meta,
+        previewAttemptId,
+      )
     : auth.mode === "session"
       ? auth.session.meta
       : null;
@@ -458,7 +482,10 @@ export async function previewRowsAction(
       }
       inRangeRowCount += 1;
 
-      const existingTransactionId = await deps.repository.findExistingTransactionId(normalized);
+      const existingTransactionId = await deps.repository.findExistingTransactionId(
+        normalized,
+        payerPersonId,
+      );
       const txStatus: RowStatus = existingTransactionId ? "skipped" : "inserted";
       const txMessage = existingTransactionId ? "Duplicate transaction" : null;
       if (txStatus === "inserted") insertedCount += 1;

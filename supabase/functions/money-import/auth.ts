@@ -19,6 +19,17 @@ export function isSessionUsable(session: Record<string, unknown>, nowMs = Date.n
   return status === "created" || status === "running";
 }
 
+/**
+ * The authenticated user an import batch should be attributed to.
+ *
+ * A session token carries the user who created the session, so a batch produced by the extension is
+ * owned by the person who started the import from the app, not by nobody.
+ */
+export function resolveBatchOwnerUserId(auth: AuthContext): string | null {
+  if (auth.mode === "user") return auth.userId;
+  return normalizeText(auth.session.created_by_auth_user_id);
+}
+
 function asSessionAuthContext(token: string, session: Record<string, unknown>): SessionAuthContext {
   return {
     mode: "session",

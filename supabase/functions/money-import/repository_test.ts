@@ -31,6 +31,30 @@ function createRepositoryWithClients(clients: {
   });
 }
 
+/**
+ * Chainable stand-in for a PostgREST query. Records every filter, so a test can assert what the
+ * repository actually asked for instead of mirroring the exact call order in nested objects.
+ */
+function createQueryFake(
+  resolve: (filters: Record<string, unknown>) => { data: unknown; error: unknown },
+): Record<string, unknown> {
+  const filters: Record<string, unknown> = {};
+  const builder: Record<string, unknown> = {};
+  const record = (operator: string) => (column: string, value?: unknown) => {
+    filters[`${operator}:${column}`] = value ?? null;
+    return builder;
+  };
+  builder.eq = record("eq");
+  builder.is = record("is");
+  builder.gte = record("gte");
+  builder.lte = record("lte");
+  builder.limit = () => builder;
+  builder.maybeSingle = async () => resolve(filters);
+  builder.then = (onFulfilled: (value: unknown) => unknown) =>
+    Promise.resolve(resolve(filters)).then(onFulfilled);
+  return builder;
+}
+
 async function assertThrowsWithMessage(
   run: () => Promise<unknown>,
   expectedMessage: string,
@@ -214,39 +238,49 @@ Deno.test(
       adminClient: {
         from: (table: string) => {
           if (table === "money_transactions") {
+            // Both lookups are now scoped by payer_person_id first: `.eq("payer_person_id", ...)`
+            // then either `.eq("source", ...).in("external_id", ...)` or `.in("dedupe_hash", ...)`.
+            const personScoped = {
+              eq: (column: string, value: string) => {
+                assertEquals(column, "source");
+                assertEquals(value, "tbank");
+                return {
+                  in: (inColumn: string, _values: string[]) => {
+                    assertEquals(inColumn, "external_id");
+                    return Promise.resolve({
+                      data: [
+                        {
+                          id: "tx-real",
+                          source: "tbank",
+                          external_id: "ext-real",
+                          dedupe_hash: "hash-real",
+                          receipt_enrichment_status: "ok",
+                        },
+                        {
+                          id: "tx-synth",
+                          source: "tbank",
+                          external_id: "ext-synth",
+                          dedupe_hash: "hash-synth",
+                          receipt_enrichment_status: "ok",
+                        },
+                      ],
+                      error: null,
+                    });
+                  },
+                };
+              },
+              in: (column: string, _values: string[]) => {
+                assertEquals(column, "dedupe_hash");
+                return Promise.resolve({ data: [], error: null });
+              },
+            };
+
             return {
               select: () => ({
-                eq: () => ({
-                  in: (column: string, _values: string[]) => {
-                    if (column === "external_id") {
-                      return Promise.resolve({
-                        data: [
-                          {
-                            id: "tx-real",
-                            source: "tbank",
-                            external_id: "ext-real",
-                            dedupe_hash: "hash-real",
-                            receipt_enrichment_status: "ok",
-                          },
-                          {
-                            id: "tx-synth",
-                            source: "tbank",
-                            external_id: "ext-synth",
-                            dedupe_hash: "hash-synth",
-                            receipt_enrichment_status: "ok",
-                          },
-                        ],
-                        error: null,
-                      });
-                    }
-                    throw new Error(`Unexpected external-id column ${column}`);
-                  },
-                }),
-                in: (column: string, _values: string[]) => {
-                  if (column === "dedupe_hash") {
-                    return Promise.resolve({ data: [], error: null });
-                  }
-                  throw new Error(`Unexpected column ${column}`);
+                eq: (column: string, value: string) => {
+                  assertEquals(column, "payer_person_id");
+                  assertEquals(value, "person-1");
+                  return personScoped;
                 },
               }),
             };
@@ -496,69 +530,63 @@ Deno.test(
   },
 );
 
-Deno.test(
-  "repository insertOrResolveTransaction handles inserted and duplicate-update paths",
-  async () => {
-    let insertCalls = 0;
-    const updatedTransactions: Array<{ id: string; payload: Record<string, unknown> }> = [];
-    const repository = createRepositoryWithClients({
-      adminClient: {
-        from: (table: string) => {
-          if (table === "money_transactions") {
-            return {
-              insert: () => ({
-                select: () => ({
-                  single: async () => {
-                    insertCalls += 1;
-                    if (insertCalls === 1) {
-                      return { data: { id: "tx-1" }, error: null };
-                    }
-                    return { data: null, error: { code: "23505", message: "duplicate" } };
-                  },
-                }),
-              }),
-              select: () => ({
-                limit: () => ({
-                  eq: () => ({
-                    eq: () => ({
-                      maybeSingle: async () => ({ data: { id: "tx-existing" }, error: null }),
-                    }),
-                  }),
-                }),
-              }),
-              update: (payload: Record<string, unknown>) => ({
-                eq: (column: string, value: string) => {
-                  assertEquals(column, "id");
-                  updatedTransactions.push({ id: value, payload });
-                  return Promise.resolve({ error: null });
-                },
-              }),
-            };
-          }
-          throw new Error(`Unexpected table ${table}`);
-        },
+Deno.test("repository insertOrResolveTransaction resolves by key before inserting", async () => {
+  let insertCalls = 0;
+  let existingId: string | null = null;
+  const updatedTransactions: Array<{ id: string; payload: Record<string, unknown> }> = [];
+
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+        return {
+          insert: () => ({
+            select: () => ({
+              single: async () => {
+                insertCalls += 1;
+                return { data: { id: "tx-1" }, error: null };
+              },
+            }),
+          }),
+          select: () =>
+            createQueryFake((filters) => {
+              assertEquals(filters["eq:payer_person_id"], "person-1");
+              return { data: existingId ? { id: existingId } : null, error: null };
+            }),
+          update: (payload: Record<string, unknown>) => ({
+            eq: (column: string, value: string) => {
+              assertEquals(column, "id");
+              updatedTransactions.push({ id: value, payload });
+              return Promise.resolve({ error: null });
+            },
+          }),
+        };
       },
-    });
+    },
+  });
 
-    const row: CanonicalTransactionRowInput = {
-      posted_at: "2026-01-01T00:00:00.000Z",
-      amount: 10,
-      transaction_type: "expense",
-      source: "tbank",
-      external_id: "ext-1",
-      account_id: "acc-1",
-    };
+  const row: CanonicalTransactionRowInput = {
+    posted_at: "2026-01-01T00:00:00.000Z",
+    amount: 10,
+    transaction_type: "expense",
+    source: "tbank",
+    external_id: "ext-1",
+    account_id: "acc-1",
+  };
 
-    const inserted = await repository.insertOrResolveTransaction(row, "person-1");
-    assertEquals(inserted, { transactionId: "tx-1", inserted: true });
+  const inserted = await repository.insertOrResolveTransaction(row, "person-1");
+  assertEquals(inserted, { transactionId: "tx-1", inserted: true });
+  assertEquals(insertCalls, 1);
 
-    const duplicate = await repository.insertOrResolveTransaction(row, "person-1");
-    assertEquals(duplicate, { transactionId: "tx-existing", inserted: false });
-    assertEquals(updatedTransactions.length, 1);
-    assertEquals(updatedTransactions[0]?.id, "tx-existing");
-    assertEquals(updatedTransactions[0]?.payload.external_id, "ext-1");
-  },
-);
+  // The second time the row is already there, so it is resolved and refreshed, never inserted.
+  existingId = "tx-existing";
+  const duplicate = await repository.insertOrResolveTransaction(row, "person-1");
+  assertEquals(duplicate, { transactionId: "tx-existing", inserted: false });
+  assertEquals(insertCalls, 1);
+  assertEquals(updatedTransactions.length, 1);
+  assertEquals(updatedTransactions[0]?.id, "tx-existing");
+  assertEquals(updatedTransactions[0]?.payload.external_id, "ext-1");
+});
 
 Deno.test(
   "repository insertLineItemIfNew handles duplicate fallback and update errors",
@@ -1024,10 +1052,10 @@ Deno.test("repository returns null for lookup errors and uses default error mess
 });
 
 Deno.test(
-  "repository duplicate transaction handling covers dedupe and unresolved duplicate branches",
+  "repository resolves a duplicate by dedupe hash and reports an unresolvable one",
   async () => {
-    let insertCall = 0;
     let dedupeQueryUsed = false;
+    let resolvable = true;
 
     const repository = createRepositoryWithClients({
       adminClient: {
@@ -1036,30 +1064,23 @@ Deno.test(
           return {
             insert: () => ({
               select: () => ({
-                single: async () => {
-                  insertCall += 1;
-                  if (insertCall === 1)
-                    return { data: null, error: { code: "23505", message: "dup" } };
-                  return { data: null, error: { code: "23505", message: "dup" } };
-                },
+                single: async () => ({ data: null, error: { code: "23505", message: "dup" } }),
               }),
             }),
             update: () => ({
               eq: async () => ({ error: null }),
             }),
-            select: () => ({
-              limit: () => ({
-                eq: (column: string) => {
-                  if (column === "dedupe_hash") dedupeQueryUsed = true;
+            select: () =>
+              createQueryFake((filters) => {
+                if ("eq:dedupe_hash" in filters) {
+                  dedupeQueryUsed = true;
                   return {
-                    eq: () => ({
-                      maybeSingle: async () => ({ data: { id: "tx-dedupe" }, error: null }),
-                    }),
-                    maybeSingle: async () => ({ data: { id: "tx-dedupe" }, error: null }),
+                    data: resolvable ? { id: "tx-dedupe" } : null,
+                    error: null,
                   };
-                },
+                }
+                return { data: null, error: null };
               }),
-            }),
           };
         },
       },
@@ -1078,6 +1099,9 @@ Deno.test(
     assertEquals(dedupeResolved, { transactionId: "tx-dedupe", inserted: false });
     assertEquals(dedupeQueryUsed, true);
 
+    // A unique violation whose row cannot then be found means the conflict came from somewhere the
+    // lookup does not cover; that must surface, not be swallowed.
+    resolvable = false;
     await assertThrowsWithMessage(
       () =>
         repository.insertOrResolveTransaction(
@@ -1086,6 +1110,7 @@ Deno.test(
             amount: 20,
             transaction_type: "expense",
             account_id: "acc-1",
+            dedupe_hash: "hash-2",
           },
           "person-1",
         ),
@@ -1872,3 +1897,401 @@ Deno.test(
     assertEquals(resolution, null);
   },
 );
+
+function createRepairRepository(existingLineItems: Array<Record<string, unknown>>): {
+  repository: MoneyImportRepository;
+  deletedIdBatches: string[][];
+  transactionUpdates: () => number;
+} {
+  const deletedIdBatches: string[][] = [];
+  let transactionUpdates = 0;
+
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table === "money_line_items") {
+          return {
+            select: () => ({
+              in: async () => ({ data: existingLineItems, error: null }),
+            }),
+            delete: () => ({
+              in: async (_column: string, values: string[]) => {
+                deletedIdBatches.push(values);
+                return { error: null };
+              },
+            }),
+          };
+        }
+        if (table === "money_transactions") {
+          return {
+            update: () => ({
+              eq: async () => {
+                transactionUpdates += 1;
+                return { error: null };
+              },
+            }),
+          };
+        }
+        throw new Error(`Unexpected table ${table}`);
+      },
+    },
+  });
+
+  return { repository, deletedIdBatches, transactionUpdates: () => transactionUpdates };
+}
+
+const repairRow: CanonicalTransactionRowInput = {
+  posted_at: "2026-03-05T10:00:00.000Z",
+  amount: -1000,
+  transaction_type: "expense",
+};
+
+Deno.test(
+  "repairExistingTransactionDetails removes a placeholder sitting next to real lines",
+  async () => {
+    // This is the shape left behind by the missing repair call: a placeholder and the real receipt
+    // lines side by side. The old "all line items are placeholders" condition was false here, so the
+    // placeholder survived forever and the amount was counted twice.
+    const { repository, deletedIdBatches } = createRepairRepository([
+      { id: "line-placeholder", raw_payload: null, is_placeholder: true },
+      { id: "line-real-1", raw_payload: { source: "receipt" } },
+      { id: "line-real-2", raw_payload: { source: "receipt" } },
+    ]);
+
+    const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+    assertEquals(result.blocked_by_manual_edit, false);
+    assertEquals(result.replaced_synthetic_line_items, true);
+    assertEquals(deletedIdBatches, [["line-placeholder"]]);
+  },
+);
+
+Deno.test("repairExistingTransactionDetails removes fallback and balancing lines", async () => {
+  const { repository, deletedIdBatches } = createRepairRepository([
+    { id: "line-fallback", raw_payload: { source: "fallback" } },
+    { id: "line-dom", raw_payload: { source: "dom_fallback" } },
+    { id: "line-balancing", raw_payload: { source: "balancing", delta: 60 } },
+    { id: "line-real", raw_payload: { source: "receipt" } },
+  ]);
+
+  await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+  assertEquals(deletedIdBatches, [["line-fallback", "line-dom", "line-balancing"]]);
+});
+
+Deno.test(
+  "repairExistingTransactionDetails refuses to touch manually edited line items",
+  async () => {
+    const { repository, deletedIdBatches } = createRepairRepository([
+      { id: "line-locked", raw_payload: null, is_placeholder: true, category_locked_by_user: true },
+      { id: "line-real", raw_payload: { source: "receipt" } },
+    ]);
+
+    const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+    assertEquals(result.blocked_by_manual_edit, true);
+    assertEquals(result.replaced_synthetic_line_items, false);
+    assertEquals(deletedIdBatches, []);
+  },
+);
+
+Deno.test("repairExistingTransactionDetails treats a manual assignment as an edit", async () => {
+  const { repository, deletedIdBatches } = createRepairRepository([
+    { id: "line-manual", raw_payload: { source: "fallback" }, assignment_method: "manual" },
+  ]);
+
+  const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+  assertEquals(result.blocked_by_manual_edit, true);
+  assertEquals(deletedIdBatches, []);
+});
+
+Deno.test(
+  "repairExistingTransactionDetails deletes nothing when there is nothing to replace",
+  async () => {
+    const { repository, deletedIdBatches, transactionUpdates } = createRepairRepository([
+      { id: "line-real", raw_payload: { source: "receipt" } },
+    ]);
+
+    const result = await repository.repairExistingTransactionDetails("tx-1", repairRow);
+
+    assertEquals(result.replaced_synthetic_line_items, false);
+    assertEquals(result.has_real_line_items, true);
+    assertEquals(deletedIdBatches, []);
+    // The transaction header is still refreshed even when no line item had to be replaced.
+    assertEquals(transactionUpdates(), 1);
+  },
+);
+
+Deno.test("getImportBatchForUser hides a batch owned by another user", async () => {
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        assertEquals(table, "money_import_batches");
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { id: "batch-1", created_by_auth_user_id: "user-other" },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      },
+    },
+  });
+
+  assertEquals(await repository.getImportBatchForUser("batch-1", "user-1"), null);
+  assertEquals((await repository.getImportBatchForUser("batch-1", "user-other"))?.id, "batch-1");
+});
+
+Deno.test(
+  "getImportBatchForUser still returns a batch that predates the owner column",
+  async () => {
+    // File imports created before the column existed carry no owner. Refusing them would strand
+    // batches that are otherwise perfectly usable, and every allowed user already sees the data.
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { id: "batch-legacy", created_by_auth_user_id: null },
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      },
+    });
+
+    assertEquals(
+      (await repository.getImportBatchForUser("batch-legacy", "user-1"))?.id,
+      "batch-legacy",
+    );
+  },
+);
+
+function createAdoptionRepository(candidates: Array<Record<string, unknown>>): {
+  repository: MoneyImportRepository;
+  queries: Array<Record<string, unknown>>;
+} {
+  const queries: Array<Record<string, unknown>> = [];
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+        return {
+          select: () =>
+            createQueryFake((filters) => {
+              queries.push(filters);
+              // The identity lookups run first and must find nothing for adoption to be reached.
+              if ("eq:external_id" in filters || "eq:dedupe_hash" in filters) {
+                return { data: null, error: null };
+              }
+              return { data: candidates, error: null };
+            }),
+        };
+      },
+    },
+  });
+  return { repository, queries };
+}
+
+const adoptionRow: CanonicalTransactionRowInput = {
+  posted_at: "2026-03-05T10:00:00.000Z",
+  amount: -1000,
+  transaction_type: "expense",
+  source: "tbank",
+  external_id: "op-1",
+  account_id: "acc-1",
+};
+
+Deno.test("findAdoptableTransactionId matches a single statement transaction", async () => {
+  const { repository, queries } = createAdoptionRepository([
+    { id: "tx-statement", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+  ]);
+
+  assertEquals(await repository.findAdoptableTransactionId(adoptionRow, "person-1"), {
+    id: "tx-statement",
+  });
+
+  const adoptionQuery = queries.at(-1) ?? {};
+  assertEquals(adoptionQuery["eq:payer_person_id"], "person-1");
+  assertEquals(adoptionQuery["eq:account_id"], "acc-1");
+  // Only statement rows are adoptable; a row that already has an external id has its own identity.
+  assertEquals("is:external_id" in adoptionQuery, true);
+});
+
+Deno.test("findAdoptableTransactionId refuses to choose between two candidates", async () => {
+  // Two identical purchases on the same day are rare but real. Merging them loses one for good, so
+  // the row goes to the batch report for a human instead.
+  const { repository } = createAdoptionRepository([
+    { id: "tx-a", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+    { id: "tx-b", posted_at: "2026-03-05T11:00:00.000Z", amount: -1000 },
+  ]);
+
+  assertEquals(await repository.findAdoptableTransactionId(adoptionRow, "person-1"), {
+    ambiguous: true,
+  });
+});
+
+Deno.test("findAdoptableTransactionId ignores candidates with a different amount", async () => {
+  const { repository } = createAdoptionRepository([
+    { id: "tx-other-amount", posted_at: "2026-03-05T09:00:00.000Z", amount: -999 },
+  ]);
+
+  assertEquals(await repository.findAdoptableTransactionId(adoptionRow, "person-1"), null);
+});
+
+Deno.test("findAdoptableTransactionId needs an account to match on", async () => {
+  const { repository } = createAdoptionRepository([
+    { id: "tx-statement", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+  ]);
+
+  assertEquals(
+    await repository.findAdoptableTransactionId({ ...adoptionRow, account_id: null }, "person-1"),
+    null,
+  );
+});
+
+Deno.test("insertOrResolveTransaction adopts instead of creating a second copy", async () => {
+  const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+  let insertCalls = 0;
+
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+        return {
+          insert: () => ({
+            select: () => ({
+              single: async () => {
+                insertCalls += 1;
+                return { data: { id: "tx-new" }, error: null };
+              },
+            }),
+          }),
+          select: () =>
+            createQueryFake((filters) => {
+              if ("eq:external_id" in filters || "eq:dedupe_hash" in filters) {
+                return { data: null, error: null };
+              }
+              return {
+                data: [
+                  { id: "tx-statement", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+                ],
+                error: null,
+              };
+            }),
+          update: (payload: Record<string, unknown>) => ({
+            eq: (column: string, value: string) => {
+              assertEquals(column, "id");
+              updates.push({ id: value, payload });
+              return Promise.resolve({ error: null });
+            },
+          }),
+        };
+      },
+    },
+  });
+
+  const result = await repository.insertOrResolveTransaction(adoptionRow, "person-1");
+
+  assertEquals(result, { transactionId: "tx-statement", inserted: false, adopted: true });
+  assertEquals(insertCalls, 0);
+  // The statement transaction takes on the operation's identity, so later runs match it exactly.
+  assertEquals(updates[0]?.payload.external_id, "op-1");
+});
+
+Deno.test("insertOrResolveTransaction reports an ambiguous match instead of guessing", async () => {
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+        return {
+          insert: () => ({
+            select: () => ({
+              single: async () => {
+                throw new Error("must not insert while the match is ambiguous");
+              },
+            }),
+          }),
+          select: () =>
+            createQueryFake((filters) => {
+              if ("eq:external_id" in filters || "eq:dedupe_hash" in filters) {
+                return { data: null, error: null };
+              }
+              return {
+                data: [
+                  { id: "tx-a", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+                  { id: "tx-b", posted_at: "2026-03-05T11:00:00.000Z", amount: -1000 },
+                ],
+                error: null,
+              };
+            }),
+        };
+      },
+    },
+  });
+
+  await assertThrowsWithMessage(
+    () => repository.insertOrResolveTransaction(adoptionRow, "person-1"),
+    "Multiple statement transactions match this operation",
+  );
+});
+
+Deno.test(
+  "insertOrResolveTransaction does not adopt for a row without an external id",
+  async () => {
+    // A statement row has no external id of its own; adopting one statement row into another would
+    // merge two unrelated operations.
+    let insertCalls = 0;
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+          return {
+            insert: () => ({
+              select: () => ({
+                single: async () => {
+                  insertCalls += 1;
+                  return { data: { id: "tx-new" }, error: null };
+                },
+              }),
+            }),
+            select: () =>
+              createQueryFake(() => ({
+                data: [
+                  { id: "tx-statement", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+                ],
+                error: null,
+              })),
+          };
+        },
+      },
+    });
+
+    const result = await repository.insertOrResolveTransaction(
+      { ...adoptionRow, external_id: null, dedupe_hash: null },
+      "person-1",
+    );
+
+    assertEquals(result, { transactionId: "tx-new", inserted: true });
+    assertEquals(insertCalls, 1);
+  },
+);
+
+Deno.test("findAdoptableTransactionId never adopts a transaction from another source", async () => {
+  // A manually entered transaction also has no external id, sits on the same account and can carry
+  // the same amount on the same day. Adoption overwrites the transaction's fields and identity, so
+  // merging a hand-entered operation into a bank one would be unrecoverable.
+  const { repository, queries } = createAdoptionRepository([
+    { id: "tx-manual", posted_at: "2026-03-05T09:00:00.000Z", amount: -1000 },
+  ]);
+
+  await repository.findAdoptableTransactionId(adoptionRow, "person-1");
+
+  assertEquals((queries.at(-1) ?? {})["eq:source"], "tbank");
+});

@@ -3,17 +3,32 @@
     "supabase/db/functions/_is_allowed_user.sql": [
       "supabase/tests/functions/is_allowed_user_test.sql"
     ],
+    "supabase/db/functions/_is_owner_of_person.sql": [
+      "supabase/tests/functions/auth_helpers_test.sql"
+    ],
     "supabase/db/functions/clear_future_med_dose_events.sql": [
       "supabase/tests/functions/medication_generation_cleanup_test.sql"
     ],
     "supabase/db/functions/clear_future_med_dose_events_for_person.sql": [
       "supabase/tests/functions/medication_generation_cleanup_test.sql"
     ],
+    "supabase/db/functions/convert_to_canonical_unit.sql": [
+      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
+    ],
     "supabase/db/functions/create_medication_refill_digests.sql": [
       "supabase/tests/functions/medication_notifications_test.sql"
     ],
     "supabase/db/functions/create_medication_reminder_digests.sql": [
       "supabase/tests/functions/medication_notifications_test.sql"
+    ],
+    "supabase/db/functions/find_body_site_by_text.sql": [
+      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
+    ],
+    "supabase/db/functions/find_finding_type_by_text.sql": [
+      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
+    ],
+    "supabase/db/functions/find_observation_by_synonym.sql": [
+      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
     ],
     "supabase/db/functions/generate_med_dose_events_for_horizon.sql": [
       "supabase/tests/functions/medication_generation_cleanup_test.sql"
@@ -26,6 +41,9 @@
     ],
     "supabase/db/functions/get_checkup_notification_payload_for_person.sql": [
       "supabase/tests/functions/record_query_functions_test.sql"
+    ],
+    "supabase/db/functions/get_checkups_for_condition.sql": [
+      "supabase/tests/functions/checkup_condition_linking_test.sql"
     ],
     "supabase/db/functions/get_medication_dose_reminder_payload_for_person.sql": [
       "supabase/tests/functions/medication_notifications_test.sql"
@@ -52,18 +70,15 @@
       "supabase/tests/functions/get_routed_persons_for_recipient_test.sql",
       "supabase/tests/functions/medication_notifications_test.sql"
     ],
+    "supabase/db/functions/link_allowed_user.sql": [
+      "supabase/tests/functions/auth_helpers_test.sql"
+    ],
     "supabase/db/functions/mark_dose_skipped.sql": [
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
     ],
     "supabase/db/functions/mark_dose_taken.sql": [
       "supabase/tests/functions/mark_dose_taken_test.sql",
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
-    ],
-    "supabase/db/functions/money_categories_enforce_invariants.sql": [
-      "supabase/tests/functions/money_canonical_categories_test.sql"
-    ],
-    "supabase/db/functions/money_categories_prevent_delete.sql": [
-      "supabase/tests/functions/money_canonical_categories_test.sql"
     ],
     "supabase/db/functions/money_apply_category_rule_pipeline.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
@@ -77,6 +92,15 @@
     "supabase/db/functions/money_budget_targets_enforce_invariants.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],
+    "supabase/db/functions/money_build_dedupe_payload.sql": [
+      "supabase/tests/functions/money_dedupe_payload_test.sql"
+    ],
+    "supabase/db/functions/money_categories_enforce_invariants.sql": [
+      "supabase/tests/functions/money_canonical_categories_test.sql"
+    ],
+    "supabase/db/functions/money_categories_prevent_delete.sql": [
+      "supabase/tests/functions/money_canonical_categories_test.sql"
+    ],
     "supabase/db/functions/money_evaluate_category_rule_filter.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
     ],
@@ -89,6 +113,9 @@
     "supabase/db/functions/money_get_category_rule_debug.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
     ],
+    "supabase/db/functions/money_list_line_item_discrepancies.sql": [
+      "supabase/tests/functions/money_line_item_discrepancies_test.sql"
+    ],
     "supabase/db/functions/money_list_transactions_feed.sql": [
       "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
     ],
@@ -98,11 +125,11 @@
     "supabase/db/functions/money_person_self_transfer_variants.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],
-    "supabase/db/functions/money_transaction_feed_summary.sql": [
-      "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
-    ],
     "supabase/db/functions/money_preview_category_rule_pipeline.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/money_reassign_card_account.sql": [
+      "supabase/tests/functions/money_reassign_card_account_test.sql"
     ],
     "supabase/db/functions/money_resolve_fx_rate.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
@@ -116,14 +143,14 @@
     "supabase/db/functions/money_seed_category_rule_mappings.sql": [
       "supabase/tests/functions/money_seed_category_rule_mappings_test.sql"
     ],
-    "supabase/db/functions/money_upsert_transactions_batch.sql": [
-      "supabase/tests/functions/money_upsert_transactions_batch_test.sql"
-    ],
-    "supabase/db/functions/money_reassign_card_account.sql": [
-      "supabase/tests/functions/money_reassign_card_account_test.sql"
+    "supabase/db/functions/money_transaction_feed_summary.sql": [
+      "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
     ],
     "supabase/db/functions/money_transfer_self_aliases_set_normalized_alias.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
+    ],
+    "supabase/db/functions/money_upsert_transactions_batch.sql": [
+      "supabase/tests/functions/money_upsert_transactions_batch_test.sql"
     ],
     "supabase/db/functions/money_write_transaction_edit_audit.sql": [
       "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
@@ -151,27 +178,6 @@
     ],
     "supabase/db/functions/update_regimen_inventory.sql": [
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
-    ],
-    "supabase/db/functions/convert_to_canonical_unit.sql": [
-      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
-    ],
-    "supabase/db/functions/find_observation_by_synonym.sql": [
-      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
-    ],
-    "supabase/db/functions/find_finding_type_by_text.sql": [
-      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
-    ],
-    "supabase/db/functions/find_body_site_by_text.sql": [
-      "supabase/tests/functions/catalog_lookup_and_units_test.sql"
-    ],
-    "supabase/db/functions/get_checkups_for_condition.sql": [
-      "supabase/tests/functions/checkup_condition_linking_test.sql"
-    ],
-    "supabase/db/functions/link_allowed_user.sql": [
-      "supabase/tests/functions/auth_helpers_test.sql"
-    ],
-    "supabase/db/functions/_is_owner_of_person.sql": [
-      "supabase/tests/functions/auth_helpers_test.sql"
     ],
     "supabase/db/functions/update_updated_at_column.sql": [
       "supabase/tests/functions/auth_helpers_test.sql"

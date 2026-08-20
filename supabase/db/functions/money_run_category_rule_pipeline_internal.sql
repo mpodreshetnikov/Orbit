@@ -223,6 +223,12 @@ BEGIN
                 v_reason := 'Applied fallback canonical category';
               END IF;
             END IF;
+
+          ELSE
+            -- A plpgsql CASE without ELSE raises CASE_NOT_FOUND, which would abort the whole run
+            -- rather than the single rule. The day a value is added to money_rule_kind and this
+            -- function is not updated with it, the pipeline must degrade to "this rule did nothing".
+            v_reason := format('Unsupported rule kind %s', v_rule.rule_kind);
         END CASE;
       END IF;
     END IF;

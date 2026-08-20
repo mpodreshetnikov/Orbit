@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../_shared/database.types.ts";
 import {
+  BALANCING_LINE_ITEM_SOURCE,
   buildTransactionInsertPayload,
   extractAccountHintFromRow,
   hasOnlySyntheticImportLineItems,
@@ -38,6 +39,7 @@ export interface MoneyImportRepository {
   updateImportSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   createImportBatch(payload: Record<string, unknown>): Promise<string>;
   getImportBatch(batchId: string): Promise<Record<string, unknown> | null>;
+  getImportBatchForUser(batchId: string, userId: string): Promise<Record<string, unknown> | null>;
   updateImportBatch(batchId: string, patch: Record<string, unknown>): Promise<void>;
   resolveAccountIdForRow(
     payerPersonId: string,
@@ -77,7 +79,14 @@ export interface MoneyImportRepository {
     payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]>;
-  findExistingTransactionId(row: CanonicalTransactionRowInput): Promise<string | null>;
+  findExistingTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<string | null>;
+  findAdoptableTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<{ id: string } | { ambiguous: true } | null>;
   findExistingLineItemId(transactionId: string, importHash: string): Promise<string | null>;
   repairExistingTransactionDetails(
     transactionId: string,
@@ -86,16 +95,18 @@ export interface MoneyImportRepository {
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }>;
   insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
-  ): Promise<{ transactionId: string; inserted: boolean }>;
+  ): Promise<{ transactionId: string; inserted: boolean; adopted?: boolean }>;
   insertLineItemIfNew(
     transactionId: string,
     lineItem: ImportLineItemInput,
     importHash: string,
     fallbackAmount: number,
+    isPlaceholder?: boolean,
   ): Promise<{ lineItemId: string | null; inserted: boolean }>;
   insertReportRow(payload: Record<string, unknown>): Promise<string>;
   listReportRowsByBatch(batchId: string): Promise<Record<string, unknown>[]>;
@@ -120,6 +131,16 @@ export interface MoneyImportRepositoryConfig {
     forceOverwriteLocked?: boolean;
   }) => Promise<Record<string, unknown>>;
 }
+
+/**
+ * How far apart the statement's timestamp and the API's timestamp may be and still be the same
+ * purchase. A statement distinguishes the operation date from the payment date, and those can sit a
+ * couple of days apart; 72 hours covers that with room to spare while staying far below the gap
+ * between two genuinely different purchases at the same merchant for the same amount.
+ */
+const ADOPTION_WINDOW_HOURS = 72;
+/** Amounts are compared to the kopek, not by equality of floating point values. */
+const ADOPTION_AMOUNT_TOLERANCE = 0.005;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === "object") return value as Record<string, unknown>;
@@ -457,6 +478,26 @@ export function createSupabaseMoneyImportRepository(
     return data as Record<string, unknown>;
   }
 
+  /**
+   * Loads a batch only if it belongs to the calling user.
+   *
+   * RLS in this project is allowlist-only, and these actions run under the service-role key, so
+   * ownership can be enforced nowhere but here. A batch created before the column existed and
+   * without a session carries no owner; it stays reachable by any allowed user, because refusing it
+   * would strand file imports that predate this change.
+   */
+  async function getImportBatchForUser(
+    batchId: string,
+    userId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const batch = await getImportBatch(batchId);
+    if (!batch) return null;
+
+    const owner = normalizeText(batch.created_by_auth_user_id);
+    if (owner && owner !== userId) return null;
+    return batch;
+  }
+
   async function updateImportBatch(batchId: string, patch: Record<string, unknown>): Promise<void> {
     const { error } = await getAdminClient()
       .from("money_import_batches")
@@ -533,19 +574,106 @@ export function createSupabaseMoneyImportRepository(
 
   async function findExistingTransactionId(
     row: CanonicalTransactionRowInput,
+    payerPersonId: string,
   ): Promise<string | null> {
-    let query = getAdminClient().from("money_transactions").select("id").limit(1);
+    // Both keys are scoped to the person, matching the unique indexes. Unscoped, one person's
+    // operation could be resolved as a duplicate of another's and silently overwritten.
     if (row.external_id) {
-      query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
-    } else if (row.dedupe_hash) {
-      query = query.eq("dedupe_hash", row.dedupe_hash);
-    } else {
-      return null;
+      const { data } = await getAdminClient()
+        .from("money_transactions")
+        .select("id")
+        .eq("payer_person_id", payerPersonId)
+        .eq("source", row.source ?? "manual")
+        .eq("external_id", row.external_id)
+        .limit(1)
+        .maybeSingle();
+      const id = data ? normalizeText((data as Record<string, unknown>).id) : null;
+      if (id) return id;
     }
 
-    const { data, error } = await query.maybeSingle();
+    if (row.dedupe_hash) {
+      const { data } = await getAdminClient()
+        .from("money_transactions")
+        .select("id")
+        .eq("payer_person_id", payerPersonId)
+        .eq("dedupe_hash", row.dedupe_hash)
+        .limit(1)
+        .maybeSingle();
+      const id = data ? normalizeText((data as Record<string, unknown>).id) : null;
+      if (id) return id;
+    }
+
+    return null;
+  }
+
+  /**
+   * Finds the statement transaction that an incoming API operation is the same purchase as.
+   *
+   * A row loaded from a CSV statement and the same operation seen by the extension never match on
+   * either key: the statement row has no external_id, and the two hashes are computed from different
+   * text — the bank's statement description on one side, the API's merchant name on the other. No
+   * change to the hash formula fixes that. What does match is what actually agrees: the person, the
+   * account, the amount to the kopek, and the instant within a tolerance.
+   *
+   * Returns `{ ambiguous: true }` rather than picking one when several candidates fit. Two identical
+   * purchases on the same day are rare but real, and merging them loses an operation for good.
+   */
+  async function findAdoptableTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<{ id: string } | { ambiguous: true } | null> {
+    const accountId = normalizeText(row.account_id);
+    const postedAtIso = toIsoOrNull(row.posted_at);
+    const amount = toNumberOrNull(row.amount);
+    if (!accountId || !postedAtIso || amount === null) return null;
+
+    const postedAtMs = new Date(postedAtIso).getTime();
+    const windowMs = ADOPTION_WINDOW_HOURS * 60 * 60 * 1000;
+
+    // Restricted to the same source, so a manually entered transaction is never adopted. A manual
+    // row also has no external_id, sits on the same account and can easily carry the same amount on
+    // the same day, and adoption overwrites the transaction's fields and identity — merging a
+    // hand-entered operation into a bank one would be unrecoverable.
+    const { data, error } = await getAdminClient()
+      .from("money_transactions")
+      .select("id, posted_at, amount")
+      .eq("payer_person_id", payerPersonId)
+      .eq("account_id", accountId)
+      // Compared raw, exactly as findExistingTransactionId does and as the insert payload stores it.
+      .eq("source", row.source ?? "manual")
+      .is("external_id", null)
+      .gte("posted_at", new Date(postedAtMs - windowMs).toISOString())
+      .lte("posted_at", new Date(postedAtMs + windowMs).toISOString());
+
     if (error || !data) return null;
-    return normalizeText((data as Record<string, unknown>).id);
+
+    const candidates = (data as Array<Record<string, unknown>>).filter((candidate) => {
+      const candidateAmount = toNumberOrNull(candidate.amount);
+      if (candidateAmount === null) return false;
+      return Math.abs(candidateAmount - amount) < ADOPTION_AMOUNT_TOLERANCE;
+    });
+
+    if (candidates.length === 0) return null;
+    if (candidates.length > 1) return { ambiguous: true };
+
+    const id = normalizeText(candidates[0].id);
+    return id ? { id } : null;
+  }
+
+  async function adoptTransaction(
+    transactionId: string,
+    row: CanonicalTransactionRowInput,
+  ): Promise<void> {
+    const { error } = await getAdminClient()
+      .from("money_transactions")
+      .update({
+        external_id: row.external_id ?? null,
+        dedupe_hash: row.dedupe_hash ?? null,
+      } as Database["public"]["Tables"]["money_transactions"]["Update"])
+      .eq("id", transactionId);
+    if (error) {
+      throw new Error(error.message || "Failed to adopt existing statement transaction");
+    }
   }
 
   async function listLineItemsByTransactionIds(
@@ -554,7 +682,9 @@ export function createSupabaseMoneyImportRepository(
     if (transactionIds.length === 0) return [];
     const { data, error } = await getAdminClient()
       .from("money_line_items")
-      .select("transaction_id, raw_payload")
+      .select(
+        "id, transaction_id, raw_payload, is_placeholder, category_locked_by_user, assignment_method",
+      )
       .in("transaction_id", transactionIds);
     if (error || !data) return [];
     return data as Array<Record<string, unknown>>;
@@ -562,7 +692,7 @@ export function createSupabaseMoneyImportRepository(
 
   async function getExistingTransactionStates(
     source: string,
-    _payerPersonId: string,
+    payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]> {
     if (candidates.length === 0) return [];
@@ -589,6 +719,7 @@ export function createSupabaseMoneyImportRepository(
       const { data } = await getAdminClient()
         .from("money_transactions")
         .select("id, source, external_id, dedupe_hash, receipt_enrichment_status")
+        .eq("payer_person_id", payerPersonId)
         .eq("source", normalizeSourceForTransactions(source))
         .in("external_id", externalIds);
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
@@ -601,6 +732,7 @@ export function createSupabaseMoneyImportRepository(
       const { data } = await getAdminClient()
         .from("money_transactions")
         .select("id, source, external_id, dedupe_hash, receipt_enrichment_status")
+        .eq("payer_person_id", payerPersonId)
         .in("dedupe_hash", dedupeHashes);
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
         const dedupeHash = normalizeText(row.dedupe_hash);
@@ -635,6 +767,7 @@ export function createSupabaseMoneyImportRepository(
           row.raw_payload && typeof row.raw_payload === "object"
             ? (row.raw_payload as Record<string, unknown>)
             : null,
+        is_placeholder: row.is_placeholder === true,
       });
       lineItemsByTransactionId.set(transactionId, existing);
     }
@@ -1401,6 +1534,7 @@ export function createSupabaseMoneyImportRepository(
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }> {
     const existingLineItems = await listLineItemsByTransactionIds([transactionId]);
     const normalizedLineItems = existingLineItems.map((lineItem) => ({
@@ -1408,15 +1542,56 @@ export function createSupabaseMoneyImportRepository(
         lineItem.raw_payload && typeof lineItem.raw_payload === "object"
           ? (lineItem.raw_payload as Record<string, unknown>)
           : null,
+      is_placeholder: lineItem.is_placeholder === true,
     }));
     const hasOnlySyntheticLineItems = hasOnlySyntheticImportLineItems(normalizedLineItems);
     const hasRealLineItems = hasRealImportLineItems(normalizedLineItems);
 
-    if (hasOnlySyntheticLineItems) {
+    // A line item a human touched is never replaced by an import. The caller reports the row as
+    // skipped, so nothing about this transaction is applied — not the line items, not the header.
+    const blockedByManualEdit = existingLineItems.some(
+      (lineItem) =>
+        lineItem.category_locked_by_user === true ||
+        normalizeText(lineItem.assignment_method) === "manual",
+    );
+    if (blockedByManualEdit) {
+      return {
+        replaced_synthetic_line_items: false,
+        has_only_synthetic_line_items: hasOnlySyntheticLineItems,
+        has_real_line_items: hasRealLineItems,
+        blocked_by_manual_edit: true,
+      };
+    }
+
+    // Placeholders are removed unconditionally, not only when every line item is a placeholder.
+    // A transaction already damaged by the missing repair call carries a placeholder *next to* the
+    // real receipt lines, so the old "all line items are placeholders" condition was false for it
+    // and the placeholder would have stayed forever.
+    //
+    // Balancing lines are removed with them: they are derived from the previous receipt, and a
+    // changed receipt must not accumulate stale difference rows.
+    const replaceableIds = existingLineItems
+      .filter((lineItem) => {
+        const rawPayload =
+          lineItem.raw_payload && typeof lineItem.raw_payload === "object"
+            ? (lineItem.raw_payload as Record<string, unknown>)
+            : null;
+        const rawSource = normalizeText(rawPayload?.source)?.toLowerCase();
+        return (
+          lineItem.is_placeholder === true ||
+          rawSource === "fallback" ||
+          rawSource === "dom_fallback" ||
+          rawSource === BALANCING_LINE_ITEM_SOURCE
+        );
+      })
+      .map((lineItem) => normalizeText(lineItem.id))
+      .filter((value): value is string => Boolean(value));
+
+    if (replaceableIds.length > 0) {
       const { error: deleteError } = await getAdminClient()
         .from("money_line_items")
         .delete()
-        .eq("transaction_id", transactionId);
+        .in("id", replaceableIds);
       if (deleteError) {
         throw new Error(deleteError.message || "Failed to replace synthetic line items");
       }
@@ -1435,16 +1610,56 @@ export function createSupabaseMoneyImportRepository(
     }
 
     return {
-      replaced_synthetic_line_items: hasOnlySyntheticLineItems,
+      replaced_synthetic_line_items: replaceableIds.length > 0,
       has_only_synthetic_line_items: hasOnlySyntheticLineItems,
       has_real_line_items: hasRealLineItems,
+      blocked_by_manual_edit: false,
     };
+  }
+
+  async function updateExistingTransactionFields(
+    transactionId: string,
+    row: CanonicalTransactionRowInput,
+  ): Promise<void> {
+    const { error } = await getAdminClient()
+      .from("money_transactions")
+      .update(
+        buildTransactionUpdatePayload(
+          row,
+        ) as Database["public"]["Tables"]["money_transactions"]["Update"],
+      )
+      .eq("id", transactionId);
+    if (error) {
+      throw new Error(error.message || "Failed to update duplicate transaction");
+    }
   }
 
   async function insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
-  ): Promise<{ transactionId: string; inserted: boolean }> {
+  ): Promise<{ transactionId: string; inserted: boolean; adopted?: boolean }> {
+    // Order matters: exact key, then hash, then adoption, then insert. Adoption has to be tried
+    // before the insert, because a statement transaction has no external_id — nothing about the
+    // incoming API row conflicts with it, so inserting first would simply create a second copy of
+    // the same purchase and double the reported spend.
+    const existingId = await findExistingTransactionId(row, payerPersonId);
+    if (existingId) {
+      await updateExistingTransactionFields(existingId, row);
+      return { transactionId: existingId, inserted: false };
+    }
+
+    if (row.external_id) {
+      const adoption = await findAdoptableTransactionId(row, payerPersonId);
+      if (adoption && "ambiguous" in adoption) {
+        throw new Error("Multiple statement transactions match this operation");
+      }
+      if (adoption) {
+        await adoptTransaction(adoption.id, row);
+        await updateExistingTransactionFields(adoption.id, row);
+        return { transactionId: adoption.id, inserted: false, adopted: true };
+      }
+    }
+
     const payload = buildTransactionInsertPayload(row, payerPersonId);
     const { data, error } = await getAdminClient()
       .from("money_transactions")
@@ -1463,24 +1678,14 @@ export function createSupabaseMoneyImportRepository(
       throw new Error((error as { message?: string })?.message || "Failed to insert transaction");
     }
 
-    const existingId = await findExistingTransactionId(row);
-    if (!existingId) {
+    // A concurrent import inserted the same row between the lookup above and this insert.
+    const concurrentId = await findExistingTransactionId(row, payerPersonId);
+    if (!concurrentId) {
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 
-    const { error: updateError } = await getAdminClient()
-      .from("money_transactions")
-      .update(
-        buildTransactionUpdatePayload(
-          row,
-        ) as Database["public"]["Tables"]["money_transactions"]["Update"],
-      )
-      .eq("id", existingId);
-    if (updateError) {
-      throw new Error(updateError.message || "Failed to update duplicate transaction");
-    }
-
-    return { transactionId: existingId, inserted: false };
+    await updateExistingTransactionFields(concurrentId, row);
+    return { transactionId: concurrentId, inserted: false };
   }
 
   async function insertLineItemIfNew(
@@ -1488,6 +1693,7 @@ export function createSupabaseMoneyImportRepository(
     lineItem: ImportLineItemInput,
     importHash: string,
     fallbackAmount: number,
+    isPlaceholder = false,
   ): Promise<{ lineItemId: string | null; inserted: boolean }> {
     const payload = {
       transaction_id: transactionId,
@@ -1499,6 +1705,7 @@ export function createSupabaseMoneyImportRepository(
       assignment_method: "import" as const,
       raw_payload: asRecord(lineItem.raw_payload),
       import_hash: importHash,
+      is_placeholder: isPlaceholder,
     };
 
     const { data, error } = await getAdminClient()
@@ -1610,6 +1817,7 @@ export function createSupabaseMoneyImportRepository(
     updateImportSession,
     createImportBatch,
     getImportBatch,
+    getImportBatchForUser,
     updateImportBatch,
     resolveAccountIdForRow,
     resolveCardIdForRow,
@@ -1622,6 +1830,7 @@ export function createSupabaseMoneyImportRepository(
     updateBatchBrandResolutionSelection,
     getExistingTransactionStates,
     findExistingTransactionId,
+    findAdoptableTransactionId,
     findExistingLineItemId,
     repairExistingTransactionDetails,
     insertOrResolveTransaction,
