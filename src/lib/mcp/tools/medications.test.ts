@@ -7,6 +7,8 @@ const meds = vi.hoisted(() => ({
   listMedicationDoses: vi.fn(),
   createRegimen: vi.fn(),
   updateRegimen: vi.fn(),
+  findRegimensByName: vi.fn(),
+  logDose: vi.fn(),
 }));
 const regen = vi.hoisted(() => ({
   regenerateDoseEvents: vi.fn(),
@@ -63,6 +65,7 @@ async function handlers(): Promise<Map<string, Handler>> {
 beforeEach(() => {
   vi.clearAllMocks();
   person.resolvePerson.mockResolvedValue({ status: "ok", person: PERSON });
+  meds.findRegimensByName.mockResolvedValue([]);
   regen.resolveTimezone.mockResolvedValue("Europe/Berlin");
   regen.regenerateDoseEvents.mockResolvedValue({
     eventsCleared: 2,
@@ -218,6 +221,74 @@ describe("add_medication", () => {
     expect(meds.createRegimen).not.toHaveBeenCalled();
   });
 
+  it("refuses when the person already has a medication with that name, naming every match", async () => {
+    meds.findRegimensByName.mockResolvedValue([
+      {
+        id: "r-old",
+        custom_name: "Ferrous sulfate",
+        effective_status: "completed",
+        dose_definition: { intake: { amount: 1, unit: "pill" } },
+        schedule: { mode: "daily_times" },
+      },
+      {
+        id: "r-older",
+        custom_name: "Ferrous sulfate",
+        effective_status: "archived",
+        dose_definition: null,
+        schedule: null,
+      },
+    ]);
+
+    const result = await (await handlers()).get("add_medication")!(args, ctx());
+
+    // A duplicate medication is exactly the bug this guard exists for: a
+    // one-off intake must land on the existing course, not beside it.
+    expect(result.isError).toBe(true);
+    expect(meds.createRegimen).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("id r-old");
+    expect(result.content[0].text).toContain("id r-older");
+    expect(result.content[0].text).toContain("log_dose");
+    expect(
+      (result.structuredContent?.existing_medications as Array<{ id: string }>).map((r) => r.id),
+    ).toEqual(["r-old", "r-older"]);
+  });
+
+  it("creates anyway with allow_duplicate, and still names what it now sits beside", async () => {
+    meds.findRegimensByName.mockResolvedValue([
+      {
+        id: "r-old",
+        custom_name: "Ferrous sulfate",
+        effective_status: "completed",
+        dose_definition: null,
+        schedule: null,
+      },
+    ]);
+    meds.createRegimen.mockResolvedValue({ id: "r-1", custom_name: "Ferrous sulfate" });
+
+    const result = await (await handlers()).get("add_medication")!(
+      { ...args, allow_duplicate: true },
+      ctx(),
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(meds.createRegimen).toHaveBeenCalled();
+    expect(result.content[0].text).toContain("r-old");
+  });
+
+  it("checks for duplicates before writing, not after", async () => {
+    meds.findRegimensByName.mockResolvedValue([
+      { id: "r-old", custom_name: "Ferrous sulfate", effective_status: "active" },
+    ]);
+
+    await (await handlers()).get("add_medication")!(args, ctx());
+
+    expect(meds.findRegimensByName).toHaveBeenCalledWith(expect.anything(), {
+      personId: "p-1",
+      name: "Ferrous sulfate",
+    });
+    expect(regen.regenerateDoseEvents).not.toHaveBeenCalled();
+  });
+
   it("reports partial success when regeneration fails after the save", async () => {
     meds.createRegimen.mockResolvedValue({ id: "r-1", custom_name: "Ferrous sulfate" });
     regen.regenerateDoseEvents.mockRejectedValue(new Error("generator down"));
@@ -306,5 +377,159 @@ describe("update_medication", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain("reminders may be stale");
+  });
+});
+
+describe("log_dose", () => {
+  const dose = {
+    id: "d-1",
+    status: "taken",
+    planned_intake: { intake: { amount: 0.5, unit: "pill" } },
+  };
+
+  beforeEach(() => {
+    meds.logDose.mockResolvedValue({
+      regimen: { id: "r-1", custom_name: "Атаракс", effective_status: "completed" },
+      dose,
+      planned: false,
+    });
+  });
+
+  it("records the intake against the regimen it was given", async () => {
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", taken_at: "2026-08-19T23:10:00+07:00", amount: 0.5, status: "taken" },
+      ctx(),
+    );
+
+    expect(meds.logDose).toHaveBeenCalledWith(expect.anything(), {
+      regimenId: "r-1",
+      at: "2026-08-19T16:10:00.000Z",
+      amount: 0.5,
+      status: "taken",
+      note: null,
+    });
+    expect(result.content[0].text).toContain("0.5 pill of Атаракс as taken");
+  });
+
+  it("logging an intake does not regenerate the plan", async () => {
+    await (await handlers()).get("log_dose")!({ regimen_id: "r-1", status: "taken" }, ctx());
+
+    // The schedule did not change, so the upcoming events are still correct.
+    expect(regen.regenerateDoseEvents).not.toHaveBeenCalled();
+  });
+
+  it("defaults the time to now and leaves the amount to the regimen", async () => {
+    await (await handlers()).get("log_dose")!({ regimen_id: "r-1", status: "taken" }, ctx());
+
+    const [, params] = meds.logDose.mock.calls[0] as [
+      unknown,
+      { at: string; amount: number | null },
+    ];
+    expect(params.amount).toBeNull();
+    expect(Date.parse(params.at)).toBeCloseTo(Date.now(), -4);
+  });
+
+  it("rejects a time it cannot read instead of filing the dose on the wrong day", async () => {
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", taken_at: "yesterday evening", status: "taken" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.logDose).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-ISO input that Date would happily accept", async () => {
+    // `new Date("0")` is a valid date in the year 2000, so a NaN check alone
+    // does not enforce the contract the description states.
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", taken_at: "0", status: "taken" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.logDose).not.toHaveBeenCalled();
+  });
+
+  it("reads an offset-less time in the user's timezone, not the server's", async () => {
+    regen.resolveTimezone.mockResolvedValue("Asia/Bangkok");
+
+    const result = await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-08-19T23:10",
+        timezone: "Asia/Bangkok",
+        status: "taken",
+      },
+      ctx(),
+    );
+
+    // Production runs in UTC; reading this there would move the intake 7 hours
+    // and onto the previous local day.
+    const [, params] = meds.logDose.mock.calls[0] as [unknown, { at: string }];
+    expect(params.at).toBe("2026-08-19T16:10:00.000Z");
+    expect(result.content[0].text).toContain("Asia/Bangkok");
+  });
+
+  it("falls back to the saved timezone when none is passed", async () => {
+    await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", taken_at: "2026-08-19T23:10", status: "taken" },
+      ctx(),
+    );
+
+    expect(regen.resolveTimezone).toHaveBeenCalledWith(expect.anything(), {
+      authUserId: "11111111-1111-1111-1111-111111111111",
+      requestedTimezone: null,
+    });
+    // The beforeEach stub resolves Europe/Berlin, which is UTC+2 in August.
+    const [, params] = meds.logDose.mock.calls[0] as [unknown, { at: string }];
+    expect(params.at).toBe("2026-08-19T21:10:00.000Z");
+  });
+
+  it("does not consult a timezone for a time that carries its own offset", async () => {
+    await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", taken_at: "2026-08-19T23:10:00+07:00", status: "taken" },
+      ctx(),
+    );
+
+    expect(regen.resolveTimezone).not.toHaveBeenCalled();
+  });
+
+  it("says whether the intake resolved a planned dose or was an extra", async () => {
+    meds.logDose.mockResolvedValue({
+      regimen: { id: "r-1", custom_name: "Атаракс", effective_status: "active" },
+      dose,
+      planned: true,
+    });
+
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", status: "taken" },
+      ctx(),
+    );
+
+    expect(result.content[0].text).toContain("resolved the dose already on the plan");
+    expect(result.structuredContent?.planned).toBe(true);
+  });
+
+  it("refuses on a read-only grant", async () => {
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", status: "taken" },
+      ctx(["health:read"]),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.logDose).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing medication as an error the model can act on", async () => {
+    meds.logDose.mockRejectedValue(new Error("No medication with id r-9."));
+
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-9", status: "taken" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("No medication with id r-9.");
   });
 });

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { rowToDoseEvent, rowToInventoryTransaction, rowToRegimen } from "@/lib/regimen-mappers";
-import { getEffectiveStatus } from "@/types/regimen";
+import { getEffectiveStatus, getPlannedIntakeAmount } from "@/types/regimen";
 import type { MedDoseEvent, MedRegimen } from "@/types/regimen";
 
 /**
@@ -183,4 +183,210 @@ export async function updateRegimen(
     throw new Error(`No medication with id ${regimenId}.`);
   }
   return withEffectiveStatus(rowToRegimen(data as unknown as Record<string, unknown>));
+}
+
+/**
+ * The medication form's matcher, in one place.
+ *
+ * `medication-form.tsx` decides whether a one-time intake belongs to an
+ * existing course by comparing trimmed, lower-cased names. Anything looser
+ * (substring, edit distance) would fuse "Магний" with "Магний B6", which are
+ * different medications.
+ */
+export function normalizeMedicationName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
+ * Every non-deleted course the person already has under this name, archived and
+ * completed ones included -- the same pool the form's name combobox offers,
+ * because a dose can legitimately be logged against a course that has ended.
+ */
+export async function findRegimensByName(
+  supabase: SupabaseClient<Database>,
+  params: { personId: string; name: string },
+): Promise<RegimenWithStatus[]> {
+  const needle = normalizeMedicationName(params.name);
+  if (!needle) {
+    return [];
+  }
+
+  const regimens = await listMedications(supabase, {
+    personId: params.personId,
+    includeArchived: true,
+  });
+
+  return regimens.filter((regimen) => normalizeMedicationName(regimen.custom_name) === needle);
+}
+
+export interface LogDoseParams {
+  regimenId: string;
+  at: string;
+  amount?: number | null;
+  status: "taken" | "skipped";
+  note?: string | null;
+}
+
+/**
+ * The unplanned dose the caller describes may be a planned one.
+ *
+ * `idx_med_dose_events_regimen_scheduled_minute` uniquely indexes unresolved
+ * events by regimen and minute, so inserting on top of a generated dose in the
+ * same minute raises a duplicate key -- which is exactly what "I took my 22:00
+ * pill" at 22:00 would do. Resolving the planned event instead is also the
+ * truthful record: the schedule was followed, not departed from.
+ */
+async function findPlannedDoseInSameMinute(
+  supabase: SupabaseClient<Database>,
+  regimenId: string,
+  at: Date,
+): Promise<Record<string, unknown> | null> {
+  const minuteStart = new Date(Math.floor(at.getTime() / 60_000) * 60_000);
+  const minuteEnd = new Date(minuteStart.getTime() + 60_000);
+
+  const { data } = await supabase
+    .from("med_dose_events")
+    .select("*")
+    .eq("regimen_id", regimenId)
+    .in("status", ["scheduled", "sent"])
+    .is("deleted_at", null)
+    .gte("scheduled_at", minuteStart.toISOString())
+    .lt("scheduled_at", minuteEnd.toISOString())
+    .limit(1)
+    .maybeSingle();
+
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
+/**
+ * Records one intake against an existing regimen.
+ *
+ * This is the write the MCP server was missing: without it the only way to say
+ * "she took half a pill tonight" was `add_medication`, which creates a second
+ * medication beside the real course. It follows the web UI's
+ * `addOneTimeDoseToRegimen` -- insert the event, then resolve it through the
+ * RPC -- because the RPC is what also writes the inventory transaction and
+ * decrements stock. Writing `status: 'taken'` straight into the insert would
+ * skip that and silently stop the stock ever going down.
+ *
+ * Unlike the UI, which reaches this path only for intakes outside the plan,
+ * this tool is the single way in, so it resolves an already-planned dose when
+ * the time names one.
+ *
+ * No dose-event regeneration here: logging an intake records history, it does
+ * not change the plan, so the upcoming events stay valid.
+ */
+export async function logDose(
+  supabase: SupabaseClient<Database>,
+  params: LogDoseParams,
+): Promise<{ regimen: RegimenWithStatus; dose: MedDoseEvent; planned: boolean }> {
+  const { data: regimenRow, error: regimenError } = await supabase
+    .from("med_regimens")
+    .select("*")
+    .eq("id", params.regimenId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (regimenError) {
+    throw new Error(`Failed to load medication: ${regimenError.message}`);
+  }
+  if (!regimenRow) {
+    throw new Error(`No medication with id ${params.regimenId}.`);
+  }
+
+  const regimen = withEffectiveStatus(
+    rowToRegimen(regimenRow as unknown as Record<string, unknown>),
+  );
+  const unit = regimen.dose_definition?.intake?.unit ?? regimen.intake_unit;
+  const note = params.note?.trim() ? params.note.trim() : null;
+
+  const planned = await findPlannedDoseInSameMinute(supabase, regimen.id, new Date(params.at));
+
+  // A per-slot amount on the planned event beats the regimen's default: a
+  // `daily_times` schedule can carry a different amount per time of day.
+  const plannedAmount = planned
+    ? (planned.planned_intake as { intake?: { amount?: number } } | null)?.intake?.amount
+    : undefined;
+  const amount = params.amount ?? plannedAmount ?? getPlannedIntakeAmount(regimen.dose_definition);
+
+  let row: Record<string, unknown>;
+
+  if (planned) {
+    row = planned;
+    // Only when the caller corrected the amount -- otherwise leave the planned
+    // intake untouched rather than rewriting it with an identical value.
+    if (params.amount != null && params.amount !== plannedAmount) {
+      const { error: amendError } = await supabase
+        .from("med_dose_events")
+        .update({ planned_intake: { intake: { amount, unit }, active: [] } } as never)
+        .eq("id", planned.id as string);
+
+      if (amendError) {
+        throw new Error(`Failed to record the intake: ${amendError.message}`);
+      }
+    }
+  } else {
+    const { data: inserted, error: insertError } = await supabase
+      .from("med_dose_events")
+      .insert({
+        person_id: regimen.person_id,
+        regimen_id: regimen.id,
+        scheduled_at: params.at,
+        actual_at: params.at,
+        planned_intake: { intake: { amount, unit }, active: [] },
+        status: "scheduled",
+      } as never)
+      .select("*")
+      .single();
+
+    if (insertError || !inserted) {
+      throw new Error(`Failed to record the intake: ${insertError?.message ?? "no row returned"}`);
+    }
+    row = inserted as unknown as Record<string, unknown>;
+  }
+
+  const doseEventId = row.id as string;
+  const { error: resolveError } = await supabase.rpc(
+    params.status === "skipped" ? "mark_dose_skipped" : "mark_dose_taken",
+    { p_dose_event_id: doseEventId, ...(note ? { p_note: note } : {}) } as never,
+  );
+
+  if (resolveError) {
+    // An event we just inserted is still `scheduled`, which the app would show
+    // as an intake the person still owes and remind them about. Take it back
+    // out rather than leave a reminder nobody asked for. A planned event was
+    // already there and stays: withdrawing it would delete part of the plan.
+    if (!planned) {
+      const { error: withdrawError } = await supabase
+        .from("med_dose_events")
+        .update({ deleted_at: new Date().toISOString() } as never)
+        .eq("id", doseEventId);
+
+      if (withdrawError) {
+        // Both halves failed -- most likely the same outage. Name the row that
+        // survived, so it can be resolved by hand instead of silently
+        // reminding the person about a dose they already took.
+        throw new Error(
+          `Failed to mark the intake as ${params.status}: ${resolveError.message}. ` +
+            `Withdrawing the event failed too (${withdrawError.message}), so dose event ${doseEventId} ` +
+            `is left scheduled on ${regimen.custom_name} and needs resolving by hand.`,
+        );
+      }
+    }
+    throw new Error(`Failed to mark the intake as ${params.status}: ${resolveError.message}`);
+  }
+
+  const { data: resolved } = await supabase
+    .from("med_dose_events")
+    .select("*")
+    .eq("id", doseEventId)
+    .maybeSingle();
+
+  return {
+    regimen,
+    dose: rowToDoseEvent(
+      ((resolved as Record<string, unknown> | null) ?? row) as Record<string, unknown>,
+    ),
+    planned: planned !== null,
+  };
 }

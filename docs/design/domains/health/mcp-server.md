@@ -101,7 +101,7 @@ function taking a `SupabaseClient` as its first argument so it can run under the
 - **Checkups** — `list_checkups`, `get_checkup`.
 - **Catalogs** — `list_catalog_entries`, `search_catalog_entries`, `upsert_catalog_entry`.
 - **Medications** — `list_medications`, `get_medication`, `list_medication_doses`,
-  `add_medication`, `update_medication`.
+  `add_medication`, `log_dose`, `update_medication`.
 
 Conventions that matter:
 
@@ -121,6 +121,38 @@ Conventions that matter:
   (`src/lib/mcp/local-day.ts`).
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.
+- **A medication a person already takes is never created twice.** `add_medication` refuses when a
+  non-deleted regimen of the same person already carries the same name — trimmed and lower-cased,
+  the matcher `src/components/medications/medication-form.tsx` uses — and returns every match so the
+  caller can pick one. `allow_duplicate: true` overrides it for a genuinely separate medication that
+  shares a name.
+
+  This lives in the server rather than in an agent's prompt because the MCP is reachable from
+  clients that never load this repository's skills. Before the guard, "she took half an Atarax
+  tonight" had only one write available to it and produced a second medication standing beside the
+  real course (`T-0018`).
+
+- `log_dose` records one intake — planned or not — against an existing regimen, which is what that
+  request should have reached for. It follows the web UI's `addOneTimeDoseToRegimen`
+  (`src/hooks/use-regimens.ts`): insert the `med_dose_events` row, then resolve it through
+  `mark_dose_taken` or `mark_dose_skipped`. Writing `status: 'taken'` straight into the insert would
+  skip the RPC that records the inventory transaction and decrements stock. It deliberately does
+  **not** regenerate dose events: logging an intake records history, it does not change the plan.
+
+  Where the UI reaches that path only for intakes _outside_ the plan, `log_dose` is the only way in,
+  so it first looks for an unresolved event in the same minute and resolves that one instead.
+  `idx_med_dose_events_regimen_scheduled_minute` uniquely indexes scheduled and sent events per
+  regimen per minute, so inserting on top of a generated dose would fail outright — and "I took my
+  22:00 pill" at 22:00 is the most ordinary call there is. If the RPC fails, an event the tool
+  itself inserted is withdrawn; an event that was already planned is left alone, since withdrawing
+  it would delete part of the plan.
+
+  `taken_at` is parsed deliberately rather than through bare `new Date`: a string carrying an offset
+  or `Z` is taken at face value, an offset-less wall-clock time is read in the caller's `timezone`
+  (or the saved preference), and anything else is refused. `new Date` would read an offset-less
+  string in the _server's_ zone — UTC in production, so hours off for anyone else, possibly landing
+  the intake on the wrong local day — and it also accepts non-ISO input like `"0"`.
+
 - `add_medication` and `update_medication` must regenerate dose events, or the app's "Today's
   intakes" keeps showing the old plan. They call the same
   `@/lib/medications/regenerate-dose-events` the web route uses.

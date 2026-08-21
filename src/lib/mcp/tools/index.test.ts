@@ -58,6 +58,7 @@ describe("registerHealthTools", () => {
         "list_medication_doses",
         "list_medications",
         "list_persons",
+        "log_dose",
         "search_catalog_entries",
         "search_findings",
         "get_finding_history",
@@ -95,6 +96,7 @@ describe("registerHealthTools", () => {
   const WRITE_TOOLS = [
     "add_measurement",
     "add_medication",
+    "log_dose",
     "update_medication",
     "upsert_catalog_entry",
   ];

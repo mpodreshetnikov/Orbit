@@ -53,22 +53,26 @@ function isValidTimeZone(timeZone: string): boolean {
 }
 
 /**
- * Start of `date` (YYYY-MM-DD) in `timeZone`, as a UTC ISO string.
+ * The instant at which `naive` -- a wall-clock reading parsed as if it were UTC
+ * -- actually occurs in `timeZone`.
  *
  * The offset is resolved iteratively because the correct offset depends on the
  * instant, and the instant depends on the offset -- one correction step settles
  * it, including across a DST boundary.
  */
+function wallClockToInstant(naive: number, timeZone: string): number {
+  let instant = naive - timezoneOffsetMinutes(timeZone, new Date(naive)) * 60_000;
+  instant = naive - timezoneOffsetMinutes(timeZone, new Date(instant)) * 60_000;
+  return instant;
+}
+
+/** Start of `date` (YYYY-MM-DD) in `timeZone`, as a UTC ISO string. */
 export function localDayStartUtc(date: string, timeZone: string): string {
   if (!isValidTimeZone(timeZone)) {
     return `${date}T00:00:00.000Z`;
   }
 
-  const naive = Date.parse(`${date}T00:00:00.000Z`);
-  let instant = naive - timezoneOffsetMinutes(timeZone, new Date(naive)) * 60_000;
-  instant = naive - timezoneOffsetMinutes(timeZone, new Date(instant)) * 60_000;
-
-  return new Date(instant).toISOString();
+  return new Date(wallClockToInstant(Date.parse(`${date}T00:00:00.000Z`), timeZone)).toISOString();
 }
 
 /** End of `date` in `timeZone` (inclusive), as a UTC ISO string. */
@@ -77,9 +81,35 @@ export function localDayEndUtc(date: string, timeZone: string): string {
     return `${date}T23:59:59.999Z`;
   }
 
-  const naive = Date.parse(`${date}T23:59:59.999Z`);
-  let instant = naive - timezoneOffsetMinutes(timeZone, new Date(naive)) * 60_000;
-  instant = naive - timezoneOffsetMinutes(timeZone, new Date(instant)) * 60_000;
+  return new Date(wallClockToInstant(Date.parse(`${date}T23:59:59.999Z`), timeZone)).toISOString();
+}
 
-  return new Date(instant).toISOString();
+/** A local date and time with no zone, e.g. `2026-08-19T23:10` or `2026-08-19 23:10:00`. */
+const WALL_CLOCK_PATTERN = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2}(\.\d{1,3})?)?$/;
+
+/**
+ * Reads a zone-less local date and time as the UTC instant it names in
+ * `timeZone`, or null when the input is not one.
+ *
+ * `new Date("2026-08-19T23:10:00")` would resolve it against the *server's*
+ * zone -- UTC in production -- so a user east of UTC would have the intake
+ * filed hours off, possibly on the wrong local day.
+ */
+export function localDateTimeUtc(wallClock: string, timeZone: string): string | null {
+  const match = WALL_CLOCK_PATTERN.exec(wallClock.trim());
+  if (!match) {
+    return null;
+  }
+
+  const [, date, hourMinute, seconds] = match;
+  const naive = Date.parse(`${date}T${hourMinute}${seconds ?? ":00"}Z`);
+  if (Number.isNaN(naive)) {
+    return null;
+  }
+
+  if (!isValidTimeZone(timeZone)) {
+    return new Date(naive).toISOString();
+  }
+
+  return new Date(wallClockToInstant(naive, timeZone)).toISOString();
 }

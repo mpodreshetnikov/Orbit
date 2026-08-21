@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { localDayEndUtc, localDayStartUtc, timezoneOffsetMinutes } from "./local-day";
+import {
+  localDateTimeUtc,
+  localDayEndUtc,
+  localDayStartUtc,
+  timezoneOffsetMinutes,
+} from "./local-day";
 
 describe("timezoneOffsetMinutes", () => {
   it("is zero for UTC", () => {
@@ -63,5 +68,38 @@ describe("localDayStartUtc / localDayEndUtc", () => {
   it("falls back to a UTC day for an unknown timezone rather than throwing", () => {
     expect(localDayStartUtc("2026-06-15", "Not/AZone")).toBe("2026-06-15T00:00:00.000Z");
     expect(localDayEndUtc("2026-06-15", "Not/AZone")).toBe("2026-06-15T23:59:59.999Z");
+  });
+});
+
+describe("localDateTimeUtc", () => {
+  it("reads a wall-clock time in the named zone, not the server's", () => {
+    // The server runs in UTC; treating this as UTC would file it 7 hours late
+    // and, at 23:10, on the wrong local day.
+    expect(localDateTimeUtc("2026-08-19T23:10", "Asia/Bangkok")).toBe("2026-08-19T16:10:00.000Z");
+  });
+
+  it("accepts seconds, milliseconds and a space separator", () => {
+    expect(localDateTimeUtc("2026-08-19 23:10:30", "Asia/Bangkok")).toBe(
+      "2026-08-19T16:10:30.000Z",
+    );
+    expect(localDateTimeUtc("2026-08-19T23:10:30.500", "UTC")).toBe("2026-08-19T23:10:30.500Z");
+  });
+
+  it("settles the offset across a DST boundary", () => {
+    // Berlin is UTC+1 in January and UTC+2 in July.
+    expect(localDateTimeUtc("2026-01-15T12:00", "Europe/Berlin")).toBe("2026-01-15T11:00:00.000Z");
+    expect(localDateTimeUtc("2026-07-15T12:00", "Europe/Berlin")).toBe("2026-07-15T10:00:00.000Z");
+  });
+
+  it("rejects anything that is not a zone-less date and time", () => {
+    // `new Date` would accept every one of these and invent an instant.
+    expect(localDateTimeUtc("0", "UTC")).toBeNull();
+    expect(localDateTimeUtc("2026-08-19", "UTC")).toBeNull();
+    expect(localDateTimeUtc("yesterday evening", "UTC")).toBeNull();
+    expect(localDateTimeUtc("2026-08-19T23:10:00+07:00", "UTC")).toBeNull();
+  });
+
+  it("falls back to reading it as UTC when the timezone is unusable", () => {
+    expect(localDateTimeUtc("2026-08-19T23:10", "Not/AZone")).toBe("2026-08-19T23:10:00.000Z");
   });
 });
