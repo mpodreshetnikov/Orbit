@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { rowToDoseEvent, rowToInventoryTransaction, rowToRegimen } from "@/lib/regimen-mappers";
-import { getEffectiveStatus, getPlannedIntakeAmount } from "@/types/regimen";
+import { getEffectiveStatus, getPlannedIntakeAmount, type PlannedIntake } from "@/types/regimen";
 import type { MedDoseEvent, MedRegimen } from "@/types/regimen";
 
 /**
@@ -228,15 +228,24 @@ export interface LogDoseParams {
 }
 
 /**
- * The unplanned dose the caller describes may be a planned one.
+ * The dose the caller describes may already exist.
  *
- * `idx_med_dose_events_regimen_scheduled_minute` uniquely indexes unresolved
- * events by regimen and minute, so inserting on top of a generated dose in the
- * same minute raises a duplicate key -- which is exactly what "I took my 22:00
- * pill" at 22:00 would do. Resolving the planned event instead is also the
- * truthful record: the schedule was followed, not departed from.
+ * Deliberately unfiltered by status. It is tempting to look only for the
+ * unresolved statuses `idx_med_dose_events_regimen_scheduled_minute` covers,
+ * but that index answers "may another unresolved row go here", not "is this
+ * intake already recorded". A dose the person ticked in the app minutes ago is
+ * `taken`: invisible to a status-filtered probe *and* unblocked by the index,
+ * so logging it again would write a second intake at the same minute and
+ * decrement stock twice. `snoozed` is the same, and additionally leaves its
+ * `medication_snoozed` digest armed, reminding the person about a dose already
+ * recorded.
+ *
+ * Every status the RPCs accept is handled by resolving this row rather than
+ * inserting beside it -- `mark_dose_taken` takes `skipped` and
+ * `mark_dose_skipped` takes `taken`, precisely so a resolution can be amended
+ * in place.
  */
-async function findPlannedDoseInSameMinute(
+async function findDoseInSameMinute(
   supabase: SupabaseClient<Database>,
   regimenId: string,
   at: Date,
@@ -244,16 +253,23 @@ async function findPlannedDoseInSameMinute(
   const minuteStart = new Date(Math.floor(at.getTime() / 60_000) * 60_000);
   const minuteEnd = new Date(minuteStart.getTime() + 60_000);
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("med_dose_events")
     .select("*")
     .eq("regimen_id", regimenId)
-    .in("status", ["scheduled", "sent"])
     .is("deleted_at", null)
     .gte("scheduled_at", minuteStart.toISOString())
     .lt("scheduled_at", minuteEnd.toISOString())
+    .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
+
+  // This read decides between resolving and inserting, so "the query failed"
+  // must not be read as "nothing is there": that would take the insert branch
+  // and trip the unique index, or worse, duplicate a resolved intake.
+  if (error) {
+    throw new Error(`Failed to look for an existing dose at that time: ${error.message}`);
+  }
 
   return (data as Record<string, unknown> | null) ?? null;
 }
@@ -270,8 +286,9 @@ async function findPlannedDoseInSameMinute(
  * skip that and silently stop the stock ever going down.
  *
  * Unlike the UI, which reaches this path only for intakes outside the plan,
- * this tool is the single way in, so it resolves an already-planned dose when
- * the time names one.
+ * this tool is the single way in, so it resolves an existing dose in the same
+ * minute -- planned, snoozed or already resolved -- rather than inserting
+ * beside it. Saying the same thing twice must not produce two intakes.
  *
  * No dose-event regeneration here: logging an intake records history, it does
  * not change the plan, so the upcoming events stay valid.
@@ -279,7 +296,12 @@ async function findPlannedDoseInSameMinute(
 export async function logDose(
   supabase: SupabaseClient<Database>,
   params: LogDoseParams,
-): Promise<{ regimen: RegimenWithStatus; dose: MedDoseEvent; planned: boolean }> {
+): Promise<{
+  regimen: RegimenWithStatus;
+  dose: MedDoseEvent;
+  planned: boolean;
+  alreadyRecorded: boolean;
+}> {
   const { data: regimenRow, error: regimenError } = await supabase
     .from("med_regimens")
     .select("*")
@@ -300,13 +322,25 @@ export async function logDose(
   const unit = regimen.dose_definition?.intake?.unit ?? regimen.intake_unit;
   const note = params.note?.trim() ? params.note.trim() : null;
 
-  const planned = await findPlannedDoseInSameMinute(supabase, regimen.id, new Date(params.at));
+  const planned = await findDoseInSameMinute(supabase, regimen.id, new Date(params.at));
+
+  // Nothing to do when the minute already holds this very outcome. Re-running
+  // the RPC would be a silent no-op anyway (it selects only rows in the other
+  // statuses), so the caller would be told "recorded" with nothing recorded and
+  // no way to tell the two apart.
+  if (planned && planned.status === params.status) {
+    return {
+      regimen,
+      dose: rowToDoseEvent(planned),
+      planned: true,
+      alreadyRecorded: true,
+    };
+  }
 
   // A per-slot amount on the planned event beats the regimen's default: a
   // `daily_times` schedule can carry a different amount per time of day.
-  const plannedAmount = planned
-    ? (planned.planned_intake as { intake?: { amount?: number } } | null)?.intake?.amount
-    : undefined;
+  const plannedIntake = (planned?.planned_intake ?? null) as PlannedIntake | null;
+  const plannedAmount = plannedIntake?.intake?.amount;
   const amount = params.amount ?? plannedAmount ?? getPlannedIntakeAmount(regimen.dose_definition);
 
   let row: Record<string, unknown>;
@@ -321,7 +355,17 @@ export async function logDose(
     if (params.amount != null && params.amount !== plannedAmount) {
       const { error: amendError } = await supabase
         .from("med_dose_events")
-        .update({ planned_intake: { intake: { amount, unit }, active: [] } } as never)
+        .update({
+          // Spread rather than rebuild: `planned_intake` also carries the
+          // active ingredients this dose delivers, which the generator
+          // deliberately preserves and which are the only record of what was
+          // actually taken. Keep the slot's own unit for the same reason --
+          // `mark_dose_taken` copies it straight into the inventory ledger.
+          planned_intake: {
+            ...(plannedIntake ?? {}),
+            intake: { amount, unit: plannedIntake?.intake?.unit ?? unit },
+          },
+        } as never)
         .eq("id", planned.id as string);
 
       if (amendError) {
@@ -356,10 +400,45 @@ export async function logDose(
   );
 
   if (resolveError) {
-    // An event we just inserted is still `scheduled`, which the app would show
-    // as an intake the person still owes and remind them about. Take it back
-    // out rather than leave a reminder nobody asked for. A planned event was
-    // already there and stays: withdrawing it would delete part of the plan.
+    // `supabase.rpc` reports a lost response exactly like a rejected call, and
+    // the RPC is plpgsql: it may well have committed -- status changed,
+    // inventory transaction written, stock decremented -- with only the reply
+    // going missing. Ask the row itself before touching anything. Deleting on
+    // that path would destroy a real intake while its decrement survived
+    // (`med_inventory_transactions.event_id` is ON DELETE SET NULL), and the
+    // retry it invites would decrement a second time.
+    const { data: afterRow, error: afterError } = await supabase
+      .from("med_dose_events")
+      .select("*")
+      .eq("id", doseEventId)
+      .maybeSingle();
+
+    const after = (afterRow as Record<string, unknown> | null) ?? null;
+
+    if (!afterError && after && after.status === params.status) {
+      return {
+        regimen,
+        dose: rowToDoseEvent(after),
+        planned: planned !== null,
+        alreadyRecorded: false,
+      };
+    }
+
+    // Blind is not the same as "it did not land". If the row cannot be read
+    // back, the safe move is to leave it and say so: an unresolved event is a
+    // reminder too many, a deleted one may be a medical record too few.
+    if (afterError || !after) {
+      throw new Error(
+        `Failed to mark the intake as ${params.status}: ${resolveError.message}. ` +
+          `Reading dose event ${doseEventId} back failed too ` +
+          `(${afterError?.message ?? "no row returned"}), so whether it was recorded on ` +
+          `${regimen.custom_name} is unknown and needs checking by hand.`,
+      );
+    }
+
+    // The row is readable and still unresolved, so the write really did not
+    // land. Only now is undoing the right move -- and only for a row this call
+    // created.
     if (!planned) {
       // A hard delete, not `deleted_at`: the row is seconds old and carries no
       // history worth keeping, and `idx_med_dose_events_regimen_scheduled_minute`
@@ -402,17 +481,28 @@ export async function logDose(
     throw new Error(`Failed to mark the intake as ${params.status}: ${resolveError.message}`);
   }
 
-  const { data: resolved } = await supabase
+  const { data: resolved, error: resolvedError } = await supabase
     .from("med_dose_events")
     .select("*")
     .eq("id", doseEventId)
     .maybeSingle();
 
+  // Falling back to `row` here would report the pre-RPC snapshot -- still
+  // `scheduled` -- for a dose that was in fact recorded, and a caller reading
+  // that would reasonably log it again. The write succeeded; say so, and say
+  // that only the read-back did not.
+  if (resolvedError || !resolved) {
+    throw new Error(
+      `The intake was recorded as ${params.status} on ${regimen.custom_name} (dose event ` +
+        `${doseEventId}), but reading it back failed ` +
+        `(${resolvedError?.message ?? "no row returned"}). Do not record it again.`,
+    );
+  }
+
   return {
     regimen,
-    dose: rowToDoseEvent(
-      ((resolved as Record<string, unknown> | null) ?? row) as Record<string, unknown>,
-    ),
+    dose: rowToDoseEvent(resolved as Record<string, unknown>),
     planned: planned !== null,
+    alreadyRecorded: false,
   };
 }

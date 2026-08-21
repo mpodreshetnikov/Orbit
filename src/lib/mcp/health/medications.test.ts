@@ -9,6 +9,7 @@ import {
   updateRegimen,
 } from "./medications";
 import { createSupabaseStub, type StubResult } from "./test-support";
+import { createDoseEventsFake } from "./dose-events-fake";
 
 function regimen(overrides: Record<string, unknown> = {}) {
   return {
@@ -394,7 +395,7 @@ describe("logDose", () => {
     expect(result.planned).toBe(true);
   });
 
-  it("probes only the minute the intake falls in, among unresolved events", async () => {
+  it("probes the minute the intake falls in, at every status", async () => {
     const stub = stubFor();
 
     await logDose(stub.client, {
@@ -409,7 +410,9 @@ describe("logDose", () => {
     expect(stub.argsFor("med_dose_events", "lt")).toEqual([
       ["scheduled_at", "2026-06-15T08:01:00.000Z"],
     ]);
-    expect(stub.argsFor("med_dose_events", "in")).toEqual([["status", ["scheduled", "sent"]]]);
+    // No status filter: a dose already `taken` or `snoozed` at that minute is
+    // outside the unique index, so only this probe can stop it duplicating.
+    expect(stub.argsFor("med_dose_events", "in")).toHaveLength(0);
   });
 
   it("takes the planned event's per-slot amount over the regimen default", async () => {
@@ -529,41 +532,6 @@ describe("logDose", () => {
     expect(stub.argsFor("med_dose_events", "insert")).toHaveLength(0);
   });
 
-  it("takes the event back out when the RPC fails, so no phantom reminder is left", async () => {
-    const stub = stubFor({}, { mark_dose_taken: { error: { message: "rpc down" } } });
-
-    await expect(
-      logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
-    ).rejects.toThrow(/rpc down/);
-
-    // Hard-deleted, not soft-deleted: `idx_med_dose_events_regimen_scheduled_minute`
-    // covers soft-deleted `scheduled` rows too, so a tombstone would hold the
-    // minute and every retry of the same intake would fail on a duplicate key.
-    expect(stub.argsFor("med_dose_events", "delete")).toHaveLength(1);
-    expect(stub.argsFor("med_dose_events", "update")).toHaveLength(0);
-    expect(stub.argsFor("med_dose_events", "eq")).toContainEqual(["id", "d-1"]);
-  });
-
-  it("names the surviving event when the withdrawal fails too", async () => {
-    const stub = createSupabaseStub(
-      {
-        med_regimens: [{ data: regimen() }],
-        med_dose_events: [
-          { data: null },
-          { data: doseEvent() },
-          { error: { message: "still down" } },
-        ],
-      },
-      { mark_dose_taken: { error: { message: "rpc down" } } },
-    );
-
-    // Both halves failing is one outage, and silence would leave the person
-    // being reminded about a dose they already took.
-    await expect(
-      logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
-    ).rejects.toThrow(/dose event d-1 is left scheduled on Ferrous sulfate/);
-  });
-
   it("leaves an already-planned event alone when the RPC fails", async () => {
     const stub = stubFor(
       {},
@@ -575,55 +543,138 @@ describe("logDose", () => {
     await expect(
       logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
     ).rejects.toThrow(/rpc down/);
-    expect(stub.argsFor("med_dose_events", "update")).toHaveLength(0);
     expect(stub.argsFor("med_dose_events", "delete")).toHaveLength(0);
   });
 
-  it("puts the planned amount back when an amended dose fails to resolve", async () => {
-    const original = { intake: { amount: 1, unit: "pill" }, active: ["morning"] };
-    const stub = stubFor(
-      {},
-      { mark_dose_taken: { error: { message: "rpc down" } } },
-      { data: doseEvent({ id: "planned-1", planned_intake: original }) },
-    );
+  describe("against a fake that enforces the real constraints", () => {
+    const AT = "2026-06-15T08:00:00.000Z";
 
-    // The amendment lands before the RPC, so a failed call would otherwise
-    // leave the still-scheduled dose restating an amount nobody accepted.
-    await expect(
-      logDose(stub.client, {
-        regimenId: "r-1",
-        at: "2026-06-15T08:00:00.000Z",
-        amount: 0.5,
-        status: "taken",
-      }),
-    ).rejects.toThrow(/rpc down/);
+    function fakeWith(events: Parameters<typeof createDoseEventsFake>[0]["events"]) {
+      return createDoseEventsFake({ regimen: regimen(), events });
+    }
 
-    const updates = stub.argsFor("med_dose_events", "update") as [{ planned_intake: unknown }][];
-    expect(updates).toHaveLength(2);
-    expect(updates[1][0].planned_intake).toEqual(original);
-  });
+    it("does not record a second intake when the minute is already taken", async () => {
+      // The case the status-filtered probe missed: she ticked the 08:00 dose in
+      // the app, then told the assistant about it. The partial unique index
+      // does not cover `taken`, so nothing but the probe stands in the way.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
 
-  it("names the amended event when restoring the planned amount fails too", async () => {
-    const stub = createSupabaseStub(
-      {
-        med_regimens: [{ data: regimen() }],
-        med_dose_events: [
-          { data: doseEvent({ id: "planned-1", planned_intake: { intake: { amount: 1 } } }) },
-          { data: null },
-          { error: { message: "still down" } },
-        ],
-      },
-      { mark_dose_taken: { error: { message: "rpc down" } } },
-    );
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
 
-    await expect(
-      logDose(stub.client, {
-        regimenId: "r-1",
-        at: "2026-06-15T08:00:00.000Z",
-        amount: 0.5,
-        status: "taken",
-      }),
-    ).rejects.toThrow(/dose event planned-1 on Ferrous sulfate still carries the corrected amount/);
+      expect(result.alreadyRecorded).toBe(true);
+      expect(result.dose.id).toBe("d-1");
+      expect(fake.events).toHaveLength(1);
+      expect(fake.inventory).toHaveLength(0);
+      expect(fake.rpc).not.toHaveBeenCalled();
+    });
+
+    it("corrects a taken dose to skipped in place instead of inserting", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "skipped" });
+
+      expect(result.alreadyRecorded).toBe(false);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("skipped");
+      // `mark_dose_skipped` reverses the earlier decrement rather than adding one.
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "correction", event_id: "d-1" }),
+      ]);
+    });
+
+    it("resolves a snoozed dose instead of leaving its reminder armed", async () => {
+      // `snoozed` is outside the unique index too, so the insert would have
+      // succeeded and left `d-1` owing a dose that was already taken.
+      const fake = fakeWith([{ id: "d-1", status: "snoozed" }]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("resolves the planned dose rather than colliding with the unique index", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.planned).toBe(true);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+    });
+
+    it("inserts and resolves when the minute is genuinely free", async () => {
+      const fake = fakeWith([]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.planned).toBe(false);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("keeps a committed intake when only the RPC response is lost", async () => {
+      // The destructive case: the RPC ran and committed, the reply did not
+      // arrive. Deleting here would wipe the record and orphan its decrement.
+      const fake = fakeWith([]);
+      fake.loseRpcResponse("gateway timeout");
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.dose.status).toBe("taken");
+      expect(fake.events).toHaveLength(1);
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "decrement", event_id: "d-1" }),
+      ]);
+    });
+
+    it("withdraws the inserted event when the RPC really did not run", async () => {
+      const fake = fakeWith([]);
+      fake.failNext("rpc", "rpc down");
+
+      await expect(
+        logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" }),
+      ).rejects.toThrow(/rpc down/);
+
+      expect(fake.events).toHaveLength(0);
+      expect(fake.inventory).toHaveLength(0);
+    });
+
+    it("keeps the active ingredients when correcting the amount", async () => {
+      const active = [{ name: "Hydroxyzine", amount: 25, unit: "mg" }];
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "scheduled",
+          planned_intake: { intake: { amount: 1, unit: "tablet" }, active },
+        },
+      ]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, amount: 0.5, status: "taken" });
+
+      // The dose event is the only record of what was actually swallowed, and
+      // the slot's own unit is what reaches the inventory ledger.
+      expect(fake.events[0].planned_intake).toEqual({
+        intake: { amount: 0.5, unit: "tablet" },
+        active,
+      });
+      expect(fake.inventory[0]).toMatchObject({ amount: 0.5, unit: "tablet" });
+    });
+
+    it("refuses rather than guessing when the probe read fails", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
+      fake.failNext("med_dose_events", "connection reset");
+
+      // Reading that failure as "no dose here" would take the insert branch
+      // straight into a duplicate-key error, or duplicate a resolved intake.
+      await expect(
+        logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" }),
+      ).rejects.toThrow(/Failed to look for an existing dose/);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("scheduled");
+    });
   });
 
   it("surfaces an insert error", async () => {

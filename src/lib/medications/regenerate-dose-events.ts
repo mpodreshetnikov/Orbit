@@ -29,18 +29,34 @@ export interface RegenerateDoseEventsResult {
   timezone: string;
 }
 
+/**
+ * The user's saved notification timezone, without touching it.
+ *
+ * `resolveTimezone` below *persists* what it is handed, which is right for the
+ * callers that are re-timing the plan and wrong for anyone who only needs to
+ * read a timestamp: `checkup_notification_timezone` drives
+ * `run_med_event_generation_for_all_users` and both reminder digests, so
+ * writing it moves every future dose event and checkup reminder in the
+ * household.
+ */
+export async function readTimezonePreference(
+  supabase: SupabaseClient<Database>,
+  authUserId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("user_preferences")
+    .select("checkup_notification_timezone")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+
+  return data?.checkup_notification_timezone ?? null;
+}
+
 export async function resolveTimezone(
   supabase: SupabaseClient<Database>,
   params: { authUserId: string; requestedTimezone?: string | null },
 ): Promise<string> {
-  const prefsTz =
-    (
-      await supabase
-        .from("user_preferences")
-        .select("checkup_notification_timezone")
-        .eq("auth_user_id", params.authUserId)
-        .maybeSingle()
-    ).data?.checkup_notification_timezone ?? null;
+  const prefsTz = await readTimezonePreference(supabase, params.authUserId);
 
   const clientTz =
     typeof params.requestedTimezone === "string" && params.requestedTimezone.trim()

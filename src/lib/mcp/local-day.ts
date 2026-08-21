@@ -43,7 +43,7 @@ export function timezoneOffsetMinutes(timeZone: string, at: Date): number {
   return Math.round((asUtc - at.getTime()) / 60_000);
 }
 
-function isValidTimeZone(timeZone: string): boolean {
+export function isValidTimeZone(timeZone: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone });
     return true;
@@ -119,5 +119,35 @@ export function localDateTimeUtc(wallClock: string, timeZone: string): string | 
     return new Date(naive).toISOString();
   }
 
-  return new Date(wallClockToInstant(naive, timeZone)).toISOString();
+  const instant = new Date(wallClockToInstant(naive, timeZone));
+
+  // The calendar check above says the *date* exists; it says nothing about the
+  // zone. A local time inside a spring-forward gap does not exist either, and
+  // the iteration settles on an instant an hour off it -- in zones whose
+  // transition sits at midnight, on the previous day. So read the instant back
+  // in the zone and require it to be the wall clock that was asked for.
+  const readBack = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .formatToParts(instant)
+    .reduce<Record<string, string>>((acc, part) => {
+      acc[part.type] = part.value;
+      return acc;
+    }, {});
+
+  const hour = readBack.hour === "24" ? "00" : readBack.hour;
+  if (`${readBack.year}-${readBack.month}-${readBack.day}` !== date) {
+    return null;
+  }
+  if (`${hour}:${readBack.minute}` !== hourMinute) {
+    return null;
+  }
+
+  return instant.toISOString();
 }

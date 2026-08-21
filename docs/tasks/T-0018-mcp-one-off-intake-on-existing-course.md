@@ -58,6 +58,14 @@ to log a dose, and `add_medication` does not look at what already exists under t
       the unique index and would make the intake permanently unrecordable), a corrected amount is
       restored onto the planned event when the RPC then fails, and `localDateTimeUtc` rejects
       calendar dates that `Date.parse` would roll forward.
+- [x] 2026-08-21 — Addressed an adversarial review of the ported PR, which found the change was not
+      yet safe for medical data. `log_dose` is now idempotent (the same-minute probe considers every
+      status, and an already-resolved dose is reported or corrected in place rather than
+      duplicated); a lost RPC response no longer destroys a committed intake, because the row is
+      re-read before anything is withdrawn; the timezone is read rather than persisted, so logging
+      history no longer re-times the household's reminders; the duplicate guard only blocks courses
+      that are still running; amendments keep the active ingredients and the slot's unit; and the
+      two reads that swallowed their errors now report them.
 - [ ] Confirm against the deployed MCP server that "I took half an X tonight" reaches `log_dose`
       instead of creating a second medication.
 
@@ -105,4 +113,56 @@ Edge Function and no UI flow.
   insert past it, so a single RPC outage would make that intake unrecordable for good. The row is
   seconds old and was never resolved, so soft-deletion protects no history. Raised by the automated
   review and confirmed against the migration.
+  Date/Author: 2026-08-21.
+
+- Decision: Probe the target minute at every status, not just the ones the unique index covers.
+  Rationale: `idx_med_dose_events_regimen_scheduled_minute` answers "may another unresolved row go
+  here", which is not the same question as "is this intake already recorded". Reusing its predicate
+  meant a dose the person had already ticked in the app was invisible to the probe _and_ unblocked
+  by the index, so telling the assistant about it wrote a second intake and a second inventory
+  decrement — on the most ordinary sequence there is. `snoozed` was the same, and additionally left
+  a reminder armed for a dose already taken. `mark_dose_taken` accepts `skipped` and
+  `mark_dose_skipped` accepts `taken` precisely so a resolution can be amended in place.
+  Date/Author: 2026-08-21, from the adversarial review.
+
+- Decision: Re-read the dose event before withdrawing it, and never withdraw one that cannot be read.
+  Rationale: `supabase.rpc` reports a lost response exactly like a rejected call, and the RPC is
+  plpgsql and commits atomically. Deleting unconditionally on error therefore destroyed committed
+  intakes: the row went, its `decrement` survived as an orphan (`event_id` is ON DELETE SET NULL),
+  stock stayed reduced, and the caller — told it had failed — decremented again on retry. An
+  unresolved event is a reminder too many; a deleted one may be a medical record too few, so when
+  the state cannot be established nothing is touched and the response says so.
+  Date/Author: 2026-08-21, from the adversarial review.
+
+- Decision: Read the timezone preference in `log_dose` and `list_medication_doses` instead of
+  resolving it.
+  Rationale: `resolveTimezone` upserts `user_preferences.checkup_notification_timezone`, which
+  `run_med_event_generation_for_all_users` and both reminder digests run on. A timezone passed to
+  interpret one timestamp therefore re-timed every future dose event and checkup reminder in the
+  household — silently, and in direct contradiction of this tool's own contract that logging an
+  intake does not change the plan. `list_medication_doses` had the same defect while declaring
+  itself read-only. `readTimezonePreference` is the read half, split out; the resolving variant
+  stays where it belongs, on the tools that really are re-timing the plan.
+  Date/Author: 2026-08-21. The `log_dose` half came from the adversarial review; the
+  `list_medication_doses` half was found while fixing it and is pre-existing.
+
+- Decision: Only `active` and `paused` courses block `add_medication`.
+  Rationale: The guard as first written refused a new course whenever any course of that name
+  existed, including one finished a year ago — and every remedy its message offered was wrong for
+  that case: `log_dose` would file today's intake against the old course, `update_medication` would
+  overwrite the record of what that course actually was, and `allow_duplicate`'s own description
+  told a compliant model not to use it for the same medication. A re-prescription is ordinary, so
+  the guard now blocks only what is still running, while still showing the finished courses as
+  context. It is also what the web form does: `medication-form.tsx` name-matches for one-off intakes
+  only and has never blocked a new course.
+  Date/Author: 2026-08-21, from the adversarial review.
+
+- Decision: Test `logDose` against a fake that enforces the database's constraints.
+  Rationale: The shared FIFO stub answers whatever a test queued, in call order, regardless of the
+  query — it models neither the partial unique index nor the RPCs' status preconditions, so the
+  suite was green while every defect above was live. `src/lib/mcp/health/dose-events-fake.ts` holds
+  rows instead: filters apply, the index rejects a second unresolved row in the same regimen-minute,
+  the RPCs follow `supabase/db/functions/mark_dose_*.sql` including inventory, and a delete nulls
+  the transaction's `event_id` as the FK does. Reverting the fixes makes ten of its tests fail,
+  which is the property the old tests lacked.
   Date/Author: 2026-08-21.

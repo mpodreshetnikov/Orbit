@@ -13,6 +13,7 @@ const meds = vi.hoisted(() => ({
 const regen = vi.hoisted(() => ({
   regenerateDoseEvents: vi.fn(),
   resolveTimezone: vi.fn(),
+  readTimezonePreference: vi.fn(),
 }));
 const person = vi.hoisted(() => ({ resolvePerson: vi.fn(), listPeople: vi.fn() }));
 
@@ -67,6 +68,7 @@ beforeEach(() => {
   person.resolvePerson.mockResolvedValue({ status: "ok", person: PERSON });
   meds.findRegimensByName.mockResolvedValue([]);
   regen.resolveTimezone.mockResolvedValue("Europe/Berlin");
+  regen.readTimezonePreference.mockResolvedValue("Europe/Berlin");
   regen.regenerateDoseEvents.mockResolvedValue({
     eventsCleared: 2,
     eventsGenerated: 14,
@@ -221,17 +223,17 @@ describe("add_medication", () => {
     expect(meds.createRegimen).not.toHaveBeenCalled();
   });
 
-  it("refuses when the person already has a medication with that name, naming every match", async () => {
+  it("refuses when a course of that name is still running, naming every match", async () => {
     meds.findRegimensByName.mockResolvedValue([
       {
-        id: "r-old",
+        id: "r-live",
         custom_name: "Ferrous sulfate",
-        effective_status: "completed",
+        effective_status: "active",
         dose_definition: { intake: { amount: 1, unit: "pill" } },
         schedule: { mode: "daily_times" },
       },
       {
-        id: "r-older",
+        id: "r-old",
         custom_name: "Ferrous sulfate",
         effective_status: "archived",
         dose_definition: null,
@@ -242,15 +244,40 @@ describe("add_medication", () => {
     const result = await (await handlers()).get("add_medication")!(args, ctx());
 
     // A duplicate medication is exactly the bug this guard exists for: a
-    // one-off intake must land on the existing course, not beside it.
+    // one-off intake must land on the running course, not beside it.
     expect(result.isError).toBe(true);
     expect(meds.createRegimen).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("id r-live");
+    // The finished one is context, not a reason to refuse -- but the caller
+    // should still see it before deciding.
     expect(result.content[0].text).toContain("id r-old");
-    expect(result.content[0].text).toContain("id r-older");
+    expect(result.content[0].text).toContain("already finished");
     expect(result.content[0].text).toContain("log_dose");
     expect(
       (result.structuredContent?.existing_medications as Array<{ id: string }>).map((r) => r.id),
-    ).toEqual(["r-old", "r-older"]);
+    ).toEqual(["r-live", "r-old"]);
+  });
+
+  it("allows a new course when every match of that name has finished", async () => {
+    // Titration and re-prescription are recorded as successive courses. Atarax
+    // in 2025 does not make Atarax in 2026 a mistake, and neither log_dose nor
+    // update_medication is the right home for it: one would file today's intake
+    // against last year's course, the other would overwrite what that course
+    // actually was.
+    meds.findRegimensByName.mockResolvedValue([
+      {
+        id: "r-old",
+        custom_name: "Ferrous sulfate",
+        effective_status: "completed",
+        dose_definition: null,
+        schedule: null,
+      },
+    ]);
+
+    const result = await (await handlers()).get("add_medication")!(args, ctx());
+
+    expect(result.isError).toBeFalsy();
+    expect(meds.createRegimen).toHaveBeenCalled();
   });
 
   it("creates anyway with allow_duplicate, and still names what it now sits beside", async () => {
@@ -452,8 +479,6 @@ describe("log_dose", () => {
   });
 
   it("reads an offset-less time in the user's timezone, not the server's", async () => {
-    regen.resolveTimezone.mockResolvedValue("Asia/Bangkok");
-
     const result = await (await handlers()).get("log_dose")!(
       {
         regimen_id: "r-1",
@@ -477,10 +502,13 @@ describe("log_dose", () => {
       ctx(),
     );
 
-    expect(regen.resolveTimezone).toHaveBeenCalledWith(expect.anything(), {
-      authUserId: "11111111-1111-1111-1111-111111111111",
-      requestedTimezone: null,
-    });
+    expect(regen.readTimezonePreference).toHaveBeenCalledWith(
+      expect.anything(),
+      "11111111-1111-1111-1111-111111111111",
+    );
+    // Never the resolving variant: it would persist the zone and re-time the
+    // household's generated events and reminders.
+    expect(regen.resolveTimezone).not.toHaveBeenCalled();
     // The beforeEach stub resolves Europe/Berlin, which is UTC+2 in August.
     const [, params] = meds.logDose.mock.calls[0] as [unknown, { at: string }];
     expect(params.at).toBe("2026-08-19T21:10:00.000Z");
@@ -493,6 +521,77 @@ describe("log_dose", () => {
     );
 
     expect(regen.resolveTimezone).not.toHaveBeenCalled();
+    expect(regen.readTimezonePreference).not.toHaveBeenCalled();
+  });
+
+  it("never persists the timezone it was handed", async () => {
+    await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-08-19T23:10",
+        timezone: "Asia/Tokyo",
+        status: "taken",
+      },
+      ctx(),
+    );
+
+    // `resolveTimezone` upserts `checkup_notification_timezone`, which the
+    // nightly generation and both reminder digests run on. Logging history
+    // must not move the plan.
+    expect(regen.resolveTimezone).not.toHaveBeenCalled();
+    const [, params] = meds.logDose.mock.calls[0] as [unknown, { at: string }];
+    expect(params.at).toBe("2026-08-19T14:10:00.000Z");
+  });
+
+  it("refuses a timezone it cannot resolve rather than silently using UTC", async () => {
+    const result = await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-08-19T23:10",
+        timezone: "Mars/Olympus",
+        status: "taken",
+      },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.logDose).not.toHaveBeenCalled();
+  });
+
+  it("refuses a local time that does not exist in the zone", async () => {
+    // 02:30 on a spring-forward night. Accepting it would file the intake an
+    // hour off, and in some zones on the previous day.
+    const result = await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-03-29T02:30",
+        timezone: "Europe/Berlin",
+        status: "taken",
+      },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.logDose).not.toHaveBeenCalled();
+  });
+
+  it("reports an already-recorded dose as written nothing", async () => {
+    meds.logDose.mockResolvedValue({
+      regimen: { id: "r-1", custom_name: "Атаракс", effective_status: "active" },
+      dose: { id: "d-1", status: "taken", planned_intake: { intake: { amount: 1, unit: "pill" } } },
+      planned: true,
+      alreadyRecorded: true,
+    });
+
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", taken_at: "2026-08-19T23:10:00Z", status: "taken" },
+      ctx(),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("already recorded");
+    expect(result.content[0].text).toContain("nothing was written");
+    expect(result.structuredContent).toMatchObject({ already_recorded: true });
   });
 
   it("says whether the intake resolved a planned dose or was an extra", async () => {

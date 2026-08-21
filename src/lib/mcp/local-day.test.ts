@@ -109,6 +109,26 @@ describe("localDateTimeUtc", () => {
     expect(localDateTimeUtc("2028-02-29T12:00", "UTC")).toBe("2028-02-29T12:00:00.000Z");
   });
 
+  it("rejects a local time that does not exist in the zone", () => {
+    // A spring-forward gap has no such wall clock. The iteration still settles
+    // on an instant, an hour off -- and where the transition sits at midnight,
+    // on the previous local day, which is the failure this whole function
+    // exists to prevent.
+    expect(localDateTimeUtc("2026-03-29T02:30", "Europe/Berlin")).toBeNull();
+    expect(localDateTimeUtc("2026-03-08T02:30", "America/New_York")).toBeNull();
+    expect(localDateTimeUtc("2026-09-06T00:30", "America/Santiago")).toBeNull();
+    expect(localDateTimeUtc("2026-03-08T00:30", "America/Havana")).toBeNull();
+  });
+
+  it("accepts an ambiguous fall-back time, settling on the later occurrence", () => {
+    // Berlin falls back on 2026-10-25, so 02:30 happens twice: 00:30Z at UTC+2
+    // and 01:30Z at UTC+1. Unlike a gap this wall clock does exist, so refusing
+    // it would be unhelpful -- and either reading is at most an hour out, which
+    // for "when did she take it" is noise rather than a wrong day. Pinned here
+    // so the choice is a decision rather than an accident of the iteration.
+    expect(localDateTimeUtc("2026-10-25T02:30", "Europe/Berlin")).toBe("2026-10-25T01:30:00.000Z");
+  });
+
   it("falls back to reading it as UTC when the timezone is unusable", () => {
     expect(localDateTimeUtc("2026-08-19T23:10", "Not/AZone")).toBe("2026-08-19T23:10:00.000Z");
   });
