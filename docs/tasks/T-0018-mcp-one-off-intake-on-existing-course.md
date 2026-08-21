@@ -166,3 +166,12 @@ Edge Function and no UI flow.
   the transaction's `event_id` as the FK does. Reverting the fixes makes ten of its tests fail,
   which is the property the old tests lacked.
   Date/Author: 2026-08-21.
+
+- Decision: Leave the concurrent double-decrement in `mark_dose_taken` to `T-0020` rather than
+  fixing it here.
+  Rationale: The review noted that the RPC's status guard takes no row lock, so two simultaneous
+  calls both pass it and both write a `decrement`. It is real, but it predates this work and lives
+  in SQL, which this change does not touch; and the fake used here is single-threaded, so nothing in
+  this suite could show a fix worked. Claiming it as covered would repeat the mistake the review had
+  just found elsewhere in this PR.
+  Date/Author: 2026-08-21.
