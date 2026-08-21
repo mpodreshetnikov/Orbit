@@ -107,6 +107,14 @@ export function localDateTimeUtc(wallClock: string, timeZone: string): string | 
     return null;
   }
 
+  // `Date.parse` rolls a nonexistent calendar date forward rather than
+  // refusing it: "2026-02-30T12:00" comes back as March 2. Filing an intake on
+  // a day the caller did not name is worse than rejecting the input, so
+  // require the date to survive the round trip.
+  if (new Date(naive).toISOString().slice(0, 10) !== date) {
+    return null;
+  }
+
   if (!isValidTimeZone(timeZone)) {
     return new Date(naive).toISOString();
   }

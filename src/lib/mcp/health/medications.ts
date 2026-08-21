@@ -310,6 +310,9 @@ export async function logDose(
   const amount = params.amount ?? plannedAmount ?? getPlannedIntakeAmount(regimen.dose_definition);
 
   let row: Record<string, unknown>;
+  // Set when the planned event's `planned_intake` was rewritten, so the
+  // amendment can be undone if the dose never gets resolved.
+  let amendedFrom: unknown | undefined;
 
   if (planned) {
     row = planned;
@@ -324,6 +327,7 @@ export async function logDose(
       if (amendError) {
         throw new Error(`Failed to record the intake: ${amendError.message}`);
       }
+      amendedFrom = planned.planned_intake ?? null;
     }
   } else {
     const { data: inserted, error: insertError } = await supabase
@@ -357,9 +361,15 @@ export async function logDose(
     // out rather than leave a reminder nobody asked for. A planned event was
     // already there and stays: withdrawing it would delete part of the plan.
     if (!planned) {
+      // A hard delete, not `deleted_at`: the row is seconds old and carries no
+      // history worth keeping, and `idx_med_dose_events_regimen_scheduled_minute`
+      // indexes every `scheduled` row whether or not it is soft-deleted. A
+      // tombstone would hold that regimen's minute forever, so the next attempt
+      // at the same intake -- which cannot see the deleted row -- would fail on
+      // a duplicate key with no way back.
       const { error: withdrawError } = await supabase
         .from("med_dose_events")
-        .update({ deleted_at: new Date().toISOString() } as never)
+        .delete()
         .eq("id", doseEventId);
 
       if (withdrawError) {
@@ -370,6 +380,22 @@ export async function logDose(
           `Failed to mark the intake as ${params.status}: ${resolveError.message}. ` +
             `Withdrawing the event failed too (${withdrawError.message}), so dose event ${doseEventId} ` +
             `is left scheduled on ${regimen.custom_name} and needs resolving by hand.`,
+        );
+      }
+    } else if (amendedFrom !== undefined) {
+      // The plan itself is not ours to change on a failed call: put the slot's
+      // original amount back, so a rejected intake does not quietly restate
+      // what the person is due to take.
+      const { error: restoreError } = await supabase
+        .from("med_dose_events")
+        .update({ planned_intake: amendedFrom } as never)
+        .eq("id", doseEventId);
+
+      if (restoreError) {
+        throw new Error(
+          `Failed to mark the intake as ${params.status}: ${resolveError.message}. ` +
+            `Restoring the planned amount failed too (${restoreError.message}), so dose event ${doseEventId} ` +
+            `on ${regimen.custom_name} still carries the corrected amount and needs resolving by hand.`,
         );
       }
     }

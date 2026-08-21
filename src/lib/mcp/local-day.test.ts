@@ -99,6 +99,16 @@ describe("localDateTimeUtc", () => {
     expect(localDateTimeUtc("2026-08-19T23:10:00+07:00", "UTC")).toBeNull();
   });
 
+  it("rejects a calendar date that does not exist", () => {
+    // `Date.parse` rolls these forward instead of failing, which would file the
+    // intake on a day the caller never named.
+    expect(localDateTimeUtc("2026-02-30T12:00", "UTC")).toBeNull();
+    expect(localDateTimeUtc("2026-04-31T12:00", "Asia/Bangkok")).toBeNull();
+    expect(localDateTimeUtc("2026-13-01T12:00", "UTC")).toBeNull();
+    // 2028 is a leap year, so this one is real and must still pass.
+    expect(localDateTimeUtc("2028-02-29T12:00", "UTC")).toBe("2028-02-29T12:00:00.000Z");
+  });
+
   it("falls back to reading it as UTC when the timezone is unusable", () => {
     expect(localDateTimeUtc("2026-08-19T23:10", "Not/AZone")).toBe("2026-08-19T23:10:00.000Z");
   });

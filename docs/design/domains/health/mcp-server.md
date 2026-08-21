@@ -145,13 +145,22 @@ Conventions that matter:
   regimen per minute, so inserting on top of a generated dose would fail outright — and "I took my
   22:00 pill" at 22:00 is the most ordinary call there is. If the RPC fails, an event the tool
   itself inserted is withdrawn; an event that was already planned is left alone, since withdrawing
-  it would delete part of the plan.
+  it would delete part of the plan, and a corrected amount written onto it is put back — the plan is
+  not ours to change on a call that failed.
+
+  That withdrawal is a hard delete rather than a `deleted_at` stamp — the one place in this domain
+  that removes a row outright. The index above is predicated on `status` alone, so a soft-deleted
+  `scheduled` row still holds its regimen's minute while every reader hides it: the next attempt
+  could neither see the tombstone nor insert past it, and that intake would be unrecordable for
+  good. The row is seconds old and was never resolved, so there is no history to keep.
 
   `taken_at` is parsed deliberately rather than through bare `new Date`: a string carrying an offset
   or `Z` is taken at face value, an offset-less wall-clock time is read in the caller's `timezone`
-  (or the saved preference), and anything else is refused. `new Date` would read an offset-less
-  string in the _server's_ zone — UTC in production, so hours off for anyone else, possibly landing
-  the intake on the wrong local day — and it also accepts non-ISO input like `"0"`.
+  (or the saved preference), and anything else is refused — including a date that does not exist,
+  since `Date.parse` rolls `2026-02-30` forward to March 2 rather than failing. `new Date` would
+  read an offset-less string in the _server's_ zone — UTC in production, so hours off for anyone
+  else, possibly landing the intake on the wrong local day — and it also accepts non-ISO input like
+  `"0"`.
 
 - `add_medication` and `update_medication` must regenerate dose events, or the app's "Today's
   intakes" keeps showing the old plan. They call the same

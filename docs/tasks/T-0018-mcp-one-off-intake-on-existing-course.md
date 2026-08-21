@@ -53,6 +53,11 @@ to log a dose, and `add_medication` does not look at what already exists under t
 - [x] 2026-08-21 — Carried the change into this repository after the migration recorded in
       `T-0016`, renumbered from `T-0017`, which this registry had already assigned to the
       dependency-vulnerability backlog.
+- [x] 2026-08-21 — Addressed the review on this repository's PR: the compensating withdrawal now
+      hard-deletes instead of stamping `deleted_at` (a soft-deleted `scheduled` row still occupies
+      the unique index and would make the intake permanently unrecordable), a corrected amount is
+      restored onto the planned event when the RPC then fails, and `localDateTimeUtc` rejects
+      calendar dates that `Date.parse` would roll forward.
 - [ ] Confirm against the deployed MCP server that "I took half an X tonight" reaches `log_dose`
       instead of creating a second medication.
 
@@ -92,3 +97,12 @@ Edge Function and no UI flow.
   non-ISO input like `"0"`, so the stated contract was not enforced. Both were raised by the
   automated review and confirmed against the migration and the parser.
   Date/Author: 2026-08-19.
+
+- Decision: Withdraw a failed insert with a hard delete rather than a `deleted_at` stamp.
+  Rationale: `idx_med_dose_events_regimen_scheduled_minute` is predicated on `status` alone, so a
+  soft-deleted `scheduled` row keeps holding its regimen's minute while every reader — including
+  `findPlannedDoseInSameMinute` — hides it. The retry could neither resolve the tombstone nor
+  insert past it, so a single RPC outage would make that intake unrecordable for good. The row is
+  seconds old and was never resolved, so soft-deletion protects no history. Raised by the automated
+  review and confirmed against the migration.
+  Date/Author: 2026-08-21.

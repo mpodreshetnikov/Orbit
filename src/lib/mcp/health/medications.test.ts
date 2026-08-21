@@ -536,10 +536,11 @@ describe("logDose", () => {
       logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
     ).rejects.toThrow(/rpc down/);
 
-    const [[values]] = stub.argsFor("med_dose_events", "update") as [
-      [{ deleted_at: string | null }],
-    ];
-    expect(values.deleted_at).toEqual(expect.any(String));
+    // Hard-deleted, not soft-deleted: `idx_med_dose_events_regimen_scheduled_minute`
+    // covers soft-deleted `scheduled` rows too, so a tombstone would hold the
+    // minute and every retry of the same intake would fail on a duplicate key.
+    expect(stub.argsFor("med_dose_events", "delete")).toHaveLength(1);
+    expect(stub.argsFor("med_dose_events", "update")).toHaveLength(0);
     expect(stub.argsFor("med_dose_events", "eq")).toContainEqual(["id", "d-1"]);
   });
 
@@ -575,6 +576,54 @@ describe("logDose", () => {
       logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
     ).rejects.toThrow(/rpc down/);
     expect(stub.argsFor("med_dose_events", "update")).toHaveLength(0);
+    expect(stub.argsFor("med_dose_events", "delete")).toHaveLength(0);
+  });
+
+  it("puts the planned amount back when an amended dose fails to resolve", async () => {
+    const original = { intake: { amount: 1, unit: "pill" }, active: ["morning"] };
+    const stub = stubFor(
+      {},
+      { mark_dose_taken: { error: { message: "rpc down" } } },
+      { data: doseEvent({ id: "planned-1", planned_intake: original }) },
+    );
+
+    // The amendment lands before the RPC, so a failed call would otherwise
+    // leave the still-scheduled dose restating an amount nobody accepted.
+    await expect(
+      logDose(stub.client, {
+        regimenId: "r-1",
+        at: "2026-06-15T08:00:00.000Z",
+        amount: 0.5,
+        status: "taken",
+      }),
+    ).rejects.toThrow(/rpc down/);
+
+    const updates = stub.argsFor("med_dose_events", "update") as [{ planned_intake: unknown }][];
+    expect(updates).toHaveLength(2);
+    expect(updates[1][0].planned_intake).toEqual(original);
+  });
+
+  it("names the amended event when restoring the planned amount fails too", async () => {
+    const stub = createSupabaseStub(
+      {
+        med_regimens: [{ data: regimen() }],
+        med_dose_events: [
+          { data: doseEvent({ id: "planned-1", planned_intake: { intake: { amount: 1 } } }) },
+          { data: null },
+          { error: { message: "still down" } },
+        ],
+      },
+      { mark_dose_taken: { error: { message: "rpc down" } } },
+    );
+
+    await expect(
+      logDose(stub.client, {
+        regimenId: "r-1",
+        at: "2026-06-15T08:00:00.000Z",
+        amount: 0.5,
+        status: "taken",
+      }),
+    ).rejects.toThrow(/dose event planned-1 on Ferrous sulfate still carries the corrected amount/);
   });
 
   it("surfaces an insert error", async () => {
