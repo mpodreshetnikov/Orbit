@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   createRegimen,
+  findRegimensByName,
   getMedication,
   listMedicationDoses,
   listMedications,
+  logDose,
   updateRegimen,
 } from "./medications";
-import { createSupabaseStub } from "./test-support";
+import { createSupabaseStub, type StubResult } from "./test-support";
+import { createDoseEventsFake } from "./dose-events-fake";
 
 function regimen(overrides: Record<string, unknown> = {}) {
   return {
@@ -290,5 +293,398 @@ describe("createRegimen / updateRegimen", () => {
     await expect(updateRegimen(stub.client, "r-1", {})).rejects.toThrow(
       /Failed to update medication/,
     );
+  });
+});
+
+describe("findRegimensByName", () => {
+  it("matches on the trimmed, lower-cased name, archived courses included", async () => {
+    const stub = createSupabaseStub({
+      med_regimens: [
+        {
+          data: [
+            regimen({ id: "live", custom_name: "Атаракс" }),
+            regimen({ id: "archived", custom_name: " атаракс ", status: "archived" }),
+            regimen({ id: "other", custom_name: "Атаракс форте" }),
+          ],
+        },
+      ],
+    });
+
+    const rows = await findRegimensByName(stub.client, { personId: "p-1", name: "  АТАРАКС " });
+
+    // "Атаракс форте" is a different medication, not a spelling of this one.
+    expect(rows.map((r) => r.id)).toEqual(["live", "archived"]);
+    // Archived courses stay in the pool: a dose can be logged against one.
+    expect(stub.argsFor("med_regimens", "neq")).toHaveLength(0);
+  });
+
+  it("does not query at all for an empty name", async () => {
+    const stub = createSupabaseStub({ med_regimens: [{ data: [regimen()] }] });
+
+    await expect(findRegimensByName(stub.client, { personId: "p-1", name: "  " })).resolves.toEqual(
+      [],
+    );
+    expect(stub.calls).toHaveLength(0);
+  });
+});
+
+describe("logDose", () => {
+  function stubFor(
+    overrides: Record<string, unknown> = {},
+    rpc: Record<string, StubResult> = {},
+    planned: StubResult = { data: null },
+  ) {
+    return createSupabaseStub(
+      {
+        med_regimens: [{ data: regimen(overrides) }],
+        med_dose_events: [
+          // The same-minute planned-dose probe, then the insert, then the re-read.
+          planned,
+          { data: doseEvent() },
+          { data: doseEvent({ status: "taken", taken_at: "2026-06-15T08:00:00Z" }) },
+        ],
+      },
+      rpc,
+    );
+  }
+
+  it("files the intake against the existing regimen and resolves it through the RPC", async () => {
+    const stub = stubFor();
+
+    const result = await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "insert") as [[Record<string, unknown>]];
+    expect(values).toMatchObject({
+      person_id: "p-1",
+      regimen_id: "r-1",
+      scheduled_at: "2026-06-15T08:00:00.000Z",
+      // The UI sets both, and the reminder payload reads actual_at.
+      actual_at: "2026-06-15T08:00:00.000Z",
+      status: "scheduled",
+    });
+    // Inserting `taken` directly would skip the RPC that writes the inventory
+    // transaction and decrements stock.
+    expect(stub.rpc).toHaveBeenCalledWith("mark_dose_taken", { p_dose_event_id: "d-1" });
+    expect(result.dose.status).toBe("taken");
+    expect(result.regimen.effective_status).toBe("active");
+    expect(result.planned).toBe(false);
+  });
+
+  it("resolves the dose already planned for that minute instead of inserting a second one", async () => {
+    const stub = stubFor(
+      {},
+      {},
+      { data: doseEvent({ id: "planned-1", scheduled_at: "2026-06-15T08:00:30Z" }) },
+    );
+
+    const result = await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+    });
+
+    // idx_med_dose_events_regimen_scheduled_minute uniquely indexes unresolved
+    // events per regimen per minute, so an insert here would fail outright --
+    // and "I took my 08:00 pill" is the most ordinary call there is.
+    expect(stub.argsFor("med_dose_events", "insert")).toHaveLength(0);
+    expect(stub.rpc).toHaveBeenCalledWith("mark_dose_taken", { p_dose_event_id: "planned-1" });
+    expect(result.planned).toBe(true);
+  });
+
+  it("probes the minute the intake falls in, at every status", async () => {
+    const stub = stubFor();
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:45.123Z",
+      status: "taken",
+    });
+
+    expect(stub.argsFor("med_dose_events", "gte")).toEqual([
+      ["scheduled_at", "2026-06-15T08:00:00.000Z"],
+    ]);
+    expect(stub.argsFor("med_dose_events", "lt")).toEqual([
+      ["scheduled_at", "2026-06-15T08:01:00.000Z"],
+    ]);
+    // No status filter: a dose already `taken` or `snoozed` at that minute is
+    // outside the unique index, so only this probe can stop it duplicating.
+    expect(stub.argsFor("med_dose_events", "in")).toHaveLength(0);
+  });
+
+  it("takes the planned event's per-slot amount over the regimen default", async () => {
+    const stub = stubFor(
+      { dose_definition: { intake: { amount: 2, unit: "pill" } } },
+      {},
+      {
+        data: doseEvent({
+          id: "planned-1",
+          planned_intake: { intake: { amount: 0.5, unit: "pill" }, active: [] },
+        }),
+      },
+    );
+
+    const result = await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+    });
+
+    // A daily_times schedule can plan a different amount per slot.
+    expect(stub.argsFor("med_dose_events", "update")).toHaveLength(0);
+    expect(result.planned).toBe(true);
+  });
+
+  it("amends a planned dose only when the caller corrected the amount", async () => {
+    const stub = stubFor(
+      {},
+      {},
+      {
+        data: doseEvent({
+          id: "planned-1",
+          planned_intake: { intake: { amount: 1, unit: "pill" }, active: [] },
+        }),
+      },
+    );
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      amount: 0.5,
+      status: "taken",
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "update") as [
+      [{ planned_intake: { intake: { amount: number } } }],
+    ];
+    expect(values.planned_intake.intake.amount).toBe(0.5);
+  });
+
+  it("defaults the amount to the regimen's planned dose", async () => {
+    const stub = stubFor({ dose_definition: { intake: { amount: 0.5, unit: "pill" } } });
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "insert") as [
+      [{ planned_intake: { intake: { amount: number; unit: string } } }],
+    ];
+    expect(values.planned_intake.intake).toEqual({ amount: 0.5, unit: "pill" });
+  });
+
+  it("takes an explicit amount over the planned one", async () => {
+    const stub = stubFor({ dose_definition: { intake: { amount: 1, unit: "pill" } } });
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      amount: 0.5,
+      status: "taken",
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "insert") as [
+      [{ planned_intake: { intake: { amount: number } } }],
+    ];
+    expect(values.planned_intake.intake.amount).toBe(0.5);
+  });
+
+  it("routes a skip to the skip RPC and passes a trimmed note", async () => {
+    const stub = stubFor();
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "skipped",
+      note: "  felt sick  ",
+    });
+
+    expect(stub.rpc).toHaveBeenCalledWith("mark_dose_skipped", {
+      p_dose_event_id: "d-1",
+      p_note: "felt sick",
+    });
+  });
+
+  it("omits a blank note rather than clearing one", async () => {
+    const stub = stubFor();
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+      note: "   ",
+    });
+
+    expect(stub.rpc).toHaveBeenCalledWith("mark_dose_taken", { p_dose_event_id: "d-1" });
+  });
+
+  it("refuses an unknown or soft-deleted regimen before writing anything", async () => {
+    const stub = createSupabaseStub({ med_regimens: [{ data: null }] });
+
+    await expect(
+      logDose(stub.client, { regimenId: "nope", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
+    ).rejects.toThrow(/No medication with id nope/);
+    expect(stub.argsFor("med_dose_events", "insert")).toHaveLength(0);
+  });
+
+  it("leaves an already-planned event alone when the RPC fails", async () => {
+    const stub = stubFor(
+      {},
+      { mark_dose_taken: { error: { message: "rpc down" } } },
+      { data: doseEvent({ id: "planned-1" }) },
+    );
+
+    // Withdrawing it would delete part of the plan the person still owes.
+    await expect(
+      logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
+    ).rejects.toThrow(/rpc down/);
+    expect(stub.argsFor("med_dose_events", "delete")).toHaveLength(0);
+  });
+
+  describe("against a fake that enforces the real constraints", () => {
+    const AT = "2026-06-15T08:00:00.000Z";
+
+    function fakeWith(events: Parameters<typeof createDoseEventsFake>[0]["events"]) {
+      return createDoseEventsFake({ regimen: regimen(), events });
+    }
+
+    it("does not record a second intake when the minute is already taken", async () => {
+      // The case the status-filtered probe missed: she ticked the 08:00 dose in
+      // the app, then told the assistant about it. The partial unique index
+      // does not cover `taken`, so nothing but the probe stands in the way.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.alreadyRecorded).toBe(true);
+      expect(result.dose.id).toBe("d-1");
+      expect(fake.events).toHaveLength(1);
+      expect(fake.inventory).toHaveLength(0);
+      expect(fake.rpc).not.toHaveBeenCalled();
+    });
+
+    it("corrects a taken dose to skipped in place instead of inserting", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "skipped" });
+
+      expect(result.alreadyRecorded).toBe(false);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("skipped");
+      // `mark_dose_skipped` reverses the earlier decrement rather than adding one.
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "correction", event_id: "d-1" }),
+      ]);
+    });
+
+    it("resolves a snoozed dose instead of leaving its reminder armed", async () => {
+      // `snoozed` is outside the unique index too, so the insert would have
+      // succeeded and left `d-1` owing a dose that was already taken.
+      const fake = fakeWith([{ id: "d-1", status: "snoozed" }]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("resolves the planned dose rather than colliding with the unique index", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.planned).toBe(true);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+    });
+
+    it("inserts and resolves when the minute is genuinely free", async () => {
+      const fake = fakeWith([]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.planned).toBe(false);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("keeps a committed intake when only the RPC response is lost", async () => {
+      // The destructive case: the RPC ran and committed, the reply did not
+      // arrive. Deleting here would wipe the record and orphan its decrement.
+      const fake = fakeWith([]);
+      fake.loseRpcResponse("gateway timeout");
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.dose.status).toBe("taken");
+      expect(fake.events).toHaveLength(1);
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "decrement", event_id: "d-1" }),
+      ]);
+    });
+
+    it("withdraws the inserted event when the RPC really did not run", async () => {
+      const fake = fakeWith([]);
+      fake.failNext("rpc", "rpc down");
+
+      await expect(
+        logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" }),
+      ).rejects.toThrow(/rpc down/);
+
+      expect(fake.events).toHaveLength(0);
+      expect(fake.inventory).toHaveLength(0);
+    });
+
+    it("keeps the active ingredients when correcting the amount", async () => {
+      const active = [{ name: "Hydroxyzine", amount: 25, unit: "mg" }];
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "scheduled",
+          planned_intake: { intake: { amount: 1, unit: "tablet" }, active },
+        },
+      ]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, amount: 0.5, status: "taken" });
+
+      // The dose event is the only record of what was actually swallowed, and
+      // the slot's own unit is what reaches the inventory ledger.
+      expect(fake.events[0].planned_intake).toEqual({
+        intake: { amount: 0.5, unit: "tablet" },
+        active,
+      });
+      expect(fake.inventory[0]).toMatchObject({ amount: 0.5, unit: "tablet" });
+    });
+
+    it("refuses rather than guessing when the probe read fails", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
+      fake.failNext("med_dose_events", "connection reset");
+
+      // Reading that failure as "no dose here" would take the insert branch
+      // straight into a duplicate-key error, or duplicate a resolved intake.
+      await expect(
+        logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" }),
+      ).rejects.toThrow(/Failed to look for an existing dose/);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("scheduled");
+    });
+  });
+
+  it("surfaces an insert error", async () => {
+    const stub = createSupabaseStub({
+      med_regimens: [{ data: regimen() }],
+      med_dose_events: [{ data: null }, { error: { message: "boom" } }],
+    });
+
+    await expect(
+      logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
+    ).rejects.toThrow(/Failed to record the intake/);
   });
 });

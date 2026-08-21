@@ -1,13 +1,19 @@
 import { z } from "zod";
 import {
   createRegimen,
+  findRegimensByName,
   getMedication,
   listMedicationDoses,
   listMedications,
+  logDose,
   updateRegimen,
+  type RegimenWithStatus,
 } from "../health/medications";
-import { regenerateDoseEvents, resolveTimezone } from "@/lib/medications/regenerate-dose-events";
-import { localDayEndUtc, localDayStartUtc } from "../local-day";
+import {
+  readTimezonePreference,
+  regenerateDoseEvents,
+} from "@/lib/medications/regenerate-dose-events";
+import { isValidTimeZone, localDateTimeUtc, localDayEndUtc, localDayStartUtc } from "../local-day";
 import { WRITE_SCOPE } from "./scopes";
 import {
   medDurationSchema,
@@ -48,6 +54,22 @@ async function regenerateOrExplain(
     return { ok: false, error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
+
+/**
+ * One-line rendering of a regimen, shared by the listing and by the duplicate
+ * guard, so the candidates the guard offers look exactly like the ones
+ * `list_medications` returned.
+ */
+function describeRegimen(regimen: RegimenWithStatus): string {
+  return (
+    `${regimen.custom_name} — ${regimen.effective_status}` +
+    `${regimen.dose_definition?.intake ? `, ${regimen.dose_definition.intake.amount} ${regimen.dose_definition.intake.unit}` : ""}` +
+    `, schedule ${regimen.schedule?.mode ?? "unknown"} (id ${regimen.id})`
+  );
+}
+
+/** ISO 8601 date-time carrying an explicit zone: a trailing `Z`, or `+hh:mm`/`-hhmm`. */
+const HAS_UTC_OFFSET = /(z|[+-]\d{2}:?\d{2})$/i;
 
 const INTAKE_ADVICE_TYPES = [
   "before_meal",
@@ -94,12 +116,7 @@ export function registerMedicationTools(server: McpToolServer): void {
       return ok(
         summarizeList(
           `medications for ${person.name}`,
-          regimens.map(
-            (regimen) =>
-              `${regimen.custom_name} — ${regimen.effective_status}` +
-              `${regimen.dose_definition?.intake ? `, ${regimen.dose_definition.intake.amount} ${regimen.dose_definition.intake.unit}` : ""}` +
-              `, schedule ${regimen.schedule?.mode ?? "unknown"} (id ${regimen.id})`,
-          ),
+          regimens.map(describeRegimen),
           regimens.length,
         ),
         { person, medications: regimens },
@@ -169,10 +186,20 @@ export function registerMedicationTools(server: McpToolServer): void {
       // The dates name local calendar days. Treating them as UTC would drop an
       // early-morning dose for anyone east of UTC and pull in one from the next
       // local day -- precisely wrong for "what do I take today?".
-      const timezone = await resolveTimezone(supabase, {
-        authUserId: auth.authUserId,
-        requestedTimezone: args.timezone ?? null,
-      });
+      //
+      // Read the preference rather than resolving it: this tool is declared
+      // read-only, and `resolveTimezone` would persist the hint into
+      // `checkup_notification_timezone`, re-timing the household's generated
+      // events and reminders. Asking what is due today must not move anything.
+      const requestedZone = args.timezone?.trim() || null;
+      if (requestedZone && !isValidTimeZone(requestedZone)) {
+        return fail(
+          `"${args.timezone}" is not a timezone this server recognises. Pass an IANA name ` +
+            `like "Europe/Berlin".`,
+        );
+      }
+      const timezone =
+        requestedZone ?? (await readTimezonePreference(supabase, auth.authUserId)) ?? "UTC";
 
       const doses = await listMedicationDoses(supabase, {
         personId: person.id,
@@ -202,10 +229,16 @@ export function registerMedicationTools(server: McpToolServer): void {
     {
       title: "Add medication",
       description:
-        "Create a medication regimen for a person and generate its upcoming intakes. Give the dose, the schedule (how often) and the duration (how long). Confirm the details with the user before calling.",
+        "Create a NEW medication regimen for a person and generate its upcoming intakes. Give the dose, the schedule (how often) and the duration (how long). This is not the tool for a single intake of something the person already takes — use log_dose for that. Confirm the details with the user before calling.",
       inputSchema: z.object({
         ...personSelectorSchema,
         custom_name: z.string().min(1).describe("Medication name as the user refers to it."),
+        allow_duplicate: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Create this even though the person already has a medication of the same name still running. Pass true for a genuinely separate concurrent course, or a different medication that shares the name. A course that has already finished does not block creation.",
+          ),
         intake_unit: medicationUnitSchema,
         dose_definition: plannedIntakeSchema.describe("Amount and unit taken per intake."),
         schedule: medScheduleSchema,
@@ -224,6 +257,45 @@ export function registerMedicationTools(server: McpToolServer): void {
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     withPerson(async (supabase, person, args, auth) => {
+      // Without this a request like "she took half an Atarax tonight" becomes a
+      // second medication standing beside the real course, because creating one
+      // was the only write this server offered. Refusing costs one round-trip
+      // and turns a silent duplicate into a choice the caller has to make: log
+      // the intake, change the existing course, or say this really is a
+      // different medication.
+      const existing = await findRegimensByName(supabase, {
+        personId: person.id,
+        name: args.custom_name,
+      });
+
+      // Only a course that is still running can be the one the caller meant.
+      // A completed or archived course under the same name is the ordinary
+      // shape of a re-prescription -- titration is recorded as successive
+      // courses, and Atarax in 2025 does not mean Atarax in 2026 is a mistake.
+      // Blocking that had no right answer: logging today's intake against last
+      // year's course is wrong, and `update_medication` would overwrite the
+      // record of what the earlier course actually was.
+      const live = existing.filter(
+        (regimen) => regimen.effective_status === "active" || regimen.effective_status === "paused",
+      );
+
+      if (live.length > 0 && !args.allow_duplicate) {
+        const ended = existing.filter((regimen) => !live.includes(regimen));
+        return fail(
+          `${person.name} already has ${live.length} medication(s) named "${args.custom_name.trim()}" still running, so nothing was created:\n` +
+            live.map((regimen) => `- ${describeRegimen(regimen)}`).join("\n") +
+            (ended.length > 0
+              ? `\nAlso on record, already finished:\n` +
+                ended.map((regimen) => `- ${describeRegimen(regimen)}`).join("\n")
+              : "") +
+            `\nTo record a single intake of it, call log_dose with one of the running regimen_id values. ` +
+            `To change the dose, extend or pause that course, call update_medication. ` +
+            `Pass allow_duplicate: true if this is genuinely a second concurrent course, or a ` +
+            `different medication that happens to share the name.`,
+          { person, existing_medications: existing },
+        );
+      }
+
       const regimen = await createRegimen(supabase, {
         person_id: person.id,
         custom_name: args.custom_name,
@@ -246,16 +318,150 @@ export function registerMedicationTools(server: McpToolServer): void {
         timezone: args.timezone ?? null,
       });
 
+      // Named even on the way out, so a caller that overrode the guard can still
+      // see what it now sits beside and offer to archive the old course.
+      const alongside =
+        existing.length > 0
+          ? ` It now stands beside ${existing.length} other medication(s) with the same name: ` +
+            `${existing.map((regimen) => regimen.id).join(", ")}.`
+          : "";
+
       if (!regenerated.ok) {
         return ok(
-          `Added ${regimen.custom_name} for ${person.name}, but generating its upcoming intakes failed: ${regenerated.error}. The medication is saved; ask the user to open the medications page, or retry update_medication, to regenerate reminders.`,
-          { person, medication: regimen, dose_events_error: regenerated.error },
+          `Added ${regimen.custom_name} for ${person.name}, but generating its upcoming intakes failed: ${regenerated.error}. The medication is saved; ask the user to open the medications page, or retry update_medication, to regenerate reminders.${alongside}`,
+          {
+            person,
+            medication: regimen,
+            dose_events_error: regenerated.error,
+            existing_medications: existing,
+          },
         );
       }
 
       return ok(
-        `Added ${regimen.custom_name} for ${person.name} and generated ${regenerated.result.eventsGenerated} upcoming intake(s) (timezone ${regenerated.result.timezone}).`,
-        { person, medication: regimen, dose_events: regenerated.result },
+        `Added ${regimen.custom_name} for ${person.name} and generated ${regenerated.result.eventsGenerated} upcoming intake(s) (timezone ${regenerated.result.timezone}).${alongside}`,
+        {
+          person,
+          medication: regimen,
+          dose_events: regenerated.result,
+          existing_medications: existing,
+        },
+      );
+    }, WRITE_SCOPE),
+  );
+
+  server.registerTool(
+    "log_dose",
+    {
+      title: "Log a medication intake",
+      description:
+        "Record that a dose of a medication the person already has was taken, or skipped. Covers both a scheduled intake and an unplanned one outside the schedule — a dose already on the plan at that time is resolved rather than duplicated. Use this, not add_medication, whenever a course for that medication already exists; find its regimen_id with list_medications. Taking a dose decrements the stock if the medication tracks one.",
+      inputSchema: z.object({
+        regimen_id: uuidSchema.describe("The existing medication this intake belongs to."),
+        taken_at: z
+          .string()
+          .optional()
+          .describe(
+            "When the dose was taken. Either ISO 8601 with an offset ('2026-08-19T23:10:00+07:00') or a local wall-clock time ('2026-08-19T23:10'), which is read in `timezone`. Defaults to now.",
+          ),
+        amount: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Amount taken; halves are allowed. Defaults to the medication's planned dose."),
+        status: z.enum(["taken", "skipped"]).default("taken"),
+        note: z.string().optional(),
+        timezone: z
+          .string()
+          .optional()
+          .describe(
+            "IANA timezone an offset-less `taken_at` is expressed in, e.g. 'Europe/Berlin'. Defaults to the user's saved preference, or UTC.",
+          ),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    withUserClient<{
+      regimen_id: string;
+      taken_at?: string;
+      amount?: number;
+      status: "taken" | "skipped";
+      note?: string;
+      timezone?: string;
+    }>(async (supabase, args, auth) => {
+      // A mis-read timestamp files the intake at the wrong instant, and the app
+      // would then show it as a dose the person still owes tonight. Two traps
+      // are worth refusing over: `new Date` reads an offset-less string in the
+      // *server's* zone (UTC in production, so hours off for anyone else), and
+      // it happily accepts non-ISO input like "0". So parse deliberately.
+      const requested = args.taken_at?.trim();
+      let at: Date;
+      let timezone: string | null = null;
+
+      if (!requested) {
+        at = new Date();
+      } else if (HAS_UTC_OFFSET.test(requested)) {
+        at = new Date(requested);
+        if (Number.isNaN(at.getTime())) {
+          return fail(`Could not read "${args.taken_at}" as a date and time.`);
+        }
+      } else {
+        // Read the preference, never write it. `resolveTimezone` persists what
+        // it is handed into `checkup_notification_timezone`, which the nightly
+        // generation cron and both reminder digests run on -- so a timezone
+        // hint given to interpret one timestamp would silently re-time every
+        // future dose event and checkup reminder in the household. Recording
+        // history must not move the plan.
+        const requestedZone = args.timezone?.trim() || null;
+        if (requestedZone && !isValidTimeZone(requestedZone)) {
+          return fail(
+            `"${args.timezone}" is not a timezone this server recognises. Pass an IANA name ` +
+              `like "Europe/Berlin", or give taken_at with an explicit offset.`,
+          );
+        }
+
+        timezone =
+          requestedZone ?? (await readTimezonePreference(supabase, auth.authUserId)) ?? "UTC";
+
+        const instant = localDateTimeUtc(requested, timezone);
+        if (!instant) {
+          return fail(
+            `Could not read "${args.taken_at}" as a date and time in ${timezone}. Pass ISO 8601 ` +
+              `with an offset ("2026-08-19T23:10:00+07:00"), or a local wall-clock time ` +
+              `("2026-08-19T23:10") that exists in that zone — a clock-change gap has no such ` +
+              `local time.`,
+          );
+        }
+        at = new Date(instant);
+      }
+
+      const { regimen, dose, planned, alreadyRecorded } = await logDose(supabase, {
+        regimenId: args.regimen_id,
+        at: at.toISOString(),
+        amount: args.amount ?? null,
+        status: args.status,
+        note: args.note ?? null,
+      });
+
+      const intake = dose.planned_intake?.intake;
+      const zoneNote = timezone ? ` (read as local time in ${timezone})` : "";
+
+      // Reporting "logged" for a dose already on record invites the caller to
+      // believe something was written, and a retry would cost one intake and
+      // one stock decrement too many.
+      if (alreadyRecorded) {
+        return ok(
+          `${regimen.custom_name} was already recorded as ${dose.status} at ${at.toISOString()}` +
+            `${zoneNote}, so nothing was written. Pass a different taken_at for a separate ` +
+            `intake, or status: "${args.status === "taken" ? "skipped" : "taken"}" to correct it.`,
+          { medication: regimen, dose, planned, already_recorded: true },
+        );
+      }
+
+      return ok(
+        `Logged ${intake ? `${intake.amount} ${intake.unit} of ` : ""}${regimen.custom_name} as ` +
+          `${dose.status} at ${at.toISOString()}${zoneNote}. ` +
+          `${planned ? "This resolved the dose already on the plan for that time." : "Recorded as an extra intake outside the plan."}`,
+        { medication: regimen, dose, planned, already_recorded: false },
       );
     }, WRITE_SCOPE),
   );

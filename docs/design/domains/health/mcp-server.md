@@ -101,7 +101,7 @@ function taking a `SupabaseClient` as its first argument so it can run under the
 - **Checkups** — `list_checkups`, `get_checkup`.
 - **Catalogs** — `list_catalog_entries`, `search_catalog_entries`, `upsert_catalog_entry`.
 - **Medications** — `list_medications`, `get_medication`, `list_medication_doses`,
-  `add_medication`, `update_medication`.
+  `add_medication`, `log_dose`, `update_medication`.
 
 Conventions that matter:
 
@@ -121,6 +121,80 @@ Conventions that matter:
   (`src/lib/mcp/local-day.ts`).
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.
+- **A medication a person is currently on is never created twice.** `add_medication` refuses when a
+  regimen of the same person is still running under the same name — trimmed and lower-cased, the
+  matcher `src/components/medications/medication-form.tsx` uses — and returns every match, finished
+  courses included, so the caller can pick one. `allow_duplicate: true` overrides it for a second
+  concurrent course or a genuinely separate medication that shares a name.
+
+  Only `active` and `paused` courses block. A completed or archived one under the same name is the
+  ordinary shape of a re-prescription — titration is recorded as successive courses — and blocking
+  it left no right answer: `log_dose` would file today's intake against last year's course, and
+  `update_medication` would overwrite the record of what that course actually was.
+
+  This lives in the server rather than in an agent's prompt because the MCP is reachable from
+  clients that never load this repository's skills. Before the guard, "she took half an Atarax
+  tonight" had only one write available to it and produced a second medication standing beside the
+  real course (`T-0018`).
+
+- `log_dose` records one intake — planned or not — against an existing regimen, which is what that
+  request should have reached for. It follows the web UI's `addOneTimeDoseToRegimen`
+  (`src/hooks/use-regimens.ts`): insert the `med_dose_events` row, then resolve it through
+  `mark_dose_taken` or `mark_dose_skipped`. Writing `status: 'taken'` straight into the insert would
+  skip the RPC that records the inventory transaction and decrements stock. It deliberately does
+  **not** regenerate dose events: logging an intake records history, it does not change the plan.
+
+  **Saying it twice must not record it twice.** Where the UI reaches this path only for intakes
+  _outside_ the plan, `log_dose` is the only way in, so it first looks for an existing event in the
+  same regimen-minute — at _any_ status — and resolves that one instead of inserting beside it. The
+  status filter is deliberately absent: `idx_med_dose_events_regimen_scheduled_minute` covers only
+  `scheduled` and `sent`, so a dose the person ticked in the app is invisible to a status-filtered
+  probe _and_ unblocked by the index, and logging it again would write a second intake and a second
+  inventory decrement. `snoozed` is the same, and additionally leaves its `medication_snoozed`
+  digest armed — a reminder for a dose already recorded. The RPCs are built for this:
+  `mark_dose_taken` accepts `skipped` and `mark_dose_skipped` accepts `taken`, so a resolution is
+  amended in place. A dose already carrying the requested status is reported back untouched.
+
+  **A failed call must not destroy a good record.** `supabase.rpc` reports a lost response exactly
+  like a rejected call, and the RPC is `plpgsql`: it may well have committed — status changed,
+  inventory transaction written, stock decremented — with only the reply going missing. So the
+  failure path re-reads the row before touching anything. If it comes back resolved, the write
+  landed and the call succeeds. Only a row that reads back still unresolved, and only one this call
+  inserted, is withdrawn; a planned event is left alone, since withdrawing it would delete part of
+  the plan, and a corrected amount written onto it is put back. If the row cannot be read at all,
+  nothing is touched and the response says the outcome is unknown — an unresolved event is a
+  reminder too many, a deleted one may be a medical record too few.
+
+  That withdrawal is a hard delete rather than a `deleted_at` stamp — the one place in this domain
+  that removes a row outright. The index above is predicated on `status` alone, so a soft-deleted
+  `scheduled` row still holds its regimen's minute while every reader hides it: the next attempt
+  could neither see the tombstone nor insert past it, and that intake would be unrecordable for
+  good. The row is seconds old and was never resolved, so there is no history to keep.
+
+  **Amendments preserve what they do not change.** Correcting the amount spreads the existing
+  `planned_intake` rather than rebuilding it, keeping the active ingredients the generator carries
+  forward and the slot's own unit — the dose event is the only record of what was actually taken,
+  and `mark_dose_taken` copies that unit straight into the inventory ledger.
+
+  **The timezone is read, never written.** `resolveTimezone` _persists_ what it is handed into
+  `user_preferences.checkup_notification_timezone`, which drives
+  `run_med_event_generation_for_all_users` and both reminder digests. That is right for
+  `add_medication` and `update_medication`, which are re-timing the plan, and wrong here: a timezone
+  hint given to interpret one timestamp would silently move every future dose event and checkup
+  reminder in the household. `log_dose` and `list_medication_doses` use `readTimezonePreference`
+  instead, and an unrecognised zone is refused rather than quietly falling through to UTC.
+
+  `taken_at` is parsed deliberately rather than through bare `new Date`: a string carrying an offset
+  or `Z` is taken at face value, an offset-less wall-clock time is read in the caller's `timezone`
+  (or the saved preference), and anything else is refused. That includes a date that does not exist,
+  since `Date.parse` rolls `2026-02-30` forward to March 2 rather than failing, and a local time
+  that does not exist in the zone — the hour a spring-forward skips, which the offset iteration
+  would otherwise resolve to an instant an hour off, and in zones whose transition sits at midnight,
+  onto the previous local day. An ambiguous fall-back time is accepted, settling on the later
+  occurrence: unlike a gap it does exist, and either reading is at most an hour out. `new Date`
+  would read an offset-less string in the _server's_ zone — UTC in production, so hours off for
+  anyone else — and it also accepts non-ISO input like `"0"`.
+
 - `add_medication` and `update_medication` must regenerate dose events, or the app's "Today's
   intakes" keeps showing the old plan. They call the same
   `@/lib/medications/regenerate-dose-events` the web route uses.

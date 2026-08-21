@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { localDayEndUtc, localDayStartUtc, timezoneOffsetMinutes } from "./local-day";
+import {
+  localDateTimeUtc,
+  localDayEndUtc,
+  localDayStartUtc,
+  timezoneOffsetMinutes,
+} from "./local-day";
 
 describe("timezoneOffsetMinutes", () => {
   it("is zero for UTC", () => {
@@ -63,5 +68,68 @@ describe("localDayStartUtc / localDayEndUtc", () => {
   it("falls back to a UTC day for an unknown timezone rather than throwing", () => {
     expect(localDayStartUtc("2026-06-15", "Not/AZone")).toBe("2026-06-15T00:00:00.000Z");
     expect(localDayEndUtc("2026-06-15", "Not/AZone")).toBe("2026-06-15T23:59:59.999Z");
+  });
+});
+
+describe("localDateTimeUtc", () => {
+  it("reads a wall-clock time in the named zone, not the server's", () => {
+    // The server runs in UTC; treating this as UTC would file it 7 hours late
+    // and, at 23:10, on the wrong local day.
+    expect(localDateTimeUtc("2026-08-19T23:10", "Asia/Bangkok")).toBe("2026-08-19T16:10:00.000Z");
+  });
+
+  it("accepts seconds, milliseconds and a space separator", () => {
+    expect(localDateTimeUtc("2026-08-19 23:10:30", "Asia/Bangkok")).toBe(
+      "2026-08-19T16:10:30.000Z",
+    );
+    expect(localDateTimeUtc("2026-08-19T23:10:30.500", "UTC")).toBe("2026-08-19T23:10:30.500Z");
+  });
+
+  it("settles the offset across a DST boundary", () => {
+    // Berlin is UTC+1 in January and UTC+2 in July.
+    expect(localDateTimeUtc("2026-01-15T12:00", "Europe/Berlin")).toBe("2026-01-15T11:00:00.000Z");
+    expect(localDateTimeUtc("2026-07-15T12:00", "Europe/Berlin")).toBe("2026-07-15T10:00:00.000Z");
+  });
+
+  it("rejects anything that is not a zone-less date and time", () => {
+    // `new Date` would accept every one of these and invent an instant.
+    expect(localDateTimeUtc("0", "UTC")).toBeNull();
+    expect(localDateTimeUtc("2026-08-19", "UTC")).toBeNull();
+    expect(localDateTimeUtc("yesterday evening", "UTC")).toBeNull();
+    expect(localDateTimeUtc("2026-08-19T23:10:00+07:00", "UTC")).toBeNull();
+  });
+
+  it("rejects a calendar date that does not exist", () => {
+    // `Date.parse` rolls these forward instead of failing, which would file the
+    // intake on a day the caller never named.
+    expect(localDateTimeUtc("2026-02-30T12:00", "UTC")).toBeNull();
+    expect(localDateTimeUtc("2026-04-31T12:00", "Asia/Bangkok")).toBeNull();
+    expect(localDateTimeUtc("2026-13-01T12:00", "UTC")).toBeNull();
+    // 2028 is a leap year, so this one is real and must still pass.
+    expect(localDateTimeUtc("2028-02-29T12:00", "UTC")).toBe("2028-02-29T12:00:00.000Z");
+  });
+
+  it("rejects a local time that does not exist in the zone", () => {
+    // A spring-forward gap has no such wall clock. The iteration still settles
+    // on an instant, an hour off -- and where the transition sits at midnight,
+    // on the previous local day, which is the failure this whole function
+    // exists to prevent.
+    expect(localDateTimeUtc("2026-03-29T02:30", "Europe/Berlin")).toBeNull();
+    expect(localDateTimeUtc("2026-03-08T02:30", "America/New_York")).toBeNull();
+    expect(localDateTimeUtc("2026-09-06T00:30", "America/Santiago")).toBeNull();
+    expect(localDateTimeUtc("2026-03-08T00:30", "America/Havana")).toBeNull();
+  });
+
+  it("accepts an ambiguous fall-back time, settling on the later occurrence", () => {
+    // Berlin falls back on 2026-10-25, so 02:30 happens twice: 00:30Z at UTC+2
+    // and 01:30Z at UTC+1. Unlike a gap this wall clock does exist, so refusing
+    // it would be unhelpful -- and either reading is at most an hour out, which
+    // for "when did she take it" is noise rather than a wrong day. Pinned here
+    // so the choice is a decision rather than an accident of the iteration.
+    expect(localDateTimeUtc("2026-10-25T02:30", "Europe/Berlin")).toBe("2026-10-25T01:30:00.000Z");
+  });
+
+  it("falls back to reading it as UTC when the timezone is unusable", () => {
+    expect(localDateTimeUtc("2026-08-19T23:10", "Not/AZone")).toBe("2026-08-19T23:10:00.000Z");
   });
 });
