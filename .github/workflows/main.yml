@@ -49,9 +49,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # Impact detection runs before the heavy toolchain setup, so a change confined to the task
-      # registry can skip installing Deno and the Supabase CLI as well as the lanes that need them.
-      # change-impact.cjs uses only Node built-ins and git, so it runs before `npm ci`.
+      # Impact detection runs before the heavy toolchain setup, so a change that needs neither the
+      # database nor the functions can skip installing Deno and the Supabase CLI along with the
+      # lanes that need them. change-impact.cjs uses only Node built-ins and git, so it runs
+      # before `npm ci`.
       - name: Detect change impact
         id: impact
         shell: bash
@@ -63,7 +64,6 @@ jobs:
               echo "extensionImpact=true"
               echo "functionsImpact=true"
               echo "docsOnly=false"
-              echo "tasksOnly=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -85,7 +85,6 @@ jobs:
       # buys roughly 20-30 GB. `df` is printed so a future disk failure is
       # diagnosable from the log rather than inferred.
       - name: Free disk space
-        if: steps.impact.outputs.tasksOnly != 'true'
         shell: bash
         run: |
           echo "Before:"
@@ -99,11 +98,9 @@ jobs:
           echo "After:"
           df -h /
       - uses: denoland/setup-deno@v2
-        if: steps.impact.outputs.tasksOnly != 'true'
         with:
           deno-version: v2.x
       - uses: supabase/setup-cli@v1
-        if: steps.impact.outputs.tasksOnly != 'true'
         with:
           version: latest
       - uses: taiki-e/install-action@just
@@ -139,14 +136,7 @@ jobs:
         run: |
           echo "Extension release surfaces changed without a browserExtension/manifest.json version bump."
           exit 1
-      # A change confined to docs/tasks gets the registry gate and the formatter only. Nothing under
-      # src, supabase, browserExtension or scripts reads the registry at build or test time, so the
-      # build, e2e and coverage lanes below cannot detect a fault the registry gate misses.
-      - name: Run quality (task registry only)
-        if: steps.impact.outputs.tasksOnly == 'true'
-        run: just quality-tasks
       - name: Run quality (format, lint, typecheck)
-        if: steps.impact.outputs.tasksOnly != 'true'
         run: just quality
       - name: Restore Supabase Docker image cache
         if: steps.impact.outputs.dbImpact == 'true'
@@ -190,7 +180,7 @@ jobs:
           SUPABASE_ALREADY_RUNNING: "1"
         run: node scripts/just/build-local-all.cjs --db-mode=always
       - name: Build (without DB lifecycle)
-        if: steps.impact.outputs.dbImpact != 'true' && steps.impact.outputs.tasksOnly != 'true'
+        if: steps.impact.outputs.dbImpact != 'true'
         run: node scripts/just/build-local-all.cjs --db-mode=skip
       - name: Install Playwright browser
         if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
@@ -241,7 +231,6 @@ jobs:
           path: .cache/docker/supabase-images
           key: ${{ steps.supabase-image-cache.outputs.cache-primary-key }}
       - name: Test and coverage
-        if: steps.impact.outputs.tasksOnly != 'true'
         run: just test-unit-coverage && just coverage-check
 
   extension-release-bundle:

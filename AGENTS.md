@@ -45,8 +45,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `functions-lock-check`: `just quality-check-supabase-functions-lock` (verify Supabase Edge Functions lockfile format compatibility)
 - `functions-lock-refresh`: `just supabase-functions-lock-refresh` (regenerate `supabase/functions/deno.lock` with runtime-compatible Deno)
 - `types`: `just quality-typecheck`
-- `quality`: `just quality` (all static checks: task registry, skill sync, format, lint, typecheck; no builds, DB, or tests)
-- `quality-tasks`: `just quality-tasks` (static checks for a change confined to `docs/tasks`: registry, skill sync, format; CI uses this instead of `quality` when nothing outside the registry changed)
+- `quality`: `just quality` (all static checks: skill sync, format, lint, typecheck; no builds, DB, or tests)
 - `db-lint`: `just quality-db-lint` (local DB lint scoped to `public` schema, warnings fail)
 - `db-test`: `just quality-db-test` (pgTAP tests under `supabase/tests`)
 - `db-coverage-report`: `just db-coverage-report` (DB object to pgTAP mapping coverage report)
@@ -58,8 +57,6 @@ Use these command IDs in plans, PRs, and handoffs:
 - `ci`: `just ci-verify-local` (run after completing a task that changed code; see docs/QUALITY.md)
 - `ci-fast`: `just ci-verify-local-fast` (quick local gate: no Supabase, no coverage; use for fast feedback; use `ci` for full pre-push)
 - `check`: `just check` (full local quality gate)
-- `tasks-index`: `just tasks-index` (regenerate `docs/tasks/INDEX.md` from the task files)
-- `tasks-check`: `just tasks-check` (validate the task registry: front matter schema, ids, required sections, index freshness; included in `quality`)
 - `agent-skills-sync`: `just agent-skills-sync` (mirror `.agents/skills` into `.claude/skills`)
 - `agent-skills-check`: `just agent-skills-check` (fail when `.claude/skills` has drifted from `.agents/skills`; included in `quality`)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
@@ -92,8 +89,7 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 - Debug information in code: `docs/design/common/error-handling-and-observability.md`
 - Quality gates and PR checks: `docs/QUALITY.md`
 - Security and RLS expectations: `docs/SECURITY.md`
-- Where work is tracked, and its schema and lifecycle: `docs/tasks/README.md`
-- How to write a multi-hour execution plan: `docs/PLANS.md`
+- Where work is tracked, and how a multi-hour execution plan is written: the private task registry (see below)
 
 ## Documentation DRY Rules
 
@@ -103,10 +99,8 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 
 ## Task Registry
 
-All work — features, bugs, tech debt, chores, ideas, and the reasoning behind decisions — is tracked as one file per unit of work under `docs/tasks/`. Read `docs/tasks/INDEX.md` before starting a task and grep `docs/tasks/` for prior decisions on the subject. Schema and lifecycle are canonical in `docs/tasks/README.md`; the `task-registry` skill carries the workflow.
+All work — features, bugs, tech debt, chores, ideas, ExecPlans, and the reasoning behind decisions — is tracked in a private registry outside this repository, because it describes unreleased work and this repository is public. Nothing here is a second tracker: do not start one.
 
-Tech debt is a task with `kind: debt` and a required `exit` condition. There is no separate debt tracker.
+A local checkout may have the registry linked in at `docs/tasks/`, along with `docs/PLANS.md` and the `task-registry` skill. All three paths are gitignored here. When they are present, read `docs/tasks/INDEX.md` before starting a task, grep `docs/tasks/` for prior decisions on the subject, and follow the skill; `docs/tasks/README.md` is canonical for the schema and lifecycle. Registry changes are committed in the registry repository, never here — a commit in this repository silently drops them.
 
-## ExecPlans
-
-When writing complex features or significant refactors, use an ExecPlan (as described in `docs/PLANS.md`) from design to implementation. An ExecPlan is not a separate document type: it is a task with `depth: execplan`, living in `docs/tasks/` like everything else.
+When they are absent, the registry is simply unavailable in this checkout: say so rather than tracking the work somewhere else.
