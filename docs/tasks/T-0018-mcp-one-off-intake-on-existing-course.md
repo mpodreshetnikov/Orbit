@@ -37,8 +37,9 @@ to log a dose, and `add_medication` does not look at what already exists under t
 
 ## Progress
 
-- [x] 2026-08-19 — Repaired the production data by hand: dose event `2256a44f` re-pointed to the
-      real course `ffe4f4a8`, the stray regimen `97eada49` soft-deleted.
+- [x] 2026-08-19 — Repaired the production data by hand: the stray dose event was re-pointed to the
+      real course and the duplicate regimen soft-deleted. Row identifiers are deliberately not
+      recorded here; see the Decision Log.
 - [x] 2026-08-19 — Added `log_dose`, backed by `logDose` in `src/lib/mcp/health/medications.ts`,
       which inserts the event and resolves it through `mark_dose_taken`/`mark_dose_skipped` and
       withdraws the event if that RPC fails.
@@ -66,8 +67,22 @@ to log a dose, and `add_medication` does not look at what already exists under t
       history no longer re-times the household's reminders; the duplicate guard only blocks courses
       that are still running; amendments keep the active ingredients and the slot's unit; and the
       two reads that swallowed their errors now report them.
-- [ ] Confirm against the deployed MCP server that "I took half an X tonight" reaches `log_dose`
-      instead of creating a second medication.
+- [x] 2026-08-21 — Exercised both behaviours against the deployed connector, after the merge of
+      PR #8 deployed at 16:18Z. Both passed writing nothing to the health record: - `log_dose`, aimed at a minute that already held a resolved intake, returned
+      `already_recorded: true` with the existing event handed back untouched. Re-reading the
+      course afterwards showed the same `updated_at` and the same number of dose events and
+      inventory transactions as before the call. On the code as first written this would have
+      inserted a second intake and a second `decrement`. - `add_medication`, for a name whose course is still running, refused — naming the running
+      course and listing the finished courses of that name separately as context. Nothing was
+      created.
+      The insert branch — a genuinely new intake at a free minute — was deliberately not exercised,
+      because doing so means writing an intake that did not happen into a real medical record. It
+      shares every step with the exercised path up to the probe's branch.
+- [ ] Confirm that a natural-language request reaches `log_dose` rather than some other tool. The
+      two checks above establish that each tool behaves correctly when called, which is not the
+      same claim: a client could still route "I took half an X tonight" to `add_medication`, be
+      refused by the guard, and leave the intake unrecorded. Observing the routing needs the
+      connector to record which tool ran — `T-0019`.
 
 Verified here: `npx vitest run` (226 files, 1656 tests, all passing), `npx tsc --noEmit`,
 `npx eslint src shared --max-warnings=0`, `npx prettier --check .`, and the coverage ratchet
@@ -174,4 +189,41 @@ Edge Function and no UI flow.
   in SQL, which this change does not touch; and the fake used here is single-threaded, so nothing in
   this suite could show a fix worked. Claiming it as covered would repeat the mistake the review had
   just found elsewhere in this PR.
+  Date/Author: 2026-08-21.
+
+- Decision: Close the task without exercising `log_dose`'s insert branch against production.
+  Rationale: The two checks that were run cover what the task exists for — the path that produced
+  the incident is closed (`add_medication` refuses while a course runs) and the path that should
+  have been taken works (`log_dose` resolves against the existing course). Exercising the insert
+  branch would mean recording an intake nobody took, in the medical record of a real person, to
+  turn a checkbox green. A fabricated entry is worse than an unexercised branch, and that branch is
+  covered by the constraint-enforcing fake.
+  Date/Author: 2026-08-21.
+
+- Decision: Note that neither check can prove `log_dose` was the tool the model chose.
+  Rationale: The verification reads the resulting data and the tool's own response. With no
+  telemetry on the connector (`T-0019`), a call that reached some other tool and happened to leave
+  the same data behind would look identical. This is the same blind spot that made the original
+  incident take a manual dig through `created_at` columns to reconstruct.
+  Date/Author: 2026-08-21.
+
+- Decision: Keep this task open rather than closing it on the two checks above.
+  Rationale: The remaining acceptance item is that a natural-language request _reaches_ `log_dose`.
+  What was verified is that `log_dose` and `add_medication` each behave correctly when called,
+  which does not establish routing — a client could still pick `add_medication`, be refused, and
+  leave the intake unrecorded, which is a worse outcome than the duplicate this task started from.
+  `docs/tasks/README.md` defines `done` as delivered _and verified_, and makes it terminal, so
+  closing on partial evidence would have been unwound only by opening a second task. Raised by the
+  automated review on PR #9.
+  Date/Author: 2026-08-21.
+
+- Decision: Record verification evidence without medication names, dose amounts, row identifiers or
+  counts.
+  Rationale: This repository is public (`T-0016`), and git history is durable — the same reason the
+  publication work removed the owner's identity from the tree rather than editing it forward. The
+  first draft of the evidence above named two real medications, an active dose, several row ids and
+  the exact number of a person's dose events. None of that was needed to say what the checks
+  established. Identifiers from the 2026-08-19 repair were removed from this file for the same
+  reason; they remain in the history of PR #8, which is a separate question for the repository
+  owner. Raised by the automated review on PR #9.
   Date/Author: 2026-08-21.
