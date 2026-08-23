@@ -155,7 +155,7 @@
       "name_ru": "ЛПВП (HDL-C)",
       "name_en": "HDL-C",
       "canonical_unit": "mmol/L",
-      "synonyms_ru": ["лпвп", "hdl", "hdl-c"],
+      "synonyms_ru": ["лпвп", "hdl", "hdl-c", "холестерин лпвп", "хс лпвп", "холестерин-лпвп"],
       "synonyms_en": ["hdl", "hdl-c"],
       "accepted_units": {
         "mg/dL": { "factor_to_canonical": 0.0259 },
@@ -201,7 +201,7 @@
       "name_ru": "ЛПНП (LDL-C)",
       "name_en": "LDL-C",
       "canonical_unit": "mmol/L",
-      "synonyms_ru": ["лпнп", "ldl", "ldl-c"],
+      "synonyms_ru": ["лпнп", "ldl", "ldl-c", "холестерин лпнп", "хс лпнп", "холестерин-лпнп"],
       "synonyms_en": ["ldl", "ldl-c"],
       "accepted_units": {
         "mg/dL": { "factor_to_canonical": 0.0259 },

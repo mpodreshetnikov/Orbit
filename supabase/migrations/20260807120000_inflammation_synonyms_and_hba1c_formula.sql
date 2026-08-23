@@ -53,7 +53,27 @@ set synonyms_ru = ARRAY[
 ]
 where obs_code = 'ggt';
 
--- 3. `hba1c` shipped a conversion that cannot be evaluated, and it is now reachable.
+-- 3. `hdl_c` and `ldl_c` could not be reached from the way a lipid panel actually prints them.
+--
+-- The catalogue lists them as `ЛПВП (HDL-C)` with the bare abbreviation as a synonym, and a Russian
+-- panel prints `Холестерин ЛПВП`. Whole-string matching misses that, and the resolver's
+-- discriminating-token tier cannot break the tie either: `холестерин` uniquely identifies
+-- `cholesterol_total` and `лпвп` uniquely identifies `hdl_c`, each appearing in exactly one
+-- catalogue entry, so neither is measurably more decisive than the other. The catalogue does not
+-- encode that ЛПВП is a *kind* of cholesterol, so no algorithm can recover it -- the printed form
+-- has to be listed.
+--
+-- Deliberately not added for VLDL: the catalogue carries no entry for it, so `Холестерин ЛПОНП`
+-- must stay uncoded rather than being folded into total cholesterol.
+update public.observation_catalog
+set synonyms_ru = ARRAY['лпвп', 'hdl', 'hdl-c', 'холестерин лпвп', 'хс лпвп', 'холестерин-лпвп']
+where obs_code = 'hdl_c';
+
+update public.observation_catalog
+set synonyms_ru = ARRAY['лпнп', 'ldl', 'ldl-c', 'холестерин лпнп', 'хс лпнп', 'холестерин-лпнп']
+where obs_code = 'ldl_c';
+
+-- 4. `hba1c` shipped a conversion that cannot be evaluated, and it is now reachable.
 --
 -- `formula_to_canonical` held the string
 --   'percent = (mmol_per_mol * 0.09148) + 2.152'

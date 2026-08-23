@@ -224,3 +224,18 @@ Deno.test("a word naming the specimen does not stop an analyte resolving", () =>
   assertEquals(observationCodeFor("Холестерин ЛПОНП"), null);
   assertEquals(observationCodeFor("Билирубин прямой"), null);
 });
+
+Deno.test("a lipid fraction resolves to its own analyte, and VLDL still to none", () => {
+  // A Russian panel prints `Холестерин ЛПВП`, while the catalogue carries the bare abbreviation.
+  // No algorithm can bridge that: `холестерин` names exactly one entry and `лпвп` names exactly one
+  // other, so neither is measurably the more decisive token. The printed forms are catalogue data.
+  assertEquals(observationCodeFor("Холестерин ЛПВП"), "hdl_c");
+  assertEquals(observationCodeFor("Холестерин ЛПНП"), "ldl_c");
+  assertEquals(observationCodeFor("ХС ЛПНП"), "ldl_c");
+  assertEquals(observationCodeFor("ЛПВП"), "hdl_c");
+
+  // And the reason those synonyms are dangerous to add carelessly: `лпонп` is one letter from
+  // `лпнп`, so a near-miss match would file VLDL into LDL's history. The catalogue has no VLDL
+  // entry, so the only correct answer is still no code.
+  assertEquals(observationCodeFor("Холестерин ЛПОНП"), null);
+});

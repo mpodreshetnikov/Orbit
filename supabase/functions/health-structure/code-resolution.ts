@@ -85,6 +85,14 @@ const DISCRIMINATING_TOKEN_MIN_LENGTH = 3;
 const TOKEN_MATCH_THRESHOLD = 0.5;
 
 /**
+ * Tokens shorter than this are treated as abbreviations and must match exactly.
+ *
+ * Six is chosen so that the lipid fractions -- `лпвп`, `лпнп`, `лпонп` -- all fall inside it, since
+ * they are the case that proves the point: one letter apart, three different analytes.
+ */
+const ABBREVIATION_MAX_LENGTH = 6;
+
+/**
  * Words that say which specimen was measured, not which analyte was measured in it.
  *
  * `Глюкоза крови`, `Глюкоза плазмы` and `Глюкоза венозной крови` are all glucose. Requiring the
@@ -162,6 +170,15 @@ function vocabularyTokens<T>(view: CatalogView<T>): string[] {
  */
 function isTokenExplained(token: string, vocabulary: string[]): boolean {
   const folded = foldHomoglyphs(token);
+  // A short token is an abbreviation, and abbreviations are not inflected -- they are chosen to be
+  // distinct. `ЛПВП`, `ЛПНП` and `ЛПОНП` are three different lipid fractions separated by a single
+  // letter, and trigram similarity rates them near-identical, so tolerating a near miss here files
+  // one analyte's result into another analyte's history. Demand an exact match and let the longer
+  // words carry the inflection tolerance, which is what actually needs it: `сыворотки` against
+  // `сывороточное` is the same word, `лпонп` against `лпнп` is not.
+  if (folded.length < ABBREVIATION_MAX_LENGTH) {
+    return vocabulary.some((word) => foldHomoglyphs(word) === folded);
+  }
   return vocabulary.some(
     (word) => similarity(folded, foldHomoglyphs(word)) >= TOKEN_MATCH_THRESHOLD,
   );

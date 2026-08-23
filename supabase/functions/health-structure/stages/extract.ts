@@ -446,9 +446,25 @@ function anchorIsGrounded(anchor: string | null | undefined, haystackNormalized:
   return isTextGrounded(anchor, haystackNormalized);
 }
 
-/** Whole-word negations, and prefixes for the ones Russian inflects. */
-const NEGATION_WORDS = new Set(["не", "нет", "без", "нE"]);
-const NEGATION_PREFIXES = ["отсутств"];
+/**
+ * Negations that can govern a term on either side of them.
+ *
+ * `не` and `нет` sit in predicates, and Russian puts the predicate after its subject as readily as
+ * before it: `ЛС не расширена`, `метаплазия не выявлена`, `Конкременты: нет`. Proximity in either
+ * direction is the right test for these.
+ */
+const SYMMETRIC_NEGATION_WORDS = new Set(["не", "нет"]);
+const SYMMETRIC_NEGATION_PREFIXES = ["отсутств"];
+
+/**
+ * `без` is a preposition, so it governs only the noun phrase that follows it — never one before it.
+ *
+ * This distinction is load-bearing rather than pedantic. `Полип без дисплазии` is a *present* polyp
+ * that happens to lack dysplasia, and it is ordinary pathology phrasing; treating the `без` two
+ * words away as negating the polyp deletes a real finding from someone's chart. The same anchor
+ * read correctly negates only `дисплазии`, which is what `без признаков дисплазии` relies on.
+ */
+const PREPOSITIONAL_NEGATION_WORDS = new Set(["без"]);
 
 /** How far from the finding term a negation still governs it. */
 const NEGATION_WINDOW = 2;
@@ -461,8 +477,29 @@ function anchorWords(text: string): string[] {
     .filter((word) => word.length > 0);
 }
 
-function isNegationWord(word: string): boolean {
-  return NEGATION_WORDS.has(word) || NEGATION_PREFIXES.some((prefix) => word.startsWith(prefix));
+function isSymmetricNegation(word: string): boolean {
+  return (
+    SYMMETRIC_NEGATION_WORDS.has(word) ||
+    SYMMETRIC_NEGATION_PREFIXES.some((prefix) => word.startsWith(prefix))
+  );
+}
+
+/**
+ * True when some negation within the window governs the term at `termIndex`.
+ *
+ * A symmetric negation counts from either side. A preposition counts only when it stands before the
+ * term, because that is the only direction it can reach.
+ */
+function negationGoverns(words: string[], termIndex: number): boolean {
+  const from = Math.max(0, termIndex - NEGATION_WINDOW);
+  const to = Math.min(words.length - 1, termIndex + NEGATION_WINDOW);
+  for (let index = from; index <= to; index++) {
+    if (index === termIndex) continue;
+    const word = words[index];
+    if (isSymmetricNegation(word)) return true;
+    if (PREPOSITIONAL_NEGATION_WORDS.has(word) && index < termIndex) return true;
+  }
+  return false;
 }
 
 /**
@@ -504,13 +541,16 @@ export function anchorAssertsAbsence(anchor: string, findingTypeText: string): b
     });
   }
 
-  if (termIndexes.length === 0) return words.some(isNegationWord);
+  // An anchor that does not contain the finding's own name is already suspect, so any negation in it
+  // counts. `без` is included here deliberately: with no term to position it against, the direction
+  // rule has nothing to work with and the safer reading wins.
+  if (termIndexes.length === 0) {
+    return words.some(
+      (word) => isSymmetricNegation(word) || PREPOSITIONAL_NEGATION_WORDS.has(word),
+    );
+  }
 
-  return termIndexes.some((index) =>
-    words
-      .slice(Math.max(0, index - NEGATION_WINDOW), index + NEGATION_WINDOW + 1)
-      .some(isNegationWord),
-  );
+  return termIndexes.some((index) => negationGoverns(words, index));
 }
 
 /**

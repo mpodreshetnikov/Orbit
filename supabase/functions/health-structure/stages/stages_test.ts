@@ -949,3 +949,66 @@ Deno.test("reconcile sees asserted absences but still never sees the document", 
   // to avoid; the anchor is evidence extraction already committed to, which is a different thing.
   assertEquals(prompt.includes("НАДПОЧЕЧНИКИ"), false);
 });
+
+Deno.test("a negation of a different feature does not delete a present finding", async () => {
+  const { fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      observations: [],
+      findings: [
+        {
+          finding_code: "polyp",
+          finding_type_text: "Полип",
+          site_code: null,
+          body_site_text: "сигмовидной кишки",
+          severity: "unknown",
+          laterality: "none",
+          // Ordinary pathology phrasing: the polyp is present and simply lacks dysplasia. `без` is
+          // a preposition and governs only what follows it, so it negates `дисплазии` and says
+          // nothing about the polyp standing before it. Reading proximity alone deleted the polyp.
+          source_anchor: "Полип без дисплазии",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+      asserted_absences: [],
+    }),
+  );
+
+  const result = await runExtractStage("Полип без дисплазии", CATALOGS, {
+    fetchFn,
+    apiKey: "k",
+    model: "m",
+  });
+  assertEquals(result.value.findings.length, 1);
+  assertEquals(result.value.findings[0].finding_code, "polyp");
+});
+
+Deno.test("a negation standing before its own term still suppresses the finding", async () => {
+  const { fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      observations: [],
+      findings: [
+        {
+          finding_code: "dysplasia",
+          finding_type_text: "Дисплазия",
+          site_code: null,
+          body_site_text: "слизистой",
+          severity: "unknown",
+          laterality: "none",
+          // Same preposition, now governing the finding itself, which follows it.
+          source_anchor: "без признаков дисплазии",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+      asserted_absences: [],
+    }),
+  );
+
+  const result = await runExtractStage("без признаков дисплазии", CATALOGS, {
+    fetchFn,
+    apiKey: "k",
+    model: "m",
+  });
+  assertEquals(result.value.findings.length, 0);
+});
