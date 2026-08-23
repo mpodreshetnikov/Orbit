@@ -41,6 +41,17 @@ is exhausted immediately and deliberately (retrying a bad key is pointless) — 
 `service.ts:191` catches it, the code already knows this was a non-retryable configuration failure
 rather than a bad photo, and throws that knowledge away.
 
+The server is not the last writer, which is what makes a server-only fix insufficient. On
+failure the service persists `truncatedMessage` (`service.ts:280`, capped at 500 by
+`maxOcrErrorLength`) but returns the _untruncated_ `errorMessage` in its payload
+(`service.ts:294`). The browser then writes that payload straight back over the column:
+`src/hooks/use-background-ocr.ts:228` and `:461` set `ocr_error: data.error` when
+`data.success` is false, and `:205` and `:438` set it to raw `errorText` or
+`response.statusText` when the response is not `ok`. So on every failure the client overwrites
+whatever the service just stored. Two consequences: the 500-character cap is bypassed, and any
+cause the service starts naming would be replaced by the client's own string — the fix defeats
+itself unless this path is included.
+
 Two smaller defects sit on the same path:
 
 - `src/components/records/record-detail.tsx:742` renders `record.ocr_error` raw. The server
@@ -69,6 +80,11 @@ error that misleads.
       the patient's document.
 - [ ] Record a partial page failure durably rather than only in the combined text, so a
       three-page document that lost one page does not read as a clean success.
+- [ ] Stop the browser from overwriting the service's value with a less careful one: make the
+      failure paths in `use-background-ocr.ts` (`:205`, `:228`, `:438`, `:461`) preserve what the
+      service persisted, or hold both writers to the same length and content contract. Returning
+      the truncated message in the payload (`service.ts:294`) is the smaller half; the client
+      composing its own string from `errorText` and `response.statusText` is the larger one.
 - [ ] Map the cause classes to translated strings in `record-detail.tsx:742` rather than rendering
       the raw English server string.
 - [ ] Cover in `health-ocr/service_test.ts`: a non-retryable provider failure, a retry-exhausted
@@ -90,4 +106,12 @@ error that misleads.
   patient's document — `openrouter-client.ts:159` already declines to read the body for exactly
   this reason. A fixed set of cause classes gives the user an actionable message and keeps
   patient data out of a database column and off the screen.
+  Date/Author: 2026-08-23 / Claude
+
+- Decision: Include the browser write-back path in scope rather than fixing only the service.
+  Rationale: Raised by an automated review on PR #11 and confirmed against the tree — the client
+  is the last writer on every failure (`use-background-ocr.ts:205,228,438,461`), so a service-only
+  change would be overwritten before anyone saw it, and the 500-character cap the service applies
+  at `service.ts:280` is already bypassed today. This also protects the previous decision: keeping
+  provider text out of the column is meaningless while the client can put it back.
   Date/Author: 2026-08-23 / Claude
