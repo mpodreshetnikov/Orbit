@@ -1,7 +1,7 @@
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CreateMoneyTransactionInput, UpdateMoneyTransactionInput } from "@/types";
+import type { CreateMoneyTransactionInput } from "@/types";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 import { createQueryBuilder } from "../../test/utils/web/supabase-query";
 

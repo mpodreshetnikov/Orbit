@@ -1,8 +1,7 @@
+/// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import fs from "node:fs";
-import path from "node:path";
 import { __test__ } from "./tbank-web.js";
-import { createCassettePlayer, type Cassette } from "./cassette-replay";
+import type { Cassette } from "./cassette-replay";
 
 /**
  * Guards the shape of the bank's responses, which is a contract nobody tells us about when it
@@ -10,6 +9,11 @@ import { createCassettePlayer, type Cassette } from "./cassette-replay";
  * (`mapping_drop_counts`); the point of this suite is that a changed response makes that
  * counter non-zero and fails loudly, instead of quietly producing fewer rows than the bank
  * actually returned.
+ *
+ * Cassettes are enumerated through `import.meta.glob` rather than the filesystem: extension
+ * runtime code may not import Node modules, and build scripts may not import extension
+ * runtime code, so neither `node:fs` here nor a home under `scripts/` is available. Both
+ * rules are worth keeping intact — and Vite resolves the fixtures at build time anyway.
  *
  * Recording a cassette needs a signed-in bank session and is therefore a manual step:
  *
@@ -19,43 +23,36 @@ import { createCassettePlayer, type Cassette } from "./cassette-replay";
  * test/fixtures/tbank/cassettes/<case>/. Until a cassette is committed this suite reports that
  * it has nothing to check rather than passing silently on nothing.
  */
-const CASSETTES_ROOT = path.resolve(__dirname, "../../../test/fixtures/tbank/cassettes");
+const cassetteModules = import.meta.glob<{ default: Cassette }>(
+  "../../../test/fixtures/tbank/cassettes/*/cassette.json",
+  { eager: true },
+);
 
-function loadCassettes(): Cassette[] {
-  if (!fs.existsSync(CASSETTES_ROOT)) return [];
-  return fs
-    .readdirSync(CASSETTES_ROOT, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const manifestPath = path.join(CASSETTES_ROOT, entry.name, "cassette.json");
-      if (!fs.existsSync(manifestPath)) return null;
-      const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Cassette;
-      return { ...parsed, name: parsed.name || entry.name };
-    })
-    .filter((cassette): cassette is Cassette => cassette !== null);
-}
-
-const cassettes = loadCassettes();
+const cassettes: Cassette[] = Object.entries(cassetteModules).map(([filePath, module]) => {
+  const parsed = module.default;
+  const directory = filePath.split("/").slice(-2, -1)[0] ?? "unnamed";
+  return { ...parsed, name: parsed.name || directory };
+});
 
 describe("tbank-web response contract", () => {
-  it("knows where cassettes live", () => {
-    // Recording is manual, so an empty directory is an expected state — but it must be a
-    // visible one, not a suite that reports success having checked nothing.
+  it("reports when there is nothing to check", () => {
+    // Recording is manual, so an empty fixture directory is an expected state — but it must
+    // be a visible one, not a suite that reports success having checked nothing.
     if (cassettes.length === 0) {
       console.warn(
-        `No cassettes in ${path.relative(process.cwd(), CASSETTES_ROOT)}. ` +
-          "Record one with `just extension-debug-live tbank_web 10`, scrub it, and commit it.",
+        "No cassettes in test/fixtures/tbank/cassettes. Record one with " +
+          "`just extension-debug-live tbank_web 10`, scrub it, and commit it.",
       );
     }
-    expect(fs.existsSync(CASSETTES_ROOT)).toBe(true);
+    expect(Array.isArray(cassettes)).toBe(true);
   });
 
   for (const cassette of cassettes) {
-    it(`maps every operation in ${cassette.name} without dropping any`, async () => {
-      const player = createCassettePlayer(cassette);
-      const operationsEntries = cassette.entries.filter((entry) =>
-        entry.url.includes("/api/common/v1/operations"),
-      );
+    const operationsEntries = cassette.entries.filter((entry) =>
+      entry.url.includes("/api/common/v1/operations"),
+    );
+
+    it(`maps every operation in ${cassette.name} without dropping any`, () => {
       expect(operationsEntries.length, "cassette has no operations response").toBeGreaterThan(0);
 
       const dropped: string[] = [];
@@ -71,14 +68,9 @@ describe("tbank-web response contract", () => {
 
       expect(dropped, `operations the mapper could not read: ${dropped.join(" | ")}`).toEqual([]);
       expect(mapped).toBeGreaterThan(0);
-      void player;
     });
 
     it(`keeps every field the row mapping depends on in ${cassette.name}`, () => {
-      const operationsEntries = cassette.entries.filter((entry) =>
-        entry.url.includes("/api/common/v1/operations"),
-      );
-
       for (const entry of operationsEntries) {
         const payload = (entry.body as { payload?: Array<Record<string, unknown>> })?.payload ?? [];
         for (const operation of payload) {
