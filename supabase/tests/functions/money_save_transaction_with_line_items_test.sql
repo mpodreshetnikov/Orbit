@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(8);
+SELECT plan(9);
 
 SELECT has_function('public', 'money_save_transaction_with_line_items', ARRAY['uuid', 'jsonb', 'jsonb']);
 

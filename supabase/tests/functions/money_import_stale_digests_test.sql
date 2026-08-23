@@ -45,9 +45,20 @@ VALUES (
   now() - interval '1 day'
 );
 
+-- The function is a sweep over everyone with an active account, so its return value counts
+-- other people's reminders too — the seed alone supplies a couple. Every assertion below
+-- therefore looks at this person's digests rather than at the number the sweep returns.
+CREATE TEMP TABLE _sweep_recent AS SELECT public.create_money_import_stale_digests(5) AS created;
+
 SELECT is(
-  public.create_money_import_stale_digests(5),
-  0,
+  (
+    SELECT count(*)
+    FROM public.notification_digests
+    WHERE type = 'money_import_stale'
+      AND person_id = '7e000000-0000-0000-0000-000000000010'
+      AND payload_json->>'source' = 'tbank'
+  ),
+  0::bigint,
   'a recent completed import raises no reminder'
 );
 
@@ -55,16 +66,32 @@ UPDATE public.money_import_batches
 SET completed_at = now() - interval '10 days'
 WHERE id = '7e000000-0000-0000-0000-000000000030';
 
+CREATE TEMP TABLE _sweep_stale AS SELECT public.create_money_import_stale_digests(5) AS created;
+
 SELECT is(
-  public.create_money_import_stale_digests(5),
-  1,
+  (
+    SELECT count(*)
+    FROM public.notification_digests
+    WHERE type = 'money_import_stale'
+      AND person_id = '7e000000-0000-0000-0000-000000000010'
+      AND payload_json->>'source' = 'tbank'
+  ),
+  1::bigint,
   'an import that has not completed in days raises exactly one reminder'
 );
 
 -- Repeating the reminder every run would teach the owner to ignore it.
+CREATE TEMP TABLE _sweep_repeat AS SELECT public.create_money_import_stale_digests(5) AS created;
+
 SELECT is(
-  public.create_money_import_stale_digests(5),
-  0,
+  (
+    SELECT count(*)
+    FROM public.notification_digests
+    WHERE type = 'money_import_stale'
+      AND person_id = '7e000000-0000-0000-0000-000000000010'
+      AND payload_json->>'source' = 'tbank'
+  ),
+  1::bigint,
   'a second run inside the same window does not repeat the reminder'
 );
 
@@ -81,7 +108,10 @@ SELECT is(
 
 -- The staleness signal must be the import run, not the spending. A month with no purchases
 -- is not a broken import, and must not look like one.
-DELETE FROM public.notification_digests WHERE type = 'money_import_stale';
+DELETE FROM public.notification_digests
+WHERE type = 'money_import_stale'
+  AND person_id = '7e000000-0000-0000-0000-000000000010';
+
 UPDATE public.money_import_batches
 SET completed_at = now() - interval '1 hour'
 WHERE id = '7e000000-0000-0000-0000-000000000030';
@@ -111,9 +141,17 @@ VALUES (
   'stale-digest-hash-1'
 );
 
+CREATE TEMP TABLE _sweep_quiet AS SELECT public.create_money_import_stale_digests(5) AS created;
+
 SELECT is(
-  public.create_money_import_stale_digests(5),
-  0,
+  (
+    SELECT count(*)
+    FROM public.notification_digests
+    WHERE type = 'money_import_stale'
+      AND person_id = '7e000000-0000-0000-0000-000000000010'
+      AND payload_json->>'source' = 'tbank'
+  ),
+  0::bigint,
   'a long stretch without spending is not mistaken for a broken import'
 );
 

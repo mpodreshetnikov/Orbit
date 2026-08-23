@@ -17,7 +17,7 @@ DECLARE
   v_operator text := COALESCE(p_filter->>'operator', 'equals');
   v_raw_value text;
   v_text_value text;
-  v_filter_value text := NULLIF(regexp_replace(lower(COALESCE(p_filter->>'value', '')), '\s+', ' ', 'g'), '');
+  v_filter_value text := NULLIF(btrim(regexp_replace(lower(COALESCE(p_filter->>'value', '')), '\s+', ' ', 'g')), '');
   v_number_value numeric;
   v_boolean_value boolean;
   v_set_values text[];
@@ -43,7 +43,9 @@ BEGIN
     ELSE ''
   END;
 
-  v_text_value := NULLIF(regexp_replace(lower(COALESCE(v_raw_value, '')), '\s+', ' ', 'g'), '');
+  -- Trimmed, so a field holding only whitespace reads as empty — the TypeScript engine
+  -- trims before it compares, and `is_empty` has to agree with it.
+  v_text_value := NULLIF(btrim(regexp_replace(lower(COALESCE(v_raw_value, '')), '\s+', ' ', 'g')), '');
   v_number_value := CASE
     WHEN v_field IN ('line_item_amount', 'transaction_amount') AND v_raw_value <> '' THEN v_raw_value::numeric
     ELSE NULL
@@ -53,7 +55,7 @@ BEGIN
     ELSE NULL
   END;
   v_set_values := ARRAY(
-    SELECT NULLIF(regexp_replace(lower(value), '\s+', ' ', 'g'), '')
+    SELECT NULLIF(btrim(regexp_replace(lower(value), '\s+', ' ', 'g')), '')
     FROM jsonb_array_elements_text(COALESCE(p_filter->'values', '[]'::jsonb)) AS value
   );
 
@@ -69,7 +71,10 @@ BEGIN
     END;
   END IF;
 
-  RETURN CASE v_operator
+  -- Every comparison below can yield NULL when the field is empty, and the pipeline reads
+  -- a NULL filter as neither matched nor rejected. The TypeScript engine has no such state:
+  -- unknown means the filter did not match.
+  RETURN COALESCE(CASE v_operator
     WHEN 'contains' THEN v_text_value IS NOT NULL AND v_filter_value IS NOT NULL
       AND POSITION(v_filter_value IN v_text_value) > 0
     WHEN 'not_contains' THEN v_text_value IS NULL OR v_filter_value IS NULL
@@ -137,7 +142,7 @@ BEGIN
     WHEN 'is_empty' THEN v_text_value IS NULL
     WHEN 'is_not_empty' THEN v_text_value IS NOT NULL
     ELSE false
-  END;
+  END, false);
 END;
 $$;
 

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(29);
+SELECT plan(30);
 
 SELECT has_function('public', 'money_preview_category_rule_pipeline', ARRAY['uuid', 'uuid', 'uuid[]']);
 SELECT has_function('public', 'money_apply_category_rule_pipeline', ARRAY['uuid[]', 'uuid', 'boolean', 'text']);
@@ -379,10 +379,24 @@ SELECT is(
     '{"line_item": {"title": "Latte"}}'::jsonb,
     NULL,
     NULL,
-    '{"field":"line_item_title","operator":"regex","value":"^lat"}'::jsonb
+    '{"field":"line_item_title","operator":"regex","value":"^Lat"}'::jsonb
   ),
   true,
   'a valid regex still matches after the guard'
+);
+
+-- Both engines run the pattern against the raw field, so the match is case-sensitive:
+-- `regex` is the one operator that does not fold case, and a rule author needs to be able
+-- to rely on that.
+SELECT is(
+  public.money_evaluate_category_rule_filter(
+    '{"line_item": {"title": "Latte"}}'::jsonb,
+    NULL,
+    NULL,
+    '{"field":"line_item_title","operator":"regex","value":"^lat"}'::jsonb
+  ),
+  false,
+  'regex matching is case-sensitive on the raw field'
 );
 
 INSERT INTO public.money_category_rules (
