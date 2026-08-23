@@ -1,28 +1,16 @@
 /**
- * One formula for the identity of an imported money transaction, shared by the web app's
- * statement parser and by the browser extension's bank connectors.
+ * The money identity formula, as the extension runtime can hold it.
  *
- * Two things depend on it being literally one formula:
+ * `shared/lib/money/dedupe.ts` is the canonical statement of this formula and the copy the
+ * web app and the SQL migration were written against. The extension cannot import it: its
+ * runtime is emitted by plain `tsc` and loaded by Chrome as ES modules, so module specifiers
+ * survive into `dist/` verbatim — a `@shared/...` import would either fail to compile or,
+ * worse, compile and then fail to load in the service worker. Only `popup-src` goes through
+ * a bundler.
  *
- * - Re-importing the same statement must not create a second copy of every row. That only
- *   holds if the same operation hashes to the same value every time, which means every
- *   field has to be normalised the same way on both sides — and in SQL, where a migration
- *   recomputes the hash for rows already in the registry.
- * - A collision silently overwrites somebody else's transaction: the import path resolves a
- *   unique-constraint violation by updating the row it found and reporting `skipped`. The
- *   previous extension formula was a 32-bit FNV-1a, about four billion values, which by the
- *   birthday bound is more likely than not to collide somewhere past ~77k rows. SHA-256
- *   removes that risk rather than making it smaller.
- *
- * The extension cannot import this file — its runtime is emitted by plain `tsc` and loaded
- * by Chrome as ES modules, so it carries a copy in
- * `browserExtension/src/connectors/money-dedupe.ts`, pinned to this one by
- * `money-dedupe.parity.test.ts`. Edit here, edit there.
- *
- * What this does NOT do is make a statement row and the same operation seen by the
- * extension hash alike — the merchant text differs between the two sources. Matching across
- * sources is adoption's job (see `findAdoptableTransactionId`); this formula is about
- * stability within one source.
+ * So the formula exists twice, and `money-dedupe.parity.test.ts` fails the build if the two
+ * copies ever disagree on a payload, a hash or an occurrence number. Change one, change the
+ * other; the test is what makes that a rule rather than a hope.
  */
 
 const DELIMITER = "|";

@@ -1,4 +1,4 @@
-import { assignMoneyDedupeOccurrences, buildMoneyDedupeHash } from "@shared/lib/money/dedupe.js";
+import { assignMoneyDedupeOccurrences, buildMoneyDedupeHash } from "./money-dedupe.js";
 
 type JsonMap = Record<string, unknown>;
 
