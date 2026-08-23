@@ -47,6 +47,17 @@ function createRepositoryMock(
     appliedCategoryPipelineCalls: [],
   };
 
+  const batchBefore = (): Record<string, unknown> | null =>
+    options.batchBefore === undefined
+      ? {
+          id: "batch-1",
+          parsed_transactions_count: 0,
+          inserted_count: 0,
+          skipped_count: 0,
+          error_count: 0,
+        }
+      : options.batchBefore;
+
   let txCounter = 0;
   let lineCounter = 0;
 
@@ -64,16 +75,8 @@ function createRepositoryMock(
       state.createdBatchPayloads.push(payload);
       return "batch-created";
     },
-    getImportBatch: async () =>
-      options.batchBefore === undefined
-        ? {
-            id: "batch-1",
-            parsed_transactions_count: 0,
-            inserted_count: 0,
-            skipped_count: 0,
-            error_count: 0,
-          }
-        : options.batchBefore,
+    getImportBatch: async () => batchBefore(),
+    getImportBatchForUser: async () => batchBefore(),
     updateImportBatch: async (batchId, patch) => {
       if (options.updateBatchError) throw new Error(options.updateBatchError);
       state.batchUpdates.push({ batchId, patch });

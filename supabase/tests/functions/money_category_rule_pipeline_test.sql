@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(25);
+SELECT plan(29);
 
 SELECT has_function('public', 'money_preview_category_rule_pipeline', ARRAY['uuid', 'uuid', 'uuid[]']);
 SELECT has_function('public', 'money_apply_category_rule_pipeline', ARRAY['uuid[]', 'uuid', 'boolean', 'text']);
@@ -360,6 +360,80 @@ SELECT is(
   ),
   'direct',
   'debug history keeps the deleted rule kind snapshot'
+);
+
+-- Robustness: a rule pattern the user typed must not be able to abort the whole run.
+SELECT is(
+  public.money_evaluate_category_rule_filter(
+    '{"line_item": {"title": "Latte"}}'::jsonb,
+    NULL,
+    NULL,
+    '{"field":"line_item_title","operator":"regex","value":"["}'::jsonb
+  ),
+  false,
+  'an uncompilable regex evaluates to false instead of raising'
+);
+
+SELECT is(
+  public.money_evaluate_category_rule_filter(
+    '{"line_item": {"title": "Latte"}}'::jsonb,
+    NULL,
+    NULL,
+    '{"field":"line_item_title","operator":"regex","value":"^lat"}'::jsonb
+  ),
+  true,
+  'a valid regex still matches after the guard'
+);
+
+INSERT INTO public.money_category_rules (
+  id,
+  person_id,
+  name,
+  enabled,
+  sort_order,
+  rule_kind,
+  target_category_id,
+  match_mode,
+  scope_filter,
+  filters,
+  config,
+  stop_processing
+)
+VALUES (
+  'a9999999-9999-9999-9999-999999999999',
+  '51111111-1111-1111-1111-111111111111',
+  'Broken pattern',
+  true,
+  0,
+  'direct',
+  '71111111-1111-1111-1111-111111111111',
+  'all',
+  'all_line_items',
+  '[{"field":"line_item_title","operator":"regex","value":"["}]'::jsonb,
+  '{}'::jsonb,
+  false
+);
+
+SELECT is(
+  (
+    SELECT public.money_preview_category_rule_pipeline(
+      '96666666-6666-6666-6666-666666666666',
+      '51111111-1111-1111-1111-111111111111',
+      NULL
+    ) IS NOT NULL
+  ),
+  true,
+  'a rule carrying a broken pattern does not abort the pipeline run'
+);
+
+-- The CASE over money_rule_kind needs an ELSE branch, or adding a value to the enum and
+-- forgetting this function raises CASE_NOT_FOUND and takes down the whole run rather than
+-- the one rule. The branch cannot be exercised directly: ALTER TYPE ... ADD VALUE inside a
+-- transaction cannot be used in that same transaction, and pgTAP tests are one transaction.
+SELECT ok(
+  pg_get_functiondef('public.money_run_category_rule_pipeline_internal(uuid, uuid, uuid[], boolean, boolean, text)'::regprocedure)
+    LIKE '%Unsupported rule kind%',
+  'the rule kind CASE has a default branch for values it does not know'
 );
 
 SELECT * FROM finish();

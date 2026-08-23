@@ -7,6 +7,19 @@ import type { MoneyImportRepository } from "./repository.ts";
 
 Deno.env.set("OBS_LOCAL_OTLP_HTTP_ENDPOINT", "");
 
+const handlerBatch: Record<string, unknown> = {
+  id: "batch-1",
+  payer_person_id: "person-1",
+  source: "tbank_web",
+  import_type: "file",
+  parsed_transactions_count: 0,
+  inserted_count: 0,
+  skipped_count: 0,
+  error_count: 0,
+  parsed_through_at: null,
+  status: "pending",
+};
+
 function createRepositoryMock(
   options: {
     sessionForUser?: Record<string, unknown> | null;
@@ -43,18 +56,8 @@ function createRepositoryMock(
     getImportSessionById: async () => options.sessionForUser ?? null,
     updateImportSession: async () => {},
     createImportBatch: async () => "batch-1",
-    getImportBatch: async () => ({
-      id: "batch-1",
-      payer_person_id: "person-1",
-      source: "tbank_web",
-      import_type: "file",
-      parsed_transactions_count: 0,
-      inserted_count: 0,
-      skipped_count: 0,
-      error_count: 0,
-      parsed_through_at: null,
-      status: "pending",
-    }),
+    getImportBatch: async () => handlerBatch,
+    getImportBatchForUser: async () => handlerBatch,
     updateImportBatch: async () => {},
     listReportRowsByBatch: async () => [
       {

@@ -40,6 +40,7 @@ export interface MoneyImportRepository {
   updateImportSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   createImportBatch(payload: Record<string, unknown>): Promise<string>;
   getImportBatch(batchId: string): Promise<Record<string, unknown> | null>;
+  getImportBatchForUser(batchId: string, userId: string): Promise<Record<string, unknown> | null>;
   updateImportBatch(batchId: string, patch: Record<string, unknown>): Promise<void>;
   resolveAccountIdForRow(
     payerPersonId: string,
@@ -459,6 +460,25 @@ export function createSupabaseMoneyImportRepository(
 
     if (error || !data) return null;
     return data as Record<string, unknown>;
+  }
+
+  /**
+   * Returns the batch only when the caller may act on it. A batch created by someone else
+   * reads as missing rather than forbidden, so the answer does not confirm that a batch
+   * with that id exists.
+   *
+   * Batches created before `created_by_auth_user_id` existed carry NULL and stay reachable
+   * by any allowed user — the same reach they had before the column was added.
+   */
+  async function getImportBatchForUser(
+    batchId: string,
+    userId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const batch = await getImportBatch(batchId);
+    if (!batch) return null;
+    const createdBy = normalizeText(batch.created_by_auth_user_id);
+    if (createdBy && createdBy !== userId) return null;
+    return batch;
   }
 
   async function updateImportBatch(batchId: string, patch: Record<string, unknown>): Promise<void> {
@@ -1679,6 +1699,7 @@ export function createSupabaseMoneyImportRepository(
     getImportSessionById,
     updateImportSession,
     createImportBatch,
+    getImportBatchForUser,
     getImportBatch,
     updateImportBatch,
     resolveAccountIdForRow,

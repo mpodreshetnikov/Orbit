@@ -75,6 +75,8 @@ function createRepositoryMock(
     },
     getImportBatch: async (batchId) =>
       state.batch && state.batch.id === batchId ? state.batch : null,
+    getImportBatchForUser: async (batchId) =>
+      state.batch && state.batch.id === batchId ? state.batch : null,
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
       if (state.batch && state.batch.id === batchId) {
@@ -362,3 +364,88 @@ Deno.test(
     assertEquals(state.session?.status, "running");
   },
 );
+
+Deno.test("previewRowsAction clears parsed rows once per preview attempt", async () => {
+  const { repository, state } = createRepositoryMock({
+    batch: {
+      id: "batch-1",
+      status: "running",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      meta: null,
+    },
+  });
+
+  const chunkZero = {
+    batch_id: "batch-1",
+    payer_person_id: "person-1",
+    source: "tbank_web",
+    rows: [txRow({ external_id: "ok-1" })],
+    chunk_index: 0,
+    chunk_count: 2,
+    row_offset: 0,
+    total_row_count: 2,
+    is_final_chunk: false,
+    preview_attempt_id: "attempt-1",
+  };
+
+  await assertJsonResponse(
+    await previewRowsAction(chunkZero, userAuth, {
+      repository,
+      now: () => new Date("2026-03-09T00:00:00.000Z"),
+    }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+
+  // A replay of chunk zero within the same attempt must not wipe what already landed.
+  await assertJsonResponse(
+    await previewRowsAction(chunkZero, userAuth, {
+      repository,
+      now: () => new Date("2026-03-09T00:00:00.000Z"),
+    }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+
+  // A genuinely new run carries a new attempt id and starts from a clean batch.
+  await assertJsonResponse(
+    await previewRowsAction({ ...chunkZero, preview_attempt_id: "attempt-2" }, userAuth, {
+      repository,
+      now: () => new Date("2026-03-09T00:00:00.000Z"),
+    }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 2);
+
+  // Callers that send no attempt id keep the previous behaviour.
+  const { repository: legacyRepository, state: legacyState } = createRepositoryMock({
+    batch: {
+      id: "batch-1",
+      status: "running",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      meta: null,
+    },
+  });
+  const legacyChunkZero = { ...chunkZero };
+  delete (legacyChunkZero as Record<string, unknown>).preview_attempt_id;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assertJsonResponse(
+      await previewRowsAction(legacyChunkZero, userAuth, {
+        repository: legacyRepository,
+        now: () => new Date("2026-03-09T00:00:00.000Z"),
+      }),
+      200,
+    );
+  }
+  assertEquals(legacyState.deletedReportRowsCount, 2);
+});

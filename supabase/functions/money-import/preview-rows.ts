@@ -179,6 +179,9 @@ export async function previewRowsAction(
   let importType = normalizeText(body.import_type) ?? "file";
   let batchId = normalizeText(body.batch_id);
   let sessionId = normalizeText(body.session_id);
+  // Batch ownership follows the human behind the request: the signed-in user directly, or
+  // the user the import session was created for.
+  let createdByAuthUserId = auth.mode === "user" ? auth.userId : null;
 
   if (auth.mode === "session") {
     const session = auth.session;
@@ -196,6 +199,7 @@ export async function previewRowsAction(
     defaultAccountId = normalizeText(session.default_account_id) ?? defaultAccountId;
     batchId = normalizeText(session.batch_id) ?? batchId;
     sessionId = normalizeText(session.id) ?? sessionId;
+    createdByAuthUserId = normalizeText(session.created_by_auth_user_id) ?? createdByAuthUserId;
     importType = "web_export";
 
     if (sessionStatus === "created" && sessionId) {
@@ -234,6 +238,7 @@ export async function previewRowsAction(
       status: "running",
       window_from: windowFromInput,
       window_to: windowToInput,
+      created_by_auth_user_id: createdByAuthUserId,
     });
 
     if (sessionId) {
@@ -262,7 +267,17 @@ export async function previewRowsAction(
     return jsonResponse({ error: "Batch is not awaiting preview" }, 409);
   }
 
-  const shouldResetPreview = !chunkState.enabled || chunkState.chunkIndex === 0;
+  // Chunk zero clears everything parsed so far. A retried or replayed chunk zero — a
+  // background script restart, a resent request — would otherwise erase chunks that already
+  // landed and leave the counters describing rows that are no longer there. The attempt id
+  // is generated once per run by the caller, so a repeat of the same attempt is recognised
+  // as a repeat rather than as a new run.
+  const previewAttemptId = normalizeText(body.preview_attempt_id);
+  const storedPreviewAttemptId = normalizeText(asRecord(batchBefore.meta)?.preview_attempt_id);
+  const isFirstChunk = !chunkState.enabled || chunkState.chunkIndex === 0;
+  const isPreviewAttemptRepeat =
+    previewAttemptId !== null && previewAttemptId === storedPreviewAttemptId;
+  const shouldResetPreview = isFirstChunk && !isPreviewAttemptRepeat;
   if (shouldResetPreview) {
     await deps.repository.deleteReportRowsByBatch(batchId);
     if (deps.repository.deleteBatchBrandResolutionsByBatch) {
@@ -612,6 +627,14 @@ export async function previewRowsAction(
           .sort()[0] ?? null)
       : null);
 
+  const batchMeta = mergeRangeMeta(batchMetaBase, body.meta, {
+    parsedRowCount: rowsRaw.length,
+    inRangeRowCount,
+    filteredOutOfRangeCount,
+    filteredInvalidDateCount,
+  });
+  if (previewAttemptId) batchMeta.preview_attempt_id = previewAttemptId;
+
   const patch: Record<string, unknown> = {
     parsed_transactions_count: parsedTransactionsCount,
     inserted_count: accumulatedInsertedBefore + insertedCount,
@@ -619,12 +642,7 @@ export async function previewRowsAction(
     error_count: accumulatedErrorBefore + errorCount,
     status: chunkState.enabled && !chunkState.isFinalChunk ? "running" : "pending",
     completed_at: null,
-    meta: mergeRangeMeta(batchMetaBase, body.meta, {
-      parsedRowCount: rowsRaw.length,
-      inRangeRowCount,
-      filteredOutOfRangeCount,
-      filteredInvalidDateCount,
-    }),
+    meta: batchMeta,
   };
   if (parsedThrough) patch.parsed_through_at = parsedThrough;
   if (windowFromInput) patch.window_from = windowFromInput;

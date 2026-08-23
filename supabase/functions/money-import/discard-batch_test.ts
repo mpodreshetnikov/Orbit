@@ -29,6 +29,7 @@ function createRepositoryMock(batch: Record<string, unknown> | null): {
       updateImportSession: async () => {},
       createImportBatch: async () => "batch-1",
       getImportBatch: async () => batch,
+      getImportBatchForUser: async () => batch,
       updateImportBatch: async (batchId, patch) => {
         updates.push({ batchId, patch });
       },

@@ -552,8 +552,6 @@ export function MoneyRuleEditor({
     switch (form.ruleKind) {
       case "mcc_map":
         return t("money.ruleKindTipmcc_map");
-      case "source_category_map":
-        return t("money.ruleKindTipsource_category_map");
       case "llm_categorization":
         return t("money.ruleKindTipllm_categorization");
       case "fallback_uncategorized":

@@ -87,6 +87,9 @@ export async function applyRowsAction(
   let importType = normalizeText(body.import_type) ?? "file";
   let batchId = normalizeText(body.batch_id);
   let sessionId = normalizeText(body.session_id);
+  // Batch ownership follows the human behind the request: the signed-in user directly, or
+  // the user the import session was created for.
+  let createdByAuthUserId = auth.mode === "user" ? auth.userId : null;
 
   if (auth.mode === "session") {
     const session = auth.session;
@@ -104,6 +107,7 @@ export async function applyRowsAction(
     defaultAccountId = normalizeText(session.default_account_id) ?? defaultAccountId;
     batchId = normalizeText(session.batch_id) ?? batchId;
     sessionId = normalizeText(session.id) ?? sessionId;
+    createdByAuthUserId = normalizeText(session.created_by_auth_user_id) ?? createdByAuthUserId;
     importType = "web_export";
 
     if (sessionStatus === "created" && sessionId) {
@@ -141,6 +145,7 @@ export async function applyRowsAction(
       status: "running",
       window_from: windowFromInput,
       window_to: windowToInput,
+      created_by_auth_user_id: createdByAuthUserId,
     });
 
     if (sessionId) {

@@ -57,6 +57,18 @@ BEGIN
     FROM jsonb_array_elements_text(COALESCE(p_filter->'values', '[]'::jsonb)) AS value
   );
 
+  -- A regex typed by a user can fail to compile. Left inside the CASE below, that error
+  -- propagates out of money_run_category_rule_pipeline_internal and aborts categorisation
+  -- for the whole batch instead of just this one rule.
+  IF v_operator = 'regex' THEN
+    BEGIN
+      RETURN COALESCE(v_raw_value, '') ~ COALESCE(p_filter->>'value', '');
+    EXCEPTION
+      WHEN invalid_regular_expression THEN
+        RETURN false;
+    END;
+  END IF;
+
   RETURN CASE v_operator
     WHEN 'contains' THEN v_text_value IS NOT NULL AND v_filter_value IS NOT NULL
       AND POSITION(v_filter_value IN v_text_value) > 0
@@ -73,7 +85,6 @@ BEGIN
       END
     WHEN 'starts_with' THEN v_text_value IS NOT NULL AND v_filter_value IS NOT NULL
       AND v_text_value LIKE CONCAT(v_filter_value, '%')
-    WHEN 'regex' THEN COALESCE(v_raw_value, '') ~ COALESCE(p_filter->>'value', '')
     WHEN 'contains_any_in_set' THEN
       EXISTS (
         SELECT 1

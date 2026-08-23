@@ -28,6 +28,7 @@ function createRepositoryMock(
     updateImportSession: async () => {},
     createImportBatch: async () => "batch-1",
     getImportBatch: async () => options.batch ?? null,
+    getImportBatchForUser: async () => options.batch ?? null,
     updateImportBatch: async () => {},
     getExistingTransactionStates: async () => [],
     listReportRowsByBatch: async () => [],

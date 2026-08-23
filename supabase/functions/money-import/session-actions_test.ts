@@ -49,6 +49,7 @@ function createRepositoryMock(
       return "batch-1";
     },
     getImportBatch: async () => options.batchById ?? null,
+    getImportBatchForUser: async () => options.batchById ?? null,
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
     },

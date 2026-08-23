@@ -36,6 +36,15 @@ function createRepositoryMock(options: RepositoryMockOptions): {
     insertedLineItems: [],
   };
 
+  const storedBatch: Record<string, unknown> = {
+    id: "batch-1",
+    status: "pending",
+    payer_person_id: "person-1",
+    source: "tbank_web",
+    window_from: null,
+    window_to: null,
+    meta: null,
+  };
   const existingExternalIds = new Set(options.existingExternalIds ?? []);
   let txCounter = 0;
   let lineCounter = 0;
@@ -49,15 +58,8 @@ function createRepositoryMock(options: RepositoryMockOptions): {
     getImportSessionById: async () => null,
     updateImportSession: async () => {},
     createImportBatch: async () => "batch-1",
-    getImportBatch: async () => ({
-      id: "batch-1",
-      status: "pending",
-      payer_person_id: "person-1",
-      source: "tbank_web",
-      window_from: null,
-      window_to: null,
-      meta: null,
-    }),
+    getImportBatch: async () => storedBatch,
+    getImportBatchForUser: async () => storedBatch,
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
     },

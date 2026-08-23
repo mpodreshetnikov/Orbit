@@ -1872,3 +1872,50 @@ Deno.test(
     assertEquals(resolution, null);
   },
 );
+
+function createBatchOwnershipRepository(batch: Record<string, unknown> | null) {
+  return createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table === "money_import_batches") {
+          return {
+            select: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: batch,
+                  error: batch ? null : { message: "not found" },
+                }),
+              }),
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    },
+  });
+}
+
+Deno.test("repository getImportBatchForUser hides a batch created by someone else", async () => {
+  const ownRepository = createBatchOwnershipRepository({
+    id: "batch-1",
+    created_by_auth_user_id: "user-1",
+  });
+  assertEquals((await ownRepository.getImportBatchForUser("batch-1", "user-1"))?.id, "batch-1");
+
+  const otherRepository = createBatchOwnershipRepository({
+    id: "batch-1",
+    created_by_auth_user_id: "user-2",
+  });
+  assertEquals(await otherRepository.getImportBatchForUser("batch-1", "user-1"), null);
+
+  // Batches created before the column existed carry NULL and keep their previous reach.
+  const legacyRepository = createBatchOwnershipRepository({
+    id: "batch-1",
+    created_by_auth_user_id: null,
+  });
+  assertEquals((await legacyRepository.getImportBatchForUser("batch-1", "user-1"))?.id, "batch-1");
+
+  const missingRepository = createBatchOwnershipRepository(null);
+  assertEquals(await missingRepository.getImportBatchForUser("batch-1", "user-1"), null);
+});

@@ -3,6 +3,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const MONEY_FX_SYNC_TOKEN = Deno.env.get("MONEY_FX_SYNC_TOKEN");
 const CBR_DAILY_URL = Deno.env.get("CBR_DAILY_URL") ?? "https://www.cbr.ru/scripts/XML_daily.asp";
 const CBR_DYNAMIC_URL =
   Deno.env.get("CBR_DYNAMIC_URL") ?? "https://www.cbr.ru/scripts/XML_dynamic.asp";
@@ -22,6 +23,7 @@ interface SyncWindowInput {
 interface MoneyFxSyncDeps {
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
+  syncToken?: string;
   cbrDailyUrl?: string;
   cbrDynamicUrl?: string;
   createClientFn?: typeof createClient;
@@ -289,6 +291,39 @@ async function loadSyncBounds(
   };
 }
 
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Comparing the SHA-256 of both strings makes the comparison independent of the
+ * secret's length and content, so a caller cannot learn the token byte by byte from
+ * how long the rejection took.
+ */
+async function tokensMatch(presented: string, expected: string): Promise<boolean> {
+  const [presentedHash, expectedHash] = await Promise.all([
+    sha256Hex(presented),
+    sha256Hex(expected),
+  ]);
+  if (presentedHash.length !== expectedHash.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < presentedHash.length; index++) {
+    mismatch |= presentedHash.charCodeAt(index) ^ expectedHash.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+function bearerToken(req: Request): string | null {
+  const header = req.headers.get("Authorization") ?? req.headers.get("authorization");
+  if (!header) return null;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  const token = (match ? match[1] : header).trim();
+  return token.length > 0 ? token : null;
+}
+
 export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
   const createClientFn = deps.createClientFn ?? createClient;
   const fetchFn = deps.fetchFn ?? fetch;
@@ -296,6 +331,7 @@ export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
   const resolvedServiceRoleKey = deps.supabaseServiceRoleKey ?? SUPABASE_SERVICE_ROLE_KEY;
   const resolvedCbrDailyUrl = deps.cbrDailyUrl ?? CBR_DAILY_URL;
   const resolvedCbrDynamicUrl = deps.cbrDynamicUrl ?? CBR_DYNAMIC_URL;
+  const resolvedSyncToken = deps.syncToken ?? MONEY_FX_SYNC_TOKEN;
 
   return async function handleMoneyFxSyncRequest(req: Request): Promise<Response> {
     if (req.method === "OPTIONS") {
@@ -304,6 +340,20 @@ export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
 
     if (req.method !== "POST") {
       return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    // The function runs with the service role key and takes an arbitrary date window
+    // from the request body, so it cannot stay reachable by anyone who knows the project
+    // address. `verify_jwt` is off because the caller is a pg_cron job rather than a
+    // signed-in user, which is exactly the case docs/SECURITY.md requires to validate the
+    // token by hand.
+    if (!resolvedSyncToken) {
+      return jsonResponse({ error: "Missing MONEY_FX_SYNC_TOKEN" }, 500);
+    }
+
+    const presentedToken = bearerToken(req);
+    if (!presentedToken || !(await tokensMatch(presentedToken, resolvedSyncToken))) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     if (!resolvedSupabaseUrl || !resolvedServiceRoleKey) {

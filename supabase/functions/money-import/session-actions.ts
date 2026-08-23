@@ -117,6 +117,7 @@ export async function createSessionAction(
     status: "running",
     window_from: windowFrom,
     window_to: windowTo,
+    created_by_auth_user_id: auth.userId,
   });
 
   await deps.repository.updateImportSession(session.id, {

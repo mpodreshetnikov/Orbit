@@ -42,6 +42,22 @@ function createRepositoryMock(
     resolveCardCalls: [],
   };
 
+  const previewBatch = (): Record<string, unknown> | null =>
+    options.batch === undefined
+      ? {
+          id: "batch-1",
+          status: "running",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          import_type: "file",
+          file_path: null,
+          parsed_transactions_count: 0,
+          inserted_count: 0,
+          skipped_count: 0,
+          error_count: 0,
+        }
+      : options.batch;
+
   const repository: MoneyImportRepository = {
     authenticateAllowedUser: async () => null,
     getSessionByToken: async () => null,
@@ -51,21 +67,8 @@ function createRepositoryMock(
     getImportSessionById: async () => null,
     updateImportSession: async () => {},
     createImportBatch: async () => "batch-1",
-    getImportBatch: async () =>
-      options.batch === undefined
-        ? {
-            id: "batch-1",
-            status: "running",
-            payer_person_id: "person-1",
-            source: "tbank_web",
-            import_type: "file",
-            file_path: null,
-            parsed_transactions_count: 0,
-            inserted_count: 0,
-            skipped_count: 0,
-            error_count: 0,
-          }
-        : options.batch,
+    getImportBatch: async () => previewBatch(),
+    getImportBatchForUser: async () => previewBatch(),
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
     },

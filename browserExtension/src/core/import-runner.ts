@@ -14,6 +14,13 @@ export interface ImportRunnerDeps {
 type ProgressPhase = string;
 const PREVIEW_ROWS_CHUNK_SIZE = 50;
 
+export function createPreviewAttemptId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export interface ImportRunnerDebugConfig {
   enabled?: boolean;
   parseOnly?: boolean;
@@ -243,6 +250,10 @@ export async function runImportSession(
     edge_path: edgeTarget.path,
   });
   const previewChunks = chunkPreviewRows(parseOutput.rows, PREVIEW_ROWS_CHUNK_SIZE);
+  // Generated once for the whole run and sent with every chunk. Chunk zero clears the rows
+  // parsed so far, so the server needs to tell a genuinely new run from a retry of the same
+  // one; without that, a replayed chunk zero would erase chunks that already landed.
+  const previewAttemptId = createPreviewAttemptId();
   let applyResult: Record<string, unknown>;
   try {
     let previewBatchId =
@@ -283,6 +294,7 @@ export async function runImportSession(
         row_offset: rowOffset,
         is_final_chunk: isFinalChunk,
         total_row_count: parseOutput.rows.length,
+        preview_attempt_id: previewAttemptId,
         rows: rowsChunk,
       });
 

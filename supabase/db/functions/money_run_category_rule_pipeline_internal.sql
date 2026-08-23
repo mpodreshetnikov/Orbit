@@ -223,6 +223,12 @@ BEGIN
                 v_reason := 'Applied fallback canonical category';
               END IF;
             END IF;
+
+          ELSE
+            -- Without this branch, adding a value to money_rule_kind and forgetting this
+            -- function raises CASE_NOT_FOUND, which aborts the whole run rather than
+            -- skipping the one rule nobody taught it about.
+            v_reason := format('Unsupported rule kind %s', v_rule.rule_kind);
         END CASE;
       END IF;
     END IF;

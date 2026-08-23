@@ -122,13 +122,14 @@ Deno.test(
         },
       })) as unknown as typeof createClient,
       now: () => new Date("2026-11-10T00:00:00.000Z"),
+      syncToken: "fx-sync-token",
     });
 
     const response = await handler(
       new Request("http://localhost/functions/v1/money-fx-sync", {
         method: "POST",
         headers: {
-          Authorization: "Bearer service-role-key",
+          Authorization: "Bearer fx-sync-token",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({}),
@@ -144,3 +145,64 @@ Deno.test(
     ]);
   },
 );
+
+function createAuthOnlyHandler(syncToken?: string) {
+  return createMoneyFxSyncHandler({
+    supabaseUrl: "http://localhost:54321",
+    supabaseServiceRoleKey: "service-role-key",
+    syncToken,
+    fetchFn: () => {
+      throw new Error("fetch must not run for a rejected request");
+    },
+    createClientFn: (() => {
+      throw new Error("database must not be touched for a rejected request");
+    }) as unknown as typeof createClient,
+  });
+}
+
+Deno.test("money-fx-sync rejects a request without an authorization header", async () => {
+  const handler = createAuthOnlyHandler("fx-sync-token");
+  const response = await handler(
+    new Request("http://localhost/functions/v1/money-fx-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }),
+  );
+
+  assertEquals(response.status, 401);
+  assertEquals(await response.json(), { error: "Unauthorized" });
+});
+
+Deno.test("money-fx-sync rejects a wrong token", async () => {
+  const handler = createAuthOnlyHandler("fx-sync-token");
+  const response = await handler(
+    new Request("http://localhost/functions/v1/money-fx-sync", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer not-the-token",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    }),
+  );
+
+  assertEquals(response.status, 401);
+});
+
+Deno.test("money-fx-sync refuses to run when no token is configured", async () => {
+  const handler = createAuthOnlyHandler(undefined);
+  const response = await handler(
+    new Request("http://localhost/functions/v1/money-fx-sync", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer anything",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    }),
+  );
+
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: "Missing MONEY_FX_SYNC_TOKEN" });
+});

@@ -72,7 +72,7 @@ export async function applyBatchAction(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const batch = await deps.repository.getImportBatch(batchId);
+  const batch = await deps.repository.getImportBatchForUser(batchId, auth.userId);
   if (!batch) {
     await actionSpan?.end({
       status: "error",
