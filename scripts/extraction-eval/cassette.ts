@@ -76,9 +76,18 @@ export function stripReasoning(response: unknown): unknown {
 }
 
 /**
- * Key on the full request body. Anything that changes the prompt — a catalogue edit, a reworded
- * instruction, a different patient context — must invalidate the recording, because the reply is
- * only valid for the question that produced it.
+ * Key on the model and the messages. Anything that changes the prompt — a catalogue edit, a
+ * reworded instruction, a different patient context — invalidates the recording, because the reply
+ * is only valid for the question that produced it.
+ *
+ * Deliberately *not* the whole request body: transport knobs (`max_tokens`, `provider`) do not
+ * change the answer, and keying on them would churn every recording whenever one was retuned.
+ *
+ * The sharp edge is `response_format`, which carries the stage's JSON schema and is excluded here.
+ * A schema change that leaves the prompt text untouched will replay stale cassettes that cannot
+ * contain the new field, and the corpus will look fine while measuring nothing. In practice a
+ * schema change comes with instructions describing the new field, which does move the key — but if
+ * you ever add a field without touching the prompt, re-record explicitly rather than trusting this.
  */
 export function cassetteKey(body: Record<string, unknown>): string {
   const material = JSON.stringify({ model: body.model, messages: body.messages });

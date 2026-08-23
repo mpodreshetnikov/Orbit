@@ -1,0 +1,50 @@
+{
+  "request_hash": "9a8937271387a950",
+  "stage": "reconcile",
+  "model": "openai/gpt-5.2:nitro",
+  "response": {
+    "id": "gen-1786103220-aNM7jI8gXZhLrWviLSFy",
+    "object": "chat.completion",
+    "created": 1786103220,
+    "model": "openai/gpt-5.2",
+    "provider": "OpenAI",
+    "system_fingerprint": null,
+    "service_tier": "default",
+    "choices": [
+      {
+        "index": 0,
+        "logprobs": null,
+        "finish_reason": "stop",
+        "native_finish_reason": "completed",
+        "message": {
+          "role": "assistant",
+          "content": "{\"findings_to_resolve\":[],\"conditions_to_resolve\":[],\"checkups_to_complete\":[{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000001\",\"reason\":\"В документе от 2026-03-06 присутствует детальный липидный профиль: общий холестерин 5.05, триглицериды 0.60, ЛПВП 1.88, ЛПНП 2.90 (также ЛПОНП 0.28, коэффициент атерогенности 1.69).\",\"suggested_done_at\":\"2026-03-06\"},{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000003\",\"reason\":\"В документе от 2026-03-06 указан «Холестерин общий» 5.05 ммоль/л.\",\"suggested_done_at\":\"2026-03-06\"},{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000005\",\"reason\":\"В документе от 2026-03-06 указаны АЛТ 10.2 Е/л, АСТ 19.4 Е/л, билирубин общий 14.70 мкмоль/л (также прямой 2.30, непрямой 12.40), ГГТ 21.7 Е/л.\",\"suggested_done_at\":\"2026-03-06\"},{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000006\",\"reason\":\"В документе от 2026-03-06 указан «Витамин В12» 704.00 пг/мл.\",\"suggested_done_at\":\"2026-03-06\"}]}",
+          "refusal": null
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 2575,
+      "completion_tokens": 768,
+      "total_tokens": 3343,
+      "cost": 0.0151056675,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.01525825,
+        "upstream_inference_prompt_cost": 0.00450625,
+        "upstream_inference_completions_cost": 0.010752
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 372,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    }
+  }
+}

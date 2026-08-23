@@ -118,6 +118,22 @@ function buildExtractedSummary(extracted: ExtractResult, recordDate: string | nu
       status: item.status,
       anchor: item.source_anchor,
     })),
+    // The findings the document says are *gone*, which is the only kind of evidence that can close
+    // one. Extraction reports what is present, so before this existed `Конкременты: нет` produced
+    // no entity and reached nothing — and this stage was being asked which existing findings had
+    // resolved while being shown only presences. That is why `findings_to_resolve` could never fire
+    // on the evidence it exists for.
+    //
+    // This does not weaken the stage's blindness to the document. It is still a derived signal from
+    // extraction, in the same shape as everything else here, and still carries an anchor rather than
+    // prose. Passing the document text through would be the shortcut; this is not that.
+    asserted_absences: extracted.asserted_absences.map((item) => ({
+      code: item.finding_code,
+      text: item.finding_type_text,
+      site_code: item.site_code,
+      site_text: item.body_site_text,
+      anchor: item.source_anchor,
+    })),
   });
 }
 
@@ -167,6 +183,8 @@ export async function runReconcileStage(
       "Report which existing findings this document shows to have resolved, which existing conditions it shows to have resolved, and which scheduled checkups it completes.",
       "Only reference ids that appear in the patient record below. Never invent an id.",
       "Only report a resolution when the extracted entities positively support it. Absence of a mention is not evidence of resolution.",
+      "asserted_absences is the exception, and the only one: it lists findings this document explicitly states are NOT present. An existing finding matched by an asserted absence of the same finding at the same site has been shown to have resolved — that is what 'Конкременты: нет' means about a stone already on the record.",
+      "An absence asserted for a whole organ covers its parts: no stones in the kidneys means no stone in the right kidney, so site_code 'kidney' resolves an existing finding on 'kidney_right'. The reverse does not hold — an absence asserted for one part says nothing about another part, and an absence in a different organ says nothing at all. When the sides are named separately and only one is clear, resolve only that one.",
       "When nothing matches, return empty arrays. Empty is the correct and expected answer in most cases.",
     ],
     schema: RECONCILE_SCHEMA,
