@@ -1,4 +1,12 @@
 import type { Connector } from "../connectors/types.js";
+import {
+  planBackfillSlice,
+  planIncrementalWindow,
+  shouldAdvanceBackfillCursor,
+  type BackfillSlice,
+} from "./backfill-scheduler.js";
+import type { BackfillStore } from "./backfill-store.js";
+import type { SessionStore } from "./session-store.js";
 
 export interface ImportRunnerDeps {
   getConnector: (sourceId: string) => Connector | null;
@@ -414,7 +422,147 @@ export async function runImportSession(
     }),
   );
 
-  return applyResult;
+  return {
+    ...applyResult,
+    // Carried out so a scheduled run can tell a finished slice from one that only got part
+    // of the way, and hold the backfill cursor accordingly.
+    import_completeness: importCompleteness,
+    receipt_enrichment: {
+      skipped_after_budget_count:
+        parseOutput.debug?.receipt_enrichment?.skipped_after_budget_count ?? 0,
+      stopped_after_budget: parseOutput.debug?.receipt_enrichment?.stopped_after_budget ?? false,
+    },
+  };
+}
+
+export interface ScheduledImportCredentials {
+  /** Long-lived grant the extension holds; the normal path for an unattended run. */
+  grantToken?: string;
+  /** A user access token, used when a run is started from the app instead. */
+  userAccessToken?: string;
+}
+
+export interface ScheduledImportInput {
+  sourceId: string;
+  payerPersonId: string;
+  nowMs: number;
+  functionUrl: string;
+  credentials: ScheduledImportCredentials;
+  /** Receipts one run may fetch; the connector's own default applies when omitted. */
+  maxReceiptsPerRun?: number;
+  defaultAccountId?: string | null;
+  appOrigin?: string | null;
+  showSourcePageWidget?: boolean;
+}
+
+export interface ScheduledImportRunResult {
+  window: BackfillSlice;
+  result: Record<string, unknown>;
+}
+
+function readCompleteness(result: Record<string, unknown>): {
+  skippedAfterBudgetCount: number;
+  partial: boolean;
+} {
+  const completeness =
+    result.import_completeness && typeof result.import_completeness === "object"
+      ? (result.import_completeness as Record<string, unknown>)
+      : {};
+  const receipts =
+    result.receipt_enrichment && typeof result.receipt_enrichment === "object"
+      ? (result.receipt_enrichment as Record<string, unknown>)
+      : {};
+  const skipped = receipts.skipped_after_budget_count;
+  return {
+    skippedAfterBudgetCount: typeof skipped === "number" && Number.isFinite(skipped) ? skipped : 0,
+    partial: completeness.partial === true,
+  };
+}
+
+/**
+ * One scheduled visit: catch up on the last few days, then take one month-sized bite out of
+ * the history.
+ *
+ * Each window gets its own import session. `runImportSession` finishes by revoking the
+ * session it was given, and the server only accepts sessions that are neither revoked nor
+ * finished — so reusing one across both windows would fail on the second window's first
+ * request. Separate sessions also read better on the import history screen, where the
+ * catch-up and the history slice show up as two clearly different runs.
+ */
+export async function runScheduledImport(
+  input: ScheduledImportInput,
+  deps: ImportRunnerDeps & { backfillStore: BackfillStore; sessionStore: SessionStore },
+  debug?: ImportRunnerDebugConfig,
+): Promise<{
+  incremental: ScheduledImportRunResult | null;
+  backfill: ScheduledImportRunResult | null;
+}> {
+  const token = input.credentials.grantToken ?? input.credentials.userAccessToken ?? "";
+  if (!token) throw new Error("No credentials available for a scheduled import");
+
+  const createSessionForWindow = async (window: BackfillSlice) => {
+    const created = await deps.callEdge(input.functionUrl, token, {
+      action: "create_session",
+      source: input.sourceId,
+      payer_person_id: input.payerPersonId,
+      window_from: window.windowFromIso,
+      window_to: window.windowToIso,
+      meta: {
+        max_receipts_per_run: input.maxReceiptsPerRun ?? null,
+        scheduled: true,
+      },
+    });
+
+    const session: Record<string, unknown> = {
+      ...created,
+      user_access_token: input.credentials.userAccessToken ?? null,
+      function_url: input.functionUrl,
+      default_account_id: input.defaultAccountId ?? null,
+      app_origin: input.appOrigin ?? null,
+      show_source_page_widget: input.showSourcePageWidget ?? true,
+      max_receipts_per_run: input.maxReceiptsPerRun ?? null,
+    };
+    await deps.sessionStore.setSession(session);
+    return session;
+  };
+
+  const runWindow = async (window: BackfillSlice): Promise<ScheduledImportRunResult> => {
+    const session = await createSessionForWindow(window);
+    const result = await runImportSession(session, window.windowFromIso, deps, debug);
+    return { window, result };
+  };
+
+  const incrementalWindow = planIncrementalWindow(input.nowMs);
+  const incremental = await runWindow(incrementalWindow);
+
+  const state = await deps.backfillStore.getState(input.sourceId);
+  const planned = planBackfillSlice(state, input.nowMs);
+  if (!planned) {
+    // The walk has reached its horizon; from here only the catch-up window matters.
+    if (state.completedAtMs === null) {
+      await deps.backfillStore.setState(input.sourceId, {
+        ...state,
+        completedAtMs: input.nowMs,
+      });
+    }
+    return { incremental, backfill: null };
+  }
+
+  let backfill: ScheduledImportRunResult | null = null;
+  try {
+    backfill = await runWindow(planned.slice);
+  } catch {
+    // A failed history slice must not cost the catch-up window, and must not move the
+    // cursor: the same slice is simply taken again next time.
+    return { incremental, backfill: null };
+  }
+
+  const outcome = readCompleteness(backfill.result);
+  if (shouldAdvanceBackfillCursor({ ok: true, ...outcome })) {
+    await deps.backfillStore.setState(input.sourceId, planned.nextState);
+  }
+
+  return { incremental, backfill };
 }
 
 export async function tryCompleteSessionAsFailed(

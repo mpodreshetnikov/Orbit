@@ -703,6 +703,7 @@ describe("tbank-web connector", () => {
     expect(executeScript).toHaveBeenCalledOnce();
     expect(executeScript.mock.calls[0]?.[0]?.args?.[0]).toEqual({
       parseStrategy: "fast",
+      maxReceiptsPerRun: 50,
       payerPersonId: null,
       sessionId: null,
       sourceId: "tbank_web",
@@ -1026,6 +1027,7 @@ describe("tbank-web connector", () => {
       windowFromIso?: string;
       sessionId?: string | null;
       parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
     }) => Promise<Record<string, unknown>>;
     const isolatedExtractor = isolatedFactory();
 
@@ -1228,6 +1230,7 @@ describe("tbank-web connector", () => {
       windowFromIso?: string;
       sessionId?: string | null;
       parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
     }) => Promise<Record<string, unknown>>;
     const isolatedExtractor = isolatedFactory();
 
@@ -1361,6 +1364,9 @@ describe("tbank-web connector", () => {
         windowFromIso: "2026-03-01T00:00:00.000Z",
         sessionId: "abc",
         parseStrategy: "full",
+        // This case is about the bank's request window, not the per-run receipt budget, so
+        // the budget is lifted out of the way.
+        maxReceiptsPerRun: 1000,
       });
 
       expect(requestTimes).toEqual([
@@ -1418,6 +1424,7 @@ describe("tbank-web connector", () => {
       windowFromIso?: string;
       sessionId?: string | null;
       parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
     }) => Promise<Record<string, unknown>>;
     const isolatedExtractor = isolatedFactory();
 
@@ -1522,6 +1529,9 @@ describe("tbank-web connector", () => {
         windowFromIso: "2026-03-01T00:00:00.000Z",
         sessionId: "abc",
         parseStrategy: "full",
+        // This case is about the bank's request window, not the per-run receipt budget, so
+        // the budget is lifted out of the way.
+        maxReceiptsPerRun: 1000,
       });
 
       expect(requestTimes).toHaveLength(71);
@@ -1744,5 +1754,117 @@ describe("tbank-web connector", () => {
         harness.restore();
       }
     });
+  });
+
+  it("stops fetching receipts once the run budget is spent", async () => {
+    const isolatedFactory = new Function(
+      `return (${__test__.extractOperationsInPage.toString()});`,
+    ) as () => (input: {
+      windowFromIso?: string;
+      sessionId?: string | null;
+      parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
+    }) => Promise<Record<string, unknown>>;
+    const isolatedExtractor = isolatedFactory();
+
+    const originals = {
+      window: (globalThis as Record<string, unknown>).window,
+      document: (globalThis as Record<string, unknown>).document,
+      performance: (globalThis as Record<string, unknown>).performance,
+      fetch: (globalThis as Record<string, unknown>).fetch,
+      URL: (globalThis as Record<string, unknown>).URL,
+      chrome: (globalThis as Record<string, unknown>).chrome,
+      setTimeout: globalThis.setTimeout,
+    };
+
+    const receiptRequests: string[] = [];
+    const operationsPayload = Array.from({ length: 3 }, (_, index) => ({
+      id: `op-${index + 1}`,
+      authorizationId: `auth-${index + 1}`,
+      operationTime: { milliseconds: Date.parse("2026-03-08T12:00:00.000Z") - index * 60_000 },
+      type: "Debit",
+      status: "OK",
+      amount: { value: 100 + index, currency: { strCode: "RUB" } },
+      accountAmount: { value: 100 + index, currency: { strCode: "RUB" } },
+      description: `Receipt ${index + 1}`,
+      documents: ["ShoppingReceipt"],
+    }));
+
+    (globalThis as Record<string, unknown>).window = {
+      location: {
+        href: "https://www.tbank.ru/mybank/operations/",
+        origin: "https://www.tbank.ru",
+      },
+    };
+    (globalThis as Record<string, unknown>).document = {
+      body: { innerText: "" },
+      querySelectorAll: vi.fn().mockReturnValue([]),
+    };
+    (globalThis as Record<string, unknown>).performance = {
+      getEntriesByType: vi.fn().mockImplementation((type: string) => {
+        if (type !== "resource") return [];
+        return [
+          { name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2" },
+        ];
+      }),
+    };
+    (globalThis as Record<string, unknown>).URL = URL;
+    (globalThis as Record<string, unknown>).chrome = { runtime: { sendMessage: vi.fn() } };
+    globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
+      callback();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockImplementation(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === "/api/common/v1/operations") {
+          return { ok: true, status: 200, json: async () => ({ payload: operationsPayload }) };
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          receiptRequests.push(url.searchParams.get("operationId") ?? "");
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resultCode: "OK",
+              payload: { receipt: { items: [{ name: "item", sum: 100, quantity: 1 }] } },
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => null };
+      });
+
+    try {
+      const result = (await isolatedExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        sessionId: "abc",
+        parseStrategy: "fast",
+        maxReceiptsPerRun: 2,
+      })) as Record<string, unknown>;
+
+      // Only the budget is spent; nothing is requested for the third operation.
+      expect(receiptRequests).toHaveLength(2);
+
+      const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
+      const statuses = records.map((record) => {
+        const meta = record.shoppingReceiptMeta as Record<string, unknown>;
+        return meta.receipt_enrichment_status;
+      });
+      expect(statuses.filter((status) => status === "skipped_after_budget")).toHaveLength(1);
+
+      const debug = (result.debug ?? {}) as Record<string, unknown>;
+      const receiptDebug = (debug.receipt_enrichment ?? {}) as Record<string, unknown>;
+      expect(receiptDebug.skipped_after_budget_count).toBe(1);
+      expect(receiptDebug.stopped_after_budget).toBe(true);
+    } finally {
+      (globalThis as Record<string, unknown>).window = originals.window;
+      (globalThis as Record<string, unknown>).document = originals.document;
+      (globalThis as Record<string, unknown>).performance = originals.performance;
+      (globalThis as Record<string, unknown>).fetch = originals.fetch;
+      (globalThis as Record<string, unknown>).URL = originals.URL;
+      (globalThis as Record<string, unknown>).chrome = originals.chrome;
+      globalThis.setTimeout = originals.setTimeout;
+    }
   });
 });

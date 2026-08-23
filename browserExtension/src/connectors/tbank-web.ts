@@ -121,6 +121,26 @@ function normalizeParseStrategy(value: unknown): ConnectorParseStrategy | null {
   return value === "fast" || value === "full" ? value : null;
 }
 
+/**
+ * How many receipts one run may fetch.
+ *
+ * A receipt costs a four-second pause and counts against a hard window of seventy requests
+ * per ten minutes, so a year of history is thousands of requests and hours of work — which
+ * the bank does not tolerate and no one waits through. Fifty receipts is about three and a
+ * half minutes and fits inside that window with room to spare; at fifty a day, half a year
+ * of history closes in roughly eighteen visits.
+ */
+const DEFAULT_MAX_RECEIPTS_PER_RUN = 50;
+
+function resolveMaxReceiptsPerRun(session?: Record<string, unknown>): number {
+  const candidates = [session?.max_receipts_per_run, asObject(session?.meta)?.max_receipts_per_run];
+  for (const candidate of candidates) {
+    const parsed = toFiniteNumber(candidate);
+    if (parsed !== null && parsed > 0) return Math.floor(parsed);
+  }
+  return DEFAULT_MAX_RECEIPTS_PER_RUN;
+}
+
 function resolveParseStrategy(session?: Record<string, unknown>): ConnectorParseStrategy {
   const topLevel = normalizeParseStrategy(session?.parse_strategy);
   if (topLevel) return topLevel;
@@ -628,6 +648,7 @@ const connector: Connector = {
       Date.now() - DEFAULT_LOOKBACK_DAYS * DAY_MS,
     ).toISOString();
     const parseStrategy = resolveParseStrategy(session);
+    const maxReceiptsPerRun = resolveMaxReceiptsPerRun(session);
     const normalizedWindowFrom =
       toIsoString(windowFrom) || toIsoString(session?.last_imported_at) || fallbackWindowFromIso;
 
@@ -658,6 +679,7 @@ const connector: Connector = {
       typeof session?.source === "string" ? session.source : "tbank_web",
       typeof session?.payer_person_id === "string" ? session.payer_person_id : null,
       parseStrategy,
+      maxReceiptsPerRun,
     );
     if (extraction.blocked_reason) {
       throw formatDiagnosticError(extraction.blocked_reason, {
@@ -862,6 +884,7 @@ async function extractOperationsWithRetry(
   sourceId: string | null,
   payerPersonId: string | null,
   parseStrategy: ConnectorParseStrategy,
+  maxReceiptsPerRun: number,
 ): Promise<PageExtraction> {
   const attemptDetails: Array<Record<string, unknown>> = [];
 
@@ -880,7 +903,9 @@ async function extractOperationsWithRetry(
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         func: extractOperationsInPage,
-        args: [{ windowFromIso, sessionId, sourceId, payerPersonId, parseStrategy }],
+        args: [
+          { windowFromIso, sessionId, sourceId, payerPersonId, parseStrategy, maxReceiptsPerRun },
+        ],
       });
       const extraction = injected?.[0]?.result as PageExtraction | undefined;
       if (extraction) {
@@ -941,6 +966,7 @@ function extractOperationsInPage(input: {
   sourceId?: string | null;
   payerPersonId?: string | null;
   parseStrategy?: ConnectorParseStrategy | null;
+  maxReceiptsPerRun?: number | null;
 }): Promise<PageExtraction> {
   const fullReceiptBasePauseMs = 4000;
   const receiptParseStrategy =
@@ -957,6 +983,15 @@ function extractOperationsInPage(input: {
   const receiptRetryStrategy: "shared_budget" | "progressive_backoff" =
     receiptParseStrategy === "full" ? "progressive_backoff" : "shared_budget";
   const progressSessionId = input.sessionId ?? null;
+  // The receipt budget is what makes history importable at all: one run takes a bite it can
+  // finish inside the bank's rate window, and what it leaves stays unfulfilled so the next
+  // pass over the same slice picks it up.
+  const maxReceiptsPerRun =
+    typeof input.maxReceiptsPerRun === "number" &&
+    Number.isFinite(input.maxReceiptsPerRun) &&
+    input.maxReceiptsPerRun > 0
+      ? Math.floor(input.maxReceiptsPerRun)
+      : 50;
 
   function computeReceiptRetryPauseMs(retryAttempts: number): number {
     if (receiptParseStrategy !== "full") return receiptRetryPauseMs;
@@ -1464,6 +1499,7 @@ function extractOperationsInPage(input: {
         hasRequestedReceipt: false,
         sharedRetriesRemaining: receiptMaxSharedRetries,
         stoppedAfterBudget: false,
+        issuedReceiptRequestCount: 0,
         requestStartedAtMs: [] as number[],
       };
       const detailStageStartedAtMs = Date.now();
@@ -1904,6 +1940,7 @@ function extractOperationsInPage(input: {
       hasRequestedReceipt: boolean;
       sharedRetriesRemaining: number;
       stoppedAfterBudget: boolean;
+      issuedReceiptRequestCount: number;
       requestStartedAtMs: number[];
     },
     receiptDebug: {
@@ -1993,6 +2030,32 @@ function extractOperationsInPage(input: {
         },
       };
     }
+
+    // Once this run has spent its receipt budget, the remaining operations are left with
+    // `skipped_after_budget`. That status is deliberately not one of the two that count as
+    // fulfilled, so the next pass over this slice takes them again — which is what makes a
+    // long history close a bite at a time instead of failing as one impossible run.
+    if (receiptState.issuedReceiptRequestCount >= maxReceiptsPerRun) {
+      receiptState.stoppedAfterBudget = true;
+      receiptDebug.stopped_after_budget = true;
+      receiptDebug.skipped_after_budget_count += 1;
+      return {
+        shoppingReceipt: null,
+        shoppingReceiptMeta: {
+          receipt_request_key: receiptRequestKey,
+          receipt_enrichment_status: "skipped_after_budget",
+          receipt_line_items_skipped: true,
+          receipt_retryable: true,
+          receipt_retry_attempts: 0,
+          receipt_result_code: null,
+          receipt_tracking_id: null,
+          receipt_message: `Receipt budget for this run is spent (${maxReceiptsPerRun} receipts).`,
+          expected: true,
+          requested: false,
+        },
+      };
+    }
+    receiptState.issuedReceiptRequestCount += 1;
 
     const url = new URL("https://www.tbank.ru/api/common/v1/shopping_receipt");
     url.searchParams.set("operationId", receiptRequestKey);
