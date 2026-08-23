@@ -15,6 +15,7 @@ Everything about you, your family, and your pets — in one place you actually o
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Edge-3ecf8e?logo=supabase&logoColor=white)](https://supabase.com)
 [![MCP](https://img.shields.io/badge/MCP-connector-6b5bd6)](./docs/design/domains/health/mcp-server.md)
+[![100% agent-built](https://img.shields.io/badge/code-100%25%20agent--written-ff6f3c)](#100-agent-built)
 
 </div>
 
@@ -33,6 +34,10 @@ Orbit is one Next.js app on top of Supabase that fixes that for a single househo
   resells your transaction history.
 - **Ask an agent about it** — the Health domain is exposed over the Model Context Protocol with a
   real OAuth 2.1 consent screen and scoped tokens.
+
+And every line of it — app, schema, Edge Functions, extension, tests, and these docs — was written
+by AI agents. That is not a disclaimer; it is the most interesting thing about this repository, and
+it is described in [100% agent-built](#100-agent-built).
 
 > [!NOTE]
 > This is a personal project, published so the architecture, docs, and agent workflows can be read
@@ -243,23 +248,44 @@ is written down in [`docs/QUALITY.md`](./docs/QUALITY.md).
 
 ---
 
-## Built with agents, on purpose
+## 100% agent-built
 
-Orbit is developed largely by AI agents, and the repository is structured so that's a strength
-rather than a liability:
+**No human has hand-written production code in this repository.** Not the React components, not the
+RLS policies, not the Deno functions, not the pgTAP tests, not this README. Agents wrote all of it.
+The human owns direction, review, and the merge button.
 
-- **[`AGENTS.md`](./AGENTS.md) is a map, not a bible** — canonical knowledge lives in `docs/`, and
-  the map only points at it. One source of truth, no drift.
-- **Docs are contracts.** [`docs/design/core-beliefs.md`](./docs/design/core-beliefs.md) states each
-  belief with _why it exists_, _how it's enforced in this repo_, _failure signals_, and _corrective
-  actions_ — the kind of thing an agent can actually check itself against.
-- **Repo-local skills** in `.agents/skills`, mirrored into `.claude/skills` and pinned by
-  `skills-lock.json` with content hashes. Vendored skills from upstream sources sit alongside
-  project-specific ones (`supabase-db-workflow`, `chrome-extension-web-scraping`,
-  `full-stack-traceability`, `relevant-quality-checks`) and a sync check runs inside `just quality`.
-- **Full-stack traceability by default** — structured logs, OTLP traces and correlation IDs across
-  frontend, API, Edge Functions and Postgres, so debugging a report is reading a trace rather than
-  guessing.
+"AI-assisted" is now the default everywhere and means very little. This is the stronger version, and
+it changes what the repository has to be: an agent has no memory of last month's decision, no
+hallway to ask in, and no instinct for "we don't do that here." Everything that a team would carry
+implicitly has to be written down, checkable, and enforced by something other than good intentions.
+
+So that is what the repository is built out of:
+
+- **Docs are contracts, not prose.** [`docs/design/core-beliefs.md`](./docs/design/core-beliefs.md)
+  states each belief with _why it exists_, _how it is enforced here_, _failure signals_, and
+  _corrective actions_. An agent can hold its own diff against that and answer honestly. A paragraph
+  of encouragement it cannot.
+- **[`AGENTS.md`](./AGENTS.md) is a map, not a bible.** It points at canonical knowledge in `docs/`
+  instead of restating it, so there is exactly one place to change when something changes — the
+  failure mode that quietly poisons agent-run repos is two documents that used to agree.
+- **Rules that live in SQL outlive the session.** Durable invariants are RLS policies, constraints
+  and triggers rather than checks in a component, because a rule enforced in the database is a rule
+  no future agent can forget, work around, or reimplement slightly differently on another surface.
+- **Skills are pinned like dependencies.** `.agents/skills` is mirrored into `.claude/skills` and
+  hash-locked in `skills-lock.json`; a drift check runs inside `just quality`. Vendored upstream
+  skills sit next to project-specific ones (`supabase-db-workflow`, `chrome-extension-web-scraping`,
+  `full-stack-traceability`, `relevant-quality-checks`), so "how we do things here" is versioned
+  rather than retold each session.
+- **The gates exist because self-reports are not evidence.** Everything in
+  [the quality bar](#the-quality-bar) runs in CI and fails the build on its own. An agent saying the
+  tests pass is a claim; the workflow going green is the fact. This is also why the checks are
+  strict enough to be annoying — they are the part of the process that cannot be talked out of.
+- **Traceability instead of recollection.** Structured logs, OTLP traces and correlation IDs run
+  across frontend, API, Edge Functions and Postgres, so an agent debugging yesterday's failure reads
+  a trace rather than guessing at context it never had.
+
+None of this is specific to Orbit. It is what the repo needed in order to be built this way, and it
+is the part most worth stealing.
 
 ---
 
