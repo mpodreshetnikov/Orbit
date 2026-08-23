@@ -26,6 +26,19 @@ function createTransactionsTableStub(options: TransactionsTableStubOptions) {
     }),
   };
 
+  /**
+   * Tail of the adoption sweep. It is reached through a chain of eq() filters (account and
+   * source), so the builder keeps returning itself until the is()/gte()/lte() window.
+   */
+  const adoptionSweep: Record<string, unknown> = {
+    is: () => ({
+      gte: () => ({
+        lte: async () => ({ data: options.statementRows ?? [], error: null }),
+      }),
+    }),
+  };
+  adoptionSweep.eq = () => adoptionSweep;
+
   return {
     insert: () => ({
       select: () => ({
@@ -55,14 +68,8 @@ function createTransactionsTableStub(options: TransactionsTableStubOptions) {
               },
               ...identityLookup,
             }),
-            // Adoption sweep continues with the account and the posted_at window.
-            eq: () => ({
-              is: () => ({
-                gte: () => ({
-                  lte: async () => ({ data: options.statementRows ?? [], error: null }),
-                }),
-              }),
-            }),
+            // Adoption sweep continues with the account, the source and the posted_at window.
+            eq: () => adoptionSweep,
             is: () => ({
               gte: () => ({
                 lte: async () => ({ data: options.statementRows ?? [], error: null }),
@@ -289,7 +296,9 @@ Deno.test(
             // The states lookup runs three queries: by external_id, by dedupe_hash, and a
             // statement sweep for candidates neither key matched. All of them are scoped to
             // the payer, so every chain starts with the same eq().
-            const statementSweep = {
+            // The sweep is reached through eq(payer) then eq(source), so the builder keeps
+            // returning itself until the is()/gte()/lte() window.
+            const statementSweep: Record<string, unknown> = {
               is: () => ({
                 gte: () => ({
                   lte: () => Promise.resolve({ data: [], error: null }),
@@ -301,6 +310,7 @@ Deno.test(
                 eq: () => ({
                   ...statementSweep,
                   eq: () => ({
+                    ...statementSweep,
                     in: (column: string, _values: string[]) => {
                       if (column === "external_id") {
                         return Promise.resolve({
@@ -712,6 +722,68 @@ Deno.test("repository refuses to adopt when two statement rows match", async () 
       ),
     "Multiple statement transactions match this operation",
   );
+});
+
+Deno.test("repository never adopts a hand-entered transaction", async () => {
+  // A manual row also has no external id, so on amount and date alone it looks adoptable.
+  // Adoption would overwrite its header and stamp the bank's identity onto it before the
+  // manual-edit guard on line items ever runs, so the source filter has to catch it first.
+  const sourceFilters: string[] = [];
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+        const sweep: Record<string, unknown> = {
+          is: () => ({
+            gte: () => ({
+              // The manual row is invisible to a sweep scoped to the bank source.
+              lte: async () => ({ data: [], error: null }),
+            }),
+          }),
+        };
+        sweep.eq = (column: string, value: string) => {
+          if (column === "source") sourceFilters.push(value);
+          return sweep;
+        };
+
+        return {
+          insert: () => ({
+            select: () => ({ single: async () => ({ data: { id: "tx-new" }, error: null }) }),
+          }),
+          update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+          select: () => ({
+            eq: () => ({
+              ...sweep,
+              limit: () => ({
+                eq: () => ({
+                  maybeSingle: async () => ({ data: null, error: { message: "not found" } }),
+                  eq: () => ({
+                    maybeSingle: async () => ({ data: null, error: { message: "not found" } }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      },
+    },
+  });
+
+  const result = await repository.insertOrResolveTransaction(
+    {
+      posted_at: "2026-01-05T10:00:00.000Z",
+      amount: -1000,
+      transaction_type: "expense",
+      source: "tbank_web",
+      external_id: "op-1",
+      account_id: "acc-1",
+    },
+    "person-1",
+  );
+
+  assertEquals(result, { transactionId: "tx-new", inserted: true });
+  // tbank_web normalises to tbank, so a manual row could never be in range.
+  assertEquals(sourceFilters, ["tbank"]);
 });
 
 Deno.test("repository adopts only within the window and only for API rows", async () => {

@@ -629,9 +629,14 @@ export function createSupabaseMoneyImportRepository(
    * match. Without this, loading a statement and then visiting the bank site produces a
    * second copy of every operation and doubles the reported spending.
    *
-   * The match is deliberately narrow: same payer, same account, same amount to the kopeck,
-   * no external id yet, and posted within ADOPTION_WINDOW_HOURS — wide enough to cover the
-   * gap between a statement's operation date and its payment date.
+   * The match is deliberately narrow: same payer, same account, same source, same amount to
+   * the kopeck, no external id yet, and posted within ADOPTION_WINDOW_HOURS — wide enough to
+   * cover the gap between a statement's operation date and its payment date.
+   *
+   * The source filter is what keeps a hand-entered transaction out of reach. A manual row
+   * also has no external id, so on amount and date alone it looks adoptable — and adoption
+   * would overwrite its header and stamp the bank's identity onto it before the manual-edit
+   * guard on line items ever runs. Only a row from the same importer is a candidate.
    *
    * When more than one candidate fits, nothing is adopted. Two identical purchases on one
    * day are rare but real, and merging the wrong one loses an operation for good.
@@ -654,6 +659,7 @@ export function createSupabaseMoneyImportRepository(
       .select("id, amount")
       .eq("payer_person_id", payerPersonId)
       .eq("account_id", accountId)
+      .eq("source", normalizeSourceForTransactions(row.source ?? "manual"))
       .is("external_id", null)
       .gte("posted_at", new Date(postedAtMs - windowMs).toISOString())
       .lte("posted_at", new Date(postedAtMs + windowMs).toISOString());
@@ -784,6 +790,7 @@ export function createSupabaseMoneyImportRepository(
         .from("money_transactions")
         .select("id, posted_at, amount, receipt_enrichment_status")
         .eq("payer_person_id", payerPersonId)
+        .eq("source", normalizeSourceForTransactions(source))
         .is("external_id", null)
         .gte("posted_at", new Date(earliest).toISOString())
         .lte("posted_at", new Date(latest).toISOString());

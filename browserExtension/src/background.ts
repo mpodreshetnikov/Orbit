@@ -321,7 +321,7 @@ telemetry.info("extension_background_initialized", {
  * also the moment the extension has a live authorised page to work from, which is the one
  * thing it cannot get on its own.
  */
-async function maybeAutoRunOnSourcePage(tabUrl: string): Promise<void> {
+async function maybeAutoRunOnSourcePage(tabUrl: string, tabId: number): Promise<void> {
   const grant = await grantStore.getGrant();
   if (!grant) return;
 
@@ -353,6 +353,9 @@ async function maybeAutoRunOnSourcePage(tabUrl: string): Promise<void> {
         credentials: { grantToken: grant.token },
         appOrigin: grant.appOrigin,
         showSourcePageWidget: true,
+        // The tab whose navigation triggered this run is the one to work in; it is not
+        // necessarily the active tab of the last focused window.
+        tabId,
       },
       {
         getConnector,
@@ -388,7 +391,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const session = await sessionStore.getSession();
     if (!session) {
       if (isComplete && matchesKnownMoneyImportSourcePageUrl(nextUrl)) {
-        await maybeAutoRunOnSourcePage(nextUrl);
+        await maybeAutoRunOnSourcePage(nextUrl, tabId);
       }
       return;
     }
@@ -456,6 +459,11 @@ async function runDailyImportSweep(): Promise<void> {
       }
     }
 
+    // Whether the tab was found or opened, it is a background tab: the connector must be
+    // told which one, or it looks at the active tab instead and rejects it.
+    const targetTabId = openedTabId ?? existingTab?.id ?? null;
+    if (typeof targetTabId !== "number") continue;
+
     try {
       await runScheduledImport(
         {
@@ -466,6 +474,7 @@ async function runDailyImportSweep(): Promise<void> {
           credentials: { grantToken: grant.token },
           appOrigin: grant.appOrigin,
           showSourcePageWidget: existingTab !== null,
+          tabId: targetTabId,
         },
         {
           getConnector,

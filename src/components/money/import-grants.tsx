@@ -14,6 +14,7 @@ import {
   useRevokeMoneyImportGrant,
   type MoneyImportGrant,
 } from "@/hooks/use-money-import-grants";
+import { getFunctionUrl } from "@/app/money/import/money-import-client";
 
 const EXTENSION_WEBAPP_SOURCE = "orbit-webapp";
 
@@ -102,6 +103,10 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
           person_id: personId,
           allowed_sources: selectedSources,
           app_origin: window.location.origin,
+          // Without this the extension stores the grant with no endpoint to call, and both
+          // the visit-triggered run and the daily sweep return immediately — the grant would
+          // exist and never do anything.
+          function_url: getFunctionUrl("money-import"),
         },
       },
       "*",

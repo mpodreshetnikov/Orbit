@@ -23,12 +23,27 @@ WHERE NOT line_item.is_placeholder
   AND lower(line_item.raw_payload->>'source') IN ('fallback', 'dom_fallback');
 
 -- Backfill 2: placeholders the CSV importer produced. They carry no marker at all, so they
--- are recognised by shape — the transaction's only imported line item, covering its full
--- amount, untouched by a human.
+-- are recognised by shape — an imported line item covering the transaction's full amount,
+-- untouched by a human.
 --
--- This can also match a genuine single-item receipt. That is harmless: the next enrichment
--- pass deletes it and re-inserts identical content, because `import_hash` is derived from
--- the content itself. Nothing is lost and no duplicate appears.
+-- Two shapes qualify, and the second is the one that matters most:
+--
+--   * the transaction's only line item — an ordinary statement row nothing has enriched yet;
+--   * a line item whose siblings already add up to the whole transaction on their own — the
+--     corrupted shape, where a real receipt landed beside the placeholder instead of
+--     replacing it and the spending counts twice.
+--
+-- Requiring the placeholder to be alone would exclude the corrupted shape by definition,
+-- which is precisely the shape this migration exists to repair. A CSV placeholder carries no
+-- `fallback` marker either, so backfill 1 does not reach it, and the cleanup below only
+-- deletes rows already flagged — leaving those transactions double-counted forever.
+--
+-- Restricting the second shape to "siblings already explain the whole amount" is what keeps
+-- it safe: flagging the row is only proposed when removing it makes the sums correct.
+--
+-- Either shape can also match a genuine single-item receipt. That is harmless: the next
+-- enrichment pass deletes it and re-inserts identical content, because `import_hash` is
+-- derived from the content itself. Nothing is lost and no duplicate appears.
 UPDATE public.money_line_items AS line_item
 SET is_placeholder = true
 FROM public.money_transactions AS transaction
@@ -38,11 +53,26 @@ WHERE transaction.id = line_item.transaction_id
   AND line_item.import_hash IS NOT NULL
   AND NOT line_item.category_locked_by_user
   AND round(line_item.amount, 2) = round(transaction.amount, 2)
-  AND NOT EXISTS (
-    SELECT 1
-    FROM public.money_line_items AS sibling
-    WHERE sibling.transaction_id = line_item.transaction_id
-      AND sibling.id <> line_item.id
+  AND (
+    NOT EXISTS (
+      SELECT 1
+      FROM public.money_line_items AS sibling
+      WHERE sibling.transaction_id = line_item.transaction_id
+        AND sibling.id <> line_item.id
+    )
+    OR round(
+      COALESCE(
+        (
+          SELECT sum(sibling.amount)
+          FROM public.money_line_items AS sibling
+          WHERE sibling.transaction_id = line_item.transaction_id
+            AND sibling.id <> line_item.id
+            AND sibling.line_status <> 'cancelled'
+        ),
+        0
+      ),
+      2
+    ) = round(transaction.amount, 2)
   );
 
 -- One-off cleanup of transactions the missing repair call already corrupted.

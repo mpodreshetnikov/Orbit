@@ -453,6 +453,13 @@ export interface ScheduledImportInput {
   defaultAccountId?: string | null;
   appOrigin?: string | null;
   showSourcePageWidget?: boolean;
+  /**
+   * The bank tab to work in. Required for an unattended run: without it the connector falls
+   * back to the active tab of the last focused window, which for a background sweep is
+   * whatever the person happens to be looking at — and it is rejected for not being a bank
+   * page, so the tab the sweep just opened goes unused.
+   */
+  tabId?: number | null;
 }
 
 export interface ScheduledImportRunResult {
@@ -526,9 +533,12 @@ export async function runScheduledImport(
     return session;
   };
 
+  const windowDebug: ImportRunnerDebugConfig | undefined =
+    typeof input.tabId === "number" ? { ...(debug ?? {}), tabId: input.tabId } : debug;
+
   const runWindow = async (window: BackfillSlice): Promise<ScheduledImportRunResult> => {
     const session = await createSessionForWindow(window);
-    const result = await runImportSession(session, window.windowFromIso, deps, debug);
+    const result = await runImportSession(session, window.windowFromIso, deps, windowDebug);
     return { window, result };
   };
 
