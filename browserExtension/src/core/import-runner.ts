@@ -254,6 +254,18 @@ export async function runImportSession(
   // parsed so far, so the server needs to tell a genuinely new run from a retry of the same
   // one; without that, a replayed chunk zero would erase chunks that already landed.
   const previewAttemptId = createPreviewAttemptId();
+
+  // A window that was only partly fetched must not look like a closed one. Recorded on the
+  // batch so the review screen can warn, and so the backfill cursor knows not to move past
+  // a slice it did not fully see.
+  const importCompleteness = {
+    partial: parseOutput.debug?.partial_result === true,
+    truncation_unresolved_count: parseOutput.debug?.truncation_unresolved_count ?? 0,
+    truncation_suspected_count: parseOutput.debug?.truncation_suspected_count ?? 0,
+    range_split_count: parseOutput.debug?.range_split_count ?? 0,
+    extraction_method: parseOutput.debug?.extraction_method ?? null,
+  };
+
   let applyResult: Record<string, unknown>;
   try {
     let previewBatchId =
@@ -295,6 +307,7 @@ export async function runImportSession(
         is_final_chunk: isFinalChunk,
         total_row_count: parseOutput.rows.length,
         preview_attempt_id: previewAttemptId,
+        meta: { import_completeness: importCompleteness },
         rows: rowsChunk,
       });
 

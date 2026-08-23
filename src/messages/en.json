@@ -576,7 +576,8 @@
     "importPendingReviewBanner": "This report is a preview. Review the predicted results, then choose whether to apply this batch. Final apply results can differ if the underlying data changed.",
     "importApplyBatch": "Apply batch",
     "importDiscardBatch": "Do not apply",
-    "importDiscardedBanner": "This batch was reviewed and not applied. The report is kept for audit purposes."
+    "importDiscardedBanner": "This batch was reviewed and not applied. The report is kept for audit purposes.",
+    "importPartialWindowWarning": "This window was not fully fetched: {count} response(s) came back truncated and could not be split further. Some operations from this period may be missing — run the import again later."
   },
   "records": {
     "title": "Medical Records",

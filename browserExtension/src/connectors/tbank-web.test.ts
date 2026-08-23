@@ -1554,4 +1554,195 @@ describe("tbank-web connector", () => {
       globalThis.setTimeout = originalSetTimeout;
     }
   });
+
+  describe("range truncation", () => {
+    function runInPageExtractor(options: {
+      windowFromIso: string;
+      nowIso: string;
+      /** Operations the bank returns for a given [start, end] range. */
+      operationsFor: (start: number, end: number) => Array<Record<string, unknown>>;
+    }) {
+      const isolatedFactory = new Function(
+        `return (${__test__.extractOperationsInPage.toString()});`,
+      ) as () => (input: {
+        windowFromIso?: string;
+        sessionId?: string | null;
+        parseStrategy?: string | null;
+      }) => Promise<Record<string, unknown>>;
+      const isolatedExtractor = isolatedFactory();
+
+      const originals = {
+        window: (globalThis as Record<string, unknown>).window,
+        document: (globalThis as Record<string, unknown>).document,
+        performance: (globalThis as Record<string, unknown>).performance,
+        fetch: (globalThis as Record<string, unknown>).fetch,
+        URL: (globalThis as Record<string, unknown>).URL,
+        chrome: (globalThis as Record<string, unknown>).chrome,
+        dateNow: Date.now,
+        setTimeout: globalThis.setTimeout,
+      };
+
+      const requestedRanges: Array<{ start: number; end: number }> = [];
+
+      (globalThis as Record<string, unknown>).window = {
+        location: {
+          href: "https://www.tbank.ru/mybank/operations/",
+          origin: "https://www.tbank.ru",
+        },
+      };
+      (globalThis as Record<string, unknown>).document = {
+        body: { innerText: "" },
+        querySelectorAll: vi.fn().mockReturnValue([]),
+      };
+      (globalThis as Record<string, unknown>).performance = {
+        getEntriesByType: vi.fn().mockImplementation((type: string) => {
+          if (type !== "resource") return [];
+          return [
+            {
+              name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2",
+            },
+          ];
+        }),
+      };
+      (globalThis as Record<string, unknown>).URL = URL;
+      (globalThis as Record<string, unknown>).chrome = { runtime: { sendMessage: vi.fn() } };
+      Date.now = () => Date.parse(options.nowIso);
+      globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
+        callback();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+      (globalThis as Record<string, unknown>).fetch = vi
+        .fn()
+        .mockImplementation(async (input: string) => {
+          const url = new URL(input);
+          if (url.pathname !== "/api/common/v1/operations") {
+            return { ok: false, status: 404, json: async () => null };
+          }
+          const start = Number(url.searchParams.get("start"));
+          const end = Number(url.searchParams.get("end"));
+          requestedRanges.push({ start, end });
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: options.operationsFor(start, end) }),
+          };
+        });
+
+      const restore = () => {
+        (globalThis as Record<string, unknown>).window = originals.window;
+        (globalThis as Record<string, unknown>).document = originals.document;
+        (globalThis as Record<string, unknown>).performance = originals.performance;
+        (globalThis as Record<string, unknown>).fetch = originals.fetch;
+        (globalThis as Record<string, unknown>).URL = originals.URL;
+        (globalThis as Record<string, unknown>).chrome = originals.chrome;
+        Date.now = originals.dateNow;
+        globalThis.setTimeout = originals.setTimeout;
+      };
+
+      return {
+        requestedRanges,
+        restore,
+        run: () =>
+          isolatedExtractor({
+            windowFromIso: options.windowFromIso,
+            sessionId: "abc",
+            parseStrategy: "fast",
+          }),
+      };
+    }
+
+    function operation(index: number, atMs: number): Record<string, unknown> {
+      return {
+        id: `op-${index}-${atMs}`,
+        authorizationId: `auth-${index}-${atMs}`,
+        operationTime: { milliseconds: atMs },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 100 + index, currency: { strCode: "RUB" } },
+        accountAmount: { value: 100 + index, currency: { strCode: "RUB" } },
+        description: `Merchant ${index}`,
+        documents: [],
+      };
+    }
+
+    it("splits a range whose response came back at the page limit", async () => {
+      const dayMs = 24 * 60 * 60 * 1000;
+      const harness = runInPageExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        nowIso: "2026-03-08T00:00:00.000Z",
+        operationsFor: (start, end) => {
+          const span = end - start + 1;
+          // A wide range comes back capped; each half fits comfortably.
+          const count = span > 4 * dayMs ? 100 : 10;
+          return Array.from({ length: count }, (_, index) =>
+            operation(index, end - index * 60_000),
+          );
+        },
+      });
+
+      try {
+        const result = (await harness.run()) as Record<string, unknown>;
+        const debug = (result.debug ?? {}) as Record<string, unknown>;
+
+        expect(debug.range_split_count).toBeGreaterThan(0);
+        expect(debug.truncation_suspected_count).toBeGreaterThan(0);
+        expect(debug.truncation_unresolved_count).toBe(0);
+        expect(debug.partial_result).toBe(false);
+
+        // Halves were re-requested, so more ranges were fetched than were planned.
+        expect(harness.requestedRanges.length).toBeGreaterThan(1);
+
+        // Operations gathered across the halves are deduplicated, not doubled.
+        const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
+        const ids = records.map((record) => {
+          const operationRecord = record.operation as Record<string, unknown>;
+          return operationRecord.id;
+        });
+        expect(new Set(ids).size).toBe(ids.length);
+      } finally {
+        harness.restore();
+      }
+    });
+
+    it("reports a single day it cannot get past instead of looking complete", async () => {
+      const harness = runInPageExtractor({
+        windowFromIso: "2026-03-06T00:00:00.000Z",
+        nowIso: "2026-03-08T00:00:00.000Z",
+        // Every range stays at the cap, so splitting bottoms out at one day.
+        operationsFor: (_start, end) =>
+          Array.from({ length: 100 }, (_, index) => operation(index, end - index * 1000)),
+      });
+
+      try {
+        const result = (await harness.run()) as Record<string, unknown>;
+        const debug = (result.debug ?? {}) as Record<string, unknown>;
+
+        expect(debug.truncation_unresolved_count).toBeGreaterThan(0);
+        expect(debug.partial_result).toBe(true);
+      } finally {
+        harness.restore();
+      }
+    });
+
+    it("leaves an unremarkable window alone", async () => {
+      const harness = runInPageExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        nowIso: "2026-03-08T00:00:00.000Z",
+        operationsFor: (_start, end) =>
+          Array.from({ length: 5 }, (_, index) => operation(index, end - index * 60_000)),
+      });
+
+      try {
+        const result = (await harness.run()) as Record<string, unknown>;
+        const debug = (result.debug ?? {}) as Record<string, unknown>;
+
+        expect(debug.range_split_count).toBe(0);
+        expect(debug.truncation_suspected_count).toBe(0);
+        expect(debug.truncation_unresolved_count).toBe(0);
+        expect(debug.partial_result).toBe(false);
+      } finally {
+        harness.restore();
+      }
+    });
+  });
 });

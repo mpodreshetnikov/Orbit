@@ -60,6 +60,18 @@ export interface ConnectorParseDebugSummary {
   }>;
   range_request_count?: number;
   effective_chunk_span_days?: number | null;
+  /** How many ranges were halved because their response looked truncated. */
+  range_split_count?: number;
+  /** How many responses looked truncated, whether or not splitting resolved it. */
+  truncation_suspected_count?: number;
+  /**
+   * Ranges still at the page limit after being narrowed to a single day. This is the one
+   * case where the connector cannot promise it fetched everything, and it must say so
+   * rather than let a partly loaded window look complete.
+   */
+  truncation_unresolved_count?: number;
+  /** True when the run is known not to cover its whole window. */
+  partial_result?: boolean;
   first_operation_posted_at?: string | null;
   last_operation_posted_at?: string | null;
   page_originated_operations_request_seen?: boolean;

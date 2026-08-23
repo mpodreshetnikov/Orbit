@@ -75,6 +75,10 @@ interface PageExtraction {
     }>;
     range_request_count?: number;
     effective_chunk_span_days?: number | null;
+    range_split_count?: number;
+    truncation_suspected_count?: number;
+    truncation_unresolved_count?: number;
+    partial_result?: boolean;
     first_operation_posted_at?: string | null;
     last_operation_posted_at?: string | null;
     page_originated_operations_request_seen?: boolean;
@@ -557,6 +561,10 @@ function summarizeExtractionDiagnostics(
     },
     range_attempts: debug?.range_attempts ?? [],
     range_request_count: debug?.range_request_count ?? debug?.range_attempts?.length ?? 0,
+    range_split_count: debug?.range_split_count ?? 0,
+    truncation_suspected_count: debug?.truncation_suspected_count ?? 0,
+    truncation_unresolved_count: debug?.truncation_unresolved_count ?? 0,
+    partial_result: debug?.partial_result ?? false,
     effective_chunk_span_days:
       debug?.effective_chunk_span_days ??
       (firstRangeAttempt
@@ -1225,6 +1233,10 @@ function extractOperationsInPage(input: {
       }>,
       range_request_count: 0,
       effective_chunk_span_days: null as number | null,
+      range_split_count: 0,
+      truncation_suspected_count: 0,
+      truncation_unresolved_count: 0,
+      partial_result: false,
       first_operation_posted_at: null as string | null,
       last_operation_posted_at: null as string | null,
       page_originated_operations_request_seen: false,
@@ -1275,6 +1287,10 @@ function extractOperationsInPage(input: {
           range_attempts: debugMeta.range_attempts,
           range_request_count: debugMeta.range_request_count,
           effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          range_split_count: debugMeta.range_split_count,
+          truncation_suspected_count: debugMeta.truncation_suspected_count,
+          truncation_unresolved_count: debugMeta.truncation_unresolved_count,
+          partial_result: debugMeta.partial_result,
           first_operation_posted_at: debugMeta.first_operation_posted_at,
           last_operation_posted_at: debugMeta.last_operation_posted_at,
           page_originated_operations_request_seen:
@@ -1322,13 +1338,27 @@ function extractOperationsInPage(input: {
       let oldestSeenMs = Number.POSITIVE_INFINITY;
       let newestSeenMs = 0;
 
-      ranges.forEach((_range, index) => {
-        if (index === 0) {
-          reportProgress("parse_fetching_ranges", 20);
-        }
-      });
+      // The bank returns one response per range and tells us nothing about whether more
+      // was available. If a response is capped, the rest of that range is lost silently —
+      // and the denser the spending, the more is lost, so exactly the periods that matter
+      // most suffer. Rather than guess how the bank paginates (a contract we do not
+      // control and would not be told about if it changed), a range whose response looks
+      // capped is halved and re-requested until each half comes back short of the cap.
+      //
+      // TODO: re-derive SUSPECTED_PAGE_LIMIT from a recorded cassette (see the connector
+      // cassette work) — until then it is set to the smallest page size worth suspecting,
+      // which errs towards extra requests rather than towards silent loss.
+      const SUSPECTED_PAGE_LIMIT = 100;
+      const MIN_RANGE_SPAN_MS = pageDayMs;
 
-      for (const [index, range] of ranges.entries()) {
+      reportProgress("parse_fetching_ranges", 20);
+
+      const pendingRanges = ranges.slice();
+      let processedRangeCount = 0;
+      let plannedRangeCount = pendingRanges.length;
+
+      while (pendingRanges.length > 0) {
+        const range = pendingRanges.shift() as { start: number; end: number };
         const rangeUrl = buildRangeUrl(operationsApiUrl, range.start, range.end);
         const response = await fetch(rangeUrl, {
           credentials: "include",
@@ -1343,6 +1373,7 @@ function extractOperationsInPage(input: {
         const histogramKey = String(response.status);
         debugMeta.response_status_histogram[histogramKey] =
           (debugMeta.response_status_histogram[histogramKey] ?? 0) + 1;
+        processedRangeCount += 1;
         if (!response.ok) continue;
 
         const json = asObj(await response.json().catch(() => null));
@@ -1354,12 +1385,16 @@ function extractOperationsInPage(input: {
         }
         const payload = Array.isArray(json?.payload) ? json.payload : [];
         attempt.payload_count = payload.length;
+
+        let oldestInResponseMs: number | null = null;
         for (const rawItem of payload) {
           const operation = asObj(rawItem);
           if (!operation) continue;
 
           const operationMs = extractTimeMs(operation);
           if (operationMs === null) continue;
+          oldestInResponseMs =
+            oldestInResponseMs === null ? operationMs : Math.min(oldestInResponseMs, operationMs);
           if (operationMs < windowFromMs) {
             debugMeta.out_of_range_skip_count += 1;
             debugMeta.preflight_enrichment_skip_count += 1;
@@ -1376,9 +1411,43 @@ function extractOperationsInPage(input: {
           newestSeenMs = Math.max(newestSeenMs, operationMs);
         }
 
-        const rangeProgress = 20 + Math.round(((index + 1) / Math.max(1, ranges.length)) * 20);
-        reportProgress("parse_fetching_ranges", rangeProgress, operationMap.size);
+        // Two signatures of a response that did not carry its whole range: it came back at
+        // the page limit, or it came back nearly full while its oldest operation still sits
+        // well inside the range, which is what a cap applied from the newer end looks like.
+        const rangeSpanMs = range.end - range.start + 1;
+        const hitPageLimit = payload.length >= SUSPECTED_PAGE_LIMIT;
+        const nearlyFull = payload.length >= Math.floor(SUSPECTED_PAGE_LIMIT * 0.9);
+        const coverageGap =
+          nearlyFull &&
+          oldestInResponseMs !== null &&
+          oldestInResponseMs - range.start > rangeSpanMs / 2;
+
+        if (hitPageLimit || coverageGap) {
+          debugMeta.truncation_suspected_count += 1;
+          if (rangeSpanMs > MIN_RANGE_SPAN_MS) {
+            // Re-requesting both halves can only add operations: buildOperationKey already
+            // deduplicates, so what this response did carry is kept either way.
+            const midpoint = range.start + Math.floor(rangeSpanMs / 2);
+            pendingRanges.unshift(
+              { start: midpoint, end: range.end },
+              { start: range.start, end: midpoint - 1 },
+            );
+            plannedRangeCount += 2;
+            debugMeta.range_split_count += 1;
+          } else {
+            // A single day still at the cap is the one case the connector cannot resolve.
+            // Saying so is the point: a partly loaded window that looks complete is never
+            // revisited, and the missing operations are lost for good.
+            debugMeta.truncation_unresolved_count += 1;
+            debugMeta.partial_result = true;
+          }
+        }
+
+        const rangeProgress =
+          20 + Math.round((processedRangeCount / Math.max(1, plannedRangeCount)) * 20);
+        reportProgress("parse_fetching_ranges", Math.min(40, rangeProgress), operationMap.size);
       }
+      debugMeta.range_request_count = debugMeta.range_attempts.length;
 
       if (operationMap.size === 0) {
         throw new Error("No operations returned by API");
@@ -1550,6 +1619,10 @@ function extractOperationsInPage(input: {
           range_attempts: debugMeta.range_attempts,
           range_request_count: debugMeta.range_request_count,
           effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          range_split_count: debugMeta.range_split_count,
+          truncation_suspected_count: debugMeta.truncation_suspected_count,
+          truncation_unresolved_count: debugMeta.truncation_unresolved_count,
+          partial_result: debugMeta.partial_result,
           first_operation_posted_at: debugMeta.first_operation_posted_at,
           last_operation_posted_at: debugMeta.last_operation_posted_at,
           page_originated_operations_request_seen:
@@ -1573,6 +1646,12 @@ function extractOperationsInPage(input: {
       const domStartedMs = Date.now();
       const rows = parseDomFallbackRows(windowFromMs);
       debugMeta.dom_row_count = rows.length;
+      // The fallback reads the rendered feed once and does not scroll it, so it sees only
+      // what the page had already drawn — typically the first screen. Marking the run
+      // partial is what makes the window get asked for again instead of counted as closed;
+      // the rows it did produce are placeholders, replaceable on the next API pass.
+      debugMeta.partial_result = true;
+      debugMeta.truncation_unresolved_count += 1;
       reportProgress("parse_dom_rows_ready", 54, rows.length);
       debugMeta.stage_timings_ms.dom = Date.now() - domStartedMs;
       debugMeta.stage_timings_ms.total = Date.now() - startedAtMs;
@@ -1593,6 +1672,10 @@ function extractOperationsInPage(input: {
           range_attempts: debugMeta.range_attempts,
           range_request_count: debugMeta.range_request_count,
           effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          range_split_count: debugMeta.range_split_count,
+          truncation_suspected_count: debugMeta.truncation_suspected_count,
+          truncation_unresolved_count: debugMeta.truncation_unresolved_count,
+          partial_result: debugMeta.partial_result,
           first_operation_posted_at: debugMeta.first_operation_posted_at,
           last_operation_posted_at: debugMeta.last_operation_posted_at,
           page_originated_operations_request_seen:
