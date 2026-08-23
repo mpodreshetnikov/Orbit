@@ -3,7 +3,9 @@
 -- Rows must be canonical: account_id, source, external_id?, posted_at, amount, currency,
 -- transaction_type, status, merchant_name, mcc, comment, is_transfer, transfer_group_id?,
 -- raw_payload?, dedupe_hash, line_item: { title, amount, quantity?, unit?, raw_payload? }.
--- Uses ON CONFLICT (source, external_id) when external_id present, else ON CONFLICT (dedupe_hash).
+-- Uses ON CONFLICT (payer_person_id, source, external_id) when external_id present, else
+-- ON CONFLICT (payer_person_id, dedupe_hash). Identity is scoped to the payer: see
+-- 20260814093000_scope_money_transaction_identity.sql.
 -- dedupe_hash must be NOT NULL when external_id is null (e.g. file imports).
 
 DROP FUNCTION IF EXISTS public.money_upsert_transactions_batch(uuid, uuid, jsonb);
@@ -96,7 +98,7 @@ BEGIN
         r->'raw_payload',
         NULLIF(trim(r->>'dedupe_hash'), '')
       )
-      ON CONFLICT (source, external_id) WHERE (external_id IS NOT NULL) DO UPDATE
+      ON CONFLICT (payer_person_id, source, external_id) WHERE (external_id IS NOT NULL) DO UPDATE
       SET
         payer_person_id = EXCLUDED.payer_person_id,
         account_id = EXCLUDED.account_id,
@@ -187,7 +189,7 @@ BEGIN
         r->'raw_payload',
         trim(r->>'dedupe_hash')
       )
-      ON CONFLICT (dedupe_hash) DO UPDATE
+      ON CONFLICT (payer_person_id, dedupe_hash) WHERE (dedupe_hash IS NOT NULL) DO UPDATE
       SET
         payer_person_id = EXCLUDED.payer_person_id,
         account_id = EXCLUDED.account_id,
