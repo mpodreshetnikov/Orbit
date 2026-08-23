@@ -424,7 +424,8 @@ describe("tbank-web connector", () => {
       base_text_color: "FFFFFF",
     });
     expect((row?.raw_payload as Record<string, unknown>)?.account_hint).toBe("6986");
-    expect(row?.dedupe_hash).toMatch(/^tbw_/);
+    // The mapper leaves identity unset; applyMoneyDedupeHashes fills it for the whole run.
+    expect(row?.dedupe_hash).toBeNull();
     expect(row?.line_items).toHaveLength(2);
     expect((row?.line_items as Array<Record<string, unknown>>)[0]?.title).toBe("Chicken roll");
     expect((row?.line_items as Array<Record<string, unknown>>)[1]?.amount).toBe(-658);

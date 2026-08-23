@@ -280,7 +280,11 @@ export async function applyBatchAction(
       const tx = await deps.repository.insertOrResolveTransaction(normalized, payerPersonId);
 
       let txStatus: RowStatus = tx.inserted ? "inserted" : "skipped";
-      let txMessage = tx.inserted ? null : "Duplicate transaction";
+      let txMessage = tx.inserted
+        ? null
+        : tx.adopted
+          ? "Adopted an existing statement transaction"
+          : "Duplicate transaction";
 
       const lineItems = normalizeLineItems(normalized);
 

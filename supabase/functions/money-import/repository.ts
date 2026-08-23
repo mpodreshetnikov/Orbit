@@ -27,6 +27,14 @@ import type {
   UserAuthContext,
 } from "./types.ts";
 
+/**
+ * How far apart a statement row and the same operation from the bank's API may sit and
+ * still be considered the same purchase. A statement distinguishes the operation date from
+ * the payment date, and those can be a couple of days apart; three days covers that with
+ * room to spare while staying far short of a monthly billing cycle.
+ */
+export const ADOPTION_WINDOW_HOURS = 72;
+
 export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
@@ -80,7 +88,14 @@ export interface MoneyImportRepository {
     payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]>;
-  findExistingTransactionId(row: CanonicalTransactionRowInput): Promise<string | null>;
+  findExistingTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<string | null>;
+  findAdoptableTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<{ id: string } | { ambiguous: true } | null>;
   findExistingLineItemId(transactionId: string, importHash: string): Promise<string | null>;
   repairExistingTransactionDetails(
     transactionId: string,
@@ -94,7 +109,7 @@ export interface MoneyImportRepository {
   insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
-  ): Promise<{ transactionId: string; inserted: boolean }>;
+  ): Promise<{ transactionId: string; inserted: boolean; adopted?: boolean }>;
   insertLineItemIfNew(
     transactionId: string,
     lineItem: ImportLineItemInput,
@@ -557,8 +572,16 @@ export function createSupabaseMoneyImportRepository(
 
   async function findExistingTransactionId(
     row: CanonicalTransactionRowInput,
+    payerPersonId: string,
   ): Promise<string | null> {
-    let query = getAdminClient().from("money_transactions").select("id").limit(1);
+    // Both identity keys are scoped to the payer, matching the unique indexes. Without the
+    // filter two people importing from the same bank share one namespace, and one person's
+    // operation can resolve to the other's row.
+    let query = getAdminClient()
+      .from("money_transactions")
+      .select("id")
+      .eq("payer_person_id", payerPersonId)
+      .limit(1);
     if (row.external_id) {
       query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
     } else if (row.dedupe_hash) {
@@ -570,6 +593,57 @@ export function createSupabaseMoneyImportRepository(
     const { data, error } = await query.maybeSingle();
     if (error || !data) return null;
     return normalizeText((data as Record<string, unknown>).id);
+  }
+
+  /**
+   * Finds a statement transaction that describes the same purchase as an operation coming
+   * from the extension.
+   *
+   * A statement row and an API row never hash alike — the merchant text differs between the
+   * two sources — and the statement row has no external id, so neither identity key can
+   * match. Without this, loading a statement and then visiting the bank site produces a
+   * second copy of every operation and doubles the reported spending.
+   *
+   * The match is deliberately narrow: same payer, same account, same amount to the kopeck,
+   * no external id yet, and posted within ADOPTION_WINDOW_HOURS — wide enough to cover the
+   * gap between a statement's operation date and its payment date.
+   *
+   * When more than one candidate fits, nothing is adopted. Two identical purchases on one
+   * day are rare but real, and merging the wrong one loses an operation for good.
+   */
+  async function findAdoptableTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<{ id: string } | { ambiguous: true } | null> {
+    const accountId = normalizeText(row.account_id);
+    const postedAtIso = toIsoOrNull(row.posted_at);
+    const amount = toNumberOrNull(row.amount);
+    if (!accountId || !postedAtIso || amount === null) return null;
+
+    const postedAtMs = new Date(postedAtIso).getTime();
+    if (!Number.isFinite(postedAtMs)) return null;
+    const windowMs = ADOPTION_WINDOW_HOURS * 60 * 60 * 1000;
+
+    const { data, error } = await getAdminClient()
+      .from("money_transactions")
+      .select("id, amount")
+      .eq("payer_person_id", payerPersonId)
+      .eq("account_id", accountId)
+      .is("external_id", null)
+      .gte("posted_at", new Date(postedAtMs - windowMs).toISOString())
+      .lte("posted_at", new Date(postedAtMs + windowMs).toISOString());
+    if (error || !data) return null;
+
+    const candidates = (data as Array<Record<string, unknown>>).filter((candidate) => {
+      const candidateAmount = toNumberOrNull(candidate.amount);
+      return candidateAmount !== null && Math.abs(candidateAmount - amount) < 0.005;
+    });
+
+    if (candidates.length === 0) return null;
+    if (candidates.length > 1) return { ambiguous: true };
+
+    const id = normalizeText(candidates[0].id);
+    return id ? { id } : null;
   }
 
   async function listLineItemsByTransactionIds(
@@ -613,7 +687,7 @@ export function createSupabaseMoneyImportRepository(
 
   async function getExistingTransactionStates(
     source: string,
-    _payerPersonId: string,
+    payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]> {
     if (candidates.length === 0) return [];
@@ -640,6 +714,7 @@ export function createSupabaseMoneyImportRepository(
       const { data } = await getAdminClient()
         .from("money_transactions")
         .select("id, source, external_id, dedupe_hash, receipt_enrichment_status")
+        .eq("payer_person_id", payerPersonId)
         .eq("source", normalizeSourceForTransactions(source))
         .in("external_id", externalIds);
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
@@ -652,6 +727,7 @@ export function createSupabaseMoneyImportRepository(
       const { data } = await getAdminClient()
         .from("money_transactions")
         .select("id, source, external_id, dedupe_hash, receipt_enrichment_status")
+        .eq("payer_person_id", payerPersonId)
         .in("dedupe_hash", dedupeHashes);
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
         const dedupeHash = normalizeText(row.dedupe_hash);
@@ -659,15 +735,67 @@ export function createSupabaseMoneyImportRepository(
       }
     }
 
+    // Third pass: statement rows that describe the same purchase but carry neither key.
+    // Without it the extension treats every already-loaded statement operation as new, and
+    // never queues it for the receipt it is missing.
+    const unmatchedCandidates = candidates.filter((candidate) => {
+      const externalId = normalizeText(candidate.external_id);
+      const dedupeHash = normalizeText(candidate.dedupe_hash);
+      if (externalId && matchesByExternalId.has(externalId)) return false;
+      if (dedupeHash && matchesByDedupeHash.has(dedupeHash)) return false;
+      return toIsoOrNull(candidate.posted_at) !== null && toNumberOrNull(candidate.amount) !== null;
+    });
+
+    const adoptableByCandidateIndex = new Map<number, Record<string, unknown>>();
+    if (unmatchedCandidates.length > 0) {
+      const windowMs = ADOPTION_WINDOW_HOURS * 60 * 60 * 1000;
+      const candidateTimes = unmatchedCandidates
+        .map((candidate) => new Date(toIsoOrNull(candidate.posted_at) as string).getTime())
+        .filter((value) => Number.isFinite(value));
+      const earliest = Math.min(...candidateTimes) - windowMs;
+      const latest = Math.max(...candidateTimes) + windowMs;
+
+      const { data } = await getAdminClient()
+        .from("money_transactions")
+        .select("id, posted_at, amount, receipt_enrichment_status")
+        .eq("payer_person_id", payerPersonId)
+        .is("external_id", null)
+        .gte("posted_at", new Date(earliest).toISOString())
+        .lte("posted_at", new Date(latest).toISOString());
+      const statementRows = (data ?? []) as Array<Record<string, unknown>>;
+
+      candidates.forEach((candidate, index) => {
+        if (!unmatchedCandidates.includes(candidate)) return;
+        const candidateMs = new Date(toIsoOrNull(candidate.posted_at) as string).getTime();
+        const candidateAmount = toNumberOrNull(candidate.amount);
+        if (!Number.isFinite(candidateMs) || candidateAmount === null) return;
+
+        const matches = statementRows.filter((row) => {
+          const rowAmount = toNumberOrNull(row.amount);
+          const rowMs = new Date(toIsoOrNull(row.posted_at) ?? "").getTime();
+          return (
+            rowAmount !== null &&
+            Number.isFinite(rowMs) &&
+            Math.abs(rowAmount - candidateAmount) < 0.005 &&
+            Math.abs(rowMs - candidateMs) <= windowMs
+          );
+        });
+        // Ambiguity is reported as "not here yet". The row then travels through the normal
+        // import path, which refuses the merge loudly instead of guessing.
+        if (matches.length === 1) adoptableByCandidateIndex.set(index, matches[0]);
+      });
+    }
+
     const matchedTransactions = Array.from(
       new Set(
         candidates
-          .map((candidate) => {
+          .map((candidate, index) => {
             const externalId = normalizeText(candidate.external_id);
             const dedupeHash = normalizeText(candidate.dedupe_hash);
             return (
               (externalId ? matchesByExternalId.get(externalId) : null) ??
               (dedupeHash ? matchesByDedupeHash.get(dedupeHash) : null) ??
+              adoptableByCandidateIndex.get(index) ??
               null
             );
           })
@@ -685,12 +813,13 @@ export function createSupabaseMoneyImportRepository(
       lineItemsByTransactionId.set(transactionId, existing);
     }
 
-    return candidates.map((candidate) => {
+    return candidates.map((candidate, index) => {
       const externalId = normalizeText(candidate.external_id);
       const dedupeHash = normalizeText(candidate.dedupe_hash);
       const matchedRow =
         (externalId ? matchesByExternalId.get(externalId) : null) ??
         (dedupeHash ? matchesByDedupeHash.get(dedupeHash) : null) ??
+        adoptableByCandidateIndex.get(index) ??
         null;
       const transactionId = normalizeText(matchedRow?.id);
       if (!transactionId) {
@@ -1529,10 +1658,60 @@ export function createSupabaseMoneyImportRepository(
     };
   }
 
+  async function updateResolvedTransaction(
+    transactionId: string,
+    row: CanonicalTransactionRowInput,
+  ): Promise<void> {
+    const { error } = await getAdminClient()
+      .from("money_transactions")
+      .update(
+        buildTransactionUpdatePayload(
+          row,
+        ) as Database["public"]["Tables"]["money_transactions"]["Update"],
+      )
+      .eq("id", transactionId);
+    if (error) {
+      throw new Error(error.message || "Failed to update duplicate transaction");
+    }
+  }
+
   async function insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
-  ): Promise<{ transactionId: string; inserted: boolean }> {
+  ): Promise<{ transactionId: string; inserted: boolean; adopted?: boolean }> {
+    // Identity is resolved before inserting, in this order: the two exact keys first, then
+    // adoption. Adoption cannot be left to the unique-violation path, because an adoptable
+    // statement row collides with nothing — the insert would simply succeed and leave two
+    // rows describing one purchase.
+    const existingId = await findExistingTransactionId(row, payerPersonId);
+    if (existingId) {
+      await updateResolvedTransaction(existingId, row);
+      return { transactionId: existingId, inserted: false };
+    }
+
+    if (normalizeText(row.external_id)) {
+      const adoptable = await findAdoptableTransactionId(row, payerPersonId);
+      if (adoptable && "ambiguous" in adoptable) {
+        throw new Error("Multiple statement transactions match this operation");
+      }
+      if (adoptable) {
+        // Taking on the incoming identity keys is what stops the next run from adopting
+        // again: from here the operation matches on external_id like any other.
+        const { error: adoptError } = await getAdminClient()
+          .from("money_transactions")
+          .update({
+            ...buildTransactionUpdatePayload(row),
+            external_id: normalizeText(row.external_id),
+            dedupe_hash: normalizeText(row.dedupe_hash),
+          } as Database["public"]["Tables"]["money_transactions"]["Update"])
+          .eq("id", adoptable.id);
+        if (adoptError) {
+          throw new Error(adoptError.message || "Failed to adopt statement transaction");
+        }
+        return { transactionId: adoptable.id, inserted: false, adopted: true };
+      }
+    }
+
     const payload = buildTransactionInsertPayload(row, payerPersonId);
     const { data, error } = await getAdminClient()
       .from("money_transactions")
@@ -1551,24 +1730,14 @@ export function createSupabaseMoneyImportRepository(
       throw new Error((error as { message?: string })?.message || "Failed to insert transaction");
     }
 
-    const existingId = await findExistingTransactionId(row);
-    if (!existingId) {
+    // A concurrent run inserted the same operation between the lookup and the insert.
+    const raced = await findExistingTransactionId(row, payerPersonId);
+    if (!raced) {
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 
-    const { error: updateError } = await getAdminClient()
-      .from("money_transactions")
-      .update(
-        buildTransactionUpdatePayload(
-          row,
-        ) as Database["public"]["Tables"]["money_transactions"]["Update"],
-      )
-      .eq("id", existingId);
-    if (updateError) {
-      throw new Error(updateError.message || "Failed to update duplicate transaction");
-    }
-
-    return { transactionId: existingId, inserted: false };
+    await updateResolvedTransaction(raced, row);
+    return { transactionId: raced, inserted: false };
   }
 
   async function insertLineItemIfNew(
@@ -1713,6 +1882,7 @@ export function createSupabaseMoneyImportRepository(
     updateBatchBrandResolutionSelection,
     getExistingTransactionStates,
     findExistingTransactionId,
+    findAdoptableTransactionId,
     findExistingLineItemId,
     repairExistingTransactionDetails,
     insertOrResolveTransaction,

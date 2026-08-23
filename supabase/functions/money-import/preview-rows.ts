@@ -473,7 +473,10 @@ export async function previewRowsAction(
       }
       inRangeRowCount += 1;
 
-      const existingTransactionId = await deps.repository.findExistingTransactionId(normalized);
+      const existingTransactionId = await deps.repository.findExistingTransactionId(
+        normalized,
+        payerPersonId,
+      );
       const txStatus: RowStatus = existingTransactionId ? "skipped" : "inserted";
       const txMessage = existingTransactionId ? "Duplicate transaction" : null;
       if (txStatus === "inserted") insertedCount += 1;

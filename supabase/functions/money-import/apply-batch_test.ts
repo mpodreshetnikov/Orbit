@@ -21,6 +21,8 @@ interface RepositoryMockOptions {
   storedRows: CanonicalTransactionRowInput[];
   /** External ids that resolve to an already existing transaction. */
   existingExternalIds?: string[];
+  /** External ids that adopt a statement transaction instead of inserting a new row. */
+  adoptedExternalIds?: string[];
   /** Repair verdict for a given transaction id. */
   blockedByManualEdit?: boolean;
 }
@@ -46,6 +48,7 @@ function createRepositoryMock(options: RepositoryMockOptions): {
     meta: null,
   };
   const existingExternalIds = new Set(options.existingExternalIds ?? []);
+  const adoptedExternalIds = new Set(options.adoptedExternalIds ?? []);
   let txCounter = 0;
   let lineCounter = 0;
 
@@ -76,9 +79,17 @@ function createRepositoryMock(options: RepositoryMockOptions): {
     resolveCardIdForRow: async () => "card-1",
     getExistingTransactionStates: async () => [],
     findExistingTransactionId: async () => null,
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async (row) => {
       const externalId = row.external_id ?? "";
+      if (adoptedExternalIds.has(externalId)) {
+        return {
+          transactionId: `tx-statement-${externalId}`,
+          inserted: false,
+          adopted: true,
+        };
+      }
       if (existingExternalIds.has(externalId)) {
         return { transactionId: `tx-existing-${externalId}`, inserted: false };
       }
@@ -276,4 +287,37 @@ Deno.test("applyBatchAction rejects a receipt that cannot belong to the operatio
   // The guard runs before the destructive step, so nothing was deleted.
   assertEquals(state.repairCalls.length, 0);
   assertEquals(state.insertedLineItems.length, 0);
+});
+
+Deno.test("applyBatchAction adopts a statement transaction and fills in its receipt", async () => {
+  // The main expected flow: a CSV statement was loaded first, then the extension sees the
+  // same purchase. One transaction must come out of it, with the real composition — not a
+  // second copy of the operation.
+  const { repository, state } = createRepositoryMock({
+    adoptedExternalIds: ["op-7"],
+    storedRows: [
+      txRow({
+        external_id: "op-7",
+        amount: -1000,
+        line_items: [
+          { title: "Молоко", amount: -400 },
+          { title: "Хлеб", amount: -600 },
+        ],
+      }),
+    ],
+  });
+
+  const response = await applyBatchAction({ batch_id: "batch-1" }, userAuth, { repository });
+  await assertJsonResponse(response, 200);
+
+  const reportRows = transactionReportRows(state);
+  assertEquals(reportRows.length, 1);
+  assertEquals(reportRows[0].status, "skipped");
+  assertEquals(reportRows[0].message, "Adopted an existing statement transaction");
+  assertEquals(reportRows[0].transaction_id, "tx-statement-op-7");
+
+  // The statement placeholder is replaced rather than joined, so the sums stay right.
+  assertEquals(state.repairCalls.length, 1);
+  assertEquals(state.repairCalls[0].transactionId, "tx-statement-op-7");
+  assertEquals(state.insertedLineItems.length, 2);
 });

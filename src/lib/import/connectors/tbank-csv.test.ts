@@ -68,8 +68,11 @@ describe("tbank-csv connector", () => {
       ["c", "d"],
     ]);
 
-    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T12:30:05.000Z");
-    expect(parseTBankDate("01.02.2026")).toBe("2026-02-01T00:00:00.000Z");
+    // Statement times are Moscow wall clock (UTC+03:00), not UTC.
+    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T09:30:05.000Z");
+    expect(parseTBankDate("01.02.2026")).toBe("2026-01-31T21:00:00.000Z");
+    // A late-evening purchase must stay on its own calendar day in Moscow.
+    expect(parseTBankDate("01.02.2026 23:30:00")).toBe("2026-02-01T20:30:00.000Z");
     expect(parseTBankDate("")).toBeNull();
     expect(parseTBankDate("2026-02-01")).toBeNull();
 
@@ -133,7 +136,7 @@ describe("tbank-csv connector", () => {
 
     expect(result.transactions[0]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-01T12:30:00.000Z",
+        posted_at: "2026-02-01T09:30:00.000Z",
         transaction_type: "expense",
         status: "posted",
         account_hint: "1234",
@@ -150,7 +153,7 @@ describe("tbank-csv connector", () => {
     );
     expect(result.transactions[1]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-02T00:00:00.000Z",
+        posted_at: "2026-02-01T21:00:00.000Z",
         currency: "RUB",
         transaction_type: "income",
         status: "pending",
@@ -173,5 +176,53 @@ describe("tbank-csv connector", () => {
     );
     expect(result.transactions[1].line_items[0].title).toBe("T-Bank");
     expect(result.transactions[0].dedupe_hash).toEqual(expect.any(String));
+    // Statement rows are placeholders: they carry no receipt composition and must be
+    // replaced when the extension fetches the real one.
+    expect(result.transactions[0].line_items[0].is_placeholder).toBe(true);
+  });
+
+  it("gives repeated identical purchases distinct dedupe hashes", async () => {
+    const header = [
+      COL.DATE_OP,
+      COL.DATE_PAY,
+      COL.CARD,
+      COL.STATUS,
+      COL.AMOUNT_OP,
+      COL.CURRENCY_OP,
+      COL.CATEGORY,
+      COL.MCC,
+      COL.DESCRIPTION,
+    ].join(";");
+
+    const identicalRow = [
+      "01.02.2026 12:30:00",
+      "",
+      "**** 1234",
+      "OK",
+      "-120,50",
+      "RUB",
+      "Food",
+      "5812",
+      "Coffee",
+    ].join(";");
+
+    const file = new File([`${header}\n${identicalRow}\n${identicalRow}\n`], "sample.csv", {
+      type: "text/csv",
+    });
+    const result = await tbankConnector.parse(file);
+
+    expect(result.transactions).toHaveLength(2);
+    expect(result.transactions[0].dedupe_hash).not.toBe(result.transactions[1].dedupe_hash);
+
+    // Re-parsing the same statement must reproduce both hashes, or a second import
+    // would create copies instead of recognising duplicates.
+    const again = await tbankConnector.parse(
+      new File([`${header}\n${identicalRow}\n${identicalRow}\n`], "sample.csv", {
+        type: "text/csv",
+      }),
+    );
+    expect(again.transactions.map((row) => row.dedupe_hash)).toEqual(
+      result.transactions.map((row) => row.dedupe_hash),
+    );
   });
 });

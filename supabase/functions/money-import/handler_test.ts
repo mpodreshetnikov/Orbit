@@ -82,6 +82,7 @@ function createRepositoryMock(
     resolveAccountIdForRow: async () => "acc-1",
     resolveCardIdForRow: async () => "card-target",
     findExistingTransactionId: async () => null,
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     getExistingTransactionStates: async () => [],
     repairExistingTransactionDetails: async () => ({

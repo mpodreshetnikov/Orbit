@@ -1,4 +1,5 @@
 import { registerConnector } from "./registry.js";
+import { applyMoneyDedupeHashes } from "./dedupe-hashes.js";
 import type {
   Connector,
   ConnectorParseInput,
@@ -436,15 +437,9 @@ function mapOperationRecordToRowWithReason(
           },
         },
       },
-      dedupe_hash: buildDedupeHash({
-        external_id: externalId,
-        posted_at: postedAt,
-        amount: signedAmount,
-        merchant_name: merchantName,
-        account_hint: accountHint,
-        operation_id: normalizeText(asObject(operation.operationId)?.value),
-        authorization_id: normalizeText(operation.authorizationId),
-      }),
+      // dedupe_hash is filled in by applyMoneyDedupeHashes once the whole run is mapped:
+      // the shared formula needs to see sibling rows to number repeats, and it is async.
+      dedupe_hash: null,
       line_items: buildLineItemsFromReceipt(shoppingReceipt, signedAmount, merchantName),
     },
   };
@@ -693,6 +688,10 @@ const connector: Connector = {
         : Array.isArray(extraction.rows)
           ? extraction.rows
           : [];
+
+    // Both extraction paths get their identity from the one formula the web app and the
+    // database migration also use, so the same operation hashes alike wherever it is seen.
+    await applyMoneyDedupeHashes(rows, "tbank");
 
     const debugSummary = summarizeExtractionDiagnostics(
       extraction,
@@ -2712,27 +2711,4 @@ function buildLineItemsFromReceipt(
       raw_payload: { source: "fallback" },
     },
   ];
-}
-
-function hashString(input: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-function buildDedupeHash(row: JsonMap): string {
-  return `tbw_${hashString(
-    [
-      row.external_id || "",
-      row.operation_id || "",
-      row.authorization_id || "",
-      row.posted_at || "",
-      row.amount || "",
-      row.merchant_name || "",
-      row.account_hint || "",
-    ].join("|"),
-  )}`;
 }

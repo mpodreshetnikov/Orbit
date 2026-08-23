@@ -1,4 +1,5 @@
 import { registerConnector } from "./registry.js";
+import { applyMoneyDedupeHashes } from "./dedupe-hashes.js";
 import type { Connector, ConnectorParseInput, ConnectorParseOutput } from "./types.js";
 
 const HISTORY_PAGE_URL = "https://web.alfabank.ru/history/";
@@ -124,6 +125,8 @@ const connector: Connector = {
         return mapped.row;
       })
       .filter(Boolean) as JsonMap[];
+
+    await applyMoneyDedupeHashes(rows, "alfa");
 
     return {
       rows,
@@ -814,14 +817,8 @@ function mapOperationRecordToRowWithReason(
         operation_detail: operationDetail,
         receipt,
       },
-      dedupe_hash: buildDedupeHash({
-        external_id: externalId,
-        posted_at: postedAt,
-        amount: signedAmount,
-        merchant_name: merchantName,
-        account_hint: accountHint,
-        operation_id: normalizeText(operation.operationId),
-      }),
+      // Filled in by applyMoneyDedupeHashes once the run is mapped — see tbank-web.
+      dedupe_hash: null,
       line_items: buildLineItemsFromReceipt(receipt, signedAmount, merchantName),
     },
   };
@@ -1070,28 +1067,6 @@ function normalizeMcc(value: unknown): string | null {
   if (!text) return null;
   const match = text.match(/\d{4}/);
   return match ? match[0] : null;
-}
-
-function buildDedupeHash(row: JsonMap): string {
-  return `afw_${hashString(
-    [
-      row.external_id || "",
-      row.operation_id || "",
-      row.posted_at || "",
-      row.amount || "",
-      row.merchant_name || "",
-      row.account_hint || "",
-    ].join("|"),
-  )}`;
-}
-
-function hashString(input: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 async function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
