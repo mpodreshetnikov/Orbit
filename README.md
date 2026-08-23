@@ -1,74 +1,350 @@
+<div align="center">
+
+<img src="./public/icons/icon-512x512.png" alt="Orbit" width="96" height="96" />
+
 # Orbit
 
-A self-hosted personal superapp for tracking **health** and **money** for yourself, your family, and your pets.
+**A self-hosted personal superapp for the two things that quietly run your life: your health and your money.**
 
-It is built as a single Next.js application on top of Supabase, with an accompanying browser extension for importing bank data and an MCP connector that exposes the Health domain to AI agents.
+Everything about you, your family, and your pets — in one place you actually own.
 
-> This is a personal project, published so the architecture and workflows can be read and reused. It is designed to be run by its owner: application access is gated by an explicit allowlist, and there is no multi-tenant sign-up flow.
+[![Deploy](https://github.com/mpodreshetnikov/Orbit/actions/workflows/main.yml/badge.svg)](https://github.com/mpodreshetnikov/Orbit/actions/workflows/main.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org)
+[![React 19](https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Edge-3ecf8e?logo=supabase&logoColor=white)](https://supabase.com)
+[![MCP](https://img.shields.io/badge/MCP-connector-6b5bd6)](./docs/design/domains/health/mcp-server.md)
+[![100% agent-built](https://img.shields.io/badge/code-100%25%20agent--written-ff6f3c)](#100-agent-built)
 
-## Features
+</div>
 
-- **Health** — medical records, lab observations, findings, conditions, medications and doses, body measurements, and checkups. Uploaded documents are run through an OCR and LLM extraction pipeline that turns scans into structured, queryable data.
-- **Money** — accounts, transactions, categories with a canonical rule pipeline, budgets, and an audit trail. Bank data is ingested through a browser extension rather than a third-party aggregator.
-- **MCP connector** — the Health domain is exposed over the Model Context Protocol with an in-app OAuth 2.1 server, so an agent can query your records with scoped access.
-- **PWA** — installable, with push notifications delivered through a service worker.
+---
 
-## Runtime surfaces
+## What is this?
 
-| Surface           | Stack                                          |
-| ----------------- | ---------------------------------------------- |
-| Web app           | Next.js (App Router), React Query, Tailwind    |
-| Database          | Supabase Postgres — RLS-first, pg_cron, pg_net |
-| Edge Functions    | Deno — OCR, LLM structuring, import, cron      |
-| Browser extension | Chrome MV3 — bank web-export ingestion         |
-| Observability     | OpenTelemetry → Grafana LGTM stack             |
+Your medical history lives in a shoebox of PDF scans. Your spending lives in a bank app that will
+happily forget it in two years. Neither talks to the other, and neither belongs to you.
 
-See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the full map of domains, layers, and boundaries.
+Orbit is one Next.js app on top of Supabase that fixes that for a single household:
+
+- **Photograph a lab report** → OCR + LLM extraction turn it into typed observations, findings and
+  conditions you can chart over five years.
+- **Import your bank statements** through your own browser, not a third-party aggregator that
+  resells your transaction history.
+- **Ask an agent about it** — the Health domain is exposed over the Model Context Protocol with a
+  real OAuth 2.1 consent screen and scoped tokens.
+
+And every line of it — app, schema, Edge Functions, extension, tests, and these docs — was written
+by AI agents. That is not a disclaimer; it is the most interesting thing about this repository, and
+it is described in [100% agent-built](#100-agent-built).
+
+> [!NOTE]
+> This is a personal project, published so the architecture, docs, and agent workflows can be read
+> and reused. It is designed to be run by its owner: access is gated by an explicit allowlist and
+> there is no multi-tenant sign-up flow. Fork it, don't sign up for it.
+
+---
+
+## Highlights
+
+### 🩺 Health
+
+Medical records, lab observations, findings, conditions, medications, doses, body measurements and
+recurring checkups — for every person **and pet** in the household.
+
+- **Scan → structured data.** A record moves through an explicit, resumable state machine:
+  `draft → ocr_processing → ocr_review → structuring → structure_review → active`. Every stage is
+  reviewable, retryable and idempotent — a double-click or a lost connection never creates a
+  duplicate record.
+- **Longitudinal history.** Observations are normalized against a catalog, so "hemoglobin" from a
+  2021 scan and a 2026 lab portal land on the same chart with the same units.
+- **ICD lookup** against the WHO ICD API for real condition coding.
+- **Medication regimens** that generate dose events, track inventory, and fire push reminders
+  through `pg_cron` → `pg_net` → Edge Function → service worker.
+
+### 💸 Money
+
+Accounts, cards, transactions with line-item splits, categories with a canonical rule pipeline,
+and an audit trail.
+
+- **Your browser is the connector.** A Chrome MV3 extension logs into your bank _as you_, exports
+  the data, and posts it to the `money-import` Edge Function. No credentials leave your machine and
+  no aggregator sits in the middle.
+- **Import sessions are inspectable** — batches, per-row status, and a debug harness
+  (`just extension-debug-live`) that produces `diagnostics.json`, a human report and a CSV preview
+  when a bank changes its DOM.
+- **FX rates** synced from the central bank, so multi-currency totals are honest.
+
+### 🤖 MCP connector
+
+The Health domain speaks [MCP](https://modelcontextprotocol.io) — `get_medical_record`,
+`get_observation_history`, `list_conditions`, `search_findings`, medication and checkup tools, and
+their write counterparts.
+
+- In-app **OAuth 2.1 authorization server** with a signed consent form.
+- **Separate read and write scopes**, checked again at dispatch time — a read-only token cannot
+  write even if the tool is called directly.
+- **Off by default.** Without `MCP_SERVER_ENABLED=1`, every MCP and OAuth route returns 404.
+
+### 📱 PWA
+
+Installable, offline-aware, bilingual (EN/RU), with push notifications rendered and actioned by a
+service worker.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph clients["Clients"]
+        PWA["Next.js PWA<br/>App Router · React Query"]
+        EXT["Chrome MV3 extension<br/>bank web export"]
+        AGENT["AI agent<br/>MCP client"]
+    end
+
+    subgraph app["Next.js runtime"]
+        MW["middleware<br/>auth + allowlist gate"]
+        API["API routes"]
+        MCP["MCP server<br/>+ OAuth 2.1"]
+    end
+
+    subgraph edge["Supabase Edge Functions (Deno)"]
+        OCR["health-ocr"]
+        STRUCT["health-structure"]
+        IMPORT["money-import"]
+        CRON["notifications-cron"]
+        MISC["icd-lookup · money-categorize · money-fx-sync"]
+    end
+
+    DB[("Postgres<br/>RLS-first · pg_cron · pg_net")]
+    EXTERNAL["OpenRouter · WHO ICD · CBR FX"]
+    OTEL["OpenTelemetry → Grafana LGTM"]
+
+    PWA --> MW --> API --> DB
+    EXT --> IMPORT --> DB
+    AGENT --> MCP --> DB
+    API --> OCR & STRUCT
+    DB -. pg_cron + pg_net .-> CRON --> DB
+    OCR & STRUCT & MISC --> EXTERNAL
+    app & edge -.-> OTEL
+```
+
+Five layers, with dependency rules that are actually written down in
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md):
+
+| Layer                        | Lives in                                                      | Rule                                                  |
+| ---------------------------- | ------------------------------------------------------------- | ----------------------------------------------------- |
+| 1. Presentation              | `src/app`, `src/components`                                   | May not duplicate durable business rules              |
+| 2. Application orchestration | `src/hooks`, `src/stores`                                     | Orchestrates calls; invariants belong below           |
+| 3. Domain workflow logic     | `supabase/functions`, `supabase/db/functions`, triggers, cron | Never depends on component assumptions                |
+| 4. Data governance           | `supabase/migrations`, `supabase/db/policies`                 | **Every user table has explicit RLS**                 |
+| 5. Delivery & operations     | `.github/workflows`, `justfile`, `scripts/just`               | DB behavior changes migration + deploy track together |
+
+### How a scan becomes data
+
+```mermaid
+sequenceDiagram
+    participant U as You
+    participant W as Add-record wizard
+    participant O as health-ocr
+    participant S as health-structure
+    participant DB as Postgres
+
+    U->>W: photo / PDF / pasted text
+    W->>DB: record (status draft)
+    W->>O: run OCR (keyed by record_id)
+    O->>DB: raw text + attachments · ocr_review
+    U->>W: correct the text
+    W->>S: structure it
+    S->>DB: observations, findings, conditions · structure_review
+    U->>W: approve or edit
+    W->>DB: status active
+    Note over DB: every state is durable —<br/>close the tab, resume later
+```
+
+Failures branch instead of dead-ending: OCR that returns garbage parks the record in `ocr_failed`
+with the error attached and a retry path that reuses the same record. The full contract is in
+[`docs/design/domains/health/records-ingestion-pipeline.md`](./docs/design/domains/health/records-ingestion-pipeline.md).
+
+---
+
+## Stack
+
+| Surface           | Built with                                                          |
+| ----------------- | ------------------------------------------------------------------- |
+| Web app           | Next.js 15 (App Router), React 19, React Query, Tailwind, shadcn/ui |
+| Database          | Supabase Postgres — RLS-first, `pg_cron`, `pg_net`, pgTAP tests     |
+| Edge Functions    | Deno 2 — OCR, LLM structuring, import, categorization, cron         |
+| Browser extension | Chrome MV3 + Vite, bank web-export connectors                       |
+| AI                | OpenRouter (vision OCR + structured extraction), WHO ICD API        |
+| Observability     | OpenTelemetry → Grafana LGTM (Loki, Tempo, Mimir)                   |
+| Delivery          | GitHub Actions → Vercel + Supabase, gitleaks pre-push hook          |
+
+---
 
 ## Getting started
 
-Prerequisites: `just`, Node.js 22, Deno 2.x, the Supabase CLI, and Docker.
+**Prerequisites:** [`just`](https://github.com/casey/just), Node.js 22, Deno 2.x, the Supabase CLI, and Docker.
+
+Bootstrapping is two-phase, because the keys you need in `.env.local` are printed by the local
+Supabase stack once it is up:
 
 ```bash
-just install-dependencies   # install dependencies
-just git-hooks-install      # enable hooks, including the pre-push secret scan
-just dev                    # start local Supabase, apply schema, seed, and run the dev stack
+just install-dependencies    # install dependencies
+just git-hooks-install       # enable hooks, including the pre-push secret scan
+
+just supabase-local-start    # phase 1 — bring up local Supabase
+just supabase-local-status   # copy the API URL and anon key from this output
+#                              into NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
+#                              in a new .env.local
+
+just dev                     # phase 2 — schema, seed, and the dev stack
 ```
 
 `just dev` is long-running and holds the foreground; tear it down with `just dev stop`.
 
-Full environment variable reference and first-run instructions are in [`docs/SETUP.md`](./docs/SETUP.md).
+The full environment variable reference — including the MCP connector and observability toggles —
+is in [`docs/SETUP.md`](./docs/SETUP.md).
 
-`just --list --unsorted` is the source of truth for available commands; [`AGENTS.md`](./AGENTS.md) maps the canonical command IDs used in plans and PRs.
-
-## Development
+### Everyday commands
 
 ```bash
-just quality      # format, lint, typecheck
-just test-unit    # all unit lanes (web, extension, node, functions)
-just test-e2e     # Playwright end-to-end flows
+just quality          # format, lint, typecheck — no builds, no DB, no tests
+just test-unit        # all unit lanes (web, extension, node, Deno functions)
+just test-e2e         # Playwright end-to-end flows
+just quality-db-test  # pgTAP tests against the local database
+just ci-verify-local  # the full local gate — static checks, builds, coverage, e2e
+just obs-up           # local Grafana LGTM stack
 ```
 
-The quality operating model — which checks run at which stage, and the final gate before handoff — is defined in [`docs/QUALITY.md`](./docs/QUALITY.md).
+`just --list --unsorted` is the source of truth for every command;
+[`AGENTS.md`](./AGENTS.md) maps the canonical command IDs used in plans and PRs.
+
+---
+
+## The quality bar
+
+These run on every push, and a failure blocks the merge:
+
+- **Secrets scan first.** gitleaks runs as a pre-push git hook _and_ as the first CI job. A leaked
+  key never reaches the remote.
+- **Runtime-split unit lanes** — web (jsdom), extension, node scripts, and Deno Edge Functions each
+  test in their real runtime instead of a lowest-common-denominator mock.
+- **pgTAP tests and a DB lint** scoped to the `public` schema, where warnings fail.
+- **Generated DB artifacts are verified, not trusted** — the schema snapshot and TypeScript types
+  are regenerated in CI and drift fails the build.
+
+Run on demand, deliberately kept out of the push path:
+
+- **Extraction quality is scored** against a fixture corpus of real documents
+  (`just test-extraction`, or the `Extraction Eval` workflow from the Actions tab). A live run calls
+  a paid provider, so it is manual by design; the default replays committed recordings and costs
+  nothing.
+
+The quality operating model — which checks run at which stage, and the final gate before handoff —
+is written down in [`docs/QUALITY.md`](./docs/QUALITY.md).
+
+---
+
+## 100% agent-built
+
+**No human has hand-written production code in this repository.** Not the React components, not the
+RLS policies, not the Deno functions, not the pgTAP tests, not this README. Agents wrote all of it.
+The human owns direction, review, and the merge button.
+
+"AI-assisted" is now the default everywhere and means very little. This is the stronger version, and
+it changes what the repository has to be: an agent has no memory of last month's decision, no
+hallway to ask in, and no instinct for "we don't do that here." Everything that a team would carry
+implicitly has to be written down, checkable, and enforced by something other than good intentions.
+
+So that is what the repository is built out of:
+
+- **Docs are contracts, not prose.** [`docs/design/core-beliefs.md`](./docs/design/core-beliefs.md)
+  states each belief with _why it exists_, _how it is enforced here_, _failure signals_, and
+  _corrective actions_. An agent can hold its own diff against that and answer honestly. A paragraph
+  of encouragement it cannot.
+- **[`AGENTS.md`](./AGENTS.md) is a map, not a bible.** It points at canonical knowledge in `docs/`
+  instead of restating it, so there is exactly one place to change when something changes — the
+  failure mode that quietly poisons agent-run repos is two documents that used to agree.
+- **Rules that live in SQL outlive the session.** Durable invariants are RLS policies, constraints
+  and triggers rather than checks in a component, because a rule enforced in the database is a rule
+  no future agent can forget, work around, or reimplement slightly differently on another surface.
+- **Skills are pinned like dependencies.** `.agents/skills` is mirrored into `.claude/skills` and
+  hash-locked in `skills-lock.json`; a drift check runs inside `just quality`. Vendored upstream
+  skills sit next to project-specific ones (`supabase-db-workflow`, `chrome-extension-web-scraping`,
+  `full-stack-traceability`, `relevant-quality-checks`), so "how we do things here" is versioned
+  rather than retold each session.
+- **The gates exist because self-reports are not evidence.** Everything in
+  [the quality bar](#the-quality-bar) runs in CI and fails the build on its own. An agent saying the
+  tests pass is a claim; the workflow going green is the fact. This is also why the checks are
+  strict enough to be annoying — they are the part of the process that cannot be talked out of.
+- **Traceability instead of recollection.** Structured logs, OTLP traces and correlation IDs run
+  across frontend, API, Edge Functions and Postgres, so an agent debugging yesterday's failure reads
+  a trace rather than guessing at context it never had.
+
+None of this is specific to Orbit. It is what the repo needed in order to be built this way, and it
+is the part most worth stealing.
+
+---
+
+## Repository layout
+
+```
+src/                    Next.js app — routes, components, hooks, stores, MCP tools
+supabase/
+  migrations/           migration history (67 and counting)
+  db/                   idempotent deploy track: functions, policies, triggers, cron, pgTAP
+  functions/            Deno Edge Functions
+browserExtension/       Chrome MV3 extension and bank connectors
+shared/                 code shared between app and extension
+docs/                   architecture, design, quality, security, runbook
+.agents/skills/         repo-local agent skills (mirrored to .claude/skills)
+scripts/just/           command implementations behind the justfile
+observability/          local Grafana LGTM configuration
+```
+
+---
 
 ## Documentation
 
-| Document                                         | Contents                                        |
-| ------------------------------------------------ | ----------------------------------------------- |
-| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Runtime surfaces, domain and layer boundaries   |
-| [`docs/DESIGN.md`](./docs/DESIGN.md)             | Design patterns and deep design notes           |
-| [`docs/SETUP.md`](./docs/SETUP.md)               | Local setup and environment variables           |
-| [`docs/QUALITY.md`](./docs/QUALITY.md)           | Quality gates and scoring model                 |
-| [`docs/SECURITY.md`](./docs/SECURITY.md)         | Access model, RLS expectations, secret handling |
-| [`docs/RUNBOOK.md`](./docs/RUNBOOK.md)           | Operations and debugging procedures             |
-| [`mcp/README.md`](./mcp/README.md)               | MCP server configuration and IDE sync           |
+| Document                                                                                 | Contents                                                          |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)                                         | Runtime surfaces, domain and layer boundaries, maturity scorecard |
+| [`docs/DESIGN.md`](./docs/DESIGN.md)                                                     | Design patterns, anti-patterns, deep design map                   |
+| [`docs/design/core-beliefs.md`](./docs/design/core-beliefs.md)                           | The principles the codebase is held to                            |
+| [`docs/SETUP.md`](./docs/SETUP.md)                                                       | Local setup and environment variables                             |
+| [`docs/QUALITY.md`](./docs/QUALITY.md)                                                   | Quality gates and scoring model                                   |
+| [`docs/SECURITY.md`](./docs/SECURITY.md)                                                 | Access model, RLS expectations, secret handling                   |
+| [`docs/RUNBOOK.md`](./docs/RUNBOOK.md)                                                   | Operations and debugging procedures                               |
+| [`docs/design/domains/health/mcp-server.md`](./docs/design/domains/health/mcp-server.md) | MCP tool surface, OAuth flow, client setup                        |
+| [`mcp/README.md`](./mcp/README.md)                                                       | MCP server configuration and IDE sync                             |
+
+---
 
 ## Security
 
-Access is allowlist-gated via `public.allowed_users`, enforced in middleware and backed by row-level security on every data table. Secrets are never committed — a gitleaks scan runs as a pre-push hook and as the first job in CI.
+Access is allowlist-gated via `public.allowed_users`, enforced in middleware and backed by
+row-level security on every data table — `is_allowed_user()` and ownership checks are applied in
+SQL, so any caller holding a user token gets the same answer whether it arrives through the web
+app, an API route, the extension or an MCP tool.
 
-If you find a security issue, please open an issue without including sensitive details, and see [`docs/SECURITY.md`](./docs/SECURITY.md) for the security model.
+Two trust boundaries, and it matters which one you are reading:
+
+- **User-scoped paths** are governed by RLS. The policy is the enforcement.
+- **Service-role paths** — cron routes and several Edge Functions that must act outside a user
+  session — deliberately hold a key that **bypasses RLS**, and are responsible for their own bearer
+  token, caller, and ownership validation. RLS does not protect them for free. If you fork this,
+  audit those paths yourself rather than assuming the policies cover them.
+
+Service-role credentials are confined to server contexts and never reach a client bundle.
+
+Found a security issue? Please open an issue **without** sensitive details, and see
+[`docs/SECURITY.md`](./docs/SECURITY.md) for the security model.
+
+---
 
 ## License
 
-[MIT](./LICENSE)
+[MIT](./LICENSE) © Maxim Podreshetnikov
