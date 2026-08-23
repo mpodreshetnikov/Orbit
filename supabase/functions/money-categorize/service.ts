@@ -1362,3 +1362,12 @@ export async function replayMoneyCategoryRulePipelineForDateRangeService(
     deps,
   );
 }
+
+/**
+ * Exposed for the conformance suite that runs the same corpus through this implementation
+ * and through money_evaluate_category_rule_filter in the database. Two implementations of
+ * one rule engine only stay equivalent if something checks.
+ */
+export const __test__ = {
+  evaluateRuleFilter,
+};

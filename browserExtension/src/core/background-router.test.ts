@@ -28,6 +28,10 @@ describe("background-router", () => {
         nowIso: vi.fn(() => "2026-01-01T00:00:00.000Z"),
       },
       debugStore: createImportDebugStore(),
+      grantStore: {
+        getGrant: vi.fn().mockResolvedValue(null),
+        setGrant: vi.fn().mockResolvedValue(undefined),
+      },
     };
   }
 
@@ -638,5 +642,50 @@ describe("background-router", () => {
 
     await expect(firstRunPromise).resolves.toMatchObject({ ok: true });
     expect(deps.importRunnerDeps.callEdge).toHaveBeenCalledTimes(2);
+  });
+
+  it("stores a grant handed over by the app", async () => {
+    const deps = createDeps();
+
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_SET_GRANT",
+          grant: {
+            token: "grant-token",
+            person_id: "person-1",
+            allowed_sources: ["tbank_web"],
+            app_origin: "https://app.example",
+          },
+        },
+        deps,
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    expect(deps.grantStore.setGrant).toHaveBeenCalledWith({
+      token: "grant-token",
+      personId: "person-1",
+      allowedSources: ["tbank_web"],
+      appOrigin: "https://app.example",
+      functionUrl: null,
+    });
+  });
+
+  it("refuses a grant without a token or a person", async () => {
+    const deps = createDeps();
+
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_SET_GRANT", grant: {} }, deps),
+    ).resolves.toEqual({ ok: false, error: "Grant token and person are required" });
+    expect(deps.grantStore.setGrant).not.toHaveBeenCalled();
+  });
+
+  it("clears a stored grant", async () => {
+    const deps = createDeps();
+
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_CLEAR_GRANT" }, deps),
+    ).resolves.toEqual({ ok: true });
+    expect(deps.grantStore.setGrant).toHaveBeenCalledWith(null);
   });
 });

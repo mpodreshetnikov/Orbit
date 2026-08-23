@@ -96,7 +96,17 @@ BEGIN
     WHEN 'equals_any_in_set' THEN
       CASE
         WHEN v_field IN ('line_item_amount', 'transaction_amount') THEN
-          to_char(v_number_value, 'FM999999999999999.################') = ANY(v_set_values)
+          -- Set membership on an amount is a text comparison against what the rule editor
+          -- stored, so the number has to be rendered the way the TypeScript engine renders
+          -- it: no padding and no trailing zeros. `#` is not a to_char template character —
+          -- it is copied through literally — so the previous mask produced values that could
+          -- never match anything.
+          (CASE
+            WHEN v_number_value IS NULL THEN NULL
+            WHEN strpos(v_number_value::text, '.') > 0
+              THEN rtrim(rtrim(v_number_value::text, '0'), '.')
+            ELSE v_number_value::text
+          END) = ANY(v_set_values)
         WHEN v_field = 'is_transfer' THEN
           COALESCE(v_boolean_value::text, '') = ANY(v_set_values)
         ELSE
@@ -105,7 +115,17 @@ BEGIN
     WHEN 'in_set' THEN
       CASE
         WHEN v_field IN ('line_item_amount', 'transaction_amount') THEN
-          to_char(v_number_value, 'FM999999999999999.################') = ANY(v_set_values)
+          -- Set membership on an amount is a text comparison against what the rule editor
+          -- stored, so the number has to be rendered the way the TypeScript engine renders
+          -- it: no padding and no trailing zeros. `#` is not a to_char template character —
+          -- it is copied through literally — so the previous mask produced values that could
+          -- never match anything.
+          (CASE
+            WHEN v_number_value IS NULL THEN NULL
+            WHEN strpos(v_number_value::text, '.') > 0
+              THEN rtrim(rtrim(v_number_value::text, '0'), '.')
+            ELSE v_number_value::text
+          END) = ANY(v_set_values)
         WHEN v_field = 'is_transfer' THEN
           COALESCE(v_boolean_value::text, '') = ANY(v_set_values)
         ELSE

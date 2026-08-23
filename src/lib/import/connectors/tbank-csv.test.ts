@@ -1,4 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import {
   COL,
   extractAccountHint,
@@ -224,5 +226,31 @@ describe("tbank-csv connector", () => {
     expect(again.transactions.map((row) => row.dedupe_hash)).toEqual(
       result.transactions.map((row) => row.dedupe_hash),
     );
+  });
+
+  it("parses the committed statement fixture end to end", () => {
+    // test/fixtures/tbank/sample.csv had been sitting unused since it was added, and its
+    // contents had been double-encoded along the way — the header row no longer matched the
+    // statement columns at all. Recovered and wired in here, it is now a real regression
+    // guard on the exact file shape the bank produces.
+    const fixturePath = path.resolve(__dirname, "../../../../test/fixtures/tbank/sample.csv");
+    const csv = fs.readFileSync(fixturePath, "utf8");
+    const rows = parseCSV(csv);
+
+    expect(rows[0]).toEqual([
+      COL.DATE_OP,
+      COL.DATE_PAY,
+      COL.CARD,
+      COL.STATUS,
+      COL.AMOUNT_OP,
+      COL.CURRENCY_OP,
+      COL.CATEGORY,
+      COL.MCC,
+      COL.DESCRIPTION,
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[1][0]).toBe("01.02.2026 12:30:00");
+    expect(parseAmount(rows[1][4])).toBe(-120.5);
+    expect(extractAccountHint(rows[1][2])).toBe("1234");
   });
 });

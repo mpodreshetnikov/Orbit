@@ -6,11 +6,13 @@ import {
 } from "./import-runner.js";
 import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
+import type { GrantStore, MoneyImportGrantCredential } from "./grant-store.js";
 import extensionManifest from "../../manifest.json";
 
 export interface BackgroundMessage {
   type: string;
   session?: Record<string, unknown>;
+  grant?: Record<string, unknown>;
   session_id?: string;
   source?: string;
   payer_person_id?: string;
@@ -41,6 +43,7 @@ export interface BackgroundRouterDeps {
   sessionStore: SessionStore;
   importRunnerDeps: BackgroundImportRunnerDeps;
   debugStore: ImportDebugStore;
+  grantStore?: GrantStore;
 }
 
 export interface BackgroundRouterContext {
@@ -240,6 +243,32 @@ export async function routeBackgroundMessage(
       extension_id: resolveRuntimeExtensionId(),
       extension_version: EXTENSION_VERSION,
     };
+  }
+
+  if (message.type === "MONEY_IMPORT_SET_GRANT") {
+    if (!deps.grantStore) return { ok: false, error: "Grant storage is unavailable" };
+    const grant = message.grant ?? {};
+    const token = typeof grant.token === "string" ? grant.token.trim() : "";
+    const personId = typeof grant.person_id === "string" ? grant.person_id.trim() : "";
+    if (!token || !personId) return { ok: false, error: "Grant token and person are required" };
+
+    const credential: MoneyImportGrantCredential = {
+      token,
+      personId,
+      allowedSources: Array.isArray(grant.allowed_sources)
+        ? grant.allowed_sources.filter((entry): entry is string => typeof entry === "string")
+        : [],
+      appOrigin: typeof grant.app_origin === "string" ? grant.app_origin : null,
+      functionUrl: typeof grant.function_url === "string" ? grant.function_url : null,
+    };
+    await deps.grantStore.setGrant(credential);
+    return { ok: true };
+  }
+
+  if (message.type === "MONEY_IMPORT_CLEAR_GRANT") {
+    if (!deps.grantStore) return { ok: false, error: "Grant storage is unavailable" };
+    await deps.grantStore.setGrant(null);
+    return { ok: true };
   }
 
   if (message.type === "MONEY_IMPORT_START_SESSION") {

@@ -102,7 +102,7 @@ const eslintConfig = [
     },
   },
   {
-    files: ["scripts/just/**/*.cjs"],
+    files: ["scripts/**/*.cjs"],
     languageOptions: {
       sourceType: "commonjs",
     },

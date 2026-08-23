@@ -200,6 +200,14 @@ export function createNotificationsCronHandler(deps: NotificationsCronDeps = {})
     });
     await digestSpan.end({ status: "ok" });
 
+    // Last line of defence for money import: if neither a bank-site visit nor the
+    // extension's own alarm has produced a completed run in days, the owner hears about it.
+    const moneyImportDigestSpan = telemetry.startSpan(
+      "edge.notifications_cron.create_money_import_stale_digests",
+    );
+    await rpcWithTelemetry("create_money_import_stale_digests", {});
+    await moneyImportDigestSpan.end({ status: "ok" });
+
     const { data: prefsRows } = await supabase
       .from("user_preferences")
       .select("auth_user_id, checkup_notification_time, checkup_notification_timezone")

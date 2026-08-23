@@ -50,6 +50,8 @@ function createRepositoryMock(
         }
       );
     },
+    getGrantByToken: async () => null,
+    markGrantUsed: async () => {},
     findLastImportedAt: async () => null,
     createImportSession: async () => ({ id: "session-1" }),
     getImportSessionForUser: async () => options.sessionForUser ?? null,

@@ -6,7 +6,8 @@
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -505,7 +506,27 @@ CREATE TABLE "public"."money_import_batches" (
     "skipped_count" integer DEFAULT 0 NOT NULL,
     "error_count" integer DEFAULT 0 NOT NULL,
     "completed_at" timestamp with time zone,
+    "created_by_auth_user_id" "uuid",
     CONSTRAINT "money_import_batches_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text", 'discarded'::"text"])))
+);
+
+
+--
+-- Name: money_import_grants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_import_grants" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "person_id" "uuid" NOT NULL,
+    "created_by_auth_user_id" "uuid" NOT NULL,
+    "label" "text" NOT NULL,
+    "token_hash" "text" NOT NULL,
+    "allowed_sources" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "expires_at" timestamp with time zone,
+    "revoked_at" timestamp with time zone,
+    "last_used_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );
 
 
@@ -557,7 +578,8 @@ CREATE TABLE "public"."money_line_items" (
     "category_locked_by_user" boolean DEFAULT false NOT NULL,
     "last_category_rule_id" "uuid",
     "last_category_rule_run_id" "uuid",
-    "category_assigned_at" timestamp with time zone
+    "category_assigned_at" timestamp with time zone,
+    "is_placeholder" boolean DEFAULT false NOT NULL
 );
 
 
@@ -867,7 +889,8 @@ ALTER TABLE ONLY "public"."db_deploy_log" ALTER COLUMN "id" SET DEFAULT "nextval
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -1884,6 +1907,34 @@ CREATE UNIQUE INDEX "idx_money_line_items_tx_import_hash" ON "public"."money_lin
 
 
 --
+-- Name: idx_money_line_items_placeholder; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_line_items_placeholder" ON "public"."money_line_items" USING "btree" ("transaction_id") WHERE "is_placeholder";
+
+
+--
+-- Name: idx_money_import_batches_created_by_auth_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_batches_created_by_auth_user_id" ON "public"."money_import_batches" USING "btree" ("created_by_auth_user_id");
+
+
+--
+-- Name: idx_money_import_grants_person_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_grants_person_id" ON "public"."money_import_grants" USING "btree" ("person_id");
+
+
+--
+-- Name: idx_money_transactions_adoption_lookup; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transactions_adoption_lookup" ON "public"."money_transactions" USING "btree" ("payer_person_id", "account_id", "posted_at") WHERE ("external_id" IS NULL);
+
+
+--
 -- Name: idx_money_transaction_brand_aliases_brand_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1933,10 +1984,10 @@ CREATE INDEX "idx_money_transactions_card_id" ON "public"."money_transactions" U
 
 
 --
--- Name: idx_money_transactions_dedupe_hash; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_money_transactions_person_dedupe_hash; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX "idx_money_transactions_dedupe_hash" ON "public"."money_transactions" USING "btree" ("dedupe_hash");
+CREATE UNIQUE INDEX "idx_money_transactions_person_dedupe_hash" ON "public"."money_transactions" USING "btree" ("payer_person_id", "dedupe_hash") WHERE ("dedupe_hash" IS NOT NULL);
 
 
 --
@@ -1968,10 +2019,10 @@ CREATE INDEX "idx_money_transactions_posted_at" ON "public"."money_transactions"
 
 
 --
--- Name: idx_money_transactions_source_external_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_money_transactions_person_source_external_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX "idx_money_transactions_source_external_id" ON "public"."money_transactions" USING "btree" ("source", "external_id") WHERE ("external_id" IS NOT NULL);
+CREATE UNIQUE INDEX "idx_money_transactions_person_source_external_id" ON "public"."money_transactions" USING "btree" ("payer_person_id", "source", "external_id") WHERE ("external_id" IS NOT NULL);
 
 
 --
@@ -2165,73 +2216,107 @@ CREATE INDEX "idx_record_observations_record_id" ON "public"."record_observation
 
 --
 -- Name: money_line_items audit_money_line_items_edits; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transactions audit_money_transactions_edits; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_delete_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_insert_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items checkup_item_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items checkup_item_set_next_due_insert; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_categories enforce_money_categories_invariants; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_categories prevent_money_categories_delete; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: body_site_catalog update_body_site_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items update_checkup_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: conditions update_conditions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: finding_type_catalog update_finding_type_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: measurement_catalog update_measurement_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: measurements update_measurements_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: med_dose_events update_med_dose_events_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: med_regimens update_med_regimens_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: medical_records update_medical_records_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: medication_refill_snoozes update_medication_refill_snoozes_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_accounts update_money_accounts_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_cards update_money_cards_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_categories update_money_categories_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_category_rules update_money_category_rules_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_import_batch_brand_resolutions update_money_import_batch_brand_resolutions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_line_items update_money_line_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transaction_brand_aliases update_money_transaction_brand_aliases_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transaction_brands update_money_transaction_brands_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transactions update_money_transactions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: notification_routing update_notification_routing_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: observation_catalog update_observation_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: persons update_persons_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: record_findings update_record_findings_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: record_observations update_record_observations_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: user_preferences update_user_preferences_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: allowed_users allowed_users_auth_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 

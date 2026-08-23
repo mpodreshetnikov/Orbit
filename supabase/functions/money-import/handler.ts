@@ -16,7 +16,7 @@ import {
   getImportContextAction,
   sessionStatusAction,
 } from "./session-actions.ts";
-import type { UserAuthContext } from "./types.ts";
+import type { GrantAuthContext, UserAuthContext } from "./types.ts";
 
 export interface MoneyImportHandlerDeps extends MoneyImportDeps {}
 
@@ -79,15 +79,18 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
     try {
       if (action === "create_session") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.create_session");
+        // The one action a grant may perform. Everything after it runs on the short-lived
+        // session token this hands back.
         const auth = (await resolveAuth(
           req,
           {
             authenticateAllowedUser: deps.repository.authenticateAllowedUser,
             getSessionByToken: deps.repository.getSessionByToken,
+            getGrantByToken: deps.repository.getGrantByToken,
             now: () => (deps.now ?? (() => new Date()))().getTime(),
           },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
+          { allowUser: true, allowSession: false, allowGrant: true },
+        )) as UserAuthContext | GrantAuthContext;
         const response = await createSessionAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({

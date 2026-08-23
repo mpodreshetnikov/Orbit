@@ -34,6 +34,8 @@ function createRepositoryMock(
   const repository: MoneyImportRepository = {
     authenticateAllowedUser: async () => null,
     getSessionByToken: async () => null,
+    getGrantByToken: async () => null,
+    markGrantUsed: async () => {},
     findLastImportedAt: async () => options.lastImportedAt ?? null,
     createImportSession: async (payload) => {
       state.createdSessionPayloads.push(payload);
@@ -467,3 +469,55 @@ Deno.test(
     assertEquals(state.batchUpdates.length, 0);
   },
 );
+
+const grantAuth: AuthContext = {
+  mode: "grant",
+  token: "grant-token",
+  grant: {
+    id: "grant-1",
+    person_id: "person-grant",
+    created_by_auth_user_id: "user-grant",
+    allowed_sources: ["tbank_web"],
+    revoked_at: null,
+    expires_at: null,
+  },
+};
+
+Deno.test("createSessionAction starts a session from a grant", async () => {
+  const { repository, state } = createRepositoryMock({});
+  const markedGrants: Array<{ grantId: string; usedAtIso: string }> = [];
+  repository.markGrantUsed = async (grantId, usedAtIso) => {
+    markedGrants.push({ grantId, usedAtIso });
+  };
+
+  const response = await createSessionAction(
+    {
+      source: "tbank_web",
+      // A grant fixes the payer; a payer named in the body must not override it.
+      payer_person_id: "person-somebody-else",
+      window_from: "2026-07-20T12:00:00.000Z",
+      window_to: "2026-08-20T12:00:00.000Z",
+    },
+    grantAuth,
+    { repository, now: () => new Date("2026-08-23T10:00:00.000Z") },
+  );
+
+  const payload = await assertJsonResponse<{ payer_person_id: string }>(response, 200);
+  assertEquals(payload.payer_person_id, "person-grant");
+  assertEquals(state.createdSessionPayloads[0]?.payer_person_id, "person-grant");
+  assertEquals(state.createdSessionPayloads[0]?.created_by_auth_user_id, "user-grant");
+  assertEquals(markedGrants, [{ grantId: "grant-1", usedAtIso: "2026-08-23T10:00:00.000Z" }]);
+});
+
+Deno.test("createSessionAction refuses a source outside the grant", async () => {
+  const { repository } = createRepositoryMock({});
+
+  const response = await createSessionAction({ source: "alfa_web" }, grantAuth, {
+    repository,
+    now: () => new Date("2026-08-23T10:00:00.000Z"),
+  });
+
+  assertEquals(await assertJsonResponse(response, 403), {
+    error: "Source is not allowed for this grant",
+  });
+});

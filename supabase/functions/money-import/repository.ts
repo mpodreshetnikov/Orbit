@@ -38,6 +38,8 @@ export const ADOPTION_WINDOW_HOURS = 72;
 export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
+  getGrantByToken(token: string): Promise<Record<string, unknown> | null>;
+  markGrantUsed(grantId: string, usedAtIso: string): Promise<void>;
   findLastImportedAt(source: string, payerPersonId: string): Promise<string | null>;
   createImportSession(payload: Record<string, unknown>): Promise<{ id: string }>;
   getImportSessionForUser(
@@ -388,6 +390,29 @@ export function createSupabaseMoneyImportRepository(
 
     if (error || !data) return null;
     return data as Record<string, unknown>;
+  }
+
+  async function getGrantByToken(token: string): Promise<Record<string, unknown> | null> {
+    const tokenHash = await sha256Hex(token);
+    const { data, error } = await getAdminClient()
+      .from("money_import_grants")
+      .select("*")
+      .eq("token_hash", tokenHash)
+      .single();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  }
+
+  async function markGrantUsed(grantId: string, usedAtIso: string): Promise<void> {
+    // Best effort: knowing when a grant was last used is worth having, but failing to
+    // record it must not cost the import that is starting.
+    await getAdminClient()
+      .from("money_import_grants")
+      .update({
+        last_used_at: usedAtIso,
+      } as Database["public"]["Tables"]["money_import_grants"]["Update"])
+      .eq("id", grantId);
   }
 
   async function findLastImportedAt(source: string, payerPersonId: string): Promise<string | null> {
@@ -1862,6 +1887,8 @@ export function createSupabaseMoneyImportRepository(
   return {
     authenticateAllowedUser,
     getSessionByToken,
+    getGrantByToken,
+    markGrantUsed,
     findLastImportedAt,
     createImportSession,
     getImportSessionForUser,
