@@ -183,17 +183,25 @@ with the error attached and a retry path that reuses the same record. The full c
 
 **Prerequisites:** [`just`](https://github.com/casey/just), Node.js 22, Deno 2.x, the Supabase CLI, and Docker.
 
+Bootstrapping is two-phase, because the keys you need in `.env.local` are printed by the local
+Supabase stack once it is up:
+
 ```bash
-just install-dependencies   # install dependencies
-just git-hooks-install      # enable hooks, including the pre-push secret scan
-just dev                    # local Supabase + schema + seed + dev stack
+just install-dependencies    # install dependencies
+just git-hooks-install       # enable hooks, including the pre-push secret scan
+
+just supabase-local-start    # phase 1 — bring up local Supabase
+just supabase-local-status   # copy the API URL and anon key from this output
+#                              into NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
+#                              in a new .env.local
+
+just dev                     # phase 2 — schema, seed, and the dev stack
 ```
 
 `just dev` is long-running and holds the foreground; tear it down with `just dev stop`.
 
-Then create `.env.local` with your local Supabase URL and anon key. The full environment variable
-reference — including the MCP connector and observability toggles — is in
-[`docs/SETUP.md`](./docs/SETUP.md).
+The full environment variable reference — including the MCP connector and observability toggles —
+is in [`docs/SETUP.md`](./docs/SETUP.md).
 
 ### Everyday commands
 
@@ -202,7 +210,7 @@ just quality          # format, lint, typecheck — no builds, no DB, no tests
 just test-unit        # all unit lanes (web, extension, node, Deno functions)
 just test-e2e         # Playwright end-to-end flows
 just quality-db-test  # pgTAP tests against the local database
-just check            # the full local gate, same shape as CI
+just ci-verify-local  # the full local gate — static checks, builds, coverage, e2e
 just obs-up           # local Grafana LGTM stack
 ```
 
@@ -213,7 +221,7 @@ just obs-up           # local Grafana LGTM stack
 
 ## The quality bar
 
-Nothing here is aspirational — it runs on every push.
+These run on every push, and a failure blocks the merge:
 
 - **Secrets scan first.** gitleaks runs as a pre-push git hook _and_ as the first CI job. A leaked
   key never reaches the remote.
@@ -222,10 +230,16 @@ Nothing here is aspirational — it runs on every push.
 - **pgTAP tests and a DB lint** scoped to the `public` schema, where warnings fail.
 - **Generated DB artifacts are verified, not trusted** — the schema snapshot and TypeScript types
   are regenerated in CI and drift fails the build.
+
+Run on demand, deliberately kept out of the push path:
+
 - **Extraction quality is scored** against a fixture corpus of real documents
-  (`just test-extraction`), replayed from recordings so it costs nothing to run.
-- **A written quality operating model** — which checks run at which stage, and the final gate before
-  handoff — in [`docs/QUALITY.md`](./docs/QUALITY.md).
+  (`just test-extraction`, or the `Extraction Eval` workflow from the Actions tab). A live run calls
+  a paid provider, so it is manual by design; the default replays committed recordings and costs
+  nothing.
+
+The quality operating model — which checks run at which stage, and the final gate before handoff —
+is written down in [`docs/QUALITY.md`](./docs/QUALITY.md).
 
 ---
 
@@ -287,8 +301,18 @@ observability/          local Grafana LGTM configuration
 
 Access is allowlist-gated via `public.allowed_users`, enforced in middleware and backed by
 row-level security on every data table — `is_allowed_user()` and ownership checks are applied in
-SQL, so no route, function or extension can route around them. Service-role credentials are
-confined to server contexts and never reach a client bundle.
+SQL, so any caller holding a user token gets the same answer whether it arrives through the web
+app, an API route, the extension or an MCP tool.
+
+Two trust boundaries, and it matters which one you are reading:
+
+- **User-scoped paths** are governed by RLS. The policy is the enforcement.
+- **Service-role paths** — cron routes and several Edge Functions that must act outside a user
+  session — deliberately hold a key that **bypasses RLS**, and are responsible for their own bearer
+  token, caller, and ownership validation. RLS does not protect them for free. If you fork this,
+  audit those paths yourself rather than assuming the policies cover them.
+
+Service-role credentials are confined to server contexts and never reach a client bundle.
 
 Found a security issue? Please open an issue **without** sensitive details, and see
 [`docs/SECURITY.md`](./docs/SECURITY.md) for the security model.
