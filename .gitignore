@@ -65,6 +65,14 @@ mcp/.env
 *.tsbuildinfo
 next-env.d.ts
 
+# Private task registry. Tasks, decision records and ExecPlans describe unreleased work and live
+# in their own private repository (`orbit-tasks`), which its install script links into a local
+# checkout at these paths. The links must never be committed here — this repository is public.
+/docs/tasks
+/docs/PLANS.md
+/.agents/skills/task-registry
+/.claude/skills/task-registry
+
 # Extraction eval corpus. Case directories may hold scans of real medical documents, which
 # belong in a private bucket and never in git history — once a blob is in a pack it cannot be
 # taken back. So this is default-deny: everything under cases/ is ignored, and only the three

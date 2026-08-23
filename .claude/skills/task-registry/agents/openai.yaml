@@ -1,4 +1,0 @@
-interface:
-  display_name: "Task Registry"
-  short_description: "Track tasks, ideas, debt and decisions in docs/tasks"
-  default_prompt: "Use $task-registry to check the repository task registry for existing work and prior decisions, then record progress and decisions for this task."

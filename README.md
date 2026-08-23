@@ -53,16 +53,15 @@ The quality operating model — which checks run at which stage, and the final g
 
 ## Documentation
 
-| Document                                         | Contents                                            |
-| ------------------------------------------------ | --------------------------------------------------- |
-| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Runtime surfaces, domain and layer boundaries       |
-| [`docs/DESIGN.md`](./docs/DESIGN.md)             | Design patterns and deep design notes               |
-| [`docs/SETUP.md`](./docs/SETUP.md)               | Local setup and environment variables               |
-| [`docs/QUALITY.md`](./docs/QUALITY.md)           | Quality gates and scoring model                     |
-| [`docs/SECURITY.md`](./docs/SECURITY.md)         | Access model, RLS expectations, secret handling     |
-| [`docs/RUNBOOK.md`](./docs/RUNBOOK.md)           | Operations and debugging procedures                 |
-| [`docs/tasks/INDEX.md`](./docs/tasks/INDEX.md)   | Task registry — open work, decisions, and tech debt |
-| [`mcp/README.md`](./mcp/README.md)               | MCP server configuration and IDE sync               |
+| Document                                         | Contents                                        |
+| ------------------------------------------------ | ----------------------------------------------- |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Runtime surfaces, domain and layer boundaries   |
+| [`docs/DESIGN.md`](./docs/DESIGN.md)             | Design patterns and deep design notes           |
+| [`docs/SETUP.md`](./docs/SETUP.md)               | Local setup and environment variables           |
+| [`docs/QUALITY.md`](./docs/QUALITY.md)           | Quality gates and scoring model                 |
+| [`docs/SECURITY.md`](./docs/SECURITY.md)         | Access model, RLS expectations, secret handling |
+| [`docs/RUNBOOK.md`](./docs/RUNBOOK.md)           | Operations and debugging procedures             |
+| [`mcp/README.md`](./mcp/README.md)               | MCP server configuration and IDE sync           |
 
 ## Security
 

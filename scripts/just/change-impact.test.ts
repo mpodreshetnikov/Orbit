@@ -8,7 +8,6 @@ const { classifyChangedFiles } = require("./change-impact.cjs") as {
     dbImpact: boolean;
     functionsImpact: boolean;
     docsOnly: boolean;
-    tasksOnly: boolean;
   };
 };
 
@@ -20,43 +19,25 @@ describe("change-impact", () => {
   });
 });
 
-describe("change-impact tasksOnly", () => {
-  it("flags a change confined to the task registry, including nested decision records", () => {
-    const impact = classifyChangedFiles([
-      "docs/tasks/T-0012-do-the-thing.md",
-      "docs/tasks/INDEX.md",
-      "docs/tasks/decisions/ADR-0002-do-it-this-way.md",
-    ]);
+describe("change-impact docsOnly", () => {
+  it("flags a change confined to prose, and lights up no build or test surface", () => {
+    const impact = classifyChangedFiles(["docs/design/core-beliefs.md", "AGENTS.md"]);
 
-    expect(impact.tasksOnly).toBe(true);
-    // A registry-only change must not light up any build or test surface.
+    expect(impact.docsOnly).toBe(true);
     expect(impact.webImpact).toBe(false);
     expect(impact.dbImpact).toBe(false);
     expect(impact.extensionImpact).toBe(false);
     expect(impact.functionsImpact).toBe(false);
   });
 
-  it("clears the flag as soon as one file lives outside the registry", () => {
-    expect(
-      classifyChangedFiles(["docs/tasks/T-0012-do-the-thing.md", "src/app/page.tsx"]).tasksOnly,
-    ).toBe(false);
-    expect(classifyChangedFiles(["docs/tasks/T-0012-do-the-thing.md", "justfile"]).tasksOnly).toBe(
+  it("clears the flag as soon as one file is not prose", () => {
+    expect(classifyChangedFiles(["docs/design/core-beliefs.md", "src/app/page.tsx"]).docsOnly).toBe(
       false,
     );
-  });
-
-  it("is narrower than docsOnly", () => {
-    const designDocs = classifyChangedFiles(["docs/design/core-beliefs.md"]);
-    expect(designDocs.docsOnly).toBe(true);
-    expect(designDocs.tasksOnly).toBe(false);
-  });
-
-  it("requires a directory boundary rather than a name prefix", () => {
-    // `docs/tasks-overview.md` is not inside the registry, so it must not take the fast path.
-    expect(classifyChangedFiles(["docs/tasks-overview.md"]).tasksOnly).toBe(false);
+    expect(classifyChangedFiles(["docs/design/core-beliefs.md", "justfile"]).docsOnly).toBe(false);
   });
 
   it("is false when nothing changed, so an empty diff never skips the gates", () => {
-    expect(classifyChangedFiles([]).tasksOnly).toBe(false);
+    expect(classifyChangedFiles([]).docsOnly).toBe(false);
   });
 });
