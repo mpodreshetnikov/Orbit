@@ -10,6 +10,7 @@ import {
   normalizeForGrounding,
 } from "./normalize.ts";
 import type {
+  AssertedAbsence,
   CatalogContext,
   ExtractResult,
   StageContext,
@@ -47,7 +48,7 @@ const SYSTEM_PROMPT = [
 export const EXTRACT_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["observations", "findings", "conditions"],
+  required: ["observations", "findings", "conditions", "asserted_absences"],
   properties: {
     observations: {
       type: "array",
@@ -148,6 +149,41 @@ export const EXTRACT_SCHEMA: Record<string, unknown> = {
         },
       },
     },
+    /**
+     * Findings the document explicitly states are **not** present.
+     *
+     * The one kind of evidence that can close an existing finding, and until now the only kind the
+     * pipeline threw away. Extraction emits what is present, so `Конкременты: нет` -- the strongest
+     * possible statement that a previously recorded stone is gone -- correctly produced no entity
+     * and therefore reached nothing. Reconciliation is asked which existing findings this document
+     * shows to have resolved and was handed only presences, so `findings_to_resolve` could not fire
+     * on the evidence it exists for.
+     *
+     * Same shape as a finding and grounded the same way, so the anchor check applies unchanged.
+     */
+    asserted_absences: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "finding_code",
+          "finding_type_text",
+          "site_code",
+          "body_site_text",
+          "source_anchor",
+          "confidence",
+        ],
+        properties: {
+          finding_code: { type: ["string", "null"] },
+          finding_type_text: { type: "string" },
+          site_code: { type: ["string", "null"] },
+          body_site_text: { type: ["string", "null"] },
+          source_anchor: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
   },
 };
 
@@ -172,6 +208,7 @@ const EXAMPLES = [
       ],
       findings: [],
       conditions: [],
+      asserted_absences: [],
     },
   },
   // Demonstrates the coded branch: `polyp` is in the vocabulary, so finding_type_text is the
@@ -195,6 +232,7 @@ const EXAMPLES = [
         },
       ],
       conditions: [],
+      asserted_absences: [],
     },
   },
   // Demonstrates the uncoded branch: nothing in the vocabulary means a kink, so the code stays
@@ -219,6 +257,90 @@ const EXAMPLES = [
         },
       ],
       conditions: [],
+      asserted_absences: [],
+    },
+  },
+  // Demonstrates three things at once, and deliberately uses a document unlike any in the eval
+  // corpus — a thyroid report, where the corpus holds a lipid panel, a renal ultrasound and a GI
+  // biopsy. An example drawn from a corpus case would measure the model's memory of this prompt
+  // rather than its reading of the document. The gallbladder example above is off-corpus for the
+  // same reason.
+  //
+  //   1. `умеренно выраженная` is a grade, so severity is `moderate` rather than `unknown`.
+  //   2. The conclusion sentence is long; the condition `name` keeps only the diagnosis, and the
+  //      anatomy stays on the finding that carries it.
+  //   3. The serology line is a qualitative positive with no measured value, so it is omitted
+  //      entirely rather than becoming a finding sited to the thyroid.
+  {
+    input:
+      "УЗИ щитовидной железы: умеренно выраженная диффузная гиперплазия правой доли.\nАнтитела к ТПО: положительно.\nЗаключение: узловой зоб щитовидной железы с признаками аутоиммунного тиреоидита.",
+    output: {
+      observations: [],
+      findings: [
+        {
+          finding_code: "hypertrophy",
+          finding_type_text: "Гипертрофия",
+          site_code: null,
+          body_site_text: "правой доли щитовидной железы",
+          size_mm: null,
+          count: 1,
+          severity: "moderate",
+          laterality: "right",
+          source_anchor: "умеренно выраженная диффузная гиперплазия правой доли",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [
+        {
+          name: "Узловой зоб",
+          icd_code: null,
+          status: "active",
+          source_anchor: "узловой зоб щитовидной железы",
+          confidence: 0.85,
+        },
+      ],
+      asserted_absences: [],
+    },
+  },
+  // Demonstrates asserted_absences, and the line either side of it. Off-corpus again: the corpus
+  // holds a renal ultrasound whose absences are stones and extra masses, so this uses a gallbladder
+  // study for the same reason the kink example above does.
+  //
+  //   1. `конкрементов не выявлено` names a specific finding as absent, so it is an asserted
+  //      absence -- the one kind of evidence that can close a stone already on the record.
+  //   2. `стенка не утолщена` denies a finding too, and is emitted nowhere: it is a denial, so it
+  //      is not a finding, and the record carries no "thickened wall" for it to close.
+  //   3. The polyp is present and is reported normally, so a document can do all three at once.
+  {
+    input:
+      "УЗИ желчного пузыря: конкрементов не выявлено. Стенка не утолщена. Полип 3 мм в области дна.",
+    output: {
+      observations: [],
+      findings: [
+        {
+          finding_code: "polyp",
+          finding_type_text: "Полип",
+          site_code: "gallbladder",
+          body_site_text: "области дна желчного пузыря",
+          size_mm: 3,
+          count: 1,
+          severity: "unknown",
+          laterality: "none",
+          source_anchor: "Полип 3 мм в области дна",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+      asserted_absences: [
+        {
+          finding_code: "stone",
+          finding_type_text: "Конкремент",
+          site_code: "gallbladder",
+          body_site_text: "желчного пузыря",
+          source_anchor: "конкрементов не выявлено",
+          confidence: 0.9,
+        },
+      ],
     },
   },
 ];
@@ -324,6 +446,73 @@ function anchorIsGrounded(anchor: string | null | undefined, haystackNormalized:
   return isTextGrounded(anchor, haystackNormalized);
 }
 
+/** Whole-word negations, and prefixes for the ones Russian inflects. */
+const NEGATION_WORDS = new Set(["не", "нет", "без", "нE"]);
+const NEGATION_PREFIXES = ["отсутств"];
+
+/** How far from the finding term a negation still governs it. */
+const NEGATION_WINDOW = 2;
+
+function anchorWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 0);
+}
+
+function isNegationWord(word: string): boolean {
+  return NEGATION_WORDS.has(word) || NEGATION_PREFIXES.some((prefix) => word.startsWith(prefix));
+}
+
+/**
+ * True when the anchor denies the finding rather than reporting it.
+ *
+ * A guard, not a substitute for the instruction. `ЛС не расширена` — the pyelocaliceal system is
+ * **not** dilated — was extracted as a positive finding, turning a statement that nothing is wrong
+ * into a record that something is. An instruction alone leaves that one sampling away from coming
+ * back, and this failure is invisible on the review screen: the row looks like any other.
+ *
+ * Cheap and reliable because it reads `source_anchor`, a short verbatim quote already validated as
+ * occurring in the document. It is not parsing free prose — it is reading the sentence the model
+ * itself nominated as its evidence.
+ *
+ * Adjacency is the whole difficulty. A negation anywhere in the anchor is the obvious rule and it
+ * is wrong: case 002's legitimate `гиперсигналы` finding is anchored on
+ * `с обеих сторон единичные гиперсигналы 0,2 см, без эхотени`, where `без` negates the acoustic
+ * shadow rather than the hypersignals, and a blanket rule would delete a real finding. So the
+ * negation has to be near the finding term, which covers the forms that matter in both directions:
+ * `не` immediately before (`не расширена`), immediately after (`метаплазия не выявлена`), or a
+ * couple of words ahead (`без признаков дисплазии`).
+ *
+ * When the term cannot be located in the anchor at all, fall back to scanning the whole anchor. An
+ * anchor that does not contain the finding's own name is already suspect, and the asymmetry of harm
+ * decides the tie: a dropped finding leaves a gap a clinician can see and refill, while a finding
+ * the document denied is a false abnormality nothing will prompt anyone to correct.
+ */
+export function anchorAssertsAbsence(anchor: string, findingTypeText: string): boolean {
+  const words = anchorWords(anchor);
+  if (words.length === 0) return false;
+
+  const termWords = anchorWords(findingTypeText);
+  const termIndexes: number[] = [];
+  for (const term of termWords) {
+    if (term.length < 4) continue;
+    const stem = term.slice(0, Math.max(4, term.length - 2));
+    words.forEach((word, index) => {
+      if (word.startsWith(stem)) termIndexes.push(index);
+    });
+  }
+
+  if (termIndexes.length === 0) return words.some(isNegationWord);
+
+  return termIndexes.some((index) =>
+    words
+      .slice(Math.max(0, index - NEGATION_WINDOW), index + NEGATION_WINDOW + 1)
+      .some(isNegationWord),
+  );
+}
+
 /**
  * Stage B — extract clinical entities from the document.
  *
@@ -348,6 +537,12 @@ export async function runExtractStage(
       "A null code is always better than an invented one — codes are resolved downstream and a wrong code is worse than none.",
       "Name findings consistently. When you set a finding_code, copy that vocabulary entry's name into finding_type_text exactly as the vocabulary spells it. When finding_code is null, copy the words the document itself uses for the finding, verbatim.",
       "finding_type_text names the finding only. Put the anatomy in body_site_text — from 'полип желчного пузыря', the finding is 'полип' and the site is 'желчного пузыря'.",
+      "A finding is a structural change with a morphology and a place in the body. A qualitative result — a test reported as positive or negative, present or absent, detected or not detected, carrying no measured number — is neither a finding nor an observation. Omit it. A microbiology or serology line such as 'Streptococcus agalactiae (+)' is one of these: it names an organism rather than a structure, it has no site of its own, and filing it against the organ the sample came from also displaces the real finding there.",
+      "severity grades the finding, and Russian reports grade in words rather than numbers: 'слабая', 'лёгкая', 'низкой степени', 'минимальная', 'незначительная' mean mild; 'умеренная', 'умеренной степени', 'средней степени' mean moderate; 'выраженная', 'тяжёлая', 'высокой степени', 'резко выраженная' mean severe. Use unknown only when the document does not grade the finding at all.",
+      "A condition's name is the diagnosis and nothing else. Do not copy a conclusion sentence into it. The anatomy belongs to the finding that carries it, and the qualifiers — grade, activity, chronicity, cause — belong in their own fields or nowhere. From 'Узловой зоб щитовидной железы с признаками аутоиммунного тиреоидита', the condition name is 'Узловой зоб'.",
+      "A sentence that denies a finding is not a finding. 'ЛС не расширена' says the pyelocaliceal system is NOT dilated; 'кишечная метаплазия не выявлена' says metaplasia was NOT found. Never report these in findings — doing so records an abnormality the document explicitly ruled out.",
+      "Put those denials in asserted_absences instead, when the document names a specific finding as absent: 'Конкременты: нет', 'дополнительных образований не выявлено', 'без признаков дисплазии'. Give the finding and the site as you would for a finding, and anchor it on the denying sentence. A general statement that an organ looks normal is not an asserted absence — it must name the thing that is missing.",
+      "asserted_absences never becomes part of the patient's record. It is read only to check whether something already on the record has since resolved.",
       "If a label is illegible or ambiguous, omit that entity entirely rather than guessing.",
     ],
     schema: EXTRACT_SCHEMA,
@@ -396,6 +591,13 @@ export async function runExtractStage(
       rejected.push({ entityKind: "finding", reason: "source anchor not found in document text" });
       continue;
     }
+    if (anchorAssertsAbsence(normalized.source_anchor, normalized.finding_type_text ?? "")) {
+      rejected.push({
+        entityKind: "finding",
+        reason: "source anchor states the finding is absent",
+      });
+      continue;
+    }
     findings.push(normalized);
   }
 
@@ -416,6 +618,36 @@ export async function runExtractStage(
     conditions.push(normalized);
   }
 
+  const assertedAbsences: AssertedAbsence[] = [];
+  for (const item of asArray(result.parsed.asserted_absences)) {
+    const obj = asObject(item);
+    const findingTypeText = asString(obj.finding_type_text);
+    const anchor = asString(obj.source_anchor);
+    if (!findingTypeText || !anchor) {
+      rejected.push({ entityKind: "absence", reason: "missing finding label or source anchor" });
+      continue;
+    }
+    if (!anchorIsGrounded(anchor, groundingHaystack)) {
+      rejected.push({ entityKind: "absence", reason: "source anchor not found in document text" });
+      continue;
+    }
+    // The mirror of the findings guard. An "absence" whose own evidence does not deny anything is
+    // a presence that arrived in the wrong array, and letting it through would hand reconciliation
+    // grounds to close a finding the document actually reported as still there.
+    if (!anchorAssertsAbsence(anchor, findingTypeText)) {
+      rejected.push({ entityKind: "absence", reason: "source anchor does not state an absence" });
+      continue;
+    }
+    assertedAbsences.push({
+      finding_code: asNullableString(obj.finding_code),
+      finding_type_text: findingTypeText,
+      site_code: asNullableString(obj.site_code),
+      body_site_text: asNullableString(obj.body_site_text),
+      source_anchor: anchor,
+      confidence: coerceConfidence(obj.confidence),
+    });
+  }
+
   // Value-level defects do not drop the entity; they replace one attribute with the column's
   // default and are reported so the review screen can flag them.
   for (const issue of valueIssues) {
@@ -426,7 +658,7 @@ export async function runExtractStage(
   }
 
   return {
-    value: { observations, findings, conditions },
+    value: { observations, findings, conditions, asserted_absences: assertedAbsences },
     usage: result.usage,
     finishReason: result.finishReason,
     rejected,

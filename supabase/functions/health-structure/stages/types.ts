@@ -26,6 +26,8 @@ export interface StageContext {
   fallbackModels?: string[];
   effort?: "low" | "medium" | "high";
   timeoutMs?: number;
+  /** Output budget for one call. Defaults in the client; see `DEFAULT_MAX_TOKENS` there. */
+  maxTokens?: number;
   maxAttempts?: number;
   log?: Pick<Console, "log" | "warn" | "error">;
   debugRawPayload?: boolean;
@@ -37,6 +39,8 @@ export interface StageContext {
 export interface StageUsage {
   promptTokens: number | null;
   completionTokens: number | null;
+  /** What the router charged for this call, in USD. Null when unknown -- never assume zero. */
+  costUsd: number | null;
 }
 
 export interface StageRejection {
@@ -77,6 +81,24 @@ export interface ExtractResult {
   observations: ExtractedObservation[];
   findings: ExtractedFinding[];
   conditions: ExtractedCondition[];
+  /**
+   * Findings the document explicitly states are absent.
+   *
+   * Not a finding and never written to the chart. It exists so that reconciliation can see the one
+   * kind of evidence that closes an existing finding — `Конкременты: нет` says a previously
+   * recorded stone is gone, and extraction, which reports what is present, otherwise discards it.
+   */
+  asserted_absences: AssertedAbsence[];
+}
+
+/** A finding the document says is not there. Grounded like any other entity. */
+export interface AssertedAbsence {
+  finding_code: string | null;
+  finding_type_text: string;
+  site_code: string | null;
+  body_site_text: string | null;
+  source_anchor: string;
+  confidence: number;
 }
 
 export interface ReconcileResult {
@@ -92,15 +114,17 @@ export const EMPTY_RECONCILE: ReconcileResult = {
 };
 
 export function emptyUsage(): StageUsage {
-  return { promptTokens: null, completionTokens: null };
+  return { promptTokens: null, completionTokens: null, costUsd: null };
 }
 
 export function sumUsage(parts: StageUsage[]): StageUsage {
   let prompt: number | null = null;
   let completion: number | null = null;
+  let cost: number | null = null;
   for (const part of parts) {
     if (part.promptTokens !== null) prompt = (prompt ?? 0) + part.promptTokens;
     if (part.completionTokens !== null) completion = (completion ?? 0) + part.completionTokens;
+    if (part.costUsd !== null) cost = (cost ?? 0) + part.costUsd;
   }
-  return { promptTokens: prompt, completionTokens: completion };
+  return { promptTokens: prompt, completionTokens: completion, costUsd: cost };
 }

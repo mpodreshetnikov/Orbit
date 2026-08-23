@@ -9,6 +9,7 @@
       "site_code": "kidney_right",
       "body_site_text": "правой почки",
       "size_mm": null,
+      "count": 1,
       "severity": "unknown",
       "laterality": "right"
     },
@@ -18,6 +19,7 @@
       "site_code": "kidney",
       "body_site_text": "почечный синус",
       "size_mm": 2,
+      "count": 1,
       "severity": "unknown",
       "laterality": "bilateral"
     }
