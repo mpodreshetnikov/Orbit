@@ -105,6 +105,7 @@ function createRepositoryMock(
       replaced_synthetic_line_items: false,
       has_only_synthetic_line_items: false,
       has_real_line_items: false,
+      blocked_by_manual_edit: false,
     }),
     resolveAccountIdForRow: async (
       _payerPersonId: string,

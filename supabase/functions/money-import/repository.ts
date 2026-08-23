@@ -1,10 +1,12 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../_shared/database.types.ts";
 import {
+  BALANCING_LINE_ITEM_SOURCE,
   buildTransactionInsertPayload,
   extractAccountHintFromRow,
   hasOnlySyntheticImportLineItems,
   hasRealImportLineItems,
+  isSyntheticImportLineItem,
   isUniqueViolation,
   normalizeSourceForTransactions,
   normalizeText,
@@ -86,6 +88,7 @@ export interface MoneyImportRepository {
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }>;
   insertOrResolveTransaction(
     row: CanonicalTransactionRowInput,
@@ -96,6 +99,7 @@ export interface MoneyImportRepository {
     lineItem: ImportLineItemInput,
     importHash: string,
     fallbackAmount: number,
+    isPlaceholder?: boolean,
   ): Promise<{ lineItemId: string | null; inserted: boolean }>;
   insertReportRow(payload: Record<string, unknown>): Promise<string>;
   listReportRowsByBatch(batchId: string): Promise<Record<string, unknown>[]>;
@@ -554,10 +558,37 @@ export function createSupabaseMoneyImportRepository(
     if (transactionIds.length === 0) return [];
     const { data, error } = await getAdminClient()
       .from("money_line_items")
-      .select("transaction_id, raw_payload")
+      .select("transaction_id, raw_payload, is_placeholder")
       .in("transaction_id", transactionIds);
     if (error || !data) return [];
     return data as Array<Record<string, unknown>>;
+  }
+
+  /**
+   * The repair path needs more than the placeholder probe: it must also see whether a
+   * human has touched the existing composition before deleting anything.
+   */
+  async function listLineItemsForRepair(
+    transactionId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const { data, error } = await getAdminClient()
+      .from("money_line_items")
+      .select(
+        "id, transaction_id, raw_payload, is_placeholder, assignment_method, category_locked_by_user",
+      )
+      .eq("transaction_id", transactionId);
+    if (error || !data) return [];
+    return data as Array<Record<string, unknown>>;
+  }
+
+  function toImportLineItemShape(row: Record<string, unknown>): ImportLineItemInput {
+    return {
+      raw_payload:
+        row.raw_payload && typeof row.raw_payload === "object"
+          ? (row.raw_payload as Record<string, unknown>)
+          : null,
+      is_placeholder: row.is_placeholder === true,
+    };
   }
 
   async function getExistingTransactionStates(
@@ -630,12 +661,7 @@ export function createSupabaseMoneyImportRepository(
       const transactionId = normalizeText(row.transaction_id);
       if (!transactionId) continue;
       const existing = lineItemsByTransactionId.get(transactionId) ?? [];
-      existing.push({
-        raw_payload:
-          row.raw_payload && typeof row.raw_payload === "object"
-            ? (row.raw_payload as Record<string, unknown>)
-            : null,
-      });
+      existing.push(toImportLineItemShape(row));
       lineItemsByTransactionId.set(transactionId, existing);
     }
 
@@ -1401,24 +1427,65 @@ export function createSupabaseMoneyImportRepository(
     replaced_synthetic_line_items: boolean;
     has_only_synthetic_line_items: boolean;
     has_real_line_items: boolean;
+    blocked_by_manual_edit: boolean;
   }> {
-    const existingLineItems = await listLineItemsByTransactionIds([transactionId]);
-    const normalizedLineItems = existingLineItems.map((lineItem) => ({
-      raw_payload:
-        lineItem.raw_payload && typeof lineItem.raw_payload === "object"
-          ? (lineItem.raw_payload as Record<string, unknown>)
-          : null,
-    }));
+    const existingLineItems = await listLineItemsForRepair(transactionId);
+    const normalizedLineItems = existingLineItems.map(toImportLineItemShape);
     const hasOnlySyntheticLineItems = hasOnlySyntheticImportLineItems(normalizedLineItems);
     const hasRealLineItems = hasRealImportLineItems(normalizedLineItems);
 
-    if (hasOnlySyntheticLineItems) {
+    // A composition a human has touched is never rebuilt from an import. Losing a manual
+    // edit is worse than leaving a visible discrepancy for that transaction.
+    const editedByHuman = existingLineItems.some(
+      (lineItem) =>
+        lineItem.category_locked_by_user === true ||
+        normalizeText(lineItem.assignment_method) === "manual",
+    );
+    if (editedByHuman) {
+      return {
+        replaced_synthetic_line_items: false,
+        has_only_synthetic_line_items: hasOnlySyntheticLineItems,
+        has_real_line_items: hasRealLineItems,
+        blocked_by_manual_edit: true,
+      };
+    }
+
+    // Placeholders go unconditionally, not only when every line item is one: a
+    // transaction already corrupted by the missing repair call carries a placeholder
+    // next to real receipt lines, and an "all synthetic" test would never free it.
+    const placeholderIds = existingLineItems
+      .filter((lineItem) => isSyntheticImportLineItem(toImportLineItemShape(lineItem)))
+      .map((lineItem) => normalizeText(lineItem.id))
+      .filter((value): value is string => Boolean(value));
+
+    if (placeholderIds.length > 0) {
       const { error: deleteError } = await getAdminClient()
         .from("money_line_items")
         .delete()
-        .eq("transaction_id", transactionId);
+        .in("id", placeholderIds);
       if (deleteError) {
         throw new Error(deleteError.message || "Failed to replace synthetic line items");
+      }
+    }
+
+    // Balancing rows describe a gap against the previous receipt. A changed receipt
+    // gets a freshly computed one, so the stale rows must not pile up.
+    const balancingIds = existingLineItems
+      .filter(
+        (lineItem) =>
+          normalizeText(asRecord(lineItem.raw_payload)?.source)?.toLowerCase() ===
+          BALANCING_LINE_ITEM_SOURCE,
+      )
+      .map((lineItem) => normalizeText(lineItem.id))
+      .filter((value): value is string => Boolean(value));
+
+    if (balancingIds.length > 0) {
+      const { error: deleteError } = await getAdminClient()
+        .from("money_line_items")
+        .delete()
+        .in("id", balancingIds);
+      if (deleteError) {
+        throw new Error(deleteError.message || "Failed to remove stale balancing line items");
       }
     }
 
@@ -1435,9 +1502,10 @@ export function createSupabaseMoneyImportRepository(
     }
 
     return {
-      replaced_synthetic_line_items: hasOnlySyntheticLineItems,
+      replaced_synthetic_line_items: placeholderIds.length > 0,
       has_only_synthetic_line_items: hasOnlySyntheticLineItems,
       has_real_line_items: hasRealLineItems,
+      blocked_by_manual_edit: false,
     };
   }
 
@@ -1488,6 +1556,7 @@ export function createSupabaseMoneyImportRepository(
     lineItem: ImportLineItemInput,
     importHash: string,
     fallbackAmount: number,
+    isPlaceholder?: boolean,
   ): Promise<{ lineItemId: string | null; inserted: boolean }> {
     const payload = {
       transaction_id: transactionId,
@@ -1499,6 +1568,7 @@ export function createSupabaseMoneyImportRepository(
       assignment_method: "import" as const,
       raw_payload: asRecord(lineItem.raw_payload),
       import_hash: importHash,
+      is_placeholder: isPlaceholder ?? isSyntheticImportLineItem(lineItem),
     };
 
     const { data, error } = await getAdminClient()

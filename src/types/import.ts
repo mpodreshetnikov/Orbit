@@ -49,6 +49,8 @@ export interface ImportLineItem {
   quantity?: number | null;
   unit?: string | null;
   raw_payload?: Record<string, unknown> | null;
+  /** True when the line item only stands in for a receipt the connector could not fetch. */
+  is_placeholder?: boolean;
 }
 
 export interface ImportSourceCategory {

@@ -181,10 +181,14 @@ async function parse(file: File): Promise<ImportParseResult> {
       raw_payload: rawPayload,
       dedupe_hash,
       line_items: [
+        // A statement carries no receipt composition, so this single line is a
+        // placeholder for the whole operation and must be replaced — not joined — once
+        // the extension fetches the real receipt.
         {
           title: merchantName || "T-Bank",
           amount,
           raw_payload: rawPayload,
+          is_placeholder: true,
         },
       ],
     });

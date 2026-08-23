@@ -16,6 +16,7 @@ export interface ImportLineItemInput {
   quantity?: number | null;
   unit?: string | null;
   raw_payload?: Record<string, unknown> | null;
+  is_placeholder?: boolean;
 }
 
 export interface ExistingTransactionStateCandidate {
