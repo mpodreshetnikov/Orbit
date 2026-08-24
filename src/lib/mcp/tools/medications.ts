@@ -13,7 +13,8 @@ import {
   readTimezonePreference,
   regenerateDoseEvents,
 } from "@/lib/medications/regenerate-dose-events";
-import { isValidTimeZone, localDateTimeUtc, localDayEndUtc, localDayStartUtc } from "../local-day";
+import { isValidTimeZone, localDayEndUtc, localDayStartUtc } from "../local-day";
+import { formatZoned, instantFromInput, withZonedTimestamps } from "../zoned-time";
 import { WRITE_SCOPE } from "./scopes";
 import {
   medDurationSchema,
@@ -68,8 +69,43 @@ function describeRegimen(regimen: RegimenWithStatus): string {
   );
 }
 
-/** ISO 8601 date-time carrying an explicit zone: a trailing `Z`, or `+hh:mm`/`-hhmm`. */
-const HAS_UTC_OFFSET = /(z|[+-]\d{2}:?\d{2})$/i;
+/**
+ * The timestamps on a dose event. Rendered into the reply in the caller's zone
+ * and offered beside the stored instants in `structuredContent`.
+ */
+const DOSE_EVENT_TIMESTAMPS = ["scheduled_at", "actual_at", "taken_at"] as const;
+
+/**
+ * Resolves the zone a reply's times are quoted in, without moving anything.
+ *
+ * `resolveTimezone` *persists* what it is handed into
+ * `checkup_notification_timezone`, which drives the generation cron and both
+ * reminder digests -- so using it here would let a request to see a time re-time
+ * the household's plan. An unrecognised zone is refused rather than falling
+ * through to UTC, since silently answering in the wrong zone is the defect this
+ * whole contract exists to close.
+ */
+async function resolveDisplayZone(
+  supabase: Parameters<typeof readTimezonePreference>[0],
+  authUserId: string,
+  requested: string | undefined,
+): Promise<{ ok: true; timezone: string } | { ok: false; error: string }> {
+  const trimmed = requested?.trim() || null;
+
+  if (trimmed && !isValidTimeZone(trimmed)) {
+    return {
+      ok: false,
+      error:
+        `"${requested}" is not a timezone this server recognises. Pass an IANA name ` +
+        `like "Europe/Berlin".`,
+    };
+  }
+
+  return {
+    ok: true,
+    timezone: trimmed ?? (await readTimezonePreference(supabase, authUserId)) ?? "UTC",
+  };
+}
 
 const INTAKE_ADVICE_TYPES = [
   "before_meal",
@@ -139,25 +175,69 @@ export function registerMedicationTools(server: McpToolServer): void {
           .max(30)
           .default(7)
           .describe("How many days either side of now to include doses for."),
+        timezone: z
+          .string()
+          .optional()
+          .describe(
+            "IANA timezone the dose times are reported in, e.g. 'Europe/Berlin'. Defaults to the user's saved preference, or UTC.",
+          ),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    withUserClient<{ regimen_id: string; horizon_days: number }>(async (supabase, args) => {
-      const detail = await getMedication(supabase, {
-        regimenId: args.regimen_id,
-        horizonDays: args.horizon_days,
-      });
+    withUserClient<{ regimen_id: string; horizon_days: number; timezone?: string }>(
+      async (supabase, args, auth) => {
+        // The regimen's `schedule.times` are local wall-clock strings and its
+        // dose events are UTC instants. Returning both without saying so is
+        // what let an assistant read a 22:00 course as a 15:00 one (T-0027), so
+        // the doses are quoted in a named zone here rather than raw.
+        const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+        if (!zone.ok) {
+          return fail(zone.error);
+        }
 
-      if (!detail?.regimen) {
-        return fail(`No medication with id ${args.regimen_id}.`);
-      }
+        const detail = await getMedication(supabase, {
+          regimenId: args.regimen_id,
+          horizonDays: args.horizon_days,
+        });
 
-      return ok(
-        `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
-          `${detail.upcomingDoses.length} upcoming dose(s), ${detail.recentDoses.length} in the recent window.`,
-        detail as unknown as Record<string, unknown>,
-      );
-    }),
+        if (!detail?.regimen) {
+          return fail(`No medication with id ${args.regimen_id}.`);
+        }
+
+        const inZone = (doses: typeof detail.upcomingDoses) =>
+          doses.map((dose) =>
+            withZonedTimestamps(
+              dose as unknown as Record<string, unknown>,
+              zone.timezone,
+              DOSE_EVENT_TIMESTAMPS,
+            ),
+          );
+
+        const next = detail.upcomingDoses[0];
+        const previous = detail.recentDoses[detail.recentDoses.length - 1];
+
+        return ok(
+          `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
+            `${detail.upcomingDoses.length} upcoming dose(s), ${detail.recentDoses.length} in the recent window. ` +
+            `Times are ${zone.timezone}` +
+            `${next ? `; next ${formatZoned(next.scheduled_at, zone.timezone)}` : ""}` +
+            `${previous ? `; last ${formatZoned(previous.taken_at ?? previous.scheduled_at, zone.timezone)}` : ""}.`,
+          {
+            ...detail,
+            timezone: zone.timezone,
+            upcomingDoses: inZone(detail.upcomingDoses),
+            recentDoses: inZone(detail.recentDoses),
+            inventoryTransactions: detail.inventoryTransactions.map((transaction) =>
+              withZonedTimestamps(
+                transaction as unknown as Record<string, unknown>,
+                zone.timezone,
+                ["created_at"],
+              ),
+            ),
+          } as unknown as Record<string, unknown>,
+        );
+      },
+    ),
   );
 
   server.registerTool(
@@ -191,15 +271,11 @@ export function registerMedicationTools(server: McpToolServer): void {
       // read-only, and `resolveTimezone` would persist the hint into
       // `checkup_notification_timezone`, re-timing the household's generated
       // events and reminders. Asking what is due today must not move anything.
-      const requestedZone = args.timezone?.trim() || null;
-      if (requestedZone && !isValidTimeZone(requestedZone)) {
-        return fail(
-          `"${args.timezone}" is not a timezone this server recognises. Pass an IANA name ` +
-            `like "Europe/Berlin".`,
-        );
+      const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+      if (!zone.ok) {
+        return fail(zone.error);
       }
-      const timezone =
-        requestedZone ?? (await readTimezonePreference(supabase, auth.authUserId)) ?? "UTC";
+      const timezone = zone.timezone;
 
       const doses = await listMedicationDoses(supabase, {
         personId: person.id,
@@ -212,14 +288,28 @@ export function registerMedicationTools(server: McpToolServer): void {
         summarizeList(
           `medication intakes for ${person.name} (${args.from} to ${args.to}, ${timezone})`,
           doses.map(
+            // Rendered in the zone the range was resolved in. Printing
+            // `scheduled_at.slice(0, 16)` put the UTC instant under a header
+            // naming the local zone, which is how a 22:00 dose came to be
+            // reported as a 15:00 one (T-0027).
             (dose) =>
-              `${dose.scheduled_at.slice(0, 16).replace("T", " ")} — ${dose.medication_name ?? "unknown"}` +
+              `${formatZoned(dose.scheduled_at, timezone)} — ${dose.medication_name ?? "unknown"}` +
               `${dose.planned_intake?.intake ? `, ${dose.planned_intake.intake.amount} ${dose.planned_intake.intake.unit}` : ""}` +
               ` [${dose.status}]`,
           ),
           doses.length,
         ),
-        { person, doses },
+        {
+          person,
+          timezone,
+          doses: doses.map((dose) =>
+            withZonedTimestamps(
+              dose as unknown as Record<string, unknown>,
+              timezone,
+              DOSE_EVENT_TIMESTAMPS,
+            ),
+          ),
+        },
       );
     }),
   );
@@ -393,45 +483,40 @@ export function registerMedicationTools(server: McpToolServer): void {
       // are worth refusing over: `new Date` reads an offset-less string in the
       // *server's* zone (UTC in production, so hours off for anyone else), and
       // it happily accepts non-ISO input like "0". So parse deliberately.
+      //
+      // The zone is resolved whether or not the input needs it, because the
+      // confirmation quotes the time back and doing that in UTC is how "I took
+      // it at 22:00" came back as "...at 15:00Z" (T-0027). Read the preference,
+      // never write it: `resolveTimezone` persists what it is handed into
+      // `checkup_notification_timezone`, which the nightly generation cron and
+      // both reminder digests run on, so a hint given to interpret one
+      // timestamp would re-time every future dose and checkup in the household.
+      const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+      if (!zone.ok) {
+        return fail(`${zone.error} Or give taken_at with an explicit offset.`);
+      }
+      const timezone = zone.timezone;
+
       const requested = args.taken_at?.trim();
       let at: Date;
-      let timezone: string | null = null;
+      let readAsLocal = false;
 
       if (!requested) {
         at = new Date();
-      } else if (HAS_UTC_OFFSET.test(requested)) {
-        at = new Date(requested);
-        if (Number.isNaN(at.getTime())) {
-          return fail(`Could not read "${args.taken_at}" as a date and time.`);
-        }
       } else {
-        // Read the preference, never write it. `resolveTimezone` persists what
-        // it is handed into `checkup_notification_timezone`, which the nightly
-        // generation cron and both reminder digests run on -- so a timezone
-        // hint given to interpret one timestamp would silently re-time every
-        // future dose event and checkup reminder in the household. Recording
-        // history must not move the plan.
-        const requestedZone = args.timezone?.trim() || null;
-        if (requestedZone && !isValidTimeZone(requestedZone)) {
+        const parsed = instantFromInput(requested, timezone);
+        if (!parsed.ok) {
           return fail(
-            `"${args.timezone}" is not a timezone this server recognises. Pass an IANA name ` +
-              `like "Europe/Berlin", or give taken_at with an explicit offset.`,
+            parsed.zoneApplied
+              ? `Could not read "${args.taken_at}" as a date and time in ${timezone}. Pass ISO 8601 ` +
+                  `with an offset ("2026-08-19T23:10:00+07:00"), or a local wall-clock time ` +
+                  `("2026-08-19T23:10") that exists in that zone — a clock-change gap has no such ` +
+                  `local time.`
+              : `Could not read "${args.taken_at}" as a date and time.`,
           );
         }
-
-        timezone =
-          requestedZone ?? (await readTimezonePreference(supabase, auth.authUserId)) ?? "UTC";
-
-        const instant = localDateTimeUtc(requested, timezone);
-        if (!instant) {
-          return fail(
-            `Could not read "${args.taken_at}" as a date and time in ${timezone}. Pass ISO 8601 ` +
-              `with an offset ("2026-08-19T23:10:00+07:00"), or a local wall-clock time ` +
-              `("2026-08-19T23:10") that exists in that zone — a clock-change gap has no such ` +
-              `local time.`,
-          );
-        }
-        at = new Date(instant);
+        at = new Date(parsed.instant);
+        readAsLocal = parsed.zoneApplied;
       }
 
       const { regimen, dose, planned, alreadyRecorded } = await logDose(supabase, {
@@ -443,25 +528,45 @@ export function registerMedicationTools(server: McpToolServer): void {
       });
 
       const intake = dose.planned_intake?.intake;
-      const zoneNote = timezone ? ` (read as local time in ${timezone})` : "";
+      // The time goes back in the caller's zone, carrying its offset, and names
+      // the zone -- an intake quoted in UTC reads to the person as a dose taken
+      // seven hours from when they took it.
+      const when = `${formatZoned(at, timezone)} (${timezone}${readAsLocal ? ", as given" : ""})`;
+      const zonedDose = withZonedTimestamps(
+        dose as unknown as Record<string, unknown>,
+        timezone,
+        DOSE_EVENT_TIMESTAMPS,
+      );
 
       // Reporting "logged" for a dose already on record invites the caller to
       // believe something was written, and a retry would cost one intake and
       // one stock decrement too many.
       if (alreadyRecorded) {
         return ok(
-          `${regimen.custom_name} was already recorded as ${dose.status} at ${at.toISOString()}` +
-            `${zoneNote}, so nothing was written. Pass a different taken_at for a separate ` +
+          `${regimen.custom_name} was already recorded as ${dose.status} at ${when}` +
+            `, so nothing was written. Pass a different taken_at for a separate ` +
             `intake, or status: "${args.status === "taken" ? "skipped" : "taken"}" to correct it.`,
-          { medication: regimen, dose, planned, already_recorded: true },
+          {
+            medication: regimen,
+            dose: zonedDose,
+            planned,
+            timezone,
+            already_recorded: true,
+          },
         );
       }
 
       return ok(
         `Logged ${intake ? `${intake.amount} ${intake.unit} of ` : ""}${regimen.custom_name} as ` +
-          `${dose.status} at ${at.toISOString()}${zoneNote}. ` +
+          `${dose.status} at ${when}. ` +
           `${planned ? "This resolved the dose already on the plan for that time." : "Recorded as an extra intake outside the plan."}`,
-        { medication: regimen, dose, planned, already_recorded: false },
+        {
+          medication: regimen,
+          dose: zonedDose,
+          planned,
+          timezone,
+          already_recorded: false,
+        },
       );
     }, WRITE_SCOPE),
   );
@@ -518,8 +623,13 @@ export function registerMedicationTools(server: McpToolServer): void {
           );
         }
 
+        // Naming the zone matters most on this tool: a schedule is local
+        // wall-clock times, and regeneration is what turns them into instants.
+        // A caller that misread an existing time as UTC and "corrected" the
+        // schedule by the offset would move every future reminder of the
+        // course, so the reply says which zone the new plan was timed in.
         return ok(
-          `Updated ${regimen.custom_name} (now ${regimen.effective_status}) and regenerated ${regenerated.result.eventsGenerated} upcoming intake(s).`,
+          `Updated ${regimen.custom_name} (now ${regimen.effective_status}) and regenerated ${regenerated.result.eventsGenerated} upcoming intake(s) (timezone ${regenerated.result.timezone}).`,
           { medication: regimen, dose_events: regenerated.result },
         );
       },

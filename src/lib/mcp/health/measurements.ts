@@ -88,12 +88,17 @@ export async function listMeasurements(
     .eq("person_id", params.personId)
     .order("measured_at", { ascending: false });
 
+  // `from` and `to` are instants, and deciding which instants bound the local
+  // days a caller means is the caller's job -- the same division of labour as
+  // `listMedicationDoses`. This function used to take bare dates and append
+  // `T23:59:59.999Z` to `to`, which bounded the range by the UTC day: east of
+  // UTC that drops a late-evening measurement out of the day it belongs to and
+  // pulls in one from the next.
   if (params.from) {
     query = query.gte("measured_at", params.from);
   }
   if (params.to) {
-    // `to` is a date; include the whole day.
-    query = query.lte("measured_at", `${params.to}T23:59:59.999Z`);
+    query = query.lte("measured_at", params.to);
   }
 
   const { data, error } = await query;
