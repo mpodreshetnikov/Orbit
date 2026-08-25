@@ -168,6 +168,23 @@ Safety constraints:
 - Works only when `DEV_AUTH_BYPASS_ENABLED=1` and non-production runtime.
 - Requires `SUPABASE_SERVICE_ROLE_KEY` in local env.
 
+## iOS App
+
+The iOS app is a Capacitor shell around the deployed web app. It needs none of the setup above
+unless you point it at a local dev server, and no local or CI gate builds native code.
+
+Extra prerequisites, on top of the list at the top of this file:
+
+1. A Mac with Xcode.
+2. An Apple Developer Program membership, for signing that outlives seven days and for
+   TestFlight.
+3. A physical iPhone.
+
+Opening, signing, running, archiving and uploading the project, and pointing it at a local dev
+server, are canonical in
+[`docs/design/common/ios-app-shell.md`](./design/common/ios-app-shell.md). Command IDs:
+`ios-sync`, `ios-open`.
+
 ## Test Setup
 
 1. Start all local services in one terminal: run `dev-ready` from `AGENTS.md` (recommended).
