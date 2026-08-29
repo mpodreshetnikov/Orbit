@@ -186,8 +186,19 @@ Conventions that matter:
   number of units, and reads `2 pill (strength not recorded for this amount)`. Naming the course's
   amount instead would not be safe either: `dose_definition` is edited in place and only future
   unresolved events are regenerated, so a past intake can sit beside a definition that moved under
-  it. Until a per-unit strength exists, withholding the figure is the difference between reporting
-  the record and inventing a dose.
+  it. Nor are matching amounts evidence on a course whose schedule overrides the amount per slot: an
+  event generated from a 2-pill slot of a 1-pill course carries the 1-pill course's milligrams, and
+  editing that course's own amount to 2 later would make the stale copy read as verified. Where any
+  slot overrides the amount, the strength is withheld on every intake of that course. Until a
+  per-unit strength exists, withholding the figure is the difference between reporting the record
+  and inventing a dose.
+
+  A dose is dated by `actual_at`, not `scheduled_at`, and its resolution timestamp is labelled by
+  what happened. The two columns are written equal by the generator and separated by `snooze_dose`,
+  which moves `actual_at` alone — and that is the time the reminder query fires on and the dashboard
+  sorts by, so a dose snoozed from 09:00 to 11:00 is reported at 11:00, saying where it moved from.
+  `taken_at` is not evidence of an intake either: `mark_dose_skipped` sets it to the resolution time
+  as well, so a skipped dose reads `marked skipped`, never `taken`.
 
   `list_medications` takes a `timezone` for the same reason the dated tools do, though it lists no
   date range: a `one_off` course carries a due instant, and quoting it in UTC beside plan times that
@@ -200,7 +211,10 @@ Conventions that matter:
 
   Free text is bounded on its way into a text block. Notes have no length limit in the database and
   a page can carry a hundred of them, so each is flattened to one line and cut with an explicit `…`;
-  `structuredContent` keeps the note itself.
+  `structuredContent` keeps the note itself. The same holds for anything else a row can carry
+  without limit: an ingredient is cut whole, unit included, and a schedule renders a bounded number
+  of slots and weekdays with a `…N more` marker, because `times`, `amounts` and `days_of_week` are
+  jsonb arrays with no maximum in the column or in the schema, rendered once per row per page.
 
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.

@@ -80,6 +80,7 @@ async function regenerateOrExplain(
 function describeIntake(
   planned: PlannedIntake | null | undefined,
   course?: PlannedIntake | null,
+  courseSchedule?: MedSchedule | null,
 ): string {
   const intake = planned?.intake;
 
@@ -94,11 +95,17 @@ function describeIntake(
   // Bounded for the same reason notes are: a combination product can carry a
   // long list, an imported row can carry a longer one, and a page holds up to a
   // hundred rows. `structuredContent` keeps the whole array.
+  // Every part of the rendering is bounded, not just the name: `unit` and
+  // `amount` are `z.string()`/`z.number()` against a jsonb column with no shape
+  // constraint, so an imported row can carry a unit as long as a note. The
+  // whole rendered ingredient is cut, which bounds all three at once.
   const ingredients = named
     .slice(0, INGREDIENT_LIMIT)
-    .map(
-      (one) =>
+    .map((one) =>
+      excerpt(
         `${excerpt(String(one.name), INGREDIENT_NAME_LIMIT)} ${one.amount}${one.unit ? ` ${one.unit}` : ""}`,
+        INGREDIENT_TEXT_LIMIT,
+      ),
     );
   if (named.length > ingredients.length) {
     ingredients.push(`…${named.length - ingredients.length} more`);
@@ -117,12 +124,21 @@ function describeIntake(
   // regenerated, so a past intake sits beside a definition that may have moved
   // under it. The row cannot tell which case it is in, so it says the
   // milligrams for this amount are not on file rather than picking one.
+  //
+  // Nor is equality with the course's current amount enough on a course whose
+  // schedule overrides the amount per slot. An event generated from a 2-pill
+  // slot of a 1-pill course stores 2 pills beside the 1-pill course's
+  // milligrams; if the course's own amount is later edited to 2, the two
+  // numbers match and the stale copy would read as verified. Where any slot
+  // overrides the amount, an event that matches the definition cannot be told
+  // from one that was generated against a different one, so the strength is
+  // withheld there too.
   const courseAmount = course?.intake?.amount;
   const unverifiable =
     ingredients.length > 0 &&
     courseAmount != null &&
     intake?.amount != null &&
-    courseAmount !== intake.amount;
+    (courseAmount !== intake.amount || overridesAmount(courseSchedule, courseAmount));
   const strength =
     ingredients.length === 0
       ? ""
@@ -206,7 +222,7 @@ function describeSchedule(
       const amount = slotAmounts?.[index];
       return amount == null ? time : `${time} (${amount}${unit ? ` ${unit}` : ""})`;
     });
-    return ` at ${slots.join(", ")} (local wall clock)`;
+    return ` at ${joinBounded(slots, SCHEDULE_SLOT_LIMIT)} (local wall clock)`;
   };
 
   switch (schedule.mode) {
@@ -233,7 +249,7 @@ function describeSchedule(
         schedule.amounts,
       )}${overrideNote(schedule.amounts)}`;
     case "days_of_week":
-      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
+      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${joinBounded(schedule.days_of_week.map(String), SCHEDULE_SLOT_LIMIT)}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
     case "one_off":
       // The due instant is a timestamp, so it is quoted only where a zone has
       // been resolved (T-0027: a time this server prints is converted and
@@ -250,6 +266,37 @@ function describeSchedule(
     default:
       return "schedule unknown";
   }
+}
+
+/**
+ * When a dose is actually due.
+ *
+ * `actual_at` is the effective time, not a copy of `scheduled_at`: the
+ * generator writes the two equal, and `snooze_dose.sql` moves `actual_at` alone
+ * -- which is then the time the reminder query fires on and the dashboard sorts
+ * and displays by. Printing `scheduled_at` would report a dose snoozed from
+ * 09:00 to 11:00 as due at 09:00, contradicting the app the owner is looking at.
+ */
+function dueAt(dose: { scheduled_at: string; actual_at?: string | null }): string {
+  return dose.actual_at ?? dose.scheduled_at;
+}
+
+/**
+ * The resolution timestamp, labelled by what actually happened.
+ *
+ * `taken_at` is not evidence of an intake. `mark_dose_skipped.sql` sets it to
+ * the resolution time as well (`taken_at = COALESCE(actual_at, now())`), so an
+ * unconditional "taken" renders a skipped dose as `[skipped], taken 09:00` --
+ * which in a medication history reads as proof the dose was swallowed.
+ */
+function describeResolution(
+  dose: { status: string; taken_at?: string | null },
+  timezone: string,
+): string {
+  if (!dose.taken_at) return "";
+  const label =
+    dose.status === "taken" ? "taken" : dose.status === "skipped" ? "marked skipped" : "resolved";
+  return `, ${label} ${formatZoned(dose.taken_at, timezone)}`;
 }
 
 /** Stock on hand, when the course tracks it. */
@@ -280,6 +327,47 @@ const NOTE_EXCERPT = { list: 80, dose: 120, detail: 400 } as const;
 /** How many active ingredients a line names, and how long each name may be. */
 const INGREDIENT_LIMIT = 4;
 const INGREDIENT_NAME_LIMIT = 60;
+const INGREDIENT_TEXT_LIMIT = 90;
+const SCHEDULE_SLOT_LIMIT = 12;
+
+/**
+ * Joins rendered parts, keeping the first `limit` and saying how many were
+ * dropped.
+ *
+ * The schedule's `times`, its `amounts` and its `days_of_week` are jsonb with
+ * no maximum in the database and none in `medScheduleSchema` either, so a
+ * single valid write can put thousands of slots into a row that a listing then
+ * renders a hundred times over. The count keeps the omission visible, which is
+ * what the truncation rule asks for.
+ */
+function joinBounded(parts: string[], limit: number): string {
+  if (parts.length <= limit) return parts.join(", ");
+  return [...parts.slice(0, limit), `…${parts.length - limit} more`].join(", ");
+}
+
+/**
+ * The per-intake amounts a schedule sets for itself, overriding the course's.
+ *
+ * Read defensively: `schedule` is jsonb, so `amounts` can be a string or hold
+ * nulls on an imported row, and a non-number there must not be compared as if
+ * it were one.
+ */
+function scheduleAmounts(schedule?: MedSchedule | null): number[] {
+  if (!schedule || typeof schedule !== "object") return [];
+  if (schedule.mode === "interval_hours") {
+    return typeof schedule.amount === "number" ? [schedule.amount] : [];
+  }
+  const amounts = (schedule as { amounts?: unknown }).amounts;
+  return Array.isArray(amounts)
+    ? amounts.filter((one): one is number => typeof one === "number")
+    : [];
+}
+
+/** Whether any slot doses a different amount than the course's own. */
+function overridesAmount(schedule: MedSchedule | null | undefined, base?: number): boolean {
+  if (base == null) return false;
+  return scheduleAmounts(schedule).some((amount) => amount !== base);
+}
 
 /** A course note, kept short enough for a list line. */
 function describeNotesExcerpt(notes: string | null): string {
@@ -498,6 +586,7 @@ export function registerMedicationTools(server: McpToolServer): void {
         );
 
       const courseDose = detail.regimen.dose_definition;
+      const courseSchedule = detail.regimen.schedule;
       // A truncated ledger says how to read the rest, like every other list
       // this server pages (ADR-260829-ube): the movements are newest first,
       // so an offset walks backwards through the history.
@@ -538,8 +627,9 @@ export function registerMedicationTools(server: McpToolServer): void {
       const upcoming = listed(detail.upcomingDoses, "first");
       const more = (omitted: number) => (omitted > 0 ? `\n- ...${omitted} more` : "");
       const doseLine = (dose: (typeof detail.upcomingDoses)[number]) =>
-        `- ${formatZoned(dose.scheduled_at, zone.timezone)} — ${describeIntake(dose.planned_intake, courseDose) || "dose unknown"} [${dose.status}]` +
-        `${dose.taken_at ? `, taken ${formatZoned(dose.taken_at, zone.timezone)}` : ""}` +
+        `- ${formatZoned(dueAt(dose), zone.timezone)} — ${describeIntake(dose.planned_intake, courseDose, courseSchedule) || "dose unknown"} [${dose.status}]` +
+        `${dueAt(dose) !== dose.scheduled_at ? `, moved from ${formatZoned(dose.scheduled_at, zone.timezone)}` : ""}` +
+        `${describeResolution(dose, zone.timezone)}` +
         `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`;
       const movementLine = (movement: (typeof detail.inventoryTransactions)[number]) =>
         `- ${formatZoned(movement.created_at, zone.timezone)} — ${movement.type} ${movement.amount} ${movement.unit}` +
@@ -549,8 +639,8 @@ export function registerMedicationTools(server: McpToolServer): void {
         `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
           `${detail.upcomingDoses.length} upcoming dose(s), ${detail.recentDoses.length} in the recent window. ` +
           `Times are ${zone.timezone}` +
-          `${next ? `; next ${formatZoned(next.scheduled_at, zone.timezone)}` : ""}` +
-          `${previous ? `; last ${formatZoned(previous.taken_at ?? previous.scheduled_at, zone.timezone)}` : ""}.` +
+          `${next ? `; next ${formatZoned(dueAt(next), zone.timezone)}` : ""}` +
+          `${previous ? `; last ${formatZoned(previous.taken_at ?? dueAt(previous), zone.timezone)}` : ""}.` +
           `\n${plan.join(", ")}.` +
           `${notes ? `\nNotes: ${notes}` : ""}` +
           `${recent.rows.length > 0 ? `\nRecent intakes:${more(recent.omitted)}\n${recent.rows.map(doseLine).join("\n")}` : ""}` +
@@ -558,7 +648,17 @@ export function registerMedicationTools(server: McpToolServer): void {
           `${
             detail.inventoryTransactions.length > 0
               ? `\nInventory movements${inventoryWindow}:\n${detail.inventoryTransactions.map(movementLine).join("\n")}`
-              : ""
+              : detail.inventoryTotal > 0
+                ? // An offset at or past the end -- asked for directly, or
+                  // reached after movements were removed between two
+                  // continuation calls -- returns no rows beside a positive
+                  // total. Dropping the section there would answer a question
+                  // about the stock history with silence, which is the failure
+                  // the paging rule exists to prevent, so it says where the
+                  // last page starts instead.
+                  `\nInventory movements: ${detail.inventoryTotal} recorded, but inventory_offset ${args.inventory_offset} is past the end. ` +
+                  `Pass an offset below ${detail.inventoryTotal} — inventory_offset: 0 starts again from the newest.`
+                : ""
           }`,
         {
           ...detail,
@@ -646,9 +746,11 @@ export function registerMedicationTools(server: McpToolServer): void {
             // reading it could not say how many milligrams an intake was, nor
             // tell "no note" apart from "notes are not returned".
             (dose) =>
-              `${formatZoned(dose.scheduled_at, timezone)} — ${dose.medication_name ?? "unknown"}` +
-              `${describeIntake(dose.planned_intake, dose.medication_dose) ? `, ${describeIntake(dose.planned_intake, dose.medication_dose)}` : ""}` +
+              `${formatZoned(dueAt(dose), timezone)} — ${dose.medication_name ?? "unknown"}` +
+              `${describeIntake(dose.planned_intake, dose.medication_dose, dose.medication_schedule) ? `, ${describeIntake(dose.planned_intake, dose.medication_dose, dose.medication_schedule)}` : ""}` +
               ` [${dose.status}]` +
+              `${dueAt(dose) !== dose.scheduled_at ? `, moved from ${formatZoned(dose.scheduled_at, timezone)}` : ""}` +
+              `${describeResolution(dose, timezone)}` +
               `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`,
           ),
           {

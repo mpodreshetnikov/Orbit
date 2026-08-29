@@ -680,6 +680,71 @@ describe("get_medication", () => {
     expect(text).toContain("pass inventory_offset: 1 for older");
   });
 
+  it("says an inventory offset is past the end rather than dropping the section", async () => {
+    // An offset can outrun the ledger by being asked for directly or by
+    // movements being removed between two continuation calls. Answering a
+    // question about the stock history with no section at all reads as "there
+    // is no ledger".
+    meds.getMedication.mockResolvedValue({
+      regimen: { custom_name: "Золофт", effective_status: "active" },
+      upcomingDoses: [],
+      recentDoses: [],
+      inventoryTransactions: [],
+      inventoryTotal: 143,
+    });
+
+    const text = (
+      await (await handlers()).get("get_medication")!(
+        { regimen_id: "r-1", horizon_days: 7, inventory_offset: 400 },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("143 recorded, but inventory_offset 400 is past the end");
+    expect(text).toContain("inventory_offset: 0");
+  });
+
+  it("does not report a skipped dose as taken, and dates a snoozed one where it moved to", async () => {
+    // `mark_dose_skipped.sql` writes `taken_at` too, so an unconditional
+    // "taken" labels a dose the owner deliberately did not take. And
+    // `snooze_dose.sql` moves `actual_at` while leaving `scheduled_at`, which
+    // is the time the reminder query and the dashboard both use.
+    meds.getMedication.mockResolvedValue({
+      regimen: { custom_name: "Золофт", effective_status: "active" },
+      upcomingDoses: [
+        {
+          scheduled_at: "2026-08-29T02:00:00.000Z",
+          actual_at: "2026-08-29T04:00:00.000Z",
+          planned_intake: { intake: { amount: 1, unit: "pill" } },
+          status: "snoozed",
+        },
+      ],
+      recentDoses: [
+        {
+          scheduled_at: "2026-08-28T02:00:00.000Z",
+          actual_at: "2026-08-28T02:00:00.000Z",
+          taken_at: "2026-08-28T03:30:00.000Z",
+          planned_intake: { intake: { amount: 1, unit: "pill" } },
+          status: "skipped",
+        },
+      ],
+      inventoryTransactions: [],
+      inventoryTotal: 0,
+    });
+
+    const text = (
+      await (await handlers()).get("get_medication")!(
+        { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0 },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("[skipped], marked skipped 2026-08-28 05:30 +02:00");
+    expect(text).not.toContain("[skipped], taken");
+    expect(text).toContain("2026-08-29 06:00 +02:00 — 1 pill [snoozed]");
+    expect(text).toContain("moved from 2026-08-29 04:00 +02:00");
+  });
+
   it("refuses a timezone it cannot resolve rather than answering in UTC", async () => {
     const result = await (await handlers()).get("get_medication")!(
       { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0, timezone: "Mars/Olympus" },
@@ -812,6 +877,101 @@ describe("list_medication_doses", () => {
 
     expect(text).toContain("Золофт, 2 pill (strength not recorded for this amount)");
     expect(text).not.toContain("150 milligram");
+  });
+
+  it("withholds a strength on a course whose slots override the amount", async () => {
+    // The matching amounts are not evidence here. An event generated from a
+    // 2-pill slot of a 1-pill course stores 2 pills beside the 1-pill course's
+    // milligrams; edit the course's own amount to 2 later and the stale copy
+    // suddenly reads as verified. The row cannot tell that case from a current
+    // one, so a schedule that overrides any amount withholds the strength.
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: {
+            intake: { amount: 2, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+          medication_dose: {
+            intake: { amount: 2, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+          medication_schedule: { mode: "daily_times", times: ["08:00", "20:00"], amounts: [1, 2] },
+          status: "taken",
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("Золофт, 2 pill (strength not recorded for this amount)");
+    expect(text).not.toContain("100 milligram");
+  });
+
+  it("bounds the whole rendered ingredient, not only its name", async () => {
+    // `unit` is an unrestricted string against a jsonb column, so an imported
+    // row can carry a unit as long as a note -- once per ingredient, per row,
+    // per page.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Imported",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "u".repeat(400) }],
+          },
+          schedule: { mode: "daily_times", times: ["08:00"] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).not.toContain("u".repeat(200));
+    expect(text).toContain("…");
+  });
+
+  it("caps the schedule slots it renders and says how many were left out", async () => {
+    // `times` has no maximum in the schema or in the column, so one valid write
+    // can put hundreds of slots into a row that a listing renders for every
+    // medication on the page.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Hourly",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: {
+            mode: "daily_times",
+            times: Array.from(
+              { length: 40 },
+              (_, index) => `${String(index % 24).padStart(2, "0")}:00`,
+            ),
+          },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("…28 more");
   });
 
   it("prints the strength plainly when the intake is the course's own amount", async () => {

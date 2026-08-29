@@ -91,6 +91,23 @@ describe("getCourseWindow", () => {
     expect(getCourseWindow(null)).toEqual({ start: null, end: null });
   });
 
+  it("refuses a value that is the right shape but not a date", () => {
+    // `medDurationSchema` accepts any string, so this is writable through the
+    // MCP tools as well as importable, and a length check alone would send it
+    // through the date arithmetic and render "NaN-NaN-NaN" as a course end.
+    expect(getCourseWindow({ type: "for_days", days: 4, start_date: "abcdefghij" })).toEqual({
+      start: null,
+      end: null,
+    });
+    expect(getCourseWindow({ type: "for_days", days: 4, start_date: "2026-02-31" })).toEqual({
+      start: null,
+      end: null,
+    });
+    expect(
+      getCourseWindow({ type: "until_date", start_date: "2026-01-01", end_date: "2026-13-01" }),
+    ).toEqual({ start: "2026-01-01", end: null });
+  });
+
   it("bounds only the start of an endless course", () => {
     expect(getCourseWindow({ type: "endless", start_date: "2026-08-07" })).toEqual({
       start: "2026-08-07",

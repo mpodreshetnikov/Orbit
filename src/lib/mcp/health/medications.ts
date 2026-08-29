@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { rowToDoseEvent, rowToInventoryTransaction, rowToRegimen } from "@/lib/regimen-mappers";
 import { getEffectiveStatus, getPlannedIntakeAmount, type PlannedIntake } from "@/types/regimen";
-import type { MedDoseEvent, MedRegimen } from "@/types/regimen";
+import type { MedDoseEvent, MedRegimen, MedSchedule } from "@/types/regimen";
 
 /**
  * Medications.
@@ -199,7 +199,11 @@ export async function listMedicationDoses(
   },
 ): Promise<{
   doses: Array<
-    MedDoseEvent & { medication_name: string | null; medication_dose: PlannedIntake | null }
+    MedDoseEvent & {
+      medication_name: string | null;
+      medication_dose: PlannedIntake | null;
+      medication_schedule: MedSchedule | null;
+    }
   >;
   total: number;
 }> {
@@ -209,8 +213,12 @@ export async function listMedicationDoses(
     // milligrams are only meaningful beside the amount they were recorded for:
     // nothing scales `active` when a slot or a correction changes the amount,
     // so the renderer has to be able to say which amount the strength belongs
-    // to rather than implying it belongs to this one.
-    .select("*, regimen:med_regimens ( custom_name, dose_definition )", { count: "exact" })
+    // to rather than implying it belongs to this one. The `schedule` comes with
+    // it because a per-slot amount is the other way an event's amount can
+    // differ from the definition the strength was recorded against.
+    .select("*, regimen:med_regimens ( custom_name, dose_definition, schedule )", {
+      count: "exact",
+    })
     .eq("person_id", params.personId)
     .is("deleted_at", null)
     .gte("scheduled_at", params.from)
@@ -252,6 +260,9 @@ export async function listMedicationDoses(
       ((row.regimen as { dose_definition?: PlannedIntake } | null)?.dose_definition as
         | PlannedIntake
         | undefined) ?? null,
+    medication_schedule:
+      ((row.regimen as { schedule?: MedSchedule } | null)?.schedule as MedSchedule | undefined) ??
+      null,
   }));
 
   return { doses, total: count ?? doses.length };

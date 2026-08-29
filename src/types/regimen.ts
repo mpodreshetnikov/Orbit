@@ -140,8 +140,22 @@ export function getCourseWindow(duration?: MedDuration | null): {
   // a number where a date belongs. Reading it as a date has to fail as "no
   // window" rather than throwing, or one such row takes down every listing it
   // appears in.
-  const asDate = (value: unknown): string | null =>
-    typeof value === "string" && value.length >= 10 ? value.slice(0, 10) : null;
+  //
+  // Type and length are not enough: `medDurationSchema` accepts any string, so
+  // "abcdefghij" is writable through the MCP tools as well as importable, and
+  // it would come back out of `shiftDate` as "NaN-NaN-NaN" -- a rendered course
+  // window that looks like a bug in the tool rather than a bad row. Only a real
+  // calendar day is returned.
+  const asDate = (value: unknown): string | null => {
+    if (typeof value !== "string") return null;
+    const day = value.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const parsed = new Date(`${day}T12:00:00Z`);
+    // The round trip rejects 2026-02-31, which `Date` rolls forward to 3 March
+    // rather than refusing.
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().slice(0, 10) === day ? day : null;
+  };
 
   const start = asDate(duration.start_date);
 
