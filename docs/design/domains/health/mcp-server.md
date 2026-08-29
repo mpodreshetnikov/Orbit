@@ -223,10 +223,16 @@ Conventions that matter:
   ledger movement — since it is unrestricted on the dose definition, on the inventory and on
   `med_inventory_transactions.unit`, and it is the field this server repeats most.
 
+  A truncated detail section names the tool that can fetch the rest:
+  `get_medication` lists the intakes nearest now and ends with
+  `...15 more; call list_medication_doses with regimen_id: … and a from/to range for them`.
+
   A course window that ends before it starts is not rendered as a window. Nothing forbids the pair
   on write and the generator answers it by producing no events at all, so printing
   `2026-09-10 to 2026-09-01` would describe a course that never doses as if it ran backwards; the
-  start is kept, the end is dropped.
+  start is kept, the end is dropped. The status does not inherit that: `getEffectiveStatus` reads the
+  stored end date directly, so such a course still completes on its end date rather than running
+  forever and being offered as a current course by the duplicate guard.
 
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.

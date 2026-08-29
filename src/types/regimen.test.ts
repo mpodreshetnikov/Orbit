@@ -108,6 +108,19 @@ describe("getCourseWindow", () => {
     ).toEqual({ start: "2026-01-01", end: null });
   });
 
+  it("still completes a course whose stored window is inverted", () => {
+    // The window drops the inverted end so the text cannot print a course
+    // running backwards, but the status must not inherit that: the row still
+    // has a real end date, and treating it as endless would leave the course
+    // active forever and the duplicate guard calling it current.
+    expect(
+      getEffectiveStatus(
+        regimen("active", { type: "until_date", start_date: "2026-09-10", end_date: "2026-09-01" }),
+        { today: "2026-09-05" },
+      ),
+    ).toBe("completed");
+  });
+
   it("refuses a window that ends before it starts", () => {
     // Nothing forbids the pair on write, and the generator answers it by
     // producing no events at all, so "2026-09-10 to 2026-09-01" would describe

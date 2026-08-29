@@ -680,6 +680,34 @@ describe("get_medication", () => {
     expect(text).toContain("pass inventory_offset: 1 for older");
   });
 
+  it("points omitted intakes at the tool that can fetch them", async () => {
+    // A twice-daily course over a seven-day horizon overruns the detail cap on
+    // both sides, and a bare "...N more" is the cursorless tail this branch
+    // removed everywhere else.
+    const doses = Array.from({ length: 25 }, (_, index) => ({
+      scheduled_at: `2026-08-${String(index + 1).padStart(2, "0")}T08:00:00.000Z`,
+      actual_at: `2026-08-${String(index + 1).padStart(2, "0")}T08:00:00.000Z`,
+      planned_intake: { intake: { amount: 1, unit: "pill" } },
+      status: "scheduled",
+    }));
+    meds.getMedication.mockResolvedValue({
+      regimen: { custom_name: "Золофт", effective_status: "active" },
+      upcomingDoses: doses,
+      recentDoses: [],
+      inventoryTransactions: [],
+      inventoryTotal: 0,
+    });
+
+    const text = (
+      await (await handlers()).get("get_medication")!(
+        { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0 },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("...15 more; call list_medication_doses with regimen_id: r-1");
+  });
+
   it("says an inventory offset is past the end rather than dropping the section", async () => {
     // An offset can outrun the ledger by being asked for directly or by
     // movements being removed between two continuation calls. Answering a

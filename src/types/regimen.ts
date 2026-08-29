@@ -93,6 +93,27 @@ function todayDateString(): string {
 export type GetEffectiveStatusOptions = { today?: string };
 
 /** `date` shifted by whole days, as YYYY-MM-DD. */
+/**
+ * A stored duration date, or null when the value is not a calendar day.
+ *
+ * `duration` is jsonb with no shape constraint, so an imported row can carry a
+ * number where a date belongs, and reading it has to fail as "no date" rather
+ * than throwing -- one such row would otherwise take down every listing it
+ * appears in. Type and length are not enough either: `medDurationSchema`
+ * accepts any string, so "abcdefghij" is writable through the MCP tools as well
+ * as importable, and it would come back out of `shiftDate` as "NaN-NaN-NaN".
+ */
+function asDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const day = value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const parsed = new Date(`${day}T12:00:00Z`);
+  // The round trip rejects 2026-02-31, which `Date` rolls forward to 3 March
+  // rather than refusing.
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10) === day ? day : null;
+}
+
 function shiftDate(date: string, days: number): string {
   // Midday, so a DST transition cannot push the arithmetic onto the wrong day.
   const shifted = new Date(date + "T12:00:00");
@@ -112,7 +133,13 @@ function shiftDate(date: string, days: number): string {
  */
 function statusBoundary(duration: MedDuration): string | null {
   const { start, end } = getCourseWindow(duration);
-  if (duration.type === "until_date") return end;
+  // Read from the stored end date rather than from the window: the window
+  // drops an end that precedes its start, because printing "2026-09-10 to
+  // 2026-09-01" would describe a course running backwards -- but that same row
+  // must still stop counting as active on 1 September. Letting the display
+  // rule reach the status would leave such a course running forever and keep
+  // the duplicate-medication guard treating it as current.
+  if (duration.type === "until_date") return asDate(duration.end_date);
   // One day past the last dosing day, which is where the dashboard has always
   // drawn this line.
   if (duration.type === "for_days" && end != null && start != null) return shiftDate(end, 1);
@@ -135,27 +162,6 @@ export function getCourseWindow(duration?: MedDuration | null): {
   end: string | null;
 } {
   if (!duration) return { start: null, end: null };
-
-  // `duration` is jsonb with no shape constraint, so an imported row can carry
-  // a number where a date belongs. Reading it as a date has to fail as "no
-  // window" rather than throwing, or one such row takes down every listing it
-  // appears in.
-  //
-  // Type and length are not enough: `medDurationSchema` accepts any string, so
-  // "abcdefghij" is writable through the MCP tools as well as importable, and
-  // it would come back out of `shiftDate` as "NaN-NaN-NaN" -- a rendered course
-  // window that looks like a bug in the tool rather than a bad row. Only a real
-  // calendar day is returned.
-  const asDate = (value: unknown): string | null => {
-    if (typeof value !== "string") return null;
-    const day = value.slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
-    const parsed = new Date(`${day}T12:00:00Z`);
-    // The round trip rejects 2026-02-31, which `Date` rolls forward to 3 March
-    // rather than refusing.
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed.toISOString().slice(0, 10) === day ? day : null;
-  };
 
   const start = asDate(duration.start_date);
 

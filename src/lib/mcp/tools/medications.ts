@@ -639,7 +639,15 @@ export function registerMedicationTools(server: McpToolServer): void {
       };
       const recent = listed(detail.recentDoses, "last");
       const upcoming = listed(detail.upcomingDoses, "first");
-      const more = (omitted: number) => (omitted > 0 ? `\n- ...${omitted} more` : "");
+      // An omitted row needs a way back, like every other truncation this
+      // server prints: `list_medication_doses` takes this course's id and a
+      // range, so the pointer names the tool and the argument rather than
+      // leaving a count nothing can act on.
+      const more = (omitted: number) =>
+        omitted > 0
+          ? `\n- ...${omitted} more; call list_medication_doses with regimen_id: ${args.regimen_id}` +
+            ` and a from/to range for them`
+          : "";
       const doseLine = (dose: (typeof detail.upcomingDoses)[number]) =>
         `- ${formatZoned(dueAt(dose), zone.timezone)} — ${describeIntake(dose.planned_intake, courseDose, courseSchedule) || "dose unknown"} [${dose.status}]` +
         `${dueAt(dose) !== dose.scheduled_at ? `, moved from ${formatZoned(dose.scheduled_at, zone.timezone)}` : ""}` +
