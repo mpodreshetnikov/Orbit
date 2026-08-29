@@ -74,6 +74,20 @@ export function summarizePage(
     return `No ${label} found.`;
   }
 
+  // An offset past the end -- asked for directly, or reached after rows were
+  // removed between two calls -- returns nothing while the total stays
+  // positive. Rendering that as a window would print an impossible range like
+  // "showing 41-40", which reads as a broken tool rather than an exhausted
+  // page, so say what happened and where the last page starts.
+  if (items.length === 0) {
+    const lastPageOffset = Math.max(0, page.total - 1);
+    return (
+      `${page.total} ${label}, but offset ${page.offset} is past the end. ` +
+      `Pass an offset below ${page.total} — offset: 0 starts again from the first.` +
+      `${lastPageOffset > 0 ? ` The last row is at offset ${lastPageOffset}.` : ""}`
+    );
+  }
+
   const window =
     items.length === page.total
       ? ""

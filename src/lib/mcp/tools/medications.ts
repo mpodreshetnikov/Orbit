@@ -155,10 +155,14 @@ function describeSchedule(
   // regimen with two amounts, and printing the base dose beside bare times
   // would describe both slots as the same size.
   const at = (times?: string[], amounts?: number[]) => {
-    if (!times || times.length === 0) return "";
+    // `Array.isArray`, not a length check: a row whose `times` is the string
+    // "09:00" has a length and would reach `.map`, throwing and taking the
+    // whole listing down with it.
+    if (!Array.isArray(times) || times.length === 0) return "";
+    const slotAmounts = Array.isArray(amounts) ? amounts : undefined;
     const unit = dose?.intake?.unit ?? "";
     const slots = times.map((time, index) => {
-      const amount = amounts?.[index];
+      const amount = slotAmounts?.[index];
       return amount == null ? time : `${time} (${amount}${unit ? ` ${unit}` : ""})`;
     });
     return ` at ${slots.join(", ")} (local wall clock)`;
@@ -175,7 +179,7 @@ function describeSchedule(
     case "interval_days":
       return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times, schedule.amounts)}`;
     case "days_of_week":
-      return `schedule days_of_week${schedule.days_of_week?.length ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times)}`;
+      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times)}`;
     case "one_off":
       return "schedule one_off";
     default:

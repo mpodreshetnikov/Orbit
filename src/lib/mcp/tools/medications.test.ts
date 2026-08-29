@@ -294,6 +294,43 @@ describe("list_medications", () => {
     expect(result.content[0].text).toContain("1.5 pill (Сертралин 150 milligram)");
   });
 
+  it("renders a schedule whose times are not an array instead of throwing", async () => {
+    // A string has a length, so a length check would have let "09:00" reach
+    // `.map`. `schedule` is jsonb with no shape constraint.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Imported",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "daily_times", times: "09:00", days_of_week: 3 },
+        },
+      ],
+      total: 1,
+    });
+
+    const result = await (await handlers()).get("list_medications")!({ ...PAGE }, ctx());
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("Imported — active, 1 pill, schedule daily_times");
+  });
+
+  it("says an offset is past the end rather than printing an impossible window", async () => {
+    // Reachable by asking for it, or by paging after rows were removed between
+    // two calls. "showing 41-40" reads as a broken tool.
+    meds.listMedications.mockResolvedValue({ regimens: [], total: 25 });
+
+    const text = (
+      await (await handlers()).get("list_medications")!({ limit: 20, offset: 40 }, ctx())
+    ).content[0].text;
+
+    expect(text).toContain("offset 40 is past the end");
+    expect(text).toContain("offset: 0");
+    expect(text).not.toContain("showing 41");
+  });
+
   it("copes with a regimen that has no dose or schedule recorded", async () => {
     meds.listMedications.mockResolvedValue({
       regimens: [
