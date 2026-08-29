@@ -165,12 +165,21 @@ function text(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * The page's own resource timeline holds whatever the page loaded, third-party requests
+ * included. Matching a candidate on its path alone would accept `https://elsewhere.example` +
+ * the bank's path — and every discovered endpoint is later handed the live `sessionid` before
+ * being fetched. CORS does not stop the request going out, so the credential would reach that
+ * origin. The recorder's whole claim is that the session never leaves the page it came from,
+ * which makes the origin check part of the claim rather than a precaution.
+ */
 function findLatestByPath(urls: string[], pathname: string, origin: string): string | null {
   for (let index = urls.length - 1; index >= 0; index -= 1) {
     const candidate = urls[index];
     if (typeof candidate !== "string") continue;
     try {
-      if (new URL(candidate, origin).pathname === pathname) return candidate;
+      const parsed = new URL(candidate, origin);
+      if (parsed.origin === origin && parsed.pathname === pathname) return candidate;
     } catch {
       continue;
     }
@@ -183,13 +192,73 @@ export function discoverSessionId(urls: string[], origin: string): string | null
     const candidate = urls[index];
     if (typeof candidate !== "string") continue;
     try {
-      const found = text(new URL(candidate, origin).searchParams.get("sessionid"));
+      // Same restriction, for a different reason: a `sessionid` on a foreign URL is not this
+      // page's session, and taking it would send someone else's token to the bank.
+      const parsed = new URL(candidate, origin);
+      if (parsed.origin !== origin) continue;
+      const found = text(parsed.searchParams.get("sessionid"));
       if (found) return found;
     } catch {
       continue;
     }
   }
   return null;
+}
+
+interface TrancheBaseParams {
+  appName: string;
+  appVersion: string;
+  origin: string;
+  platform: string;
+  programType: string;
+  wuid: string | null;
+}
+
+/**
+ * The connector's `parseTrancheBaseParams`: every optional parameter the discovered URL omits
+ * gets a default, and `tryFetchTrancheOffers` then writes all of them onto the request. The
+ * replay matches on every query parameter but `sessionid`, `start` and `end`, so a URL recorded
+ * with only the parameters the page happened to carry misses on replay — the enrichment is
+ * simply absent, and nothing says so.
+ */
+export function parseTrancheBaseParams(
+  trancheApiUrl: string | null,
+  origin: string,
+): TrancheBaseParams | null {
+  if (!trancheApiUrl) return null;
+  try {
+    const parsed = new URL(trancheApiUrl, origin);
+    return {
+      appName: text(parsed.searchParams.get("appName")) ?? "supreme",
+      appVersion: text(parsed.searchParams.get("appVersion")) ?? "0.0.1",
+      origin: text(parsed.searchParams.get("origin")) ?? "web,ib5,platform",
+      platform: text(parsed.searchParams.get("platform")) ?? "web",
+      programType: text(parsed.searchParams.get("program_type")) ?? "rpk_kk",
+      wuid: text(parsed.searchParams.get("wuid")),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The connector's own parameter order and values, so the recorded URL is the requested one. */
+export function buildTrancheUrl(
+  trancheApiUrl: string,
+  origin: string,
+  baseParams: TrancheBaseParams,
+  sessionId: string,
+  amount: number,
+): string {
+  const url = new URL(trancheApiUrl, origin);
+  url.searchParams.set("sessionid", sessionId);
+  url.searchParams.set("appName", baseParams.appName);
+  url.searchParams.set("appVersion", baseParams.appVersion);
+  url.searchParams.set("platform", baseParams.platform);
+  url.searchParams.set("program_type", baseParams.programType);
+  url.searchParams.set("origin", baseParams.origin);
+  url.searchParams.set("amount", String(Math.abs(amount)));
+  if (baseParams.wuid) url.searchParams.set("wuid", baseParams.wuid);
+  return url.toString();
 }
 
 /** Same walk as the connector's `buildRanges`, so the recorded ranges are the requested ones. */
@@ -272,6 +341,17 @@ export function detectBlockedReason(body: unknown): string | null {
 }
 
 /** The bank answers a throttled receipt with HTTP 200 and this code in the payload. */
+/**
+ * The connector's `hasReceiptItems`: a receipt response only counts as enrichment when it
+ * actually carries items. The bank answers some requests with HTTP 200 and an empty or error
+ * envelope, and a cassette that counted those would report coverage the replay cannot deliver.
+ */
+export function hasReceiptItems(body: unknown): boolean {
+  const receipt =
+    asObject(asObject(asObject(body)?.payload)?.receipt) ?? asObject(asObject(body)?.receipt);
+  return Array.isArray(receipt?.items) && receipt.items.length > 0;
+}
+
 export function isRateLimited(body: unknown): boolean {
   const payload = asObject(asObject(body)?.payload) ?? asObject(body);
   return text(payload?.resultCode)?.toUpperCase() === "REQUEST_RATE_LIMIT_EXCEEDED";
@@ -283,8 +363,18 @@ function extractOperations(body: unknown): Array<Record<string, unknown>> {
   return payload.filter((entry): entry is Record<string, unknown> => asObject(entry) !== null);
 }
 
+/**
+ * Mirrors the connector's `toNum`, numeric strings included. Rejecting `"1787227199000"` here
+ * would drop the operation from the summary and from detail and receipt recording, while the
+ * connector went on processing it and asking for entries the cassette does not hold.
+ */
 function finiteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 /** Same fields and precedence as the connector's `extractTimeMs`. */
@@ -467,13 +557,13 @@ export async function recordCassette(
 
   const operationsApiUrl =
     findLatestByPath(urls, OPERATIONS_PATH, deps.origin) ?? `${deps.origin}${OPERATIONS_PATH}`;
-  const detailApiUrl =
-    findLatestByPath(urls, OPERATION_DETAIL_PATH, deps.origin) ??
-    `${deps.origin}${OPERATION_DETAIL_PATH}`;
-  // Unlike the other two this one is not defaulted: the connector only requests tranche offers
-  // when the page has actually loaded that endpoint, so guessing a URL would record a request
-  // the replay never makes.
+  // Neither of these is defaulted, because the connector does not default them: both come from
+  // `findLatestResourceUrlByPath`, which returns null when the page never loaded that endpoint,
+  // and the connector then skips that enrichment entirely. Inventing a URL here would record a
+  // request the replay never makes — and one per operation, at that, against a live session.
+  const detailApiUrl = findLatestByPath(urls, OPERATION_DETAIL_PATH, deps.origin);
   const trancheApiUrl = findLatestByPath(urls, TRANCHE_PATH, deps.origin);
+  const trancheBaseParams = parseTrancheBaseParams(trancheApiUrl, deps.origin);
 
   const nowMs = deps.now();
   // Whole months by default: a rolling day window lines up with no month the bank ever shows,
@@ -587,6 +677,7 @@ export async function recordCassette(
   const detailPauseMs = options.pauseMs ?? DETAIL_PAUSE_MS;
   const requested = new Set<string>();
   let receipts = 0;
+  let issuedReceiptRequests = 0;
 
   const receiptBearing = operations.filter(operationHasShoppingReceipt);
   if (operations.length > 0 && receiptBearing.length === 0) {
@@ -609,7 +700,14 @@ export async function recordCassette(
   let detailCount = 0;
   let rateLimited = 0;
   let failedReceipts = 0;
-  for (const operation of operations) {
+  // The connector orders operations newest-first before it spends the receipt budget, so when a
+  // window holds more receipt-bearing operations than the budget allows, *which* fifty it asks
+  // for is decided by that order. Recording in response order would record a different fifty,
+  // and the replay would miss every one of them while the cassette looked full.
+  const enrichmentOrder = [...operations].sort(
+    (left, right) => (operationTimestampMs(right) ?? 0) - (operationTimestampMs(left) ?? 0),
+  );
+  for (const operation of enrichmentOrder) {
     const requestKey = extractReceiptRequestKey(operation);
     if (!requestKey) continue;
     // Adjacent ranges overlap on their bounds and the bank repeats an operation across them, so
@@ -618,40 +716,50 @@ export async function recordCassette(
     if (requested.has(requestKey)) continue;
     requested.add(requestKey);
 
-    const detailUrl = new URL(detailApiUrl, deps.origin);
-    detailUrl.searchParams.set("operationId", requestKey);
-    detailUrl.searchParams.set("sessionid", sessionId);
-
     // The connector asks for the detail of every operation it has not already fulfilled; only
     // the receipt request is conditional. Recording details for receipt-bearing operations
     // alone would leave the replay without an answer for every other one.
-    if (detailCount > 0) await sleep(detailPauseMs);
-    detailCount += 1;
-    report(`detail ${detailCount}/${operations.length}`);
-    entries.push((await recordRequest(deps, detailUrl.toString())).entry);
+    if (detailApiUrl) {
+      const detailUrl = new URL(detailApiUrl, deps.origin);
+      detailUrl.searchParams.set("operationId", requestKey);
+      detailUrl.searchParams.set("sessionid", sessionId);
+
+      if (detailCount > 0) await sleep(detailPauseMs);
+      detailCount += 1;
+      report(`detail ${detailCount}/${operations.length}`);
+      entries.push((await recordRequest(deps, detailUrl.toString())).entry);
+    }
 
     // The connector asks for tranche offers for every operation too, whenever the page has
     // loaded that endpoint. A cassette without them replays as one miss per operation.
-    if (trancheApiUrl) {
+    if (trancheApiUrl && trancheBaseParams) {
       const amount = operationAmount(operation);
       if (amount !== null) {
-        const trancheUrl = new URL(trancheApiUrl, deps.origin);
-        trancheUrl.searchParams.set("sessionid", sessionId);
-        trancheUrl.searchParams.set("amount", String(Math.abs(amount)));
         await sleep(pauseMs);
-        entries.push((await recordRequest(deps, trancheUrl.toString())).entry);
+        entries.push(
+          (
+            await recordRequest(
+              deps,
+              buildTrancheUrl(trancheApiUrl, deps.origin, trancheBaseParams, sessionId, amount),
+            )
+          ).entry,
+        );
       }
     }
 
     if (!operationHasShoppingReceipt(operation)) continue;
-    if (receipts >= maxReceipts) continue;
+    // The budget counts requests issued, not receipts captured — as the connector's
+    // `issuedReceiptRequestCount` does. Counting successes would let a run that keeps failing
+    // issue requests without limit, which is exactly the run the bank is rate-limiting.
+    if (issuedReceiptRequests >= maxReceipts) continue;
+    issuedReceiptRequests += 1;
 
     const receiptUrl = new URL(`${deps.origin}${RECEIPT_PATH}`);
     receiptUrl.searchParams.set("operationId", requestKey);
     receiptUrl.searchParams.set("sessionid", sessionId);
 
     await sleep(pauseMs);
-    report(`receipt ${receipts + 1}/${Math.min(maxReceipts, receiptBearing.length)}`);
+    report(`receipt ${issuedReceiptRequests}/${Math.min(maxReceipts, receiptBearing.length)}`);
     const recorded = await recordRequest(deps, receiptUrl.toString());
     entries.push(recorded.entry);
 
@@ -662,10 +770,11 @@ export async function recordCassette(
       rateLimited += 1;
       continue;
     }
-    // A gateway timeout or any other non-200 is an error body, not a receipt. Counting it would
-    // claim enrichment the cassette cannot replay — the connector retries and gets the error
-    // back — and a real recording hit exactly one 504.
-    if (recorded.entry.status !== 200) {
+    // A gateway timeout, any other non-200, and an HTTP 200 carrying no receipt items are all
+    // error bodies rather than receipts — the connector counts a success only when
+    // `hasReceiptItems` holds. Counting them would claim enrichment the cassette cannot replay:
+    // the connector retries and gets the same body back. A real recording hit exactly one 504.
+    if (recorded.entry.status !== 200 || !hasReceiptItems(recorded.body)) {
       failedReceipts += 1;
       continue;
     }
@@ -674,9 +783,17 @@ export async function recordCassette(
 
   if (failedReceipts > 0) {
     warnings.push(
-      `${failedReceipts} receipt request(s) failed with a non-200 status — a gateway timeout, ` +
-        "most likely. Those entries are error bodies, not receipts; re-record if the cassette " +
-        "needs them.",
+      `${failedReceipts} receipt request(s) came back without a receipt — a non-200 status or ` +
+        "an empty envelope. Those entries are error bodies, not receipts; re-record if the " +
+        "cassette needs them.",
+    );
+  }
+
+  if (!detailApiUrl) {
+    warnings.push(
+      "This page had not loaded the operation detail endpoint, so no detail responses were " +
+        "recorded. The connector skips that enrichment under the same condition, so the " +
+        "cassette is consistent — but open one operation before recording if you want it.",
     );
   }
 

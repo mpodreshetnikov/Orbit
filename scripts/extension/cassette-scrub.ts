@@ -88,7 +88,29 @@ const PERSON_NAME_KEYS = new Set([
   "cardHolder",
   "cardholdername",
   "cardHolderName",
+  // The bank's own abbreviated form of the counterparty's name, "Марина М." — abbreviated, but
+  // still a real person, and a live recording carried fourteen distinct ones.
+  "maskedfio",
+  "maskedFIO",
 ]);
+
+/**
+ * Operation groups whose `description` and `subcategory` hold the counterparty's name rather
+ * than a merchant's.
+ *
+ * The bank puts the same text in both fields, and what it means depends entirely on the group:
+ * under `PAY` it is "Пятёрочка", under `TRANSFER` it is "Марина М.". Redacting the fields
+ * outright would take the merchant names the mapper and the contract test are built on;
+ * redacting nothing leaves people's names in a committed fixture. So the group decides, and it
+ * sits on the same object.
+ *
+ * `INCOME` is here too. Its descriptions are the account holder's employer and salary lines
+ * where they are not a person's name outright, which is no less identifying.
+ */
+const COUNTERPARTY_GROUPS = new Set(["TRANSFER", "INCOME"]);
+
+/** The fields those groups fill with a name. */
+const COUNTERPARTY_TEXT_KEYS = new Set(["description", "subcategory", "merchantkey"]);
 
 const SENSITIVE_QUERY_PARAMS = new Set([
   "sessionid",
@@ -151,6 +173,17 @@ const LONG_DIGIT_RUN = /\d{13,}/g;
  * with a 7 would be reported as a phone.
  */
 const PHONE_NUMBER = /(?<![\d+])\+?[78]\d{10}(?!\d)/g;
+
+/**
+ * The bank's masked counterparty name: a given name, a space, one capital and a full stop —
+ * "Марина М.", "Maksim P.". Anchored to a complete JSON string value, because the point is to
+ * catch a name in a field nobody has named yet without catching "Ave Bistro & Gelato" in the
+ * merchant field beside it.
+ */
+const MASKED_PERSON_NAME = /"([A-ZА-ЯЁ][a-zа-яё]{1,30} [A-ZА-ЯЁ]\.)"/g;
+
+/** The same shape, matched against a complete string rather than inside a serialized payload. */
+const WHOLE_MASKED_PERSON_NAME = /^[A-ZА-ЯЁ][a-zа-яё]{1,30} [A-ZА-ЯЁ]\.$/;
 
 /**
  * Epoch milliseconds are a thirteen-digit run too, and they are the one thing a cassette must
@@ -257,13 +290,32 @@ function maskCardTail(value: unknown): string {
  * because the bank wraps them as `{"operationId":{"value":"…"}}`.
  */
 function scrubValue(value: unknown, preserve: boolean): unknown {
-  if (typeof value === "string") return preserve ? value : scrubFreeText(value);
+  if (typeof value === "string") {
+    if (preserve) return value;
+    // Whatever field it sits in. The group rule below covers the fields the operations list
+    // fills with a counterparty's name, but the same name comes back in the detail response
+    // under `merchantKey` and inside `{ "type": "Description", "value": … }`, where no group is
+    // in sight — and the next response shape will put it somewhere else again. Anchored to the
+    // whole value, so "Ave Bistro & Gelato" in the merchant field beside it is untouched.
+    if (WHOLE_MASKED_PERSON_NAME.test(value)) return REDACTED;
+    return scrubFreeText(value);
+  }
   if (Array.isArray(value)) return value.map((entry) => scrubValue(entry, preserve));
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
+    // Read before walking: whether `description` holds a merchant or a person is decided by the
+    // `group` sitting beside it, so the sibling has to be in hand before the field is reached.
+    const group = (value as Record<string, unknown>).group;
+    const namesCounterparty =
+      typeof group === "string" && COUNTERPARTY_GROUPS.has(group.toUpperCase());
+
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       const lowered = key.toLowerCase();
 
+      if (namesCounterparty && COUNTERPARTY_TEXT_KEYS.has(lowered)) {
+        result[key] = entry === null ? null : REDACTED;
+        continue;
+      }
       if (FISCAL_KEYS.has(lowered)) {
         result[key] = entry === null ? null : REDACTED;
         continue;
@@ -411,6 +463,19 @@ export function findCassetteLeaks(serialized: string): string[] {
     // The same identifier usually repeats across a recording; reporting it once per occurrence
     // buries the distinct problems under twenty copies of one of them.
     const leak = key ? `long digit run under "${key}": ${match[0]}` : `long digit run: ${match[0]}`;
+    if (reported.has(leak)) continue;
+    reported.add(leak);
+    leaks.push(leak);
+  }
+
+  // The bank's masked-name form — "Марина М.", "Maksim P." — as a whole JSON string value. It
+  // is what `maskedFIO`, and a transfer's `description` and `subcategory`, actually contain, and
+  // a real recording put fourteen of them in a file the scan had already called clean. Matching
+  // the whole value keeps a merchant like "Ave Bistro & Gelato" out of it.
+  for (const match of serialized.matchAll(MASKED_PERSON_NAME)) {
+    const name = match[1];
+    if (name === undefined) continue;
+    const leak = `masked person name: ${name}`;
     if (reported.has(leak)) continue;
     reported.add(leak);
     leaks.push(leak);

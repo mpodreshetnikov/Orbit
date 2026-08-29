@@ -211,6 +211,69 @@ describe("cassette scrubbing", () => {
     expect(findCassetteLeaks('{"operationTime":{"milliseconds":1787227199000}}')).toEqual([]);
   });
 
+  it("keeps the merchant but not the counterparty on the same field", () => {
+    // The bank puts the same text in `description`, `subcategory` and `merchantKey`, and what
+    // it means depends entirely on the group: under PAY it is a shop, under TRANSFER it is a
+    // person. Redacting the field outright would take the merchant names the mapper and the
+    // contract test are built on; redacting nothing left fourteen people's names in a file
+    // that was about to be committed.
+    expect(
+      scrubCassetteValue({
+        group: "PAY",
+        description: "Ave Bistro & Gelato",
+        subcategory: "kannam",
+        merchantKey: "Ave Bistro & Gelato",
+      }),
+    ).toEqual({
+      group: "PAY",
+      description: "Ave Bistro & Gelato",
+      subcategory: "kannam",
+      merchantKey: "Ave Bistro & Gelato",
+    });
+
+    expect(
+      scrubCassetteValue({
+        group: "TRANSFER",
+        description: "Марина М.",
+        subcategory: "Марина М.",
+        merchantKey: "Марина М.",
+        maskedFIO: "Марина М.",
+      }),
+    ).toEqual({
+      group: "TRANSFER",
+      description: REDACTED,
+      subcategory: REDACTED,
+      merchantKey: REDACTED,
+      maskedFIO: REDACTED,
+    });
+
+    // INCOME too: where it is not a person's name outright it is the employer and the salary
+    // line, which is no less identifying.
+    expect(
+      scrubCassetteValue({ group: "INCOME", description: 'Пополнение. Аванс. ООО "ТЦР"' }),
+    ).toEqual({ group: "INCOME", description: REDACTED });
+  });
+
+  it("removes a masked name from a field nobody named", () => {
+    // The group rule covers the operations list. The same name comes back in the detail
+    // response under `merchantKey` and inside `{ type: "Description", value: … }`, where no
+    // group is in sight — and the next response shape will put it somewhere else again.
+    expect(scrubCassetteValue({ type: "Description", value: "Марина М." })).toEqual({
+      type: "Description",
+      value: REDACTED,
+    });
+    expect(scrubCassetteValue({ mystery: "Maksim P." })).toEqual({ mystery: REDACTED });
+    // A merchant is not a masked name, whatever field it is in.
+    expect(scrubCassetteValue({ mystery: "Ave Bistro & Gelato" })).toEqual({
+      mystery: "Ave Bistro & Gelato",
+    });
+  });
+
+  it("reports a masked name the field rules did not catch", () => {
+    expect(findCassetteLeaks('{"mystery":"Марина М."}')).toEqual(["masked person name: Марина М."]);
+    expect(findCassetteLeaks('{"description":"Ave Bistro & Gelato"}')).toEqual([]);
+  });
+
   it("removes a phone number from free text", () => {
     expect(scrubFreeText("перевод на +79535912902")).toBe(`перевод на ${REDACTED}`);
     // Not a bite out of the middle of a card number: that whole run goes as one.

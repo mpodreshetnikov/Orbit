@@ -421,6 +421,195 @@ describe("cassette console recorder", () => {
     expect(july2026?.income).toBe("100000.00");
   });
 
+  it("never attaches the session id to a URL from another origin", async () => {
+    // The resource timeline holds whatever the page loaded, third parties included. Matching a
+    // candidate on path alone would accept a foreign origin, and the request builder then
+    // appends the live session id and fetches it — CORS does not stop the request going out.
+    const fetched: string[] = [];
+    const deps = makeDeps({
+      resourceUrls: () => [
+        `https://elsewhere.example/api/common/v1/operations?sessionid=stolen&start=1&end=2`,
+        `${ORIGIN}/api/common/v1/operations?sessionid=${SESSION}&start=1&end=2`,
+      ],
+      fetch: (async (input: RequestInfo | URL) => {
+        fetched.push(typeof input === "string" ? input : input.toString());
+        return new Response(JSON.stringify({ payload: [] }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await recordCassette({ name: "origins", pauseMs: 0, maxReceipts: 0 }, deps);
+
+    expect(fetched.length).toBeGreaterThan(0);
+    for (const url of fetched) expect(new URL(url).origin).toBe(ORIGIN);
+  });
+
+  it("takes no session id from a foreign URL", () => {
+    expect(
+      discoverSessionId(
+        [`https://elsewhere.example/api/common/v1/operations?sessionid=not-ours`],
+        ORIGIN,
+      ),
+    ).toBeNull();
+  });
+
+  it("spends the receipt budget on requests issued, not on receipts captured", async () => {
+    // The connector's budget counts issued requests. Counting successes instead lets a run that
+    // keeps failing issue requests without limit — which is exactly the run the bank is
+    // throttling, so the failures feed on themselves.
+    let receiptRequests = 0;
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: Array.from({ length: 10 }, (_, index) => operation(`op-${index}`, -100)),
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          receiptRequests += 1;
+          return new Response("<html>Gateway Timeout</html>", { status: 504 });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "budget", pauseMs: 0, maxReceipts: 3 }, deps);
+
+    expect(receiptRequests).toBe(3);
+    expect(result.counts.receipts).toBe(0);
+  });
+
+  it("does not count a 200 that carries no receipt items", async () => {
+    // The connector counts a success only when the payload actually holds items; the bank
+    // answers some requests with a well-formed but empty envelope.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(JSON.stringify({ payload: [operation("op-1", -2400)] }), {
+            status: 200,
+          });
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          return new Response(JSON.stringify({ payload: { receipt: { items: [] } } }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "empty", pauseMs: 0 }, deps);
+
+    expect(result.counts.receipts).toBe(0);
+  });
+
+  it("records the tranche URL with the connector's own defaults filled in", async () => {
+    // The replay matches on every query parameter but sessionid, start and end, so a URL
+    // recorded with only the parameters the page happened to carry misses on replay — silently,
+    // because a miss is indistinguishable from enrichment the connector chose not to request.
+    const deps = makeDeps({
+      resourceUrls: () => [
+        `${ORIGIN}/api/common/v1/operations?sessionid=${SESSION}&start=1&end=2`,
+        `${ORIGIN}/api/common/v1/tranche_offers?sessionid=${SESSION}&wuid=abc`,
+      ],
+    });
+
+    const result = await recordCassette({ name: "tranche", pauseMs: 0, maxReceipts: 0 }, deps);
+    const tranche = result.cassette.entries.find((entry) => entry.url.includes("tranche_offers"));
+    const params = new URL(tranche?.url ?? "").searchParams;
+
+    expect(params.get("appName")).toBe("supreme");
+    expect(params.get("appVersion")).toBe("0.0.1");
+    expect(params.get("platform")).toBe("web");
+    expect(params.get("program_type")).toBe("rpk_kk");
+    expect(params.get("origin")).toBe("web,ib5,platform");
+    expect(params.get("amount")).toBe("2400");
+    expect(params.get("wuid")).toBe("abc");
+  });
+
+  it("does not invent the detail endpoint the page never loaded", async () => {
+    // The connector's `discoverOperationDetailApiUrl` returns null and it skips detail
+    // enrichment. Defaulting the URL here would record one response per operation that the
+    // replay never asks for — hundreds of extra calls against a live session, for nothing.
+    const deps = makeDeps({
+      resourceUrls: () => [`${ORIGIN}/api/common/v1/operations?sessionid=${SESSION}&start=1&end=2`],
+    });
+
+    const result = await recordCassette({ name: "no-detail", pauseMs: 0, maxReceipts: 0 }, deps);
+
+    expect(
+      result.cassette.entries.filter((entry) => entry.url.includes("/api/common/v1/operation?")),
+    ).toHaveLength(0);
+    expect(result.warnings.join(" ")).toMatch(/detail endpoint/);
+  });
+
+  it("reads a timestamp the bank serialised as a string", async () => {
+    // The connector's `toNum` parses numeric strings. Rejecting them here would drop the
+    // operation from the summary and from enrichment while the connector went on asking for
+    // entries the cassette does not hold.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: [
+                {
+                  ...operation("op-1", -2400),
+                  debitingTime: { milliseconds: String(NOW - 1000) },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "strings", pauseMs: 0, maxReceipts: 0 }, deps);
+
+    expect(result.cassette.summary?.months.map((month) => month.month)).toEqual(["2026-08"]);
+  });
+
+  it("spends the receipt budget newest-first, as the connector does", async () => {
+    // When a window holds more receipt-bearing operations than the budget allows, which ones
+    // get asked for is decided by that order. A different set replays as a miss for every one.
+    const asked: string[] = [];
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: [
+                { ...operation("old", -100), debitingTime: { milliseconds: NOW - 900_000 } },
+                { ...operation("new", -200), debitingTime: { milliseconds: NOW - 1_000 } },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          asked.push(url.searchParams.get("operationId") ?? "");
+          return new Response(
+            JSON.stringify({ payload: { receipt: { items: [{ name: "Молоко" }] } } }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await recordCassette({ name: "order", pauseMs: 0, maxReceipts: 1 }, deps);
+
+    expect(asked).toEqual(["auth-new"]);
+  });
+
   it("records tranche offers only when the page has loaded that endpoint", async () => {
     const withTranche = makeDeps({
       resourceUrls: () => [
