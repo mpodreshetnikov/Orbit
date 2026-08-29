@@ -49,40 +49,68 @@ function versionOf(fileName) {
   return match ? match[1] : null;
 }
 
-function toVersions(fileNames) {
-  return fileNames.map(versionOf).filter(Boolean);
+function migrationsOnly(fileNames) {
+  return fileNames.filter((fileName) => versionOf(fileName));
 }
 
-/** @param {string | undefined} contents @returns {string[]} */
+/**
+ * Each entry is a version and the rationale that justifies it. The rationale is required: the
+ * policy this file enforces asks for a reason an exempted migration is safe against the newer
+ * schema, and a rationale nothing checks for is a rationale that stops being written.
+ *
+ * @param {string | undefined} contents
+ * @returns {{ version: string, rationale: string }[]}
+ */
 function parseAllowlist(contents) {
   return (contents || "")
     .split(/\r?\n/)
-    .map((line) => line.replace(/#.*$/, "").trim())
-    .filter(Boolean);
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const match = /^(\d{14})\s*#\s*(\S.*)$/.exec(line);
+      if (!match) {
+        throw new Error(
+          `Malformed allowlist entry: '${line}'. Each entry must be a 14-digit version followed ` +
+            "by '# ' and a rationale for why applying it against the newer schema is safe, e.g. " +
+            "'20260807120000 # catalogue rows only; disjoint from every later migration'.",
+        );
+      }
+      return { version: match[1], rationale: match[2].trim() };
+    });
 }
 
 /**
  * Pure core: which of head's new migrations would be applied out of order against base.
  *
- * @param {{ baseVersions: string[], headVersions: string[], allowlist?: string[] }} input
+ * Additions are identified by filename rather than version, because a new file may reuse a
+ * timestamp the base already carries. Such a file does not sort after the base's latest -- it ties
+ * with it, and duplicate versions collide in the remote migration history besides -- so the
+ * comparison is "does not sort after", not "sorts before".
+ *
+ * @param {{ baseFiles: string[], headFiles: string[], allowlist?: { version: string, rationale?: string }[] }} input
  */
-function evaluateMigrationOrder({ baseVersions, headVersions, allowlist = [] }) {
-  const base = new Set(baseVersions);
-  const allowed = new Set(allowlist);
-  const added = headVersions.filter((version) => !base.has(version));
+function evaluateMigrationOrder({ baseFiles, headFiles, allowlist = [] }) {
+  const baseMigrations = migrationsOnly(baseFiles);
+  const baseNames = new Set(baseMigrations);
+  const allowed = new Set(allowlist.map((entry) => entry.version));
+  const added = migrationsOnly(headFiles).filter((fileName) => !baseNames.has(fileName));
 
-  if (base.size === 0) {
+  if (baseMigrations.length === 0) {
     return { added, latestBaseVersion: null, offenders: [], allowed: [] };
   }
 
-  const latestBaseVersion = baseVersions.reduce((a, b) => (a > b ? a : b));
-  const outOfOrder = added.filter((version) => version < latestBaseVersion);
+  const latestBaseVersion = baseMigrations
+    .map(versionOf)
+    .reduce((a, b) => (String(a) > String(b) ? a : b));
+  const outOfOrder = added
+    .filter((fileName) => String(versionOf(fileName)) <= String(latestBaseVersion))
+    .sort();
 
   return {
     added,
     latestBaseVersion,
-    offenders: outOfOrder.filter((version) => !allowed.has(version)).sort(),
-    allowed: outOfOrder.filter((version) => allowed.has(version)).sort(),
+    offenders: outOfOrder.filter((fileName) => !allowed.has(String(versionOf(fileName)))),
+    allowed: outOfOrder.filter((fileName) => allowed.has(String(versionOf(fileName)))),
   };
 }
 
@@ -144,16 +172,17 @@ function readAllowlist() {
 function formatFailure({ offenders, latestBaseVersion, baseRef }) {
   return [
     `Migration(s) added out of order relative to ${baseRef}:`,
-    ...offenders.map((version) => `  ${version} sorts before ${latestBaseVersion}`),
+    ...offenders.map((fileName) => `  ${fileName} does not sort after ${latestBaseVersion}`),
     "",
     `${baseRef} already carries ${latestBaseVersion}, so production has applied it. A migration`,
-    "added below it is applied against a schema those later migrations already changed, which is",
-    "an order `db reset` never exercises.",
+    "that does not sort after it is applied against a schema those later migrations already",
+    "changed, which is an order `db reset` never exercises. A migration reusing that exact",
+    "timestamp collides in the remote migration history besides.",
     "",
     "Rename the file to a timestamp after the latest one on the base branch (its contents are",
     "unchanged; only the ordering is). If applying it out of order is genuinely intended and",
-    `reviewed, add its version to ${MIGRATIONS_DIR}/.out-of-order-allowlist with a comment saying`,
-    "why it is safe against the newer schema.",
+    `reviewed, add a line to ${MIGRATIONS_DIR}/.out-of-order-allowlist of the form`,
+    "'<version> # why it is safe against the newer schema'.",
   ].join("\n");
 }
 
@@ -175,13 +204,13 @@ function main() {
   }
 
   const result = evaluateMigrationOrder({
-    baseVersions: toVersions(baseFiles),
-    headVersions: toVersions(readHeadMigrations()),
+    baseFiles,
+    headFiles: readHeadMigrations(),
     allowlist: readAllowlist(),
   });
 
-  for (const version of result.allowed) {
-    console.log(`Migration ${version} is out of order but allowlisted; not failing.`);
+  for (const fileName of result.allowed) {
+    console.log(`Migration ${fileName} is out of order but allowlisted; not failing.`);
   }
 
   if (result.offenders.length > 0) {

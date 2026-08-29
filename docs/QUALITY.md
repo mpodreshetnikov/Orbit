@@ -125,13 +125,13 @@ Every behavior change must update tests in the same change set.
 
 ## Migration Order Policy
 
-A new migration's timestamp must sort **after** every migration already on the branch it will merge into.
+A new migration's timestamp must sort **after** every migration already on the branch it will merge into. Reusing an existing timestamp is the same violation: it does not sort after, and duplicate versions collide in the remote migration history.
 
 - Production applies migrations with `supabase db push --include-all`, so a file added below the latest already-deployed one runs against a schema the newer migrations have already changed.
 - `db-reset` cannot detect that: it always replays from scratch in filename order, so the order it proves is not the order production uses. The two agree only for migrations that sort after everything already deployed.
 - If your branch was opened before another migration merged, rename yours to a later timestamp. The contents do not change, only the ordering.
 - CI enforces the rule with `quality-migration-order`, which runs inside `quality` and compares against the pull request's actual base branch.
-- `supabase/migrations/.out-of-order-allowlist` is the reviewed exception. Add a version there only with a comment stating why applying it against the newer schema is safe.
+- `supabase/migrations/.out-of-order-allowlist` is the reviewed exception. Each entry is `<14-digit version> # <why it is safe against the newer schema>`; the rationale is required and an entry without one fails the check.
 
 ## Change-Type Check Matrix
 

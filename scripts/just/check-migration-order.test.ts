@@ -5,67 +5,91 @@ import * as checkMigrationOrder from "./check-migration-order.cjs";
 
 const { evaluateMigrationOrder, parseAllowlist, parseArgs, versionOf } = checkMigrationOrder;
 
-const BASE = ["20260802120000", "20260809120000"];
+const BASE = ["20260802120000_a.sql", "20260809120000_b.sql"];
+const RATIONALE = "catalogue rows only; disjoint from every later migration";
 
 describe("migration order evaluation", () => {
   it("passes when an added migration sorts after everything on the base branch", () => {
     const result = evaluateMigrationOrder({
-      baseVersions: BASE,
-      headVersions: [...BASE, "20260810000000"],
+      baseFiles: BASE,
+      headFiles: [...BASE, "20260810000000_new.sql"],
     });
 
     expect(result.offenders).toEqual([]);
-    expect(result.added).toEqual(["20260810000000"]);
+    expect(result.added).toEqual(["20260810000000_new.sql"]);
     expect(result.latestBaseVersion).toBe("20260809120000");
   });
 
   it("flags the real case: a migration merged below one production already carries", () => {
     const result = evaluateMigrationOrder({
-      baseVersions: BASE,
-      headVersions: [...BASE, "20260807120000"],
+      baseFiles: BASE,
+      headFiles: [...BASE, "20260807120000_late.sql"],
     });
 
-    expect(result.offenders).toEqual(["20260807120000"]);
+    expect(result.offenders).toEqual(["20260807120000_late.sql"]);
+  });
+
+  it("flags a new file that reuses a timestamp the base already carries", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: [...BASE, "20260809120000_different_name.sql"],
+    });
+
+    expect(result.added).toEqual(["20260809120000_different_name.sql"]);
+    expect(result.offenders).toEqual(["20260809120000_different_name.sql"]);
   });
 
   it("passes when nothing was added", () => {
-    const result = evaluateMigrationOrder({ baseVersions: BASE, headVersions: BASE });
+    const result = evaluateMigrationOrder({ baseFiles: BASE, headFiles: BASE });
 
     expect(result.offenders).toEqual([]);
     expect(result.added).toEqual([]);
   });
 
   it("does not flag a migration the base branch already carries, however old", () => {
+    const files = ["20250126000000_old.sql", ...BASE];
+    const result = evaluateMigrationOrder({ baseFiles: files, headFiles: files });
+
+    expect(result.offenders).toEqual([]);
+  });
+
+  it("ignores files in the directory that are not timestamped migrations", () => {
     const result = evaluateMigrationOrder({
-      baseVersions: ["20250126000000", ...BASE],
-      headVersions: ["20250126000000", ...BASE],
+      baseFiles: BASE,
+      headFiles: [...BASE, "README.md", ".out-of-order-allowlist"],
     });
 
+    expect(result.added).toEqual([]);
     expect(result.offenders).toEqual([]);
   });
 
   it("exempts an allowlisted version but still reports it as out of order", () => {
     const result = evaluateMigrationOrder({
-      baseVersions: BASE,
-      headVersions: [...BASE, "20260807120000"],
-      allowlist: ["20260807120000"],
+      baseFiles: BASE,
+      headFiles: [...BASE, "20260807120000_late.sql"],
+      allowlist: [{ version: "20260807120000", rationale: RATIONALE }],
     });
 
     expect(result.offenders).toEqual([]);
-    expect(result.allowed).toEqual(["20260807120000"]);
+    expect(result.allowed).toEqual(["20260807120000_late.sql"]);
   });
 
   it("flags every offender, not just the first", () => {
     const result = evaluateMigrationOrder({
-      baseVersions: BASE,
-      headVersions: [...BASE, "20260807120000", "20260101000000", "20260901000000"],
+      baseFiles: BASE,
+      headFiles: [
+        ...BASE,
+        "20260807120000_late.sql",
+        "20260101000000_older.sql",
+        "20260901000000_fine.sql",
+      ],
     });
 
-    expect(result.offenders).toEqual(["20260101000000", "20260807120000"]);
+    expect(result.offenders).toEqual(["20260101000000_older.sql", "20260807120000_late.sql"]);
   });
 
   it("cannot judge order with no base migrations, and says so rather than flagging", () => {
-    const result = evaluateMigrationOrder({ baseVersions: [], headVersions: ["20260101000000"] });
+    const result = evaluateMigrationOrder({ baseFiles: [], headFiles: ["20260101000000_a.sql"] });
 
     expect(result.offenders).toEqual([]);
     expect(result.latestBaseVersion).toBeNull();
@@ -85,17 +109,24 @@ describe("migration filename parsing", () => {
 });
 
 describe("allowlist parsing", () => {
-  it("reads versions and drops comments and blank lines", () => {
-    const parsed = parseAllowlist(
-      [
-        "# reviewed: touches only catalogue rows",
-        "20260807120000",
-        "",
-        "20260101000000 # older",
-      ].join("\n"),
-    );
+  it("reads a version and the rationale that justifies it", () => {
+    expect(parseAllowlist(`20260807120000 # ${RATIONALE}`)).toEqual([
+      { version: "20260807120000", rationale: RATIONALE },
+    ]);
+  });
 
-    expect(parsed).toEqual(["20260807120000", "20260101000000"]);
+  it("rejects a bare version, so the exemption cannot skip its rationale", () => {
+    expect(() => parseAllowlist("20260807120000")).toThrow("Malformed allowlist entry");
+  });
+
+  it("rejects an entry whose rationale is empty", () => {
+    expect(() => parseAllowlist("20260807120000 #   ")).toThrow("Malformed allowlist entry");
+  });
+
+  it("keeps whole-line comments and blank lines out of the entries", () => {
+    expect(
+      parseAllowlist(["# how to use this file", "", `20260807120000 # ${RATIONALE}`].join("\n")),
+    ).toEqual([{ version: "20260807120000", rationale: RATIONALE }]);
   });
 
   it("treats a missing or empty file as no exemptions", () => {
