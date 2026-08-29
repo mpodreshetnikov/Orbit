@@ -29,19 +29,15 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 const DB_CONTAINER = process.env.ORBIT_DB_CONTAINER ?? "orbit_db";
 const STORAGE_CONTAINER = "orbit_db_storage";
 const AUTH_CONTAINER = "orbit_db_auth";
-const NETWORK = process.env.ORBIT_DB_NETWORK ?? "orbit_db_net";
 const PORT = Number(process.env.ORBIT_DB_PORT ?? 54322);
 const PG_IMAGE = process.env.ORBIT_PG_IMAGE ?? "public.ecr.aws/supabase/postgres:17.6.1.063";
 const STORAGE_IMAGE =
   process.env.ORBIT_STORAGE_IMAGE ?? "public.ecr.aws/supabase/storage-api:v1.38.0";
 const AUTH_IMAGE = process.env.ORBIT_AUTH_IMAGE ?? "public.ecr.aws/supabase/gotrue:v2.186.0";
-const PUBLISH_DEFAULT_PORT = process.env.ORBIT_DB_PUBLISH_DEFAULT_PORT !== "0";
 const JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 
 /** What the app, psql and `run-deploy.js` connect to. */
 const DB_URL = `postgresql://postgres:postgres@127.0.0.1:${PORT}/postgres`;
-/** What the pgTAP runner connects to — it is a container, so loopback is not the database. */
-const CONTAINER_DB_URL = `postgresql://postgres:postgres@${DB_CONTAINER}:5432/postgres`;
 
 function log(message) {
   console.log(`[db-local-docker] ${message}`);
@@ -110,59 +106,16 @@ function waitFor(label, check, timeoutMs = 180000) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-function pinContainerNameToLoopback() {
-  // The pgTAP runner is a container on ${NETWORK} while the CLI that launches it runs on the
-  // host, and both are handed the same connection string. One name has to resolve in both
-  // places: inside the network Docker's DNS answers it, and here /etc/hosts does.
-  if (process.platform !== "linux") return;
-  const hosts = fs.readFileSync("/etc/hosts", "utf8");
-  if (new RegExp(`\\s${DB_CONTAINER}(\\s|$)`, "m").test(hosts)) return;
-  fs.appendFileSync("/etc/hosts", `\n127.0.0.1 ${DB_CONTAINER}\n`);
-}
-
-function enableTls() {
-  // The CLI refuses a plaintext connection to anything it does not consider local, and the
-  // container name is not local by its reckoning. A self-signed certificate is enough: this
-  // database holds fixtures and lives as long as the checkout.
-  docker([
-    "exec",
-    DB_CONTAINER,
-    "bash",
-    "-lc",
-    "test -f /var/lib/postgresql/server.crt || (openssl req -new -x509 -days 365 -nodes -text " +
-      "-out /var/lib/postgresql/server.crt -keyout /var/lib/postgresql/server.key " +
-      `-subj '/CN=${DB_CONTAINER}' >/dev/null 2>&1 && chmod 600 /var/lib/postgresql/server.key && ` +
-      "chown postgres:postgres /var/lib/postgresql/server.key /var/lib/postgresql/server.crt)",
-  ]);
-  for (const setting of [
-    "ssl = 'on'",
-    "ssl_cert_file = '/var/lib/postgresql/server.crt'",
-    "ssl_key_file = '/var/lib/postgresql/server.key'",
-  ]) {
-    // ALTER SYSTEM cannot run inside a transaction block, so one statement per call.
-    psqlSuper(`alter system set ${setting}`);
-  }
-  docker(["restart", DB_CONTAINER]);
-  waitFor("postgres after TLS restart", () => psql(["-c", "select 1"]).status === 0);
-}
-
 function startDatabase() {
   log("recreating containers");
   docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
-  docker(["network", "create", NETWORK]);
   const created = docker([
     "run",
     "-d",
     "--name",
     DB_CONTAINER,
-    "--network",
-    NETWORK,
     "-p",
     `${PORT}:5432`,
-    // Publishing 5432 as well is what lets the container name resolve to the same database on
-    // the host, which the pgTAP runner needs. A second database on the same host — the data
-    // migration check runs one — must not claim it.
-    ...(PUBLISH_DEFAULT_PORT ? ["-p", "5432:5432"] : []),
     "-e",
     "POSTGRES_PASSWORD=postgres",
     PG_IMAGE,
@@ -173,7 +126,6 @@ function startDatabase() {
   if (created.status !== 0) {
     throw new Error(`Failed to start ${DB_CONTAINER}: ${created.stderr ?? ""}`);
   }
-  if (PUBLISH_DEFAULT_PORT) pinContainerNameToLoopback();
 
   log("waiting for postgres");
   waitFor("postgres", () => psql(["-c", "select 1"]).status === 0);
@@ -350,33 +302,71 @@ function up(flags) {
   startSchemaOwners();
   applyMigrations({ until: flags.until });
   if (!flags.noDeploy) applyDeployAndSeed();
-  if (!flags.noTls) enableTls();
 
   log("ready");
   log(`  psql / app:   ${DB_URL}`);
-  log(`  pgTAP runner: --network-id ${NETWORK} --db-url ${CONTAINER_DB_URL}`);
   return 0;
 }
 
 function down() {
   docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
-  docker(["network", "rm", NETWORK]);
   log("removed");
   return 0;
 }
 
-function test(extraArgs) {
-  const result = run("npx", [
-    "supabase",
-    "test",
-    "db",
-    "--network-id",
-    NETWORK,
-    "--db-url",
-    CONTAINER_DB_URL,
-    ...(extraArgs.length > 0 ? extraArgs : ["supabase/tests"]),
-  ]);
-  return result.status ?? 1;
+/**
+ * Runs the pgTAP suite through psql rather than the CLI.
+ *
+ * `supabase test db` launches pg_prove in its own container, which cannot reach a database
+ * published on the host's loopback — and pointing it at the container name instead made the CLI
+ * demand TLS, because a name it does not recognise is "remote" to it. Working around that took a
+ * self-signed certificate, an /etc/hosts entry needing root, and a claim on port 5432 that
+ * collides with any Postgres already running. All three were workarounds for a runner this
+ * script does not need: a pgTAP file is a psql script, and its output is TAP.
+ *
+ * CI still runs the CLI against its own stack, so parity with the pipeline is unaffected.
+ */
+function test(paths) {
+  const roots = paths.length > 0 ? paths : [path.join("supabase", "tests")];
+  const files = [];
+  const collect = (target) => {
+    const absolute = path.resolve(repoRoot, target);
+    if (!fs.existsSync(absolute)) return;
+    if (fs.statSync(absolute).isDirectory()) {
+      for (const entry of fs.readdirSync(absolute).sort()) collect(path.join(target, entry));
+      return;
+    }
+    if (absolute.endsWith(".sql")) files.push(absolute);
+  };
+  for (const root of roots) collect(root);
+
+  if (files.length === 0) {
+    log("no pgTAP files found");
+    return 1;
+  }
+
+  let failed = 0;
+  let assertions = 0;
+  for (const file of files) {
+    const result = psql(["-X", "-t", "-A", "-f", file], { env: { ON_ERROR_STOP: "0" } });
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+    const notOk = output.match(/^not ok\b.*$/gm) ?? [];
+    const ok = output.match(/^ok\b/gm) ?? [];
+    assertions += ok.length + notOk.length;
+
+    const relative = path.relative(repoRoot, file);
+    if (notOk.length > 0 || result.status !== 0 || ok.length === 0) {
+      failed += 1;
+      console.log(`not ok - ${relative}`);
+      for (const line of notOk) console.log(`    ${line}`);
+      if (ok.length === 0) console.log(`    ${output.trim().split("\n").slice(-5).join("\n    ")}`);
+      continue;
+    }
+    console.log(`ok - ${relative} (${ok.length})`);
+  }
+
+  log(`${files.length} file(s), ${assertions} assertion(s), ${failed} failed`);
+  return failed === 0 ? 0 : 1;
 }
 
 function lint() {
@@ -385,7 +375,7 @@ function lint() {
     "db",
     "lint",
     "--db-url",
-    CONTAINER_DB_URL,
+    DB_URL,
     "--schema",
     "public",
     "--fail-on",

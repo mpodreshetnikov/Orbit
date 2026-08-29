@@ -132,6 +132,9 @@ const LONG_DIGIT_RUN = /\d{13,}/g;
  */
 const EXEMPT_STRUCTURAL_VALUES = [
   /"milliseconds"\s*:\s*(\d{13})(?!\d)/g,
+  // The connector's own fallback when an operation carries no nested time object. Known
+  // structural timing, so leaving it unexempt would block a recording of that shape.
+  /"operationDateTime"\s*:\s*(\d{13})(?!\d)/g,
   // Range bounds are epoch milliseconds too, and they are the only record of which window a
   // recorded response answered.
   /[?&](?:start|end)=(\d{13})(?!\d)/g,

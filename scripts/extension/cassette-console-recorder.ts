@@ -27,6 +27,7 @@ import { findCassetteLeaks, scrubCassette, type CassetteEntry } from "./cassette
 const OPERATIONS_PATH = "/api/common/v1/operations";
 const OPERATION_DETAIL_PATH = "/api/common/v1/operation";
 const RECEIPT_PATH = "/api/common/v1/shopping_receipt";
+const TRANCHE_PATH = "/api/common/v1/tranche_offers";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Mirrors the connector's 14-day request window; see `buildRanges` in `tbank-web.ts`. */
@@ -221,6 +222,12 @@ export function extractReceiptRequestKey(operation: Record<string, unknown>): st
   );
 }
 
+/** The bank answers a throttled receipt with HTTP 200 and this code in the payload. */
+export function isRateLimited(body: unknown): boolean {
+  const payload = asObject(asObject(body)?.payload) ?? asObject(body);
+  return text(payload?.resultCode)?.toUpperCase() === "REQUEST_RATE_LIMIT_EXCEEDED";
+}
+
 function extractOperations(body: unknown): Array<Record<string, unknown>> {
   const payload = asObject(body)?.payload;
   if (!Array.isArray(payload)) return [];
@@ -399,6 +406,10 @@ export async function recordCassette(
   const detailApiUrl =
     findLatestByPath(urls, OPERATION_DETAIL_PATH, deps.origin) ??
     `${deps.origin}${OPERATION_DETAIL_PATH}`;
+  // Unlike the other two this one is not defaulted: the connector only requests tranche offers
+  // when the page has actually loaded that endpoint, so guessing a URL would record a request
+  // the replay never makes.
+  const trancheApiUrl = findLatestByPath(urls, TRANCHE_PATH, deps.origin);
 
   const nowMs = deps.now();
   // Whole months by default: a rolling day window lines up with no month the bank ever shows,
@@ -522,6 +533,7 @@ export async function recordCassette(
   }
 
   let detailCount = 0;
+  let rateLimited = 0;
   for (const operation of operations) {
     const requestKey = extractReceiptRequestKey(operation);
     if (!requestKey) continue;
@@ -543,6 +555,19 @@ export async function recordCassette(
     report(`detail ${detailCount}/${operations.length}`);
     entries.push((await recordRequest(deps, detailUrl.toString())).entry);
 
+    // The connector asks for tranche offers for every operation too, whenever the page has
+    // loaded that endpoint. A cassette without them replays as one miss per operation.
+    if (trancheApiUrl) {
+      const amount = operationAmount(operation);
+      if (amount !== null) {
+        const trancheUrl = new URL(trancheApiUrl, deps.origin);
+        trancheUrl.searchParams.set("sessionid", sessionId);
+        trancheUrl.searchParams.set("amount", String(Math.abs(amount)));
+        await sleep(pauseMs);
+        entries.push((await recordRequest(deps, trancheUrl.toString())).entry);
+      }
+    }
+
     if (!operationHasShoppingReceipt(operation)) continue;
     if (receipts >= maxReceipts) continue;
 
@@ -551,9 +576,26 @@ export async function recordCassette(
     receiptUrl.searchParams.set("sessionid", sessionId);
 
     await sleep(pauseMs);
+    report(`receipt ${receipts + 1}/${Math.min(maxReceipts, receiptBearing.length)}`);
+    const recorded = await recordRequest(deps, receiptUrl.toString());
+    entries.push(recorded.entry);
+
+    // A rate-limited receipt comes back as a successful HTTP envelope carrying an error code.
+    // Counting it as captured would overstate what the cassette holds, and on replay the
+    // connector retries and gets the same error back — enrichment it can never reproduce.
+    if (isRateLimited(recorded.body)) {
+      rateLimited += 1;
+      continue;
+    }
     receipts += 1;
-    report(`receipt ${receipts}/${Math.min(maxReceipts, receiptBearing.length)}`);
-    entries.push((await recordRequest(deps, receiptUrl.toString())).entry);
+  }
+
+  if (rateLimited > 0) {
+    warnings.push(
+      `${rateLimited} receipt request(s) came back rate-limited by the bank. Those receipts are ` +
+        "error responses in this cassette, not receipts. Wait a few minutes and record again, " +
+        "or raise pauseMs.",
+    );
   }
 
   const scrubbed = scrubCassette(entries);

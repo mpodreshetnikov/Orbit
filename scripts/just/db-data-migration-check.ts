@@ -33,6 +33,13 @@ const PORT = "54329";
 /** The first T-0013 migration; everything before it is the "already accumulated" world. */
 const FIRST_REPAIR_MIGRATION = "20260814090000";
 const LAST_MIGRATION_BEFORE_REPAIR = "20260814089999";
+/**
+ * The upper bound matters as much as the lower one. Without it, `--from` sweeps in every
+ * migration added after these, and the second pass re-executes them — ordinary migrations use
+ * bare `CREATE TABLE` and `CREATE INDEX`, so the next one written would fail this check and
+ * take every database CI job with it, for a reason having nothing to do with the repairs.
+ */
+const LAST_REPAIR_MIGRATION = "20260814094000";
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const childEnv = {
@@ -514,14 +521,16 @@ async function main(): Promise<number> {
   console.log("# seeding rows in their pre-repair shape");
   seedAccumulatedRows();
 
-  console.log(`# applying the repair migrations (${FIRST_REPAIR_MIGRATION} onwards)`);
-  dbLocalDocker(["migrate", "--from", FIRST_REPAIR_MIGRATION]);
+  console.log(
+    `# applying the repair migrations (${FIRST_REPAIR_MIGRATION}..${LAST_REPAIR_MIGRATION})`,
+  );
+  dbLocalDocker(["migrate", "--from", FIRST_REPAIR_MIGRATION, "--until", LAST_REPAIR_MIGRATION]);
   await assertRepaired();
 
   const afterFirstRun = snapshot();
 
   console.log("\n# applying them a second time");
-  dbLocalDocker(["migrate", "--from", FIRST_REPAIR_MIGRATION]);
+  dbLocalDocker(["migrate", "--from", FIRST_REPAIR_MIGRATION, "--until", LAST_REPAIR_MIGRATION]);
   await assertRepaired();
   check("a second run changes nothing", snapshot(), afterFirstRun);
 

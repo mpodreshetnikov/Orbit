@@ -330,6 +330,63 @@ describe("cassette console recorder", () => {
     expect(byMonth.get("2026-08")?.complete).toBe(false);
   });
 
+  it("does not count a rate-limited receipt as captured", async () => {
+    // The bank answers a throttled receipt with HTTP 200 and an error code in the body. Counting
+    // it would overstate the cassette, and the replay would retry into the same error forever.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(JSON.stringify({ payload: [operation("op-1", -2400)] }), {
+            status: 200,
+          });
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          return new Response(
+            JSON.stringify({ payload: { resultCode: "REQUEST_RATE_LIMIT_EXCEEDED" } }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "throttled", pauseMs: 0 }, deps);
+
+    expect(result.counts.receipts).toBe(0);
+    expect(result.warnings.join(" ")).toMatch(/rate-limited/);
+  });
+
+  it("records tranche offers only when the page has loaded that endpoint", async () => {
+    const withTranche = makeDeps({
+      resourceUrls: () => [
+        `${ORIGIN}/api/common/v1/operations?sessionid=${SESSION}&start=1&end=2`,
+        `${ORIGIN}/api/common/v1/tranche_offers?sessionid=${SESSION}&appName=supreme&platform=web`,
+      ],
+    });
+    const withTrancheResult = await recordCassette(
+      { name: "tranche", pauseMs: 0, maxReceipts: 0 },
+      withTranche,
+    );
+    const trancheUrls = withTrancheResult.cassette.entries.filter((entry) =>
+      entry.url.includes("tranche_offers"),
+    );
+    expect(trancheUrls.length).toBeGreaterThan(0);
+    // The amount is part of the key the replay matches on, so it has to be there.
+    expect(trancheUrls[0]?.url).toContain("amount=2400");
+    // And the parameters the page itself used must survive the recording.
+    expect(trancheUrls[0]?.url).toContain("appName=supreme");
+
+    // Without the endpoint on the page the connector never asks, so neither may the recorder.
+    const withoutTranche = await recordCassette(
+      { name: "no-tranche", pauseMs: 0, maxReceipts: 0 },
+      makeDeps(),
+    );
+    expect(
+      withoutTranche.cassette.entries.filter((entry) => entry.url.includes("tranche_offers")),
+    ).toHaveLength(0);
+  });
+
   it("walks the same ranges as the connector", () => {
     const ranges = buildRanges(NOW - 30 * 24 * 60 * 60 * 1000, NOW, 14);
 
