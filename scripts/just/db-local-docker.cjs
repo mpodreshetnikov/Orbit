@@ -200,7 +200,10 @@ function startDatabase() {
     "--name",
     DB_CONTAINER,
     "-p",
-    `${PORT}:5432`,
+    // Loopback only. This container carries the fixed password on the next line, so publishing
+    // on every interface would offer a trivially-credentialed Postgres to anything that can
+    // reach this host — a LAN, a shared network. `DB_URL` has always been loopback; match it.
+    `127.0.0.1:${PORT}:5432`,
     "-e",
     "POSTGRES_PASSWORD=postgres",
     PG_IMAGE,
@@ -388,7 +391,7 @@ function applyMigrations({ from, until, skipApplied = false } = {}) {
   log(`applied ${files.length} migration(s)`);
 }
 
-function applyDeployAndSeed() {
+function applyDeployAndSeed({ seed }) {
   log("applying idempotent SQL objects (supabase/db/deploy.sql)");
   // Not `run-deploy.js local`: that mode hard-codes port 54322, so a database on any other port
   // would either fail to connect or — worse, if a stock Supabase stack holds 54322 — deploy into
@@ -402,6 +405,16 @@ function applyDeployAndSeed() {
 
   log("installing pgtap for the pgTAP suite");
   psqlSuper("create extension if not exists pgtap with schema extensions;");
+
+  // `deploy.sql` is idempotent by construction, so it runs either way. `seed.sql` is not: its
+  // `persons` inserts say `ON CONFLICT DO NOTHING` with no conflict target, and `persons` has no
+  // unique index those rows could ever collide on — the id is a generated uuid. So every re-run
+  // adds another Max, Kate and Demi, and the seed's own dependent lookups then pick an arbitrary
+  // copy. Only a database this command just built gets seeded.
+  if (!seed) {
+    log("reused database — skipping the seed (--recreate builds and seeds a fresh one)");
+    return;
+  }
 
   log("seeding");
   const seeded = psql(["-f", path.join(repoRoot, "supabase", "seed.sql")], { stdio: "pipe" });
@@ -439,7 +452,7 @@ function up(flags) {
   }
 
   applyMigrations({ until: flags.until, skipApplied: !rebuilding });
-  if (!flags.noDeploy) applyDeployAndSeed();
+  if (!flags.noDeploy) applyDeployAndSeed({ seed: rebuilding });
 
   log("ready");
   log(`  psql / app:   ${DB_URL}`);

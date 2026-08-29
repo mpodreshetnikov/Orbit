@@ -408,11 +408,13 @@ export function isRateLimited(body: unknown): boolean {
 function extractOperations(body: unknown): {
   rawCount: number;
   operations: Array<Record<string, unknown>>;
+  payloadIsArray: boolean;
 } {
   const payload = asObject(body)?.payload;
-  if (!Array.isArray(payload)) return { rawCount: 0, operations: [] };
+  if (!Array.isArray(payload)) return { rawCount: 0, operations: [], payloadIsArray: false };
   return {
     rawCount: payload.length,
+    payloadIsArray: true,
     operations: payload.filter(
       (entry): entry is Record<string, unknown> => asObject(entry) !== null,
     ),
@@ -733,7 +735,30 @@ export async function recordCassette(
       );
     }
 
-    const { rawCount, operations: payload } = extractOperations(body);
+    const { rawCount, operations: payload, payloadIsArray } = extractOperations(body);
+
+    // A 200 is not the same thing as an answer. The bank returns one for a general error
+    // envelope — `INVALID_REQUEST_DATA` is the shape the detail endpoint answers with all day —
+    // and a body that is not JSON at all arrives here as a string. Neither carries a `payload`
+    // array, and an absent array is indistinguishable from a range that genuinely held no
+    // operations. Left alone, such a range is recorded as empty, its month keeps `complete`,
+    // and the reconciliation compares a total missing everything that range held: the one
+    // failure the month-comparison exists to make impossible. `detectBlockedReason` above does
+    // not catch these — it looks for the auth and captcha shapes, which stop the whole
+    // recording. This is the milder case, so it gets the same treatment as a non-200: warn, and
+    // take the month out of the comparison.
+    if (!payloadIsArray || isErrorEnvelope(body)) {
+      // The code the bank gave, when it gave one — `INVALID_REQUEST_DATA` names the problem and
+      // "no payload array" does not. An error envelope usually omits the array as well, so
+      // reading the payload shape first would bury every code behind the same generic line.
+      const resultCode = text(asObject(body)?.resultCode);
+      const reason =
+        resultCode && resultCode.toUpperCase() !== "OK" ? resultCode : "no payload array";
+      warnings.push(`range request ${requestCount} answered 200 with ${reason}`);
+      incompleteStartsMs.push(range.start, range.end);
+      continue;
+    }
+
     let oldestInResponseMs: number | null = null;
     for (const operation of payload) {
       const timestampMs = operationTimestampMs(operation);

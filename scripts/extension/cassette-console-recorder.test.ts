@@ -357,6 +357,70 @@ describe("cassette console recorder", () => {
     expect(july2026?.complete ?? false).toBe(false);
   });
 
+  it("does not call a month comparable when a range answered 200 with an error envelope", async () => {
+    // The bank answers `INVALID_REQUEST_DATA` with HTTP 200, which is how every detail request
+    // in the real recording comes back. Nothing about the status line says the range failed, and
+    // the envelope carries no `payload` array — so read as an ordinary response it is a range
+    // that held no operations, which is exactly what a range the bank refused looks like from
+    // here. Marked complete, the month would be reconciled against a total missing everything
+    // that range held.
+    const july = Date.UTC(2026, 6, 15, 9, 0, 0);
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          const start = Number(url.searchParams.get("start"));
+          const end = Number(url.searchParams.get("end"));
+          if (start <= july && july <= end) {
+            return new Response(JSON.stringify({ resultCode: "INVALID_REQUEST_DATA" }), {
+              status: 200,
+            });
+          }
+          return new Response(
+            JSON.stringify({ resultCode: "OK", payload: [operation("august-1", -700)] }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "envelope", pauseMs: 0, maxReceipts: 0 }, deps);
+    const july2026 = result.cassette.summary?.months.find((month) => month.month === "2026-07");
+
+    expect(result.warnings.join(" ")).toMatch(/answered 200 with INVALID_REQUEST_DATA/);
+    expect(july2026?.complete ?? false).toBe(false);
+  });
+
+  it("does not call a month comparable when a range answered 200 with a body that is not JSON", async () => {
+    // The other way a 200 arrives without operations: an HTML interstitial, or a proxy page.
+    // `detectBlockedReason` only recognises the auth and captcha wording; anything else reaches
+    // the extraction as a string with no payload array.
+    const july = Date.UTC(2026, 6, 15, 9, 0, 0);
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          const start = Number(url.searchParams.get("start"));
+          const end = Number(url.searchParams.get("end"));
+          if (start <= july && july <= end) {
+            return new Response("<html><body>Service unavailable</body></html>", { status: 200 });
+          }
+          return new Response(JSON.stringify({ payload: [operation("august-1", -700)] }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "not-json", pauseMs: 0, maxReceipts: 0 }, deps);
+    const july2026 = result.cassette.summary?.months.find((month) => month.month === "2026-07");
+
+    expect(result.warnings.join(" ")).toMatch(/answered 200 with no payload array/);
+    expect(july2026?.complete ?? false).toBe(false);
+  });
+
   it("does not call a month comparable when a day inside it stayed capped", async () => {
     // A single day still at the page limit after splitting is a day this recording is short on,
     // and it can sit in the middle of a month the window covers end to end. Marked complete, the
