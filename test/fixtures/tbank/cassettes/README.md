@@ -26,12 +26,16 @@ nothing but their signed-in browser:
 2. Hand them that one file. On <https://www.tbank.ru/mybank/operations/>, signed in and with
    the operations list loaded, they open DevTools → Console, paste it and press Enter. Chrome
    asks them to type `allow pasting` first.
-3. It records, scrubs **in the browser**, and downloads `cassette.json`. Defaults are the last
-   30 days and up to 25 receipts; `orbitRecordCassette({ windowDays: 60, maxReceipts: 40 })`
-   re-runs with other bounds.
+3. It records, scrubs **in the browser**, and downloads `cassette.json`. By default it records
+   whole Moscow calendar months — this one and the previous one — and up to 25 receipts;
+   `orbitRecordCassette({ wholeMonths: 3 })` or `orbitRecordCassette({ windowDays: 45 })` re-run
+   with other bounds. Months rather than a rolling day window because a window of days lines up
+   with no month the bank shows, and a fragment of a month compared against the bank's figure
+   for it reports a loss that never happened.
 4. **Check the totals it prints against the bank's own screen** before passing the file on. The
    console shows a table of Moscow calendar months with an operation count and the income and
-   expense sums per currency. A recording can look complete and be short — a truncated range
+   expense sums per currency. Only rows marked `complete` are comparable — a month the window
+   does not cover end to end is short by design, and the flag is what tells the two apart. A recording can look complete and be short — a truncated range
    loses its remainder in silence, and nothing inside the file says so. The totals are the only
    cheap way to find out, and they are why the summary is written into the cassette.
 5. Put the file in a subdirectory here and run `test-unit-node` and `test-unit-ext`.

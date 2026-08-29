@@ -107,7 +107,10 @@ describe("cassette console recorder", () => {
       return stable ? `${url.pathname}?${stable}` : url.pathname;
     });
 
+    // Four range requests: the default window runs from 1 July Moscow to NOW (20 August), which
+    // buildRanges covers in four 14-day chunks.
     expect(stableKeys).toEqual([
+      "/api/common/v1/operations",
       "/api/common/v1/operations",
       "/api/common/v1/operations",
       "/api/common/v1/operations",
@@ -256,8 +259,60 @@ describe("cassette console recorder", () => {
     const result = await recordCassette({ name: "totals", maxReceipts: 0 }, deps);
 
     expect(result.cassette.summary?.months).toEqual([
-      { month: "2026-08", currency: "RUB", operations: 2, income: "100000.00", expense: "2400.00" },
+      {
+        month: "2026-08",
+        currency: "RUB",
+        operations: 2,
+        income: "100000.00",
+        expense: "2400.00",
+        // August is the month being recorded into and has not ended, so it is not comparable
+        // against the bank — saying so is the point of the flag.
+        complete: false,
+      },
     ]);
+  });
+
+  it("records whole calendar months by default, so a month can be reconciled at all", async () => {
+    // A rolling day window lines up with no month the bank shows: thirty days back from the
+    // 20th covers two thirds of the previous month, and its total then looks like a loss that
+    // never happened. Nothing in a summary could distinguish that from a real one.
+    const deps = makeDeps();
+    const result = await recordCassette({ name: "months", maxReceipts: 0 }, deps);
+
+    const requested = result.cassette.entries
+      .filter((entry) => entry.url.includes("/api/common/v1/operations"))
+      .map((entry) => Number(new URL(entry.url).searchParams.get("start")));
+    const earliest = Math.min(...requested);
+
+    // NOW is 2026-08-20 12:00 UTC, so the default of two whole months starts at 1 July, Moscow.
+    expect(new Date(earliest + 3 * 60 * 60 * 1000).toISOString()).toBe("2026-07-01T00:00:00.000Z");
+  });
+
+  it("marks a month the window covers end to end as comparable", async () => {
+    const july = Date.UTC(2026, 6, 15, 9, 0, 0);
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: [
+                { ...operation("july-1", -500), debitingTime: { milliseconds: july } },
+                operation("august-1", -700),
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "months", maxReceipts: 0 }, deps);
+    const byMonth = new Map(result.cassette.summary?.months.map((m) => [m.month, m]) ?? []);
+
+    expect(byMonth.get("2026-07")?.complete).toBe(true);
+    expect(byMonth.get("2026-08")?.complete).toBe(false);
   });
 
   it("walks the same ranges as the connector", () => {

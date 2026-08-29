@@ -40,6 +40,7 @@ interface RecordedSummary {
     operations: number;
     income: string;
     expense: string;
+    complete?: boolean;
   }>;
 }
 

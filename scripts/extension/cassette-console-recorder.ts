@@ -60,7 +60,18 @@ export interface RecorderDeps {
 
 export interface RecorderOptions {
   name: string;
-  /** How far back to record. A dense month is what Milestone 5's acceptance asks for. */
+  /**
+   * How many Moscow calendar months to record, counting the current one — the default, and the
+   * reason there is one.
+   *
+   * A rolling window of days lines up with no month the bank ever shows. Thirty days back from
+   * the 29th covers two days of the previous month, so its total is a fragment: comparing it
+   * against the bank's figure for that month reports a loss that never happened, and there is
+   * no way to tell that from a recording which genuinely lost operations. Snapping to month
+   * boundaries makes at least one month in the summary comparable by construction.
+   */
+  wholeMonths?: number;
+  /** A rolling window instead, when the months are not what matters. Overrides `wholeMonths`. */
   windowDays?: number;
   chunkDays?: number;
   /** Receipts are the expensive request; the bank rate-limits them hardest. */
@@ -76,6 +87,12 @@ export interface MonthTotals {
   /** Fixed to two decimals so a comparison against the bank is exact, not float-ish. */
   income: string;
   expense: string;
+  /**
+   * Whether the recorded window covers this whole month and the month has ended. Only a
+   * complete month can be compared against the bank; a partial one is short by design, and
+   * without this flag it looks exactly like a month the recording lost operations from.
+   */
+  complete: boolean;
 }
 
 /**
@@ -255,10 +272,25 @@ function moscowMonth(timestampMs: number): string {
   return new Date(timestampMs + MOSCOW_OFFSET_MS).toISOString().slice(0, 7);
 }
 
+/** Start of the Moscow calendar month `monthsBack` months before the one holding `timestampMs`. */
+export function moscowMonthStartMs(timestampMs: number, monthsBack: number): number {
+  const moscow = new Date(timestampMs + MOSCOW_OFFSET_MS);
+  return Date.UTC(moscow.getUTCFullYear(), moscow.getUTCMonth() - monthsBack, 1) - MOSCOW_OFFSET_MS;
+}
+
+function monthIsFullyCovered(month: string, windowFromMs: number, windowToMs: number): boolean {
+  const [year, monthIndex] = month.split("-").map(Number);
+  if (year === undefined || monthIndex === undefined) return false;
+  const startMs = Date.UTC(year, monthIndex - 1, 1) - MOSCOW_OFFSET_MS;
+  const endMs = Date.UTC(year, monthIndex, 1) - MOSCOW_OFFSET_MS - 1;
+  return windowFromMs <= startMs && endMs <= windowToMs;
+}
+
 export function summariseOperations(
   operations: Array<Record<string, unknown>>,
   truncationSuspected: number,
   truncationUnresolved: number,
+  window: { fromMs: number; toMs: number },
 ): CassetteSummary {
   const buckets = new Map<string, { income: number; expense: number; operations: number }>();
 
@@ -284,6 +316,7 @@ export function summariseOperations(
         operations: bucket.operations,
         income: bucket.income.toFixed(2),
         expense: bucket.expense.toFixed(2),
+        complete: monthIsFullyCovered(month, window.fromMs, window.toMs),
       };
     })
     .sort((left, right) =>
@@ -327,12 +360,15 @@ export async function recordCassette(
     `${deps.origin}${OPERATION_DETAIL_PATH}`;
 
   const nowMs = deps.now();
-  const windowDays = options.windowDays ?? 30;
-  const ranges = buildRanges(
-    nowMs - windowDays * DAY_MS,
-    nowMs,
-    options.chunkDays ?? CONNECTOR_CHUNK_DAYS,
-  );
+  // Whole months by default: a rolling day window lines up with no month the bank ever shows,
+  // so its totals cannot be compared against one. Two months back means the previous month is
+  // covered end to end and can be reconciled exactly, with the current month along for whatever
+  // of it has happened.
+  const windowFromMs =
+    options.windowDays === undefined
+      ? moscowMonthStartMs(nowMs, Math.max(0, (options.wholeMonths ?? 2) - 1))
+      : nowMs - options.windowDays * DAY_MS;
+  const ranges = buildRanges(windowFromMs, nowMs, options.chunkDays ?? CONNECTOR_CHUNK_DAYS);
 
   const entries: CassetteEntry[] = [];
   // Keyed exactly as the connector keys them, so a repeat across overlapping ranges counts once
@@ -461,7 +497,10 @@ export async function recordCassette(
     // Totals are derived before scrubbing but hold nothing the scrubber removes: a month, a
     // currency, a count and two sums. They are the only part of the file a person can check
     // against the bank without reading JSON.
-    summary: summariseOperations(operations, truncationSuspected, truncationUnresolved),
+    summary: summariseOperations(operations, truncationSuspected, truncationUnresolved, {
+      fromMs: windowFromMs,
+      toMs: nowMs,
+    }),
   };
   const leaks = findCassetteLeaks(JSON.stringify(cassette));
 

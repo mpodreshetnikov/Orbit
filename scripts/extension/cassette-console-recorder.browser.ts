@@ -68,9 +68,15 @@ async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
   // are printed here, in the bank's own terms, for the one person who can compare them.
   const summary = result.cassette.summary;
   if (summary && summary.months.length > 0) {
+    const complete = summary.months.filter((month) => month.complete);
     console.info(
-      "[cassette] Compare these against the bank's own totals for the same months before " +
-        "sharing the file. If a month is short, the recording missed operations.",
+      complete.length > 0
+        ? "[cassette] Compare the rows marked complete against the bank's own totals for those " +
+            "months before sharing the file. If one is short, the recording missed operations. " +
+            "Rows that are not complete are partial by design — the window does not cover the " +
+            "whole month — so they cannot be compared."
+        : "[cassette] No month in this recording is covered end to end, so none of these totals " +
+            "can be compared against the bank. Re-run with orbitRecordCassette({ wholeMonths: 2 }).",
     );
     console.table(summary.months);
     if (summary.truncationSuspected > 0) {
@@ -85,8 +91,9 @@ async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
 window.orbitRecordCassette = run;
 
 console.info(
-  "[cassette] recording with defaults (last 30 days, up to 25 receipts). " +
-    "For a different window, run e.g. orbitRecordCassette({ windowDays: 60, maxReceipts: 40 })",
+  "[cassette] recording with defaults (this month and the whole of last month, up to 25 " +
+    "receipts). For a different window, run e.g. orbitRecordCassette({ wholeMonths: 3 }) or " +
+    "orbitRecordCassette({ windowDays: 45, maxReceipts: 40 })",
 );
 
 void run().catch((error: unknown) => {
