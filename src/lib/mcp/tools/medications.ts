@@ -23,9 +23,16 @@ import {
   plannedIntakeSchema,
   regimenInventorySchema,
 } from "../schemas/regimen";
-import { isoDateSchema, personSelectorSchema, uuidSchema } from "../schemas/common";
+import {
+  isoDateSchema,
+  paginationSchema,
+  personSelectorSchema,
+  uuidSchema,
+} from "../schemas/common";
 import { withPerson, withUserClient } from "../tool-context";
-import { fail, ok, summarizeList } from "../tool-result";
+import { fail, ok, paginate, summarizePage } from "../tool-result";
+import { getCourseWindow } from "@/types/regimen";
+import type { MedDuration, MedSchedule, PlannedIntake } from "@/types/regimen";
 import type { McpToolServer } from "./types";
 
 /**
@@ -61,12 +68,101 @@ async function regenerateOrExplain(
  * guard, so the candidates the guard offers look exactly like the ones
  * `list_medications` returned.
  */
+/**
+ * One intake, with what it actually delivers: "1.5 pill (Сертралин 150 milligram)".
+ *
+ * The active ingredients are the answer to "how many milligrams", and they were
+ * stored on the regimen and copied onto every dose event long before any tool
+ * rendered them. Printing only "1.5 pill" is what made an assistant tell the
+ * owner the record held no milligrams and offer a fork between 50 mg and 100 mg
+ * tablets, while `dose_definition.active` said 150 mg.
+ */
+function describeIntake(planned: PlannedIntake | null | undefined): string {
+  const intake = planned?.intake;
+  const active = planned?.active ?? [];
+  const strength =
+    active.length > 0
+      ? ` (${active.map((one) => `${one.name} ${one.amount} ${one.unit}`).join(" + ")})`
+      : "";
+
+  if (!intake) {
+    return strength ? `dose unknown${strength}` : "";
+  }
+  return `${intake.amount} ${intake.unit}${strength}`;
+}
+
+/**
+ * The calendar days a course covers, from the same computation
+ * `getEffectiveStatus` uses. Without it, four courses of one medication under
+ * one name render as four interchangeable lines and their order is guesswork.
+ */
+function describeCourseWindow(duration: MedDuration | null | undefined): string {
+  const { start, end } = getCourseWindow(duration);
+  if (start && end) return `${start} to ${end}`;
+  if (start) return `from ${start}`;
+  if (end) return `until ${end}`;
+  return "";
+}
+
+/**
+ * The plan's own times, which are local wall-clock strings on the regimen
+ * rather than instants -- labelled as such, since the same reply quotes real
+ * instants converted into a named zone (T-0027).
+ */
+function describeSchedule(schedule: MedSchedule | null | undefined): string {
+  if (!schedule) return "schedule unknown";
+
+  // Every field is read defensively: these are jsonb columns whose shape is a
+  // TypeScript promise rather than a database constraint, and a row written
+  // before a mode gained a field would otherwise throw here and take the whole
+  // reply down -- on a list where the other medications are fine.
+  const at = (times?: string[]) =>
+    times && times.length > 0 ? ` at ${times.join(", ")} (local wall clock)` : "";
+
+  switch (schedule.mode) {
+    case "daily_times":
+      return `schedule daily_times${at(schedule.times)}`;
+    case "interval_hours":
+      return `schedule interval_hours every ${schedule.interval?.every ?? "?"}h`;
+    case "interval_days":
+      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times)}`;
+    case "days_of_week":
+      return `schedule days_of_week${schedule.days_of_week?.length ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times)}`;
+    case "one_off":
+      return "schedule one_off";
+    default:
+      return "schedule unknown";
+  }
+}
+
+/** Stock on hand, when the course tracks it. */
+function describeStock(regimen: RegimenWithStatus): string {
+  const inventory = regimen.inventory;
+  if (!inventory?.enabled || inventory.current_amount == null) return "";
+  return `stock ${inventory.current_amount} ${inventory.unit ?? regimen.intake_unit}`;
+}
+
+/** A course note, kept short enough for a list line. `get_medication` prints it whole. */
+function describeNotesExcerpt(notes: string | null): string {
+  const trimmed = notes?.trim();
+  if (!trimmed) return "";
+  const oneLine = trimmed.replace(/\s+/g, " ");
+  return oneLine.length > 80 ? `note "${oneLine.slice(0, 79)}…"` : `note "${oneLine}"`;
+}
+
 function describeRegimen(regimen: RegimenWithStatus): string {
-  return (
-    `${regimen.custom_name} — ${regimen.effective_status}` +
-    `${regimen.dose_definition?.intake ? `, ${regimen.dose_definition.intake.amount} ${regimen.dose_definition.intake.unit}` : ""}` +
-    `, schedule ${regimen.schedule?.mode ?? "unknown"} (id ${regimen.id})`
-  );
+  // Every part the tool's own description promises -- "dose, schedule, duration
+  // and stock" -- plus the note, which is where a tablet strength tends to be
+  // written down while `active` is empty.
+  const parts = [
+    describeIntake(regimen.dose_definition),
+    describeSchedule(regimen.schedule),
+    describeCourseWindow(regimen.duration),
+    describeStock(regimen),
+    describeNotesExcerpt(regimen.notes),
+  ].filter((part) => part.length > 0);
+
+  return `${regimen.custom_name} — ${regimen.effective_status}, ${parts.join(", ")} (id ${regimen.id})`;
 }
 
 /**
@@ -74,6 +170,9 @@ function describeRegimen(regimen: RegimenWithStatus): string {
  * and offered beside the stored instants in `structuredContent`.
  */
 const DOSE_EVENT_TIMESTAMPS = ["scheduled_at", "actual_at", "taken_at"] as const;
+
+/** How many intakes either side of now `get_medication` spells out in its text block. */
+const DETAIL_DOSE_LIMIT = 10;
 
 /**
  * Resolves the zone a reply's times are quoted in, without moving anything.
@@ -132,9 +231,10 @@ export function registerMedicationTools(server: McpToolServer): void {
     {
       title: "List medications",
       description:
-        "List a person's medication regimens with dose, schedule, duration and stock. `effective_status` accounts for courses whose end date has passed, so prefer it over the raw status.",
+        "List a person's medication regimens with dose, active ingredients, schedule, course dates, stock and notes. `effective_status` accounts for courses whose end date has passed, so prefer it over the raw status. Courses of the same medication are told apart by their date windows.",
       inputSchema: z.object({
         ...personSelectorSchema,
+        ...paginationSchema,
         status: z.enum(["active", "paused", "completed", "archived"]).optional(),
         search: z.string().optional().describe("Filter by medication name."),
         include_archived: z.boolean().default(false),
@@ -149,13 +249,26 @@ export function registerMedicationTools(server: McpToolServer): void {
         includeArchived: args.include_archived,
       });
 
+      // Paged here rather than in the query: `listMedications` filters `search`
+      // in memory, so a database-side range would page the unfiltered rows.
+      const page = paginate(regimens, args.limit, args.offset);
+
       return ok(
-        summarizeList(
-          `medications for ${person.name}`,
-          regimens.map(describeRegimen),
-          regimens.length,
-        ),
-        { person, medications: regimens },
+        summarizePage(`medications for ${person.name}`, page.page.map(describeRegimen), {
+          total: regimens.length,
+          offset: args.offset,
+          has_more: page.has_more,
+          next_offset: page.next_offset,
+        }),
+        {
+          person,
+          medications: page.page,
+          total: regimens.length,
+          limit: args.limit,
+          offset: args.offset,
+          has_more: page.has_more,
+          next_offset: page.next_offset,
+        },
       );
     }),
   );
@@ -216,12 +329,52 @@ export function registerMedicationTools(server: McpToolServer): void {
         const next = detail.upcomingDoses[0];
         const previous = detail.recentDoses[detail.recentDoses.length - 1];
 
+        // The description promises detail, and what this returned was one line
+        // counting the doses -- strictly less than `list_medications` prints
+        // for the same course. So the summary keeps the counts and the T-0027
+        // zone contract, then actually says what the course is and lists the
+        // doses and stock movements it is counting.
+        const plan = [
+          describeIntake(detail.regimen.dose_definition),
+          describeSchedule(detail.regimen.schedule),
+          describeCourseWindow(detail.regimen.duration),
+          describeStock(detail.regimen),
+        ].filter((part) => part.length > 0);
+
+        const notes = detail.regimen.notes?.trim();
+        // A 30-day horizon on a twice-daily course is 120 intakes. List the
+        // ones nearest now and say how many were left out, rather than either
+        // dumping all of them or going back to a bare count.
+        const listed = <T>(rows: T[], keep: "first" | "last") => {
+          if (rows.length <= DETAIL_DOSE_LIMIT) return { rows, omitted: 0 };
+          return {
+            rows:
+              keep === "first" ? rows.slice(0, DETAIL_DOSE_LIMIT) : rows.slice(-DETAIL_DOSE_LIMIT),
+            omitted: rows.length - DETAIL_DOSE_LIMIT,
+          };
+        };
+        const recent = listed(detail.recentDoses, "last");
+        const upcoming = listed(detail.upcomingDoses, "first");
+        const more = (omitted: number) => (omitted > 0 ? `\n- ...${omitted} more` : "");
+        const doseLine = (dose: (typeof detail.upcomingDoses)[number]) =>
+          `- ${formatZoned(dose.scheduled_at, zone.timezone)} — ${describeIntake(dose.planned_intake) || "dose unknown"} [${dose.status}]` +
+          `${dose.taken_at ? `, taken ${formatZoned(dose.taken_at, zone.timezone)}` : ""}` +
+          `${dose.note?.trim() ? `, note "${dose.note.trim()}"` : ""}`;
+        const movementLine = (movement: (typeof detail.inventoryTransactions)[number]) =>
+          `- ${formatZoned(movement.created_at, zone.timezone)} — ${movement.type} ${movement.amount} ${movement.unit}` +
+          `${movement.note?.trim() ? `, note "${movement.note.trim()}"` : ""}`;
+
         return ok(
           `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
             `${detail.upcomingDoses.length} upcoming dose(s), ${detail.recentDoses.length} in the recent window. ` +
             `Times are ${zone.timezone}` +
             `${next ? `; next ${formatZoned(next.scheduled_at, zone.timezone)}` : ""}` +
-            `${previous ? `; last ${formatZoned(previous.taken_at ?? previous.scheduled_at, zone.timezone)}` : ""}.`,
+            `${previous ? `; last ${formatZoned(previous.taken_at ?? previous.scheduled_at, zone.timezone)}` : ""}.` +
+            `\n${plan.join(", ")}.` +
+            `${notes ? `\nNotes: ${notes}` : ""}` +
+            `${recent.rows.length > 0 ? `\nRecent intakes:${more(recent.omitted)}\n${recent.rows.map(doseLine).join("\n")}` : ""}` +
+            `${upcoming.rows.length > 0 ? `\nUpcoming intakes:\n${upcoming.rows.map(doseLine).join("\n")}${more(upcoming.omitted)}` : ""}` +
+            `${detail.inventoryTransactions.length > 0 ? `\nInventory movements:\n${detail.inventoryTransactions.map(movementLine).join("\n")}` : ""}`,
           {
             ...detail,
             timezone: zone.timezone,
@@ -245,11 +398,15 @@ export function registerMedicationTools(server: McpToolServer): void {
     {
       title: "List medication intakes",
       description:
-        "List a person's individual medication intakes in a date range, with whether each was taken, skipped or is still scheduled. Use this for 'what do I take today?'.",
+        "List a person's individual medication intakes in a date range, with the amount and active ingredients of each, whether it was taken, skipped or is still scheduled, and any note. Use this for 'what do I take today?', and pass `regimen_id` to follow one course's dose over time.",
       inputSchema: z.object({
         ...personSelectorSchema,
+        ...paginationSchema,
         from: isoDateSchema.describe("Start of the range (YYYY-MM-DD), in local time."),
         to: isoDateSchema.describe("End of the range, inclusive (YYYY-MM-DD), in local time."),
+        regimen_id: uuidSchema
+          .optional()
+          .describe("Only intakes of this medication. Get the id from list_medications."),
         status: z
           .enum(["scheduled", "sent", "taken", "skipped", "snoozed", "missed", "cancelled"])
           .optional(),
@@ -282,33 +439,52 @@ export function registerMedicationTools(server: McpToolServer): void {
         from: localDayStartUtc(args.from, timezone),
         to: localDayEndUtc(args.to, timezone),
         status: args.status,
+        regimenId: args.regimen_id,
       });
 
+      const page = paginate(doses, args.limit, args.offset);
+
       return ok(
-        summarizeList(
+        summarizePage(
           `medication intakes for ${person.name} (${args.from} to ${args.to}, ${timezone})`,
-          doses.map(
+          page.page.map(
             // Rendered in the zone the range was resolved in. Printing
             // `scheduled_at.slice(0, 16)` put the UTC instant under a header
             // naming the local zone, which is how a 22:00 dose came to be
             // reported as a 15:00 one (T-0027).
+            //
+            // The amount carries its active ingredients and the row carries its
+            // note, both of which this line used to drop -- so an assistant
+            // reading it could not say how many milligrams an intake was, nor
+            // tell "no note" apart from "notes are not returned".
             (dose) =>
               `${formatZoned(dose.scheduled_at, timezone)} — ${dose.medication_name ?? "unknown"}` +
-              `${dose.planned_intake?.intake ? `, ${dose.planned_intake.intake.amount} ${dose.planned_intake.intake.unit}` : ""}` +
-              ` [${dose.status}]`,
+              `${describeIntake(dose.planned_intake) ? `, ${describeIntake(dose.planned_intake)}` : ""}` +
+              ` [${dose.status}]` +
+              `${dose.note?.trim() ? `, note "${dose.note.trim()}"` : ""}`,
           ),
-          doses.length,
+          {
+            total: doses.length,
+            offset: args.offset,
+            has_more: page.has_more,
+            next_offset: page.next_offset,
+          },
         ),
         {
           person,
           timezone,
-          doses: doses.map((dose) =>
+          doses: page.page.map((dose) =>
             withZonedTimestamps(
               dose as unknown as Record<string, unknown>,
               timezone,
               DOSE_EVENT_TIMESTAMPS,
             ),
           ),
+          total: doses.length,
+          limit: args.limit,
+          offset: args.offset,
+          has_more: page.has_more,
+          next_offset: page.next_offset,
         },
       );
     }),

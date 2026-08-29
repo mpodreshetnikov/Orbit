@@ -121,7 +121,7 @@ export async function getMedication(
 
 export async function listMedicationDoses(
   supabase: SupabaseClient<Database>,
-  params: { personId: string; from: string; to: string; status?: string },
+  params: { personId: string; from: string; to: string; status?: string; regimenId?: string },
 ): Promise<Array<MedDoseEvent & { medication_name: string | null }>> {
   let query = supabase
     .from("med_dose_events")
@@ -134,6 +134,14 @@ export async function listMedicationDoses(
 
   if (params.status) {
     query = query.eq("status", params.status as never);
+  }
+
+  // Filtered in the query rather than by the caller: "when did this one course
+  // change dose" is the question that otherwise costs a scan of every
+  // medication in the window, which is how a titration history came to be
+  // reconstructed by binary search over 3-5 day ranges.
+  if (params.regimenId) {
+    query = query.eq("regimen_id", params.regimenId);
   }
 
   const { data, error } = await query;

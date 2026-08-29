@@ -84,6 +84,41 @@ function todayDateString(): string {
 export type GetEffectiveStatusOptions = { today?: string };
 
 /**
+ * The calendar days a course runs between, as YYYY-MM-DD, or null where the
+ * duration does not bound that end.
+ *
+ * `getEffectiveStatus` compares the end of this window against today, and the
+ * MCP tools render it so that two courses of the same medication can be told
+ * apart. Both read it from here rather than each doing the `for_days`
+ * arithmetic, because a window that disagreed with the status it implies would
+ * be worse than no window at all.
+ */
+export function getCourseWindow(duration?: MedDuration | null): {
+  start: string | null;
+  end: string | null;
+} {
+  if (!duration) return { start: null, end: null };
+
+  const start = duration.start_date ? duration.start_date.slice(0, 10) : null;
+
+  if (duration.type === "until_date" && duration.end_date) {
+    return { start, end: duration.end_date.slice(0, 10) };
+  }
+
+  if (duration.type === "for_days" && start != null && duration.days != null) {
+    // Midday, so a DST transition cannot push the arithmetic onto the wrong day.
+    const end = new Date(start + "T12:00:00");
+    end.setDate(end.getDate() + duration.days);
+    return {
+      start,
+      end: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
+    };
+  }
+
+  return { start, end: null };
+}
+
+/**
  * Returns the effective display status: "active" regimens with end_date (or for_days end) in the past
  * are treated as "completed" so they don't show as active in the list.
  * @param options.today - YYYY-MM-DD override for "today" (for tests).
@@ -96,17 +131,8 @@ export function getEffectiveStatus(
   const duration = regimen.duration;
   if (!duration) return regimen.status;
   const today = options?.today ?? todayDateString();
-  if (duration.type === "until_date" && duration.end_date) {
-    const end = duration.end_date.slice(0, 10);
-    if (end < today) return "completed";
-  }
-  if (duration.type === "for_days" && duration.start_date != null && duration.days != null) {
-    const start = duration.start_date.slice(0, 10);
-    const d = new Date(start + "T12:00:00");
-    d.setDate(d.getDate() + duration.days);
-    const endStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    if (endStr < today) return "completed";
-  }
+  const { end } = getCourseWindow(duration);
+  if (end != null && end < today) return "completed";
   return regimen.status;
 }
 

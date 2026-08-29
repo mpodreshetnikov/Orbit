@@ -142,6 +142,30 @@ Conventions that matter:
   confirmation quotes the time back and "logged at 15:00Z" is unreadable to the person who took the
   dose at ten in the evening.
 
+- **What a tool's description promises, its text block delivers.** A read tool renders the fields
+  its description names, not a subset — `list_medications` says "dose, active ingredients, schedule,
+  course dates, stock and notes" and prints all six, and `get_medication` spells out the intakes and
+  stock movements it counts rather than only counting them. The rule exists because the opposite
+  shipped: the medication tools held the milligrams of every intake in
+  `dose_definition.active` and `planned_intake.active`, returned them in `structuredContent`, and
+  printed only "1.5 pill". Asked how long a dose had been at least 100 mg, an assistant reported
+  that the record contained no milligrams at all and offered the owner a fork between 50 mg and
+  100 mg tablets, while the row said 150 mg and the course note said «1.5 таб по 100 мг».
+  A dose is rendered as `1.5 pill (Сертралин 150 milligram)`, in the units the row stores rather
+  than abbreviations invented here, and an intake's `note` is printed so that "no note" is
+  distinguishable from "notes are not returned". `schedule.times` are labelled as local wall clock,
+  since they are plan strings rather than instants and the same reply quotes real instants in a
+  named zone.
+
+- **A list that cannot show everything says how to reach the rest.** `list_medications` and
+  `list_medication_doses` take `limit`/`offset` and answer with the window, the total, and the
+  `offset` that continues it (`summarizePage` in `src/lib/mcp/tool-result.ts`). The previous
+  "...and N more" tail named rows it gave no way to fetch, so past the twentieth medication the only
+  route was guessing names into `search`. `list_medication_doses` also takes `regimen_id`: following
+  one course's dose over time used to mean pulling every medication in the range and diffing by
+  hand, which is how a titration history came to be reconstructed by binary search over 3–5 day
+  windows.
+
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.
 - **A medication a person is currently on is never created twice.** `add_medication` refuses when a

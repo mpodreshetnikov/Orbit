@@ -57,6 +57,37 @@ export function summarizeList(
   return [`${total} ${label}:`, ...lines].join("\n");
 }
 
+/**
+ * Renders one page of a list, naming the window and how to ask for the next.
+ *
+ * `summarizeList` truncates at its preview limit and says "...and N more" with
+ * no way to reach them, which left the rows past the cap unreachable except by
+ * guessing search terms. A tool that pages says which rows these are and what
+ * `offset` continues the listing, so the model can finish the job itself.
+ */
+export function summarizePage(
+  label: string,
+  items: string[],
+  page: { total: number; offset: number; has_more: boolean; next_offset: number | null },
+): string {
+  if (page.total === 0) {
+    return `No ${label} found.`;
+  }
+
+  const window =
+    items.length === page.total
+      ? ""
+      : ` (showing ${page.offset + 1}-${page.offset + items.length})`;
+  const lines = items.map((item) => `- ${item}`);
+  if (page.has_more) {
+    lines.push(
+      `- ...${page.total - page.offset - items.length} more; pass offset: ${page.next_offset} to continue`,
+    );
+  }
+
+  return [`${page.total} ${label}${window}:`, ...lines].join("\n");
+}
+
 export function paginate<T>(
   items: T[],
   limit: number,

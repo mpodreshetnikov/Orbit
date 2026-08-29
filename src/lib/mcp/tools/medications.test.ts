@@ -50,6 +50,10 @@ function ctx(scopes = ["health:read", "health:write"]) {
 
 const PERSON = { id: "p-1", name: "Maria", kind: "human" };
 
+// The handlers are called directly here, so zod's defaults for the paging
+// arguments are never applied. Spread this where the tool takes them.
+const PAGE = { limit: 20, offset: 0 };
+
 async function handlers(): Promise<Map<string, Handler>> {
   const { registerMedicationTools } = await import("./medications");
   const map = new Map<string, Handler>();
@@ -89,9 +93,98 @@ describe("list_medications", () => {
       },
     ]);
 
-    const result = await (await handlers()).get("list_medications")!({}, ctx());
+    const result = await (await handlers()).get("list_medications")!({ ...PAGE }, ctx());
 
     expect(result.content[0].text).toContain("Ferrous sulfate — completed, 1 pill");
+  });
+
+  it("prints the milligrams, the course window, the stock and the note the row carries", async () => {
+    // Every one of these was in the row and in `structuredContent` already, and
+    // none of it reached the text block -- which is why an assistant asked how
+    // long a 100 mg dose had run and had to answer "50 mg or 100 mg, depending".
+    meds.listMedications.mockResolvedValue([
+      {
+        id: "r-1",
+        custom_name: "Золофт",
+        status: "active",
+        effective_status: "active",
+        intake_unit: "pill",
+        dose_definition: {
+          intake: { amount: 1.5, unit: "pill" },
+          active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+        },
+        schedule: { mode: "daily_times", times: ["09:00"] },
+        duration: { type: "endless", start_date: "2026-08-07" },
+        inventory: { enabled: true, current_amount: 12, unit: "pill" },
+        notes: "1.5 таб по 100 мг",
+      },
+    ]);
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("1.5 pill (Сертралин 150 milligram)");
+    expect(text).toContain("schedule daily_times at 09:00 (local wall clock)");
+    expect(text).toContain("from 2026-08-07");
+    expect(text).toContain("stock 12 pill");
+    expect(text).toContain('note "1.5 таб по 100 мг"');
+  });
+
+  it("dates each course, so two courses of one medication are distinguishable", async () => {
+    meds.listMedications.mockResolvedValue([
+      {
+        id: "r-old",
+        custom_name: "Золофт",
+        status: "active",
+        effective_status: "completed",
+        dose_definition: { intake: { amount: 1, unit: "pill" } },
+        schedule: { mode: "daily_times", times: ["21:00"] },
+        duration: { type: "for_days", days: 4, start_date: "2026-07-26" },
+      },
+      {
+        id: "r-new",
+        custom_name: "Золофт",
+        status: "active",
+        effective_status: "completed",
+        dose_definition: { intake: { amount: 1.5, unit: "pill" } },
+        schedule: { mode: "daily_times", times: ["21:00"] },
+        duration: { type: "for_days", days: 4, start_date: "2026-08-03" },
+      },
+    ]);
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("2026-07-26 to 2026-07-30");
+    expect(text).toContain("2026-08-03 to 2026-08-07");
+  });
+
+  it("pages instead of truncating into rows nothing can reach", async () => {
+    meds.listMedications.mockResolvedValue(
+      Array.from({ length: 25 }, (_, i) => ({
+        id: `r-${i}`,
+        custom_name: `Med ${i}`,
+        status: "active",
+        effective_status: "active",
+        dose_definition: { intake: { amount: 1, unit: "pill" } },
+        schedule: { mode: "daily_times", times: ["09:00"] },
+      })),
+    );
+
+    const first = await (await handlers()).get("list_medications")!(
+      { limit: 20, offset: 0 },
+      ctx(),
+    );
+    expect(first.content[0].text).toContain("25 medications for Maria (showing 1-20)");
+    expect(first.content[0].text).toContain("pass offset: 20 to continue");
+    expect(first.structuredContent).toMatchObject({ total: 25, has_more: true, next_offset: 20 });
+
+    const second = await (await handlers()).get("list_medications")!(
+      { limit: 20, offset: 20 },
+      ctx(),
+    );
+    expect(second.content[0].text).toContain("Med 24");
+    expect(second.structuredContent).toMatchObject({ has_more: false, next_offset: null });
   });
 
   it("copes with a regimen that has no dose or schedule recorded", async () => {
@@ -106,7 +199,7 @@ describe("list_medications", () => {
       },
     ]);
 
-    const result = await (await handlers()).get("list_medications")!({}, ctx());
+    const result = await (await handlers()).get("list_medications")!({ ...PAGE }, ctx());
 
     expect(result.content[0].text).toContain("schedule unknown");
     expect(result.isError).toBeUndefined();
@@ -183,6 +276,71 @@ describe("get_medication", () => {
     ).toMatchObject({ created_at_local: "2026-08-24T23:33:47+07:00" });
   });
 
+  it("returns the detail its description promises, not just a count", async () => {
+    regen.readTimezonePreference.mockResolvedValue("Asia/Bangkok");
+    meds.getMedication.mockResolvedValue({
+      regimen: {
+        custom_name: "Золофт",
+        effective_status: "active",
+        intake_unit: "pill",
+        dose_definition: {
+          intake: { amount: 1.5, unit: "pill" },
+          active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+        },
+        schedule: { mode: "daily_times", times: ["09:00"] },
+        duration: { type: "endless", start_date: "2026-08-07" },
+        inventory: { enabled: true, current_amount: 9, unit: "pill" },
+        notes: "1.5 таб по 100 мг",
+      },
+      upcomingDoses: [
+        {
+          id: "d-2",
+          scheduled_at: "2026-08-30T02:00:00+00:00",
+          planned_intake: { intake: { amount: 1.5, unit: "pill" } },
+          status: "scheduled",
+        },
+      ],
+      recentDoses: [
+        {
+          id: "d-1",
+          scheduled_at: "2026-08-29T02:00:00+00:00",
+          taken_at: "2026-08-29T04:09:00+00:00",
+          planned_intake: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          status: "taken",
+          note: "с едой",
+        },
+      ],
+      inventoryTransactions: [
+        {
+          id: "t-1",
+          created_at: "2026-08-29T04:09:00+00:00",
+          type: "decrement",
+          amount: 1.5,
+          unit: "pill",
+          note: null,
+        },
+      ],
+    });
+
+    const text = (
+      await (await handlers()).get("get_medication")!({ regimen_id: "r-1", horizon_days: 7 }, ctx())
+    ).content[0].text;
+
+    // The count line stays -- it is the T-0027 zone contract -- and the detail
+    // the description has always promised now follows it.
+    expect(text).toContain("1 upcoming dose(s), 1 in the recent window");
+    expect(text).toContain("1.5 pill (Сертралин 150 milligram)");
+    expect(text).toContain("from 2026-08-07");
+    expect(text).toContain("stock 9 pill");
+    expect(text).toContain("Notes: 1.5 таб по 100 мг");
+    expect(text).toContain("2026-08-29 09:00 +07:00 — 1.5 pill (Сертралин 150 milligram) [taken]");
+    expect(text).toContain('note "с едой"');
+    expect(text).toContain("decrement 1.5 pill");
+  });
+
   it("refuses a timezone it cannot resolve rather than answering in UTC", async () => {
     const result = await (await handlers()).get("get_medication")!(
       { regimen_id: "r-1", horizon_days: 7, timezone: "Mars/Olympus" },
@@ -199,7 +357,7 @@ describe("list_medication_doses", () => {
     meds.listMedicationDoses.mockResolvedValue([]);
 
     await (await handlers()).get("list_medication_doses")!(
-      { from: "2026-06-15", to: "2026-06-15" },
+      { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
       ctx(),
     );
 
@@ -213,7 +371,7 @@ describe("list_medication_doses", () => {
     meds.listMedicationDoses.mockResolvedValue([]);
 
     const result = await (await handlers()).get("list_medication_doses")!(
-      { from: "2026-06-15", to: "2026-06-15" },
+      { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
       ctx(),
     );
 
@@ -237,12 +395,57 @@ describe("list_medication_doses", () => {
     ]);
 
     const result = await (await handlers()).get("list_medication_doses")!(
-      { from: "2026-06-15", to: "2026-06-15" },
+      { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
       ctx(),
     );
 
     expect(result.content[0].text).toContain("Ferrous sulfate, 1 pill [taken]");
     expect(result.content[0].text).toContain("unknown [scheduled]");
+  });
+
+  it("carries the milligrams and the note of each intake", async () => {
+    meds.listMedicationDoses.mockResolvedValue([
+      {
+        scheduled_at: "2026-06-15T08:00:00.000Z",
+        medication_name: "Золофт",
+        planned_intake: {
+          intake: { amount: 1.5, unit: "pill" },
+          active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+        },
+        status: "taken",
+        note: "принял позже обычного",
+      },
+    ]);
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    // Without the milligrams the model cannot answer "how much did I take",
+    // and without the note it cannot tell an empty note apart from a tool that
+    // never returns one.
+    expect(text).toContain("Золофт, 1.5 pill (Сертралин 150 milligram) [taken]");
+    expect(text).toContain('note "принял позже обычного"');
+  });
+
+  it("filters to one course in the query rather than making the caller sift", async () => {
+    meds.listMedicationDoses.mockResolvedValue([]);
+
+    await (await handlers()).get("list_medication_doses")!(
+      {
+        ...PAGE,
+        from: "2026-07-26",
+        to: "2026-08-29",
+        regimen_id: "11111111-2222-4333-8444-555555555555",
+      },
+      ctx(),
+    );
+
+    const [, params] = meds.listMedicationDoses.mock.calls[0] as [unknown, Record<string, string>];
+    expect(params.regimenId).toBe("11111111-2222-4333-8444-555555555555");
   });
 
   it("quotes each intake in the zone the header names, not in UTC", async () => {
@@ -259,7 +462,7 @@ describe("list_medication_doses", () => {
     ]);
 
     const result = await (await handlers()).get("list_medication_doses")!(
-      { from: "2026-08-24", to: "2026-08-24" },
+      { ...PAGE, from: "2026-08-24", to: "2026-08-24" },
       ctx(),
     );
 
@@ -284,7 +487,7 @@ describe("list_medication_doses", () => {
     ]);
 
     const result = await (await handlers()).get("list_medication_doses")!(
-      { from: "2026-08-24", to: "2026-08-24" },
+      { ...PAGE, from: "2026-08-24", to: "2026-08-24" },
       ctx(),
     );
 
@@ -298,7 +501,7 @@ describe("list_medication_doses", () => {
 
   it("refuses a timezone it cannot resolve rather than answering in UTC", async () => {
     const result = await (await handlers()).get("list_medication_doses")!(
-      { from: "2026-08-24", to: "2026-08-24", timezone: "Mars/Olympus" },
+      { ...PAGE, from: "2026-08-24", to: "2026-08-24", timezone: "Mars/Olympus" },
       ctx(),
     );
 
