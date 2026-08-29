@@ -145,6 +145,60 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("keeps only what the connector reads out of a receipt", () => {
+    // Default-deny, like the form-field bag and for the same reason: four rounds each added the
+    // field that round's leak was in, and the next round found the next field. `items` is the one
+    // field the connector reads; `user` and `userInn` stay by decision, being the seller — a legal
+    // entity whose name and tax number are public. `somethingTheBankAddsNext` stands for the field
+    // nobody has thought of, which is the one that has leaked every time.
+    const scrubbed = scrubCassetteValue({
+      payload: {
+        receipt: {
+          items: [
+            { name: "АТАРАКС 25МГ. №25 ТАБ.", price: 45000, sum: 45000, quantity: 1, good_id: 12 },
+            { name: "Молоко", price: 9900, sum: 9900, quantity: 1, good_id: 34 },
+          ],
+          user: 'ООО "ПЯТЁРОЧКА"',
+          userInn: "7825706086",
+          retailPlaceAddress: "109316, Москва, Волгоградский проспект, 42, к 9",
+          retailPlace: "Аптека №1",
+          region: "77",
+          totalSum: 54900,
+          somethingTheBankAddsNext: "whatever it turns out to be",
+        },
+      },
+    });
+
+    expect(scrubbed).toEqual({
+      payload: {
+        receipt: {
+          items: [
+            { name: "Позиция 1", price: 45000, sum: 45000, quantity: 1, good_id: REDACTED },
+            { name: "Позиция 2", price: 9900, sum: 9900, quantity: 1, good_id: REDACTED },
+          ],
+          user: 'ООО "ПЯТЁРОЧКА"',
+          userInn: "7825706086",
+          retailPlaceAddress: REDACTED,
+          retailPlace: REDACTED,
+          region: REDACTED,
+          totalSum: REDACTED,
+          somethingTheBankAddsNext: REDACTED,
+        },
+      },
+    });
+  });
+
+  it("reports a postal address the field rules did not catch", () => {
+    // The structural rule above removes these from a receipt. This is for the address that turns
+    // up somewhere the walk does not cover, which is how every previous round went. The report
+    // deliberately does not quote the match: printing the address would put it in the log.
+    expect(
+      findCassetteLeaks('{"somewhereElse":"109316, Москва, Волгоградский проспект, 42"}'),
+    ).toEqual(['postal address under "somewhereElse"']);
+    // An ordinary number next to the serializer's indentation is not an address.
+    expect(findCassetteLeaks('{\n  "pointOfSaleId": 123456,\n  "amount": 12\n}')).toEqual([]);
+  });
+
   it("names the field a suspect run came from", () => {
     // "long digit run: 7384440901188332" cannot be acted on. The first real recording produced
     // twenty-five of those and nothing to say where they were.

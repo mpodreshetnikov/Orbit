@@ -837,11 +837,15 @@ export async function recordCassette(
   // The connector's budget is fixed at 50 and it is not a preference. Recording fewer receipts
   // than it will ask for leaves the replay with misses; recording more leaves entries nothing
   // asks for, and the contract test rejects both. So the only usable value is the connector's.
-  const budgetMismatch =
-    receiptBearing.length > maxReceipts
-      ? maxReceipts < CONNECTOR_MAX_RECEIPTS_PER_RUN
-      : maxReceipts > CONNECTOR_MAX_RECEIPTS_PER_RUN &&
-        receiptBearing.length > CONNECTOR_MAX_RECEIPTS_PER_RUN;
+  //
+  // Compared as counts rather than as budgets, because the two budgets only matter through the
+  // number of receipts each actually produces. Reasoning about the budgets directly left a hole
+  // between them: 51 against 60 receipt-bearing operations took the "recorded fewer than
+  // available" branch, which then asked whether 51 was below 50 and concluded there was no
+  // problem — while the recorder went on to store 51 entries for the 50 the connector asks for.
+  const recordedReceipts = Math.min(maxReceipts, receiptBearing.length);
+  const connectorReceipts = Math.min(CONNECTOR_MAX_RECEIPTS_PER_RUN, receiptBearing.length);
+  const budgetMismatch = recordedReceipts !== connectorReceipts;
 
   let detailCount = 0;
   let usableDetails = 0;
@@ -993,10 +997,11 @@ export async function recordCassette(
 
   if (budgetMismatch) {
     blockers.push(
-      `${receiptBearing.length} operations carry a receipt and this run recorded at most ` +
-        `${maxReceipts}, while the connector's budget is fixed at ` +
-        `${CONNECTOR_MAX_RECEIPTS_PER_RUN}. Below it the replay asks for receipts this cassette ` +
-        "does not hold; above it the cassette holds receipts the replay never asks for. Record " +
+      `${receiptBearing.length} operations carry a receipt, so this run records ` +
+        `${recordedReceipts} of them where the connector asks for ${connectorReceipts} ` +
+        `(its budget is fixed at ${CONNECTOR_MAX_RECEIPTS_PER_RUN}, and maxReceipts here is ` +
+        `${maxReceipts}). Record fewer and the replay asks for receipts this cassette does not ` +
+        "hold; record more and the cassette holds receipts the replay never asks for. Record " +
         "again without setting maxReceipts.",
     );
   }

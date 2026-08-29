@@ -156,6 +156,47 @@ const FORM_FIELD_BAG_KEPT = new Set(["pointertype", "workflowtype", "dstcurrency
 const COUNTERPARTY_TEXT_KEYS = new Set(["description", "subcategory", "merchantkey"]);
 
 /**
+ * A receipt is default-deny, for the same reason the form-field bag is — and with four rounds of
+ * evidence behind it. Every previous round added the field that round's leak was found in, and the
+ * next round found the next field: a phone, a counterparty, a transfer note, a cashier. The receipt
+ * is the densest personal record in the recording — it says what a person bought, where they stood
+ * when they bought it, and at what minute — so listing what to remove was never going to converge.
+ *
+ * The connector reads exactly one field of a receipt, `items` (`hasReceiptItems`, and the line-item
+ * mapper). `user` and `userInn` stay by an explicit decision: they are the seller, a legal entity
+ * whose name and tax number are public commercial data, and the merchant assertions rest on them.
+ * Everything else — `retailPlaceAddress`, `retailPlace`, `region`, the fiscal block, the totals —
+ * is redacted whether or not anyone thought of it, including whatever the bank adds next.
+ */
+const RECEIPT_KEYS = new Set(["receipt"]);
+const RECEIPT_KEPT = new Set(["items", "user", "userinn"]);
+
+/**
+ * Inside an item, the numbers the mapper reads and nothing else. `brand_id` and `good_id` are the
+ * merchant's catalogue keys, which nothing reads.
+ */
+const RECEIPT_ITEM_KEPT = new Set([
+  "price",
+  "sum",
+  "quantity",
+  "ndsrate",
+  "nds",
+  "measurename",
+  "unit",
+]);
+
+/**
+ * The item's name is read — it becomes the line item's title — so it cannot simply go. It is also
+ * the most sensitive string in the file: the recording holds prescription medication by brand,
+ * strength and pack size, against a timestamp and a pharmacy. A positional label keeps the arrays,
+ * the quantities and the sums intact, keeps the items distinguishable from each other so a mapper
+ * that swapped two would still show, and carries nothing back. Position within its own receipt, so
+ * it is stable no matter whether one entry or a whole cassette is scrubbed in a call.
+ */
+const RECEIPT_ITEM_NAME_KEYS = new Set(["name", "title"]);
+const RECEIPT_ITEM_LABEL = "Позиция";
+
+/**
  * Free-form text a person typed, redacted wherever it appears rather than by group.
  *
  * The committed recording carried ten transfer notes — a birthday message, a contribution to
@@ -266,6 +307,17 @@ const ORDER_REFERENCE = /(№\s*)[0-9A-Za-z][0-9A-Za-z-]{3,}/g;
 const UUID = /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g;
 
 /**
+ * A Russian postal index opening an address — "109316, Москва, Волгоградский проспект, 42, к 9".
+ * The receipt walk redacts these by structure now, so this exists for the address that turns up
+ * somewhere else: a shape rule survives the bank moving the field, and the field list is what has
+ * failed every round so far. Anchored to the opening quote of a JSON string: the scan runs
+ * over the serialized cassette, and an unanchored "six digits, comma, whitespace" also describes
+ * `"pointOfSaleId": 123456,` and the indentation of the next line — three false positives on the
+ * real fixture, every one of them an ordinary number sitting next to a line break.
+ */
+const POSTAL_ADDRESS = /"\d{6},\s[^"\n]{4,}/g;
+
+/**
  * Epoch milliseconds are a thirteen-digit run too, and they are the one thing a cassette must
  * keep: the connector reads operation timing out of `operationTime.milliseconds` and
  * `debitingTime.milliseconds`, and Milestone 4's acceptance turns on the contract test failing
@@ -371,7 +423,26 @@ function maskCardTail(value: unknown): string {
  * would then collapse to the same `id:REDACTED` on replay. It has to reach one level down
  * because the bank wraps them as `{"operationId":{"value":"…"}}`.
  */
-function scrubValue(value: unknown, preserve: boolean, insideFormFieldBag = false): unknown {
+type ScrubContext = "open" | "formFieldBag" | "receipt" | "receiptItem";
+
+/**
+ * One item, with its name replaced by its position. The walk redacts the name along with every
+ * other non-kept field first; this puts the label in its place afterwards, so a name under a key
+ * nobody listed still ends up as a label rather than as itself.
+ */
+function scrubReceiptItem(item: unknown, index: number): unknown {
+  const scrubbed = scrubValue(item, false, "receiptItem");
+  if (!scrubbed || typeof scrubbed !== "object" || Array.isArray(scrubbed)) return scrubbed;
+  const result = scrubbed as Record<string, unknown>;
+  for (const key of Object.keys(result)) {
+    if (RECEIPT_ITEM_NAME_KEYS.has(key.toLowerCase()) && typeof result[key] === "string") {
+      result[key] = `${RECEIPT_ITEM_LABEL} ${index + 1}`;
+    }
+  }
+  return result;
+}
+
+function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "open"): unknown {
   if (typeof value === "string") {
     if (preserve) return value;
     // Whatever field it sits in. The group rule below covers the fields the operations list
@@ -386,7 +457,7 @@ function scrubValue(value: unknown, preserve: boolean, insideFormFieldBag = fals
   // back to allow-by-default — which is the exact hole the default-deny rule was added to close,
   // reopened one level down.
   if (Array.isArray(value)) {
-    return value.map((entry) => scrubValue(entry, preserve, insideFormFieldBag));
+    return value.map((entry) => scrubValue(entry, preserve, context));
   }
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
@@ -399,13 +470,37 @@ function scrubValue(value: unknown, preserve: boolean, insideFormFieldBag = fals
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       const lowered = key.toLowerCase();
 
-      if (insideFormFieldBag && !FORM_FIELD_BAG_KEPT.has(lowered)) {
+      if (context === "formFieldBag" && !FORM_FIELD_BAG_KEPT.has(lowered)) {
         result[key] =
-          entry === null || typeof entry === "object" ? scrubValue(entry, false, true) : REDACTED;
+          entry === null || typeof entry === "object"
+            ? scrubValue(entry, false, "formFieldBag")
+            : REDACTED;
         continue;
       }
       if (FORM_FIELD_BAG_KEYS.has(lowered)) {
-        result[key] = scrubValue(entry, false, true);
+        result[key] = scrubValue(entry, false, "formFieldBag");
+        continue;
+      }
+      if (context === "receiptItem" && !RECEIPT_ITEM_KEPT.has(lowered)) {
+        result[key] =
+          entry === null || typeof entry === "object"
+            ? scrubValue(entry, false, "receiptItem")
+            : REDACTED;
+        continue;
+      }
+      if (context === "receipt" && lowered === "items" && Array.isArray(entry)) {
+        result[key] = entry.map((item, index) => scrubReceiptItem(item, index));
+        continue;
+      }
+      if (context === "receipt" && !RECEIPT_KEPT.has(lowered)) {
+        result[key] =
+          entry === null || typeof entry === "object"
+            ? scrubValue(entry, false, "receipt")
+            : REDACTED;
+        continue;
+      }
+      if (RECEIPT_KEYS.has(lowered)) {
+        result[key] = scrubValue(entry, false, "receipt");
         continue;
       }
       if (namesCounterparty && COUNTERPARTY_TEXT_KEYS.has(lowered)) {
@@ -602,6 +697,19 @@ export function findCassetteLeaks(serialized: string): string[] {
     if (key && REFERENCE_KEYS.has(key.toLowerCase())) continue;
 
     const leak = key ? `phone number under "${key}": ${match[0]}` : `phone number: ${match[0]}`;
+    if (reported.has(leak)) continue;
+    reported.add(leak);
+    leaks.push(leak);
+  }
+
+  for (const match of serialized.matchAll(POSTAL_ADDRESS)) {
+    const start = match.index;
+    if (start === undefined) continue;
+
+    const key = enclosingKey(serialized, start);
+    if (key && REFERENCE_KEYS.has(key.toLowerCase())) continue;
+
+    const leak = key ? `postal address under "${key}"` : "postal address";
     if (reported.has(leak)) continue;
     reported.add(leak);
     leaks.push(leak);

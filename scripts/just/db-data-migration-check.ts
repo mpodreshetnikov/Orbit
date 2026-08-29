@@ -72,6 +72,7 @@ const TX = {
   twinSecond: "d1000000-0000-0000-0000-000000000102",
   otherPayerTwin: "d1000000-0000-0000-0000-000000000103",
   fromExtension: "d1000000-0000-0000-0000-000000000104",
+  longMaskedCard: "d1000000-0000-0000-0000-000000000105",
 };
 
 const LI = {
@@ -366,6 +367,21 @@ function seedAccumulatedRows(): void {
     }),
   );
 
+  // J: a card number in the longer masked form the statements also carry. The parser keeps the
+  // last four characters after removing the mask; the migration used to keep every digit that
+  // was left, so it wrote `2200700368` where a re-import computes `0368` — a hash the importer
+  // cannot reproduce, and therefore a second copy of a row this migration had just repaired,
+  // slipping past a unique index that never sees a collision because the two hashes differ.
+  exec(
+    statementTransaction({
+      id: TX.longMaskedCard,
+      postedAt: "2026-03-13T08:00:00",
+      amount: "-777.00",
+      merchant: "Аптека",
+      card: "220070******0368",
+    }),
+  );
+
   // I: an extension row — no statement column in raw_payload. Neither its timestamp nor its
   // hash may move.
   exec(`insert into public.money_transactions
@@ -381,6 +397,7 @@ async function expectedHashFor(input: {
   amount: number;
   merchant: string;
   occurrence: number;
+  accountHint?: string;
 }): Promise<string> {
   return buildMoneyDedupeHash({
     source: "tbank",
@@ -388,7 +405,8 @@ async function expectedHashFor(input: {
     amount: input.amount,
     currency: "RUB",
     merchantName: input.merchant,
-    accountHint: "1234",
+    // What `extractMaskedCardLast4` returns for the seeded card, not the card itself.
+    accountHint: input.accountHint ?? "1234",
     occurrence: input.occurrence,
   });
 }
@@ -522,6 +540,22 @@ async function assertRepaired(): Promise<void> {
     "the SQL recompute agrees with shared/lib/money/dedupe.ts",
     sql(`select dedupe_hash from public.money_transactions where id = '${TX.loneStatementRow}'`),
     expected,
+  );
+
+  // The same agreement for the longer masked card, which is where the two normalisations used to
+  // part company: `*1234` reduces to `1234` however you do it, so the seeded rows above agreed
+  // whether or not the SQL matched the parser.
+  const expectedLongMask = await expectedHashFor({
+    postedAtIso: "2026-03-13T05:00:00.000Z",
+    amount: -777,
+    merchant: "Аптека",
+    occurrence: 0,
+    accountHint: "0368",
+  });
+  check(
+    "J: a 220070******0368 card hashes to the parser's last four, not to every digit left",
+    sql(`select dedupe_hash from public.money_transactions where id = '${TX.longMaskedCard}'`),
+    expectedLongMask,
   );
 }
 

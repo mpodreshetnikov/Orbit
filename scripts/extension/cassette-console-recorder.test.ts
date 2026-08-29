@@ -92,7 +92,12 @@ describe("cassette console recorder", () => {
     expect(serialized).not.toContain("Иванов");
     // Merchant text and amounts are what the replay asserts on, so they must survive.
     expect(serialized).toContain("Пятёрочка");
-    expect(serialized).toContain("Молоко");
+    expect(serialized).toContain("9900");
+    // The item's own name does not. It is read — it becomes the line item's title — but the real
+    // recording put prescription medication in it, so it is replaced by its position: the array,
+    // the quantities and the sums stay, and the items stay distinguishable from one another.
+    expect(serialized).not.toContain("Молоко");
+    expect(serialized).toContain("Позиция 1");
   });
 
   it("records the URL shapes the connector asks for, not a wall of future misses", async () => {
@@ -519,6 +524,16 @@ describe("cassette console recorder", () => {
     // At the connector's own budget the same window is fine.
     const exact = await recordCassette({ name: "exact", pauseMs: 0, maxReceipts: 50 }, denseDeps);
     expect(exact.blockers.join(" ")).toEqual("");
+
+    // One above it, with more receipts available than either budget. This is the interval the
+    // check used to miss: it is neither "recorded fewer than the connector will ask for" nor
+    // large enough for the old second branch, so nothing fired — while the recording held 51
+    // receipt entries for the 50 the replay issues, which is one unused entry and a request
+    // count that does not match.
+    const justOver = await recordCassette({ name: "over", pauseMs: 0, maxReceipts: 51 }, denseDeps);
+    expect(justOver.blockers.join(" ")).toMatch(
+      /records 51 of them where the connector asks for 50/,
+    );
   });
 
   it("refuses a recording whose range span is not the connector's", async () => {

@@ -424,6 +424,34 @@ function applyDeployAndSeed({ seed }) {
   }
 }
 
+/**
+ * True when the container exists at all, whatever state it is in.
+ *
+ * A container that exists but is stopped — after a Docker restart, or a reboot — is not healthy,
+ * and treating "not healthy" as "build a new one" force-removed it along with everything written
+ * to its writable layer. That is the same destruction `--recreate` exists to ask for explicitly,
+ * arriving because the daemon had been restarted.
+ */
+function databaseExists() {
+  return docker(["inspect", "-f", "{{.State.Status}}", DB_CONTAINER]).status === 0;
+}
+
+/**
+ * Starts a container that already exists, and reports whether it came back. A stopped database
+ * still holds its data, its migrations and its extensions, so there is nothing to rebuild — only
+ * to start and wait for.
+ */
+function startExistingDatabase() {
+  log(`starting the stopped ${DB_CONTAINER}`);
+  if (docker(["start", DB_CONTAINER]).status !== 0) return false;
+  try {
+    waitFor("postgres", () => psql(["-c", "select 1"]).status === 0);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 /** True when the database container is up and answering, so `up` has nothing to build. */
 function databaseIsHealthy() {
   const running = docker(["inspect", "-f", "{{.State.Running}}", DB_CONTAINER]);
@@ -443,12 +471,24 @@ function up(flags) {
   // fresh one: the first because stopping at a chosen migration is meaningless on a database
   // already past it, which is how the data migration check uses this; the second because saying
   // so explicitly should still be possible.
-  const rebuilding = flags.recreate || flags.until !== undefined || !databaseIsHealthy();
+  const explicitRebuild = flags.recreate || flags.until !== undefined;
+  let rebuilding = explicitRebuild;
+
+  if (!explicitRebuild) {
+    if (databaseIsHealthy()) {
+      log(`reusing the running ${DB_CONTAINER}; pass --recreate to rebuild it`);
+    } else if (databaseExists() && startExistingDatabase()) {
+      // The schema owners are not started again: storage and auth create their schemas once, and
+      // those schemas are in the database this container just brought back.
+      log(`restarted the stopped ${DB_CONTAINER}; pass --recreate to rebuild it`);
+    } else {
+      rebuilding = true;
+    }
+  }
+
   if (rebuilding) {
     startDatabase();
     startSchemaOwners();
-  } else {
-    log(`reusing the running ${DB_CONTAINER}; pass --recreate to rebuild it`);
   }
 
   applyMigrations({ until: flags.until, skipApplied: !rebuilding });

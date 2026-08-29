@@ -65,18 +65,44 @@ WITH statement_transactions AS (
     lower(btrim(regexp_replace(COALESCE(transaction.merchant_name, ''), '\s+', ' ', 'g'))) AS merchant_text,
     -- money_transactions has no account_hint column: the importer consumes the hint to
     -- resolve the account and card, then discards it. For a statement row the original
-    -- value survives in raw_payload under the statement's own card column, and the parser
-    -- derives the hint by stripping the mask characters — reproduced here.
-    lower(btrim(regexp_replace(
-      btrim(replace(btrim(COALESCE(transaction.raw_payload->>'Номер карты', '')), '*', '')),
-      '\s+', ' ', 'g'
-    ))) AS account_hint_text
+    -- value survives in raw_payload under the statement's own card column. The parser's
+    -- own normalisation is applied to it in the next CTE.
+    btrim(regexp_replace(
+      COALESCE(transaction.raw_payload->>'Номер карты', ''), '\s+', ' ', 'g'
+    )) AS account_hint_raw
   FROM public.money_transactions AS transaction
   WHERE jsonb_exists(transaction.raw_payload, 'Дата операции')
 ),
-numbered AS (
+hinted AS (
   SELECT
     statement_transactions.*,
+    -- `extractMaskedCardLast4` in the importer, statement by statement. Stripping only the
+    -- mask characters was not the same function: for `220070******0368` the parser keeps the
+    -- last four digits and this kept all ten, so the migration wrote a hash that a later
+    -- re-import could not reproduce — and a row it had just repaired would be inserted a
+    -- second time, past a unique index that never sees a collision because the hashes differ.
+    -- The un-masked 16-digit form drifted the same way.
+    --
+    -- Empty rather than NULL where the parser returns null: `buildMoneyDedupePayload` puts
+    -- `accountHint ?? ""` in that position, and concat_ws below drops a NULL argument
+    -- entirely, which would shift every later field one place left.
+    CASE
+      WHEN length(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g')) < 4
+        THEN ''
+      WHEN statement_transactions.account_hint_raw ~ '[*•xX]'
+        THEN right(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g'), 4)
+      WHEN length(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g')) = 4
+        THEN regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g')
+      WHEN length(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g'))
+             BETWEEN 12 AND 19
+        THEN right(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g'), 4)
+      ELSE ''
+    END AS account_hint_text
+  FROM statement_transactions
+),
+numbered AS (
+  SELECT
+    hinted.*,
     -- Repeats of an otherwise identical purchase are numbered in a stable order so the two
     -- rows keep distinct identities instead of collapsing into one.
     --
@@ -100,7 +126,7 @@ numbered AS (
         ORDER BY id
       ) - 1
     ) AS occurrence
-  FROM statement_transactions
+  FROM hinted
 )
 UPDATE public.money_transactions AS transaction
 SET dedupe_hash = encode(
