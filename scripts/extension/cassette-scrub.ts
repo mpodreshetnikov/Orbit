@@ -39,6 +39,23 @@ const IDENTIFIER_KEYS = new Set([
   "clientid",
   "clientId",
   "client_id",
+  // Found by running this scrubber over a real recording rather than by reading: each of these
+  // survived it. `bankAccountId` carries the same value as `account` under a name no rule
+  // covered, and the sender fields identify the other party to a transfer — or the account
+  // holder, when the transfer is their own. All are too short for the long-digit rule.
+  "bankaccountid",
+  "bankAccountId",
+  "bank_account_id",
+  "senderagreement",
+  "senderAgreement",
+  "senderdetails",
+  "senderDetails",
+  "receiveragreement",
+  "receiverAgreement",
+  "receiverdetails",
+  "receiverDetails",
+  "recipientdetails",
+  "recipientDetails",
   "authorization",
   "Authorization",
   "set-cookie",

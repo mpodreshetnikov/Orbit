@@ -119,6 +119,29 @@ describe("cassette scrubbing", () => {
     expect(scrubbed).not.toContain("5536913812345678");
   });
 
+  it("redacts the identifying fields a live recording proved it was missing", () => {
+    // Each of these survived the scrubber when it was run over a real recording: `bankAccountId`
+    // carries the same value as `account` under a name no rule covered, and the sender fields
+    // identify the other party to a transfer. All are far too short for the long-digit rule.
+    const scrubbed = scrubCassetteValue({
+      bankAccountId: "5351691778",
+      senderAgreement: "5695232671",
+      senderDetails: "Иван И.",
+      // The seller's own details stay: a receipt carries the shop, not the buyer, and the tests
+      // assert on merchant identity. Twelve distinct values across fifty receipts said as much.
+      user: 'ООО "ПЯТЁРОЧКА"',
+      userInn: "7825706086",
+    });
+
+    expect(scrubbed).toEqual({
+      bankAccountId: REDACTED,
+      senderAgreement: REDACTED,
+      senderDetails: REDACTED,
+      user: 'ООО "ПЯТЁРОЧКА"',
+      userInn: "7825706086",
+    });
+  });
+
   it("names the field a suspect run came from", () => {
     // "long digit run: 7384440901188332" cannot be acted on. The first real recording produced
     // twenty-five of those and nothing to say where they were.
