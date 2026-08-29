@@ -95,12 +95,18 @@ function describeIntake(
   // `active` is milligrams per intake with nothing recording what one unit
   // contains, and nothing rescales it: the generator copies it while
   // overriding a slot's amount, and `logDose` keeps it when a caller corrects
-  // one. So an intake whose amount differs from the course's own is carrying a
-  // total recorded for a different number of units, and printing it plainly
-  // would state a dose the record does not support -- the failure this whole
-  // task exists to close. Say which amount the strength belongs to instead.
+  // one. So an intake whose amount differs from its course's carries a total
+  // recorded for some other number of units, and printing it plainly would
+  // state a dose the record does not support -- the failure this whole task
+  // exists to close.
+  //
+  // Nor can the difference be explained away by naming the course's amount:
+  // `dose_definition` is edited in place and only future unresolved events are
+  // regenerated, so a past intake sits beside a definition that may have moved
+  // under it. The row cannot tell which case it is in, so it says the
+  // milligrams for this amount are not on file rather than picking one.
   const courseAmount = course?.intake?.amount;
-  const rescaled =
+  const unverifiable =
     ingredients.length > 0 &&
     courseAmount != null &&
     intake?.amount != null &&
@@ -108,11 +114,8 @@ function describeIntake(
   const strength =
     ingredients.length === 0
       ? ""
-      : rescaled
-        ? ` (strength on file: ${ingredients.join(" + ")} per ${courseAmount} ${course?.intake?.unit ?? intake?.unit ?? ""})`.replace(
-            / \)$/,
-            ")",
-          )
+      : unverifiable
+        ? " (strength not recorded for this amount)"
         : ` (${ingredients.join(" + ")})`;
 
   if (!intake || intake.amount == null) {
@@ -179,7 +182,7 @@ function describeSchedule(
     case "interval_days":
       return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times, schedule.amounts)}`;
     case "days_of_week":
-      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times)}`;
+      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times, schedule.amounts)}`;
     case "one_off":
       return "schedule one_off";
     default:

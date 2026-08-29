@@ -174,12 +174,15 @@ Conventions that matter:
   medication were created in the same minute in production, and an unstable order under paging
   repeats one row while dropping another.
 
-  A strength is quoted with the amount it was recorded for. `active` is milligrams per intake with
-  nothing recording what one unit contains, and nothing rescales it — the generator copies it while
-  overriding a slot's amount, and `log_dose` keeps it when a caller corrects one. So an intake whose
-  amount differs from its course's own reads `2 pill (strength on file: Сертралин 150 milligram per
-1.5 pill)` rather than implying the total belongs to this amount. Until a per-unit strength exists,
-  that qualification is the difference between reporting the record and inventing a dose.
+  A strength is printed only where it can be tied to the amount beside it. `active` is milligrams per
+  intake with nothing recording what one unit contains, and nothing rescales it — the generator
+  copies it while overriding a slot's amount, and `log_dose` keeps it when a caller corrects one. An
+  intake whose amount differs from its course's therefore carries a total recorded for some other
+  number of units, and reads `2 pill (strength not recorded for this amount)`. Naming the course's
+  amount instead would not be safe either: `dose_definition` is edited in place and only future
+  unresolved events are regenerated, so a past intake can sit beside a definition that moved under
+  it. Until a per-unit strength exists, withholding the figure is the difference between reporting
+  the record and inventing a dose.
 
   A name filter is a literal, not a pattern. `list_medications` matches with `imatch` (`~*`) over a
   regex-escaped needle rather than `ilike`: PostgREST rewrites `*` in a `like`/`ilike` value to `%`

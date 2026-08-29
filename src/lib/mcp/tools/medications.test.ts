@@ -584,12 +584,14 @@ describe("list_medication_doses", () => {
     expect(text).toContain('note "принял позже обычного"');
   });
 
-  it("says which amount a strength belongs to when the intake is not that amount", async () => {
+  it("withholds a strength that cannot be tied to this amount", async () => {
     // Nothing rescales `active`: the generator copies it while overriding a
     // slot's amount, and `log_dose` keeps it when a caller corrects one. So an
     // intake of 2 pills on a course defined as 1.5 still carries the 150 mg
     // recorded for 1.5, and printing "2 pill (Сертралин 150 milligram)" would
-    // state a dose the record does not support.
+    // state a dose the record does not support. Naming the course's amount
+    // instead would be no better: `dose_definition` is edited in place, so a
+    // past intake can sit beside a definition that moved under it.
     meds.listMedicationDoses.mockResolvedValue({
       doses: [
         {
@@ -616,9 +618,8 @@ describe("list_medication_doses", () => {
       )
     ).content[0].text;
 
-    expect(text).toContain(
-      "Золофт, 2 pill (strength on file: Сертралин 150 milligram per 1.5 pill)",
-    );
+    expect(text).toContain("Золофт, 2 pill (strength not recorded for this amount)");
+    expect(text).not.toContain("150 milligram");
   });
 
   it("prints the strength plainly when the intake is the course's own amount", async () => {
@@ -649,6 +650,34 @@ describe("list_medication_doses", () => {
     ).content[0].text;
 
     expect(text).toContain("Золофт, 1.5 pill (Сертралин 150 milligram) [taken]");
+  });
+
+  it("renders a weekly schedule's per-slot amounts", async () => {
+    // The generator reads `schedule.amounts` for `days_of_week` too; only the
+    // TypeScript type omitted the field, which is why the renderer dropped it.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Метотрексат",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 0.5, unit: "pill" } },
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["08:00", "20:00"],
+            amounts: [0.5, 1.5],
+          },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("on 1, 4 at 08:00 (0.5 pill), 20:00 (1.5 pill)");
   });
 
   it("cuts a long intake note instead of flooding the page with one", async () => {

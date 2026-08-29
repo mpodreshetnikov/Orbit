@@ -55,6 +55,15 @@ export type MedScheduleDaysOfWeek = {
   mode: "days_of_week";
   days_of_week: number[];
   times: string[];
+  /**
+   * Per-slot amounts, same length and order as `times`.
+   *
+   * The generator has always read these for this mode
+   * (`generate_med_dose_events_for_person_ids.sql`), and rows in the fixture
+   * corpus carry them; the type simply never said so, which is why the MCP
+   * renderer dropped them.
+   */
+  amounts?: number[];
 };
 
 export type MedScheduleOneOff = {
