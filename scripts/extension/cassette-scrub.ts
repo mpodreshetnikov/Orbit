@@ -92,6 +92,14 @@ const PERSON_NAME_KEYS = new Set([
   // still a real person, and a live recording carried fourteen distinct ones.
   "maskedfio",
   "maskedFIO",
+  // The cashier who rang up the purchase, named on the fiscal receipt: "Продавец-кассир
+  // Сусляков А.Е." Nine of them were in the committed recording. Unlike the seller, an employee
+  // is not public commercial data, and nothing reads this field.
+  //
+  // The seller stays — `user` and `userInn` name the shop, which the brand and merchant tests
+  // are built on. Where a sole trader's registered name appears there it is the business's own
+  // name, printed on every receipt it issues and listed in the public tax register.
+  "operator",
 ]);
 
 /**

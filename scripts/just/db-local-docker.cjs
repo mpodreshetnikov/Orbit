@@ -27,8 +27,13 @@ const { ensureDockerReady } = require("./docker-preflight.cjs");
 const repoRoot = path.resolve(__dirname, "..", "..");
 
 const DB_CONTAINER = process.env.ORBIT_DB_CONTAINER ?? "orbit_db";
-const STORAGE_CONTAINER = "orbit_db_storage";
-const AUTH_CONTAINER = "orbit_db_auth";
+// Derived from the database's own name, not fixed. `db-data-migration-check` runs a second
+// instance by setting ORBIT_DB_CONTAINER, and with fixed auxiliary names its teardown removed
+// the storage and auth containers belonging to a `supabase-docker-up` stack that was already
+// running — leaving that stack's Postgres up without the services that own two of its schemas,
+// and no sign of why it had started failing.
+const STORAGE_CONTAINER = `${DB_CONTAINER}_storage`;
+const AUTH_CONTAINER = `${DB_CONTAINER}_auth`;
 const PORT = Number(process.env.ORBIT_DB_PORT ?? 54322);
 /**
  * The registry the Supabase CLI is configured to use, which CI sets to ghcr.io.

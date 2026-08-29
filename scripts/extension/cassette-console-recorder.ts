@@ -352,6 +352,20 @@ export function hasReceiptItems(body: unknown): boolean {
   return Array.isArray(receipt?.items) && receipt.items.length > 0;
 }
 
+/**
+ * A well-formed envelope that carries an error instead of data.
+ *
+ * The committed recording's four hundred and one detail responses are every one of them an
+ * HTTP 200 `INVALID_REQUEST_DATA`: the connector's own `operationId` precedence is not what that
+ * endpoint wants. The cassette records that faithfully, but a recording where every detail
+ * response is an error proves nothing about detail mapping, and nothing in the file says so.
+ */
+export function isErrorEnvelope(body: unknown): boolean {
+  const envelope = asObject(body);
+  const resultCode = text(envelope?.resultCode) ?? text(asObject(envelope?.payload)?.resultCode);
+  return resultCode !== null && resultCode.toUpperCase() !== "OK";
+}
+
 export function isRateLimited(body: unknown): boolean {
   const payload = asObject(asObject(body)?.payload) ?? asObject(body);
   return text(payload?.resultCode)?.toUpperCase() === "REQUEST_RATE_LIMIT_EXCEEDED";
@@ -697,7 +711,6 @@ export async function recordCassette(
   const maxReceipts = options.maxReceipts ?? CONNECTOR_MAX_RECEIPTS_PER_RUN;
   const pauseMs = options.pauseMs ?? RECEIPT_PAUSE_MS;
   const detailPauseMs = options.pauseMs ?? DETAIL_PAUSE_MS;
-  const requested = new Set<string>();
   let receipts = 0;
   let issuedReceiptRequests = 0;
 
@@ -720,6 +733,7 @@ export async function recordCassette(
   }
 
   let detailCount = 0;
+  let usableDetails = 0;
   let rateLimited = 0;
   let failedReceipts = 0;
   // The connector orders operations newest-first before it spends the receipt budget, so when a
@@ -729,19 +743,21 @@ export async function recordCassette(
   const enrichmentOrder = [...operations].sort(
     (left, right) => (operationTimestampMs(right) ?? 0) - (operationTimestampMs(left) ?? 0),
   );
+  // One pass per distinct operation, with no second deduplication by request key.
+  //
+  // Adjacent ranges overlap and the bank repeats an operation across them, but `operationsByKey`
+  // has already collapsed those: `operations` holds each operation once. Deduplicating again by
+  // request key looks like the same guard and is not — two *different* operations can share an
+  // `authorizationId`, and the connector enriches each of them separately because it keys by
+  // `buildOperationKey`. The committed recording has exactly one such pair, and it recorded one
+  // detail response where the replay asks for two.
   for (const operation of enrichmentOrder) {
     const requestKey = extractReceiptRequestKey(operation);
-    if (!requestKey) continue;
-    // Adjacent ranges overlap on their bounds and the bank repeats an operation across them, so
-    // without this the recorder asks for the same detail and receipt twice — and the receipt is
-    // the request the bank rate-limits hardest.
-    if (requested.has(requestKey)) continue;
-    requested.add(requestKey);
 
     // The connector asks for the detail of every operation it has not already fulfilled; only
     // the receipt request is conditional. Recording details for receipt-bearing operations
     // alone would leave the replay without an answer for every other one.
-    if (detailApiUrl) {
+    if (detailApiUrl && requestKey !== null) {
       const detailUrl = new URL(detailApiUrl, deps.origin);
       detailUrl.searchParams.set("operationId", requestKey);
       detailUrl.searchParams.set("sessionid", sessionId);
@@ -749,11 +765,20 @@ export async function recordCassette(
       if (detailCount > 0) await sleep(detailPauseMs);
       detailCount += 1;
       report(`detail ${detailCount}/${operations.length}`);
-      entries.push((await recordRequest(deps, detailUrl.toString())).entry);
+      const recordedDetail = await recordRequest(deps, detailUrl.toString());
+      entries.push(recordedDetail.entry);
+      if (recordedDetail.entry.status === 200 && !isErrorEnvelope(recordedDetail.body)) {
+        usableDetails += 1;
+      }
     }
 
     // The connector asks for tranche offers for every operation too, whenever the page has
     // loaded that endpoint. A cassette without them replays as one miss per operation.
+    //
+    // Deliberately outside the receipt-key check above: `tryFetchTrancheOffers` needs only an
+    // amount, and `buildOperationKey` keeps an operation that has none of the three identifiers
+    // through its timestamp/amount fallback. Gating this on a key the tranche request does not
+    // use would lose that operation's tranche entry and miss on replay.
     if (trancheApiUrl && trancheBaseParams) {
       const amount = operationAmount(operation);
       if (amount !== null) {
@@ -769,6 +794,7 @@ export async function recordCassette(
       }
     }
 
+    if (requestKey === null) continue;
     if (!operationHasShoppingReceipt(operation)) continue;
     // The budget counts requests issued, not receipts captured — as the connector's
     // `issuedReceiptRequestCount` does. Counting successes would let a run that keeps failing
@@ -808,6 +834,16 @@ export async function recordCassette(
       `${failedReceipts} receipt request(s) came back without a receipt — a non-200 status or ` +
         "an empty envelope. Those entries are error bodies, not receipts; re-record if the " +
         "cassette needs them.",
+    );
+  }
+
+  if (detailCount > 0 && usableDetails === 0) {
+    warnings.push(
+      `All ${detailCount} operation detail response(s) came back as errors, so this cassette ` +
+        "exercises the range walk and the receipts but not one field that detail enrichment " +
+        "supplies. That is faithful — the connector sends the same request and gets the same " +
+        "answer — but it means a detail-mapping regression cannot be caught by replaying this " +
+        "recording, and it is worth finding out why the bank rejects the request.",
     );
   }
 

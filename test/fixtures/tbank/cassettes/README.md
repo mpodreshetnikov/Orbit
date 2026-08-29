@@ -106,6 +106,20 @@ does the asking. That replay is what caught seven ways the recorder had drifted 
 connector it mirrors, including a tranche URL missing five parameters the connector always sends
 and a detail endpoint the recorder invented where the connector returns null.
 
+**Every detail response in this recording is an error.** All 401 of them are HTTP 200
+`INVALID_REQUEST_DATA`: the connector's `operationId` precedence is not what that endpoint wants,
+so detail enrichment does not work against the live bank either. The cassette records that
+faithfully — the connector sends the same request and gets the same answer — but it means
+replaying this recording proves nothing about detail mapping. The recorder now warns when a
+recording comes out that way. Why the bank rejects the request is T-260829-g7i in the registry.
+
+**One entry in this cassette is a duplicate, deliberately.** Two operations share an
+`authorizationId`, so the connector asks for that detail twice; the recording was made before the
+recorder stopped deduplicating by request key and holds one response. The request is byte for
+byte identical both times, so the answer is by definition the same, and the fixture emits it as
+many times as the connector asks — which is what the fixed recorder produces. Nothing else is
+added: a request with no recorded response stays absent and shows up as a replay miss.
+
 **The leak scan cannot rest on the field list alone.** The delivered file carried thirteen
 counterparty phone numbers under `pointer`, a transfer field added to the scrubber minutes after
 that snippet was built — and the scan reported it clean, because eleven digits is two short of

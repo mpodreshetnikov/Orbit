@@ -64,9 +64,31 @@ const cassettes: Cassette[] = Object.entries(cassetteModules).map(([filePath, mo
  * to supply them: the origin and the endpoint URLs come out of the cassette itself, which is
  * the point — a recording that never captured an endpoint cannot make the connector ask for it.
  */
+/**
+ * The player's own match key, restated: origin and path plus every query parameter except the
+ * three that legitimately vary between runs. Duplicated rather than imported because it is not
+ * exported, and because a test that counted requests by a *different* key would agree with the
+ * player about nothing.
+ */
+function requestsPerKey(urls: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const raw of urls) {
+    const url = new URL(raw);
+    const params = Array.from(url.searchParams.entries())
+      .filter(([name]) => !["sessionid", "start", "end"].includes(name.toLowerCase()))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => `${name}=${value}`)
+      .join("&");
+    const key = params ? `${url.origin}${url.pathname}?${params}` : `${url.origin}${url.pathname}`;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
 function installPageGlobals(
   player: ReturnType<typeof createCassettePlayer>,
   cassette: Cassette,
+  fetched: string[],
 ): () => void {
   const scope = globalThis as Record<string, unknown>;
   const origin = new URL(cassette.entries[0]?.url ?? "https://www.tbank.ru").origin;
@@ -88,7 +110,10 @@ function installPageGlobals(
 
   scope.window = { location: { origin, href: `${origin}/mybank/operations/` } };
   scope.document = { body: { innerText: "" }, querySelectorAll: () => [] };
-  scope.fetch = player.fetch;
+  scope.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    fetched.push(typeof input === "string" ? input : input.toString());
+    return player.fetch(input, init);
+  }) as typeof fetch;
   performance.getEntriesByType = ((type: string) =>
     type === "resource"
       ? resourceUrls.map((name) => ({ name }))
@@ -158,17 +183,22 @@ describe("tbank-web response contract", () => {
           const payload =
             (entry.body as { payload?: Array<Record<string, unknown>> })?.payload ?? [];
           for (const operation of payload) {
-            const identity =
-              JSON.stringify(operation.id ?? operation.operationId ?? operation.authorizationId) ??
-              null;
-            if (identity === null || seen.has(identity)) continue;
-            seen.add(identity);
-
             const row = __test__.mapOperationRecordToRow(
               { operation },
               { extractionMethod: "api" },
             );
             if (!row) continue;
+
+            // The identity has to be the one the connector and the recorder both key by. An
+            // operation carrying none of the three identifiers is kept by their shared
+            // timestamp/amount fallback, so dropping it here counts it in the recorded summary
+            // and not in this recomputation — a failure on a response shape the connector
+            // explicitly supports.
+            const identity =
+              JSON.stringify(operation.id ?? operation.operationId ?? operation.authorizationId) ??
+              `fallback:${String(row.posted_at)}:${String(row.amount)}:${String(row.description)}`;
+            if (seen.has(identity)) continue;
+            seen.add(identity);
 
             const postedAt = typeof row.posted_at === "string" ? row.posted_at : null;
             const amount = typeof row.amount === "number" ? row.amount : null;
@@ -232,7 +262,8 @@ describe("tbank-web response contract", () => {
       // nothing, silently, with every enrichment entry left unused.
       vi.useFakeTimers();
       vi.setSystemTime(windowToMs);
-      const restore = installPageGlobals(player, cassette);
+      const fetched: string[] = [];
+      const restore = installPageGlobals(player, cassette, fetched);
       try {
         // The connector paces its receipt requests 300ms apart, which is fifteen seconds of
         // real waiting for a full budget. Fake timers turn that into nothing, and draining them
@@ -257,17 +288,35 @@ describe("tbank-web response contract", () => {
         expect(extraction.parsed_transactions_count).toBeGreaterThan(0);
 
         // The receipt accounting is where recorder and connector have to agree most exactly:
-        // the budget, which operations it is spent on, and what counts as a receipt. Fifty
-        // requests issued against a fifty-receipt budget, and one failure, is the recorded 504
-        // arriving where the recorder said it would.
+        // the budget, which operations it is spent on, and what counts as a receipt. Derived
+        // from this cassette rather than fixed, because a valid recording may hold fewer
+        // receipts than the budget — the recorder says as much in a warning — and hard-coding
+        // the dense month's fifty would fail every sparser cassette committed later.
+        const recordedReceipts = cassette.entries.filter((entry) =>
+          entry.url.includes("/api/common/v1/shopping_receipt"),
+        ).length;
         const receiptDebug = extraction.debug?.receipt_enrichment;
-        expect(receiptDebug?.requested_count).toBe(50);
-        expect((receiptDebug?.success_count ?? 0) + (receiptDebug?.failed_count ?? 0)).toBe(50);
+        expect(receiptDebug?.requested_count).toBe(recordedReceipts);
+        // Every issued request ends in exactly one of the two outcomes; which of them it is
+        // depends on what the bank returned when the recording was made.
+        expect((receiptDebug?.success_count ?? 0) + (receiptDebug?.failed_count ?? 0)).toBe(
+          recordedReceipts,
+        );
 
         // Recorded responses nothing asked for are the same drift seen from the other side:
         // the recorder captured requests the connector does not make.
         const unusedPaths = player.unused().map((entry) => new URL(entry.url).pathname);
         expect(unusedPaths, `unused: ${unusedPaths.join(", ")}`).toEqual([]);
+
+        // Zero misses and zero unused entries still do not pin the request count. When a match
+        // key runs out of entries the player hands back the first one again rather than
+        // reporting a miss, so an extra range request — the very drift this test exists to
+        // catch — would leave both those assertions green. Counting requests per key is what
+        // closes that: the connector must ask for each key exactly as often as the recording
+        // holds it.
+        expect(requestsPerKey(fetched), "request count per endpoint").toEqual(
+          requestsPerKey(cassette.entries.map((entry) => entry.url)),
+        );
       } finally {
         vi.useRealTimers();
         restore();
