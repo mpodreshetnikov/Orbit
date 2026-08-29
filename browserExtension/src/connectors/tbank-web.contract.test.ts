@@ -194,8 +194,20 @@ describe("tbank-web response contract", () => {
             // timestamp/amount fallback, so dropping it here counts it in the recorded summary
             // and not in this recomputation — a failure on a response shape the connector
             // explicitly supports.
+            // `buildOperationKey`'s own precedence and its own idea of what counts as present:
+            // it runs each candidate through `text`, so an empty string falls through to the next
+            // one. `??` does not — an operation carrying `id: ""` would take that branch, and
+            // every such operation would collapse to one identity while the connector keeps them
+            // apart, undercounting the month and failing a cassette that is correct.
+            const asKey = (value: unknown): string | null => {
+              if (typeof value === "string") return value.trim() || null;
+              if (typeof value === "number" && Number.isFinite(value)) return String(value);
+              return null;
+            };
             const identity =
-              JSON.stringify(operation.id ?? operation.operationId ?? operation.authorizationId) ??
+              asKey(operation.id) ??
+              asKey((operation.operationId as { value?: unknown } | undefined)?.value) ??
+              asKey(operation.authorizationId) ??
               `fallback:${String(row.posted_at)}:${String(row.amount)}:${String(row.description)}`;
             if (seen.has(identity)) continue;
             seen.add(identity);

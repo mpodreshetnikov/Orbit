@@ -372,7 +372,12 @@ function scrubValue(value: unknown, preserve: boolean, insideFormFieldBag = fals
     if (WHOLE_MASKED_PERSON_NAME.test(value)) return REDACTED;
     return scrubFreeText(value);
   }
-  if (Array.isArray(value)) return value.map((entry) => scrubValue(entry, preserve));
+  // The bag context has to survive the array, or an object inside an array-valued field drops
+  // back to allow-by-default — which is the exact hole the default-deny rule was added to close,
+  // reopened one level down.
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubValue(entry, preserve, insideFormFieldBag));
+  }
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
     // Read before walking: whether `description` holds a merchant or a person is decided by the

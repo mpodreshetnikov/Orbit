@@ -423,7 +423,51 @@ describe("cassette console recorder", () => {
 
     const result = await recordCassette({ name: "short", pauseMs: 0, maxReceipts: 1 }, deps);
 
-    expect(result.blockers.join(" ")).toMatch(/below the connector's own 50/);
+    expect(result.blockers.join(" ")).toMatch(/budget is fixed at 50/);
+
+    // And the other direction, which needs more receipt-bearing operations than the budget to
+    // show at all: above 50 the cassette holds receipts the replay never asks for, and the
+    // contract test rejects those as unused entries. Only the connector's own number replays.
+    const denseDeps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: Array.from({ length: 60 }, (_, index) => operation(`op-${index}`, -100)),
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          return new Response(
+            JSON.stringify({ payload: { receipt: { items: [{ name: "Молоко" }] } } }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const tooMany = await recordCassette({ name: "long", pauseMs: 0, maxReceipts: 80 }, denseDeps);
+    expect(tooMany.blockers.join(" ")).toMatch(/budget is fixed at 50/);
+
+    // At the connector's own budget the same window is fine.
+    const exact = await recordCassette({ name: "exact", pauseMs: 0, maxReceipts: 50 }, denseDeps);
+    expect(exact.blockers.join(" ")).toEqual("");
+  });
+
+  it("refuses a recording whose range span is not the connector's", async () => {
+    // `buildRanges` decides how many requests there are and where their bounds fall, and the
+    // replay compares both. Any span but the connector's produces a walk it cannot reproduce.
+    const deps = makeDeps();
+
+    const result = await recordCassette(
+      { name: "chunked", pauseMs: 0, maxReceipts: 0, chunkDays: 7 },
+      deps,
+    );
+
+    expect(result.blockers.join(" ")).toMatch(/chunkDays/);
   });
 
   it("does not count a rate-limited receipt as captured", async () => {

@@ -789,8 +789,14 @@ export async function recordCassette(
   // Only worth saying when the budget is below the connector's own. At or above it the replay
   // stops at the same point for the same reason and marks the rest `skipped_after_budget`, so a
   // window holding more receipts than the budget is ordinary rather than a gap in the cassette.
-  const shortOfBudget =
-    receiptBearing.length > maxReceipts && maxReceipts < CONNECTOR_MAX_RECEIPTS_PER_RUN;
+  // The connector's budget is fixed at 50 and it is not a preference. Recording fewer receipts
+  // than it will ask for leaves the replay with misses; recording more leaves entries nothing
+  // asks for, and the contract test rejects both. So the only usable value is the connector's.
+  const budgetMismatch =
+    receiptBearing.length > maxReceipts
+      ? maxReceipts < CONNECTOR_MAX_RECEIPTS_PER_RUN
+      : maxReceipts > CONNECTOR_MAX_RECEIPTS_PER_RUN &&
+        receiptBearing.length > CONNECTOR_MAX_RECEIPTS_PER_RUN;
 
   let detailCount = 0;
   let usableDetails = 0;
@@ -929,15 +935,25 @@ export async function recordCassette(
   }
 
   const blockers: string[] = [];
-  if (shortOfBudget) {
-    // The connector's budget is fixed at 50; a recording made below it omits requests the replay
-    // will still issue, and the contract test rejects it for receipt misses. Warning about that
-    // hands over a file whose only future is to fail, so it is a blocker like the others.
+  if (budgetMismatch) {
     blockers.push(
       `${receiptBearing.length} operations carry a receipt and this run recorded at most ` +
-        `${maxReceipts}, below the connector's own ${CONNECTOR_MAX_RECEIPTS_PER_RUN}. The replay ` +
-        "asks for receipts this cassette does not hold. Record again without lowering " +
-        "maxReceipts.",
+        `${maxReceipts}, while the connector's budget is fixed at ` +
+        `${CONNECTOR_MAX_RECEIPTS_PER_RUN}. Below it the replay asks for receipts this cassette ` +
+        "does not hold; above it the cassette holds receipts the replay never asks for. Record " +
+        "again without setting maxReceipts.",
+    );
+  }
+
+  if ((options.chunkDays ?? CONNECTOR_CHUNK_DAYS) !== CONNECTOR_CHUNK_DAYS) {
+    // `buildRanges` decides how many range requests there are and where their bounds fall, and
+    // the replay compares both against the recording. The connector always uses its own span, so
+    // any other value produces a cassette whose walk cannot be reproduced — and a smaller one
+    // spends extra requests on the live bank to get there.
+    blockers.push(
+      `chunkDays was set to ${options.chunkDays}, and the connector always walks in ` +
+        `${CONNECTOR_CHUNK_DAYS}-day ranges. The recorded range sequence cannot be reproduced on ` +
+        "replay. Record again without setting chunkDays.",
     );
   }
 

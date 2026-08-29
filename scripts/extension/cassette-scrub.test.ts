@@ -294,6 +294,29 @@ describe("cassette scrubbing", () => {
     ]);
   });
 
+  it("keeps redacting inside an array in the payment form-field bag", () => {
+    // The bag's default-deny has to survive the array. Dropping the context one level down
+    // returns objects inside an array-valued field to allow-by-default, which is the hole the
+    // rule was added to close.
+    expect(
+      scrubCassetteValue({
+        payment: {
+          fieldsValues: {
+            workflowType: "SBPTransfer",
+            recipients: [{ pointer: "+79535912902", unknownFutureField: "5351691778" }],
+          },
+        },
+      }),
+    ).toEqual({
+      payment: {
+        fieldsValues: {
+          workflowType: "SBPTransfer",
+          recipients: [{ pointer: REDACTED, unknownFutureField: REDACTED }],
+        },
+      },
+    });
+  });
+
   it("removes a phone number from free text", () => {
     expect(scrubFreeText("перевод на +79535912902")).toBe(`перевод на ${REDACTED}`);
     // Not a bite out of the middle of a card number: that whole run goes as one.

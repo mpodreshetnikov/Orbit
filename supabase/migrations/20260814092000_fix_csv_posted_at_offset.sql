@@ -26,7 +26,21 @@ WHERE jsonb_exists(transaction.raw_payload, 'Дата операции')
 -- numbered per payer, so two people with an otherwise identical statement row now get the same
 -- hash, and the global index rejects the second one — the UPDATE fails and the deploy stops
 -- half-applied. The next migration replaces this index with the payer-scoped one that makes
--- those two rows legitimate; dropping it here is what lets the recompute reach that point.
+-- those two rows legitimate; the swap has to happen here for the recompute to reach that point.
+--
+-- Created before dropped, and deliberately in that order. Each migration commits separately, so
+-- an application interrupted between this file and the next would otherwise leave the table with
+-- no unique index on `dedupe_hash` at all: the statement importer's `ON CONFLICT` target would
+-- have nothing to match, and every insert not using it would lose duplicate protection until
+-- someone deployed again. Creating first makes the worst interruption a table with both indexes,
+-- which costs a little write time and protects strictly more.
+--
+-- Both statements are `IF NOT EXISTS`/`IF EXISTS`, and 20260814093000 repeats them, so running
+-- either file twice or in either order lands in the same place.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_money_transactions_person_dedupe_hash
+  ON public.money_transactions(payer_person_id, dedupe_hash)
+  WHERE dedupe_hash IS NOT NULL;
+
 DROP INDEX IF EXISTS idx_money_transactions_dedupe_hash;
 
 -- Recompute dedupe_hash for statement rows with the shared formula.
