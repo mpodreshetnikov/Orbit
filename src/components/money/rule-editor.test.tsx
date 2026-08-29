@@ -307,11 +307,16 @@ describe("MoneyRuleEditor", () => {
     expect(pushMock).toHaveBeenCalledWith(expect.stringContaining("/money/rules/rule-new/edit"));
   });
 
-  it("does not expose removed history rule kinds", () => {
+  it("does not expose removed rule kinds", () => {
     render(<MoneyRuleEditor mode="create" />);
 
     expect(screen.queryByText("money.ruleKindmerchant_history")).not.toBeInTheDocument();
     expect(screen.queryByText("money.ruleKindline_item_history")).not.toBeInTheDocument();
+    // T-0013 Milestone 7's acceptance asks for this one by name. The database side is asserted
+    // by `money_category_rule_pipeline_test.sql` ("money_rule_kind no longer includes
+    // source_category_map"); the editor renders `MONEY_CATEGORY_RULE_KINDS`, which is a separate
+    // list that could drift back on its own.
+    expect(screen.queryByText("money.ruleKindsource_category_map")).not.toBeInTheDocument();
   });
 
   it("validates regex filters before save", async () => {
