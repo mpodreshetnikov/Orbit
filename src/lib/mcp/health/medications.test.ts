@@ -90,34 +90,69 @@ describe("listMedications", () => {
       ],
     });
 
-    const rows = await listMedications(stub.client, { personId: "p-1" });
+    const { regimens } = await listMedications(stub.client, { personId: "p-1" });
 
-    expect(rows[0].effective_status).toBe("active");
+    expect(regimens[0].effective_status).toBe("active");
     // The UI shows this as completed; the tool must agree.
-    expect(rows[1].effective_status).toBe("completed");
-    expect(rows[1].status).toBe("active");
+    expect(regimens[1].effective_status).toBe("completed");
+    expect(regimens[1].status).toBe("active");
   });
 
-  it("filters by name in memory, case-insensitively", async () => {
+  it("filters by name in the query, case-insensitively", async () => {
+    // In memory this was a filter over a response PostgREST had already capped
+    // at `max_rows`, so a long history could hide its own oldest courses.
     const stub = createSupabaseStub({
-      med_regimens: [
-        {
-          data: [
-            regimen({ custom_name: "Ferrous sulfate" }),
-            regimen({ custom_name: "Vitamin D" }),
-          ],
-        },
-      ],
+      med_regimens: [{ data: [regimen({ custom_name: "Ferrous sulfate" })] }],
     });
 
-    const rows = await listMedications(stub.client, { personId: "p-1", search: "FERROUS" });
-    expect(rows.map((r) => r.custom_name)).toEqual(["Ferrous sulfate"]);
+    const { regimens } = await listMedications(stub.client, {
+      personId: "p-1",
+      search: "FERROUS",
+    });
+
+    expect(stub.argsFor("med_regimens", "ilike")).toEqual([["custom_name", "%FERROUS%"]]);
+    expect(regimens.map((r) => r.custom_name)).toEqual(["Ferrous sulfate"]);
+  });
+
+  it("matches a name containing a wildcard literally", async () => {
+    const stub = createSupabaseStub({ med_regimens: [{ data: [] }] });
+    await listMedications(stub.client, { personId: "p-1", search: "50%_B" });
+
+    expect(stub.argsFor("med_regimens", "ilike")).toEqual([["custom_name", "%50\\%\\_B%"]]);
   });
 
   it("ignores a whitespace-only search", async () => {
     const stub = createSupabaseStub({ med_regimens: [{ data: [regimen(), regimen()] }] });
-    const rows = await listMedications(stub.client, { personId: "p-1", search: "  " });
-    expect(rows).toHaveLength(2);
+    const { regimens } = await listMedications(stub.client, { personId: "p-1", search: "  " });
+
+    expect(stub.argsFor("med_regimens", "ilike")).toHaveLength(0);
+    expect(regimens).toHaveLength(2);
+  });
+
+  it("pages in the query and reports the count the database returned", async () => {
+    const stub = createSupabaseStub({ med_regimens: [{ data: [regimen()], count: 1200 }] });
+
+    const { regimens, total } = await listMedications(stub.client, {
+      personId: "p-1",
+      limit: 20,
+      offset: 60,
+    });
+
+    expect(stub.argsFor("med_regimens", "range")).toEqual([[60, 79]]);
+    expect(regimens).toHaveLength(1);
+    expect(total).toBe(1200);
+  });
+
+  it("orders by a unique column as well, so a page boundary cannot repeat a row", async () => {
+    // Four courses of one medication were created in the same minute in
+    // production, so `created_at` alone is not a stable order.
+    const stub = createSupabaseStub({ med_regimens: [{ data: [] }] });
+    await listMedications(stub.client, { personId: "p-1" });
+
+    expect(stub.argsFor("med_regimens", "order")).toEqual([
+      ["created_at", { ascending: false }],
+      ["id", { ascending: true }],
+    ]);
   });
 
   it("surfaces a query error", async () => {

@@ -28,16 +28,47 @@ function withEffectiveStatus(regimen: MedRegimen): RegimenWithStatus {
   return { ...regimen, effective_status: getEffectiveStatus(regimen) };
 }
 
+/**
+ * Escapes the wildcards PostgREST's `ilike` would otherwise interpret.
+ *
+ * The filter this replaced was a case-insensitive `String.includes`, so a name
+ * containing `%` or `_` has to keep matching itself literally rather than
+ * turning into a pattern.
+ */
+function likeLiteral(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+/**
+ * One page of a person's regimens, with the total that matched.
+ *
+ * The name filter runs in the query rather than over the result: PostgREST caps
+ * a response at `max_rows` (1000 in `supabase/config.toml`), and filtering
+ * afterwards would page rows the database had already truncated -- so a person
+ * with a long history would find their oldest courses unreachable while the
+ * reply claimed there was nothing more.
+ */
 export async function listMedications(
   supabase: SupabaseClient<Database>,
-  params: { personId: string; status?: string; search?: string; includeArchived?: boolean },
-): Promise<RegimenWithStatus[]> {
+  params: {
+    personId: string;
+    status?: string;
+    search?: string;
+    includeArchived?: boolean;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<{ regimens: RegimenWithStatus[]; total: number }> {
   let query = supabase
     .from("med_regimens")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("person_id", params.personId)
     .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    // `created_at` is not unique -- four courses of one medication were created
+    // in the same minute in production -- and an unstable order under paging
+    // repeats one row while dropping another.
+    .order("id", { ascending: true });
 
   if (params.status) {
     query = query.eq("status", params.status as never);
@@ -45,21 +76,26 @@ export async function listMedications(
     query = query.neq("status", "archived");
   }
 
-  const { data, error } = await query;
+  const needle = params.search?.trim();
+  if (needle) {
+    query = query.ilike("custom_name", `%${likeLiteral(needle)}%`);
+  }
+
+  if (params.limit != null) {
+    const offset = params.offset ?? 0;
+    query = query.range(offset, offset + params.limit - 1);
+  }
+
+  const { data, error, count } = await query;
   if (error) {
     throw new Error(`Failed to load medications: ${error.message}`);
   }
 
-  let regimens = ((data ?? []) as unknown as Array<Record<string, unknown>>)
+  const regimens = ((data ?? []) as unknown as Array<Record<string, unknown>>)
     .map(rowToRegimen)
     .map(withEffectiveStatus);
 
-  if (params.search?.trim()) {
-    const needle = params.search.trim().toLowerCase();
-    regimens = regimens.filter((regimen) => regimen.custom_name.toLowerCase().includes(needle));
-  }
-
-  return regimens;
+  return { regimens, total: count ?? regimens.length };
 }
 
 export async function getMedication(
@@ -146,7 +182,11 @@ export async function listMedicationDoses(
     .is("deleted_at", null)
     .gte("scheduled_at", params.from)
     .lte("scheduled_at", params.to)
-    .order("scheduled_at", { ascending: true });
+    .order("scheduled_at", { ascending: true })
+    // Several medications commonly fall on the same minute, and ordering by a
+    // non-unique column alone lets successive pages return one of those rows
+    // twice and skip another.
+    .order("id", { ascending: true });
 
   if (params.status) {
     query = query.eq("status", params.status as never);
@@ -244,9 +284,10 @@ export async function findRegimensByName(
     return [];
   }
 
-  const regimens = await listMedications(supabase, {
+  const { regimens } = await listMedications(supabase, {
     personId: params.personId,
     includeArchived: true,
+    search: needle,
   });
 
   return regimens.filter((regimen) => normalizeMedicationName(regimen.custom_name) === needle);

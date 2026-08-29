@@ -157,7 +157,7 @@ Conventions that matter:
   since they are plan strings rather than instants and the same reply quotes real instants in a
   named zone.
 
-- **A list that cannot show everything says how to reach the rest.** `list_medications` and
+- **A list that cannot show everything says how to reach the rest, and pages in the query.** `list_medications` and
   `list_medication_doses` take `limit`/`offset` and answer with the window, the total, and the
   `offset` that continues it (`summarizePage` in `src/lib/mcp/tool-result.ts`). The previous
   "...and N more" tail named rows it gave no way to fetch, so past the twentieth medication the only
@@ -165,6 +165,18 @@ Conventions that matter:
   one course's dose over time used to mean pulling every medication in the range and diffing by
   hand, which is how a titration history came to be reconstructed by binary search over 3–5 day
   windows.
+
+  The page, the filters and the total all come from the database. PostgREST caps a response at
+  `max_rows` (1000 in `supabase/config.toml`), so paging or filtering a result in memory would let a
+  long history report its own truncation as the total and declare there was nothing further —
+  strictly worse than the cursorless tail it replaced. Both queries also order by `id` after their
+  natural sort, because neither `scheduled_at` nor `created_at` is unique: four courses of one
+  medication were created in the same minute in production, and an unstable order under paging
+  repeats one row while dropping another.
+
+  Free text is bounded on its way into a text block. Notes have no length limit in the database and
+  a page can carry a hundred of them, so each is flattened to one line and cut with an explicit `…`;
+  `structuredContent` keeps the note itself.
 
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.

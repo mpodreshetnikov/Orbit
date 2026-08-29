@@ -30,7 +30,7 @@ import {
   uuidSchema,
 } from "../schemas/common";
 import { withPerson, withUserClient } from "../tool-context";
-import { fail, ok, paginate, summarizePage } from "../tool-result";
+import { fail, ok, summarizePage } from "../tool-result";
 import { getCourseWindow } from "@/types/regimen";
 import type { MedDuration, MedSchedule, PlannedIntake } from "@/types/regimen";
 import type { McpToolServer } from "./types";
@@ -109,23 +109,41 @@ function describeCourseWindow(duration: MedDuration | null | undefined): string 
  * rather than instants -- labelled as such, since the same reply quotes real
  * instants converted into a named zone (T-0027).
  */
-function describeSchedule(schedule: MedSchedule | null | undefined): string {
+function describeSchedule(
+  schedule: MedSchedule | null | undefined,
+  dose?: PlannedIntake | null,
+): string {
   if (!schedule) return "schedule unknown";
 
   // Every field is read defensively: these are jsonb columns whose shape is a
   // TypeScript promise rather than a database constraint, and a row written
   // before a mode gained a field would otherwise throw here and take the whole
   // reply down -- on a list where the other medications are fine.
-  const at = (times?: string[]) =>
-    times && times.length > 0 ? ` at ${times.join(", ")} (local wall clock)` : "";
+  //
+  // A slot's own amount wins over the course's default, and the generator
+  // honours it: half a pill in the morning and one and a half at night is one
+  // regimen with two amounts, and printing the base dose beside bare times
+  // would describe both slots as the same size.
+  const at = (times?: string[], amounts?: number[]) => {
+    if (!times || times.length === 0) return "";
+    const unit = dose?.intake?.unit ?? "";
+    const slots = times.map((time, index) => {
+      const amount = amounts?.[index];
+      return amount == null ? time : `${time} (${amount}${unit ? ` ${unit}` : ""})`;
+    });
+    return ` at ${slots.join(", ")} (local wall clock)`;
+  };
 
   switch (schedule.mode) {
     case "daily_times":
-      return `schedule daily_times${at(schedule.times)}`;
+      return `schedule daily_times${at(schedule.times, schedule.amounts)}`;
     case "interval_hours":
-      return `schedule interval_hours every ${schedule.interval?.every ?? "?"}h`;
+      return (
+        `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
+        `${schedule.amount != null ? ` (${schedule.amount}${dose?.intake?.unit ? ` ${dose.intake.unit}` : ""} per intake)` : ""}`
+      );
     case "interval_days":
-      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times)}`;
+      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times, schedule.amounts)}`;
     case "days_of_week":
       return `schedule days_of_week${schedule.days_of_week?.length ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times)}`;
     case "one_off":
@@ -142,12 +160,28 @@ function describeStock(regimen: RegimenWithStatus): string {
   return `stock ${inventory.current_amount} ${inventory.unit ?? regimen.intake_unit}`;
 }
 
-/** A course note, kept short enough for a list line. `get_medication` prints it whole. */
+/**
+ * A note, flattened to one line and bounded.
+ *
+ * Notes are free text with no length limit in the database -- an imported one
+ * can be pages long -- and a reply can carry a hundred of them. Left whole they
+ * would crowd out the answer they were meant to support, so the text block gets
+ * an excerpt with an explicit marker and `structuredContent` keeps the note
+ * itself.
+ */
+function excerpt(text: string | null | undefined, limit: number): string {
+  const oneLine = text?.trim().replace(/\s+/g, " ");
+  if (!oneLine) return "";
+  return oneLine.length > limit ? `${oneLine.slice(0, limit)}…` : oneLine;
+}
+
+/** How much of a note each surface spells out before cutting it. */
+const NOTE_EXCERPT = { list: 80, dose: 120, detail: 400 } as const;
+
+/** A course note, kept short enough for a list line. */
 function describeNotesExcerpt(notes: string | null): string {
-  const trimmed = notes?.trim();
-  if (!trimmed) return "";
-  const oneLine = trimmed.replace(/\s+/g, " ");
-  return oneLine.length > 80 ? `note "${oneLine.slice(0, 79)}…"` : `note "${oneLine}"`;
+  const text = excerpt(notes, NOTE_EXCERPT.list);
+  return text ? `note "${text}"` : "";
 }
 
 function describeRegimen(regimen: RegimenWithStatus): string {
@@ -156,7 +190,7 @@ function describeRegimen(regimen: RegimenWithStatus): string {
   // written down while `active` is empty.
   const parts = [
     describeIntake(regimen.dose_definition),
-    describeSchedule(regimen.schedule),
+    describeSchedule(regimen.schedule, regimen.dose_definition),
     describeCourseWindow(regimen.duration),
     describeStock(regimen),
     describeNotesExcerpt(regimen.notes),
@@ -242,32 +276,37 @@ export function registerMedicationTools(server: McpToolServer): void {
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     withPerson(async (supabase, person, args) => {
-      const regimens = await listMedications(supabase, {
+      const { regimens, total } = await listMedications(supabase, {
         personId: person.id,
         status: args.status,
         search: args.search,
         includeArchived: args.include_archived,
+        limit: args.limit,
+        offset: args.offset,
       });
 
-      // Paged here rather than in the query: `listMedications` filters `search`
-      // in memory, so a database-side range would page the unfiltered rows.
-      const page = paginate(regimens, args.limit, args.offset);
+      // Both the page and the total come from the query. Filtering or slicing
+      // afterwards would page a result PostgREST had already truncated at
+      // `max_rows`, stranding the oldest courses behind a reply that claimed
+      // there was nothing more.
+      const hasMore = args.offset + regimens.length < total;
+      const nextOffset = hasMore ? args.offset + regimens.length : null;
 
       return ok(
-        summarizePage(`medications for ${person.name}`, page.page.map(describeRegimen), {
-          total: regimens.length,
+        summarizePage(`medications for ${person.name}`, regimens.map(describeRegimen), {
+          total,
           offset: args.offset,
-          has_more: page.has_more,
-          next_offset: page.next_offset,
+          has_more: hasMore,
+          next_offset: nextOffset,
         }),
         {
           person,
-          medications: page.page,
-          total: regimens.length,
+          medications: regimens,
+          total,
           limit: args.limit,
           offset: args.offset,
-          has_more: page.has_more,
-          next_offset: page.next_offset,
+          has_more: hasMore,
+          next_offset: nextOffset,
         },
       );
     }),
@@ -336,12 +375,12 @@ export function registerMedicationTools(server: McpToolServer): void {
         // doses and stock movements it is counting.
         const plan = [
           describeIntake(detail.regimen.dose_definition),
-          describeSchedule(detail.regimen.schedule),
+          describeSchedule(detail.regimen.schedule, detail.regimen.dose_definition),
           describeCourseWindow(detail.regimen.duration),
           describeStock(detail.regimen),
         ].filter((part) => part.length > 0);
 
-        const notes = detail.regimen.notes?.trim();
+        const notes = excerpt(detail.regimen.notes, NOTE_EXCERPT.detail);
         // A 30-day horizon on a twice-daily course is 120 intakes. List the
         // ones nearest now and say how many were left out, rather than either
         // dumping all of them or going back to a bare count.
@@ -359,10 +398,10 @@ export function registerMedicationTools(server: McpToolServer): void {
         const doseLine = (dose: (typeof detail.upcomingDoses)[number]) =>
           `- ${formatZoned(dose.scheduled_at, zone.timezone)} — ${describeIntake(dose.planned_intake) || "dose unknown"} [${dose.status}]` +
           `${dose.taken_at ? `, taken ${formatZoned(dose.taken_at, zone.timezone)}` : ""}` +
-          `${dose.note?.trim() ? `, note "${dose.note.trim()}"` : ""}`;
+          `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`;
         const movementLine = (movement: (typeof detail.inventoryTransactions)[number]) =>
           `- ${formatZoned(movement.created_at, zone.timezone)} — ${movement.type} ${movement.amount} ${movement.unit}` +
-          `${movement.note?.trim() ? `, note "${movement.note.trim()}"` : ""}`;
+          `${excerpt(movement.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(movement.note, NOTE_EXCERPT.dose)}"` : ""}`;
 
         return ok(
           `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
@@ -467,7 +506,7 @@ export function registerMedicationTools(server: McpToolServer): void {
               `${formatZoned(dose.scheduled_at, timezone)} — ${dose.medication_name ?? "unknown"}` +
               `${describeIntake(dose.planned_intake) ? `, ${describeIntake(dose.planned_intake)}` : ""}` +
               ` [${dose.status}]` +
-              `${dose.note?.trim() ? `, note "${dose.note.trim()}"` : ""}`,
+              `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`,
           ),
           {
             total,

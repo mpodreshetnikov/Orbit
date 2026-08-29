@@ -82,16 +82,19 @@ beforeEach(() => {
 
 describe("list_medications", () => {
   it("prefers the effective status over the stored one", async () => {
-    meds.listMedications.mockResolvedValue([
-      {
-        id: "r-1",
-        custom_name: "Ferrous sulfate",
-        status: "active",
-        effective_status: "completed",
-        dose_definition: { intake: { amount: 1, unit: "pill" } },
-        schedule: { mode: "daily_times" },
-      },
-    ]);
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Ferrous sulfate",
+          status: "active",
+          effective_status: "completed",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "daily_times" },
+        },
+      ],
+      total: 1,
+    });
 
     const result = await (await handlers()).get("list_medications")!({ ...PAGE }, ctx());
 
@@ -102,23 +105,26 @@ describe("list_medications", () => {
     // Every one of these was in the row and in `structuredContent` already, and
     // none of it reached the text block -- which is why an assistant asked how
     // long a 100 mg dose had run and had to answer "50 mg or 100 mg, depending".
-    meds.listMedications.mockResolvedValue([
-      {
-        id: "r-1",
-        custom_name: "Золофт",
-        status: "active",
-        effective_status: "active",
-        intake_unit: "pill",
-        dose_definition: {
-          intake: { amount: 1.5, unit: "pill" },
-          active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          intake_unit: "pill",
+          dose_definition: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00"] },
+          duration: { type: "endless", start_date: "2026-08-07" },
+          inventory: { enabled: true, current_amount: 12, unit: "pill" },
+          notes: "1.5 таб по 100 мг",
         },
-        schedule: { mode: "daily_times", times: ["09:00"] },
-        duration: { type: "endless", start_date: "2026-08-07" },
-        inventory: { enabled: true, current_amount: 12, unit: "pill" },
-        notes: "1.5 таб по 100 мг",
-      },
-    ]);
+      ],
+      total: 1,
+    });
 
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
@@ -130,27 +136,79 @@ describe("list_medications", () => {
     expect(text).toContain('note "1.5 таб по 100 мг"');
   });
 
+  it("prints each slot's own amount, not the course default", async () => {
+    // A regimen can carry a different amount per time of day, and the generator
+    // honours it. Printing the base dose beside bare times would describe half a
+    // pill in the morning and one and a half at night as the same intake.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Атаракс",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 0.5, unit: "pill" } },
+          schedule: { mode: "daily_times", times: ["09:00", "22:00"], amounts: [0.5, 1.5] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("at 09:00 (0.5 pill), 22:00 (1.5 pill) (local wall clock)");
+  });
+
+  it("cuts a long note rather than spending the reply on it", async () => {
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "daily_times", times: ["09:00"] },
+          notes: "и".repeat(400),
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    // Notes are unbounded free text, and a page can carry twenty of them; the
+    // whole note stays in `structuredContent`.
+    expect(text).toContain("…");
+    expect(text.length).toBeLessThan(400);
+  });
+
   it("dates each course, so two courses of one medication are distinguishable", async () => {
-    meds.listMedications.mockResolvedValue([
-      {
-        id: "r-old",
-        custom_name: "Золофт",
-        status: "active",
-        effective_status: "completed",
-        dose_definition: { intake: { amount: 1, unit: "pill" } },
-        schedule: { mode: "daily_times", times: ["21:00"] },
-        duration: { type: "for_days", days: 4, start_date: "2026-07-26" },
-      },
-      {
-        id: "r-new",
-        custom_name: "Золофт",
-        status: "active",
-        effective_status: "completed",
-        dose_definition: { intake: { amount: 1.5, unit: "pill" } },
-        schedule: { mode: "daily_times", times: ["21:00"] },
-        duration: { type: "for_days", days: 4, start_date: "2026-08-03" },
-      },
-    ]);
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-old",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "completed",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "daily_times", times: ["21:00"] },
+          duration: { type: "for_days", days: 4, start_date: "2026-07-26" },
+        },
+        {
+          id: "r-new",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "completed",
+          dose_definition: { intake: { amount: 1.5, unit: "pill" } },
+          schedule: { mode: "daily_times", times: ["21:00"] },
+          duration: { type: "for_days", days: 4, start_date: "2026-08-03" },
+        },
+      ],
+      total: 2,
+    });
 
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
@@ -159,45 +217,61 @@ describe("list_medications", () => {
     expect(text).toContain("2026-08-03 to 2026-08-06");
   });
 
-  it("pages instead of truncating into rows nothing can reach", async () => {
-    meds.listMedications.mockResolvedValue(
-      Array.from({ length: 25 }, (_, i) => ({
-        id: `r-${i}`,
-        custom_name: `Med ${i}`,
-        status: "active",
-        effective_status: "active",
-        dose_definition: { intake: { amount: 1, unit: "pill" } },
-        schedule: { mode: "daily_times", times: ["09:00"] },
-      })),
-    );
+  it("pages from the query, so nothing is stranded behind a truncated response", async () => {
+    const row = (i: number) => ({
+      id: `r-${i}`,
+      custom_name: `Med ${i}`,
+      status: "active",
+      effective_status: "active",
+      dose_definition: { intake: { amount: 1, unit: "pill" } },
+      schedule: { mode: "daily_times", times: ["09:00"] },
+    });
+
+    meds.listMedications.mockResolvedValue({
+      regimens: Array.from({ length: 20 }, (_, i) => row(i)),
+      total: 25,
+    });
 
     const first = await (await handlers()).get("list_medications")!(
       { limit: 20, offset: 0 },
       ctx(),
     );
+
+    const [, params] = meds.listMedications.mock.calls[0] as [unknown, Record<string, number>];
+    expect(params.limit).toBe(20);
+    expect(params.offset).toBe(0);
     expect(first.content[0].text).toContain("25 medications for Maria (showing 1-20)");
     expect(first.content[0].text).toContain("pass offset: 20 to continue");
     expect(first.structuredContent).toMatchObject({ total: 25, has_more: true, next_offset: 20 });
+
+    meds.listMedications.mockResolvedValue({
+      regimens: Array.from({ length: 5 }, (_, i) => row(20 + i)),
+      total: 25,
+    });
 
     const second = await (await handlers()).get("list_medications")!(
       { limit: 20, offset: 20 },
       ctx(),
     );
+
     expect(second.content[0].text).toContain("Med 24");
     expect(second.structuredContent).toMatchObject({ has_more: false, next_offset: null });
   });
 
   it("copes with a regimen that has no dose or schedule recorded", async () => {
-    meds.listMedications.mockResolvedValue([
-      {
-        id: "r-1",
-        custom_name: "Unknown",
-        status: "active",
-        effective_status: "active",
-        dose_definition: null,
-        schedule: null,
-      },
-    ]);
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Unknown",
+          status: "active",
+          effective_status: "active",
+          dose_definition: null,
+          schedule: null,
+        },
+      ],
+      total: 1,
+    });
 
     const result = await (await handlers()).get("list_medications")!({ ...PAGE }, ctx());
 
@@ -435,6 +509,33 @@ describe("list_medication_doses", () => {
     // never returns one.
     expect(text).toContain("Золофт, 1.5 pill (Сертралин 150 milligram) [taken]");
     expect(text).toContain('note "принял позже обычного"');
+  });
+
+  it("cuts a long intake note instead of flooding the page with one", async () => {
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: { intake: { amount: 1.5, unit: "pill" } },
+          status: "taken",
+          note: "з".repeat(400),
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    // A hundred intakes each carrying an imported note would crowd out the
+    // answer they were meant to support.
+    expect(text).toContain("…");
+    expect(text.length).toBeLessThan(400);
   });
 
   it("takes its page and its total from the database, not from what came back", async () => {

@@ -76,6 +76,8 @@ export function createSupabaseStub(
       lte: record("lte"),
       in: record("in"),
       or: record("or"),
+      like: record("like"),
+      ilike: record("ilike"),
       order: record("order"),
       limit: record("limit"),
       range: record("range"),
