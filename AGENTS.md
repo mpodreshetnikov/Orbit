@@ -106,3 +106,13 @@ All work — features, bugs, tech debt, chores, ideas, ExecPlans, and the reason
 A local checkout may have the registry linked in at `docs/tasks/`, along with `docs/PLANS.md` and the `task-registry` skill. All three paths are gitignored here. When they are present, read `docs/tasks/INDEX.md` before starting a task, grep `docs/tasks/` for prior decisions on the subject, and follow the skill; `docs/tasks/README.md` is canonical for the schema and lifecycle. Registry changes are committed in the registry repository, never here — a commit in this repository silently drops them.
 
 When they are absent, the registry is simply unavailable in this checkout: say so rather than tracking the work somewhere else.
+
+### No Task, No Work
+
+**Nothing in this repository is changed until a task covering it exists in the registry and is `in-progress`.** Find the task that covers the work, or create one, before editing code, schema, configuration or documentation here. A request in prose is not a claim on the tree; the task file is, and it is what a parallel agent sees. This applies to work an agent proposes itself as much as to work a user asks for — noticing debt mid-task licenses writing a task, not fixing it.
+
+The only exception is a trivial change: a typo, a formatting fix. Anything whose reasoning a reviewer would want is not trivial.
+
+Creating that task is itself gated: the registry must be searched for an existing task that already covers the request, and the user must confirm the task before it is written. Canonical statement of both gates is `docs/tasks/README.md`; the `task-registry` skill carries the applied workflow.
+
+When the registry is not linked into this checkout the gate cannot be satisfied — say the registry is unavailable and stop, rather than working untracked.
