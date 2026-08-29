@@ -82,6 +82,20 @@ claimed enrichment the cassette cannot replay, and nothing in the summary would 
 re-recording. Non-200 responses are excluded and warned about now, as throttled ones already
 were.
 
+**The bank does not paginate anywhere near `SUSPECTED_PAGE_LIMIT`.** `tbank-web.ts` still carries
+a TODO to re-derive that constant from the first recorded cassette. This is that cassette, and
+the answer is that it cannot be derived. Two fortnight ranges came back with 104 and 106
+operations — above the threshold of 100, so both were split — and each pair of halves summed
+exactly to its parent, 49+55 and 65+41. Neither response was capped. Nine responses, nine
+distinct lengths, no repeated ceiling anywhere in the recording.
+
+So the threshold should stay low deliberately rather than provisionally. Raising it to just over
+the densest fortnight one account happened to have chases a number with no meaning — the next
+account returns 130 and splits again — while giving up the margin that makes over-splitting the
+only failure mode. A split that was not needed costs two requests and is caught by the merge; a
+cap that slips past costs operations nobody will know are missing. Whoever closes that TODO
+should close it with this, not with 106.
+
 **The leak scan cannot rest on the field list alone.** The delivered file carried thirteen
 counterparty phone numbers under `pointer`, a transfer field added to the scrubber minutes after
 that snippet was built — and the scan reported it clean, because eleven digits is two short of
