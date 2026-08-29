@@ -139,6 +139,33 @@ function waitFor(label, check, timeoutMs = 180000) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+/**
+ * Waits for a borrowed service to finish writing, then stops it.
+ *
+ * The schema waits below look for one object each, but neither service stops there: storage and
+ * gotrue keep running their remaining migrations afterwards, and the containers stay up. Ours
+ * then start while theirs are still going, two streams of DDL against one database — which
+ * deadlocked in CI on the very first migration:
+ *
+ *   ERROR: deadlock detected
+ *   Process 262 waits for AccessExclusiveLock on relation 16458; blocked by process 259.
+ *   Process 259 waits for AccessExclusiveLock on relation 16470; blocked by process 262.
+ *
+ * It passes locally every time, which is the shape of a race rather than an argument that there
+ * is none. The comment above says both services are borrowed for one job each; this is what
+ * gives them back. Retrying the deadlock would leave the second writer there.
+ */
+function settleAndStop(container, role) {
+  waitFor(`${role} to finish migrating`, () => {
+    const result = psql([
+      "-Atc",
+      `select count(*) from pg_stat_activity where usename = '${role}' and state <> 'idle'`,
+    ]);
+    return result.status === 0 && result.stdout.trim() === "0";
+  });
+  docker(["stop", container]);
+}
+
 function startDatabase() {
   log("recreating containers");
   docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
@@ -228,6 +255,7 @@ function startSchemaOwners() {
     const result = psql(["-Atc", "select to_regclass('storage.buckets') is not null"]);
     return result.status === 0 && result.stdout.trim() === "t";
   });
+  settleAndStop(STORAGE_CONTAINER, "supabase_storage_admin");
 
   log("starting gotrue so it migrates the auth schema");
   const auth = docker([
@@ -270,6 +298,7 @@ function startSchemaOwners() {
     ]);
     return result.status === 0 && result.stdout.trim() === "1";
   });
+  settleAndStop(AUTH_CONTAINER, "supabase_auth_admin");
 }
 
 /**
