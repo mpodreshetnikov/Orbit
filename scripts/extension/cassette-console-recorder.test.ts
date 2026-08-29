@@ -387,6 +387,21 @@ describe("cassette console recorder", () => {
     ).toHaveLength(0);
   });
 
+  it("stops on a blocked session instead of downloading an empty cassette", async () => {
+    // The bank reports a lost session inside an HTTP 200 envelope, which reads as "no
+    // operations" — and a cassette of error envelopes scrubs perfectly and proves nothing.
+    const deps = makeDeps({
+      fetch: (async () =>
+        new Response(JSON.stringify({ resultCode: "AUTHENTICATION_FAILED" }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+    });
+
+    await expect(recordCassette({ name: "blocked", pauseMs: 0 }, deps)).rejects.toThrow(
+      /not authorized/,
+    );
+  });
+
   it("walks the same ranges as the connector", () => {
     const ranges = buildRanges(NOW - 30 * 24 * 60 * 60 * 1000, NOW, 14);
 

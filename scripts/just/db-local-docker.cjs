@@ -30,10 +30,19 @@ const DB_CONTAINER = process.env.ORBIT_DB_CONTAINER ?? "orbit_db";
 const STORAGE_CONTAINER = "orbit_db_storage";
 const AUTH_CONTAINER = "orbit_db_auth";
 const PORT = Number(process.env.ORBIT_DB_PORT ?? 54322);
-const PG_IMAGE = process.env.ORBIT_PG_IMAGE ?? "public.ecr.aws/supabase/postgres:17.6.1.063";
+/**
+ * The registry the Supabase CLI is configured to use, which CI sets to ghcr.io.
+ *
+ * Hard-coding public.ecr.aws made this script pull images the runner already had under another
+ * name — and pay the public registry's rate limit for it, which is exactly how the first CI run
+ * of the migration check failed: `toomanyrequests: Rate exceeded`. Following the CLI's own
+ * setting means the images are already on disk wherever the CLI has run.
+ */
+const IMAGE_REGISTRY = process.env.SUPABASE_INTERNAL_IMAGE_REGISTRY ?? "public.ecr.aws";
+const PG_IMAGE = process.env.ORBIT_PG_IMAGE ?? `${IMAGE_REGISTRY}/supabase/postgres:17.6.1.063`;
 const STORAGE_IMAGE =
-  process.env.ORBIT_STORAGE_IMAGE ?? "public.ecr.aws/supabase/storage-api:v1.38.0";
-const AUTH_IMAGE = process.env.ORBIT_AUTH_IMAGE ?? "public.ecr.aws/supabase/gotrue:v2.186.0";
+  process.env.ORBIT_STORAGE_IMAGE ?? `${IMAGE_REGISTRY}/supabase/storage-api:v1.38.0`;
+const AUTH_IMAGE = process.env.ORBIT_AUTH_IMAGE ?? `${IMAGE_REGISTRY}/supabase/gotrue:v2.186.0`;
 const JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 
 /** What the app, psql and `run-deploy.js` connect to. */

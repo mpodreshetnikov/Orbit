@@ -127,6 +127,8 @@ describe("cassette scrubbing", () => {
       bankAccountId: "5351691778",
       senderAgreement: "5695232671",
       senderDetails: "Иван И.",
+      // A transfer's own nested fields: the counterparty's contract and the recipient's phone.
+      fieldsValues: { bankContract: "5351691778", pointer: "79001234567" },
       // The seller's own details stay: a receipt carries the shop, not the buyer, and the tests
       // assert on merchant identity. Twelve distinct values across fifty receipts said as much.
       user: 'ООО "ПЯТЁРОЧКА"',
@@ -137,6 +139,7 @@ describe("cassette scrubbing", () => {
       bankAccountId: REDACTED,
       senderAgreement: REDACTED,
       senderDetails: REDACTED,
+      fieldsValues: { bankContract: REDACTED, pointer: REDACTED },
       user: 'ООО "ПЯТЁРОЧКА"',
       userInn: "7825706086",
     });

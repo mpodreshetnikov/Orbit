@@ -233,6 +233,44 @@ export function extractReceiptRequestKey(operation: Record<string, unknown>): st
   );
 }
 
+/**
+ * The connector's `detectBlockedReasonFromApiEnvelope`, reduced to what a recording needs.
+ *
+ * The bank reports a lost session or a verification challenge inside an HTTP 200 envelope. Read
+ * as a plain response that is what an empty operations list looks like, so the recorder would
+ * warn about having found nothing and hand over a scrubbed, useless cassette. The connector
+ * stops with the reason; so does this.
+ */
+export function detectBlockedReason(body: unknown): string | null {
+  const envelope = asObject(body);
+  if (!envelope) return null;
+  const details = asObject(envelope.details);
+  const resultCode = text(envelope.resultCode)?.toUpperCase() ?? "";
+  const errorCode = text(details?.errorCode)?.toUpperCase() ?? "";
+  const httpStatusCode = details?.httpStatusCode;
+  const message = [text(envelope.errorMessage), text(details?.message), text(details?.errorCode)]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+
+  if (
+    resultCode === "AUTHENTICATION_FAILED" ||
+    errorCode === "INSUFFICIENT_PRIVILEGES" ||
+    httpStatusCode === 401 ||
+    /authentication failed|insufficient privileges|not authorized/.test(message) ||
+    /не указан пользователь|пользователь не найден|недостаточно прав/.test(message)
+  ) {
+    return "the bank session is not authorized — sign in again and re-run";
+  }
+  if (
+    /captcha|verify you are human|too many requests|checking your browser/.test(message) ||
+    /капча|подтвердите|слишком много запросов/.test(message)
+  ) {
+    return "the bank asked for verification — resolve it on the page and re-run";
+  }
+  return null;
+}
+
 /** The bank answers a throttled receipt with HTTP 200 and this code in the payload. */
 export function isRateLimited(body: unknown): boolean {
   const payload = asObject(asObject(body)?.payload) ?? asObject(body);
@@ -463,6 +501,14 @@ export async function recordCassette(
     if (entry.status !== 200) {
       warnings.push(`range request ${requestCount} answered ${entry.status}`);
       continue;
+    }
+
+    const blocked = detectBlockedReason(body);
+    if (blocked) {
+      throw new Error(
+        `Recording stopped: ${blocked}. Nothing was downloaded — a cassette recorded through a ` +
+          "blocked session holds error envelopes, not operations.",
+      );
     }
 
     const payload = extractOperations(body);

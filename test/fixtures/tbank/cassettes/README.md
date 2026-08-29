@@ -27,7 +27,8 @@ nothing but their signed-in browser:
    the operations list loaded, they open DevTools → Console, paste it and press Enter. Chrome
    asks them to type `allow pasting` first.
 3. It records, scrubs **in the browser**, and downloads `cassette.json`. By default it records
-   whole Moscow calendar months — this one and the previous one — and up to 25 receipts;
+   whole Moscow calendar months — this one and the previous one — and up to 50 receipts, the
+   connector's own per-run budget;
    `orbitRecordCassette({ wholeMonths: 3 })` or `orbitRecordCassette({ windowDays: 45 })` re-run
    with other bounds. Months rather than a rolling day window because a window of days lines up
    with no month the bank shows, and a fragment of a month compared against the bank's figure

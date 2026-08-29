@@ -56,6 +56,12 @@ const IDENTIFIER_KEYS = new Set([
   "receiverDetails",
   "recipientdetails",
   "recipientDetails",
+  // A transfer's own fields, ten and twelve characters: the counterparty's bank contract and
+  // the recipient's phone number. Both sit under `fieldsValues`, where no digit rule reaches
+  // them and no name above covers them.
+  "bankcontract",
+  "bankContract",
+  "pointer",
   "authorization",
   "Authorization",
   "set-cookie",

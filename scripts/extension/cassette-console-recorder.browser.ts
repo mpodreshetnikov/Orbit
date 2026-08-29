@@ -98,9 +98,9 @@ async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
 window.orbitRecordCassette = run;
 
 console.info(
-  "[cassette] recording with defaults (this month and the whole of last month, up to 25 " +
-    "receipts). For a different window, run e.g. orbitRecordCassette({ wholeMonths: 3 }) or " +
-    "orbitRecordCassette({ windowDays: 45, maxReceipts: 40 })",
+  "[cassette] recording with defaults (this month and the whole of last month, up to 50 " +
+    "receipts — the connector's own per-run budget). For a different window, run e.g. " +
+    "orbitRecordCassette({ wholeMonths: 3 }) or orbitRecordCassette({ windowDays: 45 })",
 );
 
 void run().catch((error: unknown) => {
