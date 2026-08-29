@@ -141,7 +141,12 @@ describe("tbank-web response contract", () => {
             const key = `${month}|${currency}`;
             const bucket = totals.get(key) ?? { operations: 0, income: 0, expense: 0 };
             bucket.operations += 1;
-            if (amount >= 0) bucket.income += amount;
+            // Same convention as the recorder's summary: the bank subtracts a purchase refund
+            // from that month's spending rather than counting it as income, and these totals
+            // exist to be comparable with the bank's screen.
+            const isRefund = amount > 0 && String(operation.group ?? "").toUpperCase() === "PAY";
+            if (isRefund) bucket.expense -= amount;
+            else if (amount >= 0) bucket.income += amount;
             else bucket.expense += Math.abs(amount);
             totals.set(key, bucket);
           }

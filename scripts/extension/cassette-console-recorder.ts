@@ -364,6 +364,20 @@ export function buildOperationKey(
   return `fallback:${operationMs}:${amount}:${description}`;
 }
 
+/**
+ * A refund of a purchase, which the bank subtracts from that month's spending rather than
+ * counting as income — and the summary exists to be compared against the bank's own screen.
+ *
+ * Verified against a real account: the recorded totals exceeded the bank's by the same amount on
+ * both sides, 5575.00 in one month and 4068.00 in the next, and each was exactly the two
+ * `PAY`/`Credit` operations in that month. Subtracting them brought both sides to within a
+ * kopeck of what the bank displays, which is the rounding in its own figures. Without this the
+ * comparison never lines up and every reconciliation needs the same correction done by hand.
+ */
+export function isPurchaseRefund(operation: Record<string, unknown>, amount: number): boolean {
+  return amount > 0 && text(operation.group)?.toUpperCase() === "PAY";
+}
+
 function moscowMonth(timestampMs: number): string {
   return new Date(timestampMs + MOSCOW_OFFSET_MS).toISOString().slice(0, 7);
 }
@@ -399,7 +413,8 @@ export function summariseOperations(
     const key = `${moscowMonth(timestampMs)}|${operationCurrency(operation)}`;
     const bucket = buckets.get(key) ?? { income: 0, expense: 0, operations: 0 };
     bucket.operations += 1;
-    if (amount >= 0) bucket.income += amount;
+    if (isPurchaseRefund(operation, amount)) bucket.expense -= amount;
+    else if (amount >= 0) bucket.income += amount;
     else bucket.expense += Math.abs(amount);
     buckets.set(key, bucket);
   }
@@ -593,6 +608,7 @@ export async function recordCassette(
 
   let detailCount = 0;
   let rateLimited = 0;
+  let failedReceipts = 0;
   for (const operation of operations) {
     const requestKey = extractReceiptRequestKey(operation);
     if (!requestKey) continue;
@@ -646,7 +662,22 @@ export async function recordCassette(
       rateLimited += 1;
       continue;
     }
+    // A gateway timeout or any other non-200 is an error body, not a receipt. Counting it would
+    // claim enrichment the cassette cannot replay — the connector retries and gets the error
+    // back — and a real recording hit exactly one 504.
+    if (recorded.entry.status !== 200) {
+      failedReceipts += 1;
+      continue;
+    }
     receipts += 1;
+  }
+
+  if (failedReceipts > 0) {
+    warnings.push(
+      `${failedReceipts} receipt request(s) failed with a non-200 status — a gateway timeout, ` +
+        "most likely. Those entries are error bodies, not receipts; re-record if the cassette " +
+        "needs them.",
+    );
   }
 
   if (rateLimited > 0) {

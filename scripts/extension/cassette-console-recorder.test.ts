@@ -357,6 +357,70 @@ describe("cassette console recorder", () => {
     expect(result.warnings.join(" ")).toMatch(/rate-limited/);
   });
 
+  it("does not count a receipt the bank failed to return", async () => {
+    // A real recording hit one 504. The body that comes back is a gateway error page, not a
+    // receipt: counting it would claim enrichment the cassette cannot replay, and the person
+    // reading the summary would have no reason to re-record.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(JSON.stringify({ payload: [operation("op-1", -2400)] }), {
+            status: 200,
+          });
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          return new Response("<html>Gateway Timeout</html>", { status: 504 });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "timeout", pauseMs: 0 }, deps);
+
+    expect(result.counts.receipts).toBe(0);
+    expect(result.warnings.join(" ")).toMatch(/non-200/);
+  });
+
+  it("subtracts a purchase refund from spending, as the bank's own totals do", async () => {
+    // Counted as income instead, the recorded month exceeds the bank on both sides by the
+    // refund, and every reconciliation then needs the same correction done by hand. This is
+    // how a real account's two months came to differ by 5575.00 and 4068.00.
+    const july = Date.UTC(2026, 6, 15, 9, 0, 0);
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: [
+                { ...operation("purchase", -2400), debitingTime: { milliseconds: july } },
+                {
+                  ...operation("refund", 900),
+                  group: "PAY",
+                  debitingTime: { milliseconds: july },
+                },
+                {
+                  ...operation("salary", 100000),
+                  group: "INCOME",
+                  debitingTime: { milliseconds: july },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "refund", pauseMs: 0, maxReceipts: 0 }, deps);
+    const july2026 = result.cassette.summary?.months.find((month) => month.month === "2026-07");
+
+    expect(july2026?.expense).toBe("1500.00");
+    expect(july2026?.income).toBe("100000.00");
+  });
+
   it("records tranche offers only when the page has loaded that endpoint", async () => {
     const withTranche = makeDeps({
       resourceUrls: () => [
