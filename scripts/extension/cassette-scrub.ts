@@ -127,6 +127,21 @@ const PERSON_NAME_KEYS = new Set([
  */
 const COUNTERPARTY_GROUPS = new Set(["TRANSFER", "INCOME"]);
 
+/**
+ * `payment.fieldsValues` is a bag of payment form fields, and nothing in the connector reads any
+ * of it. Every review round has pulled one more identifier out of it — `pointer`, then `message`,
+ * then `pointerLinkId` and `qrId` and `subscriptionId` and `messageId`, then a nested
+ * `operationId` — because each was named one at a time while the bag kept its defaults.
+ *
+ * So the default is inverted here: inside this subtree everything is redacted except a short
+ * list of enum-like shape fields. A field the bank adds tomorrow is redacted before anyone has
+ * heard of it, which is the opposite of how the rest of this file has had to work.
+ */
+const FORM_FIELD_BAG_KEYS = new Set(["fieldsvalues"]);
+
+/** What survives inside that bag: values that classify the payment rather than identify it. */
+const FORM_FIELD_BAG_KEPT = new Set(["pointertype", "workflowtype", "dstcurrency", "mcc"]);
+
 /** The fields those groups fill with a name. */
 const COUNTERPARTY_TEXT_KEYS = new Set(["description", "subcategory", "merchantkey"]);
 
@@ -346,7 +361,7 @@ function maskCardTail(value: unknown): string {
  * would then collapse to the same `id:REDACTED` on replay. It has to reach one level down
  * because the bank wraps them as `{"operationId":{"value":"…"}}`.
  */
-function scrubValue(value: unknown, preserve: boolean): unknown {
+function scrubValue(value: unknown, preserve: boolean, insideFormFieldBag = false): unknown {
   if (typeof value === "string") {
     if (preserve) return value;
     // Whatever field it sits in. The group rule below covers the fields the operations list
@@ -369,6 +384,15 @@ function scrubValue(value: unknown, preserve: boolean): unknown {
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       const lowered = key.toLowerCase();
 
+      if (insideFormFieldBag && !FORM_FIELD_BAG_KEPT.has(lowered)) {
+        result[key] =
+          entry === null || typeof entry === "object" ? scrubValue(entry, false, true) : REDACTED;
+        continue;
+      }
+      if (FORM_FIELD_BAG_KEYS.has(lowered)) {
+        result[key] = scrubValue(entry, false, true);
+        continue;
+      }
       if (namesCounterparty && COUNTERPARTY_TEXT_KEYS.has(lowered)) {
         result[key] = entry === null ? null : REDACTED;
         continue;

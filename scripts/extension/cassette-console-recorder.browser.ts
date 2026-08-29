@@ -35,7 +35,10 @@ let inFlight: Promise<void> | null = null;
  * surest way to be rate-limited. So a second run waits for the first, and says so.
  */
 async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
-  if (inFlight) {
+  // A loop, not a single await: three quick calls would otherwise all await the same promise and
+  // all resume together, which is the concurrency this exists to prevent — the previous version
+  // checked the mutex once and never again after waking.
+  while (inFlight) {
     console.info(
       "[cassette] a recording is already running; this one will start when it finishes. " +
         "Two at once would share the session's rate limit and both would be throttled.",

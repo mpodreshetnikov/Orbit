@@ -396,6 +396,36 @@ describe("cassette console recorder", () => {
     expect(july2026?.complete).toBe(false);
   });
 
+  it("refuses a recording made below the connector's receipt budget", async () => {
+    // The connector's budget is fixed at 50. A recording made below it omits requests the replay
+    // will still issue, so the contract test rejects it for receipt misses — handing the file
+    // over would only cost someone the time to find that out.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: Array.from({ length: 3 }, (_, index) => operation(`op-${index}`, -100)),
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          return new Response(
+            JSON.stringify({ payload: { receipt: { items: [{ name: "Молоко" }] } } }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "short", pauseMs: 0, maxReceipts: 1 }, deps);
+
+    expect(result.blockers.join(" ")).toMatch(/below the connector's own 50/);
+  });
+
   it("does not count a rate-limited receipt as captured", async () => {
     // The bank answers a throttled receipt with HTTP 200 and an error code in the body. Counting
     // it would overstate the cassette, and the replay would retry into the same error forever.
@@ -408,10 +438,10 @@ describe("cassette console recorder", () => {
           });
         }
         if (url.pathname === "/api/common/v1/shopping_receipt") {
-          return new Response(
-            JSON.stringify({ payload: { resultCode: "REQUEST_RATE_LIMIT_EXCEEDED" } }),
-            { status: 200 },
-          );
+          // Top level, which is where the connector's `extractReceiptResultCode` looks.
+          return new Response(JSON.stringify({ resultCode: "REQUEST_RATE_LIMIT_EXCEEDED" }), {
+            status: 200,
+          });
         }
         return new Response(JSON.stringify({ payload: {} }), { status: 200 });
       }) as unknown as typeof fetch,

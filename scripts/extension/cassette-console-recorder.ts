@@ -385,9 +385,15 @@ export function isErrorEnvelope(body: unknown): boolean {
   return resultCode !== null && resultCode.toUpperCase() !== "OK";
 }
 
+/**
+ * The connector's `extractReceiptResultCode` reads the **top-level** `resultCode` and nothing
+ * else. Looking one level deeper as well made this stricter than the thing it mirrors: a
+ * `{ payload: { resultCode: … } }` envelope is an ordinary failed receipt to the connector, which
+ * asks once and moves on, so a recording holding it replays fine — and blocking the download
+ * would throw away a usable cassette. Same level, same verdict.
+ */
 export function isRateLimited(body: unknown): boolean {
-  const payload = asObject(asObject(body)?.payload) ?? asObject(body);
-  return text(payload?.resultCode)?.toUpperCase() === "REQUEST_RATE_LIMIT_EXCEEDED";
+  return text(asObject(body)?.resultCode)?.toUpperCase() === "REQUEST_RATE_LIMIT_EXCEEDED";
 }
 
 function extractOperations(body: unknown): Array<Record<string, unknown>> {
@@ -783,13 +789,8 @@ export async function recordCassette(
   // Only worth saying when the budget is below the connector's own. At or above it the replay
   // stops at the same point for the same reason and marks the rest `skipped_after_budget`, so a
   // window holding more receipts than the budget is ordinary rather than a gap in the cassette.
-  if (receiptBearing.length > maxReceipts && maxReceipts < CONNECTOR_MAX_RECEIPTS_PER_RUN) {
-    warnings.push(
-      `${receiptBearing.length} operations carry a receipt, and the budget of ${maxReceipts} is ` +
-        `below the connector's own ${CONNECTOR_MAX_RECEIPTS_PER_RUN}. The replay will ask for ` +
-        "receipts this cassette does not hold; raise maxReceipts to at least that.",
-    );
-  }
+  const shortOfBudget =
+    receiptBearing.length > maxReceipts && maxReceipts < CONNECTOR_MAX_RECEIPTS_PER_RUN;
 
   let detailCount = 0;
   let usableDetails = 0;
@@ -928,6 +929,18 @@ export async function recordCassette(
   }
 
   const blockers: string[] = [];
+  if (shortOfBudget) {
+    // The connector's budget is fixed at 50; a recording made below it omits requests the replay
+    // will still issue, and the contract test rejects it for receipt misses. Warning about that
+    // hands over a file whose only future is to fail, so it is a blocker like the others.
+    blockers.push(
+      `${receiptBearing.length} operations carry a receipt and this run recorded at most ` +
+        `${maxReceipts}, below the connector's own ${CONNECTOR_MAX_RECEIPTS_PER_RUN}. The replay ` +
+        "asks for receipts this cassette does not hold. Record again without lowering " +
+        "maxReceipts.",
+    );
+  }
+
   if (rateLimited > 0) {
     // Not a warning. On a throttled receipt the connector retries — twice in fast mode, more in
     // full — so it issues up to three requests where this recording holds one, and the contract
