@@ -62,6 +62,16 @@ const IDENTIFIER_KEYS = new Set([
   "bankcontract",
   "bankContract",
   "pointer",
+  // Payment correlation identifiers: the link a transfer was made through, the QR code it was
+  // scanned from, the subscription it belongs to, the message it arrived with. Each ties this
+  // cassette to one payment in the bank's records and in the merchant's, and none is read by
+  // anything. Ten- and eleven-digit or thirty-two-character values, so neither the digit rule
+  // nor the UUID rule reaches them — the committed recording held thirty-two, eleven, one and
+  // one of them respectively.
+  "pointerlinkid",
+  "qrid",
+  "subscriptionid",
+  "messageid",
   "authorization",
   "Authorization",
   "set-cookie",

@@ -27,9 +27,13 @@ import path from "node:path";
 import process from "node:process";
 import { buildMoneyDedupeHash } from "../../shared/lib/money/dedupe";
 
-const CONTAINER = "orbit_db_migration_check";
-const NETWORK = "orbit_db_check_net";
-const PORT = "54329";
+// Overridable, because they were not and two concurrent runs destroyed each other: the second
+// invocation's `startDatabase` force-removes the containers by name and then competes for the
+// same host port, so one check tears down the other and reports a migration failure that never
+// happened. Two checkouts, or an agent and a person, is not an exotic situation.
+const CONTAINER = process.env.ORBIT_DB_CONTAINER ?? "orbit_db_migration_check";
+const NETWORK = process.env.ORBIT_DB_NETWORK ?? "orbit_db_check_net";
+const PORT = process.env.ORBIT_DB_PORT ?? "54329";
 /** The first T-0013 migration; everything before it is the "already accumulated" world. */
 const FIRST_REPAIR_MIGRATION = "20260814090000";
 const LAST_MIGRATION_BEFORE_REPAIR = "20260814089999";

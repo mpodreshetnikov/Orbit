@@ -36,6 +36,10 @@ function classifyChangedFiles(changedFiles) {
       // regression in the migration-check gate merges without the gate ever executing, which is
       // exactly what happened to the commit that introduced it.
       /^scripts\/just\/db-[\w-]+\.(cjs|ts)$/.test(filePath) ||
+      // The preflight belongs with them: it starts the Docker daemon the database checks run
+      // on, so a regression there stops every one of them — and named by prefix alone it would
+      // be classified as no impact at all, which is how the gap it fixes went unnoticed.
+      /^scripts\/just\/docker-preflight\.cjs$/.test(filePath) ||
       // The dedupe formula is shared between TypeScript and a SQL migration that reproduces it
       // character for character, and the only thing comparing the two is the data migration
       // check — which runs behind this flag. Classified as web-only, a change to the formula

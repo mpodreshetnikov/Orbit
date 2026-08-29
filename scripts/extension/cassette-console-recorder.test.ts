@@ -420,7 +420,9 @@ describe("cassette console recorder", () => {
     const result = await recordCassette({ name: "throttled", pauseMs: 0 }, deps);
 
     expect(result.counts.receipts).toBe(0);
-    expect(result.warnings.join(" ")).toMatch(/rate-limited/);
+    // A blocker, not a warning: the connector retries a throttled receipt, so it issues more
+    // requests than this recording holds and the replay's request count cannot match.
+    expect(result.blockers.join(" ")).toMatch(/rate-limited/);
   });
 
   it("does not count a receipt the bank failed to return", async () => {

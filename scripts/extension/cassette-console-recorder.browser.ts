@@ -42,11 +42,16 @@ async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
     );
     await inFlight.catch(() => undefined);
   }
+  // Track the wrapper, not the promise it wraps: `inFlight` holds what `.finally()` returns,
+  // which is a different promise, so comparing against `started` never matched and the mutex
+  // never cleared. A queued run then awaited a promise that was already settled and started
+  // immediately — two paced request chains on one session, which is what this exists to stop.
   const started = record(options);
-  inFlight = started.finally(() => {
-    if (inFlight === started) inFlight = null;
+  const tracked: Promise<void> = started.finally(() => {
+    if (inFlight === tracked) inFlight = null;
   });
-  return started;
+  inFlight = tracked;
+  return tracked;
 }
 
 async function record(options: Partial<RecorderOptions> = {}): Promise<void> {
@@ -74,6 +79,14 @@ async function record(options: Partial<RecorderOptions> = {}): Promise<void> {
 
   for (const warning of result.warnings) {
     console.warn(`[cassette] ${warning}`);
+  }
+
+  if (result.blockers.length > 0) {
+    // Not a leak — nothing here is unsafe to hold. It is a recording that cannot do the one job
+    // a cassette has, so handing it over would only cost someone the time to find that out.
+    console.error("[cassette] NOT downloaded — this recording cannot be replayed:");
+    for (const blocker of result.blockers) console.error(`[cassette]   ${blocker}`);
+    return;
   }
 
   if (result.leaks.length > 0) {

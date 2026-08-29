@@ -144,6 +144,13 @@ export interface RecordingResult {
   cassette: Cassette;
   /** Non-empty means the recording must be thrown away, not committed. */
   leaks: string[];
+  /**
+   * Reasons this recording cannot serve as a cassette, whatever else is right about it.
+   *
+   * Separate from `leaks`, which is about what must not leave the browser; these are about what
+   * the file cannot do once it has. Both stop the download, for different reasons.
+   */
+  blockers: string[];
   /** Things that did not stop the recording but weaken what it proves. */
   warnings: string[];
   counts: {
@@ -266,12 +273,9 @@ export function buildTrancheUrl(
   url.searchParams.set("program_type", baseParams.programType);
   url.searchParams.set("origin", baseParams.origin);
   url.searchParams.set("amount", String(Math.abs(amount)));
-  // `wuid` identifies the browser session the recording was made from. The connector sends the
-  // real one; the cassette must not carry it, and `scrubUrl` would not catch an alphanumeric
-  // value. Recorded redacted, which means a tranche entry replays as a miss until the player
-  // ignores this parameter the way it ignores `sessionid` — T-260829-h66. That is a loud test
-  // failure rather than an identifier on disk, which is the right way round.
-  if (baseParams.wuid) url.searchParams.set("wuid", "REDACTED");
+  // The live `wuid` — the connector sends the discovered value, so the request must carry it.
+  // What the cassette keeps is decided at the call site, not here.
+  if (baseParams.wuid) url.searchParams.set("wuid", baseParams.wuid);
   return url.toString();
 }
 
@@ -594,13 +598,20 @@ export function summariseOperations(
   return { months, truncationSuspected, truncationUnresolved };
 }
 
+/**
+ * `storedUrl` exists for the one parameter that must be sent live and must not be kept: `wuid`.
+ * Redacting it before the fetch would change the request the bank sees — an endpoint that
+ * validates or routes by it answers differently, and the cassette would then record a response
+ * the connector never receives.
+ */
 async function recordRequest(
   deps: RecorderDeps,
   url: string,
+  storedUrl = url,
 ): Promise<{ entry: CassetteEntry; body: unknown }> {
   const response = await deps.fetch(url, { credentials: "include" });
   const body = await response.json().catch(() => null);
-  return { entry: { url, status: response.status, body }, body };
+  return { entry: { url: storedUrl, status: response.status, body }, body };
 }
 
 export async function recordCassette(
@@ -611,7 +622,14 @@ export async function recordCassette(
   const warnings: string[] = [];
   const urls = deps.resourceUrls();
 
-  const sessionId = discoverSessionId(urls, deps.origin);
+  // The connector reads the session out of the operations URL it discovered and only falls back
+  // to the resource timeline. Scanning the timeline first picks up whichever same-origin request
+  // happened to be newest, which can carry a stale session — and the recorder would then walk
+  // ranges the connector would have made with the valid one.
+  const operationsCandidate = findLatestByPath(urls, OPERATIONS_PATH, deps.origin);
+  const sessionId =
+    (operationsCandidate ? discoverSessionId([operationsCandidate], deps.origin) : null) ??
+    discoverSessionId(urls, deps.origin);
   if (!sessionId) {
     throw new Error(
       "No session id found in this page's requests. Open the operations page, let the list " +
@@ -822,14 +840,27 @@ export async function recordCassette(
       const amount = operationAmount(operation);
       if (amount !== null) {
         await sleep(pauseMs);
-        entries.push(
-          (
-            await recordRequest(
-              deps,
-              buildTrancheUrl(trancheApiUrl, deps.origin, trancheBaseParams, sessionId, amount),
-            )
-          ).entry,
+        // `wuid` identifies the browser session the recording was made from, and `scrubUrl`
+        // would not catch an alphanumeric value. Sent live, kept redacted — which means a
+        // tranche entry replays as a miss until the player ignores this parameter the way it
+        // ignores `sessionid` (T-260829-h66). A loud test failure beats an identifier on disk.
+        const trancheUrl = buildTrancheUrl(
+          trancheApiUrl,
+          deps.origin,
+          trancheBaseParams,
+          sessionId,
+          amount,
         );
+        const storedTrancheUrl = trancheBaseParams.wuid
+          ? buildTrancheUrl(
+              trancheApiUrl,
+              deps.origin,
+              { ...trancheBaseParams, wuid: "REDACTED" },
+              sessionId,
+              amount,
+            )
+          : trancheUrl;
+        entries.push((await recordRequest(deps, trancheUrl, storedTrancheUrl)).entry);
       }
     }
 
@@ -894,11 +925,17 @@ export async function recordCassette(
     );
   }
 
+  const blockers: string[] = [];
   if (rateLimited > 0) {
-    warnings.push(
-      `${rateLimited} receipt request(s) came back rate-limited by the bank. Those receipts are ` +
-        "error responses in this cassette, not receipts. Wait a few minutes and record again, " +
-        "or raise pauseMs.",
+    // Not a warning. On a throttled receipt the connector retries — twice in fast mode, more in
+    // full — so it issues up to three requests where this recording holds one, and the contract
+    // test's request count cannot match. A cassette that fails the acceptance path it exists to
+    // serve is not a weaker cassette, it is not one; and mirroring the retries here would mean
+    // hammering an endpoint that has just said no.
+    blockers.push(
+      `${rateLimited} receipt request(s) came back rate-limited by the bank. Those are error ` +
+        "responses, not receipts, and the connector retries each of them — so this recording " +
+        "cannot replay. Wait a few minutes and record again, or raise pauseMs.",
     );
   }
 
@@ -922,6 +959,7 @@ export async function recordCassette(
   return {
     cassette,
     leaks,
+    blockers,
     warnings,
     counts: { ranges: requestCount, operations: operations.length, receipts },
   };

@@ -56,5 +56,8 @@ describe("change-impact docsOnly", () => {
     // Classified as web-only, a change to the formula merges without that comparison running.
     expect(classifyChangedFiles(["shared/lib/money/dedupe.ts"]).dbImpact).toBe(true);
     expect(classifyChangedFiles(["shared/lib/money/other.ts"]).dbImpact).toBe(false);
+    // The preflight starts the daemon those checks run on, so a regression there stops all of
+    // them — and it is the file this branch changed to make them runnable in the first place.
+    expect(classifyChangedFiles(["scripts/just/docker-preflight.cjs"]).dbImpact).toBe(true);
   });
 });
