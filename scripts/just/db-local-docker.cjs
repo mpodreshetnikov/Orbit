@@ -332,7 +332,7 @@ function startSchemaOwners() {
  * it — which is the only way to test a data-repairing migration against anything but the empty
  * tables CI holds.
  */
-function applyMigrations({ from, until } = {}) {
+function applyMigrations({ from, until, skipApplied = false } = {}) {
   log("applying migrations");
   psql([
     "-c",
@@ -352,7 +352,28 @@ function applyMigrations({ from, until } = {}) {
       return true;
     })
     .sort();
+
+  // Only ever on a plain `up`, and never when a range was named. The repository's migrations are
+  // not idempotent — `CREATE POLICY` has no `IF NOT EXISTS` — so re-running them all against a
+  // database that has them fails on the second file. Skipping what
+  // `supabase_migrations.schema_migrations` already records is what lets `up` reuse a container.
+  //
+  // Naming `--from` or `--until` is an explicit instruction to run those files, and the data
+  // migration check depends on exactly that: its second pass re-applies the repair range to prove
+  // the migrations are idempotent. Skipping there would make that check pass by doing nothing.
+  const alreadyApplied = new Set();
+  if (skipApplied) {
+    const recorded = psql(["-Atc", "select version from supabase_migrations.schema_migrations"]);
+    if (recorded.status === 0) {
+      for (const version of recorded.stdout.split("\n")) {
+        const trimmed = version.trim();
+        if (trimmed) alreadyApplied.add(trimmed);
+      }
+    }
+  }
+
   for (const name of files) {
+    if (alreadyApplied.has(name.split("_")[0])) continue;
     const applied = psql(["-f", path.join(migrationsDir, name)], { stdio: "pipe" });
     if (applied.status !== 0) {
       console.error(applied.stderr ?? "");
@@ -390,13 +411,34 @@ function applyDeployAndSeed() {
   }
 }
 
+/** True when the database container is up and answering, so `up` has nothing to build. */
+function databaseIsHealthy() {
+  const running = docker(["inspect", "-f", "{{.State.Running}}", DB_CONTAINER]);
+  if (running.status !== 0 || running.stdout.trim() !== "true") return false;
+  return psql(["-Atc", "select 1"]).status === 0;
+}
+
 function up(flags) {
   const dockerStatus = ensureDockerReady();
   if (dockerStatus !== 0) return dockerStatus;
 
-  startDatabase();
-  startSchemaOwners();
-  applyMigrations({ until: flags.until });
+  // `up` is not a reset, and it used to behave like one: it force-removed the container and
+  // started a replacement with no volume, so re-running the documented command threw away
+  // whatever a developer had accumulated — without their asking for anything destructive.
+  //
+  // A healthy container is reused. `--until` and `--recreate` are the two ways to ask for a
+  // fresh one: the first because stopping at a chosen migration is meaningless on a database
+  // already past it, which is how the data migration check uses this; the second because saying
+  // so explicitly should still be possible.
+  const rebuilding = flags.recreate || flags.until !== undefined || !databaseIsHealthy();
+  if (rebuilding) {
+    startDatabase();
+    startSchemaOwners();
+  } else {
+    log(`reusing the running ${DB_CONTAINER}; pass --recreate to rebuild it`);
+  }
+
+  applyMigrations({ until: flags.until, skipApplied: !rebuilding });
   if (!flags.noDeploy) applyDeployAndSeed();
 
   log("ready");
@@ -510,6 +552,7 @@ const flags = {
   until: flagValue("--until"),
   from: flagValue("--from"),
   noDeploy: rest.includes("--no-deploy"),
+  recreate: rest.includes("--recreate"),
   noTls: rest.includes("--no-tls"),
 };
 const positional = rest.filter(

@@ -62,6 +62,16 @@ const IDENTIFIER_KEYS = new Set([
   "bankcontract",
   "bankContract",
   "pointer",
+  // Bank-side correlation references. None is used to match a replayed request, and each ties
+  // this file to one payment or one receipt in the bank's records. Too short or too alphanumeric
+  // for the digit and UUID rules to reach.
+  "paymentid",
+  "trackingid",
+  "ucid",
+  "documentid",
+  "receiptid",
+  "subgroupid",
+  "groupid",
   // Payment correlation identifiers: the link a transfer was made through, the QR code it was
   // scanned from, the subscription it belongs to, the message it arrived with. Each ties this
   // cassette to one payment in the bank's records and in the merchant's, and none is read by
@@ -483,17 +493,18 @@ export function scrubCassette(entries: CassetteEntry[]): CassetteEntry[] {
  * names first.
  */
 const REFERENCE_KEYS = new Set([
+  // Exactly the four the replay needs, and no more. `buildOperationKey` reads `id`,
+  // `operationId.value` and `authorizationId`; `extractReceiptRequestKey` reads the same three
+  // and the URL carries the result as `receiptRequestKey`. Everything else that was listed here
+  // — `paymentId`, `trackingId`, `ucid`, `documentId`, `receiptId`, `subgroupId`, `groupId` —
+  // was exempted defensively and matched nothing: the committed cassette held 48 twelve-digit
+  // payment ids and 459 thirty-two-character tracking ids that no request is keyed by, exempt
+  // from the scrub and from the leak scan at once. `trackingId` is the only one the connector
+  // reads at all, and only into debug metadata.
   "id",
   "operationid",
   "authorizationid",
   "receiptrequestkey",
-  "receiptid",
-  "documentid",
-  "paymentid",
-  "trackingid",
-  "ucid",
-  "subgroupid",
-  "groupid",
 ]);
 
 /**

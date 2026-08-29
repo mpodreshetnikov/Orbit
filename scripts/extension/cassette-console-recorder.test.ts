@@ -470,6 +470,42 @@ describe("cassette console recorder", () => {
     expect(result.blockers.join(" ")).toMatch(/chunkDays/);
   });
 
+  it("refuses a recording with no operations at all", async () => {
+    // The contract test needs at least one mapped operation and the replay throws on an empty
+    // operation map, so such a cassette cannot pass the suite it exists for.
+    const deps = makeDeps({
+      fetch: (async () =>
+        new Response(JSON.stringify({ payload: [] }), { status: 200 })) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "empty", pauseMs: 0, maxReceipts: 0 }, deps);
+
+    expect(result.blockers.join(" ")).toMatch(/No operations were recorded/);
+  });
+
+  it("measures truncation on the raw payload, as the connector does", async () => {
+    // The connector reads `payload.length` before skipping anything that is not an object. A
+    // response of exactly the page limit with one malformed entry looks capped to it and short to
+    // a recorder that filtered first — so it splits the range and the recorder would not.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          const payload: unknown[] = Array.from({ length: 99 }, (_, index) =>
+            operation(`op-${index}`, -100),
+          );
+          payload.push(null);
+          return new Response(JSON.stringify({ payload }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "raw", pauseMs: 0, maxReceipts: 0 }, deps);
+
+    expect(result.cassette.summary?.truncationSuspected).toBeGreaterThan(0);
+  });
+
   it("does not count a rate-limited receipt as captured", async () => {
     // The bank answers a throttled receipt with HTTP 200 and an error code in the body. Counting
     // it would overstate the cassette, and the replay would retry into the same error forever.

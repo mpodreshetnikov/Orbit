@@ -396,10 +396,27 @@ export function isRateLimited(body: unknown): boolean {
   return text(asObject(body)?.resultCode)?.toUpperCase() === "REQUEST_RATE_LIMIT_EXCEEDED";
 }
 
-function extractOperations(body: unknown): Array<Record<string, unknown>> {
+/**
+ * The raw array and the usable entries, separately.
+ *
+ * The connector measures truncation against `payload.length` *before* it skips anything that is
+ * not an object, and only then walks the entries. Filtering first and measuring the remainder
+ * makes a response of a hundred entries with one malformed look like ninety-nine to the
+ * recorder and like a hundred to the connector — so the connector splits that range and the
+ * recorder does not, and the recorded walk is not the replayed one.
+ */
+function extractOperations(body: unknown): {
+  rawCount: number;
+  operations: Array<Record<string, unknown>>;
+} {
   const payload = asObject(body)?.payload;
-  if (!Array.isArray(payload)) return [];
-  return payload.filter((entry): entry is Record<string, unknown> => asObject(entry) !== null);
+  if (!Array.isArray(payload)) return { rawCount: 0, operations: [] };
+  return {
+    rawCount: payload.length,
+    operations: payload.filter(
+      (entry): entry is Record<string, unknown> => asObject(entry) !== null,
+    ),
+  };
 }
 
 /**
@@ -716,7 +733,7 @@ export async function recordCassette(
       );
     }
 
-    const payload = extractOperations(body);
+    const { rawCount, operations: payload } = extractOperations(body);
     let oldestInResponseMs: number | null = null;
     for (const operation of payload) {
       const timestampMs = operationTimestampMs(operation);
@@ -736,8 +753,10 @@ export async function recordCassette(
     // whose oldest operation still sits well inside the range — what a cap applied from the
     // newer end looks like.
     const rangeSpanMs = range.end - range.start + 1;
-    const hitPageLimit = payload.length >= SUSPECTED_PAGE_LIMIT;
-    const nearlyFull = payload.length >= Math.floor(SUSPECTED_PAGE_LIMIT * 0.9);
+    // Raw, as the connector measures it: `attempt.payload_count = payload.length` before any
+    // entry is skipped.
+    const hitPageLimit = rawCount >= SUSPECTED_PAGE_LIMIT;
+    const nearlyFull = rawCount >= Math.floor(SUSPECTED_PAGE_LIMIT * 0.9);
     const coverageGap =
       nearlyFull &&
       oldestInResponseMs !== null &&
@@ -766,7 +785,8 @@ export async function recordCassette(
 
   const operations = Array.from(operationsByKey.values());
 
-  if (operations.length === 0) {
+  const noOperations = operations.length === 0;
+  if (noOperations) {
     warnings.push(
       "No operations in the recorded window. A cassette without operations proves nothing — " +
         "widen windowDays or pick an account with spending.",
@@ -935,6 +955,17 @@ export async function recordCassette(
   }
 
   const blockers: string[] = [];
+  if (noOperations) {
+    // The contract test needs at least one mapped operation and the replay throws on an empty
+    // operation map, so this cassette cannot pass the suite it exists for. Whether the window is
+    // genuinely empty or every range failed, handing the file over only defers finding out.
+    blockers.push(
+      "No operations were recorded, so this cassette cannot replay: the contract test needs at " +
+        "least one mapped operation. Pick a window with activity, or check whether the range " +
+        "requests came back empty because the session had expired.",
+    );
+  }
+
   if (budgetMismatch) {
     blockers.push(
       `${receiptBearing.length} operations carry a receipt and this run recorded at most ` +
