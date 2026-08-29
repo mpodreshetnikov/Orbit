@@ -321,7 +321,14 @@ function applyMigrations({ from, until } = {}) {
 
 function applyDeployAndSeed() {
   log("applying idempotent SQL objects (supabase/db/deploy.sql)");
-  const deployed = run("node", [path.join("supabase", "db", "run-deploy.js"), "local"]);
+  // Not `run-deploy.js local`: that mode hard-codes port 54322, so a database on any other port
+  // would either fail to connect or — worse, if a stock Supabase stack holds 54322 — deploy into
+  // the wrong database while reporting success.
+  const deployed = run("node", [
+    path.join("supabase", "db", "run-deploy.js"),
+    "--database-url",
+    DB_URL,
+  ]);
   if (deployed.status !== 0) throw new Error("run-deploy.js failed");
 
   log("installing pgtap for the pgTAP suite");

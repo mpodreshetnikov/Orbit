@@ -125,6 +125,20 @@ export function buildRanges(
   return ranges;
 }
 
+/**
+ * Same predicate as the connector's `operationHasShoppingReceipt`, and it has to be: the
+ * connector returns before requesting a receipt for an operation without one, so recording those
+ * would spend a limited, rate-limited budget on requests the replay never makes. A transfer at
+ * the top of the newest range would otherwise eat the whole allowance before the first purchase.
+ */
+export function operationHasShoppingReceipt(operation: Record<string, unknown>): boolean {
+  const documents = Array.isArray(operation.documents) ? operation.documents : [];
+  return (
+    Boolean(operation.hasShoppingReceipt) ||
+    documents.some((documentValue) => String(documentValue).toLowerCase() === "shoppingreceipt")
+  );
+}
+
 /** Same precedence as the connector's `extractReceiptRequestKey`. */
 export function extractReceiptRequestKey(operation: Record<string, unknown>): string | null {
   return (
@@ -210,7 +224,15 @@ export async function recordCassette(
   const requested = new Set<string>();
   let receipts = 0;
 
-  for (const operation of operations) {
+  const receiptBearing = operations.filter(operationHasShoppingReceipt);
+  if (operations.length > 0 && receiptBearing.length === 0) {
+    warnings.push(
+      "No operation in the recorded window carries a receipt, so the cassette exercises the " +
+        "range walk but not receipt enrichment. Widen windowDays or pick a month with shopping.",
+    );
+  }
+
+  for (const operation of receiptBearing) {
     if (receipts >= maxReceipts) break;
     const receiptKey = extractReceiptRequestKey(operation);
     if (!receiptKey) continue;
@@ -229,7 +251,7 @@ export async function recordCassette(
     receiptUrl.searchParams.set("sessionid", sessionId);
 
     receipts += 1;
-    report(`receipt ${receipts}/${Math.min(maxReceipts, operations.length)}`);
+    report(`receipt ${receipts}/${Math.min(maxReceipts, receiptBearing.length)}`);
     entries.push((await recordRequest(deps, detailUrl.toString())).entry);
     entries.push((await recordRequest(deps, receiptUrl.toString())).entry);
   }

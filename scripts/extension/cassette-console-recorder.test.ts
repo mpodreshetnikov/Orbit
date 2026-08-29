@@ -19,7 +19,11 @@ const ORIGIN = "https://www.tbank.ru";
 const SESSION = "live-session-abc123";
 const NOW = Date.UTC(2026, 7, 20, 12, 0, 0);
 
-function operation(id: string, amount: number): Record<string, unknown> {
+function operation(
+  id: string,
+  amount: number,
+  options: { hasReceipt?: boolean } = {},
+): Record<string, unknown> {
   return {
     id,
     authorizationId: `auth-${id}`,
@@ -28,6 +32,7 @@ function operation(id: string, amount: number): Record<string, unknown> {
     description: "Пятёрочка",
     cardNumber: "4276123456789012",
     clientName: "Иванов Иван Иванович",
+    ...(options.hasReceipt === false ? {} : { hasShoppingReceipt: true }),
   };
 }
 
@@ -109,6 +114,37 @@ describe("cassette console recorder", () => {
       "/api/common/v1/operation?operationId=auth-op-1",
       "/api/common/v1/shopping_receipt?operationId=auth-op-1",
     ]);
+  });
+
+  it("spends the receipt budget only on operations that carry a receipt", async () => {
+    // A transfer at the top of the newest range has a request key like any other operation, so
+    // without the connector's own predicate it would eat the budget on a guaranteed miss and
+    // the recording would reach no purchase at all.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: [
+                operation("transfer-1", -5000, { hasReceipt: false }),
+                operation("purchase-1", -2400),
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "mixed", maxReceipts: 1 }, deps);
+
+    const receiptUrls = result.cassette.entries
+      .map((entry) => entry.url)
+      .filter((url) => url.includes("shopping_receipt"));
+    expect(receiptUrls).toHaveLength(1);
+    expect(receiptUrls[0]).toContain("operationId=auth-purchase-1");
   });
 
   it("warns rather than silently producing a cassette that proves nothing", async () => {

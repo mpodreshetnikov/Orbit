@@ -41,6 +41,15 @@ const EXTENSION_NON_PACKAGED_PATTERNS = [
   // the version policy would require a version bump to land the change, which
   // is circular. The rest of scripts/extension/ stays governed.
   /^scripts\/extension\/release\.ts$/,
+  // The cassette tooling records and scrubs a bank session so the connector can
+  // be tested without one. It reaches the extension the same way the release
+  // tooling does — not at all: `build.ts` imports only `money-import-sources`
+  // and `esbuild-widget`, and nothing under browserExtension/ may import from
+  // scripts/ (ESLint forbids it), so none of these files can enter
+  // browserExtension/dist. Without this, adding a recording tool mints an
+  // extension release whose bundle is byte for byte the previous one, and
+  // publishes it.
+  /^scripts\/extension\/(build-)?cassette-[^/]+$/,
 ] as const;
 
 export interface ExtensionReleaseMetadata {

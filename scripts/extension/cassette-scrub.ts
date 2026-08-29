@@ -87,16 +87,26 @@ const LONG_DIGIT_RUN = /\d{13,}/g;
  * rather than flagging every long run — otherwise the first genuine recording turns the commit
  * gate red, and the only way to green is deleting the data the cassette exists to carry.
  *
- * The bound is the value, not the shape: a run counts as a timestamp only if it reads as a date
- * no later than 2100. A thirteen-digit card number starting with 4276 lands in the year 2105
- * and is still reported, as is every run of fourteen digits or more.
+ * The exemption is by field, not by value. Judging on value alone would clear any thirteen-digit
+ * number that happens to read as a date before 2100 — and an account number like 4000000000006
+ * does, so an unknown field carrying one would pass the scan silently. Only a `milliseconds`
+ * value is exempt, which is exactly what the connector reads and nothing else.
+ *
+ * A real payload that carries its timing under some other key will therefore be reported rather
+ * than passed. That is the safe direction to be wrong in: the recorder refuses to hand over the
+ * file and says which run it could not place, instead of shipping an identifier.
  */
-const EPOCH_MS_UPPER_BOUND = Date.UTC(2100, 0, 1);
+const EXEMPT_TIMESTAMP_VALUE = /"milliseconds"\s*:\s*(\d{13})(?!\d)/g;
 
-function isPlausibleEpochMilliseconds(run: string): boolean {
-  if (run.length !== 13) return false;
-  const value = Number(run);
-  return Number.isSafeInteger(value) && value <= EPOCH_MS_UPPER_BOUND;
+function exemptTimestampSpans(serialized: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  for (const match of serialized.matchAll(EXEMPT_TIMESTAMP_VALUE)) {
+    const digits = match[1];
+    if (match.index === undefined || digits === undefined) continue;
+    const start = match.index + match[0].length - digits.length;
+    spans.push([start, start + digits.length]);
+  }
+  return spans;
 }
 
 export function scrubUrl(rawUrl: string): string {
@@ -194,10 +204,12 @@ export function findCassetteLeaks(serialized: string): string[] {
     }
   }
 
-  const digitMatches = serialized.match(LONG_DIGIT_RUN) ?? [];
-  for (const match of digitMatches) {
-    if (isPlausibleEpochMilliseconds(match)) continue;
-    leaks.push(`long digit run: ${match}`);
+  const exempt = exemptTimestampSpans(serialized);
+  for (const match of serialized.matchAll(LONG_DIGIT_RUN)) {
+    const start = match.index;
+    if (start === undefined) continue;
+    if (exempt.some(([from, to]) => start === from && start + match[0].length === to)) continue;
+    leaks.push(`long digit run: ${match[0]}`);
   }
 
   return leaks;

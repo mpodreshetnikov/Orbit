@@ -100,10 +100,14 @@ describe("cassette scrubbing", () => {
     // Every real recording carries `operationTime.milliseconds`, so a scan that called thirteen
     // digits a leak on sight would fail on the first genuine cassette and stay failing.
     expect(findCassetteLeaks('{"operationTime":{"milliseconds":1787227199000}}')).toEqual([]);
-    // The exemption is the value, not the digit count: a thirteen-digit card number reads as a
-    // date past 2100 and is still reported, as is anything longer.
+    // The exemption is the field, not the value. An account number that happens to read as a
+    // date before 2100 is still reported, wherever it turns up.
+    expect(findCassetteLeaks('{"unknownField":4000000000006}')).toHaveLength(1);
+    expect(findCassetteLeaks('{"milliseconds":"4000000000006"}')).toHaveLength(1);
     expect(findCassetteLeaks('{"pan":"4276123456789"}')).toHaveLength(1);
     expect(findCassetteLeaks('{"pan":"17872271990000"}')).toHaveLength(1);
+    // A longer run beginning where a timestamp would is not one.
+    expect(findCassetteLeaks('{"milliseconds":17872271990001}')).toHaveLength(1);
   });
 
   it("finds no secrets in any committed cassette", () => {
