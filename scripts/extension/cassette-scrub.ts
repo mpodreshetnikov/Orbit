@@ -137,6 +137,22 @@ const FISCAL_KEYS = new Set([
 const LONG_DIGIT_RUN = /\d{13,}/g;
 
 /**
+ * A Russian mobile number is eleven digits — two short of the long run above, so the digit scrub
+ * walks straight past one.
+ *
+ * A real recording proved the gap costs more than the arithmetic suggests. Thirteen counterparty
+ * phone numbers reached a delivered cassette under `pointer`, a transfer field the scrubber did
+ * not yet name, and the leak scan called the file clean. Naming the key fixed that recording;
+ * this catches the next field nobody has seen yet, which is the whole reason the scan exists
+ * separately from the scrubber.
+ *
+ * The boundaries matter: without them the pattern would bite eleven digits out of the middle of
+ * a longer account number and leave the rest, and every fifteen-digit operation id starting
+ * with a 7 would be reported as a phone.
+ */
+const PHONE_NUMBER = /(?<![\d+])\+?[78]\d{10}(?!\d)/g;
+
+/**
  * Epoch milliseconds are a thirteen-digit run too, and they are the one thing a cassette must
  * keep: the connector reads operation timing out of `operationTime.milliseconds` and
  * `debitingTime.milliseconds`, and Milestone 4's acceptance turns on the contract test failing
@@ -213,7 +229,8 @@ export function scrubUrl(rawUrl: string): string {
 export function scrubFreeText(value: string): string {
   return value
     .replace(/([?&](?:sessionid|session_id|token|access_token|auth)=)[^&#\s"']+/gi, `$1${REDACTED}`)
-    .replace(LONG_DIGIT_RUN, REDACTED);
+    .replace(LONG_DIGIT_RUN, REDACTED)
+    .replace(PHONE_NUMBER, REDACTED);
 }
 
 function isIdentifierKey(key: string): boolean {
@@ -394,6 +411,22 @@ export function findCassetteLeaks(serialized: string): string[] {
     // The same identifier usually repeats across a recording; reporting it once per occurrence
     // buries the distinct problems under twenty copies of one of them.
     const leak = key ? `long digit run under "${key}": ${match[0]}` : `long digit run: ${match[0]}`;
+    if (reported.has(leak)) continue;
+    reported.add(leak);
+    leaks.push(leak);
+  }
+
+  for (const match of serialized.matchAll(PHONE_NUMBER)) {
+    const start = match.index;
+    if (start === undefined) continue;
+
+    // An operation reference is kept deliberately unscrubbed, and one of eleven digits starting
+    // with a 7 is not a phone number. Same exemption as the digit run above, for the same
+    // reason: a leak the recorder cannot clear blocks a download nobody can unblock.
+    const key = enclosingKey(serialized, start);
+    if (key && REFERENCE_KEYS.has(key.toLowerCase())) continue;
+
+    const leak = key ? `phone number under "${key}": ${match[0]}` : `phone number: ${match[0]}`;
     if (reported.has(leak)) continue;
     reported.add(leak);
     leaks.push(leak);

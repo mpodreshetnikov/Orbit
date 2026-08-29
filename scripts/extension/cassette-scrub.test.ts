@@ -192,6 +192,31 @@ describe("cassette scrubbing", () => {
     expect(findCassetteLeaks('{"milliseconds":17872271990001}')).toHaveLength(1);
   });
 
+  it("reports a phone number the field rules did not catch", () => {
+    // The delivered recording that prompted this carried thirteen counterparty numbers under
+    // `pointer`, a transfer field added to the scrubber minutes after that snippet was built —
+    // and the scan called the file clean, because eleven digits is two short of a long run. The
+    // field list will always lag some field; this is what stops the lag reaching the repository.
+    expect(findCassetteLeaks('{"mystery":"+79535912902"}')).toEqual([
+      'phone number under "mystery": +79535912902',
+    ]);
+    expect(findCassetteLeaks('{"mystery":"79535912902"}')).toEqual([
+      'phone number under "mystery": 79535912902',
+    ]);
+    // A reference the cassette keeps deliberately is exempt, exactly as it is for a long run:
+    // eleven digits starting with a 7 is not a phone number when the bank generated it, and a
+    // leak the recorder cannot clear blocks a download nobody can unblock.
+    expect(findCassetteLeaks('{"id":"79535912902"}')).toEqual([]);
+    // Eleven digits inside something longer belong to that something.
+    expect(findCassetteLeaks('{"operationTime":{"milliseconds":1787227199000}}')).toEqual([]);
+  });
+
+  it("removes a phone number from free text", () => {
+    expect(scrubFreeText("перевод на +79535912902")).toBe(`перевод на ${REDACTED}`);
+    // Not a bite out of the middle of a card number: that whole run goes as one.
+    expect(scrubFreeText("4276123456789012")).toBe(REDACTED);
+  });
+
   it("finds no secrets in any committed cassette", () => {
     // Second line of defence: the scrubber knowing about a field is not the same as the
     // field being gone from the files that are actually in the repository.

@@ -63,5 +63,32 @@ or reading an amount differently fails instead of quietly reporting less.
 3. Put the scrubbed result here and run `test-unit-ext`. `cassette-scrub.test.ts` re-scans
    every committed cassette for anything that still looks like a secret.
 
+## What the first real recording settled
+
+`dense-month/` is that recording: two whole Moscow months of one live account, 402 operations
+across nine range requests, two of which came back capped and were split, none left unresolved.
+Three things came out of reconciling it against the bank's own screen, and all three are now
+asserted rather than remembered.
+
+**The totals had to be computed the bank's way.** The first comparison was over on both sides at
+once — by 5575.00 in July and 4068.00 in August — which is the signature of a sign convention,
+not of a missing operation. Each amount was exactly that month's `PAY`/`Credit` operations:
+refunds of purchases, which the bank subtracts from the month's spending rather than adding to
+its income. With that convention the recording lands within a kopeck of the four displayed
+figures, and the kopeck is the bank's own rounding.
+
+**A gateway error is not a receipt.** One receipt request came back 504. Counting it would have
+claimed enrichment the cassette cannot replay, and nothing in the summary would have suggested
+re-recording. Non-200 responses are excluded and warned about now, as throttled ones already
+were.
+
+**The leak scan cannot rest on the field list alone.** The delivered file carried thirteen
+counterparty phone numbers under `pointer`, a transfer field added to the scrubber minutes after
+that snippet was built — and the scan reported it clean, because eleven digits is two short of
+the long-digit rule. The field was named and the scan now recognises a phone number wherever it
+appears. The general lesson is the reason the scan exists separately from the scrubber: the
+field list will always lag some field, and the scan is what stops the lag reaching the
+repository.
+
 Re-record when the bank changes its responses — `tbank-web.contract.test.ts` is what tells you
 that has happened, by failing rather than silently mapping fewer operations.
