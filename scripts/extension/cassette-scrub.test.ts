@@ -234,10 +234,10 @@ describe("cassette scrubbing", () => {
     expect(
       scrubCassetteValue({
         group: "TRANSFER",
-        description: "Марина М.",
-        subcategory: "Марина М.",
-        merchantKey: "Марина М.",
-        maskedFIO: "Марина М.",
+        description: "Тестовая П.",
+        subcategory: "Тестовая П.",
+        merchantKey: "Тестовая П.",
+        maskedFIO: "Тестовая П.",
       }),
     ).toEqual({
       group: "TRANSFER",
@@ -258,11 +258,11 @@ describe("cassette scrubbing", () => {
     // The group rule covers the operations list. The same name comes back in the detail
     // response under `merchantKey` and inside `{ type: "Description", value: … }`, where no
     // group is in sight — and the next response shape will put it somewhere else again.
-    expect(scrubCassetteValue({ type: "Description", value: "Марина М." })).toEqual({
+    expect(scrubCassetteValue({ type: "Description", value: "Тестовая П." })).toEqual({
       type: "Description",
       value: REDACTED,
     });
-    expect(scrubCassetteValue({ mystery: "Maksim P." })).toEqual({ mystery: REDACTED });
+    expect(scrubCassetteValue({ mystery: "Testcase L." })).toEqual({ mystery: REDACTED });
     // A merchant is not a masked name, whatever field it is in.
     expect(scrubCassetteValue({ mystery: "Ave Bistro & Gelato" })).toEqual({
       mystery: "Ave Bistro & Gelato",
@@ -270,7 +270,9 @@ describe("cassette scrubbing", () => {
   });
 
   it("reports a masked name the field rules did not catch", () => {
-    expect(findCassetteLeaks('{"mystery":"Марина М."}')).toEqual(["masked person name: Марина М."]);
+    expect(findCassetteLeaks('{"mystery":"Тестовая П."}')).toEqual([
+      "masked person name: Тестовая П.",
+    ]);
     expect(findCassetteLeaks('{"description":"Ave Bistro & Gelato"}')).toEqual([]);
   });
 
@@ -296,7 +298,10 @@ describe("cassette scrubbing", () => {
     };
     walk(cassettesRoot);
 
-    for (const file of files) {
+    // Cassettes only. The README beside them documents what the scan catches, and any honest
+    // example of a masked name is itself a masked name — scanning the prose makes documenting
+    // the rule impossible. Nothing the recorder writes is ever anything but `.json`.
+    for (const file of files.filter((candidate) => candidate.endsWith(".json"))) {
       const leaks = findCassetteLeaks(fs.readFileSync(file, "utf8"));
       expect(leaks, `${file}: ${leaks.join(", ")}`).toEqual([]);
     }

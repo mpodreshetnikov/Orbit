@@ -486,11 +486,31 @@ function monthIsFullyCovered(month: string, windowFromMs: number, windowToMs: nu
   return windowFromMs <= startMs && endMs <= windowToMs;
 }
 
+/**
+ * A month is comparable against the bank only if the window covers it end to end *and* nothing
+ * inside it came back capped in a way the splitting could not resolve.
+ *
+ * The window bounds alone are not enough. A single day that is still at the page limit after
+ * splitting is a day this recording is short on, and it can sit in the middle of a month the
+ * window covers completely. Marked `complete`, the console then tells the operator that row is
+ * safe to compare against the bank — and the contract test goes on asserting totals already
+ * known to omit operations, which makes a real regression indistinguishable from the gap.
+ */
+function monthIsComparable(
+  month: string,
+  window: { fromMs: number; toMs: number },
+  unresolvedStartsMs: number[],
+): boolean {
+  if (!monthIsFullyCovered(month, window.fromMs, window.toMs)) return false;
+  return !unresolvedStartsMs.some((startMs) => moscowMonth(startMs) === month);
+}
+
 export function summariseOperations(
   operations: Array<Record<string, unknown>>,
   truncationSuspected: number,
   truncationUnresolved: number,
   window: { fromMs: number; toMs: number },
+  unresolvedStartsMs: number[] = [],
 ): CassetteSummary {
   const buckets = new Map<string, { income: number; expense: number; operations: number }>();
 
@@ -518,7 +538,7 @@ export function summariseOperations(
         operations: bucket.operations,
         income: bucket.income.toFixed(2),
         expense: bucket.expense.toFixed(2),
-        complete: monthIsFullyCovered(month, window.fromMs, window.toMs),
+        complete: monthIsComparable(month, window, unresolvedStartsMs),
       };
     })
     .sort((left, right) =>
@@ -588,6 +608,7 @@ export async function recordCassette(
   let requestCount = 0;
   let truncationSuspected = 0;
   let truncationUnresolved = 0;
+  const unresolvedStartsMs: number[] = [];
 
   while (pending.length > 0) {
     const range = pending.shift();
@@ -656,6 +677,7 @@ export async function recordCassette(
     }
 
     truncationUnresolved += 1;
+    unresolvedStartsMs.push(range.start);
     warnings.push(
       `A single day (${new Date(range.start).toISOString().slice(0, 10)}) came back at the page ` +
         "limit and cannot be split further — that day is incomplete in this recording, and the " +
@@ -812,10 +834,13 @@ export async function recordCassette(
     // Totals are derived before scrubbing but hold nothing the scrubber removes: a month, a
     // currency, a count and two sums. They are the only part of the file a person can check
     // against the bank without reading JSON.
-    summary: summariseOperations(operations, truncationSuspected, truncationUnresolved, {
-      fromMs: windowFromMs,
-      toMs: nowMs,
-    }),
+    summary: summariseOperations(
+      operations,
+      truncationSuspected,
+      truncationUnresolved,
+      { fromMs: windowFromMs, toMs: nowMs },
+      unresolvedStartsMs,
+    ),
   };
   const leaks = findCassetteLeaks(JSON.stringify(cassette));
 

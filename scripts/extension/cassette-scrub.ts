@@ -88,7 +88,7 @@ const PERSON_NAME_KEYS = new Set([
   "cardHolder",
   "cardholdername",
   "cardHolderName",
-  // The bank's own abbreviated form of the counterparty's name, "Марина М." — abbreviated, but
+  // The bank's own abbreviated form of the counterparty's name, "Тестовая П." — abbreviated, but
   // still a real person, and a live recording carried fourteen distinct ones.
   "maskedfio",
   "maskedFIO",
@@ -99,7 +99,7 @@ const PERSON_NAME_KEYS = new Set([
  * than a merchant's.
  *
  * The bank puts the same text in both fields, and what it means depends entirely on the group:
- * under `PAY` it is "Пятёрочка", under `TRANSFER` it is "Марина М.". Redacting the fields
+ * under `PAY` it is "Пятёрочка", under `TRANSFER` it is "Тестовая П.". Redacting the fields
  * outright would take the merchant names the mapper and the contract test are built on;
  * redacting nothing leaves people's names in a committed fixture. So the group decides, and it
  * sits on the same object.
@@ -111,6 +111,29 @@ const COUNTERPARTY_GROUPS = new Set(["TRANSFER", "INCOME"]);
 
 /** The fields those groups fill with a name. */
 const COUNTERPARTY_TEXT_KEYS = new Set(["description", "subcategory", "merchantkey"]);
+
+/**
+ * Free-form text a person typed, redacted wherever it appears rather than by group.
+ *
+ * The committed recording carried ten transfer notes — a birthday message, a contribution to
+ * the upkeep of a grave, the settlement of a dispute over an apartment lease. The leak scan
+ * called the file clean: those strings hold no digit run and no masked name. The group rule
+ * would not have caught them either, because one of them sits at
+ * `payment.fieldsValues.message`, three levels below the object that names the group.
+ *
+ * So these are unconditional. That is the third time a rule scoped to where a value was last
+ * seen has missed the same value somewhere else, and a note somebody wrote is never what a
+ * cassette is for. The mapper does read `message` into a transaction's comment, and on replay
+ * it now reads "REDACTED" — which the replay test proves changes nothing it checks.
+ */
+const FREE_TEXT_KEYS = new Set([
+  "message",
+  "comment",
+  "note",
+  "purpose",
+  "paymentpurpose",
+  "paymentmessage",
+]);
 
 const SENSITIVE_QUERY_PARAMS = new Set([
   "sessionid",
@@ -176,7 +199,7 @@ const PHONE_NUMBER = /(?<![\d+])\+?[78]\d{10}(?!\d)/g;
 
 /**
  * The bank's masked counterparty name: a given name, a space, one capital and a full stop —
- * "Марина М.", "Maksim P.". Anchored to a complete JSON string value, because the point is to
+ * "Тестовая П.", "Testcase L.". Anchored to a complete JSON string value, because the point is to
  * catch a name in a field nobody has named yet without catching "Ave Bistro & Gelato" in the
  * merchant field beside it.
  */
@@ -314,6 +337,12 @@ function scrubValue(value: unknown, preserve: boolean): unknown {
 
       if (namesCounterparty && COUNTERPARTY_TEXT_KEYS.has(lowered)) {
         result[key] = entry === null ? null : REDACTED;
+        continue;
+      }
+      if (FREE_TEXT_KEYS.has(lowered) && typeof entry === "string") {
+        // An empty one carries nothing and blanking it would only obscure that the field was
+        // present and empty, which is part of the shape the cassette records.
+        result[key] = entry === "" ? entry : REDACTED;
         continue;
       }
       if (FISCAL_KEYS.has(lowered)) {
@@ -468,7 +497,7 @@ export function findCassetteLeaks(serialized: string): string[] {
     leaks.push(leak);
   }
 
-  // The bank's masked-name form — "Марина М.", "Maksim P." — as a whole JSON string value. It
+  // The bank's masked-name form — "Тестовая П.", "Testcase L." — as a whole JSON string value. It
   // is what `maskedFIO`, and a transfer's `description` and `subcategory`, actually contain, and
   // a real recording put fourteen of them in a file the scan had already called clean. Matching
   // the whole value keeps a merchant like "Ave Bistro & Gelato" out of it.

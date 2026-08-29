@@ -114,7 +114,7 @@ appears. The general lesson is the reason the scan exists separately from the sc
 field list will always lag some field, and the scan is what stops the lag reaching the
 repository.
 
-The same file also carried fourteen counterparty names — "Марина М." — in `maskedFIO`, and in
+The same file also carried fourteen counterparty names — "Тестовая П." — in `maskedFIO`, and in
 `description`, `subcategory` and `merchantKey` on every transfer and every incoming payment.
 Those fields cannot simply be redacted: for a purchase they hold "Пятёрочка", which the mapper
 and the tests here are built on. What the text means is decided by the `group` beside it, so the

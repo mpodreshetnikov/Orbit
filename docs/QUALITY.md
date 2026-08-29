@@ -119,7 +119,22 @@ Every behavior change must update tests in the same change set.
   - `browserExtension/**`
   - `scripts/extension/**`
   - `vite.config.extension.ts`
-- CI enforces the rule with `extension-release-check-version`.
+- Three kinds of file inside those paths are **not** packaged, and changing one does not require a
+  bump. A version change also triggers the release bundle job, so requiring one here would publish
+  a release whose bundle is byte for byte the previous one:
+  - test and spec files (`*.test.ts`, `*.spec.ts`, anything under `__tests__/`), which are never
+    bundled;
+  - `scripts/extension/release.ts`, the release tooling itself — it reads the manifest and zips
+    `browserExtension/dist`, so it cannot change what goes into that bundle, and requiring a bump
+    to edit the version policy would be circular;
+  - `scripts/extension/cassette-*.ts` and `build-cassette-*.ts`, the tooling that records and
+    scrubs a bank session for offline connector tests. `build.ts` imports only
+    `money-import-sources` and `esbuild-widget`, and ESLint forbids anything under
+    `browserExtension/` from importing `scripts/`, so none of it can reach the bundle.
+- CI enforces the rule with `extension-release-check-version`. The exemption list above is the one
+  in `EXTENSION_NON_PACKAGED_PATTERNS` in `scripts/extension/release.ts`, and
+  `release.test.ts` covers both sides of it — a governed file requires a bump, an exempt one does
+  not. Change one and change the other.
 - When the manifest version changes, build the release bundle with `extension-release-build`.
 - Production publication uses `extension-release-publish` and updates the public `extension-releases` bucket metadata consumed by the web app.
 

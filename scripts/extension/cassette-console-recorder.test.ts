@@ -330,6 +330,45 @@ describe("cassette console recorder", () => {
     expect(byMonth.get("2026-08")?.complete).toBe(false);
   });
 
+  it("does not call a month comparable when a day inside it stayed capped", async () => {
+    // A single day still at the page limit after splitting is a day this recording is short on,
+    // and it can sit in the middle of a month the window covers end to end. Marked complete, the
+    // console tells the operator that row is safe to compare against the bank, and the contract
+    // test then asserts totals already known to omit operations — which makes a real regression
+    // indistinguishable from the gap.
+    const july = Date.UTC(2026, 6, 15, 9, 0, 0);
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          const start = Number(url.searchParams.get("start"));
+          const end = Number(url.searchParams.get("end"));
+          // Every range covering 15 July comes back at the cap, however far it is split, so the
+          // splitting runs down to a single day and gives up there.
+          const capped = start <= july && july <= end;
+          return new Response(
+            JSON.stringify({
+              payload: capped
+                ? Array.from({ length: 100 }, (_, index) => ({
+                    ...operation(`capped-${index}`, -100),
+                    debitingTime: { milliseconds: july },
+                  }))
+                : [],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "capped", pauseMs: 0, maxReceipts: 0 }, deps);
+    const july2026 = result.cassette.summary?.months.find((month) => month.month === "2026-07");
+
+    expect(result.cassette.summary?.truncationUnresolved).toBeGreaterThan(0);
+    expect(july2026?.complete).toBe(false);
+  });
+
   it("does not count a rate-limited receipt as captured", async () => {
     // The bank answers a throttled receipt with HTTP 200 and an error code in the body. Counting
     // it would overstate the cassette, and the replay would retry into the same error forever.

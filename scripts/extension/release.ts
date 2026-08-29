@@ -31,6 +31,9 @@ const EXTENSION_VERSIONED_SURFACE_PATTERNS = [
  * a test-only edit — and, because a version change also triggers the release
  * bundle job, turns a test fix into a publish.
  */
+// Mirrored in prose in docs/QUALITY.md under "Extension Release Policy". That document is the
+// canonical statement of the rule and this is what CI actually runs, so they have to agree:
+// change one and change the other.
 const EXTENSION_NON_PACKAGED_PATTERNS = [
   /\.(test|spec)\.[cm]?[jt]sx?$/,
   /(^|\/)__tests__\//,
