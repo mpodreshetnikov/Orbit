@@ -54,6 +54,17 @@ const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
 /** The connector's own pause between receipt requests (`receiptBasePauseBetweenRequestsMs`). */
 const RECEIPT_PAUSE_MS = 300;
 
+/**
+ * Details are paced more lightly than receipts. The connector throttles receipts specifically —
+ * they are what the bank limits hardest — while details carry no such window, and a real account
+ * has hundreds of them: four hundred at the receipt pace is two minutes of waiting for requests
+ * nothing is limiting.
+ */
+const DETAIL_PAUSE_MS = 100;
+
+/** The connector's `DEFAULT_MAX_RECEIPTS_PER_RUN`. */
+const CONNECTOR_MAX_RECEIPTS_PER_RUN = 50;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -510,10 +521,9 @@ export async function recordCassette(
     );
   }
 
-  // The connector's own DEFAULT_MAX_RECEIPTS_PER_RUN. A smaller budget here would leave the
-  // replay asking for receipts the cassette never recorded.
-  const maxReceipts = options.maxReceipts ?? 50;
+  const maxReceipts = options.maxReceipts ?? CONNECTOR_MAX_RECEIPTS_PER_RUN;
   const pauseMs = options.pauseMs ?? RECEIPT_PAUSE_MS;
+  const detailPauseMs = options.pauseMs ?? DETAIL_PAUSE_MS;
   const requested = new Set<string>();
   let receipts = 0;
 
@@ -524,11 +534,14 @@ export async function recordCassette(
         "range walk but not receipt enrichment. Widen the window or pick a month with shopping.",
     );
   }
-  if (receiptBearing.length > maxReceipts) {
+  // Only worth saying when the budget is below the connector's own. At or above it the replay
+  // stops at the same point for the same reason and marks the rest `skipped_after_budget`, so a
+  // window holding more receipts than the budget is ordinary rather than a gap in the cassette.
+  if (receiptBearing.length > maxReceipts && maxReceipts < CONNECTOR_MAX_RECEIPTS_PER_RUN) {
     warnings.push(
-      `${receiptBearing.length} operations carry a receipt but the budget is ${maxReceipts}, so ` +
-        "the replay will ask for receipts this cassette does not hold. Raise maxReceipts to " +
-        "cover them, or expect misses for the remainder.",
+      `${receiptBearing.length} operations carry a receipt, and the budget of ${maxReceipts} is ` +
+        `below the connector's own ${CONNECTOR_MAX_RECEIPTS_PER_RUN}. The replay will ask for ` +
+        "receipts this cassette does not hold; raise maxReceipts to at least that.",
     );
   }
 
@@ -550,7 +563,7 @@ export async function recordCassette(
     // The connector asks for the detail of every operation it has not already fulfilled; only
     // the receipt request is conditional. Recording details for receipt-bearing operations
     // alone would leave the replay without an answer for every other one.
-    if (detailCount > 0) await sleep(pauseMs);
+    if (detailCount > 0) await sleep(detailPauseMs);
     detailCount += 1;
     report(`detail ${detailCount}/${operations.length}`);
     entries.push((await recordRequest(deps, detailUrl.toString())).entry);

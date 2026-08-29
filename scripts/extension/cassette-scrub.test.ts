@@ -136,15 +136,19 @@ describe("cassette scrubbing", () => {
     expect(findCassetteLeaks(repeated)).toHaveLength(1);
   });
 
-  it("clears a bank operation reference but not a bare id", () => {
-    // T-Bank operation ids are sixteen digits, so treating every long run as an account number
-    // blocks every real recording. These keys are references the bank generated; the fields
-    // that actually carry money are redacted by name long before this scan.
+  it("clears the bank's own operation references", () => {
+    // T-Bank operation ids are fifteen and sixteen digits, so treating every long run as an
+    // account number blocks every real recording. These keys are references the bank generated;
+    // the fields that actually carry money are redacted by name long before this scan.
     expect(findCassetteLeaks('{"authorizationId":"7384440901188332"}')).toEqual([]);
     expect(findCassetteLeaks('{"operationId":{"value":"7384440901188332"}}')).toEqual([]);
-    // `id` is too generic to clear sight unseen, so it is still reported — with the key named.
-    expect(findCassetteLeaks('{"id":"7384440901188332"}')).toEqual([
-      'long digit run under "id": 7384440901188332',
+    // `id` was withheld until a live recording showed what it holds: ten values of the form
+    // 200000000416948, matching the captured snapshot. It is also the field the replay keys an
+    // operation by, so blanking it merges operations.
+    expect(findCassetteLeaks('{"id":"200000000416948"}')).toEqual([]);
+    // Anything else long is still reported, with its field named.
+    expect(findCassetteLeaks('{"mystery":"5536913812345678"}')).toEqual([
+      'long digit run under "mystery": 5536913812345678',
     ]);
   });
 

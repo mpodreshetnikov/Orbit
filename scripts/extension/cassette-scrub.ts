@@ -290,10 +290,16 @@ export function scrubCassette(entries: CassetteEntry[]): CassetteEntry[] {
  * the fields that are (`cardNumber`, `pan`, `accountId`, `accountNumber`, `agreementNumber`,
  * `contractNumber`) are redacted by name before this scan ever runs.
  *
- * `id` is deliberately absent: it is too generic to clear sight unseen, so a long run under it
- * is still reported — with the key named, so the next person can decide rather than guess.
+ * `id` was deliberately withheld at first — too generic to clear sight unseen — and reported
+ * with its key named so someone could decide rather than guess. That decision has now been
+ * made on evidence: a live recording reported ten of them, every one a fifteen-digit T-Bank
+ * operation id of the form `200000000416948`, matching the shape in the captured snapshot. It
+ * is the field `buildOperationKey` prefers, so the replay cannot tell two operations apart
+ * without it. Card and account values never reach this decision: they are redacted by their own
+ * names first.
  */
 const REFERENCE_KEYS = new Set([
+  "id",
   "operationid",
   "authorizationid",
   "receiptrequestkey",
