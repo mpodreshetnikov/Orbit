@@ -547,6 +547,73 @@ describe("list_medication_doses", () => {
     expect(text).toContain('note "принял позже обычного"');
   });
 
+  it("says which amount a strength belongs to when the intake is not that amount", async () => {
+    // Nothing rescales `active`: the generator copies it while overriding a
+    // slot's amount, and `log_dose` keeps it when a caller corrects one. So an
+    // intake of 2 pills on a course defined as 1.5 still carries the 150 mg
+    // recorded for 1.5, and printing "2 pill (Сертралин 150 milligram)" would
+    // state a dose the record does not support.
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: {
+            intake: { amount: 2, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          medication_dose: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          status: "taken",
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain(
+      "Золофт, 2 pill (strength on file: Сертралин 150 milligram per 1.5 pill)",
+    );
+  });
+
+  it("prints the strength plainly when the intake is the course's own amount", async () => {
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          medication_dose: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          status: "taken",
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("Золофт, 1.5 pill (Сертралин 150 milligram) [taken]");
+  });
+
   it("cuts a long intake note instead of flooding the page with one", async () => {
     meds.listMedicationDoses.mockResolvedValue({
       doses: [

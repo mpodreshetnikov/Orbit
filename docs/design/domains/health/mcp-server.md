@@ -174,6 +174,13 @@ Conventions that matter:
   medication were created in the same minute in production, and an unstable order under paging
   repeats one row while dropping another.
 
+  A strength is quoted with the amount it was recorded for. `active` is milligrams per intake with
+  nothing recording what one unit contains, and nothing rescales it — the generator copies it while
+  overriding a slot's amount, and `log_dose` keeps it when a caller corrects one. So an intake whose
+  amount differs from its course's own reads `2 pill (strength on file: Сертралин 150 milligram per
+1.5 pill)` rather than implying the total belongs to this amount. Until a per-unit strength exists,
+  that qualification is the difference between reporting the record and inventing a dose.
+
   A name filter is a literal, not a pattern. `list_medications` matches with `imatch` (`~*`) over a
   regex-escaped needle rather than `ilike`: PostgREST rewrites `*` in a `like`/`ilike` value to `%`
   unconditionally, with no escape that survives the rewrite, so a name containing `*` would have

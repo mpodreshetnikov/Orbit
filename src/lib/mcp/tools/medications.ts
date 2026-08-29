@@ -77,7 +77,10 @@ async function regenerateOrExplain(
  * owner the record held no milligrams and offer a fork between 50 mg and 100 mg
  * tablets, while `dose_definition.active` said 150 mg.
  */
-function describeIntake(planned: PlannedIntake | null | undefined): string {
+function describeIntake(
+  planned: PlannedIntake | null | undefined,
+  course?: PlannedIntake | null,
+): string {
   const intake = planned?.intake;
 
   // `planned_intake` and `dose_definition` are jsonb with no shape constraint,
@@ -88,7 +91,29 @@ function describeIntake(planned: PlannedIntake | null | undefined): string {
   const ingredients = active
     .filter((one) => one && typeof one === "object" && one.name != null && one.amount != null)
     .map((one) => `${one.name} ${one.amount}${one.unit ? ` ${one.unit}` : ""}`);
-  const strength = ingredients.length > 0 ? ` (${ingredients.join(" + ")})` : "";
+
+  // `active` is milligrams per intake with nothing recording what one unit
+  // contains, and nothing rescales it: the generator copies it while
+  // overriding a slot's amount, and `logDose` keeps it when a caller corrects
+  // one. So an intake whose amount differs from the course's own is carrying a
+  // total recorded for a different number of units, and printing it plainly
+  // would state a dose the record does not support -- the failure this whole
+  // task exists to close. Say which amount the strength belongs to instead.
+  const courseAmount = course?.intake?.amount;
+  const rescaled =
+    ingredients.length > 0 &&
+    courseAmount != null &&
+    intake?.amount != null &&
+    courseAmount !== intake.amount;
+  const strength =
+    ingredients.length === 0
+      ? ""
+      : rescaled
+        ? ` (strength on file: ${ingredients.join(" + ")} per ${courseAmount} ${course?.intake?.unit ?? intake?.unit ?? ""})`.replace(
+            / \)$/,
+            ")",
+          )
+        : ` (${ingredients.join(" + ")})`;
 
   if (!intake || intake.amount == null) {
     return strength ? `dose unknown${strength}` : "";
@@ -370,6 +395,7 @@ export function registerMedicationTools(server: McpToolServer): void {
             ),
           );
 
+        const courseDose = detail.regimen.dose_definition;
         const next = detail.upcomingDoses[0];
         const previous = detail.recentDoses[detail.recentDoses.length - 1];
 
@@ -401,7 +427,7 @@ export function registerMedicationTools(server: McpToolServer): void {
         const upcoming = listed(detail.upcomingDoses, "first");
         const more = (omitted: number) => (omitted > 0 ? `\n- ...${omitted} more` : "");
         const doseLine = (dose: (typeof detail.upcomingDoses)[number]) =>
-          `- ${formatZoned(dose.scheduled_at, zone.timezone)} — ${describeIntake(dose.planned_intake) || "dose unknown"} [${dose.status}]` +
+          `- ${formatZoned(dose.scheduled_at, zone.timezone)} — ${describeIntake(dose.planned_intake, courseDose) || "dose unknown"} [${dose.status}]` +
           `${dose.taken_at ? `, taken ${formatZoned(dose.taken_at, zone.timezone)}` : ""}` +
           `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`;
         const movementLine = (movement: (typeof detail.inventoryTransactions)[number]) =>
@@ -509,7 +535,7 @@ export function registerMedicationTools(server: McpToolServer): void {
             // tell "no note" apart from "notes are not returned".
             (dose) =>
               `${formatZoned(dose.scheduled_at, timezone)} — ${dose.medication_name ?? "unknown"}` +
-              `${describeIntake(dose.planned_intake) ? `, ${describeIntake(dose.planned_intake)}` : ""}` +
+              `${describeIntake(dose.planned_intake, dose.medication_dose) ? `, ${describeIntake(dose.planned_intake, dose.medication_dose)}` : ""}` +
               ` [${dose.status}]` +
               `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`,
           ),

@@ -179,10 +179,20 @@ export async function listMedicationDoses(
     limit?: number;
     offset?: number;
   },
-): Promise<{ doses: Array<MedDoseEvent & { medication_name: string | null }>; total: number }> {
+): Promise<{
+  doses: Array<
+    MedDoseEvent & { medication_name: string | null; medication_dose: PlannedIntake | null }
+  >;
+  total: number;
+}> {
   let query = supabase
     .from("med_dose_events")
-    .select("*, regimen:med_regimens ( custom_name )", { count: "exact" })
+    // The course's own `dose_definition` rides along because an intake's
+    // milligrams are only meaningful beside the amount they were recorded for:
+    // nothing scales `active` when a slot or a correction changes the amount,
+    // so the renderer has to be able to say which amount the strength belongs
+    // to rather than implying it belongs to this one.
+    .select("*, regimen:med_regimens ( custom_name, dose_definition )", { count: "exact" })
     .eq("person_id", params.personId)
     .is("deleted_at", null)
     .gte("scheduled_at", params.from)
@@ -220,6 +230,10 @@ export async function listMedicationDoses(
   const doses = ((data ?? []) as unknown as Array<Record<string, unknown>>).map((row) => ({
     ...rowToDoseEvent(row),
     medication_name: (row.regimen as { custom_name?: string } | null)?.custom_name ?? null,
+    medication_dose:
+      ((row.regimen as { dose_definition?: PlannedIntake } | null)?.dose_definition as
+        | PlannedIntake
+        | undefined) ?? null,
   }));
 
   return { doses, total: count ?? doses.length };

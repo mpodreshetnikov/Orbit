@@ -117,9 +117,13 @@ describe("getCourseWindow", () => {
 
   it("never calls a course completed while its window is still open", () => {
     // The status boundary is deliberately a day later than the last dosing day
-    // for `for_days` -- the dashboard has always treated it that way. What must
-    // not happen is the reverse: a window shown as closed on a day the status
-    // still calls active.
+    // for `for_days`, so on that one day the course reads `active` with its
+    // window already closed -- the dashboard has always worked that way, and
+    // the registry task carries the question of whether it should.
+    //
+    // The direction that must never occur is the opposite one: a course called
+    // `completed` while its window says doses remain, which would tell someone
+    // a course they are still on has finished.
     const duration: MedDuration = { type: "for_days", start_date: "2026-07-26", days: 4 };
     const { end } = getCourseWindow(duration);
 
