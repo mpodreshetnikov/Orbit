@@ -119,13 +119,29 @@ export async function getMedication(
   };
 }
 
+/**
+ * One page of intakes, with the total the range actually holds.
+ *
+ * The count comes from the database rather than the length of what was
+ * returned: PostgREST caps a response at `max_rows` (1000 in
+ * `supabase/config.toml`), so a wide range would otherwise report its own
+ * truncation as the total and declare there was nothing more to fetch.
+ */
 export async function listMedicationDoses(
   supabase: SupabaseClient<Database>,
-  params: { personId: string; from: string; to: string; status?: string; regimenId?: string },
-): Promise<Array<MedDoseEvent & { medication_name: string | null }>> {
+  params: {
+    personId: string;
+    from: string;
+    to: string;
+    status?: string;
+    regimenId?: string;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<{ doses: Array<MedDoseEvent & { medication_name: string | null }>; total: number }> {
   let query = supabase
     .from("med_dose_events")
-    .select("*, regimen:med_regimens ( custom_name )")
+    .select("*, regimen:med_regimens ( custom_name )", { count: "exact" })
     .eq("person_id", params.personId)
     .is("deleted_at", null)
     .gte("scheduled_at", params.from)
@@ -144,15 +160,24 @@ export async function listMedicationDoses(
     query = query.eq("regimen_id", params.regimenId);
   }
 
-  const { data, error } = await query;
+  // Paged in the query, so the window is bounded by the database rather than
+  // sliced out of a response that may already be truncated.
+  if (params.limit != null) {
+    const offset = params.offset ?? 0;
+    query = query.range(offset, offset + params.limit - 1);
+  }
+
+  const { data, error, count } = await query;
   if (error) {
     throw new Error(`Failed to load medication intakes: ${error.message}`);
   }
 
-  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map((row) => ({
+  const doses = ((data ?? []) as unknown as Array<Record<string, unknown>>).map((row) => ({
     ...rowToDoseEvent(row),
     medication_name: (row.regimen as { custom_name?: string } | null)?.custom_name ?? null,
   }));
+
+  return { doses, total: count ?? doses.length };
 }
 
 export async function createRegimen(

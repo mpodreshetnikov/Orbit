@@ -83,15 +83,44 @@ function todayDateString(): string {
 
 export type GetEffectiveStatusOptions = { today?: string };
 
+/** `date` shifted by whole days, as YYYY-MM-DD. */
+function shiftDate(date: string, days: number): string {
+  // Midday, so a DST transition cannot push the arithmetic onto the wrong day.
+  const shifted = new Date(date + "T12:00:00");
+  shifted.setDate(shifted.getDate() + days);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}-${String(shifted.getDate()).padStart(2, "0")}`;
+}
+
 /**
- * The calendar days a course runs between, as YYYY-MM-DD, or null where the
- * duration does not bound that end.
+ * The last day a course still counts as running, for status purposes.
  *
- * `getEffectiveStatus` compares the end of this window against today, and the
- * MCP tools render it so that two courses of the same medication can be told
- * apart. Both read it from here rather than each doing the `for_days`
- * arithmetic, because a window that disagreed with the status it implies would
- * be worse than no window at all.
+ * This is NOT the last day it doses. A `for_days` course stops generating on
+ * `start + days` -- `generate_med_dose_events_for_person_ids` skips any date at
+ * or after it -- but the status has always treated that boundary day as still
+ * active, and the dashboard is built on that. Keeping the two apart is
+ * deliberate: `getCourseWindow` answers "when was this taken", this answers
+ * "does it still count as running", and only the first is safe to show.
+ */
+function statusBoundary(duration: MedDuration): string | null {
+  if (duration.type === "until_date" && duration.end_date) {
+    return duration.end_date.slice(0, 10);
+  }
+  if (duration.type === "for_days" && duration.start_date != null && duration.days != null) {
+    return shiftDate(duration.start_date.slice(0, 10), duration.days);
+  }
+  return null;
+}
+
+/**
+ * The calendar days a course is planned to dose on, inclusive of both ends, as
+ * YYYY-MM-DD, or null where the duration does not bound that end.
+ *
+ * The MCP tools render this so that two courses of the same medication under
+ * one name can be told apart. The end is the last day a dose is generated for:
+ * a four-day course starting on the 26th doses on the 26th through the 29th,
+ * because the generator skips dates on or after `start + days`. Reporting the
+ * 30th here would put a one-day error into every answer about when a dose
+ * changed, which is exactly the kind of question this window exists to answer.
  */
 export function getCourseWindow(duration?: MedDuration | null): {
   start: string | null;
@@ -106,13 +135,7 @@ export function getCourseWindow(duration?: MedDuration | null): {
   }
 
   if (duration.type === "for_days" && start != null && duration.days != null) {
-    // Midday, so a DST transition cannot push the arithmetic onto the wrong day.
-    const end = new Date(start + "T12:00:00");
-    end.setDate(end.getDate() + duration.days);
-    return {
-      start,
-      end: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
-    };
+    return { start, end: shiftDate(start, duration.days - 1) };
   }
 
   return { start, end: null };
@@ -131,8 +154,8 @@ export function getEffectiveStatus(
   const duration = regimen.duration;
   if (!duration) return regimen.status;
   const today = options?.today ?? todayDateString();
-  const { end } = getCourseWindow(duration);
-  if (end != null && end < today) return "completed";
+  const boundary = statusBoundary(duration);
+  if (boundary != null && boundary < today) return "completed";
   return regimen.status;
 }
 

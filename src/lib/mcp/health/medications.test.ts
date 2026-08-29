@@ -205,25 +205,59 @@ describe("listMedicationDoses", () => {
       ],
     });
 
-    const rows = await listMedicationDoses(stub.client, {
+    const { doses } = await listMedicationDoses(stub.client, {
       personId: "p-1",
       from: "2026-06-15T00:00:00Z",
       to: "2026-06-15T23:59:59Z",
     });
 
-    expect(rows[0].medication_name).toBe("Ferrous sulfate");
+    expect(doses[0].medication_name).toBe("Ferrous sulfate");
   });
 
-  it("falls back to null when the join is missing", async () => {
+  it("pages in the query and reports the count the database returned", async () => {
+    // PostgREST caps a response at `max_rows` (1000 in supabase/config.toml),
+    // so counting the returned rows would report a truncated page as the whole
+    // range and declare there was nothing left to fetch.
+    const stub = createSupabaseStub({
+      med_dose_events: [{ data: [doseEvent()], count: 1743 }],
+    });
+
+    const { doses, total } = await listMedicationDoses(stub.client, {
+      personId: "p-1",
+      from: "a",
+      to: "b",
+      limit: 20,
+      offset: 40,
+    });
+
+    expect(doses).toHaveLength(1);
+    expect(total).toBe(1743);
+    expect(stub.argsFor("med_dose_events", "range")).toEqual([[40, 59]]);
+  });
+
+  it("asks the database for no range when the caller wants everything", async () => {
     const stub = createSupabaseStub({ med_dose_events: [{ data: [doseEvent()] }] });
 
-    const rows = await listMedicationDoses(stub.client, {
+    const { total } = await listMedicationDoses(stub.client, {
       personId: "p-1",
       from: "a",
       to: "b",
     });
 
-    expect(rows[0].medication_name).toBeNull();
+    expect(stub.argsFor("med_dose_events", "range")).toEqual([]);
+    expect(total).toBe(1);
+  });
+
+  it("falls back to null when the join is missing", async () => {
+    const stub = createSupabaseStub({ med_dose_events: [{ data: [doseEvent()] }] });
+
+    const { doses } = await listMedicationDoses(stub.client, {
+      personId: "p-1",
+      from: "a",
+      to: "b",
+    });
+
+    expect(doses[0].medication_name).toBeNull();
   });
 
   it("applies the status filter and excludes deleted events", async () => {

@@ -434,20 +434,26 @@ export function registerMedicationTools(server: McpToolServer): void {
       }
       const timezone = zone.timezone;
 
-      const doses = await listMedicationDoses(supabase, {
+      const { doses, total } = await listMedicationDoses(supabase, {
         personId: person.id,
         from: localDayStartUtc(args.from, timezone),
         to: localDayEndUtc(args.to, timezone),
         status: args.status,
         regimenId: args.regimen_id,
+        limit: args.limit,
+        offset: args.offset,
       });
 
-      const page = paginate(doses, args.limit, args.offset);
+      // The page and its total both come from the query, so a range wider than
+      // PostgREST's `max_rows` reports what it really holds rather than
+      // declaring its own truncation to be the end of the data.
+      const hasMore = args.offset + doses.length < total;
+      const nextOffset = hasMore ? args.offset + doses.length : null;
 
       return ok(
         summarizePage(
           `medication intakes for ${person.name} (${args.from} to ${args.to}, ${timezone})`,
-          page.page.map(
+          doses.map(
             // Rendered in the zone the range was resolved in. Printing
             // `scheduled_at.slice(0, 16)` put the UTC instant under a header
             // naming the local zone, which is how a 22:00 dose came to be
@@ -464,27 +470,27 @@ export function registerMedicationTools(server: McpToolServer): void {
               `${dose.note?.trim() ? `, note "${dose.note.trim()}"` : ""}`,
           ),
           {
-            total: doses.length,
+            total,
             offset: args.offset,
-            has_more: page.has_more,
-            next_offset: page.next_offset,
+            has_more: hasMore,
+            next_offset: nextOffset,
           },
         ),
         {
           person,
           timezone,
-          doses: page.page.map((dose) =>
+          doses: doses.map((dose) =>
             withZonedTimestamps(
               dose as unknown as Record<string, unknown>,
               timezone,
               DOSE_EVENT_TIMESTAMPS,
             ),
           ),
-          total: doses.length,
+          total,
           limit: args.limit,
           offset: args.offset,
-          has_more: page.has_more,
-          next_offset: page.next_offset,
+          has_more: hasMore,
+          next_offset: nextOffset,
         },
       );
     }),

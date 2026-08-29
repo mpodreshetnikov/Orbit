@@ -155,8 +155,8 @@ describe("list_medications", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("2026-07-26 to 2026-07-30");
-    expect(text).toContain("2026-08-03 to 2026-08-07");
+    expect(text).toContain("2026-07-26 to 2026-07-29");
+    expect(text).toContain("2026-08-03 to 2026-08-06");
   });
 
   it("pages instead of truncating into rows nothing can reach", async () => {
@@ -354,7 +354,7 @@ describe("get_medication", () => {
 
 describe("list_medication_doses", () => {
   it("resolves the local day rather than assuming UTC", async () => {
-    meds.listMedicationDoses.mockResolvedValue([]);
+    meds.listMedicationDoses.mockResolvedValue({ doses: [], total: 0 });
 
     await (await handlers()).get("list_medication_doses")!(
       { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
@@ -368,7 +368,7 @@ describe("list_medication_doses", () => {
   });
 
   it("names the timezone it used, so the answer is checkable", async () => {
-    meds.listMedicationDoses.mockResolvedValue([]);
+    meds.listMedicationDoses.mockResolvedValue({ doses: [], total: 0 });
 
     const result = await (await handlers()).get("list_medication_doses")!(
       { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
@@ -379,20 +379,23 @@ describe("list_medication_doses", () => {
   });
 
   it("renders an intake with its amount and status", async () => {
-    meds.listMedicationDoses.mockResolvedValue([
-      {
-        scheduled_at: "2026-06-15T08:00:00.000Z",
-        medication_name: "Ferrous sulfate",
-        planned_intake: { intake: { amount: 1, unit: "pill" } },
-        status: "taken",
-      },
-      {
-        scheduled_at: "2026-06-15T20:00:00.000Z",
-        medication_name: null,
-        planned_intake: null,
-        status: "scheduled",
-      },
-    ]);
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Ferrous sulfate",
+          planned_intake: { intake: { amount: 1, unit: "pill" } },
+          status: "taken",
+        },
+        {
+          scheduled_at: "2026-06-15T20:00:00.000Z",
+          medication_name: null,
+          planned_intake: null,
+          status: "scheduled",
+        },
+      ],
+      total: 2,
+    });
 
     const result = await (await handlers()).get("list_medication_doses")!(
       { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
@@ -404,18 +407,21 @@ describe("list_medication_doses", () => {
   });
 
   it("carries the milligrams and the note of each intake", async () => {
-    meds.listMedicationDoses.mockResolvedValue([
-      {
-        scheduled_at: "2026-06-15T08:00:00.000Z",
-        medication_name: "Золофт",
-        planned_intake: {
-          intake: { amount: 1.5, unit: "pill" },
-          active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          status: "taken",
+          note: "принял позже обычного",
         },
-        status: "taken",
-        note: "принял позже обычного",
-      },
-    ]);
+      ],
+      total: 1,
+    });
 
     const text = (
       await (await handlers()).get("list_medication_doses")!(
@@ -431,8 +437,41 @@ describe("list_medication_doses", () => {
     expect(text).toContain('note "принял позже обычного"');
   });
 
+  it("takes its page and its total from the database, not from what came back", async () => {
+    // A range wider than PostgREST's `max_rows` returns a truncated page. If the
+    // tool counted those rows it would report the truncation as the total and
+    // say there was nothing more, stranding every later intake.
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: { intake: { amount: 1.5, unit: "pill" } },
+          status: "taken",
+        },
+      ],
+      total: 1743,
+    });
+
+    const result = await (await handlers()).get("list_medication_doses")!(
+      { limit: 1, offset: 40, from: "2020-01-01", to: "2026-08-29" },
+      ctx(),
+    );
+
+    const [, params] = meds.listMedicationDoses.mock.calls[0] as [unknown, Record<string, number>];
+    expect(params.limit).toBe(1);
+    expect(params.offset).toBe(40);
+    expect(result.content[0].text).toContain("1743 medication intakes");
+    expect(result.content[0].text).toContain("pass offset: 41 to continue");
+    expect(result.structuredContent).toMatchObject({
+      total: 1743,
+      has_more: true,
+      next_offset: 41,
+    });
+  });
+
   it("filters to one course in the query rather than making the caller sift", async () => {
-    meds.listMedicationDoses.mockResolvedValue([]);
+    meds.listMedicationDoses.mockResolvedValue({ doses: [], total: 0 });
 
     await (await handlers()).get("list_medication_doses")!(
       {
@@ -450,16 +489,19 @@ describe("list_medication_doses", () => {
 
   it("quotes each intake in the zone the header names, not in UTC", async () => {
     regen.readTimezonePreference.mockResolvedValue("Asia/Bangkok");
-    meds.listMedicationDoses.mockResolvedValue([
-      {
-        scheduled_at: "2026-08-24T15:00:00+00:00",
-        actual_at: "2026-08-24T15:00:00+00:00",
-        taken_at: null,
-        medication_name: "Атаракс",
-        planned_intake: { intake: { amount: 0.5, unit: "pill" } },
-        status: "scheduled",
-      },
-    ]);
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-08-24T15:00:00+00:00",
+          actual_at: "2026-08-24T15:00:00+00:00",
+          taken_at: null,
+          medication_name: "Атаракс",
+          planned_intake: { intake: { amount: 0.5, unit: "pill" } },
+          status: "scheduled",
+        },
+      ],
+      total: 1,
+    });
 
     const result = await (await handlers()).get("list_medication_doses")!(
       { ...PAGE, from: "2026-08-24", to: "2026-08-24" },
@@ -475,16 +517,19 @@ describe("list_medication_doses", () => {
 
   it("carries the zone and the local readings in the payload", async () => {
     regen.readTimezonePreference.mockResolvedValue("Asia/Bangkok");
-    meds.listMedicationDoses.mockResolvedValue([
-      {
-        scheduled_at: "2026-08-24T15:00:00+00:00",
-        actual_at: "2026-08-24T15:00:00+00:00",
-        taken_at: "2026-08-24T16:33:47+00:00",
-        medication_name: "Атаракс",
-        planned_intake: null,
-        status: "taken",
-      },
-    ]);
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-08-24T15:00:00+00:00",
+          actual_at: "2026-08-24T15:00:00+00:00",
+          taken_at: "2026-08-24T16:33:47+00:00",
+          medication_name: "Атаракс",
+          planned_intake: null,
+          status: "taken",
+        },
+      ],
+      total: 1,
+    });
 
     const result = await (await handlers()).get("list_medication_doses")!(
       { ...PAGE, from: "2026-08-24", to: "2026-08-24" },

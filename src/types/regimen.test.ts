@@ -104,16 +104,22 @@ describe("getCourseWindow", () => {
     ).toEqual({ start: "2026-01-01", end: "2026-03-01" });
   });
 
-  it("counts the days of a for_days course from its start", () => {
+  it("ends a for_days course on its last dosing day, not the day after", () => {
+    // `generate_med_dose_events_for_person_ids` skips any date at or after
+    // `start + days`, so a four-day course starting on the 26th doses on the
+    // 26th through the 29th. Rendering the 30th would put a one-day error into
+    // every answer about when a dose changed.
     expect(getCourseWindow({ type: "for_days", start_date: "2026-07-26", days: 4 })).toEqual({
       start: "2026-07-26",
-      end: "2026-07-30",
+      end: "2026-07-29",
     });
   });
 
-  it("agrees with the status the same window implies", () => {
-    // The two must not drift: a course rendered as ending on a date the status
-    // still calls active would be worse than showing no dates at all.
+  it("never calls a course completed while its window is still open", () => {
+    // The status boundary is deliberately a day later than the last dosing day
+    // for `for_days` -- the dashboard has always treated it that way. What must
+    // not happen is the reverse: a window shown as closed on a day the status
+    // still calls active.
     const duration: MedDuration = { type: "for_days", start_date: "2026-07-26", days: 4 };
     const { end } = getCourseWindow(duration);
 
