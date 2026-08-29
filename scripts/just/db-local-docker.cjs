@@ -163,7 +163,10 @@ function startSchemaOwners() {
   // and `seed.sql` writes an `auth.users` row), so both services run their own migrations here
   // before ours do. The CLI reaches the same state by starting the full stack.
   log("starting storage-api so it migrates the storage schema");
-  docker([
+  // Checked, unlike before: a `docker run` that fails — an image that cannot be pulled, most
+  // often — used to surface three minutes later as "Timed out waiting for storage schema",
+  // which names the symptom and hides the cause. That is exactly how it failed in CI.
+  const storage = docker([
     "run",
     "-d",
     "--name",
@@ -194,13 +197,16 @@ function startSchemaOwners() {
     "ENABLE_IMAGE_TRANSFORMATION=false",
     STORAGE_IMAGE,
   ]);
+  if (storage.status !== 0) {
+    throw new Error(`Failed to start ${STORAGE_CONTAINER}: ${storage.stderr?.trim() ?? ""}`);
+  }
   waitFor("storage schema", () => {
     const result = psql(["-Atc", "select to_regclass('storage.buckets') is not null"]);
     return result.status === 0 && result.stdout.trim() === "t";
   });
 
   log("starting gotrue so it migrates the auth schema");
-  docker([
+  const auth = docker([
     "run",
     "-d",
     "--name",
@@ -229,6 +235,9 @@ function startSchemaOwners() {
     "GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated",
     AUTH_IMAGE,
   ]);
+  if (auth.status !== 0) {
+    throw new Error(`Failed to start ${AUTH_CONTAINER}: ${auth.stderr?.trim() ?? ""}`);
+  }
   waitFor("auth schema", () => {
     const result = psql([
       "-Atc",
