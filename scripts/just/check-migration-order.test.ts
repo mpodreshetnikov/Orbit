@@ -36,7 +36,39 @@ describe("migration order evaluation", () => {
     });
 
     expect(result.added).toEqual(["20260809120000_different_name.sql"]);
-    expect(result.offenders).toEqual(["20260809120000_different_name.sql"]);
+    expect(result.duplicates).toEqual(["20260809120000_different_name.sql"]);
+  });
+
+  it("flags two added files sharing a timestamp even when both sort after the base", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: [...BASE, "20260901000000_x.sql", "20260901000000_y.sql"],
+    });
+
+    expect(result.duplicates).toEqual(["20260901000000_x.sql", "20260901000000_y.sql"]);
+    expect(result.offenders).toEqual([]);
+  });
+
+  it("does not let the allowlist excuse a duplicate version", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: [...BASE, "20260809120000_duplicate.sql"],
+      allowlist: [{ version: "20260809120000", rationale: RATIONALE }],
+    });
+
+    expect(result.duplicates).toEqual(["20260809120000_duplicate.sql"]);
+    expect(result.allowed).toEqual([]);
+  });
+
+  it("leaves a duplicate already on the base branch to the change that introduced it", () => {
+    const withDuplicate = [...BASE, "20260802120000_a_twin.sql"];
+    const result = evaluateMigrationOrder({
+      baseFiles: withDuplicate,
+      headFiles: [...withDuplicate, "20260810000000_new.sql"],
+    });
+
+    expect(result.duplicates).toEqual([]);
+    expect(result.offenders).toEqual([]);
   });
 
   it("passes when nothing was added", () => {
@@ -93,6 +125,15 @@ describe("migration order evaluation", () => {
 
     expect(result.offenders).toEqual([]);
     expect(result.latestBaseVersion).toBeNull();
+  });
+
+  it("still catches a duplicate with no base migrations to order against", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: [],
+      headFiles: ["20260101000000_a.sql", "20260101000000_b.sql"],
+    });
+
+    expect(result.duplicates).toEqual(["20260101000000_a.sql", "20260101000000_b.sql"]);
   });
 });
 

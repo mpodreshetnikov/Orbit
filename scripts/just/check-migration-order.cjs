@@ -83,35 +83,59 @@ function parseAllowlist(contents) {
 }
 
 /**
- * Pure core: which of head's new migrations would be applied out of order against base.
+ * Pure core: which of head's new migrations production could not apply as written.
+ *
+ * Two distinct faults, because only one of them is excusable.
+ *
+ * A duplicate version is never applicable. The remote migration history is keyed by version, so a
+ * second file carrying one already there -- whether the twin is on the base branch or added beside
+ * it in the same change -- cannot be recorded as its own migration, and its SQL silently never
+ * runs. No rationale changes that, so the allowlist does not reach these.
+ *
+ * Being out of order is a question of what schema the file meets, which a reviewer can answer. Those
+ * the allowlist can exempt.
  *
  * Additions are identified by filename rather than version, because a new file may reuse a
- * timestamp the base already carries. Such a file does not sort after the base's latest -- it ties
- * with it, and duplicate versions collide in the remote migration history besides -- so the
- * comparison is "does not sort after", not "sorts before".
+ * timestamp the base already carries. For the ordering test the comparison is "does not sort after"
+ * rather than "sorts before", so a tie is caught even where the duplicate test does not reach.
  *
  * @param {{ baseFiles: string[], headFiles: string[], allowlist?: { version: string, rationale?: string }[] }} input
  */
 function evaluateMigrationOrder({ baseFiles, headFiles, allowlist = [] }) {
   const baseMigrations = migrationsOnly(baseFiles);
+  const headMigrations = migrationsOnly(headFiles);
   const baseNames = new Set(baseMigrations);
   const allowed = new Set(allowlist.map((entry) => entry.version));
-  const added = migrationsOnly(headFiles).filter((fileName) => !baseNames.has(fileName));
+  const added = headMigrations.filter((fileName) => !baseNames.has(fileName));
+
+  const occurrences = new Map();
+  for (const fileName of headMigrations) {
+    const version = String(versionOf(fileName));
+    occurrences.set(version, (occurrences.get(version) ?? 0) + 1);
+  }
+  // Only additions are reported: a duplicate already present on the base branch is not this
+  // change's to answer for, and flagging it would block every unrelated pull request.
+  const duplicates = added
+    .filter((fileName) => (occurrences.get(String(versionOf(fileName))) ?? 0) > 1)
+    .sort();
+  const duplicateNames = new Set(duplicates);
 
   if (baseMigrations.length === 0) {
-    return { added, latestBaseVersion: null, offenders: [], allowed: [] };
+    return { added, latestBaseVersion: null, duplicates, offenders: [], allowed: [] };
   }
 
   const latestBaseVersion = baseMigrations
     .map(versionOf)
     .reduce((a, b) => (String(a) > String(b) ? a : b));
   const outOfOrder = added
+    .filter((fileName) => !duplicateNames.has(fileName))
     .filter((fileName) => String(versionOf(fileName)) <= String(latestBaseVersion))
     .sort();
 
   return {
     added,
     latestBaseVersion,
+    duplicates,
     offenders: outOfOrder.filter((fileName) => !allowed.has(String(versionOf(fileName)))),
     allowed: outOfOrder.filter((fileName) => allowed.has(String(versionOf(fileName)))),
   };
@@ -172,21 +196,41 @@ function readAllowlist() {
   return parseAllowlist(fs.readFileSync(ALLOWLIST_PATH, "utf8"));
 }
 
-function formatFailure({ offenders, latestBaseVersion, baseRef }) {
-  return [
-    `Migration(s) added out of order relative to ${baseRef}:`,
-    ...offenders.map((fileName) => `  ${fileName} does not sort after ${latestBaseVersion}`),
-    "",
-    `${baseRef} already carries ${latestBaseVersion}, so production has applied it. A migration`,
-    "that does not sort after it is applied against a schema those later migrations already",
-    "changed, which is an order `db reset` never exercises. A migration reusing that exact",
-    "timestamp collides in the remote migration history besides.",
-    "",
-    "Rename the file to a timestamp after the latest one on the base branch (its contents are",
-    "unchanged; only the ordering is). If applying it out of order is genuinely intended and",
-    `reviewed, add a line to ${MIGRATIONS_DIR}/.out-of-order-allowlist of the form`,
-    "'<version> # why it is safe against the newer schema'.",
-  ].join("\n");
+function formatFailure({ duplicates, offenders, latestBaseVersion, baseRef }) {
+  const lines = [];
+
+  if (duplicates.length > 0) {
+    lines.push(
+      "Migration(s) added under a timestamp another migration already uses:",
+      ...duplicates.map((fileName) => `  ${fileName}`),
+      "",
+      "The remote migration history is keyed by that timestamp, so a second file carrying it",
+      "cannot be recorded as its own migration and its SQL silently never runs. The allowlist does",
+      "not cover this: no rationale makes a duplicate version applicable. Give the file a",
+      "timestamp nothing else uses.",
+    );
+  }
+
+  if (offenders.length > 0) {
+    if (lines.length > 0) {
+      lines.push("");
+    }
+    lines.push(
+      `Migration(s) added out of order relative to ${baseRef}:`,
+      ...offenders.map((fileName) => `  ${fileName} does not sort after ${latestBaseVersion}`),
+      "",
+      `${baseRef} already carries ${latestBaseVersion}, so production has applied it. A migration`,
+      "that does not sort after it is applied against a schema those later migrations already",
+      "changed, which is an order `db reset` never exercises.",
+      "",
+      "Rename the file to a timestamp after the latest one on the base branch (its contents are",
+      "unchanged; only the ordering is). If applying it out of order is genuinely intended and",
+      `reviewed, add a line to ${MIGRATIONS_DIR}/.out-of-order-allowlist of the form`,
+      "'<version> # why it is safe against the newer schema'.",
+    );
+  }
+
+  return lines.join("\n");
 }
 
 function main() {
@@ -217,7 +261,7 @@ function main() {
     console.log(`Migration ${fileName} is out of order but allowlisted; not failing.`);
   }
 
-  if (result.offenders.length > 0) {
+  if (result.duplicates.length > 0 || result.offenders.length > 0) {
     console.error(formatFailure({ ...result, baseRef }));
     return 1;
   }

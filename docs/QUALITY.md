@@ -131,7 +131,8 @@ A new migration's timestamp must sort **after** every migration already on the b
 - `db-reset` cannot detect that: it always replays from scratch in filename order, so the order it proves is not the order production uses. The two agree only for migrations that sort after everything already deployed.
 - If your branch was opened before another migration merged, rename yours to a later timestamp. The contents do not change, only the ordering.
 - CI enforces the rule with `quality-migration-order`, which runs inside `quality` and compares against the pull request's actual base branch.
-- `supabase/migrations/.out-of-order-allowlist` is the reviewed exception. Each entry is `<14-digit version> # <why it is safe against the newer schema>`; the rationale is required and an entry without one fails the check.
+- `supabase/migrations/.out-of-order-allowlist` is the reviewed exception for ordering only. Each entry is `<14-digit version> # <why it is safe against the newer schema>`; the rationale is required and an entry without one fails the check.
+- A duplicate timestamp is never allowlistable. The remote migration history is keyed by version, so a second file carrying one another migration already uses cannot be recorded as its own migration and its SQL silently never runs. Give it a timestamp nothing else uses.
 
 ## Change-Type Check Matrix
 
