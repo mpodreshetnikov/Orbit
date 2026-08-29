@@ -146,6 +146,13 @@ function describeCourseWindow(duration: MedDuration | null | undefined): string 
   if (start && end) return `${start} to ${end}`;
   if (start) return `from ${start}`;
   if (end) return `until ${end}`;
+  // A `for_days` course may omit its start date; the generator infers one from
+  // the earliest event, `created_at` or today, so the course is bounded even
+  // though no window can be computed from the row. Saying how long it runs
+  // beats saying nothing about its duration at all.
+  if (duration?.type === "for_days" && typeof duration.days === "number") {
+    return `for ${duration.days} days (start date not recorded)`;
+  }
   return "";
 }
 
@@ -157,6 +164,7 @@ function describeCourseWindow(duration: MedDuration | null | undefined): string 
 function describeSchedule(
   schedule: MedSchedule | null | undefined,
   dose?: PlannedIntake | null,
+  timezone?: string,
 ): string {
   if (!schedule) return "schedule unknown";
 
@@ -207,14 +215,38 @@ function describeSchedule(
     case "interval_hours":
       return (
         `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
-        `${schedule.amount != null ? ` (${schedule.amount}${dose?.intake?.unit ? ` ${dose.intake.unit}` : ""} per intake)` : ""}`
+        `${schedule.amount != null ? ` (${schedule.amount}${dose?.intake?.unit ? ` ${dose.intake.unit}` : ""} per intake)` : ""}` +
+        // A scalar override is the same claim as a per-slot one, so it earns the
+        // same warning: the generator replaces the amount and copies `active`.
+        `${overrideNote(schedule.amount == null ? undefined : [schedule.amount])}`
       );
     case "interval_days":
-      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
+      // `time_of_day` is the deprecated single-time form, and the generator
+      // still reads it (`…single_generator.sql`), so a legacy row doses at a
+      // time this line would otherwise not mention at all.
+      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(
+        Array.isArray(schedule.times) && schedule.times.length > 0
+          ? schedule.times
+          : typeof schedule.time_of_day === "string"
+            ? [schedule.time_of_day]
+            : undefined,
+        schedule.amounts,
+      )}${overrideNote(schedule.amounts)}`;
     case "days_of_week":
       return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
     case "one_off":
-      return "schedule one_off";
+      // The due instant is a timestamp, so it is quoted only where a zone has
+      // been resolved (T-0027: a time this server prints is converted and
+      // labelled, or it is not printed). `list_medications` resolves none, and
+      // says where to find it rather than rendering it in UTC.
+      return (
+        "schedule one_off" +
+        (typeof schedule.due_at === "string"
+          ? timezone
+            ? `, due ${formatZoned(schedule.due_at, timezone)}`
+            : ", due time in the payload"
+          : "")
+      );
     default:
       return "schedule unknown";
   }
@@ -447,7 +479,7 @@ export function registerMedicationTools(server: McpToolServer): void {
         // doses and stock movements it is counting.
         const plan = [
           describeIntake(detail.regimen.dose_definition),
-          describeSchedule(detail.regimen.schedule, detail.regimen.dose_definition),
+          describeSchedule(detail.regimen.schedule, detail.regimen.dose_definition, zone.timezone),
           describeCourseWindow(detail.regimen.duration),
           describeStock(detail.regimen),
         ].filter((part) => part.length > 0);

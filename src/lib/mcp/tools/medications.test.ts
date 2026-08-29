@@ -219,6 +219,98 @@ describe("list_medications", () => {
     expect(text).not.toContain("Вещество 8");
   });
 
+  it("renders a one-off due time only where a zone was resolved", async () => {
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Флуконазол",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "capsule" } },
+          schedule: { mode: "one_off", due_at: "2026-08-30T02:00:00+00:00" },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    // T-0027: an instant is converted and labelled or it is not printed, and
+    // this tool resolves no zone — so it says where the time is instead.
+    expect(text).toContain("schedule one_off, due time in the payload");
+    expect(text).not.toContain("2026-08-30");
+  });
+
+  it("keeps the time of a legacy interval_days row", async () => {
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Метотрексат",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "interval_days", interval: { every: 3 }, time_of_day: "09:00" },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("every 3d at 09:00 (local wall clock)");
+  });
+
+  it("says how long a for_days course runs when it records no start date", async () => {
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Аугментин",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "daily_times", times: ["09:00"] },
+          duration: { type: "for_days", days: 7 },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("for 7 days (start date not recorded)");
+  });
+
+  it("warns when an interval_hours schedule overrides the base amount", async () => {
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Ибупрофен",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            active: [{ name: "Ибупрофен", amount: 100, unit: "milligram" }],
+          },
+          schedule: { mode: "interval_hours", interval: { every: 8 }, amount: 2 },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("every 8h (2 pill per intake)");
+    expect(text).toContain("strength on file is for the 1 pill dose only");
+  });
+
   it("cuts a long note rather than spending the reply on it", async () => {
     meds.listMedications.mockResolvedValue({
       regimens: [
