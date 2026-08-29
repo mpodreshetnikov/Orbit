@@ -49,9 +49,31 @@ Two narrow cases justify looking without an event, each **once**:
 Neither is a standing schedule. "The PR might get merged" is not one of these: a merge needs a
 human, and a human acting is an event.
 
+## The Quiet Hour, Then Detach
+
+Staying subscribed forever is its own kind of watching. So the subscription has an end:
+
+1. Once the PR clears the handoff bar, **stay subscribed for one hour of quiet**. That window
+   catches the automated review and the quick follow-up that tends to trail it.
+2. **Any new comment, review or CI transition restarts the hour.** Handle it, then the window
+   starts again from that event.
+3. **An hour with nothing new ends the subscription.** Unsubscribe, say you have stopped watching,
+   and leave the PR alone.
+
+After that the PR moves only on the owner's word. Their approval is what unblocks the merge, and
+the merge is theirs to make or to ask for explicitly — never merge a PR because it looks ready and
+has been quiet. Do not re-subscribe, re-check, or nudge on your own; if they pick it back up, they
+will say so, and that is the event.
+
+The one scheduled wake-up this permits — the timer that ends the quiet hour — is bounded and
+terminal: its only job is to unsubscribe. It is not a check-in, it never re-arms itself, and it is
+the only timer a finished PR may have.
+
 ## Never
 
-- Never poll a PR on a timer because it is open. Open and waiting is its normal state.
+- Never poll a PR on a timer because it is open. Open and waiting is its normal state. The single
+  timer that ends the quiet hour is not polling — it stops the watching rather than continuing it.
+- Never merge a PR that has gone quiet, however ready it looks. Quiet is not approval.
 - Never push an empty commit, or close and reopen a PR, to make CI or the reviewer run again.
 - Never re-request a review that nothing has changed for.
 - Never send a "no changes since last check" message. If nothing happened, nothing is worth saying.
@@ -66,4 +88,5 @@ When handing off a PR, state:
 - `checks`: CI outcome, or that the repository runs none on this PR.
 - `review`: findings addressed, and anything deliberately not addressed with the reason.
 - `waiting_on`: what a human has to do next.
-- `watching`: whether the session stays subscribed to events, or has stopped entirely.
+- `watching`: that the session stays subscribed until an hour of quiet passes, or that it has
+  already unsubscribed and stopped.
