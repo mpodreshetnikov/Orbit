@@ -54,17 +54,78 @@ function startDockerDesktop(executablePath) {
   }
 }
 
+/**
+ * Starts the daemon on Linux, where nothing else will.
+ *
+ * On a developer's machine the daemon already runs under systemd, which is why this file used
+ * to treat anything but Windows as ready. In an agent container it does not: the binary is
+ * installed and the socket is absent, so `docker info` fails with the same message a machine
+ * without Docker at all would give. Reading that as "no Docker here" cost T-0013 every database
+ * check it had — six migrations, four database functions and five pgTAP files were written and
+ * pushed without ever being executed, and the first CI run of that SQL found four defects.
+ *
+ * The default arguments disable iptables and ip6tables because the agent kernel boots with
+ * `ipv6.disable=1`, which fails ip6tables setup outright; published ports still work through
+ * the userland proxy. `DOCKERD_ARGS` overrides them where the host is less constrained.
+ */
+function startDockerDaemonOnLinux(out, waitMs, pollMs) {
+  const dockerdInstalled = ["/usr/bin/dockerd", "/usr/local/bin/dockerd"].some((candidate) =>
+    fs.existsSync(candidate),
+  );
+  if (!dockerdInstalled) {
+    out.error("Docker is not reachable and no dockerd binary is installed.");
+    return 1;
+  }
+
+  if (typeof process.getuid === "function" && process.getuid() !== 0) {
+    out.error(
+      "Docker is not reachable and this process is not root, so the daemon cannot be started " +
+        "from here. Start it with `sudo dockerd` or through your service manager.",
+    );
+    return 1;
+  }
+
+  const args = process.env.DOCKERD_ARGS
+    ? process.env.DOCKERD_ARGS.split(/\s+/).filter(Boolean)
+    : ["--iptables=false", "--ip6tables=false"];
+
+  out.log("Docker engine is not reachable. Starting dockerd...");
+  try {
+    const child = spawn("dockerd", args, { detached: true, stdio: "ignore" });
+    child.unref();
+  } catch (error) {
+    out.error(`Failed to launch dockerd: ${error.message}`);
+    return 1;
+  }
+
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    sleep(pollMs);
+    if (dockerFullyReachable()) {
+      out.log("Docker daemon is ready.");
+      return 0;
+    }
+  }
+
+  out.error(`dockerd did not become ready within ${Math.round(waitMs / 1000)}s.`);
+  return 1;
+}
+
 function ensureDockerReady(options = {}) {
   const waitMs = options.waitMs ?? 120000;
   const pollMs = options.pollMs ?? 2000;
   const stableWaitMs = options.stableWaitMs ?? 15000;
   const out = options.out ?? console;
 
-  if (process.platform !== "win32") {
+  if (process.env.SKIP_DOCKER_PREFLIGHT === "1") {
     return 0;
   }
 
-  if (process.env.SKIP_DOCKER_PREFLIGHT === "1") {
+  if (process.platform === "linux") {
+    return dockerFullyReachable() ? 0 : startDockerDaemonOnLinux(out, waitMs, pollMs);
+  }
+
+  if (process.platform !== "win32") {
     return 0;
   }
 

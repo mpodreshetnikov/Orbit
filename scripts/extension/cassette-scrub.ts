@@ -79,6 +79,26 @@ const SENSITIVE_QUERY_PARAMS = new Set([
 /** Any run of 13+ digits is a card or account number, wherever it turns up in free text. */
 const LONG_DIGIT_RUN = /\d{13,}/g;
 
+/**
+ * Epoch milliseconds are a thirteen-digit run too, and they are the one thing a cassette must
+ * keep: the connector reads operation timing out of `operationTime.milliseconds` and
+ * `debitingTime.milliseconds`, and Milestone 4's acceptance turns on the contract test failing
+ * when that timing is removed. So the leak scan has to tell a timestamp from an account number
+ * rather than flagging every long run — otherwise the first genuine recording turns the commit
+ * gate red, and the only way to green is deleting the data the cassette exists to carry.
+ *
+ * The bound is the value, not the shape: a run counts as a timestamp only if it reads as a date
+ * no later than 2100. A thirteen-digit card number starting with 4276 lands in the year 2105
+ * and is still reported, as is every run of fourteen digits or more.
+ */
+const EPOCH_MS_UPPER_BOUND = Date.UTC(2100, 0, 1);
+
+function isPlausibleEpochMilliseconds(run: string): boolean {
+  if (run.length !== 13) return false;
+  const value = Number(run);
+  return Number.isSafeInteger(value) && value <= EPOCH_MS_UPPER_BOUND;
+}
+
 export function scrubUrl(rawUrl: string): string {
   let url: URL;
   try {
@@ -176,6 +196,7 @@ export function findCassetteLeaks(serialized: string): string[] {
 
   const digitMatches = serialized.match(LONG_DIGIT_RUN) ?? [];
   for (const match of digitMatches) {
+    if (isPlausibleEpochMilliseconds(match)) continue;
     leaks.push(`long digit run: ${match}`);
   }
 

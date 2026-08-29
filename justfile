@@ -204,6 +204,22 @@ supabase-local-stop:
 supabase-local-status:
   npx supabase status
 
+# Bring up a Docker-only local DB for hosts where `supabase start` cannot run (no IPv6).
+supabase-docker-up:
+  node scripts/just/db-local-docker.cjs up
+
+# Tear the Docker-only local DB down.
+supabase-docker-down:
+  node scripts/just/db-local-docker.cjs down
+
+# Run pgTAP against the Docker-only local DB.
+supabase-docker-test *args:
+  node scripts/just/db-local-docker.cjs test {{args}}
+
+# Run DB lint against the Docker-only local DB.
+supabase-docker-lint:
+  node scripts/just/db-local-docker.cjs lint
+
 # Apply pending local migrations without reset.
 supabase-local-migrate-only:
   npx supabase migration up

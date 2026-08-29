@@ -14,7 +14,30 @@ request to the bank's API carries a `sessionid` scraped from a live authorised p
 signing in cannot be automated. Trying to would make CI a source of both false failures and
 risk to the account.
 
-To record:
+## Recording from the browser console (no checkout needed)
+
+The person who can sign in to the bank is not necessarily the person with a checkout, and
+asking them to clone the repository, install node and run a build before they can spend fifteen
+minutes recording is most of the reason no cassette existed for so long. This route needs
+nothing but their signed-in browser:
+
+1. Build the snippet once, from any checkout:
+   `npx tsx scripts/extension/build-cassette-recorder.ts .tmp/cassette-recorder.js`
+2. Hand them that one file. On <https://www.tbank.ru/mybank/operations/>, signed in and with
+   the operations list loaded, they open DevTools → Console, paste it and press Enter. Chrome
+   asks them to type `allow pasting` first.
+3. It records, scrubs **in the browser**, and downloads `cassette.json`. Defaults are the last
+   30 days and up to 25 receipts; `orbitRecordCassette({ windowDays: 60, maxReceipts: 40 })`
+   re-runs with other bounds.
+4. Put the file in a subdirectory here and run `test-unit-node` and `test-unit-ext`.
+
+The snippet refuses to download a recording that still trips `findCassetteLeaks`, so a scrubber
+miss surfaces as a console error rather than as a file someone might pass on. Its endpoint
+discovery, range walk and receipt key are mirrored from `tbank-web.ts` and asserted against
+`createCassettePlayer`, because a cassette recorded against URLs the connector never asks for
+replays as a wall of misses while looking like a real recording.
+
+## Recording from a checkout
 
 1. `just extension-debug-live tbank_web 10` — pass the bank's sign-in when it appears.
 2. Run the captured artifacts through `scripts/extension/cassette-scrub.ts`. A raw recording
