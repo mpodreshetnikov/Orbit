@@ -629,16 +629,20 @@ export function registerMedicationTools(server: McpToolServer): void {
       // A 30-day horizon on a twice-daily course is 120 intakes. List the
       // ones nearest now and say how many were left out, rather than either
       // dumping all of them or going back to a bare count.
-      const listed = <T>(rows: T[], keep: "first" | "last") => {
-        if (rows.length <= DETAIL_DOSE_LIMIT) return { rows, omitted: 0 };
-        return {
-          rows:
-            keep === "first" ? rows.slice(0, DETAIL_DOSE_LIMIT) : rows.slice(-DETAIL_DOSE_LIMIT),
-          omitted: rows.length - DETAIL_DOSE_LIMIT,
-        };
+      // `total`, not `rows.length`: the query is bounded, so counting the rows
+      // it returned would report its own page as the whole horizon -- the
+      // truncation-as-total defect the listings were fixed for.
+      const listed = <T>(rows: T[], total: number, keep: "first" | "last") => {
+        const shown =
+          rows.length <= DETAIL_DOSE_LIMIT
+            ? rows
+            : keep === "first"
+              ? rows.slice(0, DETAIL_DOSE_LIMIT)
+              : rows.slice(-DETAIL_DOSE_LIMIT);
+        return { rows: shown, omitted: Math.max(0, total - shown.length) };
       };
-      const recent = listed(detail.recentDoses, "last");
-      const upcoming = listed(detail.upcomingDoses, "first");
+      const recent = listed(detail.recentDoses, detail.recentTotal, "last");
+      const upcoming = listed(detail.upcomingDoses, detail.upcomingTotal, "first");
       // An omitted row needs a way back, like every other truncation this
       // server prints: `list_medication_doses` takes this course's id and a
       // range, so the pointer names the tool and the argument rather than
@@ -659,7 +663,7 @@ export function registerMedicationTools(server: McpToolServer): void {
 
       return ok(
         `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
-          `${detail.upcomingDoses.length} upcoming dose(s), ${detail.recentDoses.length} in the recent window. ` +
+          `${detail.upcomingTotal} upcoming dose(s), ${detail.recentTotal} in the recent window. ` +
           `Times are ${zone.timezone}` +
           `${next ? `; next ${formatZoned(dueAt(next), zone.timezone)}` : ""}` +
           `${previous ? `; last ${formatZoned(previous.taken_at ?? dueAt(previous), zone.timezone)}` : ""}.` +

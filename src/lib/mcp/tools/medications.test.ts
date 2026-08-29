@@ -519,6 +519,8 @@ describe("get_medication", () => {
     meds.getMedication.mockResolvedValue({
       regimen: { custom_name: "Ferrous sulfate", effective_status: "active" },
       upcomingDoses: [{ id: "d-1" }, { id: "d-2" }],
+      upcomingTotal: 2,
+      recentTotal: 1,
       recentDoses: [{ id: "d-0" }],
       inventoryTransactions: [],
     });
@@ -556,6 +558,8 @@ describe("get_medication", () => {
       upcomingDoses: [
         { id: "d-2", scheduled_at: "2026-08-25T15:00:00+00:00", actual_at: null, taken_at: null },
       ],
+      upcomingTotal: 1,
+      recentTotal: 1,
       recentDoses: [
         {
           id: "d-1",
@@ -608,6 +612,8 @@ describe("get_medication", () => {
           status: "scheduled",
         },
       ],
+      upcomingTotal: 1,
+      recentTotal: 1,
       recentDoses: [
         {
           id: "d-1",
@@ -656,6 +662,8 @@ describe("get_medication", () => {
     meds.getMedication.mockResolvedValue({
       regimen: { custom_name: "Золофт", effective_status: "active" },
       upcomingDoses: [],
+      upcomingTotal: 0,
+      recentTotal: 0,
       recentDoses: [],
       inventoryTransactions: [
         {
@@ -693,6 +701,8 @@ describe("get_medication", () => {
     meds.getMedication.mockResolvedValue({
       regimen: { custom_name: "Золофт", effective_status: "active" },
       upcomingDoses: doses,
+      upcomingTotal: 25,
+      recentTotal: 0,
       recentDoses: [],
       inventoryTransactions: [],
       inventoryTotal: 0,
@@ -708,6 +718,38 @@ describe("get_medication", () => {
     expect(text).toContain("...15 more; call list_medication_doses with regimen_id: r-1");
   });
 
+  it("counts the whole horizon, not the page the query returned", async () => {
+    // The detail query is bounded now, so counting its rows would report the
+    // page as the horizon: an hourly course would answer "50 upcoming" when the
+    // database holds 1440, and the omitted tail would be understated with it.
+    meds.getMedication.mockResolvedValue({
+      regimen: { custom_name: "Золофт", effective_status: "active" },
+      upcomingDoses: [
+        {
+          scheduled_at: "2026-08-29T08:00:00.000Z",
+          actual_at: "2026-08-29T08:00:00.000Z",
+          planned_intake: { intake: { amount: 1, unit: "pill" } },
+          status: "scheduled",
+        },
+      ],
+      recentDoses: [],
+      upcomingTotal: 1440,
+      recentTotal: 812,
+      inventoryTransactions: [],
+      inventoryTotal: 0,
+    });
+
+    const text = (
+      await (await handlers()).get("get_medication")!(
+        { regimen_id: "r-1", horizon_days: 30, inventory_offset: 0 },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("1440 upcoming dose(s), 812 in the recent window");
+    expect(text).toContain("...1439 more; call list_medication_doses with regimen_id: r-1");
+  });
+
   it("says an inventory offset is past the end rather than dropping the section", async () => {
     // An offset can outrun the ledger by being asked for directly or by
     // movements being removed between two continuation calls. Answering a
@@ -716,6 +758,8 @@ describe("get_medication", () => {
     meds.getMedication.mockResolvedValue({
       regimen: { custom_name: "Золофт", effective_status: "active" },
       upcomingDoses: [],
+      upcomingTotal: 0,
+      recentTotal: 0,
       recentDoses: [],
       inventoryTransactions: [],
       inventoryTotal: 143,
@@ -747,6 +791,8 @@ describe("get_medication", () => {
           status: "snoozed",
         },
       ],
+      upcomingTotal: 1,
+      recentTotal: 1,
       recentDoses: [
         {
           scheduled_at: "2026-08-28T02:00:00.000Z",
@@ -985,6 +1031,8 @@ describe("list_medication_doses", () => {
         inventory: { enabled: true, current_amount: 9, unit: "u".repeat(300) },
       },
       upcomingDoses: [],
+      upcomingTotal: 0,
+      recentTotal: 0,
       recentDoses: [],
       inventoryTransactions: [
         {

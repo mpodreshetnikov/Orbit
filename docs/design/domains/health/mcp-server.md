@@ -223,6 +223,12 @@ Conventions that matter:
   ledger movement — since it is unrestricted on the dose definition, on the inventory and on
   `med_inventory_transactions.unit`, and it is the field this server repeats most.
 
+  `get_medication` asks for its doses in two counted pages, one either side of now, rather than one
+  window split in memory: an hourly course over a 30-day horizon has around 1,440 events a side, so a
+  single ascending query would end at PostgREST's cap before "upcoming" began, and the counts would
+  report that truncation as the horizon. The counts a reply states come from the database's own
+  count, never from the rows it happened to return.
+
   A truncated detail section names the tool that can fetch the rest:
   `get_medication` lists the intakes nearest now and ends with
   `...15 more; call list_medication_doses with regimen_id: … and a from/to range for them`.

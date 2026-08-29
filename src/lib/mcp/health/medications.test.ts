@@ -168,16 +168,27 @@ describe("listMedications", () => {
 });
 
 describe("getMedication", () => {
-  it("splits doses into upcoming and recent around now", async () => {
+  it("asks for the doses either side of now separately, each counted", async () => {
+    // One unbounded window split in memory would be cut at PostgREST's
+    // `max_rows`: an hourly course over a 30-day horizon has ~1440 events a
+    // side, so the ascending page would have ended before "upcoming" began and
+    // the counts would have reported the truncation as the total.
     const past = new Date(Date.now() - 3_600_000).toISOString();
     const future = new Date(Date.now() + 3_600_000).toISOString();
 
     const stub = createSupabaseStub({
       med_regimens: [{ data: regimen() }],
       med_dose_events: [
+        // Newest first, as the recent query orders them.
         {
           data: [
-            doseEvent({ id: "past", scheduled_at: past, actual_at: past }),
+            doseEvent({ id: "yesterday", scheduled_at: past, actual_at: past }),
+            doseEvent({ id: "older", scheduled_at: past, actual_at: past }),
+          ],
+          count: 812,
+        },
+        {
+          data: [
             doseEvent({ id: "future", scheduled_at: future, actual_at: future }),
             // Snoozed forward: still scheduled for an hour ago, but due in an
             // hour, which is where the app and the reminder query place it.
@@ -188,15 +199,33 @@ describe("getMedication", () => {
               status: "snoozed",
             }),
           ],
+          count: 1440,
         },
       ],
       med_inventory_transactions: [{ data: [] }],
     });
 
-    const result = await getMedication(stub.client, { regimenId: "r-1", horizonDays: 7 });
+    const result = await getMedication(stub.client, { regimenId: "r-1", horizonDays: 30 });
 
-    expect(result?.upcomingDoses.map((d) => d.id).sort()).toEqual(["future", "snoozed"]);
-    expect(result?.recentDoses.map((d) => d.id)).toEqual(["past"]);
+    // The recent page comes back newest-first and is returned ascending, so the
+    // renderer's "last" slice really is the intakes nearest now.
+    expect(result?.recentDoses.map((d) => d.id)).toEqual(["older", "yesterday"]);
+    expect(result?.upcomingDoses.map((d) => d.id)).toEqual(["future", "snoozed"]);
+    expect(result?.recentTotal).toBe(812);
+    expect(result?.upcomingTotal).toBe(1440);
+
+    // Both pages are bounded in the database, and the boundary between them is
+    // now: the recent side ends strictly before it, the upcoming side starts at
+    // it, so no dose falls in both or neither.
+    expect(stub.argsFor("med_dose_events", "range")).toEqual([
+      [0, 49],
+      [0, 49],
+    ]);
+    const [[ltColumn, ltValue]] = stub.argsFor("med_dose_events", "lt") as [[string, string]];
+    const gte = stub.argsFor("med_dose_events", "gte") as Array<[string, string]>;
+    expect(ltColumn).toBe("actual_at");
+    expect(gte.map(([column]) => column)).toEqual(["actual_at", "actual_at"]);
+    expect(gte[1][1]).toBe(ltValue);
   });
 
   it("returns null for an unknown or deleted regimen without further queries", async () => {

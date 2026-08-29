@@ -106,6 +106,15 @@ export async function listMedications(
 /** How many of the newest stock movements `getMedication` returns. */
 export const INVENTORY_LIMIT = 20;
 
+/**
+ * Doses fetched either side of now for the detail tool.
+ *
+ * The text renders ten a side; the rest ride along in `structuredContent` for a
+ * client that wants them, and the exact totals say how many were left in the
+ * database either way.
+ */
+export const DETAIL_DOSE_FETCH = 50;
+
 export async function getMedication(
   supabase: SupabaseClient<Database>,
   params: {
@@ -118,6 +127,9 @@ export async function getMedication(
   regimen: RegimenWithStatus | null;
   upcomingDoses: MedDoseEvent[];
   recentDoses: MedDoseEvent[];
+  /** How many doses the horizon holds either side of now, of which the nearest are returned. */
+  upcomingTotal: number;
+  recentTotal: number;
   inventoryTransactions: ReturnType<typeof rowToInventoryTransaction>[];
   /** How many movements the ledger holds, of which the newest are returned. */
   inventoryTotal: number;
@@ -142,21 +154,49 @@ export async function getMedication(
   const horizonEnd = new Date(now.getTime() + params.horizonDays * 86_400_000);
   const recentStart = new Date(now.getTime() - params.horizonDays * 86_400_000);
 
-  const { data: events } = await supabase
-    .from("med_dose_events")
-    .select("*")
-    .eq("regimen_id", params.regimenId)
-    .is("deleted_at", null)
-    // `actual_at`, not `scheduled_at`: `snooze_dose.sql` moves the first and
-    // leaves the second, and the effective time is what the reminder query
-    // fires on, what the dashboard sorts by and what these tools now print. A
-    // dose snoozed across midnight belongs to the day it is now due on, and one
-    // snoozed past now is still upcoming.
-    .gte("actual_at", recentStart.toISOString())
-    .lte("actual_at", horizonEnd.toISOString())
-    .order("actual_at", { ascending: true });
+  // Two queries, each counted and bounded, rather than one unbounded window
+  // split in memory. PostgREST caps a response at `max_rows` (1000), and an
+  // hourly course over a 30-day horizon has ~1440 events either side: a single
+  // ascending query would have been cut at the cap, reporting the truncation as
+  // the count and losing the upcoming tail entirely -- the same defect the two
+  // listings were fixed for.
+  //
+  // `actual_at`, not `scheduled_at`: `snooze_dose.sql` moves the first and
+  // leaves the second, and the effective time is what the reminder query fires
+  // on, what the dashboard sorts by and what these tools print. A dose snoozed
+  // across midnight belongs to the day it is now due on, and one snoozed past
+  // now is still upcoming.
+  const nowIso = now.toISOString();
+  const dosePage = (order: "recent" | "upcoming") => {
+    const query = supabase
+      .from("med_dose_events")
+      .select("*", { count: "exact" })
+      .eq("regimen_id", params.regimenId)
+      .is("deleted_at", null);
+    return order === "recent"
+      ? query
+          .gte("actual_at", recentStart.toISOString())
+          .lt("actual_at", nowIso)
+          // Newest first, so the page holds the intakes nearest now rather than
+          // the oldest in the window.
+          .order("actual_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(0, DETAIL_DOSE_FETCH - 1)
+      : query
+          .gte("actual_at", nowIso)
+          .lte("actual_at", horizonEnd.toISOString())
+          .order("actual_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(0, DETAIL_DOSE_FETCH - 1);
+  };
 
-  const doses = ((events ?? []) as unknown as Array<Record<string, unknown>>).map(rowToDoseEvent);
+  const [recent, upcoming] = await Promise.all([dosePage("recent"), dosePage("upcoming")]);
+
+  const toDoses = (rows: unknown) =>
+    ((rows ?? []) as unknown as Array<Record<string, unknown>>).map(rowToDoseEvent);
+  // Back to ascending, which is the order the renderer and the payload expect.
+  const recentDoses = toDoses(recent.data).reverse();
+  const upcomingDoses = toDoses(upcoming.data);
 
   // Counted as well as capped: a caller told only "here are 20 movements"
   // cannot tell a complete ledger from a truncated one, and stock questions are
@@ -174,8 +214,10 @@ export async function getMedication(
 
   return {
     regimen,
-    upcomingDoses: doses.filter((dose) => new Date(dose.actual_at) >= now),
-    recentDoses: doses.filter((dose) => new Date(dose.actual_at) < now),
+    upcomingDoses,
+    recentDoses,
+    upcomingTotal: upcoming.count ?? upcomingDoses.length,
+    recentTotal: recent.count ?? recentDoses.length,
     inventoryTransactions: ((transactions ?? []) as unknown as Array<Record<string, unknown>>).map(
       rowToInventoryTransaction,
     ),
