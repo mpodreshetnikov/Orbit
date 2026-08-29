@@ -159,6 +159,107 @@ describe("cassette console recorder", () => {
     expect(result.warnings.join(" ")).toMatch(/proves nothing/);
   });
 
+  it("splits a capped range and records both halves, as the connector will request them", async () => {
+    // The replay player keys every operations request to the same origin and path, ignoring
+    // start and end, and hands entries back in recorded order. So a recording that answers a
+    // capped range once, where the connector will ask three times, does not merely miss data:
+    // it feeds the connector's second request the first request's body.
+    const cappedPage = Array.from({ length: 100 }, (unused, index) =>
+      operation(`capped-${index}`, -100),
+    );
+    let operationsRequests = 0;
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          operationsRequests += 1;
+          // Only the first response looks capped; the halves come back short.
+          const payload = operationsRequests === 1 ? cappedPage : [operation("small-1", -10)];
+          return new Response(JSON.stringify({ payload }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    // Thirteen days is one whole chunk and no remainder, so the walk starts from exactly one
+    // range and every later request is a split of it.
+    const result = await recordCassette({ name: "dense", windowDays: 13, maxReceipts: 0 }, deps);
+
+    // One range, capped, split into two halves: three requests, three recorded entries.
+    expect(operationsRequests).toBe(3);
+    const rangeEntries = result.cassette.entries.filter((entry) =>
+      entry.url.includes("/api/common/v1/operations"),
+    );
+    expect(rangeEntries).toHaveLength(3);
+    expect(result.cassette.summary?.truncationSuspected).toBe(1);
+
+    // The halves must cover the parent exactly, with no gap and no overlap, or the split loses
+    // whatever falls between them.
+    const bounds = rangeEntries.map((entry) => {
+      const url = new URL(entry.url);
+      return {
+        start: Number(url.searchParams.get("start")),
+        end: Number(url.searchParams.get("end")),
+      };
+    });
+    const [parent, newer, older] = bounds as [
+      (typeof bounds)[0],
+      (typeof bounds)[0],
+      (typeof bounds)[0],
+    ];
+    expect(newer.end).toBe(parent.end);
+    expect(older.start).toBe(parent.start);
+    expect(newer.start - older.end).toBe(1);
+  });
+
+  it("reports a single day still at the cap instead of pretending it is complete", async () => {
+    const cappedPage = Array.from({ length: 100 }, (unused, index) =>
+      operation(`capped-${index}`, -100),
+    );
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(JSON.stringify({ payload: cappedPage }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "saturated", windowDays: 2, maxReceipts: 0 }, deps);
+
+    expect(result.cassette.summary?.truncationUnresolved).toBeGreaterThan(0);
+    expect(result.warnings.join(" ")).toMatch(/cannot be split further/);
+  });
+
+  it("totals the recording in the bank's own terms, deduplicated across ranges", async () => {
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(
+            JSON.stringify({
+              payload: [
+                // The same operation comes back in every range: adjacent ranges overlap on
+                // their bounds, so counting it twice would overstate the month.
+                { ...operation("purchase-1", -2400) },
+                { ...operation("salary-1", 100000) },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "totals", maxReceipts: 0 }, deps);
+
+    expect(result.cassette.summary?.months).toEqual([
+      { month: "2026-08", currency: "RUB", operations: 2, income: "100000.00", expense: "2400.00" },
+    ]);
+  });
+
   it("walks the same ranges as the connector", () => {
     const ranges = buildRanges(NOW - 30 * 24 * 60 * 60 * 1000, NOW, 14);
 

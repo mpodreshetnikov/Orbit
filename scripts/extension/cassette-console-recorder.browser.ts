@@ -59,8 +59,27 @@ async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
   download(`cassette.json`, JSON.stringify(result.cassette, null, 2));
   console.info(
     `[cassette] recorded ${result.counts.operations} operation(s) over ${result.counts.ranges} ` +
-      `range(s) with ${result.counts.receipts} receipt(s), scrubbed and downloaded as cassette.json`,
+      `range request(s) with ${result.counts.receipts} receipt(s), scrubbed and downloaded as ` +
+      "cassette.json",
   );
+
+  // The recording can look complete and be short — a truncated range loses its remainder in
+  // silence. Nothing inside the file reveals that; the bank's own monthly totals do. So they
+  // are printed here, in the bank's own terms, for the one person who can compare them.
+  const summary = result.cassette.summary;
+  if (summary && summary.months.length > 0) {
+    console.info(
+      "[cassette] Compare these against the bank's own totals for the same months before " +
+        "sharing the file. If a month is short, the recording missed operations.",
+    );
+    console.table(summary.months);
+    if (summary.truncationSuspected > 0) {
+      console.info(
+        `[cassette] ${summary.truncationSuspected} range(s) came back looking capped and were ` +
+          "split and re-requested, exactly as the connector does.",
+      );
+    }
+  }
 }
 
 window.orbitRecordCassette = run;

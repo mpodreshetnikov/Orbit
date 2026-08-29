@@ -89,25 +89,45 @@ const LONG_DIGIT_RUN = /\d{13,}/g;
  *
  * The exemption is by field, not by value. Judging on value alone would clear any thirteen-digit
  * number that happens to read as a date before 2100 — and an account number like 4000000000006
- * does, so an unknown field carrying one would pass the scan silently. Only a `milliseconds`
- * value is exempt, which is exactly what the connector reads and nothing else.
+ * does, so an unknown field carrying one would pass the scan silently. Only the three fields
+ * below are exempt, each because blanking it breaks the cassette rather than protecting anyone.
  *
  * A real payload that carries its timing under some other key will therefore be reported rather
  * than passed. That is the safe direction to be wrong in: the recorder refuses to hand over the
  * file and says which run it could not place, instead of shipping an identifier.
  */
-const EXEMPT_TIMESTAMP_VALUE = /"milliseconds"\s*:\s*(\d{13})(?!\d)/g;
+const EXEMPT_STRUCTURAL_VALUES = [
+  /"milliseconds"\s*:\s*(\d{13})(?!\d)/g,
+  // Range bounds are epoch milliseconds too, and they are the only record of which window a
+  // recorded response answered.
+  /[?&](?:start|end)=(\d{13})(?!\d)/g,
+  // The operation id is what `createCassettePlayer` keys a receipt by. A numeric one blanked
+  // here would merge every receipt in the cassette into one entry — the replay would then
+  // answer each request with the first receipt and look like it worked. It is a bank-generated
+  // reference, not a card or account number.
+  /[?&]operationId=(\d{13,})/gi,
+] as const;
 
-function exemptTimestampSpans(serialized: string): Array<[number, number]> {
+function exemptStructuralSpans(serialized: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
-  for (const match of serialized.matchAll(EXEMPT_TIMESTAMP_VALUE)) {
-    const digits = match[1];
-    if (match.index === undefined || digits === undefined) continue;
-    const start = match.index + match[0].length - digits.length;
-    spans.push([start, start + digits.length]);
+  for (const pattern of EXEMPT_STRUCTURAL_VALUES) {
+    for (const match of serialized.matchAll(pattern)) {
+      const digits = match[1];
+      if (match.index === undefined || digits === undefined) continue;
+      const start = match.index + match[0].length - digits.length;
+      spans.push([start, start + digits.length]);
+    }
   }
   return spans;
 }
+
+/**
+ * Query parameters whose value the replay matches on, or which record the window a response
+ * answered. Running the free-text digit scrub over these does more harm than the digits could:
+ * `operationId` blanked merges every receipt into one entry, and `start`/`end` blanked leave a
+ * cassette nobody can read back. Sensitive parameters are still redacted by name above.
+ */
+const STRUCTURAL_QUERY_PARAMS = new Set(["start", "end", "operationid"]);
 
 export function scrubUrl(rawUrl: string): string {
   let url: URL;
@@ -118,11 +138,16 @@ export function scrubUrl(rawUrl: string): string {
   }
 
   for (const name of Array.from(url.searchParams.keys())) {
-    if (SENSITIVE_QUERY_PARAMS.has(name) || SENSITIVE_QUERY_PARAMS.has(name.toLowerCase())) {
+    const lowered = name.toLowerCase();
+    if (SENSITIVE_QUERY_PARAMS.has(name) || SENSITIVE_QUERY_PARAMS.has(lowered)) {
       url.searchParams.set(name, REDACTED);
+      continue;
     }
+    if (STRUCTURAL_QUERY_PARAMS.has(lowered)) continue;
+    const value = url.searchParams.get(name);
+    if (value !== null) url.searchParams.set(name, scrubFreeText(value));
   }
-  return scrubFreeText(url.toString());
+  return `${scrubFreeText(`${url.origin}${url.pathname}`)}${url.search}${url.hash}`;
 }
 
 export function scrubFreeText(value: string): string {
@@ -204,7 +229,7 @@ export function findCassetteLeaks(serialized: string): string[] {
     }
   }
 
-  const exempt = exemptTimestampSpans(serialized);
+  const exempt = exemptStructuralSpans(serialized);
   for (const match of serialized.matchAll(LONG_DIGIT_RUN)) {
     const start = match.index;
     if (start === undefined) continue;

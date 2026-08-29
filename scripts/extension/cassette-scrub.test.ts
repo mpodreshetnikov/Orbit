@@ -96,6 +96,29 @@ describe("cassette scrubbing", () => {
     expect(findCassetteLeaks('{"pan":"5536913812345678"}')).toHaveLength(1);
   });
 
+  it("keeps the URL parts the replay matches on", () => {
+    // Blanking these does not protect anyone and does break the cassette: `operationId` is what
+    // the player keys a receipt by, so a numeric one redacted merges every receipt into one
+    // entry and the replay answers each request with the first receipt.
+    const scrubbed = scrubUrl(
+      "https://www.tbank.ru/api/common/v1/shopping_receipt" +
+        "?operationId=1787227199000123&sessionid=live&start=1787227199000&end=1787313599000",
+    );
+
+    expect(scrubbed).toContain("operationId=1787227199000123");
+    expect(scrubbed).toContain("start=1787227199000");
+    expect(scrubbed).toContain("end=1787313599000");
+    expect(scrubbed).toContain(`sessionid=${REDACTED}`);
+    expect(findCassetteLeaks(JSON.stringify({ url: scrubbed }))).toEqual([]);
+  });
+
+  it("still scrubs a long digit run in any other query parameter", () => {
+    const scrubbed = scrubUrl("https://www.tbank.ru/api/common/v1/operations?pan=5536913812345678");
+
+    expect(scrubbed).toContain(`pan=${REDACTED}`);
+    expect(scrubbed).not.toContain("5536913812345678");
+  });
+
   it("does not mistake an operation timestamp for an account number", () => {
     // Every real recording carries `operationTime.milliseconds`, so a scan that called thirteen
     // digits a leak on sight would fail on the first genuine cassette and stay failing.

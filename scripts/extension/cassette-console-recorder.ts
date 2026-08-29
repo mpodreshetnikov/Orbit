@@ -32,6 +32,24 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Mirrors the connector's 14-day request window; see `buildRanges` in `tbank-web.ts`. */
 export const CONNECTOR_CHUNK_DAYS = 14;
 
+/**
+ * Mirrors the connector's truncation constants, and must keep mirroring them.
+ *
+ * The bank answers one response per range and says nothing about whether more was available,
+ * so the connector treats a capped-looking response as a truncated range, halves it and asks
+ * again. If the recorder walked plain ranges instead, a dense month would record one truncated
+ * response where the connector will make three requests — and because the replay player keys
+ * every operations request to the same origin and path, ignoring `start` and `end`, it hands
+ * them out in recorded order. A cassette whose request sequence differs from the connector's
+ * therefore does not merely miss data: it answers the connector's second request with the
+ * first request's body, silently.
+ */
+const SUSPECTED_PAGE_LIMIT = 100;
+const MIN_RANGE_SPAN_MS = DAY_MS;
+
+/** The bank prints and totals in Moscow wall clock, so the reconciliation is bucketed there. */
+const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
+
 export interface RecorderDeps {
   fetch: typeof fetch;
   /** URLs the page has already requested — `performance.getEntriesByType("resource")` names. */
@@ -50,9 +68,38 @@ export interface RecorderOptions {
   onProgress?: (message: string) => void;
 }
 
+export interface MonthTotals {
+  /** `YYYY-MM` in Moscow time, matching the months the bank's own screen groups by. */
+  month: string;
+  operations: number;
+  currency: string;
+  /** Fixed to two decimals so a comparison against the bank is exact, not float-ish. */
+  income: string;
+  expense: string;
+}
+
+/**
+ * What the recording claims it captured, in the terms the bank shows on screen.
+ *
+ * A cassette can look complete and be short: a truncated range loses its remainder in silence,
+ * and nothing inside the recording says so. Totals are the cheapest way to find out — the
+ * person who recorded it reads their own month off the bank's page and compares. Once the
+ * numbers agree the summary stops being a check and becomes an assertion: the contract test
+ * replays the cassette and must reproduce them, so a parser change that starts dropping
+ * operations fails instead of quietly reporting less.
+ */
+export interface CassetteSummary {
+  months: MonthTotals[];
+  /** Ranges that came back looking capped and were split; the connector will split them too. */
+  truncationSuspected: number;
+  /** Single days still at the cap — the one case neither the connector nor this can resolve. */
+  truncationUnresolved: number;
+}
+
 export interface Cassette {
   name: string;
   entries: CassetteEntry[];
+  summary?: CassetteSummary;
 }
 
 export interface RecordingResult {
@@ -154,6 +201,100 @@ function extractOperations(body: unknown): Array<Record<string, unknown>> {
   return payload.filter((entry): entry is Record<string, unknown> => asObject(entry) !== null);
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Same fields and precedence as the connector's `extractTimeMs`. */
+export function operationTimestampMs(operation: Record<string, unknown>): number | null {
+  return (
+    finiteNumber(asObject(operation.operationTime)?.milliseconds) ??
+    finiteNumber(asObject(operation.debitingTime)?.milliseconds) ??
+    finiteNumber(operation.operationDateTime)
+  );
+}
+
+function operationAmount(operation: Record<string, unknown>): number | null {
+  return (
+    finiteNumber(asObject(operation.accountAmount)?.value) ??
+    finiteNumber(asObject(operation.amount)?.value)
+  );
+}
+
+/** Same precedence as the connector's `extractCurrency`. */
+function operationCurrency(operation: Record<string, unknown>): string {
+  const account = asObject(asObject(operation.accountAmount)?.currency);
+  const amount = asObject(asObject(operation.amount)?.currency);
+  return (
+    text(account?.strCode) ??
+    text(account?.name) ??
+    text(amount?.strCode) ??
+    text(amount?.name) ??
+    "RUB"
+  ).toUpperCase();
+}
+
+/** Same precedence as the connector's `buildOperationKey`, so both dedupe identically. */
+export function buildOperationKey(
+  operation: Record<string, unknown>,
+  operationMs: number | null,
+): string | null {
+  const id = text(operation.id);
+  if (id) return `id:${id}`;
+  const operationId = text(asObject(operation.operationId)?.value);
+  if (operationId) return `operationId:${operationId}`;
+  const authorizationId = text(operation.authorizationId);
+  if (authorizationId) return `auth:${authorizationId}`;
+  const amount = operationAmount(operation);
+  if (amount === null) return null;
+  const description = text(operation.description) ?? "unknown";
+  return `fallback:${operationMs}:${amount}:${description}`;
+}
+
+function moscowMonth(timestampMs: number): string {
+  return new Date(timestampMs + MOSCOW_OFFSET_MS).toISOString().slice(0, 7);
+}
+
+export function summariseOperations(
+  operations: Array<Record<string, unknown>>,
+  truncationSuspected: number,
+  truncationUnresolved: number,
+): CassetteSummary {
+  const buckets = new Map<string, { income: number; expense: number; operations: number }>();
+
+  for (const operation of operations) {
+    const timestampMs = operationTimestampMs(operation);
+    const amount = operationAmount(operation);
+    if (timestampMs === null || amount === null) continue;
+
+    const key = `${moscowMonth(timestampMs)}|${operationCurrency(operation)}`;
+    const bucket = buckets.get(key) ?? { income: 0, expense: 0, operations: 0 };
+    bucket.operations += 1;
+    if (amount >= 0) bucket.income += amount;
+    else bucket.expense += Math.abs(amount);
+    buckets.set(key, bucket);
+  }
+
+  const months = Array.from(buckets.entries())
+    .map(([key, bucket]) => {
+      const [month = "", currency = ""] = key.split("|");
+      return {
+        month,
+        currency,
+        operations: bucket.operations,
+        income: bucket.income.toFixed(2),
+        expense: bucket.expense.toFixed(2),
+      };
+    })
+    .sort((left, right) =>
+      left.month === right.month
+        ? left.currency.localeCompare(right.currency)
+        : right.month.localeCompare(left.month),
+    );
+
+  return { months, truncationSuspected, truncationUnresolved };
+}
+
 async function recordRequest(
   deps: RecorderDeps,
   url: string,
@@ -194,24 +335,81 @@ export async function recordCassette(
   );
 
   const entries: CassetteEntry[] = [];
-  const operations: Array<Record<string, unknown>> = [];
+  // Keyed exactly as the connector keys them, so a repeat across overlapping ranges counts once
+  // here and once there — otherwise the reconciliation totals would double-count.
+  const operationsByKey = new Map<string, Record<string, unknown>>();
 
-  for (const [index, range] of ranges.entries()) {
+  // A work queue, not a loop over `ranges`, and `unshift` rather than `push`: this is the
+  // connector's own walk. The order requests come out in is what the replay hands back, so it
+  // has to be the same order.
+  const pending = ranges.slice();
+  let requestCount = 0;
+  let truncationSuspected = 0;
+  let truncationUnresolved = 0;
+
+  while (pending.length > 0) {
+    const range = pending.shift();
+    if (!range) break;
+
     const rangeUrl = new URL(operationsApiUrl, deps.origin);
     rangeUrl.searchParams.set("sessionid", sessionId);
     rangeUrl.searchParams.set("start", String(range.start));
     rangeUrl.searchParams.set("end", String(range.end));
 
-    report(`range ${index + 1}/${ranges.length}`);
+    requestCount += 1;
+    report(`range request ${requestCount} (${pending.length} queued)`);
     const { entry, body } = await recordRequest(deps, rangeUrl.toString());
     entries.push(entry);
 
     if (entry.status !== 200) {
-      warnings.push(`range ${index + 1} answered ${entry.status}`);
+      warnings.push(`range request ${requestCount} answered ${entry.status}`);
       continue;
     }
-    operations.push(...extractOperations(body));
+
+    const payload = extractOperations(body);
+    let oldestInResponseMs: number | null = null;
+    for (const operation of payload) {
+      const timestampMs = operationTimestampMs(operation);
+      const key = buildOperationKey(operation, timestampMs);
+      if (key && !operationsByKey.has(key)) operationsByKey.set(key, operation);
+      if (timestampMs !== null) {
+        oldestInResponseMs =
+          oldestInResponseMs === null ? timestampMs : Math.min(oldestInResponseMs, timestampMs);
+      }
+    }
+
+    // The two signatures the connector uses: a response at the page limit, or one nearly full
+    // whose oldest operation still sits well inside the range — what a cap applied from the
+    // newer end looks like.
+    const rangeSpanMs = range.end - range.start + 1;
+    const hitPageLimit = payload.length >= SUSPECTED_PAGE_LIMIT;
+    const nearlyFull = payload.length >= Math.floor(SUSPECTED_PAGE_LIMIT * 0.9);
+    const coverageGap =
+      nearlyFull &&
+      oldestInResponseMs !== null &&
+      oldestInResponseMs - range.start > rangeSpanMs / 2;
+
+    if (!hitPageLimit && !coverageGap) continue;
+
+    truncationSuspected += 1;
+    if (rangeSpanMs > MIN_RANGE_SPAN_MS) {
+      const midpoint = range.start + Math.floor(rangeSpanMs / 2);
+      pending.unshift(
+        { start: midpoint, end: range.end },
+        { start: range.start, end: midpoint - 1 },
+      );
+      continue;
+    }
+
+    truncationUnresolved += 1;
+    warnings.push(
+      `A single day (${new Date(range.start).toISOString().slice(0, 10)}) came back at the page ` +
+        "limit and cannot be split further — that day is incomplete in this recording, and the " +
+        "connector reports the same window as partial.",
+    );
   }
+
+  const operations = Array.from(operationsByKey.values());
 
   if (operations.length === 0) {
     warnings.push(
@@ -257,13 +455,20 @@ export async function recordCassette(
   }
 
   const scrubbed = scrubCassette(entries);
-  const cassette: Cassette = { name: options.name, entries: scrubbed };
+  const cassette: Cassette = {
+    name: options.name,
+    entries: scrubbed,
+    // Totals are derived before scrubbing but hold nothing the scrubber removes: a month, a
+    // currency, a count and two sums. They are the only part of the file a person can check
+    // against the bank without reading JSON.
+    summary: summariseOperations(operations, truncationSuspected, truncationUnresolved),
+  };
   const leaks = findCassetteLeaks(JSON.stringify(cassette));
 
   return {
     cassette,
     leaks,
     warnings,
-    counts: { ranges: ranges.length, operations: operations.length, receipts },
+    counts: { ranges: requestCount, operations: operations.length, receipts },
   };
 }

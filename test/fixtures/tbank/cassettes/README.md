@@ -29,13 +29,25 @@ nothing but their signed-in browser:
 3. It records, scrubs **in the browser**, and downloads `cassette.json`. Defaults are the last
    30 days and up to 25 receipts; `orbitRecordCassette({ windowDays: 60, maxReceipts: 40 })`
    re-runs with other bounds.
-4. Put the file in a subdirectory here and run `test-unit-node` and `test-unit-ext`.
+4. **Check the totals it prints against the bank's own screen** before passing the file on. The
+   console shows a table of Moscow calendar months with an operation count and the income and
+   expense sums per currency. A recording can look complete and be short — a truncated range
+   loses its remainder in silence, and nothing inside the file says so. The totals are the only
+   cheap way to find out, and they are why the summary is written into the cassette.
+5. Put the file in a subdirectory here and run `test-unit-node` and `test-unit-ext`.
 
 The snippet refuses to download a recording that still trips `findCassetteLeaks`, so a scrubber
 miss surfaces as a console error rather than as a file someone might pass on. Its endpoint
-discovery, range walk and receipt key are mirrored from `tbank-web.ts` and asserted against
-`createCassettePlayer`, because a cassette recorded against URLs the connector never asks for
-replays as a wall of misses while looking like a real recording.
+discovery, range walk, truncation splitting and receipt key are mirrored from `tbank-web.ts`,
+because a cassette recorded against URLs the connector never asks for replays as a wall of
+misses while looking like a real recording — and the replay matches an operations request on
+origin and path alone, handing entries back in recorded order, so the recorded _sequence_ has to
+be the connector's sequence too. That is why a capped range is split here exactly as the
+connector splits it.
+
+Once the totals have been checked once by hand, they stop being a one-off: `tbank-web.contract.test.ts`
+replays the cassette and must reproduce them, so a mapper that later starts dropping operations
+or reading an amount differently fails instead of quietly reporting less.
 
 ## Recording from a checkout
 
