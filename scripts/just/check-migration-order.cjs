@@ -29,6 +29,9 @@ const MIGRATIONS_DIR = "supabase/migrations";
 const ALLOWLIST_PATH = path.join(REPO_ROOT, MIGRATIONS_DIR, ".out-of-order-allowlist");
 const MIGRATION_FILE = /^(\d{14})_.+\.sql$/;
 const BASE_REF_CANDIDATES = ["origin/main", "main"];
+// A push event reports this as the previous commit when a branch has no previous commit. It means
+// "no baseline", not "a ref that failed to resolve", so it takes the fallback rather than the error.
+const ZERO_SHA = "0000000000000000000000000000000000000000";
 
 /** @param {string[]} argv @returns {{ base?: string }} */
 function parseArgs(argv) {
@@ -188,7 +191,8 @@ function formatFailure({ offenders, latestBaseVersion, baseRef }) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const requestedBase = args.base || (process.env.MIGRATION_ORDER_BASE || "").trim();
+  const envBase = (process.env.MIGRATION_ORDER_BASE || "").trim();
+  const requestedBase = args.base || (envBase === ZERO_SHA ? "" : envBase);
   const baseRef = requestedBase ? resolveExplicitBaseRef(requestedBase) : resolveDefaultBaseRef();
 
   if (!baseRef) {
@@ -235,4 +239,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { evaluateMigrationOrder, parseAllowlist, parseArgs, versionOf };
+module.exports = { ZERO_SHA, evaluateMigrationOrder, parseAllowlist, parseArgs, versionOf };

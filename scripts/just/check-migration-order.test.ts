@@ -166,6 +166,13 @@ describe("base ref resolution", () => {
     expect(result.stdout).toContain("origin/main");
   });
 
+  it("treats the zero sha as no baseline rather than an unresolvable ref", () => {
+    const result = runScript([], { MIGRATION_ORDER_BASE: checkMigrationOrder.ZERO_SHA });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("origin/main");
+  });
+
   it("falls back to the default base when none is requested", () => {
     const result = runScript([]);
 
