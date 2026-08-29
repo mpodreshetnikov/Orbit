@@ -405,12 +405,27 @@ function finiteNumber(value: unknown): number | null {
   return null;
 }
 
+/**
+ * The connector's `toMs`: a number, a numeric string, or a date string. `operationDateTime`
+ * arrives as the last of those, and reading it as a number only would drop the operation from
+ * the summary and from every enrichment request while the connector went on processing it.
+ */
+function timestampMs(value: unknown): number | null {
+  const numeric = finiteNumber(value);
+  if (numeric !== null) return numeric;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 /** Same fields and precedence as the connector's `extractTimeMs`. */
 export function operationTimestampMs(operation: Record<string, unknown>): number | null {
   return (
-    finiteNumber(asObject(operation.operationTime)?.milliseconds) ??
-    finiteNumber(asObject(operation.debitingTime)?.milliseconds) ??
-    finiteNumber(operation.operationDateTime)
+    timestampMs(asObject(operation.operationTime)?.milliseconds) ??
+    timestampMs(asObject(operation.debitingTime)?.milliseconds) ??
+    timestampMs(operation.operationDateTime)
   );
 }
 

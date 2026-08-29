@@ -614,6 +614,31 @@ describe("cassette console recorder", () => {
     expect(result.warnings.join(" ")).toMatch(/detail endpoint/);
   });
 
+  it("reads a date-string operation time the way the connector does", async () => {
+    // `operationDateTime` arrives as an ISO string, and the connector's `toMs` parses it. Read
+    // as a number only, the operation vanishes from the summary and from every enrichment
+    // request while the connector goes on processing it and asking for entries nobody recorded.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          const { debitingTime: _dropped, ...rest } = operation("op-1", -2400);
+          return new Response(
+            JSON.stringify({
+              payload: [{ ...rest, operationDateTime: new Date(NOW - 1000).toISOString() }],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "isodate", pauseMs: 0, maxReceipts: 0 }, deps);
+
+    expect(result.cassette.summary?.months.map((month) => month.month)).toEqual(["2026-08"]);
+  });
+
   it("reads a timestamp the bank serialised as a string", async () => {
     // The connector's `toNum` parses numeric strings. Rejecting them here would drop the
     // operation from the summary and from enrichment while the connector went on asking for

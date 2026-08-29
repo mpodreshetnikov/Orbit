@@ -155,14 +155,39 @@ function waitFor(label, check, timeoutMs = 180000) {
  * is none. The comment above says both services are borrowed for one job each; this is what
  * gives them back. Retrying the deadlock would leave the second writer there.
  */
-function settleAndStop(container, role) {
+function settleAndStop(container, role, migrationsTable) {
+  // Two things have to hold together, and hold *still*: the service has applied no further
+  // migration, and it is not in the middle of one. Either alone is a race — a single sample of
+  // `pg_stat_activity` catches a service that happens to be idle between two migrations and
+  // stops it half-done, which trades the deadlock for a partially migrated schema and no error
+  // at all. Requiring the pair to be unchanged across consecutive polls is what closes the gap
+  // the sample leaves; a service that pauses longer than this between migrations would have to
+  // be doing nothing for six seconds mid-run.
+  const stableSamplesRequired = 3;
+  let previous = null;
+  let stableSamples = 0;
+
   waitFor(`${role} to finish migrating`, () => {
     const result = psql([
       "-Atc",
-      `select count(*) from pg_stat_activity where usename = '${role}' and state <> 'idle'`,
+      `select coalesce((select count(*)::text from ${migrationsTable}), 'absent') || ':' || ` +
+        `(select count(*) from pg_stat_activity where usename = '${role}' and state <> 'idle')`,
     ]);
-    return result.status === 0 && result.stdout.trim() === "0";
+    if (result.status !== 0) return false;
+
+    const sample = result.stdout.trim();
+    const [applied, busy] = sample.split(":");
+    if (applied === "absent" || busy !== "0") {
+      previous = sample;
+      stableSamples = 0;
+      return false;
+    }
+
+    stableSamples = sample === previous ? stableSamples + 1 : 0;
+    previous = sample;
+    return stableSamples >= stableSamplesRequired;
   });
+
   docker(["stop", container]);
 }
 
@@ -255,7 +280,7 @@ function startSchemaOwners() {
     const result = psql(["-Atc", "select to_regclass('storage.buckets') is not null"]);
     return result.status === 0 && result.stdout.trim() === "t";
   });
-  settleAndStop(STORAGE_CONTAINER, "supabase_storage_admin");
+  settleAndStop(STORAGE_CONTAINER, "supabase_storage_admin", "storage.migrations");
 
   log("starting gotrue so it migrates the auth schema");
   const auth = docker([
@@ -298,7 +323,7 @@ function startSchemaOwners() {
     ]);
     return result.status === 0 && result.stdout.trim() === "1";
   });
-  settleAndStop(AUTH_CONTAINER, "supabase_auth_admin");
+  settleAndStop(AUTH_CONTAINER, "supabase_auth_admin", "auth.schema_migrations");
 }
 
 /**
