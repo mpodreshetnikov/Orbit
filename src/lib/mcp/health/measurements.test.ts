@@ -136,12 +136,18 @@ describe("listMeasurements", () => {
     expect(calls.eq).toContainEqual(["person_id", "p-1"]);
   });
 
-  it("includes the whole of the `to` day rather than cutting at midnight", async () => {
+  it("applies the range instants it is given without reinterpreting them", async () => {
     const { client, calls } = supabaseReturning([]);
-    await listMeasurements(client, { personId: "p-1", from: "2026-01-01", to: "2026-01-31" });
+    await listMeasurements(client, {
+      personId: "p-1",
+      from: "2025-12-31T17:00:00.000Z",
+      to: "2026-01-31T16:59:59.999Z",
+    });
 
-    expect(calls.gte).toContainEqual(["measured_at", "2026-01-01"]);
-    expect(calls.lte).toContainEqual(["measured_at", "2026-01-31T23:59:59.999Z"]);
+    // The bounds are the caller's local days already converted to instants, so
+    // widening or trimming them here would undo that.
+    expect(calls.gte).toContainEqual(["measured_at", "2025-12-31T17:00:00.000Z"]);
+    expect(calls.lte).toContainEqual(["measured_at", "2026-01-31T16:59:59.999Z"]);
   });
 
   it("keeps only the requested codes", async () => {

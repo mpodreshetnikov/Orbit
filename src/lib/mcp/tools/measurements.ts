@@ -8,6 +8,9 @@ import { dateRangeSchema, isoDateTimeSchema, personSelectorSchema } from "../sch
 import { withPerson } from "../tool-context";
 import { fail, ok, summarizeList } from "../tool-result";
 import { WRITE_SCOPE } from "./scopes";
+import { readTimezonePreference } from "@/lib/medications/regenerate-dose-events";
+import { isValidTimeZone, localDayEndUtc, localDayStartUtc } from "../local-day";
+import { formatZoned, instantFromInput, withZonedTimestamps, zonedDate } from "../zoned-time";
 import type { McpToolServer } from "./types";
 
 /**
@@ -15,7 +18,59 @@ import type { McpToolServer } from "./types";
  *
  * Distinct from observations, which are lab values pulled out of documents.
  * The descriptions say so explicitly, because the two are easy to conflate.
+ *
+ * `measured_at` is a `timestamptz`, so these tools carry the same obligation as
+ * the medication ones: a time is quoted in a named zone or not quoted at all,
+ * and a wall clock handed in is read in the caller's zone rather than the
+ * server's (T-0027). `.slice(0, 10)` on the stored instant gives the UTC date,
+ * which is the wrong day for a late-evening weigh-in east of UTC.
  */
+const timezoneArgument = z
+  .string()
+  .optional()
+  .describe(
+    "IANA timezone to read and report times in, e.g. 'Europe/Berlin'. Defaults to the user's saved preference, or UTC.",
+  );
+
+async function resolveDisplayZone(
+  supabase: Parameters<typeof readTimezonePreference>[0],
+  authUserId: string,
+  requested: string | undefined,
+): Promise<{ ok: true; timezone: string } | { ok: false; error: string }> {
+  const trimmed = requested?.trim() || null;
+
+  if (trimmed && !isValidTimeZone(trimmed)) {
+    return {
+      ok: false,
+      error:
+        `"${requested}" is not a timezone this server recognises. Pass an IANA name ` +
+        `like "Europe/Berlin".`,
+    };
+  }
+
+  // Read, never resolve: `resolveTimezone` persists what it is handed into the
+  // preference the generation cron and both reminder digests run on, so asking
+  // what someone weighed must not re-time their medication reminders.
+  return {
+    ok: true,
+    timezone: trimmed ?? (await readTimezonePreference(supabase, authUserId)) ?? "UTC",
+  };
+}
+
+/** A measurement summary with its history, quoted in `timeZone`. */
+function summaryInZone(
+  summary: Record<string, unknown>,
+  timeZone: string,
+): Record<string, unknown> {
+  const history = Array.isArray(summary.history) ? summary.history : [];
+
+  return {
+    ...withZonedTimestamps(summary, timeZone, ["latest_measured_at"]),
+    history: history.map((point) =>
+      withZonedTimestamps(point as Record<string, unknown>, timeZone, ["measured_at"]),
+    ),
+  };
+}
 export function registerMeasurementTools(server: McpToolServer): void {
   server.registerTool(
     "list_measurements",
@@ -38,32 +93,48 @@ export function registerMeasurementTools(server: McpToolServer): void {
           .max(100)
           .default(10)
           .describe("Most recent points to include per measurement type."),
+        timezone: timezoneArgument,
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    withPerson(async (supabase, person, args) => {
+    withPerson(async (supabase, person, args, auth) => {
+      const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+      if (!zone.ok) {
+        return fail(zone.error);
+      }
+
       const summaries = await listMeasurements(supabase, {
         personId: person.id,
         codes: args.codes,
-        from: args.from,
-        to: args.to,
+        // `from` and `to` name local calendar days, so they are bounded the way
+        // list_medication_doses bounds them. Passing the bare dates through
+        // compared them against UTC, which dropped a late-evening measurement
+        // east of UTC out of the range that contains it.
+        from: args.from ? localDayStartUtc(args.from, zone.timezone) : undefined,
+        to: args.to ? localDayEndUtc(args.to, zone.timezone) : undefined,
         search: args.search,
         historyLimit: args.history_limit,
       });
 
       return ok(
         summarizeList(
-          `measurement types for ${person.name}`,
+          `measurement types for ${person.name} (dates in ${zone.timezone})`,
           summaries.map(
             (summary) =>
               `${summary.name_en} (${summary.code}): ${summary.latest_value} ${summary.unit_en}` +
-              ` on ${summary.latest_measured_at.slice(0, 10)}` +
+              ` on ${zonedDate(summary.latest_measured_at, zone.timezone)}` +
               (summary.trend ? ` [${summary.trend}]` : "") +
               ` — ${summary.measurement_count} record(s)`,
           ),
           summaries.length,
         ),
-        { person, measurements: summaries },
+        {
+          person,
+          timezone: zone.timezone,
+          measurements: summaries.map((summary) =>
+            summaryInZone(summary as unknown as Record<string, unknown>, zone.timezone),
+          ),
+        },
       );
     }),
   );
@@ -78,10 +149,16 @@ export function registerMeasurementTools(server: McpToolServer): void {
         ...personSelectorSchema,
         code: z.string().describe('Catalog code, e.g. "weight" or "waist".'),
         limit: z.number().int().min(1).max(500).default(100),
+        timezone: timezoneArgument,
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    withPerson(async (supabase, person, args) => {
+    withPerson(async (supabase, person, args, auth) => {
+      const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+      if (!zone.ok) {
+        return fail(zone.error);
+      }
+
       const summaries = await listMeasurements(supabase, {
         personId: person.id,
         codes: [args.code],
@@ -96,8 +173,12 @@ export function registerMeasurementTools(server: McpToolServer): void {
       }
 
       return ok(
-        `${summary.name_en} for ${person.name}: ${summary.measurement_count} record(s), latest ${summary.latest_value} ${summary.unit_en} on ${summary.latest_measured_at.slice(0, 10)}${summary.trend ? ` (${summary.trend})` : ""}.`,
-        { person, measurement: summary },
+        `${summary.name_en} for ${person.name}: ${summary.measurement_count} record(s), latest ${summary.latest_value} ${summary.unit_en} on ${zonedDate(summary.latest_measured_at, zone.timezone)} (dates in ${zone.timezone})${summary.trend ? ` (${summary.trend})` : ""}.`,
+        {
+          person,
+          timezone: zone.timezone,
+          measurement: summaryInZone(summary as unknown as Record<string, unknown>, zone.timezone),
+        },
       );
     }),
   );
@@ -114,12 +195,40 @@ export function registerMeasurementTools(server: McpToolServer): void {
         value: z.number().describe("The measured value, in the type's catalog unit."),
         measured_at: isoDateTimeSchema
           .optional()
-          .describe("When it was measured (ISO 8601). Defaults to now."),
+          .describe(
+            "When it was measured. Either ISO 8601 with an offset ('2026-08-19T23:10:00+07:00') or a local wall-clock time ('2026-08-19T23:10'), which is read in `timezone`. Defaults to now.",
+          ),
         notes: z.string().optional(),
+        timezone: timezoneArgument,
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     withPerson(async (supabase, person, args, auth) => {
+      const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+      if (!zone.ok) {
+        return fail(`${zone.error} Or give measured_at with an explicit offset.`);
+      }
+
+      // `measured_at` went into a `timestamptz` column exactly as handed in, so
+      // an offset-less "2026-08-24T22:00" was stored as 22:00 UTC -- the same
+      // defect log_dose was fixed for, and the reason a weigh-in could land on
+      // the wrong local day. Read it in the caller's zone or refuse it.
+      let measuredAt: string | undefined;
+      if (args.measured_at?.trim()) {
+        const parsed = instantFromInput(args.measured_at, zone.timezone);
+        if (!parsed.ok) {
+          return fail(
+            parsed.zoneApplied
+              ? `Could not read "${args.measured_at}" as a date and time in ${zone.timezone}. Pass ` +
+                  `ISO 8601 with an offset ("2026-08-19T23:10:00+07:00"), or a local wall-clock ` +
+                  `time ("2026-08-19T23:10") that exists in that zone — a clock-change gap has no ` +
+                  `such local time.`
+              : `Could not read "${args.measured_at}" as a date and time.`,
+          );
+        }
+        measuredAt = parsed.instant;
+      }
+
       const catalogEntry = await getMeasurementCatalogEntryByCode(supabase, args.code);
       if (!catalogEntry) {
         return fail(
@@ -131,14 +240,23 @@ export function registerMeasurementTools(server: McpToolServer): void {
         personId: person.id,
         catalogId: catalogEntry.id,
         value: args.value,
-        measuredAt: args.measured_at,
+        measuredAt,
         notes: args.notes ?? null,
         createdByUserId: auth.authUserId,
       });
 
       return ok(
-        `Recorded ${created.value} ${catalogEntry.unit_en} for ${catalogEntry.name_en} (${person.name}) at ${created.measured_at}.`,
-        { person, measurement: created, catalog: catalogEntry },
+        `Recorded ${created.value} ${catalogEntry.unit_en} for ${catalogEntry.name_en} (${person.name}) at ${formatZoned(created.measured_at, zone.timezone)} (${zone.timezone}).`,
+        {
+          person,
+          timezone: zone.timezone,
+          measurement: withZonedTimestamps(
+            created as unknown as Record<string, unknown>,
+            zone.timezone,
+            ["measured_at"],
+          ),
+          catalog: catalogEntry,
+        },
       );
     }, WRITE_SCOPE),
   );
