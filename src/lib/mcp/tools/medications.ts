@@ -149,7 +149,7 @@ function describeIntake(
   if (!intake || intake.amount == null) {
     return strength ? `dose unknown${strength}` : "";
   }
-  return `${intake.amount} ${intake.unit ?? ""}`.trim() + strength;
+  return `${intake.amount} ${unitText(intake.unit)}`.trim() + strength;
 }
 
 /**
@@ -204,7 +204,7 @@ function describeSchedule(
     const hasStrength = Array.isArray(dose?.active) && dose.active.length > 0;
     if (!hasStrength || base == null || !Array.isArray(amounts)) return "";
     return amounts.some((amount) => amount != null && amount !== base)
-      ? `, strength on file is for the ${base} ${dose?.intake?.unit ?? ""} dose only`.replace(
+      ? `, strength on file is for the ${base} ${unitText(dose?.intake?.unit)} dose only`.replace(
           "  ",
           " ",
         )
@@ -217,7 +217,7 @@ function describeSchedule(
     // whole listing down with it.
     if (!Array.isArray(times) || times.length === 0) return "";
     const slotAmounts = Array.isArray(amounts) ? amounts : undefined;
-    const unit = dose?.intake?.unit ?? "";
+    const unit = unitText(dose?.intake?.unit);
     const slots = times.map((time, index) => {
       const amount = slotAmounts?.[index];
       return amount == null ? time : `${time} (${amount}${unit ? ` ${unit}` : ""})`;
@@ -231,7 +231,7 @@ function describeSchedule(
     case "interval_hours":
       return (
         `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
-        `${schedule.amount != null ? ` (${schedule.amount}${dose?.intake?.unit ? ` ${dose.intake.unit}` : ""} per intake)` : ""}` +
+        `${schedule.amount != null ? ` (${schedule.amount}${unitText(dose?.intake?.unit) ? ` ${unitText(dose?.intake?.unit)}` : ""} per intake)` : ""}` +
         // A scalar override is the same claim as a per-slot one, so it earns the
         // same warning: the generator replaces the amount and copies `active`.
         `${overrideNote(schedule.amount == null ? undefined : [schedule.amount])}`
@@ -303,7 +303,7 @@ function describeResolution(
 function describeStock(regimen: RegimenWithStatus): string {
   const inventory = regimen.inventory;
   if (!inventory?.enabled || inventory.current_amount == null) return "";
-  return `stock ${inventory.current_amount} ${inventory.unit ?? regimen.intake_unit}`;
+  return `stock ${inventory.current_amount} ${unitText(inventory.unit ?? regimen.intake_unit)}`;
 }
 
 /**
@@ -328,6 +328,20 @@ const NOTE_EXCERPT = { list: 80, dose: 120, detail: 400 } as const;
 const INGREDIENT_LIMIT = 4;
 const INGREDIENT_NAME_LIMIT = 60;
 const INGREDIENT_TEXT_LIMIT = 90;
+const UNIT_LIMIT = 24;
+
+/**
+ * A unit, bounded.
+ *
+ * `unit` is an unrestricted string on `dose_definition`, on `inventory` and on
+ * `med_inventory_transactions.unit` (plain `text`), and it is the most repeated
+ * field this server renders: once per slot of a schedule, once per movement of
+ * a ledger, once per row of a page. A real unit is "pill" or "milligram", so a
+ * cut at 24 characters only ever fires on a row that was never readable.
+ */
+function unitText(unit: unknown): string {
+  return unit == null ? "" : excerpt(String(unit), UNIT_LIMIT);
+}
 const SCHEDULE_SLOT_LIMIT = 12;
 
 /**
@@ -632,7 +646,7 @@ export function registerMedicationTools(server: McpToolServer): void {
         `${describeResolution(dose, zone.timezone)}` +
         `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`;
       const movementLine = (movement: (typeof detail.inventoryTransactions)[number]) =>
-        `- ${formatZoned(movement.created_at, zone.timezone)} — ${movement.type} ${movement.amount} ${movement.unit}` +
+        `- ${formatZoned(movement.created_at, zone.timezone)} — ${movement.type} ${movement.amount} ${unitText(movement.unit)}` +
         `${excerpt(movement.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(movement.note, NOTE_EXCERPT.dose)}"` : ""}`;
 
       return ok(

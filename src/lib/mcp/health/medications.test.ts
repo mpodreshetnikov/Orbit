@@ -177,8 +177,16 @@ describe("getMedication", () => {
       med_dose_events: [
         {
           data: [
-            doseEvent({ id: "past", scheduled_at: past }),
-            doseEvent({ id: "future", scheduled_at: future }),
+            doseEvent({ id: "past", scheduled_at: past, actual_at: past }),
+            doseEvent({ id: "future", scheduled_at: future, actual_at: future }),
+            // Snoozed forward: still scheduled for an hour ago, but due in an
+            // hour, which is where the app and the reminder query place it.
+            doseEvent({
+              id: "snoozed",
+              scheduled_at: past,
+              actual_at: future,
+              status: "snoozed",
+            }),
           ],
         },
       ],
@@ -187,7 +195,7 @@ describe("getMedication", () => {
 
     const result = await getMedication(stub.client, { regimenId: "r-1", horizonDays: 7 });
 
-    expect(result?.upcomingDoses.map((d) => d.id)).toEqual(["future"]);
+    expect(result?.upcomingDoses.map((d) => d.id).sort()).toEqual(["future", "snoozed"]);
     expect(result?.recentDoses.map((d) => d.id)).toEqual(["past"]);
   });
 
@@ -222,10 +230,13 @@ describe("getMedication", () => {
 
     await getMedication(stub.client, { regimenId: "r-1", horizonDays: 3 });
 
-    const [[, lower]] = stub.argsFor("med_dose_events", "gte") as [[string, string]];
-    const [[, upper]] = stub.argsFor("med_dose_events", "lte") as [[string, string]];
+    const [[lowerColumn, lower]] = stub.argsFor("med_dose_events", "gte") as [[string, string]];
+    const [[upperColumn, upper]] = stub.argsFor("med_dose_events", "lte") as [[string, string]];
     const span = Date.parse(upper) - Date.parse(lower);
     expect(Math.round(span / 86_400_000)).toBe(6);
+    // The window is over the effective time, so a dose snoozed into or out of
+    // it is selected where it is now due rather than where it was planned.
+    expect([lowerColumn, upperColumn]).toEqual(["actual_at", "actual_at"]);
   });
 
   it("surfaces a query error", async () => {
@@ -272,6 +283,22 @@ describe("listMedicationDoses", () => {
     expect(doses).toHaveLength(1);
     expect(total).toBe(1743);
     expect(stub.argsFor("med_dose_events", "range")).toEqual([[40, 59]]);
+  });
+
+  it("ranges over the effective time, not the planned one", async () => {
+    // `snooze_dose.sql` moves `actual_at` and leaves `scheduled_at`, so asking
+    // by the planned time returns a dose snoozed into tomorrow on today's list
+    // and hides it from tomorrow's.
+    const stub = createSupabaseStub({ med_dose_events: [{ data: [doseEvent()] }] });
+
+    await listMedicationDoses(stub.client, {
+      personId: "p-1",
+      from: "2026-06-15T00:00:00Z",
+      to: "2026-06-15T23:59:59Z",
+    });
+
+    expect(stub.argsFor("med_dose_events", "gte")).toEqual([["actual_at", "2026-06-15T00:00:00Z"]]);
+    expect(stub.argsFor("med_dose_events", "lte")).toEqual([["actual_at", "2026-06-15T23:59:59Z"]]);
   });
 
   it("asks the database for no range when the caller wants everything", async () => {

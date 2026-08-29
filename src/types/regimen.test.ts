@@ -108,6 +108,15 @@ describe("getCourseWindow", () => {
     ).toEqual({ start: "2026-01-01", end: null });
   });
 
+  it("refuses a window that ends before it starts", () => {
+    // Nothing forbids the pair on write, and the generator answers it by
+    // producing no events at all, so "2026-09-10 to 2026-09-01" would describe
+    // a course that never doses as if it ran backwards.
+    expect(
+      getCourseWindow({ type: "until_date", start_date: "2026-09-10", end_date: "2026-09-01" }),
+    ).toEqual({ start: "2026-09-10", end: null });
+  });
+
   it("bounds only the start of an endless course", () => {
     expect(getCourseWindow({ type: "endless", start_date: "2026-08-07" })).toEqual({
       start: "2026-08-07",

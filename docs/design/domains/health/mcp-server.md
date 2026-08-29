@@ -198,7 +198,11 @@ Conventions that matter:
   which moves `actual_at` alone — and that is the time the reminder query fires on and the dashboard
   sorts by, so a dose snoozed from 09:00 to 11:00 is reported at 11:00, saying where it moved from.
   `taken_at` is not evidence of an intake either: `mark_dose_skipped` sets it to the resolution time
-  as well, so a skipped dose reads `marked skipped`, never `taken`.
+  as well, so a skipped dose reads `marked skipped`, never `taken`. The queries select on the same
+  column they print: `list_medication_doses` ranges and orders by `actual_at`, and `get_medication`
+  splits upcoming from recent by it, so a dose snoozed across midnight is answered for the day it is
+  now due on and one snoozed past now is still upcoming. Rendering the effective time while
+  selecting on the planned one would put a dose under a heading its own timestamp contradicts.
 
   `list_medications` takes a `timezone` for the same reason the dated tools do, though it lists no
   date range: a `one_off` course carries a due instant, and quoting it in UTC beside plan times that
@@ -214,7 +218,15 @@ Conventions that matter:
   `structuredContent` keeps the note itself. The same holds for anything else a row can carry
   without limit: an ingredient is cut whole, unit included, and a schedule renders a bounded number
   of slots and weekdays with a `…N more` marker, because `times`, `amounts` and `days_of_week` are
-  jsonb arrays with no maximum in the column or in the schema, rendered once per row per page.
+  jsonb arrays with no maximum in the column or in the schema, rendered once per row per page. A
+  unit is cut wherever it is printed — the dose line, every schedule slot, the stock line and every
+  ledger movement — since it is unrestricted on the dose definition, on the inventory and on
+  `med_inventory_transactions.unit`, and it is the field this server repeats most.
+
+  A course window that ends before it starts is not rendered as a window. Nothing forbids the pair
+  on write and the generator answers it by producing no events at all, so printing
+  `2026-09-10 to 2026-09-01` would describe a course that never doses as if it ran backwards; the
+  start is kept, the end is dropped.
 
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.

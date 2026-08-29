@@ -147,9 +147,14 @@ export async function getMedication(
     .select("*")
     .eq("regimen_id", params.regimenId)
     .is("deleted_at", null)
-    .gte("scheduled_at", recentStart.toISOString())
-    .lte("scheduled_at", horizonEnd.toISOString())
-    .order("scheduled_at", { ascending: true });
+    // `actual_at`, not `scheduled_at`: `snooze_dose.sql` moves the first and
+    // leaves the second, and the effective time is what the reminder query
+    // fires on, what the dashboard sorts by and what these tools now print. A
+    // dose snoozed across midnight belongs to the day it is now due on, and one
+    // snoozed past now is still upcoming.
+    .gte("actual_at", recentStart.toISOString())
+    .lte("actual_at", horizonEnd.toISOString())
+    .order("actual_at", { ascending: true });
 
   const doses = ((events ?? []) as unknown as Array<Record<string, unknown>>).map(rowToDoseEvent);
 
@@ -169,8 +174,8 @@ export async function getMedication(
 
   return {
     regimen,
-    upcomingDoses: doses.filter((dose) => new Date(dose.scheduled_at) >= now),
-    recentDoses: doses.filter((dose) => new Date(dose.scheduled_at) < now),
+    upcomingDoses: doses.filter((dose) => new Date(dose.actual_at) >= now),
+    recentDoses: doses.filter((dose) => new Date(dose.actual_at) < now),
     inventoryTransactions: ((transactions ?? []) as unknown as Array<Record<string, unknown>>).map(
       rowToInventoryTransaction,
     ),
@@ -221,9 +226,12 @@ export async function listMedicationDoses(
     })
     .eq("person_id", params.personId)
     .is("deleted_at", null)
-    .gte("scheduled_at", params.from)
-    .lte("scheduled_at", params.to)
-    .order("scheduled_at", { ascending: true })
+    // Ranged and ordered by the effective time for the same reason the detail
+    // tool is: a dose snoozed to the next day is asked about, and answered for,
+    // the day it is actually due.
+    .gte("actual_at", params.from)
+    .lte("actual_at", params.to)
+    .order("actual_at", { ascending: true })
     // Several medications commonly fall on the same minute, and ordering by a
     // non-unique column alone lets successive pages return one of those rows
     // twice and skip another.

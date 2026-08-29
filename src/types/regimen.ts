@@ -161,7 +161,12 @@ export function getCourseWindow(duration?: MedDuration | null): {
 
   if (duration.type === "until_date") {
     const end = asDate(duration.end_date);
-    if (end != null) return { start, end };
+    // An end before the start is not a window. Nothing forbids the pair on
+    // write -- the duration schema has no cross-field check -- and the
+    // generator answers it by producing no events at all, so rendering
+    // "2026-09-10 to 2026-09-01" would describe a course that never doses as if
+    // it ran backwards. The start is still true, so it is kept.
+    if (end != null && (start == null || end >= start)) return { start, end };
   }
 
   if (duration.type === "for_days" && start != null && typeof duration.days === "number") {

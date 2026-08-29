@@ -944,6 +944,43 @@ describe("list_medication_doses", () => {
     expect(text).toContain("…");
   });
 
+  it("bounds the unit it repeats across slots, stock and the ledger", async () => {
+    // `unit` is unrestricted on the dose definition, on the inventory and on
+    // `med_inventory_transactions.unit` (plain `text`), and it is the most
+    // repeated field this server renders.
+    meds.getMedication.mockResolvedValue({
+      regimen: {
+        custom_name: "Imported",
+        effective_status: "active",
+        dose_definition: { intake: { amount: 1, unit: "u".repeat(300) } },
+        schedule: { mode: "daily_times", times: ["08:00", "20:00"] },
+        inventory: { enabled: true, current_amount: 9, unit: "u".repeat(300) },
+      },
+      upcomingDoses: [],
+      recentDoses: [],
+      inventoryTransactions: [
+        {
+          id: "t-1",
+          created_at: "2026-08-29T04:09:00+00:00",
+          type: "decrement",
+          amount: 1,
+          unit: "u".repeat(300),
+        },
+      ],
+      inventoryTotal: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("get_medication")!(
+        { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0 },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).not.toContain("u".repeat(40));
+    expect(text).toContain("decrement 1 ");
+  });
+
   it("caps the schedule slots it renders and says how many were left out", async () => {
     // `times` has no maximum in the schema or in the column, so one valid write
     // can put hundreds of slots into a row that a listing renders for every
