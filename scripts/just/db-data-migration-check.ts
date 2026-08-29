@@ -473,10 +473,27 @@ async function assertRepaired(): Promise<void> {
     ),
     "2",
   );
+  // Two payers with an otherwise identical statement row must get the *same* hash, and the
+  // unique index — scoped by `payer_person_id` — is what keeps their rows apart.
+  //
+  // This assertion originally required two distinct hashes, and passed, because the migration
+  // numbered occurrences globally. That is the bug it should have caught: the importer's
+  // `assignMoneyDedupeOccurrences` groups the rows of one batch, and a batch belongs to one
+  // person, so the second payer's next import computes occurrence 0 against a stored
+  // occurrence-1 hash, matches nothing, and inserts a second copy of a row this very migration
+  // had just repaired. A check that blesses the behaviour it exists to police is worse than no
+  // check: it reports the defect as verified.
   check(
-    "H: the same operation for another payer does not collide",
+    "H: the same operation for another payer hashes the same, and the index keeps them apart",
     sql(
       `select count(distinct dedupe_hash) from public.money_transactions where id in ('${TX.twinFirst}', '${TX.otherPayerTwin}')`,
+    ),
+    "1",
+  );
+  check(
+    "H2: both payers' rows survive, kept apart by the payer-scoped index",
+    sql(
+      `select count(*) from public.money_transactions where id in ('${TX.twinFirst}', '${TX.otherPayerTwin}')`,
     ),
     "2",
   );

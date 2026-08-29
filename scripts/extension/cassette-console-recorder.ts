@@ -502,7 +502,8 @@ function monthIsFullyCovered(month: string, windowFromMs: number, windowToMs: nu
 
 /**
  * A month is comparable against the bank only if the window covers it end to end *and* nothing
- * inside it came back capped in a way the splitting could not resolve.
+ * inside it went unread — neither a day still capped after splitting nor a range the bank
+ * answered with an error.
  *
  * The window bounds alone are not enough. A single day that is still at the page limit after
  * splitting is a day this recording is short on, and it can sit in the middle of a month the
@@ -513,10 +514,10 @@ function monthIsFullyCovered(month: string, windowFromMs: number, windowToMs: nu
 function monthIsComparable(
   month: string,
   window: { fromMs: number; toMs: number },
-  unresolvedStartsMs: number[],
+  incompleteMs: number[],
 ): boolean {
   if (!monthIsFullyCovered(month, window.fromMs, window.toMs)) return false;
-  return !unresolvedStartsMs.some((startMs) => moscowMonth(startMs) === month);
+  return !incompleteMs.some((timestampMs) => moscowMonth(timestampMs) === month);
 }
 
 export function summariseOperations(
@@ -524,7 +525,7 @@ export function summariseOperations(
   truncationSuspected: number,
   truncationUnresolved: number,
   window: { fromMs: number; toMs: number },
-  unresolvedStartsMs: number[] = [],
+  incompleteMs: number[] = [],
 ): CassetteSummary {
   const buckets = new Map<string, { income: number; expense: number; operations: number }>();
 
@@ -552,7 +553,7 @@ export function summariseOperations(
         operations: bucket.operations,
         income: bucket.income.toFixed(2),
         expense: bucket.expense.toFixed(2),
-        complete: monthIsComparable(month, window, unresolvedStartsMs),
+        complete: monthIsComparable(month, window, incompleteMs),
       };
     })
     .sort((left, right) =>
@@ -622,7 +623,11 @@ export async function recordCassette(
   let requestCount = 0;
   let truncationSuspected = 0;
   let truncationUnresolved = 0;
-  const unresolvedStartsMs: number[] = [];
+  // Every range this recording could not read in full: a day still at the page limit after
+  // splitting, or a range the bank answered with an error. Either one makes the months it
+  // touches incomparable, for the same reason — the recording is short there and nothing in the
+  // totals would show it.
+  const incompleteStartsMs: number[] = [];
 
   while (pending.length > 0) {
     const range = pending.shift();
@@ -639,7 +644,12 @@ export async function recordCassette(
     entries.push(entry);
 
     if (entry.status !== 200) {
+      // A whole range the bank did not answer. Warned about, but a warning is read once and the
+      // summary is read every time it is compared against the bank — so this has to reach the
+      // month as well, exactly like a day that stayed capped. Without it the console can tell
+      // the operator that a month is safe to compare while an entire range of it is missing.
       warnings.push(`range request ${requestCount} answered ${entry.status}`);
+      incompleteStartsMs.push(range.start, range.end);
       continue;
     }
 
@@ -691,7 +701,7 @@ export async function recordCassette(
     }
 
     truncationUnresolved += 1;
-    unresolvedStartsMs.push(range.start);
+    incompleteStartsMs.push(range.start);
     warnings.push(
       `A single day (${new Date(range.start).toISOString().slice(0, 10)}) came back at the page ` +
         "limit and cannot be split further — that day is incomplete in this recording, and the " +
@@ -875,7 +885,7 @@ export async function recordCassette(
       truncationSuspected,
       truncationUnresolved,
       { fromMs: windowFromMs, toMs: nowMs },
-      unresolvedStartsMs,
+      incompleteStartsMs,
     ),
   };
   const leaks = findCassetteLeaks(JSON.stringify(cassette));

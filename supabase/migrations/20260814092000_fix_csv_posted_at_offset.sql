@@ -22,6 +22,13 @@ SET
 WHERE jsonb_exists(transaction.raw_payload, 'Дата операции')
   AND COALESCE((transaction.raw_payload->>'posted_at_offset_fixed')::boolean, false) = false;
 
+-- The identity index is global at this point and the recompute below is not: occurrences are
+-- numbered per payer, so two people with an otherwise identical statement row now get the same
+-- hash, and the global index rejects the second one — the UPDATE fails and the deploy stops
+-- half-applied. The next migration replaces this index with the payer-scoped one that makes
+-- those two rows legitimate; dropping it here is what lets the recompute reach that point.
+DROP INDEX IF EXISTS idx_money_transactions_dedupe_hash;
+
 -- Recompute dedupe_hash for statement rows with the shared formula.
 --
 -- The text assembled here must match shared/lib/money/dedupe.ts character for character —
@@ -36,6 +43,7 @@ WHERE jsonb_exists(transaction.raw_payload, 'Дата операции')
 WITH statement_transactions AS (
   SELECT
     transaction.id,
+    transaction.payer_person_id,
     lower(btrim(regexp_replace(COALESCE(transaction.source, ''), '\s+', ' ', 'g'))) AS source_text,
     to_char(transaction.posted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS posted_at_text,
     to_char(round(transaction.amount, 2), 'FM999999999999990.00') AS amount_text,
@@ -57,9 +65,18 @@ numbered AS (
     statement_transactions.*,
     -- Repeats of an otherwise identical purchase are numbered in a stable order so the two
     -- rows keep distinct identities instead of collapsing into one.
+    --
+    -- Partitioned by payer as well, because the importer's numbering is per payer and these two
+    -- have to agree. `assignMoneyDedupeOccurrences` groups the rows of one import batch, and a
+    -- batch belongs to one person; numbering globally here would give a second payer's identical
+    -- row occurrence 1 while their next import computes occurrence 0. The hashes would not
+    -- match, the unique index is scoped by payer so nothing would collide, and the import would
+    -- insert a second copy of a row it had already repaired — the exact failure this migration
+    -- exists to prevent.
     (
       row_number() OVER (
         PARTITION BY
+          payer_person_id,
           source_text,
           posted_at_text,
           amount_text,

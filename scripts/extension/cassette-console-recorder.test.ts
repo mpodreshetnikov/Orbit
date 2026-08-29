@@ -330,6 +330,33 @@ describe("cassette console recorder", () => {
     expect(byMonth.get("2026-08")?.complete).toBe(false);
   });
 
+  it("does not call a month comparable when a range inside it failed", async () => {
+    // A warning is read once; the summary is read every time it is compared against the bank.
+    // A range the bank never answered leaves the month short in exactly the way the totals
+    // cannot show, so it has to reach the flag as well.
+    const july = Date.UTC(2026, 6, 15, 9, 0, 0);
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          const start = Number(url.searchParams.get("start"));
+          const end = Number(url.searchParams.get("end"));
+          if (start <= july && july <= end) return new Response(null, { status: 500 });
+          return new Response(JSON.stringify({ payload: [operation("august-1", -700)] }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "failed", pauseMs: 0, maxReceipts: 0 }, deps);
+    const july2026 = result.cassette.summary?.months.find((month) => month.month === "2026-07");
+
+    expect(result.warnings.join(" ")).toMatch(/answered 500/);
+    expect(july2026?.complete ?? false).toBe(false);
+  });
+
   it("does not call a month comparable when a day inside it stayed capped", async () => {
     // A single day still at the page limit after splitting is a day this recording is short on,
     // and it can sit in the middle of a month the window covers end to end. Marked complete, the

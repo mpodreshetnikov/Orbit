@@ -49,4 +49,12 @@ describe("change-impact docsOnly", () => {
   it("is false when nothing changed, so an empty diff never skips the gates", () => {
     expect(classifyChangedFiles([]).docsOnly).toBe(false);
   });
+
+  it("treats the shared dedupe formula as a database change", () => {
+    // The SQL migration reproduces `buildMoneyDedupeHash` character for character, and the only
+    // thing comparing them is the data migration check — which the workflow guards on dbImpact.
+    // Classified as web-only, a change to the formula merges without that comparison running.
+    expect(classifyChangedFiles(["shared/lib/money/dedupe.ts"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["shared/lib/money/other.ts"]).dbImpact).toBe(false);
+  });
 });

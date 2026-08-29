@@ -35,7 +35,13 @@ function classifyChangedFiles(changedFiles) {
       // The tooling that runs the database checks counts as a database change: without this a
       // regression in the migration-check gate merges without the gate ever executing, which is
       // exactly what happened to the commit that introduced it.
-      /^scripts\/just\/db-[\w-]+\.(cjs|ts)$/.test(filePath),
+      /^scripts\/just\/db-[\w-]+\.(cjs|ts)$/.test(filePath) ||
+      // The dedupe formula is shared between TypeScript and a SQL migration that reproduces it
+      // character for character, and the only thing comparing the two is the data migration
+      // check — which runs behind this flag. Classified as web-only, a change to the formula
+      // merges without that comparison ever running, and re-importing a repaired statement
+      // duplicates every row the migration fixed.
+      /^shared\/lib\/money\/dedupe\.ts$/.test(filePath),
   );
   const webImpact = normalizedChangedFiles.some(
     (filePath) =>
