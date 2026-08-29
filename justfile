@@ -24,6 +24,14 @@ web-dev-server:
 web-build-production:
   npx next build
 
+# Sync the iOS app shell: copy web assets and native plugins into ios/.
+ios-sync:
+  npx cap sync ios
+
+# Open the iOS app shell in Xcode (macOS only).
+ios-open:
+  npx cap open ios
+
 # Build browser extension in watch mode.
 extension-dev-watch:
   npx tsx scripts/extension/build.ts --mode=development --watch
@@ -82,9 +90,9 @@ quality-lint-web:
 quality-lint-extension:
   npx eslint browserExtension/src browserExtension/popup-src --ext .ts,.tsx --max-warnings=0
 
-# Run ESLint for scripts and tooling.
+# Run ESLint for scripts, tooling and the native app shell config.
 quality-lint-scripts:
-  npx eslint scripts vite.config.extension.ts --ext .js,.cjs,.mjs,.ts,.tsx --max-warnings=0
+  npx eslint scripts native vite.config.extension.ts capacitor.config.ts --ext .js,.cjs,.mjs,.ts,.tsx --max-warnings=0
 
 # Run Deno lint for Supabase Edge Functions.
 quality-lint-supabase-functions:
@@ -99,7 +107,7 @@ quality-lint-parallel:
 
 # Run ESLint autofix where safe.
 quality-lint-fix:
-  npx eslint src shared browserExtension/src browserExtension/popup-src scripts vite.config.extension.ts --ext .js,.cjs,.mjs,.ts,.tsx --fix --max-warnings=0
+  npx eslint src shared browserExtension/src browserExtension/popup-src scripts native vite.config.extension.ts capacitor.config.ts --ext .js,.cjs,.mjs,.ts,.tsx --fix --max-warnings=0
 
 # Run TypeScript type checks for web and extension surfaces.
 quality-typecheck-web:

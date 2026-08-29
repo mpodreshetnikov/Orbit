@@ -52,6 +52,7 @@ Cross-links:
 - Async jobs and notifications: [`docs/design/common/async-jobs-and-notifications.md`](./design/common/async-jobs-and-notifications.md)
 - Error handling and observability: [`docs/design/common/error-handling-and-observability.md`](./design/common/error-handling-and-observability.md)
 - UI shell, navigation, and person context: [`docs/design/common/ui-shell-navigation-and-person-context.md`](./design/common/ui-shell-navigation-and-person-context.md)
+- iOS app shell: [`docs/design/common/ios-app-shell.md`](./design/common/ios-app-shell.md)
 
 ### Domain: Health
 
