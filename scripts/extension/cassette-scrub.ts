@@ -217,6 +217,20 @@ const MASKED_PERSON_NAME = /"([A-ZА-ЯЁ][a-zа-яё]{1,30} [A-ZА-ЯЁ]\.)"/g;
 const WHOLE_MASKED_PERSON_NAME = /^[A-ZА-ЯЁ][a-zа-яё]{1,30} [A-ZА-ЯЁ]\.$/;
 
 /**
+ * A merchant's order reference, embedded in the description of a purchase: "Оплата заказа
+ * №a71787b8-5aaf-4cbc-9f47-68f162763215", "Заказ №214139831". The committed recording carried
+ * two UUIDs and four numeric references — none long enough for the digit rule, and all of them
+ * able to tie the public cassette to one customer's order in the merchant's own records.
+ *
+ * The `№` and the words around it stay: what the purchase was for is the merchant text the
+ * mapper and these tests are built on. Only the reference itself goes.
+ */
+const ORDER_REFERENCE = /(№\s*)[0-9A-Za-z][0-9A-Za-z-]{3,}/g;
+
+/** A UUID anywhere, order reference or not. Nothing a cassette needs is shaped like one. */
+const UUID = /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g;
+
+/**
  * Epoch milliseconds are a thirteen-digit run too, and they are the one thing a cassette must
  * keep: the connector reads operation timing out of `operationTime.milliseconds` and
  * `debitingTime.milliseconds`, and Milestone 4's acceptance turns on the contract test failing
@@ -294,7 +308,9 @@ export function scrubFreeText(value: string): string {
   return value
     .replace(/([?&](?:sessionid|session_id|token|access_token|auth)=)[^&#\s"']+/gi, `$1${REDACTED}`)
     .replace(LONG_DIGIT_RUN, REDACTED)
-    .replace(PHONE_NUMBER, REDACTED);
+    .replace(PHONE_NUMBER, REDACTED)
+    .replace(UUID, REDACTED)
+    .replace(ORDER_REFERENCE, `$1${REDACTED}`);
 }
 
 function isIdentifierKey(key: string): boolean {
@@ -513,6 +529,13 @@ export function findCassetteLeaks(serialized: string): string[] {
     const name = match[1];
     if (name === undefined) continue;
     const leak = `masked person name: ${name}`;
+    if (reported.has(leak)) continue;
+    reported.add(leak);
+    leaks.push(leak);
+  }
+
+  for (const match of serialized.matchAll(UUID)) {
+    const leak = `uuid: ${match[0]}`;
     if (reported.has(leak)) continue;
     reported.add(leak);
     leaks.push(leak);

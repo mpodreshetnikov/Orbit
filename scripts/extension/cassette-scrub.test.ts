@@ -276,6 +276,24 @@ describe("cassette scrubbing", () => {
     expect(findCassetteLeaks('{"description":"Ave Bistro & Gelato"}')).toEqual([]);
   });
 
+  it("removes an order reference but keeps what the purchase was for", () => {
+    // The committed recording carried two UUIDs and four numeric order references, none of them
+    // long enough for the digit rule — and each one ties the public cassette to a customer's
+    // order in the merchant's own records. The words around the reference are merchant text the
+    // mapper and the contract tests are built on, so only the reference goes.
+    expect(scrubFreeText("Оплата заказа №a71787b8-5aaf-4cbc-9f47-68f162763215")).toBe(
+      `Оплата заказа №${REDACTED}`,
+    );
+    expect(scrubFreeText("Билет в кино. Заказ №1225713")).toBe(`Билет в кино. Заказ №${REDACTED}`);
+    expect(scrubFreeText("Пятёрочка")).toBe("Пятёрочка");
+  });
+
+  it("reports a uuid a field rule did not catch", () => {
+    expect(findCassetteLeaks('{"mystery":"a71787b8-5aaf-4cbc-9f47-68f162763215"}')).toEqual([
+      "uuid: a71787b8-5aaf-4cbc-9f47-68f162763215",
+    ]);
+  });
+
   it("removes a phone number from free text", () => {
     expect(scrubFreeText("перевод на +79535912902")).toBe(`перевод на ${REDACTED}`);
     // Not a bite out of the middle of a card number: that whole run goes as one.

@@ -317,6 +317,24 @@ describe("tbank-web response contract", () => {
         expect(requestsPerKey(fetched), "request count per endpoint").toEqual(
           requestsPerKey(cassette.entries.map((entry) => entry.url)),
         );
+
+        // The count alone still does not pin the walk. `start` and `end` are excluded from the
+        // match key on purpose — splitting legitimately re-asks for the same data with different
+        // bounds — so a `buildRanges` that moved every boundary while making the same number of
+        // calls would replay the recorded payloads against ranges nobody recorded, and every
+        // assertion above would stay green. The bounds are compared here, in order, because the
+        // player hands operations bodies back in recorded order and that order only means
+        // anything if the ranges are the recorded ranges.
+        const bounds = (urls: string[]) =>
+          urls
+            .filter((url) => url.includes("/api/common/v1/operations"))
+            .map((url) => {
+              const params = new URL(url).searchParams;
+              return `${params.get("start")}..${params.get("end")}`;
+            });
+        expect(bounds(fetched), "range bounds, in order").toEqual(
+          bounds(cassette.entries.map((entry) => entry.url)),
+        );
       } finally {
         vi.useRealTimers();
         restore();

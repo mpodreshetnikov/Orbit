@@ -159,10 +159,19 @@ function asObject(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * The connector's page-local `text`, numbers included. Rejecting a numeric `id` or
+ * `authorizationId` here would leave the recorder deduplicating by a different fallback key, or
+ * with no receipt or detail key at all, while the replay processes the numeric identifier and
+ * asks for entries the cassette never recorded.
+ */
 function text(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
 }
 
 /**
@@ -257,7 +266,12 @@ export function buildTrancheUrl(
   url.searchParams.set("program_type", baseParams.programType);
   url.searchParams.set("origin", baseParams.origin);
   url.searchParams.set("amount", String(Math.abs(amount)));
-  if (baseParams.wuid) url.searchParams.set("wuid", baseParams.wuid);
+  // `wuid` identifies the browser session the recording was made from. The connector sends the
+  // real one; the cassette must not carry it, and `scrubUrl` would not catch an alphanumeric
+  // value. Recorded redacted, which means a tranche entry replays as a miss until the player
+  // ignores this parameter the way it ignores `sessionid` — T-260829-h66. That is a loud test
+  // failure rather than an identifier on disk, which is the right way round.
+  if (baseParams.wuid) url.searchParams.set("wuid", "REDACTED");
   return url.toString();
 }
 

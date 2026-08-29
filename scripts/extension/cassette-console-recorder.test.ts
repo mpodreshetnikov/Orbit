@@ -594,7 +594,8 @@ describe("cassette console recorder", () => {
     expect(params.get("program_type")).toBe("rpk_kk");
     expect(params.get("origin")).toBe("web,ib5,platform");
     expect(params.get("amount")).toBe("2400");
-    expect(params.get("wuid")).toBe("abc");
+    // Recorded redacted: it identifies the browser session the recording was made from.
+    expect(params.get("wuid")).toBe("REDACTED");
   });
 
   it("does not invent the detail endpoint the page never loaded", async () => {

@@ -430,16 +430,23 @@ function test(paths) {
     // stopped somewhere that raised no SQL error — no `not ok`, a non-empty `ok` list, green.
     // `pg_prove`, which this replaced, treats a plan mismatch as a failure, and so must this or
     // the replacement is weaker than what it stands in for.
+    // A missing plan is a failure too, not an absent constraint. `Number(undefined)` is NaN and
+    // every comparison against it is false, so checking only for a mismatch lets a file that
+    // emitted an `ok` and then stopped before `plan()`/`finish()` through — the shape `pg_prove`
+    // reports as "No plan found in TAP output".
     const planned = Number(output.match(/^1\.\.(\d+)$/m)?.[1] ?? NaN);
     const emitted = ok.length + notOk.length;
-    const planMismatch = Number.isFinite(planned) && planned !== emitted;
+    const planMissing = !Number.isFinite(planned);
+    const planMismatch = planMissing || planned !== emitted;
 
     const relative = path.relative(repoRoot, file);
     if (notOk.length > 0 || result.status !== 0 || ok.length === 0 || planMismatch) {
       failed += 1;
       console.log(`not ok - ${relative}`);
       for (const line of notOk) console.log(`    ${line}`);
-      if (planMismatch) {
+      if (planMissing) {
+        console.log(`    no plan found in TAP output (${emitted} assertion(s) emitted)`);
+      } else if (planMismatch) {
         console.log(`    plan declared ${planned} assertion(s), ${emitted} emitted`);
       }
       if (ok.length === 0) console.log(`    ${output.trim().split("\n").slice(-5).join("\n    ")}`);
