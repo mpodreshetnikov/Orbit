@@ -69,12 +69,18 @@ function makeDeps(overrides: Partial<RecorderDeps> = {}): RecorderDeps {
 describe("cassette console recorder", () => {
   it("refuses to record without a session id in the page's own requests", async () => {
     await expect(
-      recordCassette({ name: "x" }, makeDeps({ resourceUrls: () => [`${ORIGIN}/mybank/`] })),
+      recordCassette(
+        { name: "x", pauseMs: 0 },
+        makeDeps({ resourceUrls: () => [`${ORIGIN}/mybank/`] }),
+      ),
     ).rejects.toThrow(/No session id/);
   });
 
   it("records operations and receipts with the session id scrubbed out", async () => {
-    const result = await recordCassette({ name: "dense-month", maxReceipts: 5 }, makeDeps());
+    const result = await recordCassette(
+      { name: "dense-month", pauseMs: 0, maxReceipts: 5 },
+      makeDeps(),
+    );
 
     expect(result.leaks).toEqual([]);
     expect(result.counts.receipts).toBe(1);
@@ -90,7 +96,10 @@ describe("cassette console recorder", () => {
   });
 
   it("records the URL shapes the connector asks for, not a wall of future misses", async () => {
-    const result = await recordCassette({ name: "dense-month", maxReceipts: 5 }, makeDeps());
+    const result = await recordCassette(
+      { name: "dense-month", pauseMs: 0, maxReceipts: 5 },
+      makeDeps(),
+    );
 
     // `createCassettePlayer` matches on origin, path, and every query parameter except
     // `sessionid`, `start` and `end`. So what has to hold is that each recorded URL carries the
@@ -141,7 +150,7 @@ describe("cassette console recorder", () => {
       }) as unknown as typeof fetch,
     });
 
-    const result = await recordCassette({ name: "mixed", maxReceipts: 1 }, deps);
+    const result = await recordCassette({ name: "mixed", pauseMs: 0, maxReceipts: 1 }, deps);
 
     const receiptUrls = result.cassette.entries
       .map((entry) => entry.url)
@@ -156,7 +165,7 @@ describe("cassette console recorder", () => {
         new Response(JSON.stringify({ payload: [] }), { status: 200 })) as unknown as typeof fetch,
     });
 
-    const result = await recordCassette({ name: "empty" }, deps);
+    const result = await recordCassette({ name: "empty", pauseMs: 0 }, deps);
 
     expect(result.counts.operations).toBe(0);
     expect(result.warnings.join(" ")).toMatch(/proves nothing/);
@@ -186,7 +195,10 @@ describe("cassette console recorder", () => {
 
     // Thirteen days is one whole chunk and no remainder, so the walk starts from exactly one
     // range and every later request is a split of it.
-    const result = await recordCassette({ name: "dense", windowDays: 13, maxReceipts: 0 }, deps);
+    const result = await recordCassette(
+      { name: "dense", pauseMs: 0, windowDays: 13, maxReceipts: 0 },
+      deps,
+    );
 
     // One range, capped, split into two halves: three requests, three recorded entries.
     expect(operationsRequests).toBe(3);
@@ -229,7 +241,10 @@ describe("cassette console recorder", () => {
       }) as unknown as typeof fetch,
     });
 
-    const result = await recordCassette({ name: "saturated", windowDays: 2, maxReceipts: 0 }, deps);
+    const result = await recordCassette(
+      { name: "saturated", pauseMs: 0, windowDays: 2, maxReceipts: 0 },
+      deps,
+    );
 
     expect(result.cassette.summary?.truncationUnresolved).toBeGreaterThan(0);
     expect(result.warnings.join(" ")).toMatch(/cannot be split further/);
@@ -256,7 +271,7 @@ describe("cassette console recorder", () => {
       }) as unknown as typeof fetch,
     });
 
-    const result = await recordCassette({ name: "totals", maxReceipts: 0 }, deps);
+    const result = await recordCassette({ name: "totals", pauseMs: 0, maxReceipts: 0 }, deps);
 
     expect(result.cassette.summary?.months).toEqual([
       {
@@ -277,7 +292,7 @@ describe("cassette console recorder", () => {
     // 20th covers two thirds of the previous month, and its total then looks like a loss that
     // never happened. Nothing in a summary could distinguish that from a real one.
     const deps = makeDeps();
-    const result = await recordCassette({ name: "months", maxReceipts: 0 }, deps);
+    const result = await recordCassette({ name: "months", pauseMs: 0, maxReceipts: 0 }, deps);
 
     const requested = result.cassette.entries
       .filter((entry) => entry.url.includes("/api/common/v1/operations"))
@@ -308,7 +323,7 @@ describe("cassette console recorder", () => {
       }) as unknown as typeof fetch,
     });
 
-    const result = await recordCassette({ name: "months", maxReceipts: 0 }, deps);
+    const result = await recordCassette({ name: "months", pauseMs: 0, maxReceipts: 0 }, deps);
     const byMonth = new Map(result.cassette.summary?.months.map((m) => [m.month, m]) ?? []);
 
     expect(byMonth.get("2026-07")?.complete).toBe(true);

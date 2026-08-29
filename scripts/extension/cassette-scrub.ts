@@ -76,6 +76,40 @@ const SENSITIVE_QUERY_PARAMS = new Set([
   "auth",
 ]);
 
+/**
+ * Card fields, kept as their last four digits rather than blanked.
+ *
+ * The importer resolves which of the account holder's cards an operation belongs to from
+ * exactly those four digits — `tbank-web.ts` reduces every card candidate to `uniqueLast4`,
+ * and `extractAccountHintFromRow` consumes the result. Blanking the field outright therefore
+ * removed the one part of it the pipeline uses, and a cassette recorded that way could not
+ * exercise account resolution at all. Four digits cannot be charged and are what the bank
+ * itself prints on screen.
+ */
+const CARD_TAIL_KEYS = new Set(["cardnumber", "card_number", "pan", "panmasked", "pan_masked"]);
+
+/**
+ * Keys that hold an identifier when they carry a scalar and a container when they do not.
+ *
+ * Real payloads use `"account":"5351691778"` and `"card":"151542334"` — the account holder's
+ * internal references, nine and ten digits, short enough to slip past every digit rule — while
+ * elsewhere `card` is an object whose `panMasked` the importer reads. One name, two meanings.
+ */
+const CONTAINER_OR_IDENTIFIER_KEYS = new Set(["account", "card"]);
+
+/**
+ * The merchant's fiscal register fields. Numbers, so the value scrub never touched them, and
+ * sixteen digits, so the leak scan reported every one of them and refused the download — which
+ * is what the first real recording did, once per receipt. Nothing in the import path reads
+ * them, so they are removed rather than exempted.
+ */
+const FISCAL_KEYS = new Set([
+  "fiscaldrivenumber",
+  "fiscaldrivenumberstring",
+  "fiscaldocumentnumber",
+  "fiscalsign",
+]);
+
 /** Any run of 13+ digits is a card or account number, wherever it turns up in free text. */
 const LONG_DIGIT_RUN = /\d{13,}/g;
 
@@ -164,16 +198,42 @@ function isPersonNameKey(key: string): boolean {
   return PERSON_NAME_KEYS.has(key) || PERSON_NAME_KEYS.has(key.toLowerCase());
 }
 
+function maskCardTail(value: unknown): string {
+  const digits = String(value).replace(/\D/g, "");
+  return digits.length >= 4 ? `****${digits.slice(-4)}` : REDACTED;
+}
+
 /**
  * Walks a recorded payload and redacts every identifier and personal name it can name, plus
  * any long digit run left in free text. Structure, amounts and merchant text are untouched.
+ *
+ * `preserve` carries down the subtree of a key naming the bank's own operation reference. Those
+ * are long numeric strings — the captured snapshot holds fifteen-digit ones — so the free-text
+ * digit scrub would blank them, and `buildOperationKey` prefers `id`: every affected operation
+ * would then collapse to the same `id:REDACTED` on replay. It has to reach one level down
+ * because the bank wraps them as `{"operationId":{"value":"…"}}`.
  */
-export function scrubCassetteValue(value: unknown): unknown {
-  if (typeof value === "string") return scrubFreeText(value);
-  if (Array.isArray(value)) return value.map((entry) => scrubCassetteValue(entry));
+function scrubValue(value: unknown, preserve: boolean): unknown {
+  if (typeof value === "string") return preserve ? value : scrubFreeText(value);
+  if (Array.isArray(value)) return value.map((entry) => scrubValue(entry, preserve));
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      const lowered = key.toLowerCase();
+
+      if (FISCAL_KEYS.has(lowered)) {
+        result[key] = entry === null ? null : REDACTED;
+        continue;
+      }
+      if (CARD_TAIL_KEYS.has(lowered)) {
+        result[key] = entry === null ? null : maskCardTail(entry);
+        continue;
+      }
+      if (CONTAINER_OR_IDENTIFIER_KEYS.has(lowered)) {
+        const isContainer = entry !== null && typeof entry === "object";
+        result[key] = isContainer ? scrubValue(entry, false) : entry === null ? null : REDACTED;
+        continue;
+      }
       if (isIdentifierKey(key) || isPersonNameKey(key)) {
         result[key] = entry === null ? null : REDACTED;
         continue;
@@ -182,11 +242,15 @@ export function scrubCassetteValue(value: unknown): unknown {
         result[key] = scrubUrl(entry);
         continue;
       }
-      result[key] = scrubCassetteValue(entry);
+      result[key] = scrubValue(entry, preserve || PRESERVED_REFERENCE_KEYS.has(lowered));
     }
     return result;
   }
   return value;
+}
+
+export function scrubCassetteValue(value: unknown): unknown {
+  return scrubValue(value, false);
 }
 
 export interface CassetteEntry {
@@ -238,6 +302,14 @@ const REFERENCE_KEYS = new Set([
   "subgroupid",
   "groupid",
 ]);
+
+/**
+ * The same references, plus `id`, kept out of the value scrub so the replay can still tell two
+ * operations apart. `id` is preserved here but still *reported* by the leak scan: keeping a
+ * value is not the same as vouching for it, and the account and card fields that could hide
+ * behind a generic name are handled by name well before this.
+ */
+const PRESERVED_REFERENCE_KEYS = new Set([...REFERENCE_KEYS, "id"]);
 
 /**
  * The JSON key a match sits under, so a report says where the run is rather than only what it

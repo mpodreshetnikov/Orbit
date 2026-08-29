@@ -11,6 +11,7 @@
  */
 
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { build } from "esbuild";
 
@@ -38,7 +39,10 @@ export async function buildCassetteRecorderSnippet(input: {
 
 const isEntryPoint = process.argv[1]?.endsWith("build-cassette-recorder.ts");
 if (isEntryPoint) {
-  const scriptsDir = path.dirname(new URL(import.meta.url).pathname);
+  // `new URL(...).pathname` yields "/C:/..." on Windows, which path handling then turns into
+  // "\\C:\\..." and esbuild cannot open. The other extension build scripts convert for the same
+  // reason.
+  const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
   const outfile = path.resolve(
     process.argv[2] ?? path.join(scriptsDir, "..", "..", ".tmp", "cassette-recorder.js"),
   );

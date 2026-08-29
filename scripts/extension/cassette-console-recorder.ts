@@ -83,6 +83,8 @@ export interface RecorderOptions {
   chunkDays?: number;
   /** Receipts are the expensive request; the bank rate-limits them hardest. */
   maxReceipts?: number;
+  /** Pause between per-operation requests. Tests set it to zero; nothing else should. */
+  pauseMs?: number;
   onProgress?: (message: string) => void;
 }
 
@@ -245,17 +247,48 @@ function operationAmount(operation: Record<string, unknown>): number | null {
   );
 }
 
-/** Same precedence as the connector's `extractCurrency`. */
+/**
+ * Same precedence *and* same normalisation as the connector's `extractCurrency`.
+ *
+ * Real payloads carry `{ code: 643, name: "RUB", strCode: "643" }`, and the connector maps the
+ * numeric code to a letter one. Taking `strCode` at face value would bucket the summary under
+ * "643" while the contract test looks for "RUB", and every month would report as missing.
+ */
+function normalizeCurrencyToken(value: unknown): string | null {
+  const token = text(value)?.toUpperCase();
+  if (!token) return null;
+  if (/^\d+$/.test(token)) {
+    if (token === "643") return "RUB";
+    if (token === "840") return "USD";
+    if (token === "978") return "EUR";
+    return null;
+  }
+  const letters = token.match(/[A-Z]{3}/);
+  return letters ? letters[0] : null;
+}
+
 function operationCurrency(operation: Record<string, unknown>): string {
   const account = asObject(asObject(operation.accountAmount)?.currency);
   const amount = asObject(asObject(operation.amount)?.currency);
   return (
-    text(account?.strCode) ??
-    text(account?.name) ??
-    text(amount?.strCode) ??
-    text(amount?.name) ??
+    normalizeCurrencyToken(account?.strCode) ??
+    normalizeCurrencyToken(account?.name) ??
+    normalizeCurrencyToken(amount?.strCode) ??
+    normalizeCurrencyToken(amount?.name) ??
     "RUB"
-  ).toUpperCase();
+  );
+}
+
+/**
+ * Same as the connector's `resolveSignedAmount`. T-Bank reports a purchase as `type: "Debit"`
+ * with a **positive** `accountAmount.value`, so totalling the raw value counts every purchase
+ * as income — the summary would then disagree with the bank on its very first row.
+ */
+export function resolveSignedAmount(operation: Record<string, unknown>, amount: number): number {
+  const type = text(operation.type)?.toLowerCase() ?? "";
+  if (type.includes("debit") || type.includes("expense")) return -Math.abs(amount);
+  if (type.includes("credit") || type.includes("income")) return Math.abs(amount);
+  return amount;
 }
 
 /** Same precedence as the connector's `buildOperationKey`, so both dedupe identically. */
@@ -303,8 +336,9 @@ export function summariseOperations(
 
   for (const operation of operations) {
     const timestampMs = operationTimestampMs(operation);
-    const amount = operationAmount(operation);
-    if (timestampMs === null || amount === null) continue;
+    const rawAmount = operationAmount(operation);
+    if (timestampMs === null || rawAmount === null) continue;
+    const amount = resolveSignedAmount(operation, rawAmount);
 
     const key = `${moscowMonth(timestampMs)}|${operationCurrency(operation)}`;
     const bucket = buckets.get(key) ?? { income: 0, expense: 0, operations: 0 };
@@ -413,12 +447,16 @@ export async function recordCassette(
     let oldestInResponseMs: number | null = null;
     for (const operation of payload) {
       const timestampMs = operationTimestampMs(operation);
+      // The connector drops an operation with no readable time, and one older than the window
+      // even when the bank volunteers it. Keeping either here would put operations in the
+      // summary and spend receipt budget on rows the replay will never process.
+      if (timestampMs === null) continue;
+      oldestInResponseMs =
+        oldestInResponseMs === null ? timestampMs : Math.min(oldestInResponseMs, timestampMs);
+      if (timestampMs < windowFromMs) continue;
+
       const key = buildOperationKey(operation, timestampMs);
       if (key && !operationsByKey.has(key)) operationsByKey.set(key, operation);
-      if (timestampMs !== null) {
-        oldestInResponseMs =
-          oldestInResponseMs === null ? timestampMs : Math.min(oldestInResponseMs, timestampMs);
-      }
     }
 
     // The two signatures the connector uses: a response at the page limit, or one nearly full
@@ -461,7 +499,10 @@ export async function recordCassette(
     );
   }
 
-  const maxReceipts = options.maxReceipts ?? 25;
+  // The connector's own DEFAULT_MAX_RECEIPTS_PER_RUN. A smaller budget here would leave the
+  // replay asking for receipts the cassette never recorded.
+  const maxReceipts = options.maxReceipts ?? 50;
+  const pauseMs = options.pauseMs ?? RECEIPT_PAUSE_MS;
   const requested = new Set<string>();
   let receipts = 0;
 
@@ -469,37 +510,49 @@ export async function recordCassette(
   if (operations.length > 0 && receiptBearing.length === 0) {
     warnings.push(
       "No operation in the recorded window carries a receipt, so the cassette exercises the " +
-        "range walk but not receipt enrichment. Widen windowDays or pick a month with shopping.",
+        "range walk but not receipt enrichment. Widen the window or pick a month with shopping.",
+    );
+  }
+  if (receiptBearing.length > maxReceipts) {
+    warnings.push(
+      `${receiptBearing.length} operations carry a receipt but the budget is ${maxReceipts}, so ` +
+        "the replay will ask for receipts this cassette does not hold. Raise maxReceipts to " +
+        "cover them, or expect misses for the remainder.",
     );
   }
 
-  for (const operation of receiptBearing) {
-    if (receipts >= maxReceipts) break;
-    const receiptKey = extractReceiptRequestKey(operation);
-    if (!receiptKey) continue;
+  let detailCount = 0;
+  for (const operation of operations) {
+    const requestKey = extractReceiptRequestKey(operation);
+    if (!requestKey) continue;
     // Adjacent ranges overlap on their bounds and the bank repeats an operation across them, so
-    // without this the recorder spends its receipt budget asking for the same receipt twice —
-    // the exact request the bank rate-limits hardest.
-    if (requested.has(receiptKey)) continue;
-    requested.add(receiptKey);
+    // without this the recorder asks for the same detail and receipt twice — and the receipt is
+    // the request the bank rate-limits hardest.
+    if (requested.has(requestKey)) continue;
+    requested.add(requestKey);
 
     const detailUrl = new URL(detailApiUrl, deps.origin);
-    detailUrl.searchParams.set("operationId", receiptKey);
+    detailUrl.searchParams.set("operationId", requestKey);
     detailUrl.searchParams.set("sessionid", sessionId);
 
+    // The connector asks for the detail of every operation it has not already fulfilled; only
+    // the receipt request is conditional. Recording details for receipt-bearing operations
+    // alone would leave the replay without an answer for every other one.
+    if (detailCount > 0) await sleep(pauseMs);
+    detailCount += 1;
+    report(`detail ${detailCount}/${operations.length}`);
+    entries.push((await recordRequest(deps, detailUrl.toString())).entry);
+
+    if (!operationHasShoppingReceipt(operation)) continue;
+    if (receipts >= maxReceipts) continue;
+
     const receiptUrl = new URL(`${deps.origin}${RECEIPT_PATH}`);
-    receiptUrl.searchParams.set("operationId", receiptKey);
+    receiptUrl.searchParams.set("operationId", requestKey);
     receiptUrl.searchParams.set("sessionid", sessionId);
 
-    // The bank rate-limits receipts hardest, and the connector paces itself accordingly rather
-    // than firing them back to back. A recorder that ignores that gets throttled part-way
-    // through and produces a cassette full of error bodies — against a live account, from a
-    // browser the account holder is signed into.
-    if (receipts > 0) await sleep(RECEIPT_PAUSE_MS);
-
+    await sleep(pauseMs);
     receipts += 1;
     report(`receipt ${receipts}/${Math.min(maxReceipts, receiptBearing.length)}`);
-    entries.push((await recordRequest(deps, detailUrl.toString())).entry);
     entries.push((await recordRequest(deps, receiptUrl.toString())).entry);
   }
 

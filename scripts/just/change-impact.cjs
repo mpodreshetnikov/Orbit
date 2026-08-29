@@ -29,8 +29,13 @@ function classifyChangedFiles(changedFiles) {
   const normalizedChangedFiles = uniq(changedFiles.map(normalizePath));
   const hasFiles = normalizedChangedFiles.length > 0;
 
-  const dbImpact = normalizedChangedFiles.some((filePath) =>
-    /^supabase\/(db|migrations|tests)\//.test(filePath),
+  const dbImpact = normalizedChangedFiles.some(
+    (filePath) =>
+      /^supabase\/(db|migrations|tests)\//.test(filePath) ||
+      // The tooling that runs the database checks counts as a database change: without this a
+      // regression in the migration-check gate merges without the gate ever executing, which is
+      // exactly what happened to the commit that introduced it.
+      /^scripts\/just\/db-[\w-]+\.(cjs|ts)$/.test(filePath),
   );
   const webImpact = normalizedChangedFiles.some(
     (filePath) =>

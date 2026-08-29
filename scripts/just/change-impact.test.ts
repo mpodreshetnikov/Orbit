@@ -12,6 +12,15 @@ const { classifyChangedFiles } = require("./change-impact.cjs") as {
 };
 
 describe("change-impact", () => {
+  it("treats the database tooling as a database change", () => {
+    // Otherwise a change to the migration-check gate merges without the gate running — which is
+    // how the commit that introduced it slipped through.
+    expect(classifyChangedFiles(["scripts/just/db-data-migration-check.ts"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["scripts/just/db-local-docker.cjs"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["supabase/migrations/1_x.sql"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["scripts/just/coverage-report.cjs"]).dbImpact).toBe(false);
+  });
+
   it("treats extension build surfaces as extension impact", () => {
     expect(classifyChangedFiles(["scripts/extension/build.ts"]).extensionImpact).toBe(true);
     expect(classifyChangedFiles(["vite.config.extension.ts"]).extensionImpact).toBe(true);

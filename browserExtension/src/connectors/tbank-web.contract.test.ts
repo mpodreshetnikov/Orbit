@@ -104,10 +104,22 @@ describe("tbank-web response contract", () => {
         // which a count of successfully mapped rows cannot express.
         const totals = new Map<string, { operations: number; income: number; expense: number }>();
 
+        // A capped range is recorded as the parent response *and* both halves, so the same
+        // operation appears in several payloads. The recorder's totals deduplicate through the
+        // connector's own operation key; totalling raw payload entries here would double-count
+        // every dense cassette and fail against a mapper that is perfectly correct.
+        const seen = new Set<string>();
+
         for (const entry of operationsEntries) {
           const payload =
             (entry.body as { payload?: Array<Record<string, unknown>> })?.payload ?? [];
           for (const operation of payload) {
+            const identity =
+              JSON.stringify(operation.id ?? operation.operationId ?? operation.authorizationId) ??
+              null;
+            if (identity === null || seen.has(identity)) continue;
+            seen.add(identity);
+
             const row = __test__.mapOperationRecordToRow(
               { operation },
               { extractionMethod: "api" },
