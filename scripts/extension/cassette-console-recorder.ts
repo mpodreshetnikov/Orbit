@@ -374,9 +374,10 @@ export function hasReceiptItems(body: unknown): boolean {
  * A well-formed envelope that carries an error instead of data.
  *
  * The committed recording's four hundred and one detail responses are every one of them an
- * HTTP 200 `INVALID_REQUEST_DATA`: the connector's own `operationId` precedence is not what that
- * endpoint wants. The cassette records that faithfully, but a recording where every detail
- * response is an error proves nothing about detail mapping, and nothing in the file says so.
+ * HTTP 200 `INVALID_REQUEST_DATA`. Why the bank refuses them is not established — a wrong
+ * `operationId`, a missing parameter and a retired endpoint all look like this from here. The
+ * cassette records the refusal faithfully, but a recording where every detail response is an
+ * error proves nothing about detail mapping, and nothing in the file says so.
  */
 export function isErrorEnvelope(body: unknown): boolean {
   const envelope = asObject(body);
@@ -507,9 +508,10 @@ export function buildOperationKey(
  *
  * Verified against a real account: the recorded totals exceeded the bank's by the same amount on
  * both sides, 5575.00 in one month and 4068.00 in the next, and each was exactly the two
- * `PAY`/`Credit` operations in that month. Subtracting them brought both sides to within a
- * kopeck of what the bank displays, which is the rounding in its own figures. Without this the
- * comparison never lines up and every reconciliation needs the same correction done by hand.
+ * `PAY`/`Credit` operations in that month. Subtracting them brought all four totals onto the
+ * bank's own figures to within a rouble — the bank displays whole roubles, and the differences
+ * land in [0, 1) where truncation would put them. Without this the comparison never lines up at
+ * all, and every reconciliation needs the same correction done by hand.
  */
 export function isPurchaseRefund(operation: Record<string, unknown>, amount: number): boolean {
   return amount > 0 && text(operation.group)?.toUpperCase() === "PAY";

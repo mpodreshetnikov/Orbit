@@ -74,8 +74,10 @@ asserted rather than remembered.
 once — by 5575.00 in July and 4068.00 in August — which is the signature of a sign convention,
 not of a missing operation. Each amount was exactly that month's `PAY`/`Credit` operations:
 refunds of purchases, which the bank subtracts from the month's spending rather than adding to
-its income. With that convention the recording lands within a kopeck of the four displayed
-figures, and the kopeck is the bank's own rounding.
+its income. With that convention the recording lands on the four displayed figures — to within
+a rouble, not a kopeck. The bank displays whole roubles, and all four differences fall in [0, 1)
+in the direction truncation would put them. A missing or mis-signed amount under a rouble would
+still hide; what this comparison catches is a convention error, which is what it caught.
 
 **A gateway error is not a receipt.** One receipt request came back 504. Counting it would have
 claimed enrichment the cassette cannot replay, and nothing in the summary would have suggested
@@ -107,8 +109,9 @@ connector it mirrors, including a tranche URL missing five parameters the connec
 and a detail endpoint the recorder invented where the connector returns null.
 
 **Every detail response in this recording is an error.** All 401 of them are HTTP 200
-`INVALID_REQUEST_DATA`: the connector's `operationId` precedence is not what that endpoint wants,
-so detail enrichment does not work against the live bank either. The cassette records that
+`INVALID_REQUEST_DATA`, so detail enrichment does not work against the live bank either. Why is
+not established: the rejection shows the request is refused, not that `operationId` is the reason
+— a missing parameter or a retired endpoint would look the same. The cassette records that
 faithfully — the connector sends the same request and gets the same answer — but it means
 replaying this recording proves nothing about detail mapping. The recorder now warns when a
 recording comes out that way. Why the bank rejects the request is T-260829-g7i in the registry.
