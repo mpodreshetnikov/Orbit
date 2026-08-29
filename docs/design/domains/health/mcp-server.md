@@ -119,6 +119,29 @@ Conventions that matter:
 - Date-range tools take an optional `timezone` and resolve the saved preference, because the app's
   users are not in UTC and "what do I take today?" must mean the local day
   (`src/lib/mcp/local-day.ts`).
+- **A time this server quotes is converted and labelled, or it is not quoted.** Every timestamp
+  rendered into a tool's text block goes through `src/lib/mcp/zoned-time.ts` and comes out as
+  `2026-08-24 22:00 +07:00` — the caller's wall clock, carrying its offset — and the reply names the
+  IANA zone it used. A date is the local calendar date, not `instant.slice(0, 10)`. In
+  `structuredContent` the stored ISO instant stays exactly as it was and gains a `<field>_local`
+  sibling, so anything already parsing these payloads keeps working.
+
+  This is the output half of the same contract as the parsing rules below, and it was missing until
+  `T-0027`. A course scheduled for 22:00 seven hours east of UTC is stored as `15:00+00:00`;
+  `list_medication_doses` printed that instant with its offset sliced off, directly beneath a header
+  naming the local zone, while `get_medication` returned those instants beside the regimen's own
+  local wall-clock `schedule.times`. Two frames in one payload with nothing to tell them apart. An
+  assistant asked to move the 22:00 dose reported that it "is at 15:00", refused, and asked the user
+  to confirm — and the failure available to it next was worse: "correcting" the schedule by the
+  offset through `update_medication`, which regenerates events and would have moved every future
+  reminder of that course while reporting success.
+
+  The zone comes from `readTimezonePreference`, never `resolveTimezone`, on read tools and on
+  `log_dose` and `add_measurement` alike, and an unrecognised zone is refused rather than falling
+  through to UTC. `log_dose` resolves it even when `taken_at` carries its own offset, because the
+  confirmation quotes the time back and "logged at 15:00Z" is unreadable to the person who took the
+  dose at ten in the evening.
+
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.
 - **A medication a person is currently on is never created twice.** `add_medication` refuses when a
@@ -193,7 +216,11 @@ Conventions that matter:
   onto the previous local day. An ambiguous fall-back time is accepted, settling on the later
   occurrence: unlike a gap it does exist, and either reading is at most an hour out. `new Date`
   would read an offset-less string in the _server's_ zone — UTC in production, so hours off for
-  anyone else — and it also accepts non-ISO input like `"0"`.
+  anyone else — and it also accepts non-ISO input like `"0"`. That parser is
+  `instantFromInput` in `src/lib/mcp/zoned-time.ts`, and `add_measurement` uses it too:
+  `measured_at` went into a `timestamptz` column exactly as handed in until `T-0027`, so an
+  offset-less wall clock was stored as UTC — the same defect, on the tool most likely to be given a
+  bare "yesterday evening" time.
 
 - `add_medication` and `update_medication` must regenerate dose events, or the app's "Today's
   intakes" keeps showing the old plan. They call the same

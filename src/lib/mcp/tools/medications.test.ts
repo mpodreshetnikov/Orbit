@@ -140,6 +140,58 @@ describe("get_medication", () => {
 
     expect(result.isError).toBe(true);
   });
+
+  it("names the zone and quotes the next dose in it", async () => {
+    regen.readTimezonePreference.mockResolvedValue("Asia/Bangkok");
+    meds.getMedication.mockResolvedValue({
+      // The regimen's own times are local wall-clock strings; its events are
+      // UTC instants. Handing both over unlabelled is what let an assistant
+      // conclude the app contradicted the user (T-0027).
+      regimen: {
+        custom_name: "Атаракс",
+        effective_status: "active",
+        schedule: { mode: "daily_times", times: ["22:00"] },
+      },
+      upcomingDoses: [
+        { id: "d-2", scheduled_at: "2026-08-25T15:00:00+00:00", actual_at: null, taken_at: null },
+      ],
+      recentDoses: [
+        {
+          id: "d-1",
+          scheduled_at: "2026-08-24T15:00:00+00:00",
+          actual_at: null,
+          taken_at: "2026-08-24T16:33:47+00:00",
+        },
+      ],
+      inventoryTransactions: [{ id: "t-1", created_at: "2026-08-24T16:33:47+00:00" }],
+    });
+
+    const result = await (await handlers()).get("get_medication")!(
+      { regimen_id: "r-1", horizon_days: 7 },
+      ctx(),
+    );
+
+    expect(result.content[0].text).toContain("Times are Asia/Bangkok");
+    expect(result.content[0].text).toContain("next 2026-08-25 22:00 +07:00");
+    expect(result.content[0].text).toContain("last 2026-08-24 23:33 +07:00");
+    expect(result.structuredContent).toMatchObject({ timezone: "Asia/Bangkok" });
+    expect(
+      (result.structuredContent?.upcomingDoses as Array<Record<string, unknown>>)[0],
+    ).toMatchObject({ scheduled_at_local: "2026-08-25T22:00:00+07:00" });
+    expect(
+      (result.structuredContent?.inventoryTransactions as Array<Record<string, unknown>>)[0],
+    ).toMatchObject({ created_at_local: "2026-08-24T23:33:47+07:00" });
+  });
+
+  it("refuses a timezone it cannot resolve rather than answering in UTC", async () => {
+    const result = await (await handlers()).get("get_medication")!(
+      { regimen_id: "r-1", horizon_days: 7, timezone: "Mars/Olympus" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.getMedication).not.toHaveBeenCalled();
+  });
 });
 
 describe("list_medication_doses", () => {
@@ -191,6 +243,67 @@ describe("list_medication_doses", () => {
 
     expect(result.content[0].text).toContain("Ferrous sulfate, 1 pill [taken]");
     expect(result.content[0].text).toContain("unknown [scheduled]");
+  });
+
+  it("quotes each intake in the zone the header names, not in UTC", async () => {
+    regen.readTimezonePreference.mockResolvedValue("Asia/Bangkok");
+    meds.listMedicationDoses.mockResolvedValue([
+      {
+        scheduled_at: "2026-08-24T15:00:00+00:00",
+        actual_at: "2026-08-24T15:00:00+00:00",
+        taken_at: null,
+        medication_name: "Атаракс",
+        planned_intake: { intake: { amount: 0.5, unit: "pill" } },
+        status: "scheduled",
+      },
+    ]);
+
+    const result = await (await handlers()).get("list_medication_doses")!(
+      { from: "2026-08-24", to: "2026-08-24" },
+      ctx(),
+    );
+
+    // The course is scheduled for 22:00 local. Printing the stored 15:00Z under
+    // a header naming the local zone is the defect this test exists for: an
+    // assistant read it as a 15:00 dose and refused to move a 22:00 one (T-0027).
+    expect(result.content[0].text).toContain("2026-08-24 22:00 +07:00");
+    expect(result.content[0].text).not.toContain("2026-08-24 15:00");
+  });
+
+  it("carries the zone and the local readings in the payload", async () => {
+    regen.readTimezonePreference.mockResolvedValue("Asia/Bangkok");
+    meds.listMedicationDoses.mockResolvedValue([
+      {
+        scheduled_at: "2026-08-24T15:00:00+00:00",
+        actual_at: "2026-08-24T15:00:00+00:00",
+        taken_at: "2026-08-24T16:33:47+00:00",
+        medication_name: "Атаракс",
+        planned_intake: null,
+        status: "taken",
+      },
+    ]);
+
+    const result = await (await handlers()).get("list_medication_doses")!(
+      { from: "2026-08-24", to: "2026-08-24" },
+      ctx(),
+    );
+
+    expect(result.structuredContent).toMatchObject({ timezone: "Asia/Bangkok" });
+    expect((result.structuredContent?.doses as Array<Record<string, unknown>>)[0]).toMatchObject({
+      scheduled_at: "2026-08-24T15:00:00+00:00",
+      scheduled_at_local: "2026-08-24T22:00:00+07:00",
+      taken_at_local: "2026-08-24T23:33:47+07:00",
+    });
+  });
+
+  it("refuses a timezone it cannot resolve rather than answering in UTC", async () => {
+    const result = await (await handlers()).get("list_medication_doses")!(
+      { from: "2026-08-24", to: "2026-08-24", timezone: "Mars/Olympus" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.listMedicationDoses).not.toHaveBeenCalled();
   });
 });
 
@@ -514,14 +627,63 @@ describe("log_dose", () => {
     expect(params.at).toBe("2026-08-19T21:10:00.000Z");
   });
 
-  it("does not consult a timezone for a time that carries its own offset", async () => {
+  it("reads the saved zone even for an offset-bearing time, to quote it back", async () => {
     await (await handlers()).get("log_dose")!(
       { regimen_id: "r-1", taken_at: "2026-08-19T23:10:00+07:00", status: "taken" },
       ctx(),
     );
 
+    // The instant needs no zone, but the confirmation does: reporting it back
+    // in UTC is how "I took it at 22:00" came back as "...at 15:00Z" (T-0027).
+    // Reading the preference is free of side effects; resolving it is not.
+    expect(regen.readTimezonePreference).toHaveBeenCalled();
     expect(regen.resolveTimezone).not.toHaveBeenCalled();
-    expect(regen.readTimezonePreference).not.toHaveBeenCalled();
+  });
+
+  it("quotes the intake back in the caller's zone, never in UTC", async () => {
+    const result = await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-08-24T22:00",
+        timezone: "Asia/Bangkok",
+        status: "taken",
+      },
+      ctx(),
+    );
+
+    // Stored as 15:00Z. Quoting that instant raw is the whole defect.
+    expect(result.content[0].text).toContain("2026-08-24 22:00 +07:00");
+    expect(result.content[0].text).toContain("Asia/Bangkok");
+    expect(result.content[0].text).not.toContain("15:00");
+  });
+
+  it("offers the local reading beside the stored instant in the payload", async () => {
+    meds.logDose.mockResolvedValue({
+      regimen: { id: "r-1", custom_name: "Атаракс", effective_status: "active" },
+      dose: {
+        id: "d-1",
+        status: "taken",
+        scheduled_at: "2026-08-24T15:00:00+00:00",
+        taken_at: "2026-08-24T15:04:00+00:00",
+        planned_intake: { intake: { amount: 0.5, unit: "pill" } },
+      },
+      planned: true,
+    });
+
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", timezone: "Asia/Bangkok", status: "taken" },
+      ctx(),
+    );
+
+    expect(result.structuredContent).toMatchObject({
+      timezone: "Asia/Bangkok",
+      dose: {
+        // Additive: whatever already parses the ISO instant keeps working.
+        scheduled_at: "2026-08-24T15:00:00+00:00",
+        scheduled_at_local: "2026-08-24T22:00:00+07:00",
+        taken_at_local: "2026-08-24T22:04:00+07:00",
+      },
+    });
   });
 
   it("never persists the timezone it was handed", async () => {
