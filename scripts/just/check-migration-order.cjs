@@ -12,6 +12,12 @@
  *
  * Usage:
  *   node check-migration-order.cjs [--base <git-ref>]
+ *
+ * The base defaults to origin/main. CI passes the pull request's real base through
+ * MIGRATION_ORDER_BASE, so a branch targeting something other than main is measured against the
+ * branch it will actually merge into. A base that is asked for and cannot be resolved is an error,
+ * not a skip: a gate that reports "skipped" and exits 0 is the one failure mode that would let the
+ * order it exists to check go unchecked while CI stays green.
  */
 
 const fs = require("fs");
@@ -84,19 +90,33 @@ function runGit(args) {
   return spawnSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" });
 }
 
-function resolveBaseRef(explicitBase) {
-  if (explicitBase) {
-    const result = runGit(["rev-parse", "--verify", "--quiet", `${explicitBase}^{commit}`]);
-    return result.status === 0 ? explicitBase : null;
+function refExists(ref) {
+  return runGit(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).status === 0;
+}
+
+function resolveExplicitBaseRef(explicitBase) {
+  if (refExists(explicitBase)) {
+    return explicitBase;
   }
 
-  for (const candidate of BASE_REF_CANDIDATES) {
-    const result = runGit(["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`]);
-    if (result.status === 0) {
-      return candidate;
-    }
+  // A shallow or partial clone can be missing a commit that genuinely exists upstream, so fetch
+  // once before treating the ref as wrong. Deliberately not --depth=1: that writes .git/shallow on
+  // an otherwise complete clone, and later steps in the same job read history.
+  runGit(["fetch", "origin", explicitBase]);
+  if (refExists(explicitBase)) {
+    return explicitBase;
   }
-  return null;
+
+  throw new Error(
+    `Cannot resolve base ref '${explicitBase}'. It was requested explicitly, so the migration ` +
+      "order cannot be checked and this is a failure rather than a skip. Pass a ref that exists " +
+      "in this checkout, or omit it to fall back to " +
+      `${BASE_REF_CANDIDATES.join(" then ")}.`,
+  );
+}
+
+function resolveDefaultBaseRef() {
+  return BASE_REF_CANDIDATES.find((candidate) => refExists(candidate)) ?? null;
 }
 
 function readBaseMigrations(baseRef) {
@@ -139,19 +159,19 @@ function formatFailure({ offenders, latestBaseVersion, baseRef }) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const baseRef = resolveBaseRef(args.base);
+  const requestedBase = args.base || (process.env.MIGRATION_ORDER_BASE || "").trim();
+  const baseRef = requestedBase ? resolveExplicitBaseRef(requestedBase) : resolveDefaultBaseRef();
 
   if (!baseRef) {
     console.log(
-      `Migration order check skipped: no base ref to compare against (tried ${args.base ? args.base : BASE_REF_CANDIDATES.join(", ")}).`,
+      `Migration order check skipped: no base ref to compare against (tried ${BASE_REF_CANDIDATES.join(", ")}).`,
     );
     return 0;
   }
 
   const baseFiles = readBaseMigrations(baseRef);
   if (baseFiles === null) {
-    console.log(`Migration order check skipped: could not read ${MIGRATIONS_DIR} at ${baseRef}.`);
-    return 0;
+    throw new Error(`Could not read ${MIGRATIONS_DIR} at ${baseRef}.`);
   }
 
   const result = evaluateMigrationOrder({
