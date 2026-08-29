@@ -166,6 +166,11 @@ Conventions that matter:
   hand, which is how a titration history came to be reconstructed by binary search over 3–5 day
   windows.
 
+  That covers every list this server returns, the stock ledger included: `get_medication` takes an
+  `inventory_offset`, says which movements it is showing of how many, and names the offset that
+  reaches the older ones — a ledger truncated in silence is at its most misleading in exactly the
+  question it gets asked for, a stock discrepancy.
+
   The page, the filters and the total all come from the database. PostgREST caps a response at
   `max_rows` (1000 in `supabase/config.toml`), so paging or filtering a result in memory would let a
   long history report its own truncation as the total and declare there was nothing further —
@@ -183,6 +188,10 @@ Conventions that matter:
   unresolved events are regenerated, so a past intake can sit beside a definition that moved under
   it. Until a per-unit strength exists, withholding the figure is the difference between reporting
   the record and inventing a dose.
+
+  `list_medications` takes a `timezone` for the same reason the dated tools do, though it lists no
+  date range: a `one_off` course carries a due instant, and quoting it in UTC beside plan times that
+  are local wall clock is the T-0027 defect in miniature.
 
   A name filter is a literal, not a pattern. `list_medications` matches with `imatch` (`~*`) over a
   regex-escaped needle rather than `ilike`: PostgREST rewrites `*` in a `like`/`ilike` value to `%`

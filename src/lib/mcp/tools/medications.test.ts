@@ -219,7 +219,7 @@ describe("list_medications", () => {
     expect(text).not.toContain("Вещество 8");
   });
 
-  it("renders a one-off due time only where a zone was resolved", async () => {
+  it("renders a one-off due time in the zone it names", async () => {
     meds.listMedications.mockResolvedValue({
       regimens: [
         {
@@ -237,10 +237,20 @@ describe("list_medications", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    // T-0027: an instant is converted and labelled or it is not printed, and
-    // this tool resolves no zone — so it says where the time is instead.
-    expect(text).toContain("schedule one_off, due time in the payload");
-    expect(text).not.toContain("2026-08-30");
+    // T-0027: an instant is converted and labelled, or it is not printed. The
+    // tool resolves the saved preference (Europe/Berlin in these tests), so the
+    // due time is quoted with its offset rather than left in the payload.
+    expect(text).toContain("schedule one_off, due 2026-08-30 04:00 +02:00");
+  });
+
+  it("refuses a timezone it cannot resolve rather than listing in UTC", async () => {
+    const result = await (await handlers()).get("list_medications")!(
+      { ...PAGE, timezone: "Mars/Olympus" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(meds.listMedications).not.toHaveBeenCalled();
   });
 
   it("keeps the time of a legacy interval_days row", async () => {
@@ -514,7 +524,7 @@ describe("get_medication", () => {
     });
 
     const result = await (await handlers()).get("get_medication")!(
-      { regimen_id: "r-1", horizon_days: 7 },
+      { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0 },
       ctx(),
     );
 
@@ -525,7 +535,7 @@ describe("get_medication", () => {
     meds.getMedication.mockResolvedValue(null);
 
     const result = await (await handlers()).get("get_medication")!(
-      { regimen_id: "nope", horizon_days: 7 },
+      { regimen_id: "nope", horizon_days: 7, inventory_offset: 0 },
       ctx(),
     );
 
@@ -558,7 +568,7 @@ describe("get_medication", () => {
     });
 
     const result = await (await handlers()).get("get_medication")!(
-      { regimen_id: "r-1", horizon_days: 7 },
+      { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0 },
       ctx(),
     );
 
@@ -624,7 +634,10 @@ describe("get_medication", () => {
     });
 
     const text = (
-      await (await handlers()).get("get_medication")!({ regimen_id: "r-1", horizon_days: 7 }, ctx())
+      await (await handlers()).get("get_medication")!(
+        { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0 },
+        ctx(),
+      )
     ).content[0].text;
 
     // The count line stays -- it is the T-0027 zone contract -- and the detail
@@ -657,15 +670,19 @@ describe("get_medication", () => {
     });
 
     const text = (
-      await (await handlers()).get("get_medication")!({ regimen_id: "r-1", horizon_days: 7 }, ctx())
+      await (await handlers()).get("get_medication")!(
+        { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0 },
+        ctx(),
+      )
     ).content[0].text;
 
-    expect(text).toContain("Inventory movements (latest 1 of 143)");
+    expect(text).toContain("Inventory movements (1-1 of 143, newest first");
+    expect(text).toContain("pass inventory_offset: 1 for older");
   });
 
   it("refuses a timezone it cannot resolve rather than answering in UTC", async () => {
     const result = await (await handlers()).get("get_medication")!(
-      { regimen_id: "r-1", horizon_days: 7, timezone: "Mars/Olympus" },
+      { regimen_id: "r-1", horizon_days: 7, inventory_offset: 0, timezone: "Mars/Olympus" },
       ctx(),
     );
 

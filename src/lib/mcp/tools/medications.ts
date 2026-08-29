@@ -287,13 +287,13 @@ function describeNotesExcerpt(notes: string | null): string {
   return text ? `note "${text}"` : "";
 }
 
-function describeRegimen(regimen: RegimenWithStatus): string {
+function describeRegimen(regimen: RegimenWithStatus, timezone?: string): string {
   // Every part the tool's own description promises -- "dose, schedule, duration
   // and stock" -- plus the note, which is where a tablet strength tends to be
   // written down while `active` is empty.
   const parts = [
     describeIntake(regimen.dose_definition),
-    describeSchedule(regimen.schedule, regimen.dose_definition),
+    describeSchedule(regimen.schedule, regimen.dose_definition, timezone),
     describeCourseWindow(regimen.duration),
     describeStock(regimen),
     describeNotesExcerpt(regimen.notes),
@@ -375,10 +375,24 @@ export function registerMedicationTools(server: McpToolServer): void {
         status: z.enum(["active", "paused", "completed", "archived"]).optional(),
         search: z.string().optional().describe("Filter by medication name."),
         include_archived: z.boolean().default(false),
+        timezone: z
+          .string()
+          .optional()
+          .describe(
+            "IANA timezone a one-off course's due time is reported in, e.g. 'Europe/Berlin'. Defaults to the user's saved preference, or UTC.",
+          ),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    withPerson(async (supabase, person, args) => {
+    withPerson(async (supabase, person, args, auth) => {
+      // Resolved even though most schedules carry no instant: a `one_off`
+      // course's `due_at` is one, and T-0027's contract is that a time this
+      // server prints is converted and labelled or it is not printed at all.
+      const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+      if (!zone.ok) {
+        return fail(zone.error);
+      }
+
       const { regimens, total } = await listMedications(supabase, {
         personId: person.id,
         status: args.status,
@@ -396,12 +410,16 @@ export function registerMedicationTools(server: McpToolServer): void {
       const nextOffset = hasMore ? args.offset + regimens.length : null;
 
       return ok(
-        summarizePage(`medications for ${person.name}`, regimens.map(describeRegimen), {
-          total,
-          offset: args.offset,
-          has_more: hasMore,
-          next_offset: nextOffset,
-        }),
+        summarizePage(
+          `medications for ${person.name}`,
+          regimens.map((regimen) => describeRegimen(regimen, zone.timezone)),
+          {
+            total,
+            offset: args.offset,
+            has_more: hasMore,
+            next_offset: nextOffset,
+          },
+        ),
         {
           person,
           medications: regimens,
@@ -436,108 +454,125 @@ export function registerMedicationTools(server: McpToolServer): void {
           .describe(
             "IANA timezone the dose times are reported in, e.g. 'Europe/Berlin'. Defaults to the user's saved preference, or UTC.",
           ),
+        inventory_offset: z
+          .number()
+          .int()
+          .min(0)
+          .default(0)
+          .describe("Stock movements to skip, newest first, for reading older ledger entries."),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    withUserClient<{ regimen_id: string; horizon_days: number; timezone?: string }>(
-      async (supabase, args, auth) => {
-        // The regimen's `schedule.times` are local wall-clock strings and its
-        // dose events are UTC instants. Returning both without saying so is
-        // what let an assistant read a 22:00 course as a 15:00 one (T-0027), so
-        // the doses are quoted in a named zone here rather than raw.
-        const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
-        if (!zone.ok) {
-          return fail(zone.error);
-        }
+    withUserClient<{
+      regimen_id: string;
+      horizon_days: number;
+      timezone?: string;
+      inventory_offset: number;
+    }>(async (supabase, args, auth) => {
+      // The regimen's `schedule.times` are local wall-clock strings and its
+      // dose events are UTC instants. Returning both without saying so is
+      // what let an assistant read a 22:00 course as a 15:00 one (T-0027), so
+      // the doses are quoted in a named zone here rather than raw.
+      const zone = await resolveDisplayZone(supabase, auth.authUserId, args.timezone);
+      if (!zone.ok) {
+        return fail(zone.error);
+      }
 
-        const detail = await getMedication(supabase, {
-          regimenId: args.regimen_id,
-          horizonDays: args.horizon_days,
-        });
+      const detail = await getMedication(supabase, {
+        regimenId: args.regimen_id,
+        horizonDays: args.horizon_days,
+        inventoryOffset: args.inventory_offset,
+      });
 
-        if (!detail?.regimen) {
-          return fail(`No medication with id ${args.regimen_id}.`);
-        }
+      if (!detail?.regimen) {
+        return fail(`No medication with id ${args.regimen_id}.`);
+      }
 
-        const inZone = (doses: typeof detail.upcomingDoses) =>
-          doses.map((dose) =>
-            withZonedTimestamps(
-              dose as unknown as Record<string, unknown>,
-              zone.timezone,
-              DOSE_EVENT_TIMESTAMPS,
-            ),
-          );
-
-        const courseDose = detail.regimen.dose_definition;
-        const next = detail.upcomingDoses[0];
-        const previous = detail.recentDoses[detail.recentDoses.length - 1];
-
-        // The description promises detail, and what this returned was one line
-        // counting the doses -- strictly less than `list_medications` prints
-        // for the same course. So the summary keeps the counts and the T-0027
-        // zone contract, then actually says what the course is and lists the
-        // doses and stock movements it is counting.
-        const plan = [
-          describeIntake(detail.regimen.dose_definition),
-          describeSchedule(detail.regimen.schedule, detail.regimen.dose_definition, zone.timezone),
-          describeCourseWindow(detail.regimen.duration),
-          describeStock(detail.regimen),
-        ].filter((part) => part.length > 0);
-
-        const notes = excerpt(detail.regimen.notes, NOTE_EXCERPT.detail);
-        // A 30-day horizon on a twice-daily course is 120 intakes. List the
-        // ones nearest now and say how many were left out, rather than either
-        // dumping all of them or going back to a bare count.
-        const listed = <T>(rows: T[], keep: "first" | "last") => {
-          if (rows.length <= DETAIL_DOSE_LIMIT) return { rows, omitted: 0 };
-          return {
-            rows:
-              keep === "first" ? rows.slice(0, DETAIL_DOSE_LIMIT) : rows.slice(-DETAIL_DOSE_LIMIT),
-            omitted: rows.length - DETAIL_DOSE_LIMIT,
-          };
-        };
-        const recent = listed(detail.recentDoses, "last");
-        const upcoming = listed(detail.upcomingDoses, "first");
-        const more = (omitted: number) => (omitted > 0 ? `\n- ...${omitted} more` : "");
-        const doseLine = (dose: (typeof detail.upcomingDoses)[number]) =>
-          `- ${formatZoned(dose.scheduled_at, zone.timezone)} — ${describeIntake(dose.planned_intake, courseDose) || "dose unknown"} [${dose.status}]` +
-          `${dose.taken_at ? `, taken ${formatZoned(dose.taken_at, zone.timezone)}` : ""}` +
-          `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`;
-        const movementLine = (movement: (typeof detail.inventoryTransactions)[number]) =>
-          `- ${formatZoned(movement.created_at, zone.timezone)} — ${movement.type} ${movement.amount} ${movement.unit}` +
-          `${excerpt(movement.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(movement.note, NOTE_EXCERPT.dose)}"` : ""}`;
-
-        return ok(
-          `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
-            `${detail.upcomingDoses.length} upcoming dose(s), ${detail.recentDoses.length} in the recent window. ` +
-            `Times are ${zone.timezone}` +
-            `${next ? `; next ${formatZoned(next.scheduled_at, zone.timezone)}` : ""}` +
-            `${previous ? `; last ${formatZoned(previous.taken_at ?? previous.scheduled_at, zone.timezone)}` : ""}.` +
-            `\n${plan.join(", ")}.` +
-            `${notes ? `\nNotes: ${notes}` : ""}` +
-            `${recent.rows.length > 0 ? `\nRecent intakes:${more(recent.omitted)}\n${recent.rows.map(doseLine).join("\n")}` : ""}` +
-            `${upcoming.rows.length > 0 ? `\nUpcoming intakes:\n${upcoming.rows.map(doseLine).join("\n")}${more(upcoming.omitted)}` : ""}` +
-            `${
-              detail.inventoryTransactions.length > 0
-                ? `\nInventory movements${detail.inventoryTotal > detail.inventoryTransactions.length ? ` (latest ${detail.inventoryTransactions.length} of ${detail.inventoryTotal})` : ""}:\n${detail.inventoryTransactions.map(movementLine).join("\n")}`
-                : ""
-            }`,
-          {
-            ...detail,
-            timezone: zone.timezone,
-            upcomingDoses: inZone(detail.upcomingDoses),
-            recentDoses: inZone(detail.recentDoses),
-            inventoryTransactions: detail.inventoryTransactions.map((transaction) =>
-              withZonedTimestamps(
-                transaction as unknown as Record<string, unknown>,
-                zone.timezone,
-                ["created_at"],
-              ),
-            ),
-          } as unknown as Record<string, unknown>,
+      const inZone = (doses: typeof detail.upcomingDoses) =>
+        doses.map((dose) =>
+          withZonedTimestamps(
+            dose as unknown as Record<string, unknown>,
+            zone.timezone,
+            DOSE_EVENT_TIMESTAMPS,
+          ),
         );
-      },
-    ),
+
+      const courseDose = detail.regimen.dose_definition;
+      // A truncated ledger says how to read the rest, like every other list
+      // this server pages (ADR-260829-ube): the movements are newest first,
+      // so an offset walks backwards through the history.
+      const shownMovements = args.inventory_offset + detail.inventoryTransactions.length;
+      const inventoryWindow =
+        detail.inventoryTotal > shownMovements || args.inventory_offset > 0
+          ? ` (${args.inventory_offset + 1}-${shownMovements} of ${detail.inventoryTotal}, newest first` +
+            `${detail.inventoryTotal > shownMovements ? `; pass inventory_offset: ${shownMovements} for older` : ""})`
+          : "";
+      const next = detail.upcomingDoses[0];
+      const previous = detail.recentDoses[detail.recentDoses.length - 1];
+
+      // The description promises detail, and what this returned was one line
+      // counting the doses -- strictly less than `list_medications` prints
+      // for the same course. So the summary keeps the counts and the T-0027
+      // zone contract, then actually says what the course is and lists the
+      // doses and stock movements it is counting.
+      const plan = [
+        describeIntake(detail.regimen.dose_definition),
+        describeSchedule(detail.regimen.schedule, detail.regimen.dose_definition, zone.timezone),
+        describeCourseWindow(detail.regimen.duration),
+        describeStock(detail.regimen),
+      ].filter((part) => part.length > 0);
+
+      const notes = excerpt(detail.regimen.notes, NOTE_EXCERPT.detail);
+      // A 30-day horizon on a twice-daily course is 120 intakes. List the
+      // ones nearest now and say how many were left out, rather than either
+      // dumping all of them or going back to a bare count.
+      const listed = <T>(rows: T[], keep: "first" | "last") => {
+        if (rows.length <= DETAIL_DOSE_LIMIT) return { rows, omitted: 0 };
+        return {
+          rows:
+            keep === "first" ? rows.slice(0, DETAIL_DOSE_LIMIT) : rows.slice(-DETAIL_DOSE_LIMIT),
+          omitted: rows.length - DETAIL_DOSE_LIMIT,
+        };
+      };
+      const recent = listed(detail.recentDoses, "last");
+      const upcoming = listed(detail.upcomingDoses, "first");
+      const more = (omitted: number) => (omitted > 0 ? `\n- ...${omitted} more` : "");
+      const doseLine = (dose: (typeof detail.upcomingDoses)[number]) =>
+        `- ${formatZoned(dose.scheduled_at, zone.timezone)} — ${describeIntake(dose.planned_intake, courseDose) || "dose unknown"} [${dose.status}]` +
+        `${dose.taken_at ? `, taken ${formatZoned(dose.taken_at, zone.timezone)}` : ""}` +
+        `${excerpt(dose.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(dose.note, NOTE_EXCERPT.dose)}"` : ""}`;
+      const movementLine = (movement: (typeof detail.inventoryTransactions)[number]) =>
+        `- ${formatZoned(movement.created_at, zone.timezone)} — ${movement.type} ${movement.amount} ${movement.unit}` +
+        `${excerpt(movement.note, NOTE_EXCERPT.dose) ? `, note "${excerpt(movement.note, NOTE_EXCERPT.dose)}"` : ""}`;
+
+      return ok(
+        `${detail.regimen.custom_name} — ${detail.regimen.effective_status}. ` +
+          `${detail.upcomingDoses.length} upcoming dose(s), ${detail.recentDoses.length} in the recent window. ` +
+          `Times are ${zone.timezone}` +
+          `${next ? `; next ${formatZoned(next.scheduled_at, zone.timezone)}` : ""}` +
+          `${previous ? `; last ${formatZoned(previous.taken_at ?? previous.scheduled_at, zone.timezone)}` : ""}.` +
+          `\n${plan.join(", ")}.` +
+          `${notes ? `\nNotes: ${notes}` : ""}` +
+          `${recent.rows.length > 0 ? `\nRecent intakes:${more(recent.omitted)}\n${recent.rows.map(doseLine).join("\n")}` : ""}` +
+          `${upcoming.rows.length > 0 ? `\nUpcoming intakes:\n${upcoming.rows.map(doseLine).join("\n")}${more(upcoming.omitted)}` : ""}` +
+          `${
+            detail.inventoryTransactions.length > 0
+              ? `\nInventory movements${inventoryWindow}:\n${detail.inventoryTransactions.map(movementLine).join("\n")}`
+              : ""
+          }`,
+        {
+          ...detail,
+          timezone: zone.timezone,
+          upcomingDoses: inZone(detail.upcomingDoses),
+          recentDoses: inZone(detail.recentDoses),
+          inventoryTransactions: detail.inventoryTransactions.map((transaction) =>
+            withZonedTimestamps(transaction as unknown as Record<string, unknown>, zone.timezone, [
+              "created_at",
+            ]),
+          ),
+        } as unknown as Record<string, unknown>,
+      );
+    }),
   );
 
   server.registerTool(

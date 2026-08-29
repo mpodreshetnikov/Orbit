@@ -108,7 +108,12 @@ export const INVENTORY_LIMIT = 20;
 
 export async function getMedication(
   supabase: SupabaseClient<Database>,
-  params: { regimenId: string; horizonDays: number },
+  params: {
+    regimenId: string;
+    horizonDays: number;
+    inventoryLimit?: number;
+    inventoryOffset?: number;
+  },
 ): Promise<{
   regimen: RegimenWithStatus | null;
   upcomingDoses: MedDoseEvent[];
@@ -157,7 +162,10 @@ export async function getMedication(
     .eq("regimen_id", params.regimenId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: true })
-    .limit(INVENTORY_LIMIT);
+    .range(
+      params.inventoryOffset ?? 0,
+      (params.inventoryOffset ?? 0) + (params.inventoryLimit ?? INVENTORY_LIMIT) - 1,
+    );
 
   return {
     regimen,
