@@ -35,6 +35,7 @@ const PG_IMAGE = process.env.ORBIT_PG_IMAGE ?? "public.ecr.aws/supabase/postgres
 const STORAGE_IMAGE =
   process.env.ORBIT_STORAGE_IMAGE ?? "public.ecr.aws/supabase/storage-api:v1.38.0";
 const AUTH_IMAGE = process.env.ORBIT_AUTH_IMAGE ?? "public.ecr.aws/supabase/gotrue:v2.186.0";
+const PUBLISH_DEFAULT_PORT = process.env.ORBIT_DB_PUBLISH_DEFAULT_PORT !== "0";
 const JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 
 /** What the app, psql and `run-deploy.js` connect to. */
@@ -158,8 +159,10 @@ function startDatabase() {
     NETWORK,
     "-p",
     `${PORT}:5432`,
-    "-p",
-    "5432:5432",
+    // Publishing 5432 as well is what lets the container name resolve to the same database on
+    // the host, which the pgTAP runner needs. A second database on the same host — the data
+    // migration check runs one — must not claim it.
+    ...(PUBLISH_DEFAULT_PORT ? ["-p", "5432:5432"] : []),
     "-e",
     "POSTGRES_PASSWORD=postgres",
     PG_IMAGE,
@@ -170,7 +173,7 @@ function startDatabase() {
   if (created.status !== 0) {
     throw new Error(`Failed to start ${DB_CONTAINER}: ${created.stderr ?? ""}`);
   }
-  pinContainerNameToLoopback();
+  if (PUBLISH_DEFAULT_PORT) pinContainerNameToLoopback();
 
   log("waiting for postgres");
   waitFor("postgres", () => psql(["-c", "select 1"]).status === 0);
@@ -275,7 +278,13 @@ function startSchemaOwners() {
   });
 }
 
-function applyMigrations() {
+/**
+ * `from` and `until` are inclusive migration version prefixes. They exist so a caller can stop
+ * before a migration, put rows in the shape that migration was written to repair, and then run
+ * it — which is the only way to test a data-repairing migration against anything but the empty
+ * tables CI holds.
+ */
+function applyMigrations({ from, until } = {}) {
   log("applying migrations");
   psql([
     "-c",
@@ -288,6 +297,12 @@ function applyMigrations() {
   const files = fs
     .readdirSync(migrationsDir)
     .filter((name) => name.endsWith(".sql"))
+    .filter((name) => {
+      const version = name.split("_")[0];
+      if (from && version < from) return false;
+      if (until && version > until) return false;
+      return true;
+    })
     .sort();
   for (const name of files) {
     const applied = psql(["-f", path.join(migrationsDir, name)], { stdio: "pipe" });
@@ -320,15 +335,15 @@ function applyDeployAndSeed() {
   }
 }
 
-function up() {
+function up(flags) {
   const dockerStatus = ensureDockerReady();
   if (dockerStatus !== 0) return dockerStatus;
 
   startDatabase();
   startSchemaOwners();
-  applyMigrations();
-  applyDeployAndSeed();
-  enableTls();
+  applyMigrations({ until: flags.until });
+  if (!flags.noDeploy) applyDeployAndSeed();
+  if (!flags.noTls) enableTls();
 
   log("ready");
   log(`  psql / app:   ${DB_URL}`);
@@ -373,10 +388,31 @@ function lint() {
 }
 
 const [command = "up", ...rest] = process.argv.slice(2);
+
+function flagValue(name) {
+  const index = rest.indexOf(name);
+  return index === -1 ? undefined : rest[index + 1];
+}
+
+const flags = {
+  until: flagValue("--until"),
+  from: flagValue("--from"),
+  noDeploy: rest.includes("--no-deploy"),
+  noTls: rest.includes("--no-tls"),
+};
+const positional = rest.filter(
+  (token, index) =>
+    !token.startsWith("--") && !["--until", "--from"].includes(rest[index - 1] ?? ""),
+);
+
 const commands = {
-  up,
+  up: () => up(flags),
   down,
-  test: () => test(rest),
+  migrate: () => {
+    applyMigrations({ from: flags.from, until: flags.until });
+    return 0;
+  },
+  test: () => test(positional),
   lint,
   url: () => {
     console.log(DB_URL);

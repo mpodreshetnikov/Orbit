@@ -220,6 +220,10 @@ supabase-docker-test *args:
 supabase-docker-lint:
   node scripts/just/db-local-docker.cjs lint
 
+# Run the money data-repair migrations against rows in their pre-repair shape (needs Docker).
+db-data-migration-check:
+  npx tsx scripts/just/db-data-migration-check.ts
+
 # Apply pending local migrations without reset.
 supabase-local-migrate-only:
   npx supabase migration up

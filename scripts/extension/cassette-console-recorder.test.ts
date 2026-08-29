@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCassettePlayer } from "../../browserExtension/src/connectors/cassette-replay";
 import {
   buildRanges,
   discoverSessionId,
@@ -85,17 +84,31 @@ describe("cassette console recorder", () => {
     expect(serialized).toContain("Молоко");
   });
 
-  it("records URLs the replay player matches, so a recording is not a wall of misses", async () => {
+  it("records the URL shapes the connector asks for, not a wall of future misses", async () => {
     const result = await recordCassette({ name: "dense-month", maxReceipts: 5 }, makeDeps());
-    const player = createCassettePlayer(result.cassette);
 
-    // A different session id and different range bounds are exactly what a later replay sends.
-    const replayed = await player.fetch(
-      `${ORIGIN}/api/common/v1/shopping_receipt?operationId=auth-op-1&sessionid=other-session`,
-    );
+    // `createCassettePlayer` matches on origin, path, and every query parameter except
+    // `sessionid`, `start` and `end`. So what has to hold is that each recorded URL carries the
+    // right path and the right *stable* parameter — for a receipt, the operation id the
+    // connector will derive from the same operation. These are pinned as literals rather than
+    // replayed through the player, because a build script may not import extension runtime
+    // code; the end-to-end proof is `tbank-web.contract.test.ts` once a cassette is committed.
+    const stableKeys = result.cassette.entries.map((entry) => {
+      const url = new URL(entry.url);
+      const stable = [...url.searchParams.entries()]
+        .filter(([name]) => !["sessionid", "start", "end"].includes(name.toLowerCase()))
+        .map(([name, value]) => `${name}=${value}`)
+        .join("&");
+      return stable ? `${url.pathname}?${stable}` : url.pathname;
+    });
 
-    expect(replayed.status).toBe(200);
-    expect(player.misses).toEqual([]);
+    expect(stableKeys).toEqual([
+      "/api/common/v1/operations",
+      "/api/common/v1/operations",
+      "/api/common/v1/operations",
+      "/api/common/v1/operation?operationId=auth-op-1",
+      "/api/common/v1/shopping_receipt?operationId=auth-op-1",
+    ]);
   });
 
   it("warns rather than silently producing a cassette that proves nothing", async () => {
