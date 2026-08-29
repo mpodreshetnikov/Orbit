@@ -215,6 +215,54 @@ export function scrubCassette(entries: CassetteEntry[]): CassetteEntry[] {
 }
 
 /**
+ * Keys whose value is a reference the bank generated for an operation, not a way to move money.
+ *
+ * T-Bank's operation identifiers are sixteen-digit numbers, so a scan that calls every long run
+ * an account number reports one per receipt and blocks the recording — which is what the first
+ * real recording did, twenty-five times over. None of these is a card or account number, and
+ * the fields that are (`cardNumber`, `pan`, `accountId`, `accountNumber`, `agreementNumber`,
+ * `contractNumber`) are redacted by name before this scan ever runs.
+ *
+ * `id` is deliberately absent: it is too generic to clear sight unseen, so a long run under it
+ * is still reported — with the key named, so the next person can decide rather than guess.
+ */
+const REFERENCE_KEYS = new Set([
+  "operationid",
+  "authorizationid",
+  "receiptrequestkey",
+  "receiptid",
+  "documentid",
+  "paymentid",
+  "trackingid",
+  "ucid",
+  "subgroupid",
+  "groupid",
+]);
+
+/**
+ * The JSON key a match sits under, so a report says where the run is rather than only what it
+ * is. "long digit run: 7384440901188332" cannot be acted on; naming the field it came from can.
+ */
+function enclosingKey(serialized: string, index: number): string | null {
+  let cursor = index;
+  // Two steps, because the bank wraps identifiers as `{"operationId":{"value":"…"}}` and the
+  // immediate key there is `value`, which names nothing. One step out reaches the real field.
+  for (let depth = 0; depth < 2; depth += 1) {
+    const from = Math.max(0, cursor - 256);
+    const before = serialized.slice(from, cursor);
+    const keyEnd = before.lastIndexOf('":');
+    if (keyEnd === -1) return null;
+    const keyStart = before.lastIndexOf('"', keyEnd - 1);
+    if (keyStart === -1) return null;
+    const key = before.slice(keyStart + 1, keyEnd);
+    if (key.includes('"')) return null;
+    if (key !== "value") return key;
+    cursor = from + keyStart;
+  }
+  return "value";
+}
+
+/**
  * Finds anything in a scrubbed cassette that still looks like a secret. Used as a last check
  * before a cassette is committed, on the principle that the scrubber knowing about a field is
  * not the same as the field being gone.
@@ -230,11 +278,21 @@ export function findCassetteLeaks(serialized: string): string[] {
   }
 
   const exempt = exemptStructuralSpans(serialized);
+  const reported = new Set<string>();
   for (const match of serialized.matchAll(LONG_DIGIT_RUN)) {
     const start = match.index;
     if (start === undefined) continue;
     if (exempt.some(([from, to]) => start === from && start + match[0].length === to)) continue;
-    leaks.push(`long digit run: ${match[0]}`);
+
+    const key = enclosingKey(serialized, start);
+    if (key && REFERENCE_KEYS.has(key.toLowerCase())) continue;
+
+    // The same identifier usually repeats across a recording; reporting it once per occurrence
+    // buries the distinct problems under twenty copies of one of them.
+    const leak = key ? `long digit run under "${key}": ${match[0]}` : `long digit run: ${match[0]}`;
+    if (reported.has(leak)) continue;
+    reported.add(leak);
+    leaks.push(leak);
   }
 
   return leaks;

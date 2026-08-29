@@ -50,6 +50,13 @@ const MIN_RANGE_SPAN_MS = DAY_MS;
 /** The bank prints and totals in Moscow wall clock, so the reconciliation is bucketed there. */
 const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
 
+/** The connector's own pause between receipt requests (`receiptBasePauseBetweenRequestsMs`). */
+const RECEIPT_PAUSE_MS = 300;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export interface RecorderDeps {
   fetch: typeof fetch;
   /** URLs the page has already requested — `performance.getEntriesByType("resource")` names. */
@@ -483,6 +490,12 @@ export async function recordCassette(
     const receiptUrl = new URL(`${deps.origin}${RECEIPT_PATH}`);
     receiptUrl.searchParams.set("operationId", receiptKey);
     receiptUrl.searchParams.set("sessionid", sessionId);
+
+    // The bank rate-limits receipts hardest, and the connector paces itself accordingly rather
+    // than firing them back to back. A recorder that ignores that gets throttled part-way
+    // through and produces a cassette full of error bodies — against a live account, from a
+    // browser the account holder is signed into.
+    if (receipts > 0) await sleep(RECEIPT_PAUSE_MS);
 
     receipts += 1;
     report(`receipt ${receipts}/${Math.min(maxReceipts, receiptBearing.length)}`);

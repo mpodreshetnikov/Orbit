@@ -28,7 +28,14 @@ function download(name: string, contents: string): void {
 async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
   const name = options.name ?? "dense-month";
   const result = await recordCassette(
-    { ...options, name },
+    {
+      ...options,
+      name,
+      // Without this the console shows the banner, then `undefined`, then nothing at all for a
+      // minute or more while twenty-five paced receipt requests run. That reads as a script
+      // that did nothing.
+      onProgress: (message) => console.info(`[cassette] ${message}`),
+    },
     {
       fetch: (input, init) => window.fetch(input, init),
       resourceUrls: () =>
