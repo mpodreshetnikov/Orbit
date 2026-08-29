@@ -103,6 +103,9 @@ export async function listMedications(
   return { regimens, total: count ?? regimens.length };
 }
 
+/** How many of the newest stock movements `getMedication` returns. */
+export const INVENTORY_LIMIT = 20;
+
 export async function getMedication(
   supabase: SupabaseClient<Database>,
   params: { regimenId: string; horizonDays: number },
@@ -111,6 +114,8 @@ export async function getMedication(
   upcomingDoses: MedDoseEvent[];
   recentDoses: MedDoseEvent[];
   inventoryTransactions: ReturnType<typeof rowToInventoryTransaction>[];
+  /** How many movements the ledger holds, of which the newest are returned. */
+  inventoryTotal: number;
 } | null> {
   const { data, error } = await supabase
     .from("med_regimens")
@@ -143,12 +148,16 @@ export async function getMedication(
 
   const doses = ((events ?? []) as unknown as Array<Record<string, unknown>>).map(rowToDoseEvent);
 
-  const { data: transactions } = await supabase
+  // Counted as well as capped: a caller told only "here are 20 movements"
+  // cannot tell a complete ledger from a truncated one, and stock questions are
+  // exactly where that matters.
+  const { data: transactions, count: inventoryTotal } = await supabase
     .from("med_inventory_transactions")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("regimen_id", params.regimenId)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .order("id", { ascending: true })
+    .limit(INVENTORY_LIMIT);
 
   return {
     regimen,
@@ -157,6 +166,7 @@ export async function getMedication(
     inventoryTransactions: ((transactions ?? []) as unknown as Array<Record<string, unknown>>).map(
       rowToInventoryTransaction,
     ),
+    inventoryTotal: inventoryTotal ?? (transactions ?? []).length,
   };
 }
 

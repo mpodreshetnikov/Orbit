@@ -88,9 +88,21 @@ function describeIntake(
   // row whose `active` is not an array must not throw and take down the reply
   // for the medications around it, so the shape is checked rather than trusted.
   const active = Array.isArray(planned?.active) ? planned.active : [];
-  const ingredients = active
-    .filter((one) => one && typeof one === "object" && one.name != null && one.amount != null)
-    .map((one) => `${one.name} ${one.amount}${one.unit ? ` ${one.unit}` : ""}`);
+  const named = active.filter(
+    (one) => one && typeof one === "object" && one.name != null && one.amount != null,
+  );
+  // Bounded for the same reason notes are: a combination product can carry a
+  // long list, an imported row can carry a longer one, and a page holds up to a
+  // hundred rows. `structuredContent` keeps the whole array.
+  const ingredients = named
+    .slice(0, INGREDIENT_LIMIT)
+    .map(
+      (one) =>
+        `${excerpt(String(one.name), INGREDIENT_NAME_LIMIT)} ${one.amount}${one.unit ? ` ${one.unit}` : ""}`,
+    );
+  if (named.length > ingredients.length) {
+    ingredients.push(`…${named.length - ingredients.length} more`);
+  }
 
   // `active` is milligrams per intake with nothing recording what one unit
   // contains, and nothing rescales it: the generator copies it while
@@ -157,6 +169,24 @@ function describeSchedule(
   // honours it: half a pill in the morning and one and a half at night is one
   // regimen with two amounts, and printing the base dose beside bare times
   // would describe both slots as the same size.
+  // A slot amount that differs from the course's own means the strength printed
+  // beside the dose was recorded for a different number of units, and nothing
+  // rescales it -- the same reason an intake withholds its milligrams when the
+  // amounts disagree. Saying so once per schedule keeps the two surfaces
+  // consistent instead of letting a reader carry the base strength onto an
+  // overridden slot.
+  const overrideNote = (amounts?: number[]) => {
+    const base = dose?.intake?.amount;
+    const hasStrength = Array.isArray(dose?.active) && dose.active.length > 0;
+    if (!hasStrength || base == null || !Array.isArray(amounts)) return "";
+    return amounts.some((amount) => amount != null && amount !== base)
+      ? `, strength on file is for the ${base} ${dose?.intake?.unit ?? ""} dose only`.replace(
+          "  ",
+          " ",
+        )
+      : "";
+  };
+
   const at = (times?: string[], amounts?: number[]) => {
     // `Array.isArray`, not a length check: a row whose `times` is the string
     // "09:00" has a length and would reach `.map`, throwing and taking the
@@ -173,16 +203,16 @@ function describeSchedule(
 
   switch (schedule.mode) {
     case "daily_times":
-      return `schedule daily_times${at(schedule.times, schedule.amounts)}`;
+      return `schedule daily_times${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
     case "interval_hours":
       return (
         `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
         `${schedule.amount != null ? ` (${schedule.amount}${dose?.intake?.unit ? ` ${dose.intake.unit}` : ""} per intake)` : ""}`
       );
     case "interval_days":
-      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times, schedule.amounts)}`;
+      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
     case "days_of_week":
-      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times, schedule.amounts)}`;
+      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${schedule.days_of_week.join(", ")}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
     case "one_off":
       return "schedule one_off";
     default:
@@ -214,6 +244,10 @@ function excerpt(text: string | null | undefined, limit: number): string {
 
 /** How much of a note each surface spells out before cutting it. */
 const NOTE_EXCERPT = { list: 80, dose: 120, detail: 400 } as const;
+
+/** How many active ingredients a line names, and how long each name may be. */
+const INGREDIENT_LIMIT = 4;
+const INGREDIENT_NAME_LIMIT = 60;
 
 /** A course note, kept short enough for a list line. */
 function describeNotesExcerpt(notes: string | null): string {
@@ -451,7 +485,11 @@ export function registerMedicationTools(server: McpToolServer): void {
             `${notes ? `\nNotes: ${notes}` : ""}` +
             `${recent.rows.length > 0 ? `\nRecent intakes:${more(recent.omitted)}\n${recent.rows.map(doseLine).join("\n")}` : ""}` +
             `${upcoming.rows.length > 0 ? `\nUpcoming intakes:\n${upcoming.rows.map(doseLine).join("\n")}${more(upcoming.omitted)}` : ""}` +
-            `${detail.inventoryTransactions.length > 0 ? `\nInventory movements:\n${detail.inventoryTransactions.map(movementLine).join("\n")}` : ""}`,
+            `${
+              detail.inventoryTransactions.length > 0
+                ? `\nInventory movements${detail.inventoryTotal > detail.inventoryTransactions.length ? ` (latest ${detail.inventoryTransactions.length} of ${detail.inventoryTotal})` : ""}:\n${detail.inventoryTransactions.map(movementLine).join("\n")}`
+                : ""
+            }`,
           {
             ...detail,
             timezone: zone.timezone,

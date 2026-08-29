@@ -111,12 +111,11 @@ function shiftDate(date: string, days: number): string {
  * "does it still count as running", and only the first is safe to show.
  */
 function statusBoundary(duration: MedDuration): string | null {
-  if (duration.type === "until_date" && duration.end_date) {
-    return duration.end_date.slice(0, 10);
-  }
-  if (duration.type === "for_days" && duration.start_date != null && duration.days != null) {
-    return shiftDate(duration.start_date.slice(0, 10), duration.days);
-  }
+  const { start, end } = getCourseWindow(duration);
+  if (duration.type === "until_date") return end;
+  // One day past the last dosing day, which is where the dashboard has always
+  // drawn this line.
+  if (duration.type === "for_days" && end != null && start != null) return shiftDate(end, 1);
   return null;
 }
 
@@ -137,13 +136,21 @@ export function getCourseWindow(duration?: MedDuration | null): {
 } {
   if (!duration) return { start: null, end: null };
 
-  const start = duration.start_date ? duration.start_date.slice(0, 10) : null;
+  // `duration` is jsonb with no shape constraint, so an imported row can carry
+  // a number where a date belongs. Reading it as a date has to fail as "no
+  // window" rather than throwing, or one such row takes down every listing it
+  // appears in.
+  const asDate = (value: unknown): string | null =>
+    typeof value === "string" && value.length >= 10 ? value.slice(0, 10) : null;
 
-  if (duration.type === "until_date" && duration.end_date) {
-    return { start, end: duration.end_date.slice(0, 10) };
+  const start = asDate(duration.start_date);
+
+  if (duration.type === "until_date") {
+    const end = asDate(duration.end_date);
+    if (end != null) return { start, end };
   }
 
-  if (duration.type === "for_days" && start != null && duration.days != null) {
+  if (duration.type === "for_days" && start != null && typeof duration.days === "number") {
     return { start, end: shiftDate(start, duration.days - 1) };
   }
 

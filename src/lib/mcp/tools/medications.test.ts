@@ -160,6 +160,65 @@ describe("list_medications", () => {
     expect(text).toContain("at 09:00 (0.5 pill), 22:00 (1.5 pill) (local wall clock)");
   });
 
+  it("says the strength belongs to the base dose when a slot overrides the amount", async () => {
+    // The generator copies `active` unchanged while replacing the amount, so a
+    // reader must not carry 150 mg onto the 0.5-pill slot — the same rule the
+    // intake lines follow when an amount disagrees with its course.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00", "21:00"], amounts: [1.5, 0.5] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("strength on file is for the 1.5 pill dose only");
+  });
+
+  it("names only a bounded number of active ingredients", async () => {
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Комбинация",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            active: Array.from({ length: 9 }, (_, i) => ({
+              name: `Вещество ${i}`,
+              amount: 10 + i,
+              unit: "milligram",
+            })),
+          },
+          schedule: { mode: "daily_times", times: ["09:00"] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    // A page can carry a hundred rows; an unbounded ingredient list on each is
+    // the same context problem notes already have a cap for.
+    expect(text).toContain("Вещество 0 10 milligram");
+    expect(text).toContain("…5 more");
+    expect(text).not.toContain("Вещество 8");
+  });
+
   it("cuts a long note rather than spending the reply on it", async () => {
     meds.listMedications.mockResolvedValue({
       regimens: [
@@ -486,6 +545,30 @@ describe("get_medication", () => {
     expect(text).toContain("2026-08-29 09:00 +07:00 — 1.5 pill (Сертралин 150 milligram) [taken]");
     expect(text).toContain('note "с едой"');
     expect(text).toContain("decrement 1.5 pill");
+  });
+
+  it("says the stock ledger is truncated rather than presenting a partial one as whole", async () => {
+    meds.getMedication.mockResolvedValue({
+      regimen: { custom_name: "Золофт", effective_status: "active" },
+      upcomingDoses: [],
+      recentDoses: [],
+      inventoryTransactions: [
+        {
+          id: "t-1",
+          created_at: "2026-08-29T04:09:00+00:00",
+          type: "decrement",
+          amount: 1.5,
+          unit: "pill",
+        },
+      ],
+      inventoryTotal: 143,
+    });
+
+    const text = (
+      await (await handlers()).get("get_medication")!({ regimen_id: "r-1", horizon_days: 7 }, ctx())
+    ).content[0].text;
+
+    expect(text).toContain("Inventory movements (latest 1 of 143)");
   });
 
   it("refuses a timezone it cannot resolve rather than answering in UTC", async () => {
