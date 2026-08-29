@@ -26,6 +26,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `format-check`: `just quality-format-check`
 - `format-write`: `just quality-format-write`
 - `test`: `just quality-smoke-build` (smoke/integration build gate)
+- `ios-sync`: `just ios-sync` (copy web assets and native plugins into `ios/`; run after changing `capacitor.config.ts` or adding a Capacitor plugin)
+- `ios-open`: `just ios-open` (open the iOS app shell in Xcode; macOS only)
 - `test-unit-web`: `just test-unit-web`
 - `test-unit-ext`: `just test-unit-ext`
 - `test-unit-node`: `just test-unit-node`

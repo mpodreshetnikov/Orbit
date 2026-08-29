@@ -122,7 +122,11 @@ export default defineConfig({
           name: "node",
           environment: "node",
           setupFiles: ["test/setup/node.ts"],
-          include: ["scripts/**/*.{test,spec}.ts", "src/lib/**/*.{test,spec}.ts"],
+          include: [
+            "scripts/**/*.{test,spec}.ts",
+            "src/lib/**/*.{test,spec}.ts",
+            "native/**/*.{test,spec}.ts",
+          ],
         },
       },
     ],
