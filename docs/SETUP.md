@@ -175,13 +175,14 @@ unless you point it at a local dev server, and no local or CI gate builds native
 
 Extra prerequisites, on top of the list at the top of this file:
 
-1. A Mac with Xcode.
-2. An Apple Developer Program membership, for signing that outlives seven days and for
-   TestFlight.
-3. A physical iPhone.
+1. An Apple Developer Program membership, for signing that outlives seven days and for TestFlight.
+   Enrolment is done from an iPhone or iPad, not a Mac.
+2. A physical iPhone.
+3. A Mac with Xcode — optional. Building, signing and uploading run on a GitHub-hosted macOS
+   runner (`.github/workflows/ios.yml`), which is free on this repository because it is public.
 
-Opening, signing, running, archiving and uploading the project, and pointing it at a local dev
-server, are canonical in
+Opening, signing, running, archiving and uploading the project, what a Mac is still good for, and
+pointing the app at a local dev server, are canonical in
 [`docs/design/common/ios-app-shell.md`](./design/common/ios-app-shell.md). Command IDs:
 `ios-sync`, `ios-open`.
 

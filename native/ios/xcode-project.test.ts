@@ -19,6 +19,16 @@ function compactXml(source: string): string {
   return source.replace(/>\s+</g, "><");
 }
 
+/** The id `project.pbxproj` gives the application target, which a scheme has to point back at. */
+function appTargetId(project: string): string {
+  const match = /([0-9A-F]{24}) \/\* App \*\/ = \{\s*isa = PBXNativeTarget;/.exec(project);
+  if (!match) {
+    throw new Error("project.pbxproj has no PBXNativeTarget named App");
+  }
+
+  return match[1];
+}
+
 describe("generated Xcode project", () => {
   it("builds under the bundle identifier registered with the Apple team", () => {
     const project = readProjectFile("App/App.xcodeproj/project.pbxproj");
@@ -35,6 +45,20 @@ describe("generated Xcode project", () => {
     const infoPlist = compactXml(readProjectFile("App/App/Info.plist"));
 
     expect(infoPlist).toContain(`<key>CFBundleDisplayName</key><string>${IOS_APP_NAME}</string>`);
+  });
+
+  it("ships the shared scheme xcodebuild needs to build it anywhere but a developer's Xcode", () => {
+    // The Capacitor template ships no scheme at all. Xcode writes one on first open, into
+    // xcuserdata, which is gitignored — so the project builds on the machine that opened it and
+    // nowhere else. A CI runner that has never opened it fails with "does not contain a scheme
+    // named App" before compiling a single file. This is that scheme, shared and committed.
+    const scheme = readProjectFile("App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme");
+    const project = readProjectFile("App/App.xcodeproj/project.pbxproj");
+
+    // Pinned against the project rather than against a copied literal, so a regenerated project
+    // with fresh object ids cannot be paired with a stale scheme that silently builds nothing.
+    expect(scheme).toContain(`BlueprintIdentifier = "${appTargetId(project)}"`);
+    expect(scheme).toMatch(/<ArchiveAction\s+buildConfiguration = "Release"/);
   });
 
   it("keeps the App Transport Security exception the LAN override depends on", () => {
