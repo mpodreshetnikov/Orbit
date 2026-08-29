@@ -72,6 +72,8 @@ next-env.d.ts
 /docs/PLANS.md
 /.agents/skills/task-registry
 /.claude/skills/task-registry
+/.agents/skills/task-status-sync
+/.claude/skills/task-status-sync
 
 # Extraction eval corpus. Case directories may hold scans of real medical documents, which
 # belong in a private bucket and never in git history — once a blob is in a pack it cannot be
