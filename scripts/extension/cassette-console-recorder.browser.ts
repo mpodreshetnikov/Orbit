@@ -25,7 +25,31 @@ function download(name: string, contents: string): void {
   URL.revokeObjectURL(url);
 }
 
+let inFlight: Promise<void> | null = null;
+
+/**
+ * Pasting the snippet starts the default recording immediately, which is what makes it a
+ * paste-and-walk-away tool. But the banner also advertises `orbitRecordCassette({ ... })` for a
+ * different window, and calling that while the first run is still going would put two paced
+ * request chains on the same session at once — each unaware of the other's pacing, which is the
+ * surest way to be rate-limited. So a second run waits for the first, and says so.
+ */
 async function run(options: Partial<RecorderOptions> = {}): Promise<void> {
+  if (inFlight) {
+    console.info(
+      "[cassette] a recording is already running; this one will start when it finishes. " +
+        "Two at once would share the session's rate limit and both would be throttled.",
+    );
+    await inFlight.catch(() => undefined);
+  }
+  const started = record(options);
+  inFlight = started.finally(() => {
+    if (inFlight === started) inFlight = null;
+  });
+  return started;
+}
+
+async function record(options: Partial<RecorderOptions> = {}): Promise<void> {
   const name = options.name ?? "dense-month";
   const result = await recordCassette(
     {

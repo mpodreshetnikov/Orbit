@@ -96,6 +96,16 @@ only failure mode. A split that was not needed costs two requests and is caught 
 cap that slips past costs operations nobody will know are missing. Whoever closes that TODO
 should close it with this, not with 106.
 
+**A cassette is only proven by replaying it through the connector.** `tbank-web.contract.test.ts`
+now runs `extractOperationsInPage` against `createCassettePlayer`, with the window taken from the
+recording and the clock frozen at its end, and requires zero player misses and zero unused
+entries. Everything else in that file reads the cassette and calls the mapper directly, which
+checks the mapping and nothing else — the range walk, the truncation splitting, the receipt
+request key, the tranche parameters and the detail endpoint are exercised only when the connector
+does the asking. That replay is what caught seven ways the recorder had drifted from the
+connector it mirrors, including a tranche URL missing five parameters the connector always sends
+and a detail endpoint the recorder invented where the connector returns null.
+
 **The leak scan cannot rest on the field list alone.** The delivered file carried thirteen
 counterparty phone numbers under `pointer`, a transfer field added to the scrubber minutes after
 that snippet was built — and the scan reported it clean, because eleven digits is two short of
@@ -103,6 +113,14 @@ the long-digit rule. The field was named and the scan now recognises a phone num
 appears. The general lesson is the reason the scan exists separately from the scrubber: the
 field list will always lag some field, and the scan is what stops the lag reaching the
 repository.
+
+The same file also carried fourteen counterparty names — "Марина М." — in `maskedFIO`, and in
+`description`, `subcategory` and `merchantKey` on every transfer and every incoming payment.
+Those fields cannot simply be redacted: for a purchase they hold "Пятёрочка", which the mapper
+and the tests here are built on. What the text means is decided by the `group` beside it, so the
+group decides — and, because the same names came back from the detail response under keys with
+no group in sight, the masked-name form is redacted wherever a whole value has it and reported
+by the scan when it survives.
 
 Re-record when the bank changes its responses — `tbank-web.contract.test.ts` is what tells you
 that has happened, by failing rather than silently mapping fewer operations.

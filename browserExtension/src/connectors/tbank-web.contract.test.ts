@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { __test__ } from "./tbank-web.js";
-import type { Cassette } from "./cassette-replay";
+import { createCassettePlayer, type Cassette } from "./cassette-replay";
 
 /**
  * Guards the shape of the bank's responses, which is a contract nobody tells us about when it
@@ -57,6 +57,50 @@ const cassettes: Cassette[] = Object.entries(cassetteModules).map(([filePath, mo
   const directory = filePath.split("/").slice(-2, -1)[0] ?? "unnamed";
   return { ...parsed, name: parsed.name || directory };
 });
+
+/**
+ * The connector reads its page through globals — the origin it is on, the resource timeline it
+ * discovers endpoints from, and `fetch`. In a node test none of those exist, so the replay has
+ * to supply them: the origin and the endpoint URLs come out of the cassette itself, which is
+ * the point — a recording that never captured an endpoint cannot make the connector ask for it.
+ */
+function installPageGlobals(
+  player: ReturnType<typeof createCassettePlayer>,
+  cassette: Cassette,
+): () => void {
+  const scope = globalThis as Record<string, unknown>;
+  const origin = new URL(cassette.entries[0]?.url ?? "https://www.tbank.ru").origin;
+
+  // One URL per endpoint the recording actually holds, newest last: `findLatestResourceUrlByPath`
+  // walks the timeline backwards and takes the first match.
+  const resourceUrls = Array.from(
+    new Map(
+      cassette.entries.map((entry) => [new URL(entry.url).pathname, entry.url] as const),
+    ).values(),
+  );
+
+  const saved = {
+    window: scope.window,
+    document: scope.document,
+    fetch: scope.fetch,
+    getEntriesByType: performance.getEntriesByType,
+  };
+
+  scope.window = { location: { origin, href: `${origin}/mybank/operations/` } };
+  scope.document = { body: { innerText: "" }, querySelectorAll: () => [] };
+  scope.fetch = player.fetch;
+  performance.getEntriesByType = ((type: string) =>
+    type === "resource"
+      ? resourceUrls.map((name) => ({ name }))
+      : []) as typeof performance.getEntriesByType;
+
+  return () => {
+    scope.window = saved.window;
+    scope.document = saved.document;
+    scope.fetch = saved.fetch;
+    performance.getEntriesByType = saved.getEntriesByType;
+  };
+}
 
 describe("tbank-web response contract", () => {
   it("reports when there is nothing to check", () => {
@@ -161,6 +205,74 @@ describe("tbank-web response contract", () => {
         }
       });
     }
+
+    it(`replays ${cassette.name} through the connector without a miss`, async () => {
+      // Everything above reads the cassette and calls the mapper on what it finds. That checks
+      // the mapping and nothing else: the range walk, the truncation splitting, the receipt
+      // request key, the tranche parameters and the detail endpoint are all exercised only when
+      // the connector itself does the asking. A recorder that drifts from any of them produces
+      // a cassette that looks complete and replays as misses, which is precisely the failure
+      // this whole arrangement exists to prevent — and it would pass every other test here.
+      const player = createCassettePlayer(cassette);
+
+      // The window is taken from the recording itself, and the clock is frozen at its end. The
+      // player ignores `start` and `end` when matching, but not how many requests are made:
+      // asked for a wider window than was recorded, the connector walks extra ranges and reuses
+      // the first recorded response for each. Freezing the clock makes the request sequence the
+      // recorded sequence, which is the property the recorder is built to guarantee.
+      const bounds = operationsEntries
+        .map((entry) => new URL(entry.url).searchParams)
+        .map((params) => ({ start: Number(params.get("start")), end: Number(params.get("end")) }))
+        .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end));
+      const windowFromMs = Math.min(...bounds.map(({ start }) => start));
+      const windowToMs = Math.max(...bounds.map(({ end }) => end));
+
+      // Fake timers first: enabling them replaces `performance`, which would take the resource
+      // timeline the page globals install with it — and endpoint discovery would then find
+      // nothing, silently, with every enrichment entry left unused.
+      vi.useFakeTimers();
+      vi.setSystemTime(windowToMs);
+      const restore = installPageGlobals(player, cassette);
+      try {
+        // The connector paces its receipt requests 300ms apart, which is fifteen seconds of
+        // real waiting for a full budget. Fake timers turn that into nothing, and draining them
+        // alongside the promise is what lets the paced chain run to completion.
+        const pending = __test__.extractOperationsInPage({
+          windowFromIso: new Date(windowFromMs).toISOString(),
+          sessionId: "REDACTED",
+          parseStrategy: "fast",
+        });
+        await vi.runAllTimersAsync();
+        const extraction = await pending;
+
+        // A miss is the whole point: it means the connector asked for something the recorder
+        // never recorded, so the offline path silently loses that enrichment in production.
+        expect(player.misses, `player misses: ${player.misses.join(", ")}`).toEqual([]);
+        expect(extraction.blocked_reason ?? null).toBeNull();
+        // `mapping_drop_counts` is written into the debug payload at runtime but is not on its
+        // declared type, so it is read positionally rather than by widening a shipped interface
+        // for a test. Non-empty means the connector saw operations it could not map.
+        const debugRecord = (extraction.debug ?? {}) as Record<string, unknown>;
+        expect(debugRecord.mapping_drop_counts ?? {}).toEqual({});
+        expect(extraction.parsed_transactions_count).toBeGreaterThan(0);
+
+        // The receipt accounting is where recorder and connector have to agree most exactly:
+        // the budget, which operations it is spent on, and what counts as a receipt. Fifty
+        // requests issued against a fifty-receipt budget, and one failure, is the recorded 504
+        // arriving where the recorder said it would.
+        const receiptDebug = extraction.debug?.receipt_enrichment;
+        expect(receiptDebug?.requested_count).toBe(50);
+        expect((receiptDebug?.success_count ?? 0) + (receiptDebug?.failed_count ?? 0)).toBe(50);
+
+        // Recorded responses nothing asked for are the same drift seen from the other side:
+        // the recorder captured requests the connector does not make.
+        const unusedPaths = player.unused().map((entry) => new URL(entry.url).pathname);
+        expect(unusedPaths, `unused: ${unusedPaths.join(", ")}`).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+        restore();
+      }
+    });
 
     it(`keeps every field the row mapping depends on in ${cassette.name}`, () => {
       for (const entry of operationsEntries) {

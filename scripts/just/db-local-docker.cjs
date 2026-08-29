@@ -65,6 +65,25 @@ function docker(args, options = {}) {
   return run("docker", args, { stdio: "pipe", ...options });
 }
 
+/**
+ * Fails now, with the reason, rather than in three minutes with the wrong one.
+ *
+ * Every command here shells out to a host `psql`, which the repository's prerequisites do not
+ * ask for — Docker, Node, Deno and the Supabase CLI, but no Postgres client. Without it
+ * `spawnSync` returns ENOENT, `up` reads that as "not ready yet" and polls until it times out
+ * reporting that PostgreSQL never came up. The container is fine; the client is missing.
+ */
+function requirePsqlClient() {
+  const probe = spawnSync("psql", ["--version"], { stdio: "pipe", encoding: "utf8" });
+  if (probe.error?.code === "ENOENT") {
+    throw new Error(
+      "psql was not found on PATH. This script drives the container through the host's " +
+        "PostgreSQL client: install it (Debian/Ubuntu `apt-get install -y postgresql-client`, " +
+        "macOS `brew install libpq`) and run the command again.",
+    );
+  }
+}
+
 function psql(args, options = {}) {
   return run(
     "psql",
@@ -372,11 +391,23 @@ function test(paths) {
     const ok = output.match(/^ok\b/gm) ?? [];
     assertions += ok.length + notOk.length;
 
+    // A pgTAP file opens with `plan(n)` and that number is the contract. Counting `ok` lines
+    // alone accepts a file that declared twenty assertions and emitted twelve before execution
+    // stopped somewhere that raised no SQL error — no `not ok`, a non-empty `ok` list, green.
+    // `pg_prove`, which this replaced, treats a plan mismatch as a failure, and so must this or
+    // the replacement is weaker than what it stands in for.
+    const planned = Number(output.match(/^1\.\.(\d+)$/m)?.[1] ?? NaN);
+    const emitted = ok.length + notOk.length;
+    const planMismatch = Number.isFinite(planned) && planned !== emitted;
+
     const relative = path.relative(repoRoot, file);
-    if (notOk.length > 0 || result.status !== 0 || ok.length === 0) {
+    if (notOk.length > 0 || result.status !== 0 || ok.length === 0 || planMismatch) {
       failed += 1;
       console.log(`not ok - ${relative}`);
       for (const line of notOk) console.log(`    ${line}`);
+      if (planMismatch) {
+        console.log(`    plan declared ${planned} assertion(s), ${emitted} emitted`);
+      }
       if (ok.length === 0) console.log(`    ${output.trim().split("\n").slice(-5).join("\n    ")}`);
       continue;
     }
@@ -421,14 +452,22 @@ const positional = rest.filter(
 );
 
 const commands = {
-  up: () => up(flags),
+  up: () => {
+    requirePsqlClient();
+    return up(flags);
+  },
   down,
   migrate: () => {
+    requirePsqlClient();
     applyMigrations({ from: flags.from, until: flags.until });
     return 0;
   },
-  test: () => test(positional),
+  test: () => {
+    requirePsqlClient();
+    return test(positional);
+  },
   lint,
+  // `url` only prints a string, and `down` only stops containers: neither touches the client.
   url: () => {
     console.log(DB_URL);
     return 0;
