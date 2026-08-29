@@ -29,14 +29,17 @@ function withEffectiveStatus(regimen: MedRegimen): RegimenWithStatus {
 }
 
 /**
- * Escapes the wildcards PostgREST's `ilike` would otherwise interpret.
+ * Escapes every POSIX regex metacharacter, so a name is matched literally.
  *
- * The filter this replaced was a case-insensitive `String.includes`, so a name
- * containing `%` or `_` has to keep matching itself literally rather than
- * turning into a pattern.
+ * The filter this replaced was a case-insensitive `String.includes`, and the
+ * search text is whatever the user said -- a name can legitimately contain `%`,
+ * `*`, `+` or a bracket. `ilike` was the obvious operator and the wrong one:
+ * PostgREST reads `*` in a `like`/`ilike` value as `%`, unconditionally and
+ * with no escape that survives the substitution, so `B*Complex` would silently
+ * widen into a wildcard search and inflate the count beside it.
  */
-function likeLiteral(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+function regexLiteral(value: string): string {
+  return value.replace(/[.^$*+?()[\]{}|\\]/g, (match) => `\\${match}`);
 }
 
 /**
@@ -78,7 +81,9 @@ export async function listMedications(
 
   const needle = params.search?.trim();
   if (needle) {
-    query = query.ilike("custom_name", `%${likeLiteral(needle)}%`);
+    // `imatch` is `~*`: a case-insensitive regex, with no wildcard aliasing of
+    // its own, so an escaped needle means exactly "contains this text".
+    query = query.regexIMatch("custom_name", regexLiteral(needle));
   }
 
   if (params.limit != null) {

@@ -174,6 +174,11 @@ Conventions that matter:
   medication were created in the same minute in production, and an unstable order under paging
   repeats one row while dropping another.
 
+  A name filter is a literal, not a pattern. `list_medications` matches with `imatch` (`~*`) over a
+  regex-escaped needle rather than `ilike`: PostgREST rewrites `*` in a `like`/`ilike` value to `%`
+  unconditionally, with no escape that survives the rewrite, so a name containing `*` would have
+  turned a search into a wildcard and inflated the total beside it.
+
   Free text is bounded on its way into a text block. Notes have no length limit in the database and
   a page can carry a hundred of them, so each is flattened to one line and cut with an explicit `…`;
   `structuredContent` keeps the note itself.

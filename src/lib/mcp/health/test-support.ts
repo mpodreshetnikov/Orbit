@@ -78,6 +78,8 @@ export function createSupabaseStub(
       or: record("or"),
       like: record("like"),
       ilike: record("ilike"),
+      regexMatch: record("regexMatch"),
+      regexIMatch: record("regexIMatch"),
       order: record("order"),
       limit: record("limit"),
       range: record("range"),

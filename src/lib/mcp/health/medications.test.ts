@@ -110,22 +110,26 @@ describe("listMedications", () => {
       search: "FERROUS",
     });
 
-    expect(stub.argsFor("med_regimens", "ilike")).toEqual([["custom_name", "%FERROUS%"]]);
+    expect(stub.argsFor("med_regimens", "regexIMatch")).toEqual([["custom_name", "FERROUS"]]);
     expect(regimens.map((r) => r.custom_name)).toEqual(["Ferrous sulfate"]);
   });
 
-  it("matches a name containing a wildcard literally", async () => {
+  it("matches a name containing pattern characters literally", async () => {
+    // `ilike` was the wrong operator here: PostgREST reads `*` in its value as
+    // `%`, so "B*Complex" would have quietly become a wildcard search.
     const stub = createSupabaseStub({ med_regimens: [{ data: [] }] });
-    await listMedications(stub.client, { personId: "p-1", search: "50%_B" });
+    await listMedications(stub.client, { personId: "p-1", search: "B*Complex (50%)" });
 
-    expect(stub.argsFor("med_regimens", "ilike")).toEqual([["custom_name", "%50\\%\\_B%"]]);
+    expect(stub.argsFor("med_regimens", "regexIMatch")).toEqual([
+      ["custom_name", "B\\*Complex \\(50%\\)"],
+    ]);
   });
 
   it("ignores a whitespace-only search", async () => {
     const stub = createSupabaseStub({ med_regimens: [{ data: [regimen(), regimen()] }] });
     const { regimens } = await listMedications(stub.client, { personId: "p-1", search: "  " });
 
-    expect(stub.argsFor("med_regimens", "ilike")).toHaveLength(0);
+    expect(stub.argsFor("med_regimens", "regexIMatch")).toHaveLength(0);
     expect(regimens).toHaveLength(2);
   });
 

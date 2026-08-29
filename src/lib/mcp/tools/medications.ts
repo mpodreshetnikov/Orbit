@@ -79,16 +79,21 @@ async function regenerateOrExplain(
  */
 function describeIntake(planned: PlannedIntake | null | undefined): string {
   const intake = planned?.intake;
-  const active = planned?.active ?? [];
-  const strength =
-    active.length > 0
-      ? ` (${active.map((one) => `${one.name} ${one.amount} ${one.unit}`).join(" + ")})`
-      : "";
 
-  if (!intake) {
+  // `planned_intake` and `dose_definition` are jsonb with no shape constraint,
+  // and every row of every listing passes through here. A legacy or imported
+  // row whose `active` is not an array must not throw and take down the reply
+  // for the medications around it, so the shape is checked rather than trusted.
+  const active = Array.isArray(planned?.active) ? planned.active : [];
+  const ingredients = active
+    .filter((one) => one && typeof one === "object" && one.name != null && one.amount != null)
+    .map((one) => `${one.name} ${one.amount}${one.unit ? ` ${one.unit}` : ""}`);
+  const strength = ingredients.length > 0 ? ` (${ingredients.join(" + ")})` : "";
+
+  if (!intake || intake.amount == null) {
     return strength ? `dose unknown${strength}` : "";
   }
-  return `${intake.amount} ${intake.unit}${strength}`;
+  return `${intake.amount} ${intake.unit ?? ""}`.trim() + strength;
 }
 
 /**

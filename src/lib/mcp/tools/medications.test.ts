@@ -258,6 +258,42 @@ describe("list_medications", () => {
     expect(second.structuredContent).toMatchObject({ has_more: false, next_offset: null });
   });
 
+  it("renders the medications around a malformed row instead of failing wholesale", async () => {
+    // `dose_definition` is jsonb with no shape constraint, so a legacy or
+    // imported row can carry anything. One of those must not take down the
+    // listing for the healthy courses beside it.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-bad",
+          custom_name: "Imported",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" }, active: "Сертралин 150 мг" },
+          schedule: { mode: "daily_times", times: ["09:00"] },
+        },
+        {
+          id: "r-good",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1.5, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00"] },
+        },
+      ],
+      total: 2,
+    });
+
+    const result = await (await handlers()).get("list_medications")!({ ...PAGE }, ctx());
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("Imported — active, 1 pill");
+    expect(result.content[0].text).toContain("1.5 pill (Сертралин 150 milligram)");
+  });
+
   it("copes with a regimen that has no dose or schedule recorded", async () => {
     meds.listMedications.mockResolvedValue({
       regimens: [
