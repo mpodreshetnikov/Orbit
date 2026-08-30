@@ -315,6 +315,11 @@ const SENSITIVE_QUERY_PARAMS = new Set([
   "token",
   "access_token",
   "auth",
+  // The browser session the recording was made from. Short and alphanumeric, so no pattern rule
+  // sees it, and it was being replaced by hand at the one call site that builds a tranche URL —
+  // which makes the privacy boundary a property of that call site rather than of the scrubber.
+  // Any other URL carrying it, or a cassette handed straight to `scrubCassette`, kept it.
+  "wuid",
 ]);
 
 /**

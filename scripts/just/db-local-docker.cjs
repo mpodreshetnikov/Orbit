@@ -558,22 +558,21 @@ function up(flags) {
     startSchemaOwners();
   }
 
-  applyMigrations({ until: flags.until, skipApplied: !rebuilding });
-  if (!flags.noDeploy) {
-    // A fresh build that fails to seed must not survive. The seed runs in one transaction, so
-    // the database rolls back clean — but the container is left running and healthy, and the
-    // next ordinary `up` reuses it, skips the seed by design, and reports an unseeded database
-    // as ready. Nothing short of `--recreate` would ever seed it again. Removing the container
-    // we just built destroys nothing that existed before this command.
-    try {
-      applyDeployAndSeed({ seed: rebuilding });
-    } catch (error) {
-      if (rebuilding) {
-        log(`removing the half-built ${DB_CONTAINER} so a re-run starts clean`);
-        docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
-      }
-      throw error;
+  // A fresh build that does not finish must not survive, and the migration phase is as much a
+  // part of finishing as the seed. Either way the container is left running and healthy, and the
+  // next ordinary `up` reuses it: after a failed seed it skips seeding by design and reports an
+  // unseeded database ready; after failed migrations it resumes the remaining ones and *still*
+  // skips the seed, because reuse means `seed: false`. Nothing short of `--recreate` would ever
+  // seed it. Removing a container this same command created destroys nothing that existed before.
+  try {
+    applyMigrations({ until: flags.until, skipApplied: !rebuilding });
+    if (!flags.noDeploy) applyDeployAndSeed({ seed: rebuilding });
+  } catch (error) {
+    if (rebuilding) {
+      log(`removing the half-built ${DB_CONTAINER} so a re-run starts clean`);
+      docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
     }
+    throw error;
   }
 
   log("ready");

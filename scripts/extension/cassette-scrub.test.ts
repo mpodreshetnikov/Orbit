@@ -96,6 +96,18 @@ describe("cassette scrubbing", () => {
     expect(findCassetteLeaks('{"pan":"5536913812345678"}')).toHaveLength(1);
   });
 
+  it("redacts wuid wherever a URL carries it, not only where the recorder built one", () => {
+    // The browser session the recording was made from. Short and alphanumeric, so no pattern rule
+    // sees it — and it was being replaced by hand at the single call site that builds a tranche
+    // URL, which made the boundary a property of that call site. A cassette handed straight to
+    // `scrubCassette`, or any other URL carrying it, kept it.
+    expect(
+      scrubUrl("https://www.tbank.ru/api/common/v1/tranche_offers?wuid=a1b2c3d4&sessionid=live"),
+    ).toBe(
+      `https://www.tbank.ru/api/common/v1/tranche_offers?wuid=${REDACTED}&sessionid=${REDACTED}`,
+    );
+  });
+
   it("keeps the URL parts the replay matches on", () => {
     // Blanking these does not protect anyone and does break the cassette: `operationId` is what
     // the player keys a receipt by, so a numeric one redacted merges every receipt into one

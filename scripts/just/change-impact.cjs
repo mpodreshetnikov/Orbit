@@ -40,6 +40,11 @@ function classifyChangedFiles(changedFiles) {
       // on, so a regression there stops every one of them — and named by prefix alone it would
       // be classified as no impact at all, which is how the gap it fixes went unnoticed.
       /^scripts\/just\/docker-preflight\.cjs$/.test(filePath) ||
+      // The CSV parser's `extractAccountHint` is the function `20260814092000` reproduces in SQL,
+      // and the migration check imports the real one to derive what it expects. Change the parser
+      // without running that check and the migration silently stops matching the importer, which
+      // is a duplicate transaction past an index that cannot see it.
+      /^src\/lib\/import\/connectors\/tbank-csv\.ts$/.test(filePath) ||
       // The dedupe formula is shared between TypeScript and a SQL migration that reproduces it
       // character for character, and the only thing comparing the two is the data migration
       // check — which runs behind this flag. Classified as web-only, a change to the formula

@@ -95,15 +95,21 @@ function startDockerDaemonOnLinux(out, waitMs, pollMs) {
   // proves one of the two absolute paths exists and proves nothing about PATH.
   //
   // `spawn` reports ENOENT and EACCES on the child's `error` event, after this block has already
-  // returned, so the `catch` never sees them. Without a listener that event is unhandled and
-  // takes the process down; with one, the failure is a diagnostic instead of the polling loop
-  // running its full two minutes and then blaming a timeout.
-  let spawnError = null;
+  // returned, so the `catch` never sees them — and waiting for that event is not an option here:
+  // `sleep` below is `Atomics.wait`, which blocks the thread, so the loop never yields and the
+  // event can never be delivered while it runs. A listener is still attached, because an
+  // unhandled `error` event would take the process down, but it cannot be what reports the
+  // failure.
+  //
+  // What does is `pid`: Node leaves it undefined when the spawn itself failed, and that is
+  // readable straight away.
   try {
     const child = spawn(dockerdPath, args, { detached: true, stdio: "ignore" });
-    child.on("error", (error) => {
-      spawnError = error;
-    });
+    child.on("error", () => {});
+    if (child.pid === undefined) {
+      out.error(`Failed to launch ${dockerdPath}: the process could not be spawned.`);
+      return 1;
+    }
     child.unref();
   } catch (error) {
     out.error(`Failed to launch dockerd: ${error.message}`);
@@ -113,10 +119,6 @@ function startDockerDaemonOnLinux(out, waitMs, pollMs) {
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     sleep(pollMs);
-    if (spawnError) {
-      out.error(`Failed to launch ${dockerdPath}: ${spawnError.message}`);
-      return 1;
-    }
     if (dockerFullyReachable()) {
       out.log("Docker daemon is ready.");
       return 0;

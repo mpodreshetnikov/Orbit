@@ -37,6 +37,7 @@ import { extractAccountHint } from "../../src/lib/import/connectors/tbank-csv";
 const CONTAINER = process.env.ORBIT_DB_CONTAINER ?? "orbit_db_migration_check";
 const NETWORK = process.env.ORBIT_DB_NETWORK ?? "orbit_db_check_net";
 const PORT = process.env.ORBIT_DB_PORT ?? "54329";
+const USING_DEFAULT_INSTANCE = !process.env.ORBIT_DB_CONTAINER && !process.env.ORBIT_DB_PORT;
 /** The first T-0013 migration; everything before it is the "already accumulated" world. */
 const FIRST_REPAIR_MIGRATION = "20260814090000";
 const LAST_MIGRATION_BEFORE_REPAIR = "20260814089999";
@@ -608,7 +609,38 @@ function snapshot(): string {
     ) as rows;`);
 }
 
+/** True when a container of that name exists in any state. */
+function containerExists(name: string): boolean {
+  try {
+    execFileSync("docker", ["inspect", "-f", "{{.State.Status}}", name], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function main(): Promise<number> {
+  // Overridable names were not enough. Whoever runs the documented command gets the defaults, so
+  // two of them — two checkouts, or an agent beside a person — still pick the same container and
+  // the same port: the second run's fresh `up` force-removes the first one's database, and either
+  // run's closing `down` can remove the other's replacement. The first run then reports a
+  // migration failure that never happened.
+  //
+  // Refusing is the honest move rather than allocating a port. Destroying someone else's run to
+  // start your own is the behaviour being fixed, and picking a free port silently would leave two
+  // checks interleaving against one daemon with nothing saying so.
+  if (USING_DEFAULT_INSTANCE && containerExists(CONTAINER)) {
+    console.error(
+      `${CONTAINER} already exists, so another data migration check is either running or left ` +
+        `it behind. This one stops rather than removing it.\n` +
+        `  If a run is in progress, wait for it.\n` +
+        `  If it is a leftover: docker rm -f ${CONTAINER}\n` +
+        `  To run two at once, give this one its own: ORBIT_DB_CONTAINER=… ORBIT_DB_PORT=… ` +
+        `ORBIT_DB_NETWORK=…`,
+    );
+    return 1;
+  }
+
   console.log(`# building a database at migration ${LAST_MIGRATION_BEFORE_REPAIR}`);
   dbLocalDocker(["up", "--until", LAST_MIGRATION_BEFORE_REPAIR, "--no-deploy", "--no-tls"]);
 
