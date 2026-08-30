@@ -818,6 +818,49 @@ describe("logDose", () => {
       expect(fake.inventory).toHaveLength(1);
     });
 
+    it("records the intake rather than reporting a missed dose as logged", async () => {
+      // `mark_dose_taken` selects only scheduled/sent/snoozed/skipped rows, so a
+      // `missed` one is a silent no-op that the readback returns unchanged —
+      // "logged" with nothing recorded. It is left alone and the intake becomes
+      // its own event.
+      const fake = fakeWith([{ id: "d-1", status: "missed", scheduled_at: AT, actual_at: AT }]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(fake.events.find((event) => event.id === "d-1")?.status).toBe("missed");
+      expect(fake.events).toHaveLength(2);
+      expect(fake.events[1].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("ranks every candidate on the minute, however many share it", async () => {
+      // A cap applied before the ranking could discard the dose still owed:
+      // eleven snoozed doses collide, ten are resolved, and the next call would
+      // see only resolved rows and answer "already recorded".
+      const fake = fakeWith([
+        ...Array.from({ length: 10 }, (_, index) => ({
+          id: `taken-${index}`,
+          status: "taken",
+          taken_at: AT,
+          scheduled_at: AT,
+          actual_at: AT,
+          created_at: `2026-06-01T00:00:0${index}.000Z`,
+        })),
+        {
+          id: "owed",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T07:00:00.000Z",
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:20.000Z",
+        },
+      ]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.alreadyRecorded).toBeFalsy();
+      expect(fake.events.find((event) => event.id === "owed")?.status).toBe("taken");
+    });
+
     it("resolves the planned dose rather than colliding with the unique index", async () => {
       const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
 

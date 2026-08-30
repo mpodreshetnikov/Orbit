@@ -420,6 +420,21 @@ export interface LogDoseParams {
 /** The statuses that still owe an intake, per `snooze_dose.sql`'s own guard. */
 const OWED_STATUSES = new Set(["scheduled", "sent", "snoozed"]);
 
+/**
+ * The statuses each resolution RPC will move a dose out of, from their own
+ * `WHERE e.status IN (...)` guards.
+ *
+ * A row outside its target's set is not a candidate at all: the RPC selects no
+ * row, returns success, and the readback hands back the unchanged event -- so
+ * matching a `missed` or `cancelled` dose would report an intake as logged with
+ * nothing recorded. Leaving such a row alone lets the intake be inserted as its
+ * own event, which is what happens today when the minute holds nothing.
+ */
+const TRANSITIONS_INTO: Record<string, Set<string>> = {
+  taken: new Set(["scheduled", "sent", "snoozed", "skipped"]),
+  skipped: new Set(["scheduled", "sent", "snoozed", "taken"]),
+};
+
 async function findDoseInSameMinute(
   supabase: SupabaseClient<Database>,
   regimenId: string,
@@ -447,11 +462,11 @@ async function findDoseInSameMinute(
     .or(
       `and(scheduled_at.gte.${from},scheduled_at.lt.${to}),and(actual_at.gte.${from},actual_at.lt.${to})`,
     )
-    .order("created_at", { ascending: true })
-    // More than two rows can share a minute: the unique index bounds only the
-    // unresolved ones, and a snooze can move a dose onto a minute that already
-    // holds a resolved intake.
-    .limit(10);
+    // No limit: the ranking below decides which row this call belongs to, and a
+    // cap applied first could discard the dose still owed before the ranking
+    // ever sees it. The filter is one regimen inside one minute, so the set is
+    // small by construction, and PostgREST's own `max_rows` still bounds it.
+    .order("created_at", { ascending: true });
 
   // This read decides between resolving and inserting, so "the query failed"
   // must not be read as "nothing is there": that would take the insert branch
@@ -480,7 +495,16 @@ async function findDoseInSameMinute(
     if (OWED_STATUSES.has(String(row.status))) return 0;
     return requestedStatus == null || row.status !== requestedStatus ? 1 : 2;
   };
-  const ranked = [...rows].sort((a, b) => {
+  // A row the RPC cannot move is not a candidate, whatever tier it would land
+  // in: choosing it would report the intake as logged while nothing changed.
+  const transitionable = requestedStatus == null ? null : TRANSITIONS_INTO[requestedStatus];
+  const candidates = rows.filter(
+    (row) =>
+      transitionable == null ||
+      row.status === requestedStatus ||
+      transitionable.has(String(row.status)),
+  );
+  const ranked = [...candidates].sort((a, b) => {
     const byTier = rank(a) - rank(b);
     if (byTier !== 0) return byTier;
     // Then the effective time, because that is the one the caller was shown.
