@@ -789,6 +789,35 @@ describe("logDose", () => {
       expect(fake.inventory).toHaveLength(1);
     });
 
+    it("prefers a dose still owed over one resolved the other way", async () => {
+      // Both differ from the requested status, so "needs the transition" alone
+      // ties them and the older skipped row would win — rewriting a real record
+      // while the snoozed dose kept its reminder armed.
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "skipped",
+          taken_at: AT,
+          scheduled_at: AT,
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:00.000Z",
+        },
+        {
+          id: "d-2",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T07:00:00.000Z",
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:01.000Z",
+        },
+      ]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(fake.events.find((event) => event.id === "d-2")?.status).toBe("taken");
+      expect(fake.events.find((event) => event.id === "d-1")?.status).toBe("skipped");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
     it("resolves the planned dose rather than colliding with the unique index", async () => {
       const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
 

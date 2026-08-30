@@ -417,6 +417,9 @@ export interface LogDoseParams {
  * `mark_dose_skipped` takes `taken`, precisely so a resolution can be amended
  * in place.
  */
+/** The statuses that still owe an intake, per `snooze_dose.sql`'s own guard. */
+const OWED_STATUSES = new Set(["scheduled", "sent", "snoozed"]);
+
 async function findDoseInSameMinute(
   supabase: SupabaseClient<Database>,
   regimenId: string,
@@ -460,16 +463,26 @@ async function findDoseInSameMinute(
   const rows = (data ?? []) as Array<Record<string, unknown>>;
   const byEffectiveTime = (row: Record<string, unknown>) =>
     typeof row.actual_at === "string" && row.actual_at >= from && row.actual_at < to;
-  // A row already in the requested status has nothing left to do, so choosing
-  // it would answer "already recorded" while a second dose on the same minute
-  // -- which `snooze_dose` allows -- stays unresolved, its reminder armed and
-  // its stock movement unwritten. The dose that still needs the transition
-  // comes first; only when none does is the call genuinely a repeat.
-  const needsTransition = (row: Record<string, unknown>) =>
-    requestedStatus == null || row.status !== requestedStatus;
+
+  // Which candidate a minute's worth of doses deserves, best first:
+  //
+  //   0. still owed -- `scheduled`, `sent` or `snoozed`. Resolving one of these
+  //      is what logging an intake is for, and leaving it behind is what leaves
+  //      a reminder armed and a stock movement unwritten.
+  //   1. resolved the other way -- a correction of a real record, legitimate
+  //      but never at the cost of a dose still owed.
+  //   2. already in the requested status -- nothing to do, and choosing it
+  //      answers "already recorded".
+  //
+  // The three tiers matter because `snooze_dose` can move a dose onto a minute
+  // that already holds a resolved one, so all three can be present at once.
+  const rank = (row: Record<string, unknown>) => {
+    if (OWED_STATUSES.has(String(row.status))) return 0;
+    return requestedStatus == null || row.status !== requestedStatus ? 1 : 2;
+  };
   const ranked = [...rows].sort((a, b) => {
-    const byWork = Number(needsTransition(b)) - Number(needsTransition(a));
-    if (byWork !== 0) return byWork;
+    const byTier = rank(a) - rank(b);
+    if (byTier !== 0) return byTier;
     // Then the effective time, because that is the one the caller was shown.
     return Number(byEffectiveTime(b)) - Number(byEffectiveTime(a));
   });

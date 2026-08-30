@@ -103,6 +103,18 @@ describe("getCourseWindow", () => {
       start: null,
       end: null,
     });
+    // A valid-looking prefix is not a date either: the generator casts the whole
+    // stored value, so this course would save with no reminders behind it.
+    expect(getCourseWindow({ type: "for_days", days: 4, start_date: "2026-09-01garbage" })).toEqual(
+      {
+        start: null,
+        end: null,
+      },
+    );
+    // A stored timestamp still reads as its day, which is what Postgres casts it to.
+    expect(
+      getCourseWindow({ type: "for_days", days: 4, start_date: "2026-09-01T00:00:00Z" }),
+    ).toEqual({ start: "2026-09-01", end: "2026-09-04" });
     expect(
       getCourseWindow({ type: "until_date", start_date: "2026-01-01", end_date: "2026-13-01" }),
     ).toEqual({ start: "2026-01-01", end: null });

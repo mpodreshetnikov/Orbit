@@ -107,6 +107,12 @@ function asDate(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const day = value.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  // The rest has to be a time or nothing: the generator casts the whole stored
+  // value to `date`, so "2026-09-01garbage" fails regeneration outright and the
+  // course keeps a plausible window with no reminders behind it. A stored
+  // timestamp still passes, since Postgres casts that to a date happily.
+  const rest = value.slice(10);
+  if (rest !== "" && !/^[T ]\d{2}:\d{2}/.test(rest)) return null;
   const parsed = new Date(`${day}T12:00:00Z`);
   // The round trip rejects 2026-02-31, which `Date` rolls forward to 3 March
   // rather than refusing.
