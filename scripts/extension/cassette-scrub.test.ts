@@ -5,6 +5,7 @@ import {
   findCassetteLeaks,
   REDACTED,
   scrubCassette,
+  scrubCassetteEntry,
   scrubCassetteValue,
   scrubFreeText,
   scrubUrl,
@@ -224,6 +225,37 @@ describe("cassette scrubbing", () => {
         receipt: { items: [{ name: "Позиция 1", sum: 1 }], tags: [REDACTED] },
       },
     });
+  });
+
+  it("denies an operation subtree all the way down, and keeps its structural arrays", () => {
+    // Two failures with one cause: the operation list has to allow generic nested names, because
+    // a currency's `name` is "RUB" and the reconciliation is built on it. Recursing a *denied*
+    // key through that same list therefore allowed it back — `locations: { name: "Home" }` was
+    // denied at the top and permitted one level down. Denied now means denied all the way.
+    //
+    // The other half is the opposite mistake: redacting every scalar in every array under a
+    // default-deny context also hit `documents: ["ShoppingReceipt"]`, which is a kept key and the
+    // only way replay's `operationHasShoppingReceipt` knows to ask for the receipt at all.
+    const scrubbed = scrubCassetteEntry({
+      url: "https://www.tbank.ru/api/common/v1/operations?sessionid=live&start=1&end=2",
+      status: 200,
+      headers: {},
+      body: {
+        payload: [
+          {
+            id: "1",
+            accountAmount: { value: 1, currency: { name: "RUB" } },
+            documents: ["ShoppingReceipt"],
+            locations: { name: "Home", city: "Moscow" },
+          },
+        ],
+      },
+    });
+
+    const operation = (scrubbed.body as { payload: Record<string, unknown>[] }).payload[0];
+    expect(operation.documents).toEqual(["ShoppingReceipt"]);
+    expect(operation.locations).toEqual({ name: REDACTED, city: REDACTED });
+    expect(operation.accountAmount).toEqual({ value: 1, currency: { name: "RUB" } });
   });
 
   it("keeps only what the mapper reads out of a merchant", () => {

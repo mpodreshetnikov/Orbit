@@ -600,6 +600,25 @@ function scrubReceiptItem(item: unknown, index: number): unknown {
   return result;
 }
 
+/**
+ * A denied key's whole subtree, with nothing kept and the shape intact.
+ *
+ * Recursing a denied key through its own default-deny context was not the same thing, and the
+ * difference is a leak: the operation list has to allow generic nested names — `name` is a
+ * currency's "RUB" — so `locations: { name: "Home" }` was denied at the top and then allowed one
+ * level down by the very list that denied it. Denied means denied all the way down.
+ */
+function redactSubtree(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSubtree);
+  if (value === null) return null;
+  if (typeof value !== "object") return REDACTED;
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = redactSubtree(entry);
+  }
+  return result;
+}
+
 function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "open"): unknown {
   if (typeof value === "string") {
     if (preserve) return value;
@@ -621,12 +640,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
   // inherited the denial, and then each string quietly ignored it. Scalars are redacted here,
   // where the context is still in hand.
   if (Array.isArray(value)) {
-    return value.map((entry) => {
-      if (context !== "open" && (entry === null || typeof entry !== "object")) {
-        return entry === null ? null : REDACTED;
-      }
-      return scrubValue(entry, preserve, context);
-    });
+    return value.map((entry) => scrubValue(entry, preserve, context));
   }
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
@@ -640,10 +654,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
       const lowered = key.toLowerCase();
 
       if (context === "formFieldBag" && !FORM_FIELD_BAG_KEPT.has(lowered)) {
-        result[key] =
-          entry === null || typeof entry === "object"
-            ? scrubValue(entry, false, "formFieldBag")
-            : REDACTED;
+        result[key] = redactSubtree(entry);
         continue;
       }
       if (FORM_FIELD_BAG_KEYS.has(lowered)) {
@@ -651,10 +662,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
         continue;
       }
       if (context === "receiptItem" && !RECEIPT_ITEM_KEPT.has(lowered)) {
-        result[key] =
-          entry === null || typeof entry === "object"
-            ? scrubValue(entry, false, "receiptItem")
-            : REDACTED;
+        result[key] = redactSubtree(entry);
         continue;
       }
       if (context === "receipt" && lowered === "items" && Array.isArray(entry)) {
@@ -662,10 +670,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
         continue;
       }
       if (context === "receipt" && !RECEIPT_KEPT.has(lowered)) {
-        result[key] =
-          entry === null || typeof entry === "object"
-            ? scrubValue(entry, false, "receipt")
-            : REDACTED;
+        result[key] = redactSubtree(entry);
         continue;
       }
       if (context === "loyalty") {
@@ -673,10 +678,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
         // `amount` is kept and is an object, and dropping back would reopen everything inside it,
         // which is the whole defect this closes.
         if (!LOYALTY_KEPT.has(lowered)) {
-          result[key] =
-            entry === null || typeof entry === "object"
-              ? scrubValue(entry, false, "loyalty")
-              : REDACTED;
+          result[key] = redactSubtree(entry);
           continue;
         }
         result[key] =
@@ -688,10 +690,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
         continue;
       }
       if (context === "operation" && !OPERATION_KEPT.has(lowered)) {
-        result[key] =
-          entry === null || typeof entry === "object"
-            ? scrubValue(entry, false, "operation")
-            : REDACTED;
+        result[key] = redactSubtree(entry);
         continue;
       }
       // A kept key that holds an object stays in the operation's context rather than dropping
@@ -710,10 +709,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
         continue;
       }
       if (context === "merchant" && !MERCHANT_KEPT.has(lowered)) {
-        result[key] =
-          entry === null || typeof entry === "object"
-            ? scrubValue(entry, false, "merchant")
-            : REDACTED;
+        result[key] = redactSubtree(entry);
         continue;
       }
       if (RECEIPT_KEYS.has(lowered)) {
