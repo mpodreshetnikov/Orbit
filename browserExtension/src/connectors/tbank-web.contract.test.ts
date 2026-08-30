@@ -52,10 +52,18 @@ const cassetteModules = import.meta.glob<{ default: Cassette }>(
   { eager: true },
 );
 
+/**
+ * The fixture directory names the cassette, not the `name` inside the file.
+ *
+ * That field is whatever the recorder was told, and the paste-ready recorder defaults every
+ * recording to `dense-month` — so a second fixture committed without editing it would carry the
+ * first one's name into the test titles and, worse, into anything keyed by it. The directory is
+ * unique by construction because the filesystem says so.
+ */
 const cassettes: Cassette[] = Object.entries(cassetteModules).map(([filePath, module]) => {
   const parsed = module.default;
   const directory = filePath.split("/").slice(-2, -1)[0] ?? "unnamed";
-  return { ...parsed, name: parsed.name || directory };
+  return { ...parsed, name: directory };
 });
 
 /**
@@ -186,11 +194,14 @@ interface ReplayResult {
   fetched: string[];
 }
 
-const replays = new Map<string, Promise<ReplayResult>>();
+// Keyed by the cassette itself rather than by anything written inside it. A name is a label; two
+// fixtures sharing one would have made the second cassette's tests inspect the first cassette's
+// replay — passing on the wrong evidence, which is worse than failing.
+const replays = new Map<Cassette, Promise<ReplayResult>>();
 
 function replayCassette(cassette: Cassette): Promise<ReplayResult> {
-  const started = replays.get(cassette.name) ?? runReplay(cassette);
-  replays.set(cassette.name, started);
+  const started = replays.get(cassette) ?? runReplay(cassette);
+  replays.set(cassette, started);
   return started;
 }
 
@@ -687,10 +698,19 @@ describe("tbank-web response contract", () => {
         expect(row.receipt_enrichment_status, `receipt status for ${label}`).toBe("ok");
         expect(row.receipt_line_items_skipped, `receipt skipped flag for ${label}`).toBe(false);
       }
-      expect(
-        recordsWithReceiptItems,
-        "no replayed record carried receipt line items — the receipt budget bought nothing",
-      ).toBeGreaterThan(0);
+      // Same rule the surfaces table uses below, and for the same reason. A window whose
+      // operations carry no receipts is a valid recording — the recorder says so with a warning
+      // rather than refusing the download — and failing here would make that cassette
+      // unusable by construction. But a cassette that *did* record receipt responses and yields
+      // no items from any of them is the scrub-damage shape, and that fails.
+      if (cassette.entries.some((entry) => entry.url.includes(SHOPPING_RECEIPT_PATH))) {
+        expect(
+          recordsWithReceiptItems,
+          "receipts were recorded and not one produced a line item — the budget bought nothing",
+        ).toBeGreaterThan(0);
+      } else {
+        console.warn(`${cassette.name} cannot check receipt line items: it recorded no receipts`);
+      }
 
       // Every other derived field, through the table. A surface present in the recording and
       // missing from the row is a lost enrichment whatever the cause.

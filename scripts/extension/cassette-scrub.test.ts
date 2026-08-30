@@ -340,6 +340,45 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("keeps a card hint as a masked last four, and nothing else in the container", () => {
+    // `extractCardLast4FromOperation` reads `card.panMasked` and `card.number`. Both were being
+    // denied — `card` is allowlisted, so the container survived, and then the flat operation list
+    // denied the two names inside it — leaving two of the mapper's four hint candidates dead on
+    // replay. Masked rather than preserved: the last four is the whole of what the mapper
+    // extracts, and a raw PAN in a public file is not a trade worth making for a fixture.
+    const scrubbed = scrubCassetteEntry({
+      url: "https://www.tbank.ru/api/common/v1/operations",
+      status: 200,
+      body: {
+        payload: [
+          {
+            id: "1",
+            card: {
+              panMasked: "4377 72** **** 7379",
+              number: "5536913812345678",
+              holder: "IVAN PETROV",
+              expiry: "12/28",
+            },
+          },
+          // The same name carrying the account holder's internal reference instead of a
+          // container. It is not a hint and nothing reads it.
+          { id: "2", card: "151542334" },
+        ],
+      },
+    });
+    const [withContainer, withScalar] = (
+      scrubbed.body as { payload: Array<Record<string, unknown>> }
+    ).payload;
+
+    expect(withContainer.card).toEqual({
+      panMasked: "****7379",
+      number: "****5678",
+      holder: REDACTED,
+      expiry: REDACTED,
+    });
+    expect(withScalar.card).toBe(REDACTED);
+  });
+
   it("keeps an operation's own reference, bare and wrapped", () => {
     const scrubbed = scrubCassetteEntry({
       url: "https://www.tbank.ru/api/common/v1/operations?sessionid=X",
@@ -617,7 +656,17 @@ describe("cassette scrubbing", () => {
     // times. Adding a key is a one-line diff in `known-keys.json` and it shows up in review.
     const cassettesRoot = path.resolve(__dirname, "..", "..", "test/fixtures/tbank/cassettes");
     const manifestPath = path.join(cassettesRoot, "known-keys.json");
-    if (!fs.existsSync(cassettesRoot) || !fs.existsSync(manifestPath)) return;
+    // No fixtures at all is a state the suite reports elsewhere, and there is genuinely nothing
+    // to review. A *missing manifest* beside cassettes that do exist is the opposite: the gate
+    // this test advertises would pass having checked nothing, and the next cassette could carry
+    // a short identifier or a private note — the exact class the manifest exists to put in front
+    // of a person — with CI green. So one is a skip and the other is a failure.
+    if (!fs.existsSync(cassettesRoot)) return;
+    expect(
+      fs.existsSync(manifestPath),
+      `${manifestPath} is missing, so the unknown-key gate has nothing to compare against. ` +
+        `Restore it rather than letting this check pass by doing nothing.`,
+    ).toBe(true);
 
     const known = new Set<string>(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
     const seen = new Set<string>();

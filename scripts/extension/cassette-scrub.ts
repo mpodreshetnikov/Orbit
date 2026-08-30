@@ -384,6 +384,17 @@ const CARD_TAIL_KEYS = new Set(["cardnumber", "card_number", "pan", "panmasked",
 const CONTAINER_OR_IDENTIFIER_KEYS = new Set(["account", "card"]);
 
 /**
+ * Inside a `card` container, the names that may survive — as a masked last four and nothing more.
+ *
+ * `extractCardLast4FromOperation` reads exactly `card.panMasked` and `card.number`, so those two
+ * have to be here or a cassette cannot exercise account/card resolution at all; the rest are the
+ * spellings `CARD_TAIL_KEYS` already knows. Every one is masked rather than preserved:
+ * `maskCardTail` leaves `****7379`, which is the whole of what the mapper extracts, and a raw PAN
+ * in a public file is the thing this repository exists not to produce.
+ */
+const CARD_HINT_MASKED = new Set([...CARD_TAIL_KEYS, "number"]);
+
+/**
  * The merchant's fiscal register fields. Numbers, so the value scrub never touched them, and
  * sixteen digits, so the leak scan reported every one of them and refused the download — which
  * is what the first real recording did, once per receipt. Nothing in the import path reads
@@ -617,7 +628,8 @@ type ScrubContext =
   | "merchant"
   | "operation"
   | "loyalty"
-  | "reference";
+  | "reference"
+  | "card";
 
 /**
  * One item, with its name replaced by its position. The walk redacts the name along with every
@@ -734,6 +746,30 @@ function scrubValue(value: unknown, context: ScrubContext = "open"): unknown {
       }
       if (context === "operation" && !OPERATION_KEPT.has(lowered)) {
         result[key] = redactSubtree(entry);
+        continue;
+      }
+      if (context === "card") {
+        // Default-deny again, and the two kept keys are masked rather than preserved:
+        // `maskCardTail` leaves `****7379` and nothing else, which is the whole of what
+        // `extractCardLast4` reads. Keeping the raw value would be a card number in a public
+        // file; redacting the key, which is what happened before this, leaves two of the
+        // mapper's four hint candidates dead on replay, so a cassette cannot exercise the
+        // account/card resolution it exists to check.
+        result[key] =
+          CARD_HINT_MASKED.has(lowered) && entry !== null
+            ? maskCardTail(entry)
+            : redactSubtree(entry);
+        continue;
+      }
+      if (context === "operation" && CONTAINER_OR_IDENTIFIER_KEYS.has(lowered)) {
+        // One name, two meanings — `"card": "151542334"` is the account holder's internal
+        // reference and `"card": { panMasked: … }` is the thing the importer reads. The scalar
+        // goes, the container gets its own scoped context. Without this the container fell into
+        // the branch below, stayed in the operation's flat allowlist, and `panMasked` and
+        // `number` were denied one level down for not being on a list that never described a
+        // card — the same shape as the brand and category damage two commits ago.
+        const isContainer = entry !== null && typeof entry === "object";
+        result[key] = isContainer ? scrubValue(entry, "card") : entry === null ? null : REDACTED;
         continue;
       }
       if (context === "operation" && PRESERVED_REFERENCE_KEYS.has(lowered)) {
