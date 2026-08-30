@@ -15,6 +15,15 @@ export const REDACTED = "REDACTED";
 
 /** Field names whose value is an identifier, wherever they appear in a payload. */
 const IDENTIFIER_KEYS = new Set([
+  // The till and the shop, as the bank numbers them. Only eight digits, so no pattern rule sees
+  // them, and nothing in the connector reads either — but they are stable keys for "which
+  // terminal in which branch", so against the timestamps and amounts already in the file they
+  // rebuild exactly the location trail redacting `retailPlaceAddress` was meant to remove. 138
+  // distinct `posId` and 59 distinct `pointOfSaleId` in the recording.
+  "posid",
+  "posId",
+  "pointofsaleid",
+  "pointOfSaleId",
   "sessionid",
   "sessionId",
   "session_id",
@@ -453,11 +462,22 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
     if (WHOLE_MASKED_PERSON_NAME.test(value)) return REDACTED;
     return scrubFreeText(value);
   }
-  // The bag context has to survive the array, or an object inside an array-valued field drops
-  // back to allow-by-default — which is the exact hole the default-deny rule was added to close,
-  // reopened one level down.
+  // The context has to survive the array, or an object inside an array-valued field drops back to
+  // allow-by-default — which is the exact hole the default-deny rule was added to close, reopened
+  // one level down.
+  //
+  // Carrying the context is not enough on its own, though: a *scalar* element never reaches the
+  // object walk where default-deny is enforced, it returns from the string branch above. So
+  // `fieldsValues: { aliases: ["Alice"] }` came through untouched — the key was denied, the array
+  // inherited the denial, and then each string quietly ignored it. Scalars are redacted here,
+  // where the context is still in hand.
   if (Array.isArray(value)) {
-    return value.map((entry) => scrubValue(entry, preserve, context));
+    return value.map((entry) => {
+      if (context !== "open" && (entry === null || typeof entry !== "object")) {
+        return entry === null ? null : REDACTED;
+      }
+      return scrubValue(entry, preserve, context);
+    });
   }
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};

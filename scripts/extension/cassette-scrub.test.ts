@@ -188,6 +188,42 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("redacts a scalar inside a default-denied array", () => {
+    // Carrying the context into the array was not enough: a scalar element never reaches the
+    // object walk where default-deny is enforced — it returns from the string branch. So the key
+    // was denied, the array inherited the denial, and every string in it quietly ignored both.
+    const scrubbed = scrubCassetteValue({
+      fieldsValues: {
+        aliases: ["Тестовая П.", "short-id"],
+        pointerType: "PHONE",
+        nested: [{ message: "тоже нет" }],
+      },
+      payload: { receipt: { items: [{ name: "Молоко", sum: 1 }], tags: ["Аптека №1"] } },
+    });
+
+    expect(scrubbed).toEqual({
+      fieldsValues: {
+        aliases: [REDACTED, REDACTED],
+        // A kept key is still kept — the denial applies to what the bag does not name.
+        pointerType: "PHONE",
+        nested: [{ message: REDACTED }],
+      },
+      payload: {
+        receipt: { items: [{ name: "Позиция 1", sum: 1 }], tags: [REDACTED] },
+      },
+    });
+  });
+
+  it("redacts the till and the shop the bank numbers", () => {
+    // Eight digits each, so no pattern rule sees them, and nothing in the connector reads either.
+    // Against the timestamps and amounts already in the file they are a stable key for "which
+    // terminal in which branch" — the location trail that redacting the address removed.
+    expect(scrubCassetteValue({ posId: "41952009", pointOfSaleId: "41405565" })).toEqual({
+      posId: REDACTED,
+      pointOfSaleId: REDACTED,
+    });
+  });
+
   it("reports a postal address the field rules did not catch", () => {
     // The structural rule above removes these from a receipt. This is for the address that turns
     // up somewhere the walk does not cover, which is how every previous round went. The report

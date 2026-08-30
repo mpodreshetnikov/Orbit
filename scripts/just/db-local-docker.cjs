@@ -377,7 +377,15 @@ function applyMigrations({ from, until, skipApplied = false } = {}) {
 
   for (const name of files) {
     if (alreadyApplied.has(name.split("_")[0])) continue;
-    const applied = psql(["-f", path.join(migrationsDir, name)], { stdio: "pipe" });
+    // One transaction per file. `ON_ERROR_STOP=1` already stops psql at the first error, but
+    // without a wrapping transaction every statement before it has committed under autocommit —
+    // and the version is not recorded, so the next `up` replays the whole file: non-idempotent
+    // DDL fails again on what already exists, and a data repair runs a second time over rows it
+    // already changed. Either way the database cannot be brought forward without `--recreate`.
+    // psql documents `--single-transaction` as wrapping the `-f` script in BEGIN/COMMIT.
+    const applied = psql(["--single-transaction", "-f", path.join(migrationsDir, name)], {
+      stdio: "pipe",
+    });
     if (applied.status !== 0) {
       console.error(applied.stderr ?? "");
       throw new Error(`Migration failed: ${name}`);
@@ -554,16 +562,26 @@ function test(paths) {
     // every comparison against it is false, so checking only for a mismatch lets a file that
     // emitted an `ok` and then stopped before `plan()`/`finish()` through — the shape `pg_prove`
     // reports as "No plan found in TAP output".
+    // TAP treats `Bail out!` as fatal. Today the exit status alone already catches it: pgTAP's
+    // `bail_out()` raises, and `ON_ERROR_STOP=1` turns that into a non-zero psql exit — checked
+    // with a probe file that emits a full plan and a passing assertion before bailing, which is
+    // reported `not ok` with this condition stubbed out. So this is a second, independent reason
+    // rather than a repair: the TAP text is the contract, while the exit status is a side effect
+    // of a psql flag set elsewhere in this file and removable without anyone connecting the two.
+    const bailedOut = /^Bail out!/m.test(output);
     const planned = Number(output.match(/^1\.\.(\d+)$/m)?.[1] ?? NaN);
     const emitted = ok.length + notOk.length;
     const planMissing = !Number.isFinite(planned);
     const planMismatch = planMissing || planned !== emitted;
 
     const relative = path.relative(repoRoot, file);
-    if (notOk.length > 0 || result.status !== 0 || ok.length === 0 || planMismatch) {
+    if (notOk.length > 0 || result.status !== 0 || ok.length === 0 || planMismatch || bailedOut) {
       failed += 1;
       console.log(`not ok - ${relative}`);
       for (const line of notOk) console.log(`    ${line}`);
+      if (bailedOut) {
+        console.log(`    ${output.match(/^Bail out!.*$/m)?.[0] ?? "Bail out!"}`);
+      }
       if (planMissing) {
         console.log(`    no plan found in TAP output (${emitted} assertion(s) emitted)`);
       } else if (planMismatch) {
