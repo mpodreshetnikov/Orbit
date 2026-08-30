@@ -499,7 +499,19 @@ function up(flags) {
   if (!explicitRebuild) {
     if (databaseIsHealthy()) {
       log(`reusing the running ${DB_CONTAINER}; pass --recreate to rebuild it`);
-    } else if (databaseExists() && startExistingDatabase()) {
+    } else if (databaseExists()) {
+      // It exists, so it holds data, and starting it is the only non-destructive move available.
+      // When that fails the answer is to say why and stop — falling through to the rebuild would
+      // force-remove the one copy of that data to fix a problem that is usually outside the
+      // container (a port still held, a daemon mid-restart) and would defeat the replacement too.
+      if (!startExistingDatabase()) {
+        throw new Error(
+          `${DB_CONTAINER} exists but did not come back up, so this stopped instead of ` +
+            `replacing it — the data in it is still there. Check what is holding port ${PORT} ` +
+            `and what the container says (docker logs ${DB_CONTAINER}); pass --recreate to ` +
+            `discard it and build a new one.`,
+        );
+      }
       // The schema owners are not started again: storage and auth create their schemas once, and
       // those schemas are in the database this container just brought back.
       log(`restarted the stopped ${DB_CONTAINER}; pass --recreate to rebuild it`);
