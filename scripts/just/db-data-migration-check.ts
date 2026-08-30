@@ -23,6 +23,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { buildMoneyDedupeHash } from "../../shared/lib/money/dedupe";
@@ -619,6 +621,33 @@ function containerExists(name: string): boolean {
   }
 }
 
+const LOCK_PATH = path.join(os.tmpdir(), `orbit-data-migration-check-${CONTAINER}.lock`);
+
+/**
+ * Reserves the shared instance, atomically.
+ *
+ * Asking whether the container exists and then creating it are two operations, and two checks
+ * starting together both get "no" before either has built anything — which is the race the check
+ * was supposed to remove, arriving a few milliseconds earlier. `mkdir` is atomic and fails when
+ * the directory is there, so exactly one of them wins.
+ */
+function acquireLock(): boolean {
+  try {
+    fs.mkdirSync(LOCK_PATH);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseLock(): void {
+  try {
+    fs.rmdirSync(LOCK_PATH);
+  } catch {
+    // Releasing is best effort; a lock left behind is reported by the next run, with the path.
+  }
+}
+
 async function main(): Promise<number> {
   // Overridable names were not enough. Whoever runs the documented command gets the defaults, so
   // two of them — two checkouts, or an agent beside a person — still pick the same container and
@@ -629,14 +658,23 @@ async function main(): Promise<number> {
   // Refusing is the honest move rather than allocating a port. Destroying someone else's run to
   // start your own is the behaviour being fixed, and picking a free port silently would leave two
   // checks interleaving against one daemon with nothing saying so.
-  if (USING_DEFAULT_INSTANCE && containerExists(CONTAINER)) {
+  if (USING_DEFAULT_INSTANCE && !acquireLock()) {
     console.error(
-      `${CONTAINER} already exists, so another data migration check is either running or left ` +
-        `it behind. This one stops rather than removing it.\n` +
+      `Another data migration check holds ${CONTAINER}, or one crashed and left the lock. This ` +
+        `run stops rather than removing a database it does not own.\n` +
         `  If a run is in progress, wait for it.\n` +
-        `  If it is a leftover: docker rm -f ${CONTAINER}\n` +
+        `  If it is a leftover: rm -r ${LOCK_PATH} && docker rm -f ${CONTAINER}\n` +
         `  To run two at once, give this one its own: ORBIT_DB_CONTAINER=… ORBIT_DB_PORT=… ` +
         `ORBIT_DB_NETWORK=…`,
+    );
+    return 1;
+  }
+  if (USING_DEFAULT_INSTANCE && containerExists(CONTAINER)) {
+    // The lock is free but the container is not: a previous run was killed between the two.
+    releaseLock();
+    console.error(
+      `${CONTAINER} exists while no check holds the lock, so a previous run was interrupted. ` +
+        `Remove it and try again: docker rm -f ${CONTAINER}`,
     );
     return 1;
   }
@@ -672,7 +710,10 @@ async function main(): Promise<number> {
 }
 
 main()
-  .then((code) => process.exit(code))
+  .then((code) => {
+    if (USING_DEFAULT_INSTANCE) releaseLock();
+    process.exit(code);
+  })
   .catch((error: unknown) => {
     console.error(error);
     try {
@@ -680,5 +721,6 @@ main()
     } catch {
       // The teardown is best effort; the original failure is what matters.
     }
+    if (USING_DEFAULT_INSTANCE) releaseLock();
     process.exit(1);
   });

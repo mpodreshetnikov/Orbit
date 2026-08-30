@@ -941,6 +941,11 @@ export async function recordCassette(
 
     if (requestKey === null) continue;
     if (!operationHasShoppingReceipt(operation)) continue;
+    // Above the connector's budget the recording is already known to be blocked, so every receipt
+    // from here is a live request against the bank's rate limit for a file nobody can use. Below
+    // it, the requests are fewer than a real run would make and an operator diagnosing a window
+    // may well want them, so those still go out — the blocker stops the download either way.
+    if (budgetMismatch && recordedReceipts > connectorReceipts) continue;
     // The budget counts requests issued, not receipts captured — as the connector's
     // `issuedReceiptRequestCount` does. Counting successes would let a run that keeps failing
     // issue requests without limit, which is exactly the run the bank is rate-limiting.

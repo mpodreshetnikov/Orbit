@@ -564,18 +564,20 @@ function up(flags) {
     }
   }
 
-  if (rebuilding) {
-    startDatabase();
-    startSchemaOwners();
-  }
-
-  // A fresh build that does not finish must not survive, and the migration phase is as much a
-  // part of finishing as the seed. Either way the container is left running and healthy, and the
+  // A fresh build that does not finish must not survive, and every phase of building counts —
+  // the schema owners as much as the migrations, the migrations as much as the seed. A crash
+  // while storage-api or GoTrue is migrating leaves the new Postgres container behind, and the
+  // next `up` finds it healthy, skips both schema owners because it is not rebuilding, and
+  // applies our migrations onto a partial `storage` or `auth` schema. Either way the container is left running and healthy, and the
   // next ordinary `up` reuses it: after a failed seed it skips seeding by design and reports an
   // unseeded database ready; after failed migrations it resumes the remaining ones and *still*
   // skips the seed, because reuse means `seed: false`. Nothing short of `--recreate` would ever
   // seed it. Removing a container this same command created destroys nothing that existed before.
   try {
+    if (rebuilding) {
+      startDatabase();
+      startSchemaOwners();
+    }
     applyMigrations({ until: flags.until, skipApplied: !rebuilding });
     if (!flags.noDeploy) applyDeployAndSeed({ seed: rebuilding });
   } catch (error) {
