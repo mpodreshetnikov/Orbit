@@ -134,6 +134,48 @@ A new migration's timestamp must sort **after** every migration already on the b
 - `supabase/migrations/.out-of-order-allowlist` is the reviewed exception for ordering only. Each entry is `<14-digit version> # <why it is safe against the newer schema>`; the rationale is required and an entry without one fails the check.
 - A duplicate timestamp is never allowlistable. The remote migration history is keyed by version, so a second file carrying one another migration already uses cannot be recorded as its own migration and its SQL silently never runs. Give it a timestamp nothing else uses.
 
+## Automated Review Policy
+
+Codex reviews a pull request on its `New commits` trigger, so **one push to an open pull request is one review round**. Rounds are the unit the Codex allowance is spent in, and the code review shares that allowance with the security review lane running beside it. A branch that pushes twenty times buys twenty code reviews and starves the security review: on PR #20 the last security review that completed was the fourth round, and the sixteen after it returned a usage-limit message instead.
+
+Three rules bound that, in the order they bite.
+
+### Answer a round by class, not by finding
+
+A finding is one instance of a rule. Fix the rule, everywhere in the change it reaches, before pushing.
+
+- `Bound notes rendered into MCP text responses` is not a defect about notes. It is "every unbounded value rendered into a text response", and it also covers the ingredients, the schedule slots, the units and the intervals. Applying it to notes alone is what turned one rule into seven rounds on #20; date validation took five more the same way.
+- The reviewer names one occurrence because it read one file. After fixing, re-read the whole diff for other occurrences of the same class, and fix those in the same push.
+- A fix that changes a shape — the column a value is read from, the order rows are selected in — is applied at every reader of that shape in the same push. Nine of #20's findings were the previous round's fix leaking into a reader it had not updated, four of them at `P1`.
+
+### One push per round
+
+Batch every finding from a round into one push. Pushing per finding starts a fresh round against a half-answered review, which is how a five-finding round becomes five rounds.
+
+### The round budget
+
+**Three automatic rounds per pull request.** After the third, stop pushing and hand the pull request to its owner: what is fixed, what is still open, and what the next round would cost. Further rounds are bought deliberately with an explicit `@codex review`, not spent by default.
+
+The budget is per pull request rather than per day, and neither rebasing nor reopening resets it. A round that produced no finding still counts — it was still a review.
+
+## Reviewable Change Size
+
+Rounds grow superlinearly with the size of the diff, so the cheapest way to bound them is to bound the change. Measured across four pull requests:
+
+| PR  | Files | Added lines | Rounds |
+| --- | ----- | ----------- | ------ |
+| #17 | 3     | 46          | 0      |
+| #19 | 5     | 194         | 0      |
+| #21 | 9     | 651         | 5      |
+| #20 | 11    | 3011        | 20     |
+
+A pull request may add at most **1000 reviewable lines** against its base branch. Reviewable excludes recorded fixtures, lockfiles, generated artifacts and the generated skill mirror — content no reviewer reads line by line, and which would otherwise let a cassette recording fail a check aimed at hand-written code.
+
+- CI enforces the rule with `quality-pr-size`, which runs inside `quality` and compares against the pull request's actual base branch.
+- `.large-change-allowlist` is the reviewed exception. An entry is `path <glob> # <why this content is not reviewable>` or `branch <name> # <why this change cannot be split>`; the rationale is required and an entry without one fails the check.
+- Prefer splitting to allowlisting. The limit is not a claim about how much work belongs in a branch — it is a claim about how much a reviewer reads in one pass, and this reviewer bills per pass.
+- The limit sits in the gap between the largest change that reviewed cleanly and the smallest that did not, rather than just above the former: a limit set at 800 fires on ordinary well-tested changes the size of #21, and a gate that fires on ordinary work is a gate somebody turns off.
+
 ## Change-Type Check Matrix
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.

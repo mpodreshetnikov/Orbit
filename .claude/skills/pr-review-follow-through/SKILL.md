@@ -1,32 +1,85 @@
 ---
 name: pr-review-follow-through
-description: Finish a pull request and stop, instead of watching it forever. Use after opening a PR, when asked to watch, monitor, babysit or autofix one, when an automated reviewer posts findings, and whenever deciding whether to check a PR again. Defines what "done with this PR" means, why the automated review arrives once rather than continuously, and the narrow cases that justify looking again.
+description: Finish a pull request and stop, instead of watching it forever or answering it one finding at a time. Use after opening a PR, when an automated reviewer posts findings, when asked to watch, monitor, babysit or autofix one, and whenever deciding whether to push again or check again. Defines how to answer a review round, how many rounds a PR may spend, and what "done with this PR" means.
 ---
 
 # PR Review Follow-Through
 
-A pull request is finished work handed to a human, not a process to supervise. This skill says when
-to stop.
+A pull request is finished work handed to a human, not a process to supervise. This skill says how
+to answer the reviewer, and when to stop.
 
-## The Review Arrives Once
+Canonical policy — the round budget, the class rule, the reviewable size limit — is
+`docs/QUALITY.md` under **Automated Review Policy** and **Reviewable Change Size**. This is how to
+apply it.
 
-The automated reviewer on this repository runs on a **trigger**, not a schedule: a PR being opened,
-a draft marked ready, or someone commenting `@codex review`. It posts its findings, and that is the
-whole review. Nothing further arrives on its own.
+## One Push Is One Review Round
 
-So there is nothing to poll for. An agent that re-checks a PR every hour after the review landed is
-asking a question whose answer cannot change without a human acting first — and when a human does
-act, the event wakes the session anyway.
+The automated reviewer runs on a **`New commits` trigger**. Every push to an open pull request buys
+a fresh review, and those reviews spend the same allowance as the security review lane beside them.
+A branch that pushes twenty times spends twenty rounds and starves the lane that reads the next
+branch for leaked credentials and personal data.
+
+So the round is the unit of cost, and pushing is what spends it. Nothing arrives on its own between
+pushes: there is still nothing to poll for.
+
+## Answering A Round
+
+Three rules, applied in order, on every round.
+
+### 1. Fix the class, not the finding
+
+A finding is one instance of a rule. Find the rule, then fix it everywhere in the change it reaches
+— in the same push.
+
+- "Bound the notes rendered into the text response" is not about notes. It is *every unbounded value
+  rendered into a text response*, and it also covers the ingredients, the slots, the units and the
+  intervals. Answering only the named field is what turned one rule into seven rounds on PR #20.
+- The reviewer named one occurrence because it read one file. Before pushing, re-read the whole
+  diff for other occurrences of the same class and fix those too.
+- A fix that changes a **shape** — the column a value is read from, the order rows are selected in,
+  the key a lookup uses — is applied at every reader of that shape in the same push. Nine of #20's
+  findings were the previous round's fix leaking into a reader it had not updated, four of them at
+  `P1`. A fix that creates the next round's finding has not saved a round.
+
+### 2. One push per round
+
+Batch every finding from a round into a single push, together with the class sweep above and the
+checks that prove it. Pushing per finding starts a fresh round against a half-answered review, which
+is exactly how a five-finding round becomes five rounds.
+
+### 3. Three rounds, then hand it over
+
+**Three automatic rounds per pull request.** After the third, stop pushing. Report to the owner:
+what is fixed, what is still open, and what another round would cost. Further rounds are bought
+deliberately with an explicit `@codex review`, not spent by default.
+
+The budget is per pull request. Rebasing does not reset it, reopening does not reset it, and a round
+that produced no finding still counts — it was still a review.
+
+If the third round arrives with the branch still visibly unfinished, that is the signal the change
+is too large to review in one pass, not a reason to spend a fourth. Say so and propose the split.
+
+### What still gets answered outside the budget
+
+Not every finding needs a push. Answer on the thread instead, and it costs no round at all:
+
+- A finding that is **real but not this branch's** — pre-existing on the base, or in code the diff
+  does not touch. Record it as a task and say where, rather than widening the pull request.
+- A finding whose **premise does not hold**. Say which part, with the evidence.
+- A finding you are **deliberately not taking**. Say why on its thread.
+
+Resolve the threads you addressed either way.
 
 ## Done With This PR
 
 A PR is handed off when all four hold:
 
 1. **CI is green**, or the repository runs no check on it and you have said so.
-2. **Every automated finding is addressed** — fixed and pushed, or answered on its thread with why
-   not — and the threads you addressed are resolved.
+2. **Every finding is addressed** — fixed and pushed, or answered on its thread with why not — and
+   the threads you addressed are resolved.
 3. **No merge conflict** against the base branch.
-4. **You have said what is left for a human**: review, approval, merge.
+4. **You have said what is left for a human**: review, approval, merge — and how many rounds the
+   pull request has spent.
 
 At that point say so once and stop. Do not schedule a check-in, do not re-read the PR "to be sure",
 and do not send a status message that reports no change. Silence is the correct output of a PR that
@@ -34,9 +87,9 @@ is waiting on somebody else.
 
 ## Waking Up Again
 
-Events wake the session on their own: a comment, a review, a push, a CI transition, a
-merge-conflict notice. When one arrives, handle it under the same bar as above, then return to
-silence. One wake, one round of work, one stop.
+Events wake the session on their own: a comment, a review, a push, a CI transition, a merge-conflict
+notice. When one arrives, handle it under the same bar as above, then return to silence. One wake,
+one round of work, one stop.
 
 Two narrow cases justify looking without an event, each **once**:
 
@@ -60,10 +113,10 @@ Staying subscribed forever is its own kind of watching. So the subscription has 
 3. **An hour with nothing new ends the subscription.** Unsubscribe, say you have stopped watching,
    and leave the PR alone.
 
-After that the PR moves only on the owner's word. Their approval is what unblocks the merge, and
-the merge is theirs to make or to ask for explicitly — never merge a PR because it looks ready and
-has been quiet. Do not re-subscribe, re-check, or nudge on your own; if they pick it back up, they
-will say so, and that is the event.
+After that the PR moves only on the owner's word. Their approval is what unblocks the merge, and the
+merge is theirs to make or to ask for explicitly — never merge a PR because it looks ready and has
+been quiet. Do not re-subscribe, re-check, or nudge on your own; if they pick it back up, they will
+say so, and that is the event.
 
 The one scheduled wake-up this permits — the timer that ends the quiet hour — is bounded and
 terminal: its only job is to unsubscribe. It is not a check-in, it never re-arms itself, and it is
@@ -71,6 +124,10 @@ the only timer a finished PR may have.
 
 ## Never
 
+- Never push once per finding. One push answers the whole round.
+- Never spend a fourth automatic round without the owner asking for it.
+- Never fix only the field a finding names when the rule reaches further. The next round will find
+  the rest, at full price.
 - Never poll a PR on a timer because it is open. Open and waiting is its normal state. The single
   timer that ends the quiet hour is not polling — it stops the watching rather than continuing it.
 - Never merge a PR that has gone quiet, however ready it looks. Quiet is not approval.
@@ -86,7 +143,8 @@ When handing off a PR, state:
 
 - `pr`: the link.
 - `checks`: CI outcome, or that the repository runs none on this PR.
-- `review`: findings addressed, and anything deliberately not addressed with the reason.
+- `review`: rounds spent out of the budget, findings addressed, and anything deliberately not
+  addressed with the reason.
 - `waiting_on`: what a human has to do next.
 - `watching`: that the session stays subscribed until an hour of quiet passes, or that it has
   already unsubscribed and stopped.
