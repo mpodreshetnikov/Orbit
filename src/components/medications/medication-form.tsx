@@ -313,13 +313,19 @@ export function MedicationForm({
   }, [kind, totalWizardSteps]);
 
   /**
-   * The generator inserts one event per regimen and scheduled minute, so two slots
-   * at one time would show a dose it never produces.
+   * What is wrong with the slot times, if anything. A blank slot is cast to a
+   * timestamp by the generator and fails the whole regimen, and two slots at one
+   * time show a dose it never produces — it inserts one event per regimen and
+   * scheduled minute.
    */
-  const hasDuplicateReminderTimes = (): boolean => {
-    if (!hasPerSlotAmounts(schedule)) return false;
+  const reminderTimesError = (): string => {
+    if (!hasPerSlotAmounts(schedule)) return "";
     const times = schedule.times ?? [];
-    return new Set(times).size !== times.length;
+    if (times.some((time) => !/^\d{1,2}:\d{2}(:\d{2})?$/.test(time.trim()))) {
+      return t("medications.reminderTimeRequired");
+    }
+    if (new Set(times).size !== times.length) return t("medications.duplicateReminderTimes");
+    return "";
   };
 
   const buildDoseDefinition = (amount: number): PlannedIntake => ({
@@ -416,8 +422,9 @@ export function MedicationForm({
       return;
     }
 
-    if (hasDuplicateReminderTimes()) {
-      setSlotsError(t("medications.duplicateReminderTimes"));
+    const timesError = reminderTimesError();
+    if (timesError) {
+      setSlotsError(timesError);
       // On mobile the slots live on the schedule step, which is hidden once the
       // wizard has moved on: go back to the message rather than refusing silently.
       if (isMobile) setWizardStep(SCHEDULE_WIZARD_STEP);
@@ -575,8 +582,9 @@ export function MedicationForm({
         setScheduleError(t("medications.daysCountRequired"));
         return;
       }
-      if (hasDuplicateReminderTimes()) {
-        setSlotsError(t("medications.duplicateReminderTimes"));
+      const timesError = reminderTimesError();
+      if (timesError) {
+        setSlotsError(timesError);
         return;
       }
     }

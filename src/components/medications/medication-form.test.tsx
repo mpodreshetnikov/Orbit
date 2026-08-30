@@ -879,6 +879,35 @@ describe("MedicationForm", () => {
     });
   });
 
+  it("refuses to save a weekly slot with no time", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    const timeInputs = screen.getAllByDisplayValue(/^(09:00|20:00)$/);
+    fireEvent.change(timeInputs[0], { target: { value: "" } });
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    // A blank slot is cast to a timestamp by the generator and fails the regimen.
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("medications.reminderTimeRequired");
+  });
+
   it("keeps the mobile wizard on the schedule step when two slots share a time", async () => {
     hookMocks.useIsMobile.mockReturnValue(true);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
