@@ -233,9 +233,14 @@ Conventions that matter:
   `get_medication` lists the intakes nearest now and ends with
   `...15 more; call list_medication_doses with regimen_id: … and a from/to range for them`.
 
-  A schedule says what it plans in terms a reader cannot misread: weekdays as `Mon`, `Thu` rather
-  than the stored indexes, since a reader who assumes the week starts on Monday would shift the whole
-  course by a day; per-slot amounts paired with their slots by index, as the generator pairs them, so
+  A schedule says what the generator will actually do, in terms a reader cannot misread: weekdays as
+  `Mon`, `Thu` rather than the stored indexes, since a reader who assumes the week starts on Monday
+  would shift the whole course by a day — and a stored `7` as `7 (never dosed)`, because the
+  generator maps `isodow` 7 to 0 before testing membership, so that row matches no day however much
+  it looks like Sunday; an `interval_days` course with no time recorded shown at the `09:00` the
+  generator substitutes, marked as the default rather than as a stored time; a fractional
+  `interval_hours` interval marked as generating nothing, since the generator casts `every` to `int`
+  and the schema requires a whole number of days but not of hours; per-slot amounts paired with their slots by index, as the generator pairs them, so
   an `amounts` longer than `times` neither warns about a slot that is never dosed nor withholds a
   strength for it; and a `one_off` due value that is not an instant named as such, never echoed,
   because `formatZoned` returns what it cannot parse.

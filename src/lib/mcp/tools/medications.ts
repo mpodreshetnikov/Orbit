@@ -232,23 +232,38 @@ function describeSchedule(
     case "interval_hours":
       return (
         `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
+        // The generator reads `every` as text and casts it to `int`
+        // (`(v_schedule->'interval'->>'every')::int`), which a fractional value
+        // does not survive -- and `medScheduleSchema` requires a whole number of
+        // days for `interval_days` but not of hours here, so `every: 1.5` is
+        // writable and generates nothing at all. Printing it as the plan would
+        // describe doses that are never made.
+        `${typeof schedule.interval?.every === "number" && !Number.isInteger(schedule.interval.every) ? " — not generated: the interval must be a whole number of hours" : ""}` +
         `${schedule.amount != null ? ` (${schedule.amount}${unitText(dose?.intake?.unit) ? ` ${unitText(dose?.intake?.unit)}` : ""} per intake)` : ""}` +
         // A scalar override is the same claim as a per-slot one, so it earns the
         // same warning: the generator replaces the amount and copies `active`.
         `${overrideNote()}`
       );
-    case "interval_days":
+    case "interval_days": {
       // `time_of_day` is the deprecated single-time form, and the generator
-      // still reads it (`…single_generator.sql`), so a legacy row doses at a
-      // time this line would otherwise not mention at all.
-      return `schedule interval_days every ${schedule.interval?.every ?? "?"}d${at(
+      // still reads it, so a legacy row doses at a time this line would
+      // otherwise not mention at all. With neither field the generator does not
+      // give up either -- it substitutes `09:00`
+      // (`COALESCE(v_schedule->>'time_of_day', '09:00')`) and doses then, so
+      // reporting no time would deny an intake the reminders do make.
+      const stored =
         Array.isArray(schedule.times) && schedule.times.length > 0
           ? schedule.times
           : typeof schedule.time_of_day === "string"
             ? [schedule.time_of_day]
-            : undefined,
-        schedule.amounts,
-      )}${overrideNote()}`;
+            : null;
+      return (
+        `schedule interval_days every ${schedule.interval?.every ?? "?"}d` +
+        `${at(stored ?? [GENERATOR_DEFAULT_TIME], schedule.amounts)}` +
+        `${stored ? "" : " — no time recorded, so the generator uses its default"}` +
+        `${overrideNote()}`
+      );
+    }
     case "days_of_week":
       return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${joinBounded(schedule.days_of_week.map(weekdayName), SCHEDULE_SLOT_LIMIT)}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote()}`;
     case "one_off":
@@ -396,19 +411,25 @@ function scheduleAmounts(schedule?: MedSchedule | null): number[] {
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
+/** The time the generator doses an `interval_days` course at when the row records none. */
+const GENERATOR_DEFAULT_TIME = "09:00";
+
 /**
- * A weekday index as a name.
+ * A weekday index as a name, or as a day that never doses.
  *
  * `on 0, 1` is only unambiguous to a reader who knows this domain counts from
  * Sunday, and a reader who assumes Monday shifts the whole schedule by a day.
- * `7` is Sunday as well, which is what `regimen-card.tsx` does; anything else is
- * printed as it is stored, bounded, rather than guessed at.
+ *
+ * `7` is not Sunday here, however plausible it looks: the generator maps
+ * `isodow` 7 to 0 before testing membership (`v_days_of_week @> to_jsonb(v_dow)`),
+ * so a stored `7` matches no day and the course doses on it never.
+ * `regimen-card.tsx` prints it as Sunday; repeating that promise in a reply
+ * would describe intakes the app and the reminders never make.
  */
 function weekdayName(day: unknown): string {
-  const index = typeof day === "number" && day === 7 ? 0 : day;
-  return typeof index === "number" && Number.isInteger(index) && index >= 0 && index <= 6
-    ? WEEKDAYS[index]
-    : excerpt(String(day), UNIT_LIMIT);
+  return typeof day === "number" && Number.isInteger(day) && day >= 0 && day <= 6
+    ? WEEKDAYS[day]
+    : `${excerpt(String(day), UNIT_LIMIT)} (never dosed)`;
 }
 
 /** Whether any slot doses a different amount than the course's own. */

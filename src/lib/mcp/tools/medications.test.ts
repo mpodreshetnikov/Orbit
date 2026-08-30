@@ -993,7 +993,8 @@ describe("list_medication_doses", () => {
   it("names the weekdays instead of leaving bare indexes", async () => {
     // "on 0, 1" is unambiguous only to a reader who knows this domain counts
     // from Sunday; one who assumes Monday shifts the whole schedule by a day.
-    // 7 is Sunday too, as `regimen-card.tsx` treats it.
+    // 7 is not Sunday, however plausible it looks: the generator maps isodow 7
+    // to 0 before testing membership, so a stored 7 matches no day at all.
     meds.listMedications.mockResolvedValue({
       regimens: [
         {
@@ -1011,7 +1012,55 @@ describe("list_medication_doses", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("on Sun, Wed, Sun");
+    expect(text).toContain("on Sun, Wed, 7 (never dosed)");
+  });
+
+  it("names the time an interval_days course doses at when the row records none", async () => {
+    // The generator substitutes 09:00 rather than skipping the course, so
+    // rendering no time would deny an intake the reminders do make.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Метотрексат",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "interval_days", interval: { every: 3 } },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("every 3d at 09:00 (local wall clock)");
+    expect(text).toContain("no time recorded, so the generator uses its default");
+  });
+
+  it("does not present a fractional hourly interval as the plan", async () => {
+    // `medScheduleSchema` requires a whole number of days but not of hours, and
+    // the generator casts `every` from text to int — which 1.5 does not
+    // survive, so the course generates nothing at all.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Ибупрофен",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "interval_hours", interval: { every: 1.5 } },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("not generated: the interval must be a whole number of hours");
   });
 
   it("ignores an amount that has no slot to dose it", async () => {
