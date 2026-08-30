@@ -436,7 +436,18 @@ function applyDeployAndSeed({ seed }) {
   if (deployed.status !== 0) throw new Error("run-deploy.js failed");
 
   log("installing pgtap for the pgTAP suite");
-  psqlSuper("create extension if not exists pgtap with schema extensions;");
+  // Checked, because the failure is silent and the symptom is nothing like the cause: `up` would
+  // report ready, and then every one of the 41 pgTAP files fails on `plan()` being undefined.
+  // Whoever ran it goes looking at their SQL. An overridden `ORBIT_PG_IMAGE` without the
+  // extension, or without the `extensions` schema, is how it happens.
+  const pgtap = psqlSuper("create extension if not exists pgtap with schema extensions;");
+  if (pgtap.status !== 0) {
+    console.error(pgtap.stderr ?? "");
+    throw new Error(
+      "Failed to install pgtap. The pgTAP suite cannot run without it, so this stops here " +
+        "rather than reporting a database that every test will fail against.",
+    );
+  }
 
   // `deploy.sql` is idempotent by construction, so it runs either way. `seed.sql` is not: its
   // `persons` inserts say `ON CONFLICT DO NOTHING` with no conflict target, and `persons` has no

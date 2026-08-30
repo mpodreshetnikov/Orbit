@@ -249,7 +249,28 @@ const OPERATION_KEPT = new Set([
   "subcategory",
   "subgroup",
   "type",
+  // Nested names the mapper reaches through the keys above: `accountAmount.value`,
+  // `.currency.{code,name,strCode}`, `debitingTime.milliseconds`, `operationId.value`,
+  // `cashbackAmount.value`. They are here because the context now recurses — see below.
+  "value",
+  "currency",
+  "code",
+  "name",
+  "strcode",
+  "milliseconds",
 ]);
+
+/**
+ * A loyalty bonus, and the summary beside it, get a set of their own.
+ *
+ * Allowlisting `loyaltyBonus` kept its whole subtree, which is the same hole one level down: the
+ * connector reads `amount.value` and nothing else, while the bank puts the account holder's tier
+ * in `amount.loyalty` *and* `amount.name` — "Black Premium", 830 times in this recording. `name`
+ * cannot simply go from the operation list, because a currency's `name` is "RUB" and the summary
+ * is built on it. So this subtree is named explicitly instead of relying on the flat list.
+ */
+const LOYALTY_KEYS = new Set(["loyaltybonus", "loyaltybonussummary"]);
+const LOYALTY_KEPT = new Set(["amount", "value"]);
 
 /** The two endpoints whose payload is operations. */
 const OPERATION_PATHS = new Set(["/api/common/v1/operations", "/api/common/v1/operation"]);
@@ -553,7 +574,14 @@ function maskCardTail(value: unknown): string {
  * would then collapse to the same `id:REDACTED` on replay. It has to reach one level down
  * because the bank wraps them as `{"operationId":{"value":"…"}}`.
  */
-type ScrubContext = "open" | "formFieldBag" | "receipt" | "receiptItem" | "merchant" | "operation";
+type ScrubContext =
+  | "open"
+  | "formFieldBag"
+  | "receipt"
+  | "receiptItem"
+  | "merchant"
+  | "operation"
+  | "loyalty";
 
 /**
  * One item, with its name replaced by its position. The walk redacts the name along with every
@@ -640,11 +668,45 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
             : REDACTED;
         continue;
       }
+      if (context === "loyalty") {
+        // Kept keys recurse in the same context rather than falling through to the open walk —
+        // `amount` is kept and is an object, and dropping back would reopen everything inside it,
+        // which is the whole defect this closes.
+        if (!LOYALTY_KEPT.has(lowered)) {
+          result[key] =
+            entry === null || typeof entry === "object"
+              ? scrubValue(entry, false, "loyalty")
+              : REDACTED;
+          continue;
+        }
+        result[key] =
+          entry !== null && typeof entry === "object" ? scrubValue(entry, false, "loyalty") : entry;
+        continue;
+      }
+      if (context === "operation" && LOYALTY_KEYS.has(lowered)) {
+        result[key] = scrubValue(entry, false, "loyalty");
+        continue;
+      }
       if (context === "operation" && !OPERATION_KEPT.has(lowered)) {
         result[key] =
           entry === null || typeof entry === "object"
             ? scrubValue(entry, false, "operation")
             : REDACTED;
+        continue;
+      }
+      // A kept key that holds an object stays in the operation's context rather than dropping
+      // back to allow-by-default. Without this, allowlisting a key allowlisted its whole subtree
+      // — which is how the tier above was published under a key that was itself perfectly
+      // ordinary. `merchant` and `receipt` still divert into their own contexts below.
+      if (
+        context === "operation" &&
+        entry !== null &&
+        typeof entry === "object" &&
+        !MERCHANT_KEYS.has(lowered) &&
+        !RECEIPT_KEYS.has(lowered) &&
+        !FORM_FIELD_BAG_KEYS.has(lowered)
+      ) {
+        result[key] = scrubValue(entry, false, "operation");
         continue;
       }
       if (context === "merchant" && !MERCHANT_KEPT.has(lowered)) {

@@ -204,10 +204,19 @@ describe("tbank-web response contract", () => {
               if (typeof value === "number" && Number.isFinite(value)) return String(value);
               return null;
             };
+            // Prefixed exactly as `buildOperationKey` prefixes them. Without the namespaces, one
+            // operation's `id` equal to another's `operationId.value` or `authorizationId` is the
+            // same identity here and two distinct identities to the connector — so the recorded
+            // summary counts both, this loop counts one, and a correct cassette is rejected.
+            const id = asKey(operation.id);
+            const operationId = asKey(
+              (operation.operationId as { value?: unknown } | undefined)?.value,
+            );
+            const authorizationId = asKey(operation.authorizationId);
             const identity =
-              asKey(operation.id) ??
-              asKey((operation.operationId as { value?: unknown } | undefined)?.value) ??
-              asKey(operation.authorizationId) ??
+              (id !== null ? `id:${id}` : null) ??
+              (operationId !== null ? `operationId:${operationId}` : null) ??
+              (authorizationId !== null ? `auth:${authorizationId}` : null) ??
               `fallback:${String(row.posted_at)}:${String(row.amount)}:${String(row.description)}`;
             if (seen.has(identity)) continue;
             seen.add(identity);
@@ -348,8 +357,13 @@ describe("tbank-web response contract", () => {
           bounds(cassette.entries.map((entry) => entry.url)),
         );
       } finally {
-        vi.useRealTimers();
+        // Order matters. `installPageGlobals` captured the `performance` object that fake timers
+        // had already replaced, so restoring after `useRealTimers()` writes the fake-timer
+        // `getEntriesByType` onto the real object — leaking a mocked resource timeline into every
+        // later cassette and every later test in this worker, where endpoint discovery would
+        // quietly resolve against it.
         restore();
+        vi.useRealTimers();
       }
     });
 
