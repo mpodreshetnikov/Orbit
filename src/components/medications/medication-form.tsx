@@ -36,6 +36,9 @@ import { getUnitIcon, getUnitLabel } from "./medication-units";
 import type {
   MedRegimen,
   MedSchedule,
+  MedScheduleDailyTimes,
+  MedScheduleDaysOfWeek,
+  MedScheduleIntervalDays,
   MedDuration,
   CreateMedRegimenInput,
   UpdateMedRegimenInput,
@@ -73,6 +76,18 @@ const DEFAULT_SCHEDULE: MedSchedule = {
 };
 
 const DEFAULT_DURATION: MedDuration = { type: "endless" };
+
+/** Schedules whose `times` carry a matching per-slot `amounts` array. */
+type MedSchedulePerSlot = MedScheduleDailyTimes | MedScheduleIntervalDays | MedScheduleDaysOfWeek;
+
+/**
+ * True for the schedule modes that `generate_med_dose_events_for_person_ids.sql`
+ * doses slot by slot, reading `amounts[i]` beside `times[i]` and falling back to
+ * the course's base amount when a slot has none.
+ */
+function hasPerSlotAmounts(s: MedSchedule): s is MedSchedulePerSlot {
+  return s.mode === "daily_times" || s.mode === "interval_days" || s.mode === "days_of_week";
+}
 
 // Preset intake times: morning (9AM), midday (12), late afternoon (3PM), evening (8PM), night (11PM), plus extras for 6–10
 const PRESET_INTAKE_TIMES: string[] = [
@@ -134,12 +149,17 @@ export function getInitialSchedule(
     const amounts = sd.amounts?.length ? sd.amounts : times.map(() => 1);
     return { mode: "interval_days", interval: { every: sd.interval?.every ?? 1 }, times, amounts };
   }
-  if (s.mode === "days_of_week")
+  if (s.mode === "days_of_week") {
+    const sw = s as { days_of_week?: number[]; times?: string[]; amounts?: number[] };
     return {
       mode: "days_of_week",
-      days_of_week: (s as { days_of_week?: number[] }).days_of_week ?? [1, 2, 3, 4, 5],
-      times: (s as { times?: string[] }).times ?? ["09:00"],
+      days_of_week: sw.days_of_week ?? [1, 2, 3, 4, 5],
+      times: sw.times ?? ["09:00"],
+      // Carried verbatim: the generator doses these per slot, so rewriting or
+      // dropping them here silently replaces the course's weekly overrides.
+      ...(sw.amounts?.length ? { amounts: [...sw.amounts] } : {}),
     };
+  }
   return DEFAULT_SCHEDULE;
 }
 
@@ -212,6 +232,8 @@ export function MedicationForm({
   const [schedule, setSchedule] = useState<MedSchedule>(() =>
     getInitialSchedule(initial, defaultKind),
   );
+  /** The course's base dose, which the generator falls back to for a slot without its own amount. */
+  const baseIntakeAmount = toPositiveAmount(initial?.dose_definition?.intake?.amount);
   const [duration, setDuration] = useState<MedDuration>(() => getInitialDuration(initial));
   const [startDate, setStartDate] = useState(() => getInitialStartDate(initial));
   const [inventoryEnabled, setInventoryEnabled] = useState(
@@ -348,15 +370,13 @@ export function MedicationForm({
       return;
     }
 
+    const scheduleAmounts = (schedule as { amounts?: number[] }).amounts;
     const amount =
-      schedule.mode === "daily_times" && schedule.amounts?.length
-        ? toPositiveAmount(schedule.amounts[0])
-        : schedule.mode === "interval_hours"
-          ? toPositiveAmount((schedule as { amount?: number }).amount)
-          : schedule.mode === "interval_days" &&
-              (schedule as { amounts?: number[] }).amounts?.length
-            ? toPositiveAmount((schedule as { amounts: number[] }).amounts[0])
-            : 1;
+      schedule.mode === "interval_hours"
+        ? toPositiveAmount((schedule as { amount?: number }).amount)
+        : hasPerSlotAmounts(schedule) && scheduleAmounts?.length
+          ? toPositiveAmount(scheduleAmounts[0])
+          : baseIntakeAmount;
 
     const durationToSubmit: MedDuration =
       duration.type === "for_days"
@@ -396,37 +416,39 @@ export function MedicationForm({
 
   const updateReminderTime = (index: number, field: "time" | "amount", value: string | number) => {
     setSchedule((prev) => {
-      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
+      if (!hasPerSlotAmounts(prev)) return prev;
       const times = [...(prev.times ?? [])];
-      const amounts = [...(prev.amounts ?? [])];
-      if (field === "time") times[index] = value as string;
-      else amounts[index] = toPositiveAmount(value);
+      if (field === "time") {
+        times[index] = value as string;
+        // Leave `amounts` untouched: a course that dosed its base amount on every
+        // slot keeps doing so instead of gaining overrides nobody asked for.
+        return { ...prev, times };
+      }
+      // Editing one amount materializes the whole array, aligned with `times`, so
+      // the generator pairs each slot with the amount shown beside it.
+      const amounts = times.map((_, i) => toPositiveAmount(prev.amounts?.[i], baseIntakeAmount));
+      amounts[index] = toPositiveAmount(value);
       return { ...prev, times, amounts };
     });
   };
 
   const addReminderTime = () => {
     setSchedule((prev) => {
-      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
-      const amount = toPositiveAmount(prev.amounts?.[0]);
-      return {
-        ...prev,
-        times: [...(prev.times ?? []), "08:00"],
-        amounts: [...(prev.amounts ?? []), amount],
-      };
+      if (!hasPerSlotAmounts(prev)) return prev;
+      const times = [...(prev.times ?? []), "08:00"];
+      if (!prev.amounts?.length) return { ...prev, times };
+      return { ...prev, times, amounts: [...prev.amounts, toPositiveAmount(prev.amounts[0])] };
     });
   };
 
   const removeReminderTime = (index: number) => {
     setSchedule((prev) => {
-      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
-      const times = (prev.times ?? []).filter((_, i) => i !== index);
-      const amounts = (prev.amounts ?? []).filter((_, i) => i !== index);
-      return {
-        ...prev,
-        times: times.length ? times : ["09:00"],
-        amounts: amounts.length ? amounts : [1],
-      };
+      if (!hasPerSlotAmounts(prev)) return prev;
+      const filtered = (prev.times ?? []).filter((_, i) => i !== index);
+      const times = filtered.length ? filtered : ["09:00"];
+      if (!prev.amounts?.length) return { ...prev, times };
+      const amounts = prev.amounts.filter((_, i) => i !== index);
+      return { ...prev, times, amounts: amounts.length ? amounts : [baseIntakeAmount] };
     });
   };
 
@@ -446,13 +468,13 @@ export function MedicationForm({
 
   const DAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-  const reminderSlots =
-    schedule.mode === "daily_times" || schedule.mode === "interval_days"
-      ? ((schedule as { times?: string[]; amounts?: number[] }).times ?? []).map((time, i) => ({
-          time,
-          amount: ((schedule as { amounts?: number[] }).amounts ?? [])[i] ?? 1,
-        }))
-      : [];
+  const reminderSlots = hasPerSlotAmounts(schedule)
+    ? ((schedule as { times?: string[]; amounts?: number[] }).times ?? []).map((time, i) => ({
+        time,
+        // No per-slot amount means the generator doses the base amount here, so show that.
+        amount: (schedule as { amounts?: number[] }).amounts?.[i] ?? baseIntakeAmount,
+      }))
+    : [];
 
   const currentStep = Math.min(wizardStep, totalWizardSteps - 1);
 
@@ -751,20 +773,22 @@ export function MedicationForm({
                       times: prev?.times?.length ? prev.times : ["09:00"],
                       amounts: prev?.amounts?.length ? prev.amounts : [1],
                     });
-                  } else if (v === "days_of_week")
+                  } else if (v === "days_of_week") {
+                    const prev =
+                      schedule.mode === "days_of_week"
+                        ? (schedule as {
+                            days_of_week?: number[];
+                            times?: string[];
+                            amounts?: number[];
+                          })
+                        : null;
                     setScheduleMode({
                       mode: "days_of_week",
-                      days_of_week:
-                        schedule.mode === "days_of_week"
-                          ? ((schedule as { days_of_week?: number[] }).days_of_week ?? [
-                              1, 2, 3, 4, 5,
-                            ])
-                          : [1, 2, 3, 4, 5],
-                      times:
-                        schedule.mode === "days_of_week"
-                          ? ((schedule as { times?: string[] }).times ?? ["09:00"])
-                          : ["09:00"],
+                      days_of_week: prev?.days_of_week ?? [1, 2, 3, 4, 5],
+                      times: prev?.times?.length ? prev.times : ["09:00"],
+                      ...(prev?.amounts?.length ? { amounts: prev.amounts } : {}),
                     });
+                  }
                 }}
               >
                 <SelectTrigger>
@@ -966,7 +990,7 @@ export function MedicationForm({
               </div>
             )}
 
-            {(schedule.mode === "daily_times" || schedule.mode === "interval_days") && (
+            {hasPerSlotAmounts(schedule) && (
               <div className="space-y-2">
                 <Label>{t("medications.reminderTimes")}</Label>
                 <div className="space-y-1.5">
@@ -985,6 +1009,7 @@ export function MedicationForm({
                           const nextSlots = getReminderSlotsForIntakesPerDay(num);
                           const amount = toPositiveAmount(
                             (schedule as { amounts?: number[] }).amounts?.[0],
+                            baseIntakeAmount,
                           );
                           if (schedule.mode === "daily_times") {
                             setSchedule({
