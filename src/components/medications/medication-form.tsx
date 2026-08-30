@@ -77,6 +77,9 @@ const DEFAULT_SCHEDULE: MedSchedule = {
 
 const DEFAULT_DURATION: MedDuration = { type: "endless" };
 
+/** Index of the schedule step in the mobile wizard, where the slots are edited. */
+const SCHEDULE_WIZARD_STEP = 1;
+
 /** Schedules whose `times` carry a matching per-slot `amounts` array. */
 type MedSchedulePerSlot = MedScheduleDailyTimes | MedScheduleIntervalDays | MedScheduleDaysOfWeek;
 
@@ -309,6 +312,16 @@ export function MedicationForm({
     setWizardStep((s) => Math.min(s, totalWizardSteps - 1));
   }, [kind, totalWizardSteps]);
 
+  /**
+   * The generator inserts one event per regimen and scheduled minute, so two slots
+   * at one time would show a dose it never produces.
+   */
+  const hasDuplicateReminderTimes = (): boolean => {
+    if (!hasPerSlotAmounts(schedule)) return false;
+    const times = schedule.times ?? [];
+    return new Set(times).size !== times.length;
+  };
+
   const buildDoseDefinition = (amount: number): PlannedIntake => ({
     intake: { amount, unit },
     active: [],
@@ -403,14 +416,12 @@ export function MedicationForm({
       return;
     }
 
-    // The generator inserts one event per regimen and scheduled minute, so two slots
-    // at one time would show a dose it never produces.
-    if (hasPerSlotAmounts(schedule)) {
-      const times = schedule.times ?? [];
-      if (new Set(times).size !== times.length) {
-        setSlotsError(t("medications.duplicateReminderTimes"));
-        return;
-      }
+    if (hasDuplicateReminderTimes()) {
+      setSlotsError(t("medications.duplicateReminderTimes"));
+      // On mobile the slots live on the schedule step, which is hidden once the
+      // wizard has moved on: go back to the message rather than refusing silently.
+      if (isMobile) setWizardStep(SCHEDULE_WIZARD_STEP);
+      return;
     }
 
     const scheduleAmounts = (schedule as { amounts?: number[] }).amounts;
@@ -559,14 +570,15 @@ export function MedicationForm({
       }
       setBasicErrorType("");
     }
-    if (
-      kind === "regular" &&
-      currentStep === 1 &&
-      duration.type === "for_days" &&
-      (!duration.days || duration.days < 1)
-    ) {
-      setScheduleError(t("medications.daysCountRequired"));
-      return;
+    if (kind === "regular" && currentStep === SCHEDULE_WIZARD_STEP) {
+      if (duration.type === "for_days" && (!duration.days || duration.days < 1)) {
+        setScheduleError(t("medications.daysCountRequired"));
+        return;
+      }
+      if (hasDuplicateReminderTimes()) {
+        setSlotsError(t("medications.duplicateReminderTimes"));
+        return;
+      }
     }
     setScheduleError("");
     setWizardStep((s) => Math.min(s + 1, totalWizardSteps - 1));

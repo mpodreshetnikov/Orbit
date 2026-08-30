@@ -879,6 +879,51 @@ describe("MedicationForm", () => {
     });
   });
 
+  it("keeps the mobile wizard on the schedule step when two slots share a time", async () => {
+    hookMocks.useIsMobile.mockReturnValue(true);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "common.next" }));
+
+    const timeInputs = screen.getAllByDisplayValue(/^(09:00|20:00)$/);
+    fireEvent.change(timeInputs[1], { target: { value: "09:00" } });
+
+    // The message lives on this step, so the wizard must not move past it.
+    await user.click(screen.getByRole("button", { name: "common.next" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("medications.duplicateReminderTimes");
+    expect(screen.queryByRole("button", { name: "common.save" })).not.toBeInTheDocument();
+
+    fireEvent.change(timeInputs[1], { target: { value: "21:00" } });
+    await user.click(screen.getByRole("button", { name: "common.next" }));
+    await user.click(screen.getByRole("button", { name: "common.next" }));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule: expect.objectContaining({ times: ["09:00", "21:00"], amounts: [0.5, 1.5] }),
+        }),
+      );
+    });
+  });
+
   it("validates and progresses mobile wizard before submit", async () => {
     hookMocks.useIsMobile.mockReturnValue(true);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
