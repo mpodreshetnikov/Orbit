@@ -632,6 +632,209 @@ describe("MedicationForm", () => {
     });
   });
 
+  it("leaves weekly doses alone when the already-selected intake count is clicked", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "2" }));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule: expect.objectContaining({
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("keeps the doses of slots that survive an intake-count change", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "3" }));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule: expect.objectContaining({
+            times: ["09:00", "15:00", "20:00"],
+            // The two slots that already existed keep their doses; the added one
+            // starts from the first slot's dose.
+            amounts: [0.5, 1.5, 0.5],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("keeps the base dose and slot alignment when only some slots are overridden", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    const amountInputs = screen.getAllByLabelText("medications.amountPerIntake");
+    expect(amountInputs.map((input) => (input as HTMLInputElement).value)).toEqual(["0.5", "2"]);
+
+    fireEvent.change(screen.getByLabelText(/medications\.notes/), { target: { value: "note" } });
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // The single override must not become the base dose: the second slot
+          // has none and would silently move from 2 to 0.5.
+          dose_definition: { intake: { amount: 2, unit: "pill" }, active: [] },
+          schedule: expect.objectContaining({ times: ["09:00", "20:00"], amounts: [0.5] }),
+        }),
+      );
+    });
+
+    onSubmit.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "medications.addReminder" }));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // Adding a slot aligns the array first, so the uncovered second slot
+          // keeps the base dose instead of inheriting the first slot's override.
+          schedule: expect.objectContaining({
+            times: ["09:00", "20:00", "12:00"],
+            amounts: [0.5, 2, 0.5],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("adds a weekly slot at a time no other slot uses", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1],
+            times: ["09:00"],
+            amounts: [1],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "medications.addReminder" }));
+    await user.click(screen.getByRole("button", { name: "medications.addReminder" }));
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalled();
+    });
+    const times = (
+      onSubmit.mock.calls[0][0] as UpdateMedRegimenInput & { schedule: { times: string[] } }
+    ).schedule.times;
+    expect(times).toHaveLength(3);
+    expect(new Set(times).size).toBe(3);
+  });
+
+  it("restores the weekly plan when the frequency is switched away and back", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "medications.frequencyDaily" }));
+    await user.click(screen.getByRole("button", { name: "medications.frequencyDaysOfWeek" }));
+
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          },
+        }),
+      );
+    });
+  });
+
   it("validates and progresses mobile wizard before submit", async () => {
     hookMocks.useIsMobile.mockReturnValue(true);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
