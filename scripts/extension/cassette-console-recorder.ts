@@ -328,6 +328,16 @@ export function extractReceiptRequestKey(operation: Record<string, unknown>): st
  * warn about having found nothing and hand over a scrubbed, useless cassette. The connector
  * stops with the reason; so does this.
  */
+/**
+ * `response.ok`, which is what every request site in the connector actually tests. Comparing
+ * against 200 made the recorder stricter than the thing it mirrors: a 206 with a whole payload
+ * was discarded and its range marked incomplete here, while the connector went on to process
+ * those operations and then ask for details and receipts the cassette does not hold.
+ */
+function isSuccessStatus(status: number): boolean {
+  return status >= 200 && status <= 299;
+}
+
 export function detectBlockedReason(body: unknown): string | null {
   const envelope = asObject(body);
   if (!envelope) return null;
@@ -720,7 +730,7 @@ export async function recordCassette(
     const { entry, body } = await recordRequest(deps, rangeUrl.toString());
     entries.push(entry);
 
-    if (entry.status !== 200) {
+    if (!isSuccessStatus(entry.status)) {
       // A whole range the bank did not answer. Warned about, but a warning is read once and the
       // summary is read every time it is compared against the bank — so this has to reach the
       // month as well, exactly like a day that stayed capped. Without it the console can tell
@@ -889,7 +899,7 @@ export async function recordCassette(
       report(`detail ${detailCount}/${operations.length}`);
       const recordedDetail = await recordRequest(deps, detailUrl.toString());
       entries.push(recordedDetail.entry);
-      if (recordedDetail.entry.status === 200 && !isErrorEnvelope(recordedDetail.body)) {
+      if (isSuccessStatus(recordedDetail.entry.status) && !isErrorEnvelope(recordedDetail.body)) {
         usableDetails += 1;
       }
     }
@@ -957,7 +967,7 @@ export async function recordCassette(
     // error bodies rather than receipts — the connector counts a success only when
     // `hasReceiptItems` holds. Counting them would claim enrichment the cassette cannot replay:
     // the connector retries and gets the same body back. A real recording hit exactly one 504.
-    if (recorded.entry.status !== 200 || !hasReceiptItems(recorded.body)) {
+    if (!isSuccessStatus(recorded.entry.status) || !hasReceiptItems(recorded.body)) {
       failedReceipts += 1;
       continue;
     }

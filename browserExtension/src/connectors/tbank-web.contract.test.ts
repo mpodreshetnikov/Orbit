@@ -363,7 +363,16 @@ describe("tbank-web response contract", () => {
             "operation time",
           ).toBeDefined();
           expect(operation.accountAmount ?? operation.amount, "operation amount").toBeDefined();
-          expect(operation.description ?? operation.brand, "operation description").toBeDefined();
+          // The mapper's own chain for the merchant label: `description`, then `merchant.name`,
+          // then `subgroup.name`. `brand` was never in it, and two shapes that are were missing —
+          // so this rejected a recording the connector maps without complaint. It stays an
+          // assertion rather than going away because the mapper defaults to "T-Bank operation",
+          // which turns a recording that lost its merchant text into one that silently maps.
+          const merchantLabel =
+            operation.description ??
+            (operation.merchant as { name?: unknown } | undefined)?.name ??
+            (operation.subgroup as { name?: unknown } | undefined)?.name;
+          expect(merchantLabel, "operation merchant label").toBeDefined();
         }
       }
     });

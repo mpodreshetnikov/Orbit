@@ -49,6 +49,31 @@ describe("cassette replay", () => {
     expect(player.misses).toEqual(["https://www.tbank.ru/api/common/v1/tranche_offers"]);
   });
 
+  it("replays a status that cannot carry a body without one", async () => {
+    // `JSON.stringify(null)` is the four-character string "null", and the Fetch spec forbids a
+    // body on 204/205/304 — the `Response` constructor throws rather than ignoring it. So a
+    // cassette holding one of these blew the replay up on construction, before the connector saw
+    // anything it could act on.
+    const player = createCassettePlayer({
+      name: "bodyless",
+      entries: [
+        {
+          url: "https://www.tbank.ru/api/common/v1/operations?sessionid=live&start=1&end=2",
+          status: 204,
+          body: null,
+        },
+      ],
+    });
+
+    const response = await player.fetch(
+      "https://www.tbank.ru/api/common/v1/operations?sessionid=x&start=1&end=2",
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(player.misses).toEqual([]);
+  });
+
   it("reports recorded responses nothing asked for", async () => {
     const player = createCassettePlayer(cassette);
     await player.fetch("https://www.tbank.ru/api/common/v1/operations?sessionid=x&start=1&end=2");

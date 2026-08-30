@@ -362,6 +362,30 @@ describe("cassette console recorder", () => {
     expect(july2026?.complete ?? false).toBe(false);
   });
 
+  it("keeps a range the bank answered with another success status", async () => {
+    // Every request site in the connector tests `response.ok`, so a 206 with a whole payload is
+    // an answer to it. Insisting on exactly 200 here discarded those operations and marked the
+    // range incomplete, while the connector went on to process them and then ask for details and
+    // receipts the cassette does not hold — misses, and totals that do not agree.
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          return new Response(JSON.stringify({ payload: [operation("op-206", -1500)] }), {
+            status: 206,
+          });
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette({ name: "partial", pauseMs: 0, maxReceipts: 0 }, deps);
+
+    expect(result.warnings.join(" ")).not.toMatch(/answered 206/);
+    expect(result.cassette.summary?.months.some((month) => month.operations > 0)).toBe(true);
+    expect(result.blockers.join(" ")).not.toMatch(/No operations/);
+  });
+
   it("does not call a month comparable when a range answered 200 with an error envelope", async () => {
     // The bank answers `INVALID_REQUEST_DATA` with HTTP 200, which is how every detail request
     // in the real recording comes back. Nothing about the status line says the range failed, and
