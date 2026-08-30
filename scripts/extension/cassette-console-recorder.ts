@@ -463,11 +463,28 @@ function timestampMs(value: unknown): number | null {
   return null;
 }
 
-/** Same fields and precedence as the connector's `extractTimeMs`. */
+/**
+ * Same fields, same precedence and the same treatment of zero as the connector's in-page
+ * `extractTimeMs`, which is what decides whether an operation is inside the window.
+ *
+ * The zero is the whole reason this is `||` and not `??`. `toMs(0)` is `0`, not null, so a
+ * `milliseconds: 0` placeholder beside a real `operationDateTime` is a value under `??` and a
+ * fall-through under `||`. The connector falls through; this used to stop, dating the operation
+ * to 1970 and putting it outside the window — so the recorder captured none of its enrichment
+ * while replay, walking the same window with the connector's own rule, asks for all of it and
+ * misses.
+ *
+ * Worth naming rather than fixing here: the connector's *other* time reader,
+ * `extractOperationTimeMs`, which `mapOperationRecordToRow` uses for `posted_at`, still uses
+ * `??`. So a zero sentinel would put the operation in the window and date its row to 1970. That
+ * is a connector defect on a versioned surface and belongs to T-0013, not to the acceptance
+ * tooling; the totals check would report it as a month that does not reconcile, which is the
+ * right way for it to surface.
+ */
 export function operationTimestampMs(operation: Record<string, unknown>): number | null {
   return (
-    timestampMs(asObject(operation.operationTime)?.milliseconds) ??
-    timestampMs(asObject(operation.debitingTime)?.milliseconds) ??
+    timestampMs(asObject(operation.operationTime)?.milliseconds) ||
+    timestampMs(asObject(operation.debitingTime)?.milliseconds) ||
     timestampMs(operation.operationDateTime)
   );
 }

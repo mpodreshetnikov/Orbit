@@ -39,7 +39,19 @@ import { extractAccountHint } from "../../src/lib/import/connectors/tbank-csv";
 const CONTAINER = process.env.ORBIT_DB_CONTAINER ?? "orbit_db_migration_check";
 const NETWORK = process.env.ORBIT_DB_NETWORK ?? "orbit_db_check_net";
 const PORT = process.env.ORBIT_DB_PORT ?? "54329";
-const USING_DEFAULT_INSTANCE = !process.env.ORBIT_DB_CONTAINER && !process.env.ORBIT_DB_PORT;
+/**
+ * Isolation takes both overrides, so anything less takes the lock.
+ *
+ * `&&` on the negations said the opposite: overriding only the port — the obvious thing to do
+ * when the default port is busy — turned the lock off while `CONTAINER` stayed
+ * `orbit_db_migration_check`, and `up --until` then force-removed that shared container out from
+ * under the run holding it. The mirror case is the same: a private container name on the default
+ * port isolates the name and collides on the host port. Neither half isolates anything on its
+ * own, and a run that is not isolated is one the lock is for.
+ */
+const FULLY_ISOLATED =
+  Boolean(process.env.ORBIT_DB_CONTAINER) && Boolean(process.env.ORBIT_DB_PORT);
+const USING_DEFAULT_INSTANCE = !FULLY_ISOLATED;
 /** The first T-0013 migration; everything before it is the "already accumulated" world. */
 const FIRST_REPAIR_MIGRATION = "20260814090000";
 const LAST_MIGRATION_BEFORE_REPAIR = "20260814089999";

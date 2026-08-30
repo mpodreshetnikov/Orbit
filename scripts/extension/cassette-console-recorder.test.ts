@@ -3,6 +3,7 @@ import {
   buildRanges,
   discoverSessionId,
   extractReceiptRequestKey,
+  operationTimestampMs,
   recordCassette,
   type RecorderDeps,
 } from "./cassette-console-recorder";
@@ -1053,5 +1054,30 @@ describe("cassette console recorder", () => {
         ORIGIN,
       ),
     ).toBe("new");
+  });
+});
+
+describe("operation timestamps", () => {
+  it("treats a zero placeholder the way the connector does", () => {
+    // `toMs(0)` is `0`, not null, so a `milliseconds: 0` beside a real date is a value under `??`
+    // and a fall-through under `||`. The connector's in-page `extractTimeMs` uses `||`. Under
+    // `??` this dated the operation to 1970, put it outside the window and captured none of its
+    // enrichment — while replay, walking the window with the connector's own rule, asks for all
+    // of it and misses.
+    const realDate = "2026-07-15T09:30:00.000Z";
+    expect(
+      operationTimestampMs({ operationTime: { milliseconds: 0 }, operationDateTime: realDate }),
+    ).toBe(Date.parse(realDate));
+    expect(
+      operationTimestampMs({
+        operationTime: { milliseconds: 0 },
+        debitingTime: { milliseconds: 1_752_571_800_000 },
+      }),
+    ).toBe(1_752_571_800_000);
+    // A real timestamp still wins over everything after it, and nothing usable is still null.
+    expect(
+      operationTimestampMs({ operationTime: { milliseconds: 42 }, operationDateTime: realDate }),
+    ).toBe(42);
+    expect(operationTimestampMs({ operationTime: { milliseconds: 0 } })).toBeNull();
   });
 });

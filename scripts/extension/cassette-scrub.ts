@@ -602,11 +602,12 @@ function maskCardTail(value: unknown): string {
  * Walks a recorded payload and redacts every identifier and personal name it can name, plus
  * any long digit run left in free text. Structure, amounts and merchant text are untouched.
  *
- * `preserve` carries down the subtree of a key naming the bank's own operation reference. Those
- * are long numeric strings — the captured snapshot holds fifteen-digit ones — so the free-text
- * digit scrub would blank them, and `buildOperationKey` prefers `id`: every affected operation
- * would then collapse to the same `id:REDACTED` on replay. It has to reach one level down
- * because the bank wraps them as `{"operationId":{"value":"…"}}`.
+ * The one value the walk hands back untouched is an operation's own reference — `id`,
+ * `operationId`, `authorizationId`. Those are long numeric strings, the captured snapshot holds
+ * fifteen-digit ones, so the free-text digit rule would blank them and `buildOperationKey`
+ * prefers `id`: every affected operation would collapse to the same `id:REDACTED` on replay.
+ * That exemption is granted at the key, in the operation context, for a string — see the branch
+ * itself for why each of those three limits is load-bearing.
  */
 type ScrubContext =
   | "open"
@@ -615,7 +616,8 @@ type ScrubContext =
   | "receiptItem"
   | "merchant"
   | "operation"
-  | "loyalty";
+  | "loyalty"
+  | "reference";
 
 /**
  * One item, with its name replaced by its position. The walk redacts the name along with every
@@ -623,7 +625,7 @@ type ScrubContext =
  * nobody listed still ends up as a label rather than as itself.
  */
 function scrubReceiptItem(item: unknown, index: number): unknown {
-  const scrubbed = scrubValue(item, false, "receiptItem");
+  const scrubbed = scrubValue(item, "receiptItem");
   if (!scrubbed || typeof scrubbed !== "object" || Array.isArray(scrubbed)) return scrubbed;
   const result = scrubbed as Record<string, unknown>;
   for (const key of Object.keys(result)) {
@@ -653,9 +655,8 @@ function redactSubtree(value: unknown): unknown {
   return result;
 }
 
-function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "open"): unknown {
+function scrubValue(value: unknown, context: ScrubContext = "open"): unknown {
   if (typeof value === "string") {
-    if (preserve) return value;
     // Whatever field it sits in. The group rule below covers the fields the operations list
     // fills with a counterparty's name, but the same name comes back in the detail response
     // under `merchantKey` and inside `{ "type": "Description", "value": … }`, where no group is
@@ -674,7 +675,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
   // inherited the denial, and then each string quietly ignored it. Scalars are redacted here,
   // where the context is still in hand.
   if (Array.isArray(value)) {
-    return value.map((entry) => scrubValue(entry, preserve, context));
+    return value.map((entry) => scrubValue(entry, context));
   }
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
@@ -687,12 +688,20 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       const lowered = key.toLowerCase();
 
+      if (context === "reference") {
+        // Default-deny, one key wide. The reference itself is what the exemption is for; anything
+        // else the bank chose to put beside it is not.
+        result[key] =
+          lowered === "value" && typeof entry === "string" ? entry : redactSubtree(entry);
+        continue;
+      }
+
       if (context === "formFieldBag" && !FORM_FIELD_BAG_KEPT.has(lowered)) {
         result[key] = redactSubtree(entry);
         continue;
       }
       if (FORM_FIELD_BAG_KEYS.has(lowered)) {
-        result[key] = scrubValue(entry, false, "formFieldBag");
+        result[key] = scrubValue(entry, "formFieldBag");
         continue;
       }
       if (context === "receiptItem" && !RECEIPT_ITEM_KEPT.has(lowered)) {
@@ -716,15 +725,31 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
           continue;
         }
         result[key] =
-          entry !== null && typeof entry === "object" ? scrubValue(entry, false, "loyalty") : entry;
+          entry !== null && typeof entry === "object" ? scrubValue(entry, "loyalty") : entry;
         continue;
       }
       if (context === "operation" && LOYALTY_KEYS.has(lowered)) {
-        result[key] = scrubValue(entry, false, "loyalty");
+        result[key] = scrubValue(entry, "loyalty");
         continue;
       }
       if (context === "operation" && !OPERATION_KEPT.has(lowered)) {
         result[key] = redactSubtree(entry);
+        continue;
+      }
+      if (context === "operation" && PRESERVED_REFERENCE_KEYS.has(lowered)) {
+        // The bank writes the same reference two ways — bare, and wrapped as
+        // `{"operationId":{"value":"…"}}` — and `buildOperationKey` reads both. The wrapped form
+        // was never actually exempt: the comment above this walk said the exemption reached one
+        // level down, and it did not, so a fifteen-digit `operationId.value` was blanked by the
+        // digit-run rule and every operation carrying no bare `id` would have collapsed to one
+        // identity on replay. This cassette's references are twelve digits, which is why nothing
+        // showed it.
+        result[key] =
+          typeof entry === "string"
+            ? entry
+            : entry !== null && typeof entry === "object"
+              ? scrubValue(entry, "reference")
+              : scrubValue(entry);
         continue;
       }
       // A kept key that holds an object stays in the operation's context rather than dropping
@@ -739,19 +764,28 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
         !RECEIPT_KEYS.has(lowered) &&
         !FORM_FIELD_BAG_KEYS.has(lowered)
       ) {
-        result[key] = scrubValue(entry, false, "operation");
+        result[key] = scrubValue(entry, "operation");
         continue;
       }
       if (context === "merchant" && !MERCHANT_KEPT.has(lowered)) {
         result[key] = redactSubtree(entry);
         continue;
       }
+      if (context === "merchant" && lowered === "id" && typeof entry === "string") {
+        // The merchant's own catalogue key — fifteen digits, ten distinct across a hundred
+        // operations in the recording, and `extractSourceBrand` reads it as the brand's source
+        // key when `brand.id` and `merchantKey` are absent. It identifies Пятёрочка, not a
+        // person, so it is exempt by name here rather than by having been swept up in a generic
+        // `id` grant that also covered a customer id in a response nobody had modelled.
+        result[key] = entry;
+        continue;
+      }
       if (RECEIPT_KEYS.has(lowered)) {
-        result[key] = scrubValue(entry, false, "receipt");
+        result[key] = scrubValue(entry, "receipt");
         continue;
       }
       if (MERCHANT_KEYS.has(lowered) && entry !== null && typeof entry === "object") {
-        result[key] = scrubValue(entry, false, "merchant");
+        result[key] = scrubValue(entry, "merchant");
         continue;
       }
       if (namesCounterparty && COUNTERPARTY_TEXT_KEYS.has(lowered)) {
@@ -778,7 +812,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
       }
       if (CONTAINER_OR_IDENTIFIER_KEYS.has(lowered)) {
         const isContainer = entry !== null && typeof entry === "object";
-        result[key] = isContainer ? scrubValue(entry, false) : entry === null ? null : REDACTED;
+        result[key] = isContainer ? scrubValue(entry) : entry === null ? null : REDACTED;
         continue;
       }
       if (isIdentifierKey(key) || isPersonNameKey(key)) {
@@ -789,7 +823,19 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
         result[key] = scrubUrl(entry);
         continue;
       }
-      result[key] = scrubValue(entry, preserve || PRESERVED_REFERENCE_KEYS.has(lowered));
+      // The one exemption from the string rules, and it is granted here rather than carried
+      // down. `buildOperationKey` reads these three names on an operation and nowhere else, and
+      // the bank writes them as long numeric strings that the digit-run rule would otherwise
+      // blank — collapsing every affected operation to the same identity on replay. So the
+      // exemption is scoped to an operation, and to a string: an object under a key called `id`
+      // is an object like any other, and a key called `id` in a receipt, a tranche offer or any
+      // response the open walk reaches is not a replay key at all.
+      //
+      // It used to be neither. Granted on the key alone and then carried into the whole subtree,
+      // it turned every string rule off for anything underneath — `{ customer: { id: "…" } }`
+      // came through a receipt untouched, and so did a name and a phone under `id: { … }`, with
+      // the leak scan exempting the same key and reporting clean.
+      result[key] = scrubValue(entry);
     }
     return result;
   }
@@ -797,7 +843,7 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
 }
 
 export function scrubCassetteValue(value: unknown): unknown {
-  return scrubValue(value, false);
+  return scrubValue(value);
 }
 
 /**
@@ -826,8 +872,8 @@ function scrubOperationsBody(body: unknown): unknown {
       continue;
     }
     result[key] = Array.isArray(value)
-      ? value.map((operation) => scrubValue(operation, false, "operation"))
-      : scrubValue(value, false, "operation");
+      ? value.map((operation) => scrubValue(operation, "operation"))
+      : scrubValue(value, "operation");
   }
   return result;
 }
@@ -900,12 +946,18 @@ const REFERENCE_KEYS = new Set([
 ]);
 
 /**
- * The same references, plus `id`, kept out of the value scrub so the replay can still tell two
- * operations apart. `id` is preserved here but still *reported* by the leak scan: keeping a
- * value is not the same as vouching for it, and the account and card fields that could hide
- * behind a generic name are handled by name well before this.
+ * The references the value scrub hands back untouched, so replay can still tell two operations
+ * apart. The same set the leak scan exempts, and deliberately so: the scan reads a serialized
+ * string and has no idea which context a key sits in, so an exemption it granted that the scrub
+ * did not would be a value kept and unreported. The scrub is what makes the pair safe — it grants
+ * this only inside an operation, where these names are the replay key and nothing else.
+ *
+ * It said the opposite here until now: that `id` was preserved but still reported. It was not —
+ * `id` is in `REFERENCE_KEYS`, so the scan skipped it too, and the extra `"id"` this set spread
+ * in was already there. A comment claiming a second line of defence that does not exist is worse
+ * than no comment, because it is what stops the next reader looking.
  */
-const PRESERVED_REFERENCE_KEYS = new Set([...REFERENCE_KEYS, "id"]);
+const PRESERVED_REFERENCE_KEYS = REFERENCE_KEYS;
 
 /**
  * The JSON key a match sits under, so a report says where the run is rather than only what it

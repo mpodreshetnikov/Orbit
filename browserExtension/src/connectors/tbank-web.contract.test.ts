@@ -85,6 +85,50 @@ function requestsPerKey(urls: string[]): Record<string, number> {
   return counts;
 }
 
+/**
+ * `buildOperationKey`'s last resort, reproduced from the raw operation rather than from the row.
+ *
+ * Every field in it is a raw one, and each differs from its mapped counterpart in a way that
+ * merges two operations the connector keeps apart. The timestamp is the millisecond number, not
+ * the ISO string. The amount is the bank's own value — T-Bank writes a purchase as a *positive*
+ * `accountAmount.value` with `type: "Debit"`, so `10`/Debit and `-10` are two identities to the
+ * connector and one signed `-10` to the mapper. And the description is `operation.description`
+ * or the literal "unknown", not the merchant label, which falls through `merchant.name` and
+ * `subgroup.name` before defaulting to "T-Bank operation". Built from the row, this collapsed
+ * identities the connector counts separately and would have failed a cassette that is correct.
+ *
+ * `||` on the timestamp, not `??`, because that is what the connector's `extractTimeMs` uses: a
+ * `milliseconds: 0` placeholder is a fall-through there and a value under `??`.
+ */
+function fallbackIdentity(operation: Record<string, unknown>): string {
+  const asNumber = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const ms = (value: unknown): number | null => {
+    const numberValue = asNumber(value);
+    if (numberValue !== null) return numberValue;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = new Date(value).getTime();
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+  const nested = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+
+  const operationMs =
+    ms(nested(operation.operationTime, "milliseconds")) ||
+    ms(nested(operation.debitingTime, "milliseconds")) ||
+    ms(operation.operationDateTime);
+  const amount =
+    asNumber(nested(operation.accountAmount, "value")) ??
+    asNumber(nested(operation.amount, "value"));
+  const description =
+    (typeof operation.description === "string" ? operation.description.trim() : "") || "unknown";
+  return `fallback:${operationMs}:${amount}:${description}`;
+}
+
 function installPageGlobals(
   player: ReturnType<typeof createCassettePlayer>,
   cassette: Cassette,
@@ -372,6 +416,30 @@ describe("tbank-web response contract", () => {
     expect(Array.isArray(cassettes)).toBe(true);
   });
 
+  it("keeps identifier-less operations apart the way the connector does", () => {
+    // The fallback the totals test uses has to be `buildOperationKey`'s, and it was the mapped
+    // row's instead. T-Bank writes a purchase as a *positive* `accountAmount.value` with
+    // `type: "Debit"`, so these two are two identities to the connector and one signed `-10`
+    // once mapped: the totals test would have counted one where the recorded summary counts two
+    // and rejected a cassette that is correct, on a response shape the connector supports.
+    const debit = {
+      operationTime: { milliseconds: 1_752_571_800_000 },
+      accountAmount: { value: 10 },
+      type: "Debit",
+      description: "Пятёрочка",
+    };
+    const credit = { ...debit, accountAmount: { value: -10 }, type: "Credit" };
+    expect(fallbackIdentity(debit)).not.toBe(fallbackIdentity(credit));
+
+    // Same for the description: the mapper falls through to `merchant.name` and then to
+    // "T-Bank operation", so two operations with no description of their own collapse there and
+    // stay apart here.
+    const noDescription = { ...debit, description: undefined, merchant: { name: "Лента" } };
+    const otherNoDescription = { ...debit, description: undefined, merchant: { name: "Магнит" } };
+    expect(fallbackIdentity(noDescription)).toBe(fallbackIdentity(otherNoDescription));
+    expect(fallbackIdentity(noDescription)).toContain(":unknown");
+  });
+
   for (const cassette of cassettes) {
     const operationsEntries = cassette.entries.filter((entry) =>
       entry.url.includes("/api/common/v1/operations"),
@@ -449,7 +517,7 @@ describe("tbank-web response contract", () => {
               (id !== null ? `id:${id}` : null) ??
               (operationId !== null ? `operationId:${operationId}` : null) ??
               (authorizationId !== null ? `auth:${authorizationId}` : null) ??
-              `fallback:${String(row.posted_at)}:${String(row.amount)}:${String(row.description)}`;
+              fallbackIdentity(operation);
             if (seen.has(identity)) continue;
             seen.add(identity);
 

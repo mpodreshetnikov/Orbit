@@ -322,6 +322,65 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("exempts a reference only where it is the replay key", () => {
+    // The exemption exists so `buildOperationKey` can still tell two operations apart, and it was
+    // granted on the key name alone and then carried into the whole subtree. So a generic nested
+    // `id` in any response the open walk reaches turned every string rule off underneath it —
+    // and the leak scan, which skips long digit runs under the same key name, agreed.
+    expect(scrubCassetteValue({ customer: { id: "123456789012345" } })).toEqual({
+      customer: { id: REDACTED },
+    });
+    expect(scrubCassetteValue({ offers: [{ id: "5536913812345678" }] })).toEqual({
+      offers: [{ id: REDACTED }],
+    });
+    // And it is granted for a string: an object under a key called `id` is an object like any
+    // other, not a reference.
+    expect(scrubCassetteValue({ id: { phone: "+79535912902" } })).toEqual({
+      id: { phone: REDACTED },
+    });
+  });
+
+  it("keeps an operation's own reference, bare and wrapped", () => {
+    const scrubbed = scrubCassetteEntry({
+      url: "https://www.tbank.ru/api/common/v1/operations?sessionid=X",
+      status: 200,
+      body: {
+        payload: [
+          {
+            id: "159872659877000",
+            // The wrapped form the bank also uses. It was never actually exempt — the comment
+            // said the exemption reached one level down and it did not — so a fifteen-digit
+            // value was blanked and every operation carrying no bare `id` would have collapsed
+            // to one identity on replay.
+            // `merchant` is here on purpose: a default-deny context has to be the *first* thing
+            // the walk checks, or a key that diverts into another context on its name alone —
+            // `merchant`, `receipt`, `fieldsValues` — escapes the denial it is sitting inside.
+            operationId: {
+              value: "440372029230111",
+              holder: "Иван Петров",
+              merchant: { name: "Пятёрочка" },
+            },
+            authorizationId: "440372029230",
+            merchant: { id: "200000000416948", name: "Пятёрочка" },
+          },
+        ],
+      },
+    });
+    const operation = (scrubbed.body as { payload: Array<Record<string, unknown>> }).payload[0];
+
+    expect(operation.id).toBe("159872659877000");
+    expect(operation.operationId).toEqual({
+      value: "440372029230111",
+      holder: REDACTED,
+      merchant: { name: REDACTED },
+    });
+    expect(operation.authorizationId).toBe("440372029230");
+    // The merchant's catalogue key, which `extractSourceBrand` reads as the brand's source key.
+    // It identifies Пятёрочка, not a person, so it is exempt by name in the merchant context
+    // rather than by having been swept up in a grant that also covered a customer id.
+    expect(operation.merchant).toEqual({ id: "200000000416948", name: "Пятёрочка" });
+  });
+
   it("removes a phone or a card written the way a person writes it", () => {
     // Contiguous-digit rules match none of these, and both the scrub and the scan were built on
     // those rules — so a formatted number survived the whole pipeline. A comma, a quote or a dot
