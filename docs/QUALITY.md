@@ -192,13 +192,14 @@ A pull request gets one review pass on open, so its size decides how much of it 
 | #21 | 9     | 651         | 5      |
 | #20 | 11    | 3011        | 21     |
 
-A pull request may add at most **1000 reviewable lines** against its base branch. Reviewable excludes recorded fixtures, lockfiles, generated artifacts and the generated skill mirror — content no reviewer reads line by line, and which would otherwise let a cassette recording fail a check aimed at hand-written code.
+A pull request may add at most **1500 reviewable lines** against its base branch. Reviewable excludes recorded fixtures, lockfiles, generated artifacts and the generated skill mirror — content no reviewer reads line by line, and which would otherwise let a cassette recording fail a check aimed at hand-written code.
 
 - CI enforces the rule with `quality-pr-size`, which runs inside `quality` and compares against the pull request's actual base branch.
 - `.large-change-allowlist` is the reviewed exception. An entry is `path <glob> # <why this content is not reviewable>` or `branch <name> # <why this change cannot be split>`; the rationale is required and an entry without one fails the check.
-- Prefer splitting to allowlisting. The limit is not a claim about how much work belongs in a branch — it is a claim about how much a reviewer reads in one pass, and this reviewer bills per pass.
-- The limit sits in the gap between the largest change that reviewed cleanly and the smallest that did not, rather than just above the former: a limit set at 800 fires on ordinary well-tested changes the size of #21, and a gate that fires on ordinary work is a gate somebody turns off.
-- The rounds column is history rather than a forecast: reviews no longer arrive per push. It is kept because it is the evidence the limit rests on — a change that needed twenty-one passes to converge is not one a single pass reads adequately.
+- The limit is a backstop, not a guarantee. No number here makes one pass sufficient: 651 lines still took five passes to converge, so a change of any real size outgrows its opening review. What the limit marks is the point above which the unreviewed remainder is too large to compensate for at all. Below it, the compensation is **Automated Review Policy** above — measure the gap, request a second pass when it earns one.
+- It sits well above the change that converged in a handful of passes and well below the one that took twenty-one, rather than just above the former: a limit set close to ordinary well-tested work is a gate somebody turns off.
+- Splitting is no longer automatically cheaper. Under the previous `New commits` trigger, a smaller branch meant fewer rounds; now every pull request costs one opening review, so splitting one change into two spends two. Split when the halves are genuinely separate work, not to get under this number.
+- The rounds column is history rather than a forecast — reviews no longer arrive per push. It is kept because it is the evidence the limit rests on.
 
 ## Change-Type Check Matrix
 

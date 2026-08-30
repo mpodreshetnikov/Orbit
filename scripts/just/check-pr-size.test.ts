@@ -161,13 +161,13 @@ describe("change size evaluation", () => {
   });
 
   it("treats the limit as inclusive, so exactly the limit passes", () => {
-    expect(evaluate([[1000, 0, "src/a.ts"]]).overLimit).toBe(false);
-    expect(evaluate([[1001, 0, "src/a.ts"]]).overLimit).toBe(true);
+    expect(evaluate([[1500, 0, "src/a.ts"]]).overLimit).toBe(false);
+    expect(evaluate([[1501, 0, "src/a.ts"]]).overLimit).toBe(true);
   });
 
   it("uses the shipped limit when none is passed", () => {
-    expect(checkPrSize.MAX_REVIEWABLE_ADDED_LINES).toBe(1000);
-    expect(evaluate([[1001, 0, "src/a.ts"]], { limit: undefined }).limit).toBe(1000);
+    expect(checkPrSize.MAX_REVIEWABLE_ADDED_LINES).toBe(1500);
+    expect(evaluate([[1501, 0, "src/a.ts"]], { limit: undefined }).limit).toBe(1500);
   });
 });
 

@@ -31,7 +31,7 @@ const { spawnSync } = require("child_process");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const ALLOWLIST_PATH = path.join(REPO_ROOT, ".large-change-allowlist");
 const BASE_REF_CANDIDATES = ["origin/main", "main"];
-const MAX_REVIEWABLE_ADDED_LINES = 1000;
+const MAX_REVIEWABLE_ADDED_LINES = 1500;
 
 // A push event reports this as the previous commit when a branch has no previous commit. It means
 // "no baseline", not "a ref that failed to resolve", so it takes the fallback rather than the error.
