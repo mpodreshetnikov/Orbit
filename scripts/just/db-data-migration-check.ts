@@ -26,6 +26,9 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { buildMoneyDedupeHash } from "../../shared/lib/money/dedupe";
+// The CSV importer's own normalisation, not a copy of it. These rows carry `Номер карты`, so
+// this is the function that produced their hashes, and the SQL under test claims to mirror it.
+import { extractAccountHint } from "../../src/lib/import/connectors/tbank-csv";
 
 // Overridable, because they were not and two concurrent runs destroyed each other: the second
 // invocation's `startDatabase` force-removes the containers by name and then competes for the
@@ -155,6 +158,9 @@ function dbLocalDocker(args: string[]): void {
  * stored as UTC, and the statement's own column names left in `raw_payload`, which is what
  * both migrations use to recognise a statement row.
  */
+/** The card every seeded row carries unless it is testing another shape. */
+const DEFAULT_STATEMENT_CARD = "*1234";
+
 function statementTransaction(input: {
   id: string;
   person?: string;
@@ -166,7 +172,7 @@ function statementTransaction(input: {
 }): string {
   const raw = JSON.stringify({
     "Дата операции": input.postedAt,
-    "Номер карты": input.card ?? "*1234",
+    "Номер карты": input.card ?? DEFAULT_STATEMENT_CARD,
     Описание: input.merchant,
   });
   return `insert into public.money_transactions
@@ -413,16 +419,20 @@ async function expectedHashFor(input: {
   amount: number;
   merchant: string;
   occurrence: number;
-  accountHint?: string;
+  /** The raw statement cell, exactly as seeded — not the hint derived from it. */
+  card?: string;
 }): Promise<string> {
+  // Derived, never written down. Hard-coding "0368" and "12" here made the parity gate assert
+  // that the SQL agrees with *this file's idea* of the parser: change `extractAccountHint` and
+  // the SQL would drift away from the importer with every check still green. Running the seeded
+  // card through the real function is what makes this a gate rather than a restatement.
   return buildMoneyDedupeHash({
     source: "tbank",
     postedAtIso: input.postedAtIso,
     amount: input.amount,
     currency: "RUB",
     merchantName: input.merchant,
-    // What `extractMaskedCardLast4` returns for the seeded card, not the card itself.
-    accountHint: input.accountHint ?? "1234",
+    accountHint: extractAccountHint(input.card ?? DEFAULT_STATEMENT_CARD) || null,
     occurrence: input.occurrence,
   });
 }
@@ -566,7 +576,7 @@ async function assertRepaired(): Promise<void> {
     amount: -777,
     merchant: "Аптека",
     occurrence: 0,
-    accountHint: "0368",
+    card: "220070******0368",
   });
   check(
     "J: a 220070******0368 card hashes to the parser's last four, not to every digit left",
@@ -579,7 +589,7 @@ async function assertRepaired(): Promise<void> {
     amount: -55,
     merchant: "Киоск",
     occurrence: 0,
-    accountHint: "12",
+    card: "** 12",
   });
   check(
     "K: a short '** 12' card keeps its two characters rather than becoming an empty hint",

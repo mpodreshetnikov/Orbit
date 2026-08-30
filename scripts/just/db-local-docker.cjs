@@ -481,6 +481,14 @@ function databaseExists() {
 function startExistingDatabase() {
   log(`starting the stopped ${DB_CONTAINER}`);
   if (docker(["start", DB_CONTAINER]).status !== 0) return false;
+
+  // Same check the healthy path makes, and for the same reason: a container created against a
+  // different `ORBIT_DB_PORT` publishes somewhere else, so the `psql` below would be answered by
+  // whatever else is listening — and `up` would then migrate that database believing it had
+  // recovered this container.
+  const published = docker(["port", DB_CONTAINER, "5432/tcp"]);
+  if (published.status !== 0 || !published.stdout.includes(`:${PORT}`)) return false;
+
   try {
     waitFor("postgres", () => psql(["-c", "select 1"]).status === 0);
   } catch {
@@ -551,7 +559,22 @@ function up(flags) {
   }
 
   applyMigrations({ until: flags.until, skipApplied: !rebuilding });
-  if (!flags.noDeploy) applyDeployAndSeed({ seed: rebuilding });
+  if (!flags.noDeploy) {
+    // A fresh build that fails to seed must not survive. The seed runs in one transaction, so
+    // the database rolls back clean — but the container is left running and healthy, and the
+    // next ordinary `up` reuses it, skips the seed by design, and reports an unseeded database
+    // as ready. Nothing short of `--recreate` would ever seed it again. Removing the container
+    // we just built destroys nothing that existed before this command.
+    try {
+      applyDeployAndSeed({ seed: rebuilding });
+    } catch (error) {
+      if (rebuilding) {
+        log(`removing the half-built ${DB_CONTAINER} so a re-run starts clean`);
+        docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
+      }
+      throw error;
+    }
+  }
 
   log("ready");
   log(`  psql / app:   ${DB_URL}`);

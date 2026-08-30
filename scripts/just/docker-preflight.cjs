@@ -69,10 +69,10 @@ function startDockerDesktop(executablePath) {
  * the userland proxy. `DOCKERD_ARGS` overrides them where the host is less constrained.
  */
 function startDockerDaemonOnLinux(out, waitMs, pollMs) {
-  const dockerdInstalled = ["/usr/bin/dockerd", "/usr/local/bin/dockerd"].some((candidate) =>
+  const dockerdPath = ["/usr/bin/dockerd", "/usr/local/bin/dockerd"].find((candidate) =>
     fs.existsSync(candidate),
   );
-  if (!dockerdInstalled) {
+  if (!dockerdPath) {
     out.error("Docker is not reachable and no dockerd binary is installed.");
     return 1;
   }
@@ -90,8 +90,20 @@ function startDockerDaemonOnLinux(out, waitMs, pollMs) {
     : ["--iptables=false", "--ip6tables=false"];
 
   out.log("Docker engine is not reachable. Starting dockerd...");
+
+  // The binary that was found, not whatever `dockerd` resolves to on PATH — the check above
+  // proves one of the two absolute paths exists and proves nothing about PATH.
+  //
+  // `spawn` reports ENOENT and EACCES on the child's `error` event, after this block has already
+  // returned, so the `catch` never sees them. Without a listener that event is unhandled and
+  // takes the process down; with one, the failure is a diagnostic instead of the polling loop
+  // running its full two minutes and then blaming a timeout.
+  let spawnError = null;
   try {
-    const child = spawn("dockerd", args, { detached: true, stdio: "ignore" });
+    const child = spawn(dockerdPath, args, { detached: true, stdio: "ignore" });
+    child.on("error", (error) => {
+      spawnError = error;
+    });
     child.unref();
   } catch (error) {
     out.error(`Failed to launch dockerd: ${error.message}`);
@@ -101,6 +113,10 @@ function startDockerDaemonOnLinux(out, waitMs, pollMs) {
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     sleep(pollMs);
+    if (spawnError) {
+      out.error(`Failed to launch ${dockerdPath}: ${spawnError.message}`);
+      return 1;
+    }
     if (dockerFullyReachable()) {
       out.log("Docker daemon is ready.");
       return 0;
