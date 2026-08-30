@@ -246,7 +246,7 @@ function describeSchedule(
         // writable and generates nothing at all. Printing it as the plan would
         // describe doses that are never made.
         `${typeof schedule.interval?.every === "number" && !Number.isInteger(schedule.interval.every) ? " — not generated: the interval must be a whole number of hours" : ""}` +
-        `${schedule.amount != null ? ` (${schedule.amount}${unitText(dose?.intake?.unit) ? ` ${unitText(dose?.intake?.unit)}` : ""} per intake)` : ""}` +
+        `${typeof schedule.amount === "number" && schedule.amount > 0 ? ` (${schedule.amount}${unitText(dose?.intake?.unit) ? ` ${unitText(dose?.intake?.unit)}` : ""} per intake)` : ""}` +
         // A scalar override is the same claim as a per-slot one, so it earns the
         // same warning: the generator replaces the amount and copies `active`.
         `${overrideNote()}`
@@ -432,7 +432,15 @@ function effectiveSlots(schedule?: MedSchedule | null): ScheduleSlot[] {
     if (seen.has(text)) return;
     seen.add(text);
     const amount = Array.isArray(amounts) ? amounts[index] : undefined;
-    slots.push({ time: text, amount: typeof amount === "number" ? amount : undefined });
+    // Only a positive amount is an amount: the generator replaces a zero or
+    // negative slot value with the course's own
+    // (`IF v_slot_amount IS NULL OR v_slot_amount <= 0`), so rendering `0 pill`
+    // would report a dose the reminders never carry, and counting it as an
+    // override would withhold a strength for a slot that doses the base amount.
+    slots.push({
+      time: text,
+      amount: typeof amount === "number" && amount > 0 ? amount : undefined,
+    });
   });
   return slots;
 }
@@ -441,7 +449,9 @@ function effectiveSlots(schedule?: MedSchedule | null): ScheduleSlot[] {
 function scheduleAmounts(schedule?: MedSchedule | null): number[] {
   if (!schedule || typeof schedule !== "object") return [];
   if (schedule.mode === "interval_hours") {
-    return typeof schedule.amount === "number" ? [schedule.amount] : [];
+    // Same rule as a slot amount: the generator falls back to the course's own
+    // amount for anything not positive.
+    return typeof schedule.amount === "number" && schedule.amount > 0 ? [schedule.amount] : [];
   }
   return effectiveSlots(schedule)
     .map((slot) => slot.amount)

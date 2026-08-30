@@ -1091,6 +1091,37 @@ describe("list_medication_doses", () => {
     expect(text).not.toContain("strength on file is for the");
   });
 
+  it("falls back from a nonpositive slot amount, as the generator does", async () => {
+    // `IF v_slot_amount IS NULL OR v_slot_amount <= 0` — the generator doses the
+    // course amount there, so rendering "0 pill" would report an intake the
+    // reminders never carry, and counting it as an override would withhold a
+    // strength for a slot that doses the base dose.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["08:00", "20:00"], amounts: [0, 1] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("at 08:00, 20:00 (1 pill)");
+    expect(text).not.toContain("0 pill");
+    expect(text).toContain("1 pill (Сертралин 100 milligram)");
+    expect(text).not.toContain("strength on file is for the");
+  });
+
   it("collapses a repeated time, which the generator doses only once", async () => {
     // The generator loops both slots, but its NOT EXISTS guard and the
     // regimen-minute unique index let only the first event exist — so promising

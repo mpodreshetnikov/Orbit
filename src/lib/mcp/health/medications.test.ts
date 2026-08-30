@@ -758,6 +758,37 @@ describe("logDose", () => {
       expect(fake.inventory).toHaveLength(1);
     });
 
+    it("resolves the dose that still needs it when two share the minute", async () => {
+      // `snooze_dose` can move a dose onto a minute that already holds a
+      // resolved one. Picking the resolved row would answer "already recorded"
+      // and leave the other owing a dose, its reminder armed and its stock
+      // movement unwritten.
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "taken",
+          taken_at: AT,
+          scheduled_at: AT,
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:00.000Z",
+        },
+        {
+          id: "d-2",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T07:00:00.000Z",
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:01.000Z",
+        },
+      ]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.alreadyRecorded).toBeFalsy();
+      expect(fake.events).toHaveLength(2);
+      expect(fake.events.find((event) => event.id === "d-2")?.status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
     it("resolves the planned dose rather than colliding with the unique index", async () => {
       const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
 

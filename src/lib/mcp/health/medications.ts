@@ -421,6 +421,7 @@ async function findDoseInSameMinute(
   supabase: SupabaseClient<Database>,
   regimenId: string,
   at: Date,
+  requestedStatus?: string,
 ): Promise<Record<string, unknown> | null> {
   const minuteStart = new Date(Math.floor(at.getTime() / 60_000) * 60_000);
   const minuteEnd = new Date(minuteStart.getTime() + 60_000);
@@ -444,7 +445,10 @@ async function findDoseInSameMinute(
       `and(scheduled_at.gte.${from},scheduled_at.lt.${to}),and(actual_at.gte.${from},actual_at.lt.${to})`,
     )
     .order("created_at", { ascending: true })
-    .limit(2);
+    // More than two rows can share a minute: the unique index bounds only the
+    // unresolved ones, and a snooze can move a dose onto a minute that already
+    // holds a resolved intake.
+    .limit(10);
 
   // This read decides between resolving and inserting, so "the query failed"
   // must not be read as "nothing is there": that would take the insert branch
@@ -454,13 +458,22 @@ async function findDoseInSameMinute(
   }
 
   const rows = (data ?? []) as Array<Record<string, unknown>>;
-  // A dose snoozed into this minute and one planned for it can both match. The
-  // effective time is what the caller was shown, so it wins the tie.
-  const effective = rows.find((row) => {
-    const actual = row.actual_at;
-    return typeof actual === "string" && actual >= from && actual < to;
+  const byEffectiveTime = (row: Record<string, unknown>) =>
+    typeof row.actual_at === "string" && row.actual_at >= from && row.actual_at < to;
+  // A row already in the requested status has nothing left to do, so choosing
+  // it would answer "already recorded" while a second dose on the same minute
+  // -- which `snooze_dose` allows -- stays unresolved, its reminder armed and
+  // its stock movement unwritten. The dose that still needs the transition
+  // comes first; only when none does is the call genuinely a repeat.
+  const needsTransition = (row: Record<string, unknown>) =>
+    requestedStatus == null || row.status !== requestedStatus;
+  const ranked = [...rows].sort((a, b) => {
+    const byWork = Number(needsTransition(b)) - Number(needsTransition(a));
+    if (byWork !== 0) return byWork;
+    // Then the effective time, because that is the one the caller was shown.
+    return Number(byEffectiveTime(b)) - Number(byEffectiveTime(a));
   });
-  return effective ?? rows[0] ?? null;
+  return ranked[0] ?? null;
 }
 
 /**
@@ -511,7 +524,12 @@ export async function logDose(
   const unit = regimen.dose_definition?.intake?.unit ?? regimen.intake_unit;
   const note = params.note?.trim() ? params.note.trim() : null;
 
-  const planned = await findDoseInSameMinute(supabase, regimen.id, new Date(params.at));
+  const planned = await findDoseInSameMinute(
+    supabase,
+    regimen.id,
+    new Date(params.at),
+    params.status,
+  );
 
   // Nothing to do when the minute already holds this very outcome. Re-running
   // the RPC would be a silent no-op anyway (it selects only rows in the other
