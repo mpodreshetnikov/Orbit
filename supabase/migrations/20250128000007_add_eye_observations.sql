@@ -3,8 +3,6 @@
 -- Basic eye/vision-related observations
 -- ============================================================================
 
-BEGIN;
-
 INSERT INTO public.observation_catalog (obs_code, name_ru, name_en, canonical_unit, synonyms_ru, synonyms_en, accepted_units, notes)
 VALUES
   -- Visual Acuity (decimal notation)
@@ -84,5 +82,3 @@ ON CONFLICT (obs_code) DO UPDATE SET
   accepted_units = EXCLUDED.accepted_units,
   notes = EXCLUDED.notes,
   updated_at = now();
-
-COMMIT;

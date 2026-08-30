@@ -345,6 +345,137 @@ function startSchemaOwners() {
 }
 
 /**
+ * Blanks out everything psql would not read as SQL — comments, string literals and dollar-quoted
+ * bodies — replacing each character with a space so every offset in the result still points at
+ * the same place in the original.
+ *
+ * Written this way because the thing it feeds needs to tell a plpgsql `BEGIN` inside a function
+ * body from a `BEGIN;` that starts a transaction, and those are the same five characters. A
+ * regular expression over the raw file cannot: every `CREATE FUNCTION ... $$ BEGIN ... END $$`
+ * in this repository would read as transaction control.
+ */
+function maskSqlNoise(sql) {
+  const blank = (text) => text.replace(/[^\n]/g, " ");
+  let masked = "";
+  let index = 0;
+
+  while (index < sql.length) {
+    const rest = sql.slice(index);
+
+    if (rest.startsWith("--")) {
+      const newline = sql.indexOf("\n", index);
+      const end = newline === -1 ? sql.length : newline;
+      masked += blank(sql.slice(index, end));
+      index = end;
+      continue;
+    }
+
+    if (rest.startsWith("/*")) {
+      // Postgres block comments nest, so this counts rather than searching for the first `*/`.
+      let depth = 1;
+      let cursor = index + 2;
+      while (cursor < sql.length && depth > 0) {
+        if (sql.startsWith("/*", cursor)) {
+          depth += 1;
+          cursor += 2;
+        } else if (sql.startsWith("*/", cursor)) {
+          depth -= 1;
+          cursor += 2;
+        } else {
+          cursor += 1;
+        }
+      }
+      masked += blank(sql.slice(index, cursor));
+      index = cursor;
+      continue;
+    }
+
+    const dollarTag = /^\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$/.exec(rest);
+    if (dollarTag) {
+      const tag = dollarTag[0];
+      const close = sql.indexOf(tag, index + tag.length);
+      const end = close === -1 ? sql.length : close + tag.length;
+      masked += blank(sql.slice(index, end));
+      index = end;
+      continue;
+    }
+
+    const quote = sql[index];
+    if (quote === "'" || quote === '"') {
+      let cursor = index + 1;
+      while (cursor < sql.length) {
+        // A doubled quote is an escaped one and does not end the literal.
+        if (sql[cursor] === quote && sql[cursor + 1] === quote) {
+          cursor += 2;
+          continue;
+        }
+        if (sql[cursor] === quote) {
+          cursor += 1;
+          break;
+        }
+        cursor += 1;
+      }
+      masked += blank(sql.slice(index, cursor));
+      index = cursor;
+      continue;
+    }
+
+    masked += sql[index];
+    index += 1;
+  }
+
+  return masked;
+}
+
+/** `END` and `END TRANSACTION` are documented synonyms for `COMMIT`, so they belong here too. */
+const TRANSACTION_CONTROL_STATEMENT =
+  /^(begin|start\s+transaction|commit|end|rollback|savepoint|release|abort)\b/i;
+
+/**
+ * The statements in a migration file that open or close a transaction, with the line each is on.
+ *
+ * A migration must not manage its own transaction, because the runner already wraps it: the file
+ * and the `schema_migrations` row that records it are applied in one `psql --single-transaction`
+ * so they commit together or not at all. PostgreSQL documents what a `COMMIT` inside such a
+ * script does — it commits the wrapper then and there, and everything after it runs in
+ * autocommit. For a file whose last statement is `COMMIT;` that means the schema change commits
+ * and the version insert that follows becomes a separate transaction, which is exactly the split
+ * the wrapper exists to prevent: interrupt in between and the next `up` replays a file the
+ * database already has.
+ *
+ * So this is checked rather than worked around. A migration that needs to run outside a
+ * transaction — `CREATE INDEX CONCURRENTLY`, `ALTER TYPE ... ADD VALUE` before 12 — needs the
+ * runner to know that, not a `COMMIT;` in the middle of a file the runner thinks is atomic.
+ */
+function findTransactionControl(sql) {
+  const masked = maskSqlNoise(sql);
+  const found = [];
+  let statementStart = 0;
+
+  const inspect = (start, end) => {
+    const statement = masked.slice(start, end);
+    const leading = statement.length - statement.trimStart().length;
+    const text = statement.trim();
+    if (!text || !TRANSACTION_CONTROL_STATEMENT.test(text)) return;
+    const offset = start + leading;
+    found.push({
+      line: masked.slice(0, offset).split("\n").length,
+      // From the original, so the message quotes what is actually in the file.
+      statement: sql.slice(offset, end).trim(),
+    });
+  };
+
+  for (let index = 0; index < masked.length; index += 1) {
+    if (masked[index] !== ";") continue;
+    inspect(statementStart, index);
+    statementStart = index + 1;
+  }
+  inspect(statementStart, masked.length);
+
+  return found;
+}
+
+/**
  * `from` and `until` are inclusive migration version prefixes. They exist so a caller can stop
  * before a migration, put rows in the shape that migration was written to repair, and then run
  * it — which is the only way to test a data-repairing migration against anything but the empty
@@ -388,6 +519,30 @@ function applyMigrations({ from, until, skipApplied = false } = {}) {
         if (trimmed) alreadyApplied.add(trimmed);
       }
     }
+  }
+
+  // Checked before the first file is applied, not as each one comes up: a migration that manages
+  // its own transaction breaks the atomicity of the whole run, and finding that out halfway
+  // through leaves the database in the state this check exists to prevent.
+  const selfManaged = files
+    .map((name) => ({
+      name,
+      statements: findTransactionControl(fs.readFileSync(path.join(migrationsDir, name), "utf8")),
+    }))
+    .filter(({ statements }) => statements.length > 0);
+  if (selfManaged.length > 0) {
+    const detail = selfManaged
+      .map(
+        ({ name, statements }) =>
+          `  ${name}: ` +
+          statements.map((entry) => `line ${entry.line} (${entry.statement})`).join(", "),
+      )
+      .join("\n");
+    throw new Error(
+      "Migrations must not open or close their own transaction — the runner already applies " +
+        "each file and its schema_migrations row in one, and a COMMIT inside commits that " +
+        `wrapper early:\n${detail}`,
+    );
   }
 
   for (const name of files) {
@@ -740,14 +895,24 @@ const commands = {
   },
 };
 
-if (!Object.hasOwn(commands, command)) {
-  console.error(`Unknown command: ${command}. Use one of: ${Object.keys(commands).join(", ")}`);
-  process.exit(1);
+// Guarded so the migration checks below can be imported and run without Docker, a database or
+// an argv the dispatcher would reject. Every sibling script under scripts/just/ that has tests
+// is arranged the same way.
+if (require.main === module) {
+  if (!Object.hasOwn(commands, command)) {
+    console.error(`Unknown command: ${command}. Use one of: ${Object.keys(commands).join(", ")}`);
+    process.exit(1);
+  }
+
+  try {
+    process.exit(commands[command]());
+  } catch (error) {
+    console.error(`[db-local-docker] ${error.message}`);
+    process.exit(1);
+  }
 }
 
-try {
-  process.exit(commands[command]());
-} catch (error) {
-  console.error(`[db-local-docker] ${error.message}`);
-  process.exit(1);
-}
+module.exports = {
+  findTransactionControl,
+  maskSqlNoise,
+};
