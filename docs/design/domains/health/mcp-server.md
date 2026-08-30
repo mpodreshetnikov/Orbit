@@ -233,6 +233,13 @@ Conventions that matter:
   `get_medication` lists the intakes nearest now and ends with
   `...15 more; call list_medication_doses with regimen_id: … and a from/to range for them`.
 
+  A schedule says what it plans in terms a reader cannot misread: weekdays as `Mon`, `Thu` rather
+  than the stored indexes, since a reader who assumes the week starts on Monday would shift the whole
+  course by a day; per-slot amounts paired with their slots by index, as the generator pairs them, so
+  an `amounts` longer than `times` neither warns about a slot that is never dosed nor withholds a
+  strength for it; and a `one_off` due value that is not an instant named as such, never echoed,
+  because `formatZoned` returns what it cannot parse.
+
   A course window that ends before it starts is not rendered as a window. Nothing forbids the pair
   on write and the generator answers it by producing no events at all, so printing
   `2026-09-10 to 2026-09-01` would describe a course that never doses as if it ran backwards; the

@@ -990,6 +990,87 @@ describe("list_medication_doses", () => {
     expect(text).not.toContain("100 milligram");
   });
 
+  it("names the weekdays instead of leaving bare indexes", async () => {
+    // "on 0, 1" is unambiguous only to a reader who knows this domain counts
+    // from Sunday; one who assumes Monday shifts the whole schedule by a day.
+    // 7 is Sunday too, as `regimen-card.tsx` treats it.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Метотрексат",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "days_of_week", days_of_week: [0, 3, 7], times: ["08:00"] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("on Sun, Wed, Sun");
+  });
+
+  it("ignores an amount that has no slot to dose it", async () => {
+    // The generator pairs `amounts` with `times` by index, so a trailing entry
+    // is never dosed. Counting it as an override would withhold the strength on
+    // every intake and warn about a slot that does not exist.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            active: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["08:00"], amounts: [1, 2] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("1 pill (Сертралин 100 milligram)");
+    expect(text).not.toContain("strength on file is for the");
+  });
+
+  it("does not echo a due_at that is not a timestamp", async () => {
+    // `formatZoned` returns a value it cannot parse verbatim, and `due_at` is an
+    // unrestricted string on a jsonb column — so a malformed row would print
+    // itself, unbounded, under a heading that calls it a time.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Одноразово",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "one_off", due_at: `not a date ${"x".repeat(500)}` },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medications")!(
+        { ...PAGE, timezone: "Europe/Berlin" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("due time not recorded as a timestamp");
+    expect(text).not.toContain("x".repeat(40));
+  });
+
   it("bounds the whole rendered ingredient, not only its name", async () => {
     // `unit` is an unrestricted string against a jsonb column, so an imported
     // row can carry a unit as long as a note -- once per ingredient, per row,
@@ -1142,7 +1223,7 @@ describe("list_medication_doses", () => {
     const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
       .text;
 
-    expect(text).toContain("on 1, 4 at 08:00 (0.5 pill), 20:00 (1.5 pill)");
+    expect(text).toContain("on Mon, Thu at 08:00 (0.5 pill), 20:00 (1.5 pill)");
   });
 
   it("cuts a long intake note instead of flooding the page with one", async () => {

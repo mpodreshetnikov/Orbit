@@ -14,7 +14,7 @@ import {
   regenerateDoseEvents,
 } from "@/lib/medications/regenerate-dose-events";
 import { isValidTimeZone, localDayEndUtc, localDayStartUtc } from "../local-day";
-import { formatZoned, instantFromInput, withZonedTimestamps } from "../zoned-time";
+import { formatZoned, instantFromInput, withZonedTimestamps, zonedIso } from "../zoned-time";
 import { WRITE_SCOPE } from "./scopes";
 import {
   medDurationSchema,
@@ -199,10 +199,11 @@ function describeSchedule(
   // amounts disagree. Saying so once per schedule keeps the two surfaces
   // consistent instead of letting a reader carry the base strength onto an
   // overridden slot.
-  const overrideNote = (amounts?: number[]) => {
+  const overrideNote = () => {
     const base = dose?.intake?.amount;
     const hasStrength = Array.isArray(dose?.active) && dose.active.length > 0;
-    if (!hasStrength || base == null || !Array.isArray(amounts)) return "";
+    const amounts = scheduleAmounts(schedule);
+    if (!hasStrength || base == null || amounts.length === 0) return "";
     return amounts.some((amount) => amount != null && amount !== base)
       ? `, strength on file is for the ${base} ${unitText(dose?.intake?.unit)} dose only`.replace(
           "  ",
@@ -227,14 +228,14 @@ function describeSchedule(
 
   switch (schedule.mode) {
     case "daily_times":
-      return `schedule daily_times${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
+      return `schedule daily_times${at(schedule.times, schedule.amounts)}${overrideNote()}`;
     case "interval_hours":
       return (
         `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
         `${schedule.amount != null ? ` (${schedule.amount}${unitText(dose?.intake?.unit) ? ` ${unitText(dose?.intake?.unit)}` : ""} per intake)` : ""}` +
         // A scalar override is the same claim as a per-slot one, so it earns the
         // same warning: the generator replaces the amount and copies `active`.
-        `${overrideNote(schedule.amount == null ? undefined : [schedule.amount])}`
+        `${overrideNote()}`
       );
     case "interval_days":
       // `time_of_day` is the deprecated single-time form, and the generator
@@ -247,20 +248,26 @@ function describeSchedule(
             ? [schedule.time_of_day]
             : undefined,
         schedule.amounts,
-      )}${overrideNote(schedule.amounts)}`;
+      )}${overrideNote()}`;
     case "days_of_week":
-      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${joinBounded(schedule.days_of_week.map(String), SCHEDULE_SLOT_LIMIT)}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote(schedule.amounts)}`;
+      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${joinBounded(schedule.days_of_week.map(weekdayName), SCHEDULE_SLOT_LIMIT)}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote()}`;
     case "one_off":
       // The due instant is a timestamp, so it is quoted only where a zone has
       // been resolved (T-0027: a time this server prints is converted and
       // labelled, or it is not printed). `list_medications` resolves none, and
       // says where to find it rather than rendering it in UTC.
+      // `formatZoned` echoes a value it cannot parse, and `due_at` is an
+      // unrestricted string on a jsonb column, so a malformed row would print
+      // itself -- unbounded, once per listing row -- under a heading that says
+      // it is a time. A value that is not an instant is named as such instead.
       return (
         "schedule one_off" +
         (typeof schedule.due_at === "string"
-          ? timezone
-            ? `, due ${formatZoned(schedule.due_at, timezone)}`
-            : ", due time in the payload"
+          ? !timezone
+            ? ", due time in the payload"
+            : zonedIso(schedule.due_at, timezone)
+              ? `, due ${formatZoned(schedule.due_at, timezone)}`
+              : ", due time not recorded as a timestamp"
           : "")
       );
     default:
@@ -372,9 +379,36 @@ function scheduleAmounts(schedule?: MedSchedule | null): number[] {
     return typeof schedule.amount === "number" ? [schedule.amount] : [];
   }
   const amounts = (schedule as { amounts?: unknown }).amounts;
-  return Array.isArray(amounts)
-    ? amounts.filter((one): one is number => typeof one === "number")
-    : [];
+  if (!Array.isArray(amounts)) return [];
+  // Paired with the slots by index, because that is how the generator reads
+  // them (`v_schedule->'amounts'->(v_slot.idx - 1)`). An `amounts` longer than
+  // `times` is schema-valid and the extra entries are never dosed, so counting
+  // them as overrides would withhold a strength and warn about a slot that does
+  // not exist.
+  const times = (schedule as { times?: unknown }).times;
+  const slots = Array.isArray(times)
+    ? times.length
+    : typeof (schedule as { time_of_day?: unknown }).time_of_day === "string"
+      ? 1
+      : 0;
+  return amounts.slice(0, slots).filter((one): one is number => typeof one === "number");
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/**
+ * A weekday index as a name.
+ *
+ * `on 0, 1` is only unambiguous to a reader who knows this domain counts from
+ * Sunday, and a reader who assumes Monday shifts the whole schedule by a day.
+ * `7` is Sunday as well, which is what `regimen-card.tsx` does; anything else is
+ * printed as it is stored, bounded, rather than guessed at.
+ */
+function weekdayName(day: unknown): string {
+  const index = typeof day === "number" && day === 7 ? 0 : day;
+  return typeof index === "number" && Number.isInteger(index) && index >= 0 && index <= 6
+    ? WEEKDAYS[index]
+    : excerpt(String(day), UNIT_LIMIT);
 }
 
 /** Whether any slot doses a different amount than the course's own. */
