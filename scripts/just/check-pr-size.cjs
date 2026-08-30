@@ -7,7 +7,7 @@
  * Codex reviews on its `New commits` trigger, so one push to an open pull request is one review
  * round, and the rounds share an allowance with the security review lane beside them. Rounds grow
  * superlinearly with the diff: measured on Orbit, 46 added lines drew none, 651 drew five, and 3011
- * drew twenty over sixteen hours. Bounding the diff is the cheapest thing that bounds the rounds,
+ * drew twenty-one over nineteen hours. Bounding the diff is the cheapest thing that bounds the rounds,
  * and here the fix is free -- split the branch -- rather than after the allowance is spent.
  *
  * "Reviewable" excludes recorded fixtures, lockfiles, generated artifacts and the generated skill
@@ -286,9 +286,9 @@ function formatFailure({ addedLines, limit, files, largest, excludedAdded }, bas
     ...largest.map((file) => `  ${String(file.added).padStart(6)}  ${file.path}`),
     "",
     "One push to an open pull request is one automated review round, and rounds grow superlinearly",
-    "with the diff -- 651 added lines drew five rounds here, 3011 drew twenty. The rounds share an",
-    "allowance with the security review lane, so a branch this size spends the review that reads",
-    "the next branch for leaked data.",
+    "with the diff -- 651 added lines drew five rounds here, 3011 drew twenty-one. The rounds",
+    "share an allowance with the security review lane, so a branch this size spends the review",
+    "that reads the next branch for leaked data.",
     "",
     "Split the branch into changes that land on their own. If this content is not read line by",
     "line, exempt its path in .large-change-allowlist with the reason; if the change genuinely",

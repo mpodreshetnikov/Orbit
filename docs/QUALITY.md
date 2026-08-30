@@ -136,7 +136,7 @@ A new migration's timestamp must sort **after** every migration already on the b
 
 ## Automated Review Policy
 
-Codex reviews a pull request on its `New commits` trigger, so **one push to an open pull request is one review round**. Rounds are the unit the Codex allowance is spent in, and the code review shares that allowance with the security review lane running beside it. A branch that pushes twenty times buys twenty code reviews and starves the security review: on PR #20 the last security review that completed was the fourth round, and the sixteen after it returned a usage-limit message instead.
+Codex reviews a pull request on its `New commits` trigger, so **one push to an open pull request is one review round**. Rounds are the unit the Codex allowance is spent in, and the code review shares that allowance with the security review lane running beside it. A branch that pushes twenty times buys twenty code reviews and starves the security review: on PR #20 the last security review that completed was the fourth round, and every one of the seventeen rounds after it returned a usage-limit message instead.
 
 Three rules bound that, in the order they bite.
 
@@ -167,7 +167,7 @@ Rounds grow superlinearly with the size of the diff, so the cheapest way to boun
 | #17 | 3     | 46          | 0      |
 | #19 | 5     | 194         | 0      |
 | #21 | 9     | 651         | 5      |
-| #20 | 11    | 3011        | 20     |
+| #20 | 11    | 3011        | 21     |
 
 A pull request may add at most **1000 reviewable lines** against its base branch. Reviewable excludes recorded fixtures, lockfiles, generated artifacts and the generated skill mirror — content no reviewer reads line by line, and which would otherwise let a cassette recording fail a check aimed at hand-written code.
 
