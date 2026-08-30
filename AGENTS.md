@@ -106,3 +106,7 @@ All work — features, bugs, tech debt, chores, ideas, ExecPlans, and the reason
 A local checkout may have the registry linked in at `docs/tasks/`, along with `docs/PLANS.md` and the `task-registry` skill. All three paths are gitignored here. When they are present, read `docs/tasks/INDEX.md` before starting a task, grep `docs/tasks/` for prior decisions on the subject, and follow the skill; `docs/tasks/README.md` is canonical for the schema and lifecycle. Registry changes are committed in the registry repository, never here — a commit in this repository silently drops them.
 
 When they are absent, the registry is simply unavailable in this checkout: say so rather than tracking the work somewhere else.
+
+### No Task, No Work
+
+**Nothing in this repository is changed until a task covering it exists in the registry and is `in-progress`** — the one rule from the registry that gates work in this tree, so it is stated here rather than only linked. Its scope, its exception for trivial changes, and the two gates on creating that task (a duplicate search, and the user's confirmation) are canonical in `docs/tasks/README.md` under `No Work Without A Task` and `Creating A Task`; the `task-registry` skill carries the applied workflow. When the registry is not linked into this checkout the gate cannot be satisfied — the paragraph above applies.
