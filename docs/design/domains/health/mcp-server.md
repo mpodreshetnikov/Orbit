@@ -142,6 +142,116 @@ Conventions that matter:
   confirmation quotes the time back and "logged at 15:00Z" is unreadable to the person who took the
   dose at ten in the evening.
 
+- **What a tool's description promises, its text block delivers.** A read tool renders the fields
+  its description names, not a subset — `list_medications` says "dose, active ingredients, schedule,
+  course dates, stock and notes" and prints all six, and `get_medication` spells out the intakes and
+  stock movements it counts rather than only counting them. The rule exists because the opposite
+  shipped: the medication tools held the milligrams of every intake in
+  `dose_definition.active` and `planned_intake.active`, returned them in `structuredContent`, and
+  printed only "1.5 pill". Asked how long a dose had been at least 100 mg, an assistant reported
+  that the record contained no milligrams at all and offered the owner a fork between 50 mg and
+  100 mg tablets, while the row said 150 mg and the course note said «1.5 таб по 100 мг».
+  A dose is rendered as `1.5 pill (Сертралин 150 milligram)`, in the units the row stores rather
+  than abbreviations invented here, and an intake's `note` is printed so that "no note" is
+  distinguishable from "notes are not returned". `schedule.times` are labelled as local wall clock,
+  since they are plan strings rather than instants and the same reply quotes real instants in a
+  named zone.
+
+- **A list that cannot show everything says how to reach the rest, and pages in the query.** `list_medications` and
+  `list_medication_doses` take `limit`/`offset` and answer with the window, the total, and the
+  `offset` that continues it (`summarizePage` in `src/lib/mcp/tool-result.ts`). The previous
+  "...and N more" tail named rows it gave no way to fetch, so past the twentieth medication the only
+  route was guessing names into `search`. `list_medication_doses` also takes `regimen_id`: following
+  one course's dose over time used to mean pulling every medication in the range and diffing by
+  hand, which is how a titration history came to be reconstructed by binary search over 3–5 day
+  windows.
+
+  That covers every list this server returns, the stock ledger included: `get_medication` takes an
+  `inventory_offset`, says which movements it is showing of how many, and names the offset that
+  reaches the older ones — a ledger truncated in silence is at its most misleading in exactly the
+  question it gets asked for, a stock discrepancy.
+
+  The page, the filters and the total all come from the database. PostgREST caps a response at
+  `max_rows` (1000 in `supabase/config.toml`), so paging or filtering a result in memory would let a
+  long history report its own truncation as the total and declare there was nothing further —
+  strictly worse than the cursorless tail it replaced. Both queries also order by `id` after their
+  natural sort, because neither `scheduled_at` nor `created_at` is unique: four courses of one
+  medication were created in the same minute in production, and an unstable order under paging
+  repeats one row while dropping another.
+
+  A strength is printed only where it can be tied to the amount beside it. `active` is milligrams per
+  intake with nothing recording what one unit contains, and nothing rescales it — the generator
+  copies it while overriding a slot's amount, and `log_dose` keeps it when a caller corrects one. An
+  intake whose amount differs from its course's therefore carries a total recorded for some other
+  number of units, and reads `2 pill (strength not recorded for this amount)`. Naming the course's
+  amount instead would not be safe either: `dose_definition` is edited in place and only future
+  unresolved events are regenerated, so a past intake can sit beside a definition that moved under
+  it. Nor are matching amounts evidence on a course whose schedule overrides the amount per slot: an
+  event generated from a 2-pill slot of a 1-pill course carries the 1-pill course's milligrams, and
+  editing that course's own amount to 2 later would make the stale copy read as verified. Where any
+  slot overrides the amount, the strength is withheld on every intake of that course. Until a
+  per-unit strength exists, withholding the figure is the difference between reporting the record
+  and inventing a dose.
+
+  A dose is dated by `actual_at`, not `scheduled_at`, and its resolution timestamp is labelled by
+  what happened. The two columns are written equal by the generator and separated by `snooze_dose`,
+  which moves `actual_at` alone — and that is the time the reminder query fires on and the dashboard
+  sorts by, so a dose snoozed from 09:00 to 11:00 is reported at 11:00, saying where it moved from.
+  `taken_at` is not evidence of an intake either: `mark_dose_skipped` sets it to the resolution time
+  as well, so a skipped dose reads `marked skipped`, never `taken`. The queries select on the same
+  column they print: `list_medication_doses` ranges and orders by `actual_at`, and `get_medication`
+  splits upcoming from recent by it, so a dose snoozed across midnight is answered for the day it is
+  now due on and one snoozed past now is still upcoming. Rendering the effective time while
+  selecting on the planned one would put a dose under a heading its own timestamp contradicts.
+
+  `list_medications` takes a `timezone` for the same reason the dated tools do, though it lists no
+  date range: a `one_off` course carries a due instant, and quoting it in UTC beside plan times that
+  are local wall clock is the T-0027 defect in miniature.
+
+  A name filter is a literal, not a pattern. `list_medications` matches with `imatch` (`~*`) over a
+  regex-escaped needle rather than `ilike`: PostgREST rewrites `*` in a `like`/`ilike` value to `%`
+  unconditionally, with no escape that survives the rewrite, so a name containing `*` would have
+  turned a search into a wildcard and inflated the total beside it.
+
+  Free text is bounded on its way into a text block. Notes have no length limit in the database and
+  a page can carry a hundred of them, so each is flattened to one line and cut with an explicit `…`;
+  `structuredContent` keeps the note itself. The same holds for anything else a row can carry
+  without limit: an ingredient is cut whole, unit included, and a schedule renders a bounded number
+  of slots and weekdays with a `…N more` marker, because `times`, `amounts` and `days_of_week` are
+  jsonb arrays with no maximum in the column or in the schema, rendered once per row per page. A
+  unit is cut wherever it is printed — the dose line, every schedule slot, the stock line and every
+  ledger movement — since it is unrestricted on the dose definition, on the inventory and on
+  `med_inventory_transactions.unit`, and it is the field this server repeats most.
+
+  `get_medication` asks for its doses in two counted pages, one either side of now, rather than one
+  window split in memory: an hourly course over a 30-day horizon has around 1,440 events a side, so a
+  single ascending query would end at PostgREST's cap before "upcoming" began, and the counts would
+  report that truncation as the horizon. The counts a reply states come from the database's own
+  count, never from the rows it happened to return.
+
+  A truncated detail section names the tool that can fetch the rest:
+  `get_medication` lists the intakes nearest now and ends with
+  `...15 more; call list_medication_doses with regimen_id: … and a from/to range for them`.
+
+  A schedule says what the generator will actually do, in terms a reader cannot misread: weekdays as
+  `Mon`, `Thu` rather than the stored indexes, since a reader who assumes the week starts on Monday
+  would shift the whole course by a day — and a stored `7` as `7 (never dosed)`, because the
+  generator maps `isodow` 7 to 0 before testing membership, so that row matches no day however much
+  it looks like Sunday; an `interval_days` course with no time recorded shown at the `09:00` the
+  generator substitutes, marked as the default rather than as a stored time; a fractional
+  `interval_hours` interval marked as generating nothing, since the generator casts `every` to `int`
+  and the schema requires a whole number of days but not of hours; per-slot amounts paired with their slots by index, as the generator pairs them, so
+  an `amounts` longer than `times` neither warns about a slot that is never dosed nor withholds a
+  strength for it; and a `one_off` due value that is not an instant named as such, never echoed,
+  because `formatZoned` returns what it cannot parse.
+
+  A course window that ends before it starts is not rendered as a window. Nothing forbids the pair
+  on write and the generator answers it by producing no events at all, so printing
+  `2026-09-10 to 2026-09-01` would describe a course that never doses as if it ran backwards; the
+  start is kept, the end is dropped. The status does not inherit that: `getEffectiveStatus` reads the
+  stored end date directly, so such a course still completes on its end date rather than running
+  forever and being offered as a current course by the duplicate guard.
+
 - **No deletion tools exist.** Catalog rows are foreign-key targets of live data, and regimens and
   conditions use soft deletion with app-level semantics.
 - **A medication a person is currently on is never created twice.** `add_medication` refuses when a

@@ -113,6 +113,31 @@ export function createDoseEventsFake(params: {
               return String(cell) < String(value);
             case "lte":
               return String(cell) <= String(value);
+            case "or":
+              // The one shape this codebase builds:
+              // `and(col.gte.X,col.lt.Y),and(other.gte.X,other.lt.Y)`.
+              return String(value)
+                .split(/\),(?=and\()/)
+                .map((group) => group.replace(/^and\(/, "").replace(/\)$/, ""))
+                .some((group) =>
+                  group.split(",").every((condition) => {
+                    const [conditionColumn, conditionOp, ...rest] = condition.split(".");
+                    const target = rest.join(".");
+                    const conditionCell = (row as unknown as Record<string, unknown>)[
+                      conditionColumn
+                    ];
+                    if (conditionCell == null) return false;
+                    return conditionOp === "gte"
+                      ? String(conditionCell) >= target
+                      : conditionOp === "lt"
+                        ? String(conditionCell) < target
+                        : (() => {
+                            throw new Error(
+                              `dose-events-fake: unsupported or-condition "${conditionOp}"`,
+                            );
+                          })();
+                  }),
+                );
             default:
               throw new Error(`dose-events-fake: unsupported filter "${op}"`);
           }
@@ -120,7 +145,7 @@ export function createDoseEventsFake(params: {
       );
     }
 
-    function settle(): { data: unknown; error: { message: string } | null } {
+    function settle(many = false): { data: unknown; error: { message: string } | null } {
       if (table === "med_regimens") {
         const id = filters.find(([op, column]) => op === "eq" && column === "id")?.[2];
         return { data: params.regimen.id === id ? params.regimen : null, error: null };
@@ -188,7 +213,9 @@ export function createDoseEventsFake(params: {
       }
 
       const rows = [...matching()].sort((a, b) => a.created_at.localeCompare(b.created_at));
-      return { data: rows[0] ?? null, error: null };
+      // A select awaited directly reads rows; `single`/`maybeSingle` reads one,
+      // as PostgREST does.
+      return { data: many ? rows : (rows[0] ?? null), error: null };
     }
 
     const filter = (op: string) => (column: string, value: unknown) => {
@@ -214,6 +241,10 @@ export function createDoseEventsFake(params: {
       },
       eq: filter("eq"),
       is: filter("is"),
+      or: (expression: string) => {
+        filters.push(["or", "", expression]);
+        return builder;
+      },
       gte: filter("gte"),
       lt: filter("lt"),
       lte: filter("lte"),
@@ -221,7 +252,7 @@ export function createDoseEventsFake(params: {
       limit: () => builder,
       single: async () => settle(),
       maybeSingle: async () => settle(),
-      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(settle())),
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(settle(true))),
     };
 
     return builder;

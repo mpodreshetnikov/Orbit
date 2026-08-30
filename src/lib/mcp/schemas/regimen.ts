@@ -55,6 +55,10 @@ export const medScheduleSchema = z
         .min(1)
         .describe("Days as 0=Sunday through 6=Saturday."),
       times: z.array(timeOfDay).min(1),
+      amounts: z
+        .array(positiveAmount)
+        .optional()
+        .describe("Per-slot amounts, same length and order as `times`."),
     }),
     z.object({
       mode: z.literal("one_off"),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getEffectiveStatus } from "./regimen";
+import { getCourseWindow, getEffectiveStatus } from "./regimen";
 import type { MedDuration, MedRegimenStatus } from "./regimen";
 
 function regimen(
@@ -82,5 +82,124 @@ describe("getEffectiveStatus", () => {
         { today },
       ),
     ).toBe("active");
+  });
+});
+
+describe("getCourseWindow", () => {
+  it("has no window without a duration", () => {
+    expect(getCourseWindow(undefined)).toEqual({ start: null, end: null });
+    expect(getCourseWindow(null)).toEqual({ start: null, end: null });
+  });
+
+  it("refuses a value that is the right shape but not a date", () => {
+    // `medDurationSchema` accepts any string, so this is writable through the
+    // MCP tools as well as importable, and a length check alone would send it
+    // through the date arithmetic and render "NaN-NaN-NaN" as a course end.
+    expect(getCourseWindow({ type: "for_days", days: 4, start_date: "abcdefghij" })).toEqual({
+      start: null,
+      end: null,
+    });
+    expect(getCourseWindow({ type: "for_days", days: 4, start_date: "2026-02-31" })).toEqual({
+      start: null,
+      end: null,
+    });
+    // A valid-looking prefix is not a date either: the generator casts the whole
+    // stored value, so this course would save with no reminders behind it.
+    expect(getCourseWindow({ type: "for_days", days: 4, start_date: "2026-09-01garbage" })).toEqual(
+      {
+        start: null,
+        end: null,
+      },
+    );
+    // A stored timestamp still reads as its day, which is what Postgres casts it to.
+    expect(
+      getCourseWindow({ type: "for_days", days: 4, start_date: "2026-09-01T00:00:00Z" }),
+    ).toEqual({ start: "2026-09-01", end: "2026-09-04" });
+    expect(
+      getCourseWindow({ type: "until_date", start_date: "2026-01-01", end_date: "2026-13-01" }),
+    ).toEqual({ start: "2026-01-01", end: null });
+  });
+
+  it("still completes a course whose stored window is inverted", () => {
+    // The window drops the inverted end so the text cannot print a course
+    // running backwards, but the status must not inherit that: the row still
+    // has a real end date, and treating it as endless would leave the course
+    // active forever and the duplicate guard calling it current.
+    expect(
+      getEffectiveStatus(
+        regimen("active", { type: "until_date", start_date: "2026-09-10", end_date: "2026-09-01" }),
+        { today: "2026-09-05" },
+      ),
+    ).toBe("completed");
+  });
+
+  it("refuses a course length that runs off the end of the calendar", () => {
+    // `medDurationSchema` puts no maximum on `days`, so this is writable — and
+    // the shifted date reads NaN in every field, which `statusBoundary` would
+    // then shift again and never complete the course.
+    expect(
+      getCourseWindow({ type: "for_days", days: 1_000_000_000, start_date: "2026-09-01" }),
+    ).toEqual({ start: "2026-09-01", end: null });
+    expect(
+      getEffectiveStatus(
+        regimen("active", { type: "for_days", days: 1_000_000_000, start_date: "2026-09-01" }),
+        { today: "2026-09-05" },
+      ),
+    ).toBe("active");
+  });
+
+  it("refuses a window that ends before it starts", () => {
+    // Nothing forbids the pair on write, and the generator answers it by
+    // producing no events at all, so "2026-09-10 to 2026-09-01" would describe
+    // a course that never doses as if it ran backwards.
+    expect(
+      getCourseWindow({ type: "until_date", start_date: "2026-09-10", end_date: "2026-09-01" }),
+    ).toEqual({ start: "2026-09-10", end: null });
+  });
+
+  it("bounds only the start of an endless course", () => {
+    expect(getCourseWindow({ type: "endless", start_date: "2026-08-07" })).toEqual({
+      start: "2026-08-07",
+      end: null,
+    });
+  });
+
+  it("takes both ends of an until_date course", () => {
+    expect(
+      getCourseWindow({ type: "until_date", start_date: "2026-01-01", end_date: "2026-03-01" }),
+    ).toEqual({ start: "2026-01-01", end: "2026-03-01" });
+  });
+
+  it("ends a for_days course on its last dosing day, not the day after", () => {
+    // `generate_med_dose_events_for_person_ids` skips any date at or after
+    // `start + days`, so a four-day course starting on the 26th doses on the
+    // 26th through the 29th. Rendering the 30th would put a one-day error into
+    // every answer about when a dose changed.
+    expect(getCourseWindow({ type: "for_days", start_date: "2026-07-26", days: 4 })).toEqual({
+      start: "2026-07-26",
+      end: "2026-07-29",
+    });
+  });
+
+  it("never calls a course completed while its window is still open", () => {
+    // The status boundary is deliberately a day later than the last dosing day
+    // for `for_days`, so on that one day the course reads `active` with its
+    // window already closed -- the dashboard has always worked that way, and
+    // the registry task carries the question of whether it should.
+    //
+    // The direction that must never occur is the opposite one: a course called
+    // `completed` while its window says doses remain, which would tell someone
+    // a course they are still on has finished.
+    const duration: MedDuration = { type: "for_days", start_date: "2026-07-26", days: 4 };
+    const { end } = getCourseWindow(duration);
+
+    expect(getEffectiveStatus({ status: "active", duration }, { today: end! })).toBe("active");
+    expect(getEffectiveStatus({ status: "active", duration }, { today: "2026-07-31" })).toBe(
+      "completed",
+    );
+  });
+
+  it("leaves a for_days course unbounded when it has no start date", () => {
+    expect(getCourseWindow({ type: "for_days", days: 4 })).toEqual({ start: null, end: null });
   });
 });
