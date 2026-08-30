@@ -633,7 +633,21 @@ function containerExists(name: string): boolean {
   }
 }
 
-const LOCK_PATH = path.join(os.tmpdir(), `orbit-data-migration-check-${CONTAINER}.lock`);
+/**
+ * One lock for every run that is not fully isolated, named after the shared resources rather than
+ * after this run's container.
+ *
+ * Naming it after `CONTAINER` undid the widening above: a run overriding only the container name
+ * is still not isolated — it takes the default port 54329 — but it would have taken a *different*
+ * lock, so the two never contended and raced on the port instead. What is being reserved is the
+ * default instance, and that is one thing however a partial override spells it.
+ */
+const LOCK_PATH = path.join(
+  os.tmpdir(),
+  FULLY_ISOLATED
+    ? `orbit-data-migration-check-${CONTAINER}.lock`
+    : "orbit-data-migration-check-default.lock",
+);
 
 /**
  * Reserves the shared instance, atomically.

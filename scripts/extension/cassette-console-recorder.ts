@@ -916,7 +916,16 @@ export async function recordCassette(
       report(`detail ${detailCount}/${operations.length}`);
       const recordedDetail = await recordRequest(deps, detailUrl.toString());
       entries.push(recordedDetail.entry);
-      if (isSuccessStatus(recordedDetail.entry.status) && !isErrorEnvelope(recordedDetail.body)) {
+      // A 2xx with no parsed body — 204, or JSON that did not parse — is not an error envelope,
+      // so it used to count as usable and suppress the "no detail responses" warning. Replay
+      // then produces no `operationDetail` at all and the contract test rejects the cassette for
+      // a gap the recorder said was not there. Usable means there is something to replay.
+      const detailBody = asObject(recordedDetail.body);
+      if (
+        isSuccessStatus(recordedDetail.entry.status) &&
+        detailBody !== null &&
+        !isErrorEnvelope(recordedDetail.body)
+      ) {
         usableDetails += 1;
       }
     }

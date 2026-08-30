@@ -109,8 +109,17 @@ function requestsPerKey(urls: string[]): Record<string, number> {
  * `milliseconds: 0` placeholder is a fall-through there and a value under `??`.
  */
 function fallbackIdentity(operation: Record<string, unknown>): string {
-  const asNumber = (value: unknown): number | null =>
-    typeof value === "number" && Number.isFinite(value) ? value : null;
+  // `toNum`, restated: a numeric string is a number to the connector. Without the coercion,
+  // `"1787227199000"` fell through to `new Date("1787227199000")`, which does not parse it, and
+  // two distinct operations collapsed into one `fallback:null:null:…` identity.
+  const asNumber = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
   const ms = (value: unknown): number | null => {
     const numberValue = asNumber(value);
     if (numberValue !== null) return numberValue;
@@ -449,6 +458,18 @@ describe("tbank-web response contract", () => {
     const otherNoDescription = { ...debit, description: undefined, merchant: { name: "Магнит" } };
     expect(fallbackIdentity(noDescription)).toBe(fallbackIdentity(otherNoDescription));
     expect(fallbackIdentity(noDescription)).toContain(":unknown");
+
+    // Numeric strings are numbers to the connector's `toNum`. Without the same coercion here,
+    // `"1787227199000"` fell through to `new Date("1787227199000")`, which does not parse it, and
+    // two distinct operations collapsed into one `fallback:null:null:…`.
+    const asStrings = {
+      operationTime: { milliseconds: "1787227199000" },
+      accountAmount: { value: "10" },
+      description: "Пятёрочка",
+    };
+    const otherAsStrings = { ...asStrings, accountAmount: { value: "20" } };
+    expect(fallbackIdentity(asStrings)).toBe("fallback:1787227199000:10:Пятёрочка");
+    expect(fallbackIdentity(asStrings)).not.toBe(fallbackIdentity(otherAsStrings));
   });
 
   for (const cassette of cassettes) {
@@ -753,7 +774,24 @@ describe("tbank-web response contract", () => {
       for (const entry of operationsEntries) {
         const payload = (entry.body as { payload?: Array<Record<string, unknown>> })?.payload ?? [];
         for (const operation of payload) {
-          expect(operation.id ?? operation.operationId, "operation identity").toBeDefined();
+          // All three the connector keys by, not two. `buildOperationKey` falls through
+          // `id` → `operationId.value` → `authorizationId` and then to a timestamp/amount
+          // fallback, so an operation carrying only `authorizationId` — or none of the three —
+          // is one the connector handles and this used to reject, failing a cassette for holding
+          // a shape the connector explicitly supports. The fallback needs the time and the
+          // amount, and those are asserted on the next two lines, so nothing here is unchecked.
+          const identity =
+            operation.id ??
+            (operation.operationId as { value?: unknown } | undefined)?.value ??
+            operation.authorizationId;
+          const hasFallback =
+            (operation.operationTime ?? operation.debitingTime ?? operation.operationDateTime) !==
+              undefined && (operation.accountAmount ?? operation.amount) !== undefined;
+          expect(
+            identity !== undefined || hasFallback,
+            "operation identity: none of id/operationId/authorizationId, and no timestamp and " +
+              "amount for the fallback either",
+          ).toBe(true);
           expect(
             operation.operationTime ?? operation.debitingTime ?? operation.operationDateTime,
             "operation time",

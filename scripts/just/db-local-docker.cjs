@@ -749,7 +749,18 @@ function up(flags) {
 }
 
 function down() {
-  docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
+  const removed = docker(["rm", "-f", DB_CONTAINER, STORAGE_CONTAINER, AUTH_CONTAINER]);
+  // `docker rm -f` succeeds on a container that is not there, so a non-zero status here is a
+  // real failure — the daemon gone, the context unavailable, permissions changed — and the
+  // containers are still running with their ports published. Reporting "removed" over that is
+  // how a caller proceeds to build a new stack on top of the old one.
+  if (removed.status !== 0) {
+    const detail = (removed.stderr ?? "").trim();
+    throw new Error(
+      `docker rm -f did not remove the containers, so they are still running` +
+        `${detail ? `: ${detail}` : "."}`,
+    );
+  }
   log("removed");
   return 0;
 }

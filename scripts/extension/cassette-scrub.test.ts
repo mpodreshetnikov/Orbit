@@ -340,6 +340,58 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("keeps a nested name and denies one sitting on the operation", () => {
+    // `name` has to be allowed inside an operation — a currency's is "RUB" and the whole
+    // reconciliation rests on it — and a flat list could not tell that from a `name` on the
+    // operation itself, which nothing reads. An ordinary full name written there passed the
+    // walk, the string rules (which only recognise the bank's abbreviated `Given I.` form) and
+    // the reviewed-key manifest, which already knows the generic key `name`.
+    const scrubbed = scrubCassetteEntry({
+      url: "https://www.tbank.ru/api/common/v1/operations",
+      status: 200,
+      body: {
+        payload: [
+          {
+            id: "1",
+            name: "Ivan Ivanov",
+            description: "Пятёрочка",
+            accountAmount: { value: -100, currency: { name: "RUB", code: 643, strCode: "643" } },
+            brand: { name: "Пятёрочка", link: "https://5ka.ru", baseColor: "#fff" },
+            categoryInfo: { bankCategory: { id: "7", name: "Супермаркеты" } },
+          },
+        ],
+      },
+    });
+    const operation = (scrubbed.body as { payload: Array<Record<string, unknown>> }).payload[0];
+
+    expect(operation.name, "a name on the operation itself").toBe(REDACTED);
+    expect(operation.accountAmount).toEqual({
+      value: -100,
+      currency: { name: "RUB", code: 643, strCode: "643" },
+    });
+    expect(operation.brand).toEqual({
+      name: "Пятёрочка",
+      link: "https://5ka.ru",
+      baseColor: "#fff",
+    });
+    expect(operation.categoryInfo).toEqual({ bankCategory: { id: "7", name: "Супермаркеты" } });
+  });
+
+  it("scrubs a URL whatever the field is called, and rewrites nothing else", () => {
+    // The check was `key === "url"`, so a field spelled `URL` fell through to the free-text
+    // rules — which strip only the query parameters they name, and `wuid` is not among them. A
+    // browser-session `wuid` is short and alphanumeric, so no pattern rule sees it either.
+    for (const key of ["url", "URL", "Url", "href", "link"]) {
+      expect(scrubCassetteValue({ [key]: "https://www.tbank.ru/x?wuid=abc123&keep=1" })).toEqual({
+        [key]: `https://www.tbank.ru/x?wuid=${REDACTED}&keep=1`,
+      });
+    }
+    // And a URL with nothing to redact comes back exactly as it went in. Reparsing normalises —
+    // `https://5ka.ru` becomes `https://5ka.ru/` — and a scrubber that rewrites what it did not
+    // redact turns every cassette diff into noise.
+    expect(scrubUrl("https://5ka.ru")).toBe("https://5ka.ru");
+  });
+
   it("keeps a card hint as a masked last four, and nothing else in the container", () => {
     // `extractCardLast4FromOperation` reads `card.panMasked` and `card.number`. Both were being
     // denied — `card` is allowlisted, so the container survived, and then the flat operation list

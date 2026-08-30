@@ -249,24 +249,36 @@ const OPERATION_KEPT = new Set([
   "subcategory",
   "subgroup",
   "type",
-  // Nested names the mapper reaches through the keys above: `accountAmount.value`,
-  // `.currency.{code,name,strCode}`, `debitingTime.milliseconds`, `operationId.value`,
-  // `cashbackAmount.value`. They are here because the context now recurses — see below.
+]);
+
+/**
+ * The names that may appear *inside* an operation's kept objects, added to the ones above.
+ *
+ * Split from the list at the top level because a flat list cannot tell `accountAmount.currency.name`
+ * — which is "RUB", and on which the whole reconciliation rests — from a `name` sitting directly on
+ * an operation. That one is not a currency: nothing in the mapper reads it, and an ordinary full
+ * name written there survived the walk, the string rules (which only recognise the bank's
+ * abbreviated `Given I.` form) and the reviewed-key manifest, which already knows the generic key
+ * `name`. Three gates and none of them looks at a value under a name they all consider ordinary.
+ *
+ * Every name here is nested-only in the recording — checked, not assumed: the 612 operations in
+ * the committed cassette carry none of them at their own level.
+ *
+ * What the mapper reaches through the kept objects: `accountAmount.value` and
+ * `.currency.{code,name,strCode}`, `debitingTime.milliseconds`, `operationId.value`,
+ * `cashbackAmount.value`; `extractSourceBrand` takes the brand's link, logo, fallback file link
+ * and its two colours; `extractSourceCategory` takes `categoryInfo.bankCategory.{id,name}`; and
+ * the transfer heuristics read `categoryInfo.metacategory.name` and the payment's provider
+ * fields. None is personal — a merchant's site, its logo, two hex colours, a provider code.
+ */
+const OPERATION_NESTED_KEPT = new Set([
+  ...OPERATION_KEPT,
   "value",
   "currency",
   "code",
   "name",
   "strcode",
   "milliseconds",
-  // The rest of what the mapper reaches inside kept objects, found by reading it rather than by
-  // guessing: `extractSourceBrand` takes the brand's link, logo, fallback file link and its two
-  // colours; `extractSourceCategory` takes `categoryInfo.bankCategory.{id,name}`; and the
-  // transfer heuristics read `categoryInfo.metacategory.name` and the payment's provider fields.
-  // None of them is personal — a merchant's site, its logo, two hex colours and a provider code.
-  //
-  // They were being redacted, and nothing failed: the contract test replays operations and
-  // compares totals and identity, not the brand and category a row is mapped to. So the cassette
-  // was quietly replaying fake metadata. That is the gap the enriched-row assertion closes.
   "link",
   "logo",
   "filelink",
@@ -382,6 +394,34 @@ const CARD_TAIL_KEYS = new Set(["cardnumber", "card_number", "pan", "panmasked",
  * elsewhere `card` is an object whose `panMasked` the importer reads. One name, two meanings.
  */
 const CONTAINER_OR_IDENTIFIER_KEYS = new Set(["account", "card"]);
+
+/**
+ * Fields whose value is a URL, so it goes through `scrubUrl` rather than the free-text rules.
+ *
+ * Matched case-insensitively, which is the point: the check here was `key === "url"`, so a field
+ * spelled `URL` fell through to `scrubFreeText` — and that only strips the query parameters it
+ * names, which does not include `wuid`. A browser-session `wuid` is short and alphanumeric, so no
+ * pattern rule sees it either, and it survived to the file. `scrubUrl` knows the whole list.
+ *
+ * The brand's own URLs are here as well. They carry nothing sensitive today, so routing them
+ * through the URL scrubber changes nothing in the committed cassette — but a URL is a URL, and
+ * the rule that decides what to do with one should not depend on which field it arrived in.
+ */
+const URL_VALUED_KEYS = new Set([
+  "url",
+  "uri",
+  "href",
+  "link",
+  "logo",
+  "filelink",
+  "logofile",
+  "roundedlogo",
+  "icon",
+  "iconurl",
+  "imageurl",
+  "redirecturl",
+  "callbackurl",
+]);
 
 /**
  * Inside a `card` container, the names that may survive — as a masked last four and nothing more.
@@ -581,7 +621,12 @@ export function scrubUrl(rawUrl: string): string {
     const value = url.searchParams.get(name);
     if (value !== null) url.searchParams.set(name, scrubFreeText(value));
   }
-  return `${scrubFreeText(`${url.origin}${url.pathname}`)}${url.search}${url.hash}`;
+  const scrubbed = `${scrubFreeText(`${url.origin}${url.pathname}`)}${url.search}${url.hash}`;
+  // Parsing and re-serialising a URL normalises it — `https://5ka.ru` comes back as
+  // `https://5ka.ru/` — and a scrubber that rewrites what it did not redact turns every diff of
+  // a committed cassette into noise, and makes "the file is unchanged" stop meaning anything.
+  // Reparsing the input the same way is what tells a normalisation apart from a redaction.
+  return scrubbed === new URL(rawUrl).toString() ? rawUrl : scrubbed;
 }
 
 export function scrubFreeText(value: string): string {
@@ -627,6 +672,7 @@ type ScrubContext =
   | "receiptItem"
   | "merchant"
   | "operation"
+  | "operationNested"
   | "loyalty"
   | "reference"
   | "card";
@@ -666,6 +712,14 @@ function redactSubtree(value: unknown): unknown {
   }
   return result;
 }
+
+/**
+ * Both depths of an operation. The rules below — the loyalty diversion, the card container, the
+ * object diversion — apply the same way whether the object is the operation itself or something
+ * inside it; only the allowlist differs, which is the whole point of the split.
+ */
+const isOperationContext = (context: ScrubContext): boolean =>
+  context === "operation" || context === "operationNested";
 
 function scrubValue(value: unknown, context: ScrubContext = "open"): unknown {
   if (typeof value === "string") {
@@ -740,11 +794,14 @@ function scrubValue(value: unknown, context: ScrubContext = "open"): unknown {
           entry !== null && typeof entry === "object" ? scrubValue(entry, "loyalty") : entry;
         continue;
       }
-      if (context === "operation" && LOYALTY_KEYS.has(lowered)) {
+      if (isOperationContext(context) && LOYALTY_KEYS.has(lowered)) {
         result[key] = scrubValue(entry, "loyalty");
         continue;
       }
-      if (context === "operation" && !OPERATION_KEPT.has(lowered)) {
+      // The allowlist is the depth's own. A `name` here is a currency's "RUB" one level
+      // down and nothing the mapper reads at the top, so the two cannot share a list.
+      const kept = context === "operation" ? OPERATION_KEPT : OPERATION_NESTED_KEPT;
+      if (isOperationContext(context) && !kept.has(lowered)) {
         result[key] = redactSubtree(entry);
         continue;
       }
@@ -761,7 +818,7 @@ function scrubValue(value: unknown, context: ScrubContext = "open"): unknown {
             : redactSubtree(entry);
         continue;
       }
-      if (context === "operation" && CONTAINER_OR_IDENTIFIER_KEYS.has(lowered)) {
+      if (isOperationContext(context) && CONTAINER_OR_IDENTIFIER_KEYS.has(lowered)) {
         // One name, two meanings — `"card": "151542334"` is the account holder's internal
         // reference and `"card": { panMasked: … }` is the thing the importer reads. The scalar
         // goes, the container gets its own scoped context. Without this the container fell into
@@ -793,14 +850,14 @@ function scrubValue(value: unknown, context: ScrubContext = "open"): unknown {
       // — which is how the tier above was published under a key that was itself perfectly
       // ordinary. `merchant` and `receipt` still divert into their own contexts below.
       if (
-        context === "operation" &&
+        isOperationContext(context) &&
         entry !== null &&
         typeof entry === "object" &&
         !MERCHANT_KEYS.has(lowered) &&
         !RECEIPT_KEYS.has(lowered) &&
         !FORM_FIELD_BAG_KEYS.has(lowered)
       ) {
-        result[key] = scrubValue(entry, "operation");
+        result[key] = scrubValue(entry, "operationNested");
         continue;
       }
       if (context === "merchant" && !MERCHANT_KEPT.has(lowered)) {
@@ -855,7 +912,7 @@ function scrubValue(value: unknown, context: ScrubContext = "open"): unknown {
         result[key] = entry === null ? null : REDACTED;
         continue;
       }
-      if (key === "url" && typeof entry === "string") {
+      if (URL_VALUED_KEYS.has(lowered) && typeof entry === "string") {
         result[key] = scrubUrl(entry);
         continue;
       }
