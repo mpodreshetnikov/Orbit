@@ -238,7 +238,7 @@ function describeSchedule(
       return `schedule daily_times${at()}${overrideNote()}`;
     case "interval_hours":
       return (
-        `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
+        `schedule interval_hours every ${intervalText(schedule.interval?.every)}h` +
         // The generator reads `every` as text and casts it to `int`
         // (`(v_schedule->'interval'->>'every')::int`), which a fractional value
         // does not survive -- and `medScheduleSchema` requires a whole number of
@@ -262,7 +262,7 @@ function describeSchedule(
         (Array.isArray(schedule.times) && schedule.times.length > 0) ||
         typeof schedule.time_of_day === "string";
       return (
-        `schedule interval_days every ${schedule.interval?.every ?? "?"}d` +
+        `schedule interval_days every ${intervalText(schedule.interval?.every)}d` +
         `${at()}` +
         `${stored ? "" : " — no time recorded, so the generator uses its default"}` +
         `${overrideNote()}`
@@ -465,6 +465,19 @@ function hasDuplicateTimes(schedule?: MedSchedule | null): boolean {
 }
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/**
+ * An interval, or `?` where the row does not hold one.
+ *
+ * `interval.every` is a number in the schema and unconstrained jsonb in the
+ * column, so an imported row can carry a string as long as a note there — and
+ * this value is interpolated into every listing line for that course. A
+ * non-finite value is not an interval anyway: the generator casts it and
+ * generates nothing.
+ */
+function intervalText(every: unknown): string {
+  return typeof every === "number" && Number.isFinite(every) ? String(every) : "?";
+}
 
 /** The time the generator doses an `interval_days` course at when the row records none. */
 const GENERATOR_DEFAULT_TIME = "09:00";

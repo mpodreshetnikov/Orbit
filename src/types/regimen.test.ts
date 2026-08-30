@@ -133,6 +133,21 @@ describe("getCourseWindow", () => {
     ).toBe("completed");
   });
 
+  it("refuses a course length that runs off the end of the calendar", () => {
+    // `medDurationSchema` puts no maximum on `days`, so this is writable — and
+    // the shifted date reads NaN in every field, which `statusBoundary` would
+    // then shift again and never complete the course.
+    expect(
+      getCourseWindow({ type: "for_days", days: 1_000_000_000, start_date: "2026-09-01" }),
+    ).toEqual({ start: "2026-09-01", end: null });
+    expect(
+      getEffectiveStatus(
+        regimen("active", { type: "for_days", days: 1_000_000_000, start_date: "2026-09-01" }),
+        { today: "2026-09-05" },
+      ),
+    ).toBe("active");
+  });
+
   it("refuses a window that ends before it starts", () => {
     // Nothing forbids the pair on write, and the generator answers it by
     // producing no events at all, so "2026-09-10 to 2026-09-01" would describe

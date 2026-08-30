@@ -120,10 +120,16 @@ function asDate(value: unknown): string | null {
   return parsed.toISOString().slice(0, 10) === day ? day : null;
 }
 
-function shiftDate(date: string, days: number): string {
+function shiftDate(date: string, days: number): string | null {
   // Midday, so a DST transition cannot push the arithmetic onto the wrong day.
   const shifted = new Date(date + "T12:00:00");
   shifted.setDate(shifted.getDate() + days);
+  // `medDurationSchema` puts no maximum on `days`, so a schema-valid
+  // `days: 1000000000` runs off the end of the `Date` range and every field
+  // reads NaN. Rendering "NaN-NaN-NaN" would be the least of it: `statusBoundary`
+  // shifts that end again, so the course would never complete and the
+  // duplicate-medication guard would keep offering it as running.
+  if (Number.isNaN(shifted.getTime())) return null;
   return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}-${String(shifted.getDate()).padStart(2, "0")}`;
 }
 

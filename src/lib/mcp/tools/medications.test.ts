@@ -1039,6 +1039,30 @@ describe("list_medication_doses", () => {
     expect(text).toContain("no time recorded, so the generator uses its default");
   });
 
+  it("does not echo a malformed interval into every listing line", async () => {
+    // `interval.every` is a number in the schema and unconstrained jsonb in the
+    // column, and it is interpolated into the line for that course.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Imported",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "interval_hours", interval: { every: "x".repeat(500) } },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("every ?h");
+    expect(text).not.toContain("x".repeat(40));
+  });
+
   it("does not present a fractional hourly interval as the plan", async () => {
     // `medScheduleSchema` requires a whole number of days but not of hours, and
     // the generator casts `every` from text to int — which 1.5 does not
