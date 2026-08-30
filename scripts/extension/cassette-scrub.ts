@@ -258,6 +258,25 @@ const OPERATION_KEPT = new Set([
   "name",
   "strcode",
   "milliseconds",
+  // The rest of what the mapper reaches inside kept objects, found by reading it rather than by
+  // guessing: `extractSourceBrand` takes the brand's link, logo, fallback file link and its two
+  // colours; `extractSourceCategory` takes `categoryInfo.bankCategory.{id,name}`; and the
+  // transfer heuristics read `categoryInfo.metacategory.name` and the payment's provider fields.
+  // None of them is personal — a merchant's site, its logo, two hex colours and a provider code.
+  //
+  // They were being redacted, and nothing failed: the contract test replays operations and
+  // compares totals and identity, not the brand and category a row is mapped to. So the cassette
+  // was quietly replaying fake metadata. That is the gap the enriched-row assertion closes.
+  "link",
+  "logo",
+  "filelink",
+  "basecolor",
+  "basetextcolor",
+  "bankcategory",
+  "metacategory",
+  "providerid",
+  "providergroupid",
+  "paymenttype",
 ]);
 
 /**
@@ -395,6 +414,19 @@ const LONG_DIGIT_RUN = /\d{13,}/g;
  * with a 7 would be reported as a phone.
  */
 const PHONE_NUMBER = /(?<![\d+])\+?[78]\d{10}(?!\d)/g;
+
+/**
+ * The same two shapes, written the way a human writes them: `+7 (953) 591-29-02`,
+ * `7-953-591-29-02`, `5536 9138 1234 5678`. Contiguous-digit patterns match none of these, and
+ * both the scrub and the leak scan are built on those patterns — so a formatted number survived
+ * everything. Only spaces, dashes and parentheses count as separators, which is what keeps these
+ * from running across a serialized JSON: a comma, a quote or a dot ends the match.
+ *
+ * Thirteen digits for the run, the same threshold the contiguous rule uses; eleven for the phone,
+ * because that is what a Russian number has and thirteen would miss it.
+ */
+const SEPARATED_PHONE = /(?<![\d])\+?[78](?:[\s()\-]*\d){10}(?!\d)/g;
+const SEPARATED_DIGIT_RUN = /(?<![\d])\d(?:[\s\-]*\d){12,}(?!\d)/g;
 
 /**
  * The bank's masked counterparty name: a given name, a space, one capital and a full stop —
@@ -545,7 +577,9 @@ export function scrubFreeText(value: string): string {
   const scrubbed = value
     .replace(/([?&](?:sessionid|session_id|token|access_token|auth)=)[^&#\s"']+/gi, `$1${REDACTED}`)
     .replace(LONG_DIGIT_RUN, REDACTED)
+    .replace(SEPARATED_DIGIT_RUN, REDACTED)
     .replace(PHONE_NUMBER, REDACTED)
+    .replace(SEPARATED_PHONE, REDACTED)
     .replace(UUID, REDACTED)
     .replace(ORDER_REFERENCE, `$1${REDACTED}`);
   return stripCorrelationToken(scrubbed);
@@ -982,6 +1016,29 @@ export function findCassetteLeaks(serialized: string): string[] {
     if (reported.has(leak)) continue;
     reported.add(leak);
     leaks.push(leak);
+  }
+
+  // The formatted forms, reported the same way. Without these the scan agrees with a scrub that
+  // could not see them either, which is the failure mode that made the earlier shared guard
+  // useless: a check built on the same blind spot as the thing it checks.
+  for (const [pattern, label] of [
+    [SEPARATED_DIGIT_RUN, "separated digit run"],
+    [SEPARATED_PHONE, "separated phone number"],
+  ] as const) {
+    for (const match of serialized.matchAll(pattern)) {
+      const start = match.index;
+      if (start === undefined) continue;
+      // Separators are optional in these patterns, so they also match what the contiguous rules
+      // above already reported. Only the formatted forms are this pair's to report.
+      if (!/[\s()\-]/.test(match[0])) continue;
+      const key = enclosingKey(serialized, start);
+      if (key && REFERENCE_KEYS.has(key.toLowerCase())) continue;
+
+      const leak = key ? `${label} under "${key}": ${match[0]}` : `${label}: ${match[0]}`;
+      if (reported.has(leak)) continue;
+      reported.add(leak);
+      leaks.push(leak);
+    }
   }
 
   for (const match of serialized.matchAll(POSTAL_ADDRESS)) {

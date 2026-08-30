@@ -322,6 +322,29 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("removes a phone or a card written the way a person writes it", () => {
+    // Contiguous-digit rules match none of these, and both the scrub and the scan were built on
+    // those rules — so a formatted number survived the whole pipeline. A comma, a quote or a dot
+    // ends the match, which is what keeps the pattern from running across serialized JSON.
+    expect(scrubFreeText("позвонил +7 (953) 591-29-02")).toBe(`позвонил ${REDACTED}`);
+    expect(scrubFreeText("7-953-591-29-02")).toBe(REDACTED);
+    expect(scrubFreeText("5536 9138 1234 5678")).toBe(REDACTED);
+    // Merchant text, a date and an amount are not identifiers.
+    expect(scrubFreeText("Пятёрочка 42")).toBe("Пятёрочка 42");
+    expect(scrubFreeText("2026-08-30")).toBe("2026-08-30");
+    expect(scrubFreeText("1 234.56")).toBe("1 234.56");
+  });
+
+  it("reports a formatted number the field rules did not catch", () => {
+    expect(findCassetteLeaks('{"note":"+7 (953) 591-29-02"}')).toEqual([
+      'separated phone number under "note": +7 (953) 591-29-02',
+    ]);
+    // The contiguous rules already report an unseparated run; this pair does not repeat them.
+    expect(findCassetteLeaks('{"mystery":"7384440901188332"}')).toEqual([
+      'long digit run under "mystery": 7384440901188332',
+    ]);
+  });
+
   it("reports a correlation token the field rules did not catch", () => {
     expect(findCassetteLeaks('{"somewhereElse":"B86939CMC - Неизвестный тип"}')).toEqual([
       'correlation token under "somewhereElse": B86939CMC',
