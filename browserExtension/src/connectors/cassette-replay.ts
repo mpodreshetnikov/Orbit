@@ -53,9 +53,6 @@ function matchKey(rawUrl: string): string {
   }
 }
 
-/** Statuses the Fetch spec says carry no body; `new Response(body, { status })` throws for them. */
-const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
-
 export function createCassettePlayer(cassette: Cassette): CassettePlayer {
   const byKey = new Map<string, CassetteEntry[]>();
   for (const entry of cassette.entries) {
@@ -84,13 +81,6 @@ export function createCassettePlayer(cassette: Cassette): CassettePlayer {
       }
 
       consumed.add(entry);
-      // The Fetch spec forbids a body on these statuses, and the `Response` constructor throws
-      // rather than ignoring one. `JSON.stringify(null)` is the four-character string "null",
-      // which counts as a body — so a cassette holding a 204 blew the replay up on construction,
-      // before the connector saw anything it could handle.
-      if (NULL_BODY_STATUSES.has(entry.status)) {
-        return new Response(null, { status: entry.status });
-      }
       return new Response(JSON.stringify(entry.body ?? null), {
         status: entry.status,
         headers: { "Content-Type": "application/json" },
