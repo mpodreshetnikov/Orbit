@@ -136,31 +136,54 @@ A new migration's timestamp must sort **after** every migration already on the b
 
 ## Automated Review Policy
 
-Codex reviews a pull request on its `New commits` trigger, so **one push to an open pull request is one review round**. Rounds are the unit the Codex allowance is spent in, and the code review shares that allowance with the security review lane running beside it. A branch that pushes twenty times buys twenty code reviews and starves the security review: on PR #20 the last security review that completed was the fourth round, and every one of the seventeen rounds after it returned a usage-limit message instead.
+Codex reviews a pull request **once, when it is opened**, and does not look again unless asked with an `@codex review` comment. Pushing afterwards reviews nothing: a branch can change completely between the opening review and the merge, and the reviewer will never see it.
 
-Three rules bound that, in the order they bite.
+So the failure mode is not spending rounds — it is merging code no reviewer read. On PR #20, under the previous `New commits` trigger, twenty-one rounds went by and two thirds of the findings were one defect class re-found in a new field. Under this trigger the same branch would have had **one** review, of its first commit, and the twenty rounds' worth of real findings — including four `P1`s — would have merged unseen.
 
-### Answer a round by class, not by finding
+A requested review still costs from the allowance the security review draws on, so it is bought deliberately rather than asked for by reflex. These rules say when it is worth buying.
+
+### The reviewed commit is a watermark
+
+The review reads one commit and names it: `Reviewed commit` in the review body, and the `Commit` column of its review summary comment. Everything pushed after that commit is unreviewed.
+
+The question at handoff is therefore never "has this been reviewed" but "has **this head** been reviewed", and the gap between the two is what the rules below measure. Record which commit the review read, so the gap can be measured later by someone who was not there.
+
+### Request another review when any of these holds
+
+Measure the change since the watermark with `review-delta`, which reports the first two:
+
+1. **New surface** — more than **200 reviewable added lines** since the reviewed commit. Below that the sample here has yielded nothing: #19's entire 194-line change drew no findings, while #21's 651 drew eight.
+2. **A sensitive surface, at any size** — migrations, `supabase/db`, edge functions, the OAuth and auth routes, the workflows that deploy and hold secrets, the connector that scrapes and scrubs upstream data, and recorded fixtures. Each is on the list because a reviewer caught something there, or because the failure is unrecoverable once merged. Recorded fixtures are on it precisely because they are excluded from the line count: nobody reads them in sequence, which is how #18 put thirteen phone numbers, fourteen counterparty names and ten personal messages into one that the repository's own leak scan had cleared.
+3. **A shape changed** — the fixes since the last review moved the column a value is read from, the order rows are selected in, the key a lookup uses, or a signature other code depends on. No script sees this; it is the class that produced nine of #20's findings and four of its six `P1`s, each one the previous fix leaking into a reader it had not updated.
+
+### Do not request one when
+
+- The change is only the last review's findings, fixed locally and in place.
+- It is only documentation, comments, formatting, or test names.
+- It is only a merge of the base branch with no conflict resolved.
+- Nothing has been pushed since the watermark, or a review is already running or already requested for this head.
+
+A review that reads a change it has already seen returns findings you have already answered, and spends the lane that reads the next branch for leaked data.
+
+### The request budget
+
+**At most two requested reviews beyond the one the pull request opened with.** After the second, hand the pull request to its owner with what is unreviewed, why another pass looked worthwhile, and what it would cost.
+
+The budget is per pull request. Rebasing does not reset it, reopening does not reset it, and a requested review that returned no finding still counts — it was still a review.
+
+### Answer a review by class, not by finding
 
 A finding is one instance of a rule. Fix the rule, everywhere in the change it reaches, before pushing.
 
 - `Bound notes rendered into MCP text responses` is not a defect about notes. It is "every unbounded value rendered into a text response", and it also covers the ingredients, the schedule slots, the units and the intervals. Applying it to notes alone is what turned one rule into seven rounds on #20; date validation took five more the same way.
 - The reviewer names one occurrence because it read one file. After fixing, re-read the whole diff for other occurrences of the same class, and fix those in the same push.
-- A fix that changes a shape — the column a value is read from, the order rows are selected in — is applied at every reader of that shape in the same push. Nine of #20's findings were the previous round's fix leaking into a reader it had not updated, four of them at `P1`.
+- Push the whole answer at once, and request any further review only on a finished state. A review asked for mid-fix reads a half-answered branch and spends a round saying so.
 
-### One push per round
-
-Batch every finding from a round into one push. Pushing per finding starts a fresh round against a half-answered review, which is how a five-finding round becomes five rounds.
-
-### The round budget
-
-**Three automatic rounds per pull request.** After the third, stop pushing and hand the pull request to its owner: what is fixed, what is still open, and what the next round would cost. Further rounds are bought deliberately with an explicit `@codex review`, not spent by default.
-
-The budget is per pull request rather than per day, and neither rebasing nor reopening resets it. A round that produced no finding still counts — it was still a review.
+Not every finding needs a push, and these cost no round at all — answer them on the thread instead: a finding that is real but not this branch's (record it as a task and say where), a finding whose premise does not hold (say which part, with the evidence), and a finding deliberately not taken (say why). Resolve the threads you addressed either way.
 
 ## Reviewable Change Size
 
-Rounds grow superlinearly with the size of the diff, so the cheapest way to bound them is to bound the change. Measured across four pull requests:
+A pull request gets one review pass on open, so its size decides how much of it that single pass has to carry. Under the previous `New commits` trigger the same relationship showed up as rounds, which grew superlinearly with the diff — the measurement that set this limit:
 
 | PR  | Files | Added lines | Rounds |
 | --- | ----- | ----------- | ------ |
@@ -175,6 +198,7 @@ A pull request may add at most **1000 reviewable lines** against its base branch
 - `.large-change-allowlist` is the reviewed exception. An entry is `path <glob> # <why this content is not reviewable>` or `branch <name> # <why this change cannot be split>`; the rationale is required and an entry without one fails the check.
 - Prefer splitting to allowlisting. The limit is not a claim about how much work belongs in a branch — it is a claim about how much a reviewer reads in one pass, and this reviewer bills per pass.
 - The limit sits in the gap between the largest change that reviewed cleanly and the smallest that did not, rather than just above the former: a limit set at 800 fires on ordinary well-tested changes the size of #21, and a gate that fires on ordinary work is a gate somebody turns off.
+- The rounds column is history rather than a forecast: reviews no longer arrive per push. It is kept because it is the evidence the limit rests on — a change that needed twenty-one passes to converge is not one a single pass reads adequately.
 
 ## Change-Type Check Matrix
 

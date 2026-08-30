@@ -62,6 +62,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `agent-skills-sync`: `just agent-skills-sync` (mirror `.agents/skills` into `.claude/skills`)
 - `agent-skills-check`: `just agent-skills-check` (fail when `.claude/skills` has drifted from `.agents/skills`; included in `quality`)
 - `pr-size`: `just quality-pr-size` (fail when a branch adds more reviewable lines against its base than one automated review pass is worth; included in `quality`; canonical policy in `docs/QUALITY.md`)
+- `review-delta`: `just review-delta <reviewed-commit>` (report whether the change since the last automated review is worth requesting another review for; advisory, never gates CI; canonical policy in `docs/QUALITY.md`)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
 - `mcp-grafana-token-create`: `just mcp-grafana-token-create [service_account_id] [token_name]` (create a local Grafana service account token for MCP via Grafana API; auto-creates `mcp-local` when id is omitted)
 - `mcp-grafana-token-list`: `just mcp-grafana-token-list [service_account_id]` (list local Grafana service account token metadata via Grafana API; defaults to `mcp-local`)

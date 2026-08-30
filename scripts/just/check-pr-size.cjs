@@ -4,11 +4,11 @@
  * Fails when a branch adds more reviewable lines against its base branch than one automated review
  * pass is worth.
  *
- * Codex reviews on its `New commits` trigger, so one push to an open pull request is one review
- * round, and the rounds share an allowance with the security review lane beside them. Rounds grow
- * superlinearly with the diff: measured on Orbit, 46 added lines drew none, 651 drew five, and 3011
- * drew twenty-one over nineteen hours. Bounding the diff is the cheapest thing that bounds the rounds,
- * and here the fix is free -- split the branch -- rather than after the allowance is spent.
+ * Codex reviews a pull request once, when it is opened, so the diff is what that single pass has to
+ * carry. The measurement this limit rests on was taken under the previous `New commits` trigger,
+ * where the same relationship showed up as rounds: 46 added lines drew none, 651 drew five, and
+ * 3011 drew twenty-one over nineteen hours. A change that needed twenty-one passes to converge is
+ * not one a single pass reads adequately, and here the fix is free -- split the branch.
  *
  * "Reviewable" excludes recorded fixtures, lockfiles, generated artifacts and the generated skill
  * mirror. Nobody reads those line by line, and counting them would fail a cassette recording with a
@@ -138,27 +138,46 @@ function isReviewable(filePath, allowlist) {
 /**
  * @param {{ numstat: string, allowlist: ReturnType<typeof parseAllowlist>, branch: string | null, limit?: number }} input
  */
-function evaluateChangeSize({ numstat, allowlist, branch, limit = MAX_REVIEWABLE_ADDED_LINES }) {
+/**
+ * git numstat into `{ path, added }`, one entry per changed file. Shared with
+ * check-review-delta.cjs so both measure a diff the same way.
+ *
+ * @param {string} numstat
+ * @returns {{ path: string, added: number }[]}
+ */
+function parseNumstat(numstat) {
   /** @type {{ path: string, added: number }[]} */
-  const reviewable = [];
-  let excludedAdded = 0;
+  const files = [];
 
   for (const line of numstat.split(/\r?\n/)) {
     const match = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line.trim());
     if (!match) {
       continue;
     }
-    // git reports "-" for a binary file. It has no lines to read, so it is never reviewable text.
-    const added = match[1] === "-" ? 0 : Number(match[1]);
-    // A rename is reported as "old => new" or with braces; the new path is what the reviewer reads.
-    const filePath = match[3].includes(" => ")
-      ? match[3].replace(/\{([^{}]*) => ([^{}]*)\}/, "$2").replace(/^.* => /, "")
-      : match[3];
+    files.push({
+      // git reports "-" for a binary file. It has no lines to read, so it is never reviewable text.
+      added: match[1] === "-" ? 0 : Number(match[1]),
+      // A rename is reported as "old => new" or with braces; the new path is what the reviewer
+      // reads, and git keeps the unchanged prefix outside the braces.
+      path: match[3].includes(" => ")
+        ? match[3].replace(/\{([^{}]*) => ([^{}]*)\}/, "$2").replace(/^.* => /, "")
+        : match[3],
+    });
+  }
 
-    if (isReviewable(filePath, allowlist)) {
-      reviewable.push({ path: filePath, added });
+  return files;
+}
+
+function evaluateChangeSize({ numstat, allowlist, branch, limit = MAX_REVIEWABLE_ADDED_LINES }) {
+  /** @type {{ path: string, added: number }[]} */
+  const reviewable = [];
+  let excludedAdded = 0;
+
+  for (const file of parseNumstat(numstat)) {
+    if (isReviewable(file.path, allowlist)) {
+      reviewable.push(file);
     } else {
-      excludedAdded += added;
+      excludedAdded += file.added;
     }
   }
 
@@ -285,10 +304,9 @@ function formatFailure({ addedLines, limit, files, largest, excludedAdded }, bas
     }. Largest:`,
     ...largest.map((file) => `  ${String(file.added).padStart(6)}  ${file.path}`),
     "",
-    "One push to an open pull request is one automated review round, and rounds grow superlinearly",
-    "with the diff -- 651 added lines drew five rounds here, 3011 drew twenty-one. The rounds",
-    "share an allowance with the security review lane, so a branch this size spends the review",
-    "that reads the next branch for leaked data.",
+    "A pull request is reviewed once, on open, so this whole diff gets one pass. Measured here,",
+    "651 added lines took five passes to converge and 3011 took twenty-one -- a change this size",
+    "is not one a single review reads adequately, and what it misses merges unseen.",
     "",
     "Split the branch into changes that land on their own. If this content is not read line by",
     "line, exempt its path in .large-change-allowlist with the reason; if the change genuinely",
@@ -353,6 +371,8 @@ module.exports = {
   ZERO_SHA,
   evaluateChangeSize,
   globToRegExp,
+  parseNumstat,
+  readUntrackedNumstat,
   isReviewable,
   parseAllowlist,
   parseArgs,

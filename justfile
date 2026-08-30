@@ -146,6 +146,11 @@ quality-migration-order *base:
 quality-pr-size *base:
   node scripts/just/check-pr-size.cjs {{ if base == "" { "" } else { "--base " + base } }}
 
+# Report whether the change made since the last automated review is worth requesting another one.
+# Pass the commit that review read (Codex names it as "Reviewed commit"). Advisory, not a gate.
+review-delta since:
+  node scripts/just/check-review-delta.cjs --since {{ since }}
+
 # All static quality checks: skill sync, migration order, PR size, format, lint, typecheck (no
 # builds, DB, tests). The skill, migration-order and size checks run first because they finish in
 # milliseconds, so a drifted skill mirror, a misordered migration or a branch too large to review

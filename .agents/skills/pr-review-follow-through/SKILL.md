@@ -1,6 +1,6 @@
 ---
 name: pr-review-follow-through
-description: Finish a pull request and stop, instead of watching it forever or answering it one finding at a time. Use after opening a PR, when an automated reviewer posts findings, when asked to watch, monitor, babysit or autofix one, and whenever deciding whether to push again or check again. Defines how to answer a review round, how many rounds a PR may spend, and what "done with this PR" means.
+description: Finish a pull request and stop, instead of watching it forever or handing over a head nobody reviewed. Use after opening a PR, when an automated reviewer posts findings, when deciding whether to ask for another review after pushing more work, when asked to watch, monitor, babysit or autofix one, and whenever deciding whether to push or check again. The automated review arrives once on open; this defines when to request another, how to answer one, and what "done with this PR" means.
 ---
 
 # PR Review Follow-Through
@@ -12,56 +12,71 @@ Canonical policy — the round budget, the class rule, the reviewable size limit
 `docs/QUALITY.md` under **Automated Review Policy** and **Reviewable Change Size**. This is how to
 apply it.
 
-## One Push Is One Review Round
+## The Review Arrives Once, On Open
 
-The automated reviewer runs on a **`New commits` trigger**. Every push to an open pull request buys
-a fresh review, and those reviews spend the same allowance as the security review lane beside them.
-A branch that pushes twenty times spends twenty rounds and starves the lane that reads the next
-branch for leaked credentials and personal data.
+The automated reviewer runs when a pull request is **opened**, and not again unless asked with an
+`@codex review` comment. It reads one commit and names it — `Reviewed commit` in the review body,
+and the `Commit` column of its summary comment. Everything pushed after that is unreviewed.
 
-So the round is the unit of cost, and pushing is what spends it. Nothing arrives on its own between
-pushes: there is still nothing to poll for.
+So the risk is no longer burning rounds. It is handing over a branch whose head no reviewer has
+seen: the opening review read your first commit, and eight pushes of real work landed behind it.
 
-## Answering A Round
+Treat that commit as a **watermark**, and carry it: when you hand the pull request over, say which
+commit was reviewed and what has changed since.
 
-Three rules, applied in order, on every round.
+## Asking For Another Review
 
-### 1. Fix the class, not the finding
+Canonical policy is `docs/QUALITY.md` under **Automated Review Policy**. Applied:
+
+### 1. Measure the gap
+
+    just review-delta <reviewed-commit>
+
+It reports the reviewable lines added since that commit and whether any of it landed on a sensitive
+surface — migrations, `supabase/db`, edge functions, the OAuth and auth routes, the deploy
+workflows, the scraping connector, and recorded fixtures. Fixtures are on that list *because* they
+are excluded from the line count: nobody reads them in sequence, which is how #18 put thirteen
+phone numbers and ten personal messages into one the leak scan had cleared.
+
+### 2. Add the judgement the script cannot make
+
+Request a review, whatever the script said, when the work since the watermark **changed a shape**
+other code reads — the column a value comes from, the order rows are selected in, the key a lookup
+uses, a signature. That is the class that produced nine of #20's findings and four of its six
+`P1`s, every one of them the previous fix leaking into a reader it had not updated.
+
+Do **not** request one when the change is only the last review's findings fixed in place, only
+docs, comments, formatting or test names, only a clean base merge, or when nothing has been pushed
+since the watermark. A review of a change it has already seen returns findings you have already
+answered.
+
+### 3. Ask on a finished state, and at most twice
+
+Comment `@codex review` once the branch is in a state you would hand over: fixes batched, checks
+green. A review asked for mid-fix reads a half-answered branch and spends its pass saying so.
+
+**At most two requested reviews beyond the opening one.** After the second, hand the pull request
+to its owner with what is unreviewed and why another pass looked worthwhile. The budget is per pull
+request; rebasing and reopening do not reset it, and a request that returned no finding still spent
+one.
+
+## Answering A Review
+
+### Fix the class, not the finding
 
 A finding is one instance of a rule. Find the rule, then fix it everywhere in the change it reaches
 — in the same push.
 
 - "Bound the notes rendered into the text response" is not about notes. It is *every unbounded value
   rendered into a text response*, and it also covers the ingredients, the slots, the units and the
-  intervals. Answering only the named field is what turned one rule into seven rounds on PR #20.
-- The reviewer named one occurrence because it read one file. Before pushing, re-read the whole
-  diff for other occurrences of the same class and fix those too.
-- A fix that changes a **shape** — the column a value is read from, the order rows are selected in,
-  the key a lookup uses — is applied at every reader of that shape in the same push. Nine of #20's
-  findings were the previous round's fix leaking into a reader it had not updated, four of them at
-  `P1`. A fix that creates the next round's finding has not saved a round.
+  intervals. Answering only the named field is what turned one rule into seven rounds on #20; date
+  validation took five more.
+- The reviewer named one occurrence because it read one file. Before pushing, re-read the whole diff
+  for other occurrences of the same class and fix those too.
 
-### 2. One push per round
+### Some findings are answered on the thread, not by a push
 
-Batch every finding from a round into a single push, together with the class sweep above and the
-checks that prove it. Pushing per finding starts a fresh round against a half-answered review, which
-is exactly how a five-finding round becomes five rounds.
-
-### 3. Three rounds, then hand it over
-
-**Three automatic rounds per pull request.** After the third, stop pushing. Report to the owner:
-what is fixed, what is still open, and what another round would cost. Further rounds are bought
-deliberately with an explicit `@codex review`, not spent by default.
-
-The budget is per pull request. Rebasing does not reset it, reopening does not reset it, and a round
-that produced no finding still counts — it was still a review.
-
-If the third round arrives with the branch still visibly unfinished, that is the signal the change
-is too large to review in one pass, not a reason to spend a fourth. Say so and propose the split.
-
-### What still gets answered outside the budget
-
-Not every finding needs a push. Answer on the thread instead, and it costs no round at all:
+These cost nothing and still close the finding:
 
 - A finding that is **real but not this branch's** — pre-existing on the base, or in code the diff
   does not touch. Record it as a task and say where, rather than widening the pull request.
@@ -124,8 +139,10 @@ the only timer a finished PR may have.
 
 ## Never
 
-- Never push once per finding. One push answers the whole round.
-- Never spend a fourth automatic round without the owner asking for it.
+- Never push once per finding. One push answers the whole review.
+- Never hand over a branch whose head is unreviewed without saying so. Silence reads as reviewed.
+- Never request a review for a change the last one already saw, and never a third beyond the
+  opening one without the owner asking.
 - Never fix only the field a finding names when the rule reaches further. The next round will find
   the rest, at full price.
 - Never poll a PR on a timer because it is open. Open and waiting is its normal state. The single
@@ -143,8 +160,8 @@ When handing off a PR, state:
 
 - `pr`: the link.
 - `checks`: CI outcome, or that the repository runs none on this PR.
-- `review`: rounds spent out of the budget, findings addressed, and anything deliberately not
-  addressed with the reason.
+- `review`: the reviewed commit, what has changed since it, whether another review was requested
+  and why or why not, findings addressed, and anything deliberately not addressed with the reason.
 - `waiting_on`: what a human has to do next.
 - `watching`: that the session stays subscribed until an hour of quiet passes, or that it has
   already unsubscribed and stopped.

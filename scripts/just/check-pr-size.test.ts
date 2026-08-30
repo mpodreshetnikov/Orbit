@@ -266,25 +266,28 @@ describe("base ref resolution", () => {
     expect(result.stderr).toContain("Cannot resolve base ref");
   });
 
-  it("checks against the base it was given", () => {
-    const result = runScript([], { PR_SIZE_BASE: "origin/main" });
+  // These assert that a base was resolved and measured against, not what the verdict was: the
+  // verdict depends on how large the working tree happens to be, and a test that reads it would
+  // fail on any branch legitimately over the limit -- including one raising the limit.
+  function resolvedAgainst(result: ReturnType<typeof runScript>) {
+    expect(result.status, result.stderr).toBeLessThan(2);
+    return `${result.stdout}${result.stderr}`;
+  }
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("origin/main");
+  it("checks against the base it was given", () => {
+    expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: "origin/main" }))).toContain(
+      "origin/main",
+    );
   });
 
   it("treats the zero sha as no baseline rather than an unresolvable ref", () => {
-    const result = runScript([], { PR_SIZE_BASE: checkPrSize.ZERO_SHA });
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("origin/main");
+    expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: checkPrSize.ZERO_SHA }))).toContain(
+      "origin/main",
+    );
   });
 
   it("falls back to the default base when none is requested", () => {
-    const result = runScript([]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("PR size OK");
+    expect(resolvedAgainst(runScript([]))).toMatch(/against origin\/main|reviewable lines against/);
   });
 });
 
