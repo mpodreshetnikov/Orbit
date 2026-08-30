@@ -139,5 +139,25 @@ group decides — and, because the same names came back from the detail response
 no group in sight, the masked-name form is redacted wherever a whole value has it and reported
 by the scan when it survives.
 
+## `known-keys.json`
+
+Every key that may appear anywhere in a committed cassette, written down. A key outside this list
+fails `cassette-scrub.test.ts`.
+
+It exists because naming fields did not converge. Seven review rounds each found one more thing in
+this recording that nothing read and that should not have been published — a phone number, a
+counterparty, a private transfer note, a cashier, a shop's street address, a course of prescription
+medication, a till number, eleven cities, four hundred correlation tokens. Every round's fix named
+the field that round had found. The scrubber is allowlist-based now, so an unknown field is
+redacted rather than shipped; this file adds the other half, which is that an unknown field is
+_seen_. When the bank adds one, or a recording covers an endpoint the last one did not, the test
+goes red and somebody has to look at what is in it.
+
+So when it fails: open the recording, read what the bank actually puts in that key, and only then
+add it here. If it should survive the scrub, add it to the matching allowlist in
+`cassette-scrub.ts` as well — `OPERATION_KEPT`, `MERCHANT_KEPT`, `RECEIPT_KEPT` or
+`RECEIPT_ITEM_KEPT`. Adding it here alone means the key is known and still redacted, which is the
+right default.
+
 Re-record when the bank changes its responses — `tbank-web.contract.test.ts` is what tells you
 that has happened, by failing rather than silently mapping fewer operations.

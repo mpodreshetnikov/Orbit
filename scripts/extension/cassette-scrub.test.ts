@@ -476,6 +476,53 @@ describe("cassette scrubbing", () => {
     expect(scrubFreeText("4276123456789012")).toBe(REDACTED);
   });
 
+  it("finds no key in a committed cassette that nobody has reviewed", () => {
+    // The mechanism, as distinct from the rules.
+    //
+    // Every rule in this file was added after a review round found the field it covers, and the
+    // next round found the next field — seven times. The rules are shape- and allowlist-based now,
+    // so an unknown field is redacted rather than shipped, but nothing yet made an unknown field
+    // *visible*. This does: the set of keys that may appear in a committed cassette is written
+    // down, and a key outside it fails here.
+    //
+    // What that buys is a person looking. When the bank adds a field, or a recording covers an
+    // endpoint the last one did not, this goes red and someone has to decide what the field is
+    // before adding it to the list. That is the step that was missing every one of those seven
+    // times. Adding a key is a one-line diff in `known-keys.json` and it shows up in review.
+    const cassettesRoot = path.resolve(__dirname, "..", "..", "test/fixtures/tbank/cassettes");
+    const manifestPath = path.join(cassettesRoot, "known-keys.json");
+    if (!fs.existsSync(cassettesRoot) || !fs.existsSync(manifestPath)) return;
+
+    const known = new Set<string>(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
+    const seen = new Set<string>();
+    const collect = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(collect);
+      if (!value || typeof value !== "object") return;
+      for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+        seen.add(key);
+        collect(nested);
+      }
+    };
+
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (full.endsWith(".json") && full !== manifestPath) {
+          collect(JSON.parse(fs.readFileSync(full, "utf8")));
+        }
+      }
+    };
+    walk(cassettesRoot);
+
+    const unknown = [...seen].filter((key) => !known.has(key)).sort();
+    expect(
+      unknown,
+      `keys no one has reviewed: ${unknown.join(", ")}. Look at what the bank puts in each, ` +
+        `then add it to known-keys.json — and to the scrubber's allowlists if it should survive.`,
+    ).toEqual([]);
+  });
+
   it("finds no secrets in any committed cassette", () => {
     // Second line of defence: the scrubber knowing about a field is not the same as the
     // field being gone from the files that are actually in the repository.

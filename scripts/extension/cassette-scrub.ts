@@ -197,6 +197,63 @@ const COUNTERPARTY_TEXT_KEYS = new Set(["description", "subcategory", "merchantk
  * built on, `mcc` classifies the purchase, and `id` is the fallback for the receipt request key.
  * Everything else goes, `region` included, and so does whatever the bank nests there next.
  */
+/**
+ * The operation itself, default-deny — the fourth object here to become so, and the last one that
+ * was still allow-by-default.
+ *
+ * Seven rounds of review each found one more field that nothing read and that should not have
+ * been in the file: a phone, a counterparty, a transfer note, a cashier, an address, a till, a
+ * city, a correlation token. Every fix named the field that round had found, and the next round
+ * found the next field. In the real recording an operation carries 67 distinct top-level keys and
+ * the connector reads 33 of them; the other 34 were shipped because nobody had thought about
+ * them. `locations` is among those 34 — empty in this recording, by the luck of one account and
+ * two months, and nothing would have stopped it.
+ *
+ * So the list below is what the connector reads, taken from its own mapper, and everything else
+ * goes whether or not anyone has thought about it. A kept key falls through to the ordinary rules,
+ * which is what keeps `cardNumber` masked, `message` redacted and `merchant` default-deny in turn.
+ */
+const OPERATION_KEPT = new Set([
+  "accountamount",
+  "amount",
+  "authorizationid",
+  "brand",
+  "card",
+  "cardnumber",
+  "cashback",
+  "cashbackamount",
+  "category",
+  "categoryinfo",
+  "comment",
+  "debitingtime",
+  "description",
+  "documents",
+  "group",
+  "hasshoppingreceipt",
+  "icon",
+  "id",
+  "loyaltybonus",
+  "loyaltybonussummary",
+  "loyaltyunits",
+  "mcc",
+  "mccstring",
+  "merchant",
+  "merchantkey",
+  "message",
+  "operationdatetime",
+  "operationid",
+  "operationtime",
+  "payment",
+  "spendingcategory",
+  "status",
+  "subcategory",
+  "subgroup",
+  "type",
+]);
+
+/** The two endpoints whose payload is operations. */
+const OPERATION_PATHS = new Set(["/api/common/v1/operations", "/api/common/v1/operation"]);
+
 const MERCHANT_KEYS = new Set(["merchant"]);
 const MERCHANT_KEPT = new Set(["name", "mcc", "id"]);
 
@@ -491,7 +548,7 @@ function maskCardTail(value: unknown): string {
  * would then collapse to the same `id:REDACTED` on replay. It has to reach one level down
  * because the bank wraps them as `{"operationId":{"value":"…"}}`.
  */
-type ScrubContext = "open" | "formFieldBag" | "receipt" | "receiptItem" | "merchant";
+type ScrubContext = "open" | "formFieldBag" | "receipt" | "receiptItem" | "merchant" | "operation";
 
 /**
  * One item, with its name replaced by its position. The walk redacts the name along with every
@@ -578,6 +635,13 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
             : REDACTED;
         continue;
       }
+      if (context === "operation" && !OPERATION_KEPT.has(lowered)) {
+        result[key] =
+          entry === null || typeof entry === "object"
+            ? scrubValue(entry, false, "operation")
+            : REDACTED;
+        continue;
+      }
       if (context === "merchant" && !MERCHANT_KEPT.has(lowered)) {
         result[key] =
           entry === null || typeof entry === "object"
@@ -639,6 +703,38 @@ export function scrubCassetteValue(value: unknown): unknown {
   return scrubValue(value, false);
 }
 
+/**
+ * The same walk, but the envelope's `payload` is treated as operations.
+ *
+ * Which it is cannot be told from the JSON — an operation has no marker distinguishing it from
+ * any other object the bank returns — so it is told from the URL the entry was recorded against,
+ * which the entry carries. Everything outside `payload` keeps the ordinary rules: `trackingId` is
+ * an identifier, `errorMessage` gets its token stripped.
+ */
+function scrubOperationsBody(body: unknown): unknown {
+  const envelope = body && typeof body === "object" && !Array.isArray(body) ? body : null;
+  if (!envelope) return scrubCassetteValue(body);
+
+  const fields = envelope as Record<string, unknown>;
+  // Scrubbed together so the ordinary sibling rules still see each other, then reassembled in the
+  // recorded order — a reordered envelope would be a whole-file diff saying nothing.
+  const scrubbedRest = scrubCassetteValue(
+    Object.fromEntries(Object.entries(fields).filter(([key]) => key.toLowerCase() !== "payload")),
+  ) as Record<string, unknown>;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (key.toLowerCase() !== "payload") {
+      result[key] = scrubbedRest[key];
+      continue;
+    }
+    result[key] = Array.isArray(value)
+      ? value.map((operation) => scrubValue(operation, false, "operation"))
+      : scrubValue(value, false, "operation");
+  }
+  return result;
+}
+
 export interface CassetteEntry {
   url: string;
   status: number;
@@ -652,10 +748,20 @@ export function scrubCassetteEntry(entry: CassetteEntry): CassetteEntry {
     headers[name] = isIdentifierKey(name) ? REDACTED : scrubFreeText(headerValue);
   }
 
+  let path: string | null = null;
+  try {
+    path = new URL(entry.url).pathname;
+  } catch {
+    path = null;
+  }
+
   return {
     url: scrubUrl(entry.url),
     status: entry.status,
-    body: scrubCassetteValue(entry.body),
+    body:
+      path && OPERATION_PATHS.has(path)
+        ? scrubOperationsBody(entry.body)
+        : scrubCassetteValue(entry.body),
     headers,
   };
 }
