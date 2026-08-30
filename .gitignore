@@ -69,6 +69,9 @@ next-env.d.ts
 # in their own private repository (`orbit-tasks`), which its install script links into a local
 # checkout at these paths. The links must never be committed here — this repository is public.
 /docs/tasks
+# PLANS.md moved into docs/tasks/ and is no longer linked on its own. The line stays while
+# installations made before the move still have a leftover file at the old path: dropping it now
+# would turn that remnant into an untracked file of a public repository.
 /docs/PLANS.md
 /.agents/skills/task-registry
 /.claude/skills/task-registry
