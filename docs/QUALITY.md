@@ -123,6 +123,17 @@ Every behavior change must update tests in the same change set.
 - When the manifest version changes, build the release bundle with `extension-release-build`.
 - Production publication uses `extension-release-publish` and updates the public `extension-releases` bucket metadata consumed by the web app.
 
+## Migration Order Policy
+
+A new migration's timestamp must sort **after** every migration already on the branch it will merge into. Reusing an existing timestamp is the same violation: it does not sort after, and duplicate versions collide in the remote migration history.
+
+- Production applies migrations with `supabase db push --include-all`, so a file added below the latest already-deployed one runs against a schema the newer migrations have already changed.
+- `db-reset` cannot detect that: it always replays from scratch in filename order, so the order it proves is not the order production uses. The two agree only for migrations that sort after everything already deployed.
+- If your branch was opened before another migration merged, rename yours to a later timestamp. The contents do not change, only the ordering.
+- CI enforces the rule with `quality-migration-order`, which runs inside `quality` and compares against the pull request's actual base branch.
+- `supabase/migrations/.out-of-order-allowlist` is the reviewed exception for ordering only. Each entry is `<14-digit version> # <why it is safe against the newer schema>`; the rationale is required and an entry without one fails the check.
+- A duplicate timestamp is never allowlistable. The remote migration history is keyed by version, so a second file carrying one another migration already uses cannot be recorded as its own migration and its SQL silently never runs. Give it a timestamp nothing else uses.
+
 ## Change-Type Check Matrix
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.

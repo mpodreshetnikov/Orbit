@@ -136,10 +136,15 @@ agent-skills-sync:
 agent-skills-check:
   node scripts/just/sync-agent-skills.cjs --check
 
-# All static quality checks: skill sync, format, lint, typecheck (no builds, DB, tests).
-# The skill check runs first because it finishes in milliseconds, so a drifted skill mirror is
-# reported before the slow lanes start.
-quality: agent-skills-check quality-format-check quality-lint-parallel quality-typecheck
+# Fail when a branch adds a migration that sorts before one the base branch already carries.
+# Defaults to origin/main; pass a ref for a branch that targets something else.
+quality-migration-order *base:
+  node scripts/just/check-migration-order.cjs {{ if base == "" { "" } else { "--base " + base } }}
+
+# All static quality checks: skill sync, migration order, format, lint, typecheck (no builds, DB,
+# tests). The skill and migration-order checks run first because they finish in milliseconds, so a
+# drifted skill mirror or a misordered migration is reported before the slow lanes start.
+quality: agent-skills-check quality-migration-order quality-format-check quality-lint-parallel quality-typecheck
 
 # Run current smoke gate (web production build).
 quality-smoke-build: web-build-production
