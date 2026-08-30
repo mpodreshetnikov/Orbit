@@ -127,6 +127,238 @@ function installPageGlobals(
   };
 }
 
+/**
+ * One replay per cassette, shared by every test that needs its result.
+ *
+ * Replaying is by far the most expensive thing this suite does — it drives the whole connector,
+ * including its paced receipt requests — and two tests need what comes out of it: the one that
+ * checks the connector asked for exactly what was recorded, and the one that checks the enriched
+ * records it came back with still map into complete rows. Running it once and awaiting the same
+ * promise twice keeps those two checks independent without paying for the walk twice.
+ */
+interface ReplayResult {
+  extraction: Awaited<ReturnType<typeof __test__.extractOperationsInPage>>;
+  player: ReturnType<typeof createCassettePlayer>;
+  fetched: string[];
+}
+
+const replays = new Map<string, Promise<ReplayResult>>();
+
+function replayCassette(cassette: Cassette): Promise<ReplayResult> {
+  const started = replays.get(cassette.name) ?? runReplay(cassette);
+  replays.set(cassette.name, started);
+  return started;
+}
+
+async function runReplay(cassette: Cassette): Promise<ReplayResult> {
+  const player = createCassettePlayer(cassette);
+
+  // The window is taken from the recording itself, and the clock is frozen at its end. The
+  // player ignores `start` and `end` when matching, but not how many requests are made: asked
+  // for a wider window than was recorded, the connector walks extra ranges and reuses the first
+  // recorded response for each. Freezing the clock makes the request sequence the recorded
+  // sequence, which is the property the recorder is built to guarantee.
+  const bounds = cassette.entries
+    .filter((entry) => entry.url.includes("/api/common/v1/operations"))
+    .map((entry) => new URL(entry.url).searchParams)
+    .map((params) => ({ start: Number(params.get("start")), end: Number(params.get("end")) }))
+    .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end));
+  const windowFromMs = Math.min(...bounds.map(({ start }) => start));
+  const windowToMs = Math.max(...bounds.map(({ end }) => end));
+
+  // Fake timers first: enabling them replaces `performance`, which would take the resource
+  // timeline the page globals install with it — and endpoint discovery would then find nothing,
+  // silently, with every enrichment entry left unused.
+  vi.useFakeTimers();
+  vi.setSystemTime(windowToMs);
+  const fetched: string[] = [];
+  const restore = installPageGlobals(player, cassette, fetched);
+  try {
+    // The connector paces its receipt requests 300ms apart, which is fifteen seconds of real
+    // waiting for a full budget. Fake timers turn that into nothing, and draining them alongside
+    // the promise is what lets the paced chain run to completion.
+    const pending = __test__.extractOperationsInPage({
+      windowFromIso: new Date(windowFromMs).toISOString(),
+      sessionId: "REDACTED",
+      parseStrategy: "fast",
+    });
+    await vi.runAllTimersAsync();
+    const extraction = await pending;
+    return { extraction, player, fetched };
+  } finally {
+    // Order matters. `installPageGlobals` captured the `performance` object that fake timers had
+    // already replaced, so restoring after `useRealTimers()` writes the fake-timer
+    // `getEntriesByType` onto the real object — leaking a mocked resource timeline into every
+    // later cassette and every later test in this worker, where endpoint discovery would quietly
+    // resolve against it.
+    restore();
+    vi.useRealTimers();
+  }
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const hasText = (value: unknown): boolean => typeof value === "string" && value.trim().length > 0;
+
+const isHttpUrl = (value: unknown): boolean => {
+  if (!hasText(value)) return false;
+  try {
+    return /^https?:$/i.test(new URL(value as string).protocol);
+  } catch {
+    return false;
+  }
+};
+
+const isFiniteNumber = (value: unknown): boolean =>
+  typeof value === "number" && Number.isFinite(value);
+
+/** The receipt items as the mapper finds them, through both shapes it accepts. */
+function receiptItemsOf(record: Record<string, unknown>): unknown[] {
+  const shoppingReceipt = asRecord(record.shoppingReceipt);
+  const receipt =
+    asRecord(asRecord(shoppingReceipt?.payload)?.receipt) ?? asRecord(shoppingReceipt?.receipt);
+  return Array.isArray(receipt?.items) ? (receipt.items as unknown[]) : [];
+}
+
+/**
+ * A field the mapper derives from the recording: where the value comes from, and where it is
+ * supposed to end up.
+ *
+ * The table exists instead of a list of one-off assertions because the failure it guards against
+ * is a class, not a field. An over-eager scrub, a mapper that stops reading a key, a response
+ * shape that moves one — all three look the same from here: something the recording carries that
+ * the row no longer does. Adding the next derived field is one entry.
+ */
+interface EnrichedSurface {
+  name: string;
+  /**
+   * The endpoint whose recorded response this surface is derived from. A cassette that never
+   * captured that endpoint cannot check the surface, and saying which one it is here is what
+   * separates "this recording does not cover it" from "this recording lost it" — the second is
+   * a failure and the first is not.
+   */
+  derivedFrom: string;
+  /** True when the recorded input carries what this surface is derived from. */
+  recorded: (record: Record<string, unknown>, row: Record<string, unknown>) => boolean;
+  /** True when the mapped row exposes it. */
+  mapped: (row: Record<string, unknown>) => boolean;
+}
+
+const OPERATIONS_PATH = "/api/common/v1/operations";
+const OPERATION_DETAIL_PATH = "/api/common/v1/operation";
+const SHOPPING_RECEIPT_PATH = "/api/common/v1/shopping_receipt";
+const TRANCHE_OFFERS_PATH = "/api/common/v1/tranche_offers";
+
+const operationOf = (record: Record<string, unknown>) => asRecord(record.operation) ?? {};
+const brandOf = (record: Record<string, unknown>) => asRecord(operationOf(record).brand);
+const sourceBrandOf = (row: Record<string, unknown>) => asRecord(row.source_brand);
+
+const ENRICHED_SURFACES: EnrichedSurface[] = [
+  {
+    // `source_brand` is dropped whole for the bank's own labels ("внутрибанковский перевод" and
+    // the rest), so each brand surface is conditioned on the row having kept the brand at all —
+    // otherwise every transfer in the recording would read as a lost enrichment.
+    name: "source_brand.website_url",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record, row) => sourceBrandOf(row) !== null && isHttpUrl(brandOf(record)?.link),
+    mapped: (row) => sourceBrandOf(row)?.website_url != null,
+  },
+  {
+    name: "source_brand.logo_url",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record, row) =>
+      sourceBrandOf(row) !== null &&
+      (isHttpUrl(brandOf(record)?.logo) || isHttpUrl(brandOf(record)?.fileLink)),
+    mapped: (row) => sourceBrandOf(row)?.logo_url != null,
+  },
+  {
+    name: "source_brand.base_color",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record, row) => sourceBrandOf(row) !== null && hasText(brandOf(record)?.baseColor),
+    mapped: (row) => sourceBrandOf(row)?.base_color != null,
+  },
+  {
+    name: "source_category",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record) => {
+      const bankCategory = asRecord(asRecord(operationOf(record).categoryInfo)?.bankCategory);
+      return hasText(bankCategory?.id) || hasText(bankCategory?.name);
+    },
+    mapped: (row) => asRecord(row.source_category) !== null,
+  },
+  {
+    name: "operation_icon_url",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record) => isHttpUrl(operationOf(record).icon),
+    mapped: (row) => row.operation_icon_url != null,
+  },
+  {
+    name: "mcc",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record) => {
+      const operation = operationOf(record);
+      const candidates = [
+        operation.mccString,
+        operation.mcc,
+        asRecord(asRecord(operation.merchant)?.mcc)?.value,
+      ];
+      return candidates.some((candidate) => /\d{3,4}/.test(String(candidate ?? "")));
+    },
+    mapped: (row) => row.mcc != null,
+  },
+  {
+    name: "cashback_amount",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record) => {
+      const operation = operationOf(record);
+      if (isFiniteNumber(asRecord(operation.loyaltyBonusSummary)?.amount)) return true;
+      if (isFiniteNumber(asRecord(operation.cashbackAmount)?.value)) return true;
+      if (isFiniteNumber(operation.cashback)) return true;
+      const bonuses = Array.isArray(operation.loyaltyBonus) ? operation.loyaltyBonus : [];
+      return bonuses.some((bonus) => isFiniteNumber(asRecord(asRecord(bonus)?.amount)?.value));
+    },
+    mapped: (row) => row.cashback_amount != null,
+  },
+  {
+    name: "receipt_tracking_id",
+    derivedFrom: SHOPPING_RECEIPT_PATH,
+    recorded: (record) => hasText(asRecord(record.shoppingReceipt)?.trackingId),
+    mapped: (row) => row.receipt_tracking_id != null,
+  },
+  {
+    name: "comment",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record) => {
+      const operation = operationOf(record);
+      const detail = asRecord(record.operationDetail);
+      const payload = asRecord(detail?.payload);
+      return [
+        operation.message,
+        operation.comment,
+        payload?.message,
+        payload?.comment,
+        detail?.comment,
+      ].some(hasText);
+    },
+    mapped: (row) => row.comment != null,
+  },
+  {
+    name: "raw_payload.operation_detail",
+    derivedFrom: OPERATION_DETAIL_PATH,
+    recorded: (record) => asRecord(record.operationDetail) !== null,
+    mapped: (row) => asRecord(asRecord(row.raw_payload)?.operation_detail) !== null,
+  },
+  {
+    name: "raw_payload.tranche_offers",
+    derivedFrom: TRANCHE_OFFERS_PATH,
+    recorded: (record) => asRecord(record.trancheOffers) !== null,
+    mapped: (row) => asRecord(asRecord(row.raw_payload)?.tranche_offers) !== null,
+  },
+];
+
 describe("tbank-web response contract", () => {
   it("reports when there is nothing to check", () => {
     // Recording is manual, so an empty fixture directory is an expected state — but it must
@@ -264,106 +496,168 @@ describe("tbank-web response contract", () => {
       // the connector itself does the asking. A recorder that drifts from any of them produces
       // a cassette that looks complete and replays as misses, which is precisely the failure
       // this whole arrangement exists to prevent — and it would pass every other test here.
-      const player = createCassettePlayer(cassette);
+      const { extraction, player, fetched } = await replayCassette(cassette);
 
-      // The window is taken from the recording itself, and the clock is frozen at its end. The
-      // player ignores `start` and `end` when matching, but not how many requests are made:
-      // asked for a wider window than was recorded, the connector walks extra ranges and reuses
-      // the first recorded response for each. Freezing the clock makes the request sequence the
-      // recorded sequence, which is the property the recorder is built to guarantee.
-      const bounds = operationsEntries
-        .map((entry) => new URL(entry.url).searchParams)
-        .map((params) => ({ start: Number(params.get("start")), end: Number(params.get("end")) }))
-        .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end));
-      const windowFromMs = Math.min(...bounds.map(({ start }) => start));
-      const windowToMs = Math.max(...bounds.map(({ end }) => end));
+      // A miss is the whole point: it means the connector asked for something the recorder
+      // never recorded, so the offline path silently loses that enrichment in production.
+      expect(player.misses, `player misses: ${player.misses.join(", ")}`).toEqual([]);
+      expect(extraction.blocked_reason ?? null).toBeNull();
+      // `mapping_drop_counts` is written into the debug payload at runtime but is not on its
+      // declared type, so it is read positionally rather than by widening a shipped interface
+      // for a test. Non-empty means the connector saw operations it could not map.
+      const debugRecord = (extraction.debug ?? {}) as Record<string, unknown>;
+      expect(debugRecord.mapping_drop_counts ?? {}).toEqual({});
+      expect(extraction.parsed_transactions_count).toBeGreaterThan(0);
 
-      // Fake timers first: enabling them replaces `performance`, which would take the resource
-      // timeline the page globals install with it — and endpoint discovery would then find
-      // nothing, silently, with every enrichment entry left unused.
-      vi.useFakeTimers();
-      vi.setSystemTime(windowToMs);
-      const fetched: string[] = [];
-      const restore = installPageGlobals(player, cassette, fetched);
-      try {
-        // The connector paces its receipt requests 300ms apart, which is fifteen seconds of
-        // real waiting for a full budget. Fake timers turn that into nothing, and draining them
-        // alongside the promise is what lets the paced chain run to completion.
-        const pending = __test__.extractOperationsInPage({
-          windowFromIso: new Date(windowFromMs).toISOString(),
-          sessionId: "REDACTED",
-          parseStrategy: "fast",
-        });
-        await vi.runAllTimersAsync();
-        const extraction = await pending;
+      // The receipt accounting is where recorder and connector have to agree most exactly:
+      // the budget, which operations it is spent on, and what counts as a receipt. Derived
+      // from this cassette rather than fixed, because a valid recording may hold fewer
+      // receipts than the budget — the recorder says as much in a warning — and hard-coding
+      // the dense month's fifty would fail every sparser cassette committed later.
+      const recordedReceipts = cassette.entries.filter((entry) =>
+        entry.url.includes("/api/common/v1/shopping_receipt"),
+      ).length;
+      const receiptDebug = extraction.debug?.receipt_enrichment;
+      expect(receiptDebug?.requested_count).toBe(recordedReceipts);
+      // Every issued request ends in exactly one of the two outcomes; which of them it is
+      // depends on what the bank returned when the recording was made.
+      expect((receiptDebug?.success_count ?? 0) + (receiptDebug?.failed_count ?? 0)).toBe(
+        recordedReceipts,
+      );
 
-        // A miss is the whole point: it means the connector asked for something the recorder
-        // never recorded, so the offline path silently loses that enrichment in production.
-        expect(player.misses, `player misses: ${player.misses.join(", ")}`).toEqual([]);
-        expect(extraction.blocked_reason ?? null).toBeNull();
-        // `mapping_drop_counts` is written into the debug payload at runtime but is not on its
-        // declared type, so it is read positionally rather than by widening a shipped interface
-        // for a test. Non-empty means the connector saw operations it could not map.
-        const debugRecord = (extraction.debug ?? {}) as Record<string, unknown>;
-        expect(debugRecord.mapping_drop_counts ?? {}).toEqual({});
-        expect(extraction.parsed_transactions_count).toBeGreaterThan(0);
+      // Recorded responses nothing asked for are the same drift seen from the other side:
+      // the recorder captured requests the connector does not make.
+      const unusedPaths = player.unused().map((entry) => new URL(entry.url).pathname);
+      expect(unusedPaths, `unused: ${unusedPaths.join(", ")}`).toEqual([]);
 
-        // The receipt accounting is where recorder and connector have to agree most exactly:
-        // the budget, which operations it is spent on, and what counts as a receipt. Derived
-        // from this cassette rather than fixed, because a valid recording may hold fewer
-        // receipts than the budget — the recorder says as much in a warning — and hard-coding
-        // the dense month's fifty would fail every sparser cassette committed later.
-        const recordedReceipts = cassette.entries.filter((entry) =>
-          entry.url.includes("/api/common/v1/shopping_receipt"),
-        ).length;
-        const receiptDebug = extraction.debug?.receipt_enrichment;
-        expect(receiptDebug?.requested_count).toBe(recordedReceipts);
-        // Every issued request ends in exactly one of the two outcomes; which of them it is
-        // depends on what the bank returned when the recording was made.
-        expect((receiptDebug?.success_count ?? 0) + (receiptDebug?.failed_count ?? 0)).toBe(
-          recordedReceipts,
-        );
+      // Zero misses and zero unused entries still do not pin the request count. When a match
+      // key runs out of entries the player hands back the first one again rather than
+      // reporting a miss, so an extra range request — the very drift this test exists to
+      // catch — would leave both those assertions green. Counting requests per key is what
+      // closes that: the connector must ask for each key exactly as often as the recording
+      // holds it.
+      expect(requestsPerKey(fetched), "request count per endpoint").toEqual(
+        requestsPerKey(cassette.entries.map((entry) => entry.url)),
+      );
 
-        // Recorded responses nothing asked for are the same drift seen from the other side:
-        // the recorder captured requests the connector does not make.
-        const unusedPaths = player.unused().map((entry) => new URL(entry.url).pathname);
-        expect(unusedPaths, `unused: ${unusedPaths.join(", ")}`).toEqual([]);
+      // The count alone still does not pin the walk. `start` and `end` are excluded from the
+      // match key on purpose — splitting legitimately re-asks for the same data with different
+      // bounds — so a `buildRanges` that moved every boundary while making the same number of
+      // calls would replay the recorded payloads against ranges nobody recorded, and every
+      // assertion above would stay green. The bounds are compared here, in order, because the
+      // player hands operations bodies back in recorded order and that order only means
+      // anything if the ranges are the recorded ranges.
+      const bounds = (urls: string[]) =>
+        urls
+          .filter((url) => url.includes("/api/common/v1/operations"))
+          .map((url) => {
+            const params = new URL(url).searchParams;
+            return `${params.get("start")}..${params.get("end")}`;
+          });
+      expect(bounds(fetched), "range bounds, in order").toEqual(
+        bounds(cassette.entries.map((entry) => entry.url)),
+      );
+    });
 
-        // Zero misses and zero unused entries still do not pin the request count. When a match
-        // key runs out of entries the player hands back the first one again rather than
-        // reporting a miss, so an extra range request — the very drift this test exists to
-        // catch — would leave both those assertions green. Counting requests per key is what
-        // closes that: the connector must ask for each key exactly as often as the recording
-        // holds it.
-        expect(requestsPerKey(fetched), "request count per endpoint").toEqual(
-          requestsPerKey(cassette.entries.map((entry) => entry.url)),
-        );
+    it(`keeps every enrichment it fetched for ${cassette.name} once the rows are built`, async () => {
+      // The replay proves the connector asked for the right things and got them back. It does
+      // not prove any of it reaches a transaction: `extractOperationsInPage` returns raw
+      // `operation_records`, and the mapping from record to row happens afterwards, in the
+      // connector's runner. So a cassette that lost its receipt items, its brand links or its
+      // category names — to an over-eager scrub, or to a mapper that stopped reading them —
+      // replays with zero misses, zero unused entries and the recorded request sequence, and
+      // leaves every assertion above green while producing rows with none of what the receipt
+      // budget and the detail walk were spent on. This is the test that fails instead.
+      const { extraction } = await replayCassette(cassette);
+      const records = (extraction.operation_records ?? []) as unknown as Array<
+        Record<string, unknown>
+      >;
+      expect(records.length, "the replay produced no operation records").toBeGreaterThan(0);
 
-        // The count alone still does not pin the walk. `start` and `end` are excluded from the
-        // match key on purpose — splitting legitimately re-asks for the same data with different
-        // bounds — so a `buildRanges` that moved every boundary while making the same number of
-        // calls would replay the recorded payloads against ranges nobody recorded, and every
-        // assertion above would stay green. The bounds are compared here, in order, because the
-        // player hands operations bodies back in recorded order and that order only means
-        // anything if the ranges are the recorded ranges.
-        const bounds = (urls: string[]) =>
-          urls
-            .filter((url) => url.includes("/api/common/v1/operations"))
-            .map((url) => {
-              const params = new URL(url).searchParams;
-              return `${params.get("start")}..${params.get("end")}`;
-            });
-        expect(bounds(fetched), "range bounds, in order").toEqual(
-          bounds(cassette.entries.map((entry) => entry.url)),
-        );
-      } finally {
-        // Order matters. `installPageGlobals` captured the `performance` object that fake timers
-        // had already replaced, so restoring after `useRealTimers()` writes the fake-timer
-        // `getEntriesByType` onto the real object — leaking a mocked resource timeline into every
-        // later cassette and every later test in this worker, where endpoint discovery would
-        // quietly resolve against it.
-        restore();
-        vi.useRealTimers();
+      const rows: Array<{ record: Record<string, unknown>; row: Record<string, unknown> }> = [];
+      const dropped: string[] = [];
+      for (const record of records) {
+        const row = __test__.mapOperationRecordToRow(record, { extractionMethod: "api" }) as Record<
+          string,
+          unknown
+        > | null;
+        if (row) rows.push({ record, row });
+        else dropped.push(JSON.stringify(record.operation ?? record).slice(0, 200));
+      }
+      // The same check the first test makes on raw payloads, made again on enriched records:
+      // enrichment merges a detail response and a receipt into the record before mapping, and a
+      // merge that mangles the operation drops a row the raw payload maps perfectly well.
+      expect(dropped, `enriched records the mapper could not read: ${dropped.join(" | ")}`).toEqual(
+        [],
+      );
+
+      // Receipt line items are what the whole receipt budget is spent on, and the one
+      // enrichment with a fallback: a row whose receipt was lost still gets a single line item
+      // standing in for the transaction, so counting rows that have line items proves nothing.
+      // Every recorded item has to reach the row it belongs to.
+      let recordsWithReceiptItems = 0;
+      for (const { record, row } of rows) {
+        const items = receiptItemsOf(record);
+        if (items.length === 0) continue;
+        recordsWithReceiptItems += 1;
+
+        const lineItems = (Array.isArray(row.line_items) ? row.line_items : []) as Array<
+          Record<string, unknown>
+        >;
+        const label = String(row.external_id ?? row.posted_at);
+        expect(lineItems.length, `line items for ${label}`).toBe(items.length);
+        for (const lineItem of lineItems) {
+          expect(hasText(lineItem.title), `line item title for ${label}`).toBe(true);
+          expect(isFiniteNumber(lineItem.amount), `line item amount for ${label}`).toBe(true);
+          // Signs have to agree with the transaction, or summing a purchase by its line items
+          // turns an expense into income.
+          const sameDirection =
+            lineItem.amount === 0 ||
+            Math.sign(lineItem.amount as number) === Math.sign(row.amount as number);
+          expect(sameDirection, `line item direction for ${label}`).toBe(true);
+        }
+        expect(row.receipt_enrichment_status, `receipt status for ${label}`).toBe("ok");
+        expect(row.receipt_line_items_skipped, `receipt skipped flag for ${label}`).toBe(false);
+      }
+      expect(
+        recordsWithReceiptItems,
+        "no replayed record carried receipt line items — the receipt budget bought nothing",
+      ).toBeGreaterThan(0);
+
+      // Every other derived field, through the table. A surface present in the recording and
+      // missing from the row is a lost enrichment whatever the cause.
+      const recordedPaths = new Set(cassette.entries.map((entry) => new URL(entry.url).pathname));
+      const lost: string[] = [];
+      const uncovered: string[] = [];
+      const notRecorded: string[] = [];
+      for (const surface of ENRICHED_SURFACES) {
+        // Nothing to say about a field whose endpoint this recording never captured: the
+        // connector could not have asked for it, so its absence from every row is correct.
+        if (!recordedPaths.has(surface.derivedFrom)) {
+          notRecorded.push(`${surface.name} (no ${surface.derivedFrom} in the recording)`);
+          continue;
+        }
+        let present = 0;
+        let exposed = 0;
+        for (const { record, row } of rows) {
+          if (!surface.recorded(record, row)) continue;
+          present += 1;
+          if (surface.mapped(row)) exposed += 1;
+        }
+        if (present === 0) uncovered.push(surface.name);
+        else if (exposed !== present) {
+          lost.push(`${surface.name}: ${present - exposed} of ${present} rows lost it`);
+        }
+      }
+      expect(lost, "recorded in the cassette, missing from the mapped row").toEqual([]);
+      // The endpoint is in the recording and not one response carried the field: that is a
+      // surface this cassette should have covered and does not — and it is exactly the shape a
+      // wholesale redaction takes, which is why it fails rather than passing quietly.
+      expect(uncovered, "the endpoint was recorded but no record carried these").toEqual([]);
+      // Said out loud rather than skipped in silence, so the gap in a cassette's coverage is
+      // visible to whoever records the next one.
+      if (notRecorded.length > 0) {
+        console.warn(`${cassette.name} cannot check: ${notRecorded.join(", ")}`);
       }
     });
 
