@@ -334,7 +334,10 @@ export function detectBlockedReason(body: unknown): string | null {
   const details = asObject(envelope.details);
   const resultCode = text(envelope.resultCode)?.toUpperCase() ?? "";
   const errorCode = text(details?.errorCode)?.toUpperCase() ?? "";
-  const httpStatusCode = details?.httpStatusCode;
+  // The connector reads this through `toNum`, so `"401"` is 401 to it. Comparing the raw value
+  // against a number made the recorder miss an envelope the connector treats as unauthorized —
+  // and a cassette recorded through one replays as a block on the first request.
+  const httpStatusCode = finiteNumber(details?.httpStatusCode);
   const message = [text(envelope.errorMessage), text(details?.message), text(details?.errorCode)]
     .filter((value): value is string => Boolean(value))
     .join(" ")
@@ -800,7 +803,11 @@ export async function recordCassette(
     }
 
     truncationUnresolved += 1;
-    incompleteStartsMs.push(range.start);
+    // Both endpoints, like the failed and error-envelope branches above. A leaf range is at most
+    // a day, but a day can straddle a Moscow month boundary — and recording only the start marks
+    // the earlier month incomplete while leaving the later one eligible for reconciliation with
+    // part of its range unread.
+    incompleteStartsMs.push(range.start, range.end);
     warnings.push(
       `A single day (${new Date(range.start).toISOString().slice(0, 10)}) came back at the page ` +
         "limit and cannot be split further — that day is incomplete in this recording, and the " +

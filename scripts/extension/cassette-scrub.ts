@@ -156,10 +156,20 @@ const COUNTERPARTY_GROUPS = new Set(["TRANSFER", "INCOME"]);
  * list of enum-like shape fields. A field the bank adds tomorrow is redacted before anyone has
  * heard of it, which is the opposite of how the rest of this file has had to work.
  */
-const FORM_FIELD_BAG_KEYS = new Set(["fieldsvalues"]);
+// `additionalInfo` is the same shape as the form-field bag — a list of label/value pairs — and
+// gets the same treatment for the same reason: the label is a caption the bank chose, the value is
+// whatever it chose to put there. In this recording that was «Номер банкомата» / `007103`: which
+// cash machine, which is a place and a time.
+const FORM_FIELD_BAG_KEYS = new Set(["fieldsvalues", "additionalinfo"]);
 
 /** What survives inside that bag: values that classify the payment rather than identify it. */
-const FORM_FIELD_BAG_KEPT = new Set(["pointertype", "workflowtype", "dstcurrency", "mcc"]);
+const FORM_FIELD_BAG_KEPT = new Set([
+  "pointertype",
+  "workflowtype",
+  "dstcurrency",
+  "mcc",
+  "fieldname",
+]);
 
 /** The fields those groups fill with a name. */
 const COUNTERPARTY_TEXT_KEYS = new Set(["description", "subcategory", "merchantkey"]);
@@ -177,6 +187,19 @@ const COUNTERPARTY_TEXT_KEYS = new Set(["description", "subcategory", "merchantk
  * Everything else — `retailPlaceAddress`, `retailPlace`, `region`, the fiscal block, the totals —
  * is redacted whether or not anyone thought of it, including whatever the bank adds next.
  */
+/**
+ * The merchant, default-deny for the third time in this file — and the reason is now a pattern
+ * rather than a guess. The receipt gave up its address; `posId` and `pointOfSaleId` gave up the
+ * till; and `merchant.region.city` gave up eleven cities across two months, which against the
+ * timestamps is where the account holder lives and where they travelled.
+ *
+ * Three fields are read and stay: `name` is the merchant text the mapper and the dedupe hash are
+ * built on, `mcc` classifies the purchase, and `id` is the fallback for the receipt request key.
+ * Everything else goes, `region` included, and so does whatever the bank nests there next.
+ */
+const MERCHANT_KEYS = new Set(["merchant"]);
+const MERCHANT_KEPT = new Set(["name", "mcc", "id"]);
+
 const RECEIPT_KEYS = new Set(["receipt"]);
 const RECEIPT_KEPT = new Set(["items", "user", "userinn"]);
 
@@ -432,7 +455,7 @@ function maskCardTail(value: unknown): string {
  * would then collapse to the same `id:REDACTED` on replay. It has to reach one level down
  * because the bank wraps them as `{"operationId":{"value":"…"}}`.
  */
-type ScrubContext = "open" | "formFieldBag" | "receipt" | "receiptItem";
+type ScrubContext = "open" | "formFieldBag" | "receipt" | "receiptItem" | "merchant";
 
 /**
  * One item, with its name replaced by its position. The walk redacts the name along with every
@@ -519,8 +542,19 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
             : REDACTED;
         continue;
       }
+      if (context === "merchant" && !MERCHANT_KEPT.has(lowered)) {
+        result[key] =
+          entry === null || typeof entry === "object"
+            ? scrubValue(entry, false, "merchant")
+            : REDACTED;
+        continue;
+      }
       if (RECEIPT_KEYS.has(lowered)) {
         result[key] = scrubValue(entry, false, "receipt");
+        continue;
+      }
+      if (MERCHANT_KEYS.has(lowered) && entry !== null && typeof entry === "object") {
+        result[key] = scrubValue(entry, false, "merchant");
         continue;
       }
       if (namesCounterparty && COUNTERPARTY_TEXT_KEYS.has(lowered)) {

@@ -214,6 +214,34 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("keeps only what the mapper reads out of a merchant", () => {
+    // Eleven cities across two months is where the account holder lives and where they travelled.
+    // `name`, `mcc` and `id` are read — the merchant text, the classification, and the fallback
+    // for the receipt request key — so they stay; the region and anything nested there next do not.
+    expect(
+      scrubCassetteValue({
+        merchant: {
+          name: "HELLO COFFEE",
+          id: "871000338074",
+          mcc: { value: "5812" },
+          region: { country: "RUS", city: "KRASNOYARSK" },
+          somethingNestedLater: { street: "пр. Мира, 1" },
+        },
+        additionalInfo: [{ fieldName: "Номер банкомата", fieldValue: "007103" }],
+      }),
+    ).toEqual({
+      merchant: {
+        name: "HELLO COFFEE",
+        id: "871000338074",
+        mcc: { value: "5812" },
+        region: { country: REDACTED, city: REDACTED },
+        somethingNestedLater: { street: REDACTED },
+      },
+      // The label is a caption the bank chose; the value is whatever it put there.
+      additionalInfo: [{ fieldName: "Номер банкомата", fieldValue: REDACTED }],
+    });
+  });
+
   it("redacts the till and the shop the bank numbers", () => {
     // Eight digits each, so no pattern rule sees them, and nothing in the connector reads either.
     // Against the timestamps and amounts already in the file they are a stable key for "which

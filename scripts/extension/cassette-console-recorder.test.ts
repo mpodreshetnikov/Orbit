@@ -465,6 +465,73 @@ describe("cassette console recorder", () => {
     expect(july2026?.complete).toBe(false);
   });
 
+  it("stops on an auth envelope whose status code is a numeric string", async () => {
+    // The connector reads `details.httpStatusCode` through `toNum`, so `"401"` is 401 to it and
+    // the replay is blocked on the first request. Comparing the raw value against a number here
+    // let the recorder carry on and produce a cassette that cannot replay at all.
+    const deps = makeDeps({
+      fetch: (async () =>
+        new Response(JSON.stringify({ details: { httpStatusCode: "401" } }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+    });
+
+    await expect(
+      recordCassette({ name: "stringy-401", pauseMs: 0, maxReceipts: 0 }, deps),
+    ).rejects.toThrow(/not authorized/);
+  });
+
+  it("marks both months when a capped leaf straddles the boundary between them", async () => {
+    // A leaf range is at most a day, but a Moscow month boundary falls inside a day. Recording
+    // only `range.start` marked the earlier month incomplete and left the later one eligible for
+    // reconciliation with part of its first day unread — an operator comparing that total against
+    // the bank would be comparing a number known to be short.
+    //
+    // July is the month under test because the window covers it end to end; August never can be,
+    // the recording stopping partway through it, so August could not tell this bug from the
+    // ordinary case.
+    const boundaryMs = Date.UTC(2026, 5, 30, 21, 0, 0); // 2026-07-01 00:00 Moscow
+    const july = Date.UTC(2026, 6, 15, 9, 0, 0);
+    const cappedPage = Array.from({ length: 100 }, (unused, index) => ({
+      ...operation(`capped-${index}`, -100),
+      debitingTime: { milliseconds: boundaryMs + 1000 },
+    }));
+
+    const deps = makeDeps({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/common/v1/operations") {
+          const start = Number(url.searchParams.get("start"));
+          const end = Number(url.searchParams.get("end"));
+          // Only the range holding the boundary saturates, so only its leaf stays capped — and
+          // that leaf begins in June, which is the whole point: June is what `range.start` names.
+          if (start <= boundaryMs && boundaryMs <= end) {
+            return new Response(JSON.stringify({ payload: cappedPage }), { status: 200 });
+          }
+          return new Response(
+            JSON.stringify({
+              payload: [
+                { ...operation("july-1", -500), debitingTime: { milliseconds: july } },
+                operation("august-1", -700),
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ payload: {} }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await recordCassette(
+      { name: "straddle", pauseMs: 0, windowDays: 85, maxReceipts: 0 },
+      deps,
+    );
+    const byMonth = new Map(result.cassette.summary?.months.map((m) => [m.month, m]) ?? []);
+
+    expect(result.cassette.summary?.truncationUnresolved).toBeGreaterThan(0);
+    expect(byMonth.get("2026-07")?.complete ?? false).toBe(false);
+  });
+
   it("refuses a recording made below the connector's receipt budget", async () => {
     // The connector's budget is fixed at 50. A recording made below it omits requests the replay
     // will still issue, so the contract test rejects it for receipt misses — handing the file

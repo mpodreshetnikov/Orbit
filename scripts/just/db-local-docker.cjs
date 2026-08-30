@@ -383,18 +383,27 @@ function applyMigrations({ from, until, skipApplied = false } = {}) {
     // DDL fails again on what already exists, and a data repair runs a second time over rows it
     // already changed. Either way the database cannot be brought forward without `--recreate`.
     // psql documents `--single-transaction` as wrapping the `-f` script in BEGIN/COMMIT.
-    const applied = psql(["--single-transaction", "-f", path.join(migrationsDir, name)], {
-      stdio: "pipe",
-    });
+    // The version insert belongs to the same transaction as the file. psql wraps every `-c` and
+    // `-f` it is given in one BEGIN/COMMIT under `--single-transaction`, so the schema change and
+    // the record of it commit together or not at all. Split across two invocations, an interrupt
+    // in between — or a failure of the unchecked second call — left the schema changed and
+    // `schema_migrations` saying the file had never run, so the next `up` replayed it and failed
+    // on DDL that already existed.
+    const applied = psql(
+      [
+        "--single-transaction",
+        "-f",
+        path.join(migrationsDir, name),
+        "-c",
+        `insert into supabase_migrations.schema_migrations (version, name) values ` +
+          `('${name.split("_")[0]}', '${name}') on conflict do nothing;`,
+      ],
+      { stdio: "pipe" },
+    );
     if (applied.status !== 0) {
       console.error(applied.stderr ?? "");
       throw new Error(`Migration failed: ${name}`);
     }
-    psql([
-      "-c",
-      `insert into supabase_migrations.schema_migrations (version, name) values ` +
-        `('${name.split("_")[0]}', '${name}') on conflict do nothing;`,
-    ]);
   }
   log(`applied ${files.length} migration(s)`);
 }
@@ -425,7 +434,12 @@ function applyDeployAndSeed({ seed }) {
   }
 
   log("seeding");
-  const seeded = psql(["-f", path.join(repoRoot, "supabase", "seed.sql")], { stdio: "pipe" });
+  // In one transaction as well. A failure late in the file used to leave every insert before it
+  // committed, and the next `up` sees a healthy database, takes the reuse path and skips seeding
+  // entirely — reporting ready over a half-seeded database that only `--recreate` repairs.
+  const seeded = psql(["--single-transaction", "-f", path.join(repoRoot, "supabase", "seed.sql")], {
+    stdio: "pipe",
+  });
   if (seeded.status !== 0) {
     console.error(seeded.stderr ?? "");
     throw new Error("seed.sql failed");
