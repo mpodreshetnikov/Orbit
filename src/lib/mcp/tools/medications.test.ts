@@ -1091,6 +1091,65 @@ describe("list_medication_doses", () => {
     expect(text).not.toContain("strength on file is for the");
   });
 
+  it("collapses a repeated time, which the generator doses only once", async () => {
+    // The generator loops both slots, but its NOT EXISTS guard and the
+    // regimen-minute unique index let only the first event exist — so promising
+    // a second 2-pill dose at 08:00 would describe an intake nothing creates.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          dose_definition: { intake: { amount: 1, unit: "pill" } },
+          schedule: { mode: "daily_times", times: ["08:00", "08:00"], amounts: [1, 2] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("at 08:00 (1 pill)");
+    expect(text).not.toContain("2 pill)");
+    expect(text).toContain("repeated times collapsed");
+  });
+
+  it("counts the interval_days fallback slot as a slot that can be overridden", async () => {
+    // The generator makes one slot from `time_of_day` and applies `amounts[0]`
+    // to it, so a 2-pill fallback slot on a 1-pill course is a real override and
+    // the strength on file is not recorded for it.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Метотрексат",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            active: [{ name: "Метотрексат", amount: 10, unit: "milligram" }],
+          },
+          schedule: {
+            mode: "interval_days",
+            interval: { every: 7 },
+            time_of_day: "20:00",
+            amounts: [2],
+          },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).toContain("at 20:00 (2 pill)");
+    expect(text).toContain("strength on file is for the 1 pill dose only");
+  });
+
   it("does not echo a due_at that is not a timestamp", async () => {
     // `formatZoned` returns a value it cannot parse verbatim, and `due_at` is an
     // unrestricted string on a jsonb column — so a malformed row would print
@@ -1203,7 +1262,8 @@ describe("list_medication_doses", () => {
             mode: "daily_times",
             times: Array.from(
               { length: 40 },
-              (_, index) => `${String(index % 24).padStart(2, "0")}:00`,
+              (_, index) =>
+                `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 === 0 ? "00" : "30"}`,
             ),
           },
         },

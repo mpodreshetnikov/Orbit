@@ -463,12 +463,18 @@ describe("logDose", () => {
     rpc: Record<string, StubResult> = {},
     planned: StubResult = { data: null },
   ) {
+    // The probe matches either timestamp in the minute, so it reads rows rather
+    // than a single row; callers still pass the one planned dose they mean.
+    const probe: StubResult = {
+      ...planned,
+      data: planned.data == null ? [] : Array.isArray(planned.data) ? planned.data : [planned.data],
+    };
     return createSupabaseStub(
       {
         med_regimens: [{ data: regimen(overrides) }],
         med_dose_events: [
           // The same-minute planned-dose probe, then the insert, then the re-read.
-          planned,
+          probe,
           { data: doseEvent() },
           { data: doseEvent({ status: "taken", taken_at: "2026-06-15T08:00:00Z" }) },
         ],
@@ -533,11 +539,14 @@ describe("logDose", () => {
       status: "taken",
     });
 
-    expect(stub.argsFor("med_dose_events", "gte")).toEqual([
-      ["scheduled_at", "2026-06-15T08:00:00.000Z"],
-    ]);
-    expect(stub.argsFor("med_dose_events", "lt")).toEqual([
-      ["scheduled_at", "2026-06-15T08:01:00.000Z"],
+    // Both timestamps: `scheduled_at` is the planned slot, `actual_at` is where
+    // a snooze moved it to and the time the read tools print, so a caller
+    // logging the dose they were just shown finds it either way.
+    expect(stub.argsFor("med_dose_events", "or")).toEqual([
+      [
+        "and(scheduled_at.gte.2026-06-15T08:00:00.000Z,scheduled_at.lt.2026-06-15T08:01:00.000Z)," +
+          "and(actual_at.gte.2026-06-15T08:00:00.000Z,actual_at.lt.2026-06-15T08:01:00.000Z)",
+      ],
     ]);
     // No status filter: a dose already `taken` or `snoozed` at that minute is
     // outside the unique index, so only this probe can stop it duplicating.
@@ -718,6 +727,32 @@ describe("logDose", () => {
 
       await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
 
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("resolves a dose snoozed to the time the caller was shown", async () => {
+      // The read tools print `actual_at`, so this is the time a caller repeats:
+      // the 09:00 dose was snoozed to 11:00 and the owner logs it at 11:00.
+      // Probing only `scheduled_at` inserted a second event, decremented stock
+      // for it, and left the snoozed reminder armed.
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T09:00:00.000Z",
+          actual_at: "2026-06-15T11:00:00.000Z",
+        },
+      ]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: "2026-06-15T11:00:00.000Z",
+        status: "taken",
+      });
+
+      expect(result.planned).toBe(true);
       expect(fake.events).toHaveLength(1);
       expect(fake.events[0].status).toBe("taken");
       expect(fake.inventory).toHaveLength(1);

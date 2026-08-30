@@ -212,23 +212,30 @@ function describeSchedule(
       : "";
   };
 
-  const at = (times?: string[], amounts?: number[]) => {
-    // `Array.isArray`, not a length check: a row whose `times` is the string
-    // "09:00" has a length and would reach `.map`, throwing and taking the
-    // whole listing down with it.
-    if (!Array.isArray(times) || times.length === 0) return "";
-    const slotAmounts = Array.isArray(amounts) ? amounts : undefined;
+  const at = () => {
+    const slots = effectiveSlots(schedule);
+    if (slots.length === 0) return "";
     const unit = unitText(dose?.intake?.unit);
-    const slots = times.map((time, index) => {
-      const amount = slotAmounts?.[index];
-      return amount == null ? time : `${time} (${amount}${unit ? ` ${unit}` : ""})`;
-    });
-    return ` at ${joinBounded(slots, SCHEDULE_SLOT_LIMIT)} (local wall clock)`;
+    // Each slot is cut as well as the list: `times` is jsonb, so one entry can
+    // be as long as a note, and bounding only their number would still let a
+    // single value fill the reply.
+    const rendered = slots.map((slot) =>
+      excerpt(
+        slot.amount == null ? slot.time : `${slot.time} (${slot.amount}${unit ? ` ${unit}` : ""})`,
+        SLOT_TEXT_LIMIT,
+      ),
+    );
+    return (
+      ` at ${joinBounded(rendered, SCHEDULE_SLOT_LIMIT)} (local wall clock)` +
+      (hasDuplicateTimes(schedule)
+        ? " — repeated times collapsed, since only one dose per minute is generated"
+        : "")
+    );
   };
 
   switch (schedule.mode) {
     case "daily_times":
-      return `schedule daily_times${at(schedule.times, schedule.amounts)}${overrideNote()}`;
+      return `schedule daily_times${at()}${overrideNote()}`;
     case "interval_hours":
       return (
         `schedule interval_hours every ${schedule.interval?.every ?? "?"}h` +
@@ -252,20 +259,17 @@ function describeSchedule(
       // (`COALESCE(v_schedule->>'time_of_day', '09:00')`) and doses then, so
       // reporting no time would deny an intake the reminders do make.
       const stored =
-        Array.isArray(schedule.times) && schedule.times.length > 0
-          ? schedule.times
-          : typeof schedule.time_of_day === "string"
-            ? [schedule.time_of_day]
-            : null;
+        (Array.isArray(schedule.times) && schedule.times.length > 0) ||
+        typeof schedule.time_of_day === "string";
       return (
         `schedule interval_days every ${schedule.interval?.every ?? "?"}d` +
-        `${at(stored ?? [GENERATOR_DEFAULT_TIME], schedule.amounts)}` +
+        `${at()}` +
         `${stored ? "" : " — no time recorded, so the generator uses its default"}` +
         `${overrideNote()}`
       );
     }
     case "days_of_week":
-      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${joinBounded(schedule.days_of_week.map(weekdayName), SCHEDULE_SLOT_LIMIT)}` : ""}${at(schedule.times, schedule.amounts)}${overrideNote()}`;
+      return `schedule days_of_week${Array.isArray(schedule.days_of_week) && schedule.days_of_week.length > 0 ? ` on ${joinBounded(schedule.days_of_week.map(weekdayName), SCHEDULE_SLOT_LIMIT)}` : ""}${at()}${overrideNote()}`;
     case "one_off":
       // The due instant is a timestamp, so it is quoted only where a zone has
       // been resolved (T-0027: a time this server prints is converted and
@@ -365,6 +369,7 @@ function unitText(unit: unknown): string {
   return unit == null ? "" : excerpt(String(unit), UNIT_LIMIT);
 }
 const SCHEDULE_SLOT_LIMIT = 12;
+const SLOT_TEXT_LIMIT = 32;
 
 /**
  * Joins rendered parts, keeping the first `limit` and saying how many were
@@ -388,25 +393,65 @@ function joinBounded(parts: string[], limit: number): string {
  * nulls on an imported row, and a non-number there must not be compared as if
  * it were one.
  */
+type ScheduleSlot = { time: string; amount?: number };
+
+/**
+ * The slots a schedule actually doses, as the generator derives them.
+ *
+ * Three differences from reading `times` and `amounts` straight off the row,
+ * each of which the text got wrong on its own:
+ *
+ * - An `interval_days` course with no `times` still doses: the generator
+ *   substitutes `time_of_day`, or `09:00`, and makes one slot from it.
+ * - `amounts` pairs with the slots by index
+ *   (`v_schedule->'amounts'->(v_slot.idx - 1)`), so entries past the last slot
+ *   are never dosed and are not overrides.
+ * - A repeated time is one dose, not two. The generator loops every slot, but
+ *   its `NOT EXISTS` guard and `idx_med_dose_events_regimen_scheduled_minute`
+ *   let only the first event exist at a given regimen-minute, so
+ *   `times: ["08:00", "08:00"], amounts: [1, 2]` doses once, at 1.
+ */
+function effectiveSlots(schedule?: MedSchedule | null): ScheduleSlot[] {
+  if (!schedule || typeof schedule !== "object") return [];
+  if (schedule.mode === "interval_hours") return [];
+  const stored = (schedule as { times?: unknown }).times;
+  const times: unknown[] = Array.isArray(stored) && stored.length > 0 ? stored : [];
+  const withFallback =
+    times.length === 0 && schedule.mode === "interval_days"
+      ? [
+          typeof (schedule as { time_of_day?: unknown }).time_of_day === "string"
+            ? (schedule as { time_of_day: string }).time_of_day
+            : GENERATOR_DEFAULT_TIME,
+        ]
+      : times;
+  const amounts = (schedule as { amounts?: unknown }).amounts;
+  const seen = new Set<string>();
+  const slots: ScheduleSlot[] = [];
+  withFallback.forEach((time, index) => {
+    const text = typeof time === "string" ? time : String(time);
+    if (seen.has(text)) return;
+    seen.add(text);
+    const amount = Array.isArray(amounts) ? amounts[index] : undefined;
+    slots.push({ time: text, amount: typeof amount === "number" ? amount : undefined });
+  });
+  return slots;
+}
+
+/** The per-intake amounts a schedule doses, overriding the course's own. */
 function scheduleAmounts(schedule?: MedSchedule | null): number[] {
   if (!schedule || typeof schedule !== "object") return [];
   if (schedule.mode === "interval_hours") {
     return typeof schedule.amount === "number" ? [schedule.amount] : [];
   }
-  const amounts = (schedule as { amounts?: unknown }).amounts;
-  if (!Array.isArray(amounts)) return [];
-  // Paired with the slots by index, because that is how the generator reads
-  // them (`v_schedule->'amounts'->(v_slot.idx - 1)`). An `amounts` longer than
-  // `times` is schema-valid and the extra entries are never dosed, so counting
-  // them as overrides would withhold a strength and warn about a slot that does
-  // not exist.
-  const times = (schedule as { times?: unknown }).times;
-  const slots = Array.isArray(times)
-    ? times.length
-    : typeof (schedule as { time_of_day?: unknown }).time_of_day === "string"
-      ? 1
-      : 0;
-  return amounts.slice(0, slots).filter((one): one is number => typeof one === "number");
+  return effectiveSlots(schedule)
+    .map((slot) => slot.amount)
+    .filter((one): one is number => typeof one === "number");
+}
+
+/** Whether a schedule stores more time slots than it can dose. */
+function hasDuplicateTimes(schedule?: MedSchedule | null): boolean {
+  const stored = (schedule as { times?: unknown } | null | undefined)?.times;
+  return Array.isArray(stored) && stored.length > effectiveSlots(schedule).length;
 }
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;

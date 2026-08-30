@@ -425,16 +425,26 @@ async function findDoseInSameMinute(
   const minuteStart = new Date(Math.floor(at.getTime() / 60_000) * 60_000);
   const minuteEnd = new Date(minuteStart.getTime() + 60_000);
 
+  const from = minuteStart.toISOString();
+  const to = minuteEnd.toISOString();
+
+  // Either timestamp, because the caller may name either one. `scheduled_at` is
+  // the planned slot an off-plan intake attaches to; `actual_at` is where a
+  // snooze moved that slot to, and it is the time the read tools print, the app
+  // shows and the reminder fires on. Matching only the planned time meant a
+  // caller logging the 11:00 dose they had just been shown -- snoozed there
+  // from 09:00 -- inserted a second event, decremented stock for it, and left
+  // the snoozed reminder unresolved.
   const { data, error } = await supabase
     .from("med_dose_events")
     .select("*")
     .eq("regimen_id", regimenId)
     .is("deleted_at", null)
-    .gte("scheduled_at", minuteStart.toISOString())
-    .lt("scheduled_at", minuteEnd.toISOString())
+    .or(
+      `and(scheduled_at.gte.${from},scheduled_at.lt.${to}),and(actual_at.gte.${from},actual_at.lt.${to})`,
+    )
     .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .limit(2);
 
   // This read decides between resolving and inserting, so "the query failed"
   // must not be read as "nothing is there": that would take the insert branch
@@ -443,7 +453,14 @@ async function findDoseInSameMinute(
     throw new Error(`Failed to look for an existing dose at that time: ${error.message}`);
   }
 
-  return (data as Record<string, unknown> | null) ?? null;
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  // A dose snoozed into this minute and one planned for it can both match. The
+  // effective time is what the caller was shown, so it wins the tie.
+  const effective = rows.find((row) => {
+    const actual = row.actual_at;
+    return typeof actual === "string" && actual >= from && actual < to;
+  });
+  return effective ?? rows[0] ?? null;
 }
 
 /**
