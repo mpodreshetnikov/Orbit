@@ -696,9 +696,9 @@ describe("MedicationForm", () => {
         expect.objectContaining({
           schedule: expect.objectContaining({
             times: ["09:00", "15:00", "20:00"],
-            // The two slots that already existed keep their doses; the added one
-            // starts from the first slot's dose.
-            amounts: [0.5, 1.5, 0.5],
+            // Doses follow their own time, not their old position: 09:00 keeps 0.5 and
+            // 20:00 keeps 1.5 even though 15:00 was inserted between them.
+            amounts: [0.5, 0.5, 1.5],
           }),
         }),
       );
@@ -830,6 +830,50 @@ describe("MedicationForm", () => {
             times: ["09:00", "20:00"],
             amounts: [0.5, 1.5],
           },
+        }),
+      );
+    });
+  });
+
+  it("refuses to save two weekly slots at the same time", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          schedule: {
+            mode: "days_of_week",
+            days_of_week: [1, 4],
+            times: ["09:00", "20:00"],
+            amounts: [0.5, 1.5],
+          } as MedSchedule,
+        })}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    const timeInputs = screen.getAllByDisplayValue(/^(09:00|20:00)$/);
+    fireEvent.change(timeInputs[1], { target: { value: "09:00" } });
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    // The generator would insert one event for the shared minute, so the second
+    // dose would never exist.
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("medications.duplicateReminderTimes");
+
+    fireEvent.change(timeInputs[1], { target: { value: "21:00" } });
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule: expect.objectContaining({
+            times: ["09:00", "21:00"],
+            amounts: [0.5, 1.5],
+          }),
         }),
       );
     });

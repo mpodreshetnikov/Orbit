@@ -279,6 +279,7 @@ export function MedicationForm({
   );
   const [notes, setNotes] = useState(() => initial?.notes ?? "");
   const [scheduleError, setScheduleError] = useState("");
+  const [slotsError, setSlotsError] = useState("");
   const [basicErrorType, setBasicErrorType] = useState<"" | "name" | "scheduled_at">("");
   const [oneTimeAmount, setOneTimeAmount] = useState(() =>
     toPositiveAmount(initial?.dose_definition?.intake?.amount),
@@ -402,6 +403,16 @@ export function MedicationForm({
       return;
     }
 
+    // The generator inserts one event per regimen and scheduled minute, so two slots
+    // at one time would show a dose it never produces.
+    if (hasPerSlotAmounts(schedule)) {
+      const times = schedule.times ?? [];
+      if (new Set(times).size !== times.length) {
+        setSlotsError(t("medications.duplicateReminderTimes"));
+        return;
+      }
+    }
+
     const scheduleAmounts = (schedule as { amounts?: number[] }).amounts;
     // Only take the base dose from the slots when they all carry one. A partial
     // array leaves the uncovered slots on the course's base dose, so overwriting
@@ -454,6 +465,7 @@ export function MedicationForm({
   };
 
   const updateReminderTime = (index: number, field: "time" | "amount", value: string | number) => {
+    setSlotsError("");
     setSchedule((prev) => {
       if (!hasPerSlotAmounts(prev)) return prev;
       const times = [...(prev.times ?? [])];
@@ -472,6 +484,7 @@ export function MedicationForm({
   };
 
   const addReminderTime = () => {
+    setSlotsError("");
     setSchedule((prev) => {
       if (!hasPerSlotAmounts(prev)) return prev;
       const prevTimes = prev.times ?? [];
@@ -488,6 +501,7 @@ export function MedicationForm({
   };
 
   const removeReminderTime = (index: number) => {
+    setSlotsError("");
     setSchedule((prev) => {
       if (!hasPerSlotAmounts(prev)) return prev;
       const filtered = (prev.times ?? []).filter((_, i) => i !== index);
@@ -1064,12 +1078,20 @@ export function MedicationForm({
                               prev.amounts?.[0],
                               baseIntakeAmount,
                             );
-                            const amounts = nextTimes.map((_, i) =>
-                              i < prevTimes.length
-                                ? // A slot that already existed keeps its dose, or the base
-                                  // dose the generator would have used for it.
-                                  toPositiveAmount(prev.amounts?.[i], baseIntakeAmount)
-                                : firstAmount,
+                            // Preset times are sorted, so a new slot can land between
+                            // existing ones: pair doses by time, not by position, or a
+                            // surviving slot inherits its neighbour's dose.
+                            const doseByTime = new Map<string, number>();
+                            prevTimes.forEach((time, i) => {
+                              if (!doseByTime.has(time)) {
+                                doseByTime.set(
+                                  time,
+                                  toPositiveAmount(prev.amounts?.[i], baseIntakeAmount),
+                                );
+                              }
+                            });
+                            const amounts = nextTimes.map(
+                              (time) => doseByTime.get(time) ?? firstAmount,
                             );
                             return { ...prev, times: nextTimes, amounts };
                           });
@@ -1117,6 +1139,15 @@ export function MedicationForm({
                   <Plus className="h-4 w-4 mr-1" />
                   {t("medications.addReminder")}
                 </Button>
+                {slotsError && (
+                  <p
+                    id="med-reminder-times-error"
+                    className="text-sm text-destructive"
+                    role="alert"
+                  >
+                    {slotsError}
+                  </p>
+                )}
               </div>
             )}
 

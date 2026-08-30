@@ -1423,6 +1423,7 @@
     "daysCount": "Days",
     "daysFromStartCount": "Take for (days)",
     "daysCountRequired": "Please enter the number of days (at least 1).",
+    "duplicateReminderTimes": "Two intakes cannot share the same time — each time must be unique.",
     "scheduleAt": "at",
     "reminderTimes": "Reminder times",
     "quickSetIntakes": "Intakes per day (quick set):",
