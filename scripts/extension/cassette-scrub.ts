@@ -350,6 +350,41 @@ const UUID = /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9
 const POSTAL_ADDRESS = /"\d{6},\s[^"\n]{4,}/g;
 
 /**
+ * The bank prefixes an error with a per-request correlation token — "B86939CMC - Неизвестный тип
+ * запроса operation". Nine mixed characters: no digit-run, phone or UUID rule sees them, and the
+ * recording held 401 distinct ones, each able to tie the published file to a line in the bank's
+ * own logs. Exactly what `trackingId` is redacted for, arriving inside a sentence instead of in a
+ * field of its own.
+ *
+ * The message itself stays: the connector reads `errorMessage`, both for the wording that tells
+ * it a session is blocked and for the `receipt_message` it stores. Only the token goes.
+ *
+ * Two rules, because one was not enough and the failure was instructive. In `errorMessage` the
+ * prefix is a token by construction, so it goes whatever it is made of. Anywhere else the same
+ * shape also describes a merchant — `PYATEROCHKA - ...` — so it is only redacted when it mixes
+ * letters and digits, which no word does.
+ *
+ * The first attempt applied the mixed-class test everywhere. It cleared 379 of the 401 and left
+ * 22 letters-only tokens like `YJRXLUCNT`, and because the scan carried the same test it called
+ * the result clean. A guard shared between the scrub and the check that verifies it is not a
+ * check at all.
+ */
+const LEADING_CORRELATION_TOKEN = /^[0-9A-Z]{6,16}(?=\s-\s)/;
+
+function isMixedToken(token: string): boolean {
+  return /[0-9]/.test(token) && /[A-Z]/.test(token);
+}
+
+function stripCorrelationToken(value: string, requireMixed = true): string {
+  return value.replace(LEADING_CORRELATION_TOKEN, (token) =>
+    !requireMixed || isMixedToken(token) ? REDACTED : token,
+  );
+}
+
+/** Where the bank puts that token: the message stays, the prefix does not. */
+const ERROR_MESSAGE_KEYS = new Set(["errormessage", "error_message"]);
+
+/**
  * Epoch milliseconds are a thirteen-digit run too, and they are the one thing a cassette must
  * keep: the connector reads operation timing out of `operationTime.milliseconds` and
  * `debitingTime.milliseconds`, and Milestone 4's acceptance turns on the contract test failing
@@ -424,12 +459,13 @@ export function scrubUrl(rawUrl: string): string {
 }
 
 export function scrubFreeText(value: string): string {
-  return value
+  const scrubbed = value
     .replace(/([?&](?:sessionid|session_id|token|access_token|auth)=)[^&#\s"']+/gi, `$1${REDACTED}`)
     .replace(LONG_DIGIT_RUN, REDACTED)
     .replace(PHONE_NUMBER, REDACTED)
     .replace(UUID, REDACTED)
     .replace(ORDER_REFERENCE, `$1${REDACTED}`);
+  return stripCorrelationToken(scrubbed);
 }
 
 function isIdentifierKey(key: string): boolean {
@@ -559,6 +595,10 @@ function scrubValue(value: unknown, preserve: boolean, context: ScrubContext = "
       }
       if (namesCounterparty && COUNTERPARTY_TEXT_KEYS.has(lowered)) {
         result[key] = entry === null ? null : REDACTED;
+        continue;
+      }
+      if (ERROR_MESSAGE_KEYS.has(lowered) && typeof entry === "string") {
+        result[key] = stripCorrelationToken(scrubFreeText(entry), false);
         continue;
       }
       if (FREE_TEXT_KEYS.has(lowered) && typeof entry === "string") {
@@ -751,6 +791,25 @@ export function findCassetteLeaks(serialized: string): string[] {
     if (key && REFERENCE_KEYS.has(key.toLowerCase())) continue;
 
     const leak = key ? `phone number under "${key}": ${match[0]}` : `phone number: ${match[0]}`;
+    if (reported.has(leak)) continue;
+    reported.add(leak);
+    leaks.push(leak);
+  }
+
+  for (const match of serialized.matchAll(/"([0-9A-Z]{6,16})(?=\s-\s)/g)) {
+    const token = match[1];
+    const start = match.index;
+    // The replacement is itself eight uppercase characters before a dash, so without this the
+    // scan reports every token it has already removed.
+    if (!token || token === REDACTED || start === undefined) continue;
+
+    const key = enclosingKey(serialized, start);
+    if (key && REFERENCE_KEYS.has(key.toLowerCase())) continue;
+    // In the field the bank actually puts it in, any prefix is a token. Elsewhere the same shape
+    // is also a merchant name, so only a mixed one is reported.
+    if (!(key && ERROR_MESSAGE_KEYS.has(key.toLowerCase())) && !isMixedToken(token)) continue;
+
+    const leak = key ? `correlation token under "${key}": ${token}` : `correlation token: ${token}`;
     if (reported.has(leak)) continue;
     reported.add(leak);
     leaks.push(leak);

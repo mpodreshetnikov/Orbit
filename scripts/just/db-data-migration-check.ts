@@ -73,6 +73,7 @@ const TX = {
   otherPayerTwin: "d1000000-0000-0000-0000-000000000103",
   fromExtension: "d1000000-0000-0000-0000-000000000104",
   longMaskedCard: "d1000000-0000-0000-0000-000000000105",
+  shortMaskedCard: "d1000000-0000-0000-0000-000000000106",
 };
 
 const LI = {
@@ -382,6 +383,21 @@ function seedAccumulatedRows(): void {
     }),
   );
 
+  // K: the short masked form. `extractAccountHint("  ** 12 ")` is tested to return "12", so the
+  // hint is two characters and not four — the shape that told me I had mirrored the wrong
+  // function. Counting digits and demanding four of them turns this into an empty hint, which is
+  // a different hash from the one a re-import computes, which is a duplicate the payer-scoped
+  // index cannot catch.
+  exec(
+    statementTransaction({
+      id: TX.shortMaskedCard,
+      postedAt: "2026-03-14T08:00:00",
+      amount: "-55.00",
+      merchant: "Киоск",
+      card: "** 12",
+    }),
+  );
+
   // I: an extension row — no statement column in raw_payload. Neither its timestamp nor its
   // hash may move.
   exec(`insert into public.money_transactions
@@ -556,6 +572,19 @@ async function assertRepaired(): Promise<void> {
     "J: a 220070******0368 card hashes to the parser's last four, not to every digit left",
     sql(`select dedupe_hash from public.money_transactions where id = '${TX.longMaskedCard}'`),
     expectedLongMask,
+  );
+
+  const expectedShortMask = await expectedHashFor({
+    postedAtIso: "2026-03-14T05:00:00.000Z",
+    amount: -55,
+    merchant: "Киоск",
+    occurrence: 0,
+    accountHint: "12",
+  });
+  check(
+    "K: a short '** 12' card keeps its two characters rather than becoming an empty hint",
+    sql(`select dedupe_hash from public.money_transactions where id = '${TX.shortMaskedCard}'`),
+    expectedShortMask,
   );
 }
 

@@ -67,37 +67,42 @@ WITH statement_transactions AS (
     -- resolve the account and card, then discards it. For a statement row the original
     -- value survives in raw_payload under the statement's own card column. The parser's
     -- own normalisation is applied to it in the next CTE.
-    btrim(regexp_replace(
-      COALESCE(transaction.raw_payload->>'Номер карты', ''), '\s+', ' ', 'g'
-    )) AS account_hint_raw
+    COALESCE(transaction.raw_payload->>'Номер карты', '') AS account_hint_raw
   FROM public.money_transactions AS transaction
   WHERE jsonb_exists(transaction.raw_payload, 'Дата операции')
 ),
 hinted AS (
   SELECT
     statement_transactions.*,
-    -- `extractMaskedCardLast4` in the importer, statement by statement. Stripping only the
-    -- mask characters was not the same function: for `220070******0368` the parser keeps the
-    -- last four digits and this kept all ten, so the migration wrote a hash that a later
-    -- re-import could not reproduce — and a row it had just repaired would be inserted a
-    -- second time, past a unique index that never sees a collision because the hashes differ.
-    -- The un-masked 16-digit form drifted the same way.
+    -- `extractAccountHint` in `src/lib/import/connectors/tbank-csv.ts`, character for character.
     --
-    -- Empty rather than NULL where the parser returns null: `buildMoneyDedupePayload` puts
-    -- `accountHint ?? ""` in that position, and concat_ws below drops a NULL argument
-    -- entirely, which would shift every later field one place left.
-    CASE
-      WHEN length(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g')) < 4
-        THEN ''
-      WHEN statement_transactions.account_hint_raw ~ '[*•xX]'
-        THEN right(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g'), 4)
-      WHEN length(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g')) = 4
-        THEN regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g')
-      WHEN length(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g'))
-             BETWEEN 12 AND 19
-        THEN right(regexp_replace(statement_transactions.account_hint_raw, '\D', '', 'g'), 4)
-      ELSE ''
-    END AS account_hint_text
+    -- That is the function that matters here and it took two goes to establish. The rows this
+    -- repairs carry `Номер карты`, so they came from the CSV importer — and the CSV importer
+    -- computes `dedupe_hash` itself, in the browser, from its own `extractAccountHint`. The edge
+    -- function passes that hash through untouched. `extractMaskedCardLast4` in
+    -- `supabase/functions/money-import/normalize.ts` is a different normalisation on a different
+    -- path, and mirroring it here was wrong: it agrees on `220070******0368` by coincidence and
+    -- disagrees on the short shapes the parser explicitly supports — `"  ** 12 "` is tested to
+    -- give `12`, where digit-counting gives nothing at all.
+    --
+    -- Asterisks out, trim either side, then the last four characters — characters, not digits,
+    -- and no whitespace collapsing before the slice, because the parser does neither. The
+    -- collapse and the lowercasing below are `normalizeText` from `shared/lib/money/dedupe.ts`,
+    -- which runs after, on the hint the parser returns.
+    lower(
+      btrim(
+        regexp_replace(
+          CASE
+            WHEN length(btrim(replace(btrim(statement_transactions.account_hint_raw), '*', ''))) >= 4
+              THEN right(btrim(replace(btrim(statement_transactions.account_hint_raw), '*', '')), 4)
+            ELSE btrim(replace(btrim(statement_transactions.account_hint_raw), '*', ''))
+          END,
+          '\s+',
+          ' ',
+          'g'
+        )
+      )
+    ) AS account_hint_text
   FROM statement_transactions
 ),
 numbered AS (

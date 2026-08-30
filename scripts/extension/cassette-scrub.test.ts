@@ -252,6 +252,41 @@ describe("cassette scrubbing", () => {
     });
   });
 
+  it("strips the bank's correlation token but keeps the message", () => {
+    // "B86939CMC - Неизвестный тип запроса operation": nine mixed characters that tie the file to
+    // a line in the bank's own logs, inside a sentence rather than in a field of its own. The
+    // message has to survive — the connector reads `errorMessage` both for the wording that tells
+    // it a session is blocked and for the `receipt_message` it stores.
+    expect(
+      scrubCassetteValue({
+        errorMessage: "B86939CMC - Неизвестный тип запроса operation",
+        // Letters only. The first version of this rule required a digit everywhere and left 22 of
+        // these behind — and the scan shared the test, so it called that clean.
+        alsoAnError: { errorMessage: "YJRXLUCNT - Неизвестный тип запроса operation" },
+      }),
+    ).toEqual({
+      errorMessage: `${REDACTED} - Неизвестный тип запроса operation`,
+      alsoAnError: { errorMessage: `${REDACTED} - Неизвестный тип запроса operation` },
+    });
+
+    // Outside that field the same shape is also a merchant, so only a mixed run goes.
+    expect(scrubCassetteValue({ description: "PYATEROCHKA - Москва" })).toEqual({
+      description: "PYATEROCHKA - Москва",
+    });
+    expect(scrubCassetteValue({ description: "B86939CMC - Москва" })).toEqual({
+      description: `${REDACTED} - Москва`,
+    });
+  });
+
+  it("reports a correlation token the field rules did not catch", () => {
+    expect(findCassetteLeaks('{"somewhereElse":"B86939CMC - Неизвестный тип"}')).toEqual([
+      'correlation token under "somewhereElse": B86939CMC',
+    ]);
+    // A word is not a token outside `errorMessage`; the replacement is not one anywhere.
+    expect(findCassetteLeaks('{"description":"PYATEROCHKA - Москва"}')).toEqual([]);
+    expect(findCassetteLeaks(`{"errorMessage":"${REDACTED} - Неизвестный тип"}`)).toEqual([]);
+  });
+
   it("reports a postal address the field rules did not catch", () => {
     // The structural rule above removes these from a receipt. This is for the address that turns
     // up somewhere the walk does not cover, which is how every previous round went. The report

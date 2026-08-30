@@ -168,6 +168,21 @@ function settleAndStop(container, role, migrationsTable) {
   let stableSamples = 0;
 
   waitFor(`${role} to finish migrating`, () => {
+    // A service that died mid-migration also has a count that stops moving and no session of its
+    // own, so the two conditions below are satisfied by a crash exactly as they are by success.
+    // `docker stop` then succeeds on the already-exited container and `up` carries on, reporting
+    // ready over a half-migrated `storage` or `auth` schema — which only shows up later, and only
+    // if our own SQL happens to touch the objects that never got created.
+    const state = docker(["inspect", "-f", "{{.State.Running}}:{{.State.ExitCode}}", container]);
+    if (state.status !== 0 || !state.stdout.trim().startsWith("true")) {
+      throw new Error(
+        `${container} stopped while migrating the ${role} schema (state ${
+          state.stdout.trim() || "unknown"
+        }). That schema is half-applied, so this is not a state to build on: check ` +
+          `docker logs ${container}, then re-run with --recreate.`,
+      );
+    }
+
     const result = psql([
       "-Atc",
       `select coalesce((select count(*)::text from ${migrationsTable}), 'absent') || ':' || ` +
@@ -478,6 +493,16 @@ function startExistingDatabase() {
 function databaseIsHealthy() {
   const running = docker(["inspect", "-f", "{{.State.Running}}", DB_CONTAINER]);
   if (running.status !== 0 || running.stdout.trim() !== "true") return false;
+
+  // The `psql` below goes to the host port, which is not by itself evidence about this container.
+  // Change `ORBIT_DB_PORT` after the container was built and any other Postgres listening there
+  // answers just as well — and `up` would then apply every migration and the deploy SQL to that
+  // database while reporting that it reused `DB_CONTAINER`. Asking Docker where this container
+  // actually publishes 5432 is what ties the two together. It also catches the container that is
+  // running with no mapping at all, which a daemon restart can leave behind.
+  const published = docker(["port", DB_CONTAINER, "5432/tcp"]);
+  if (published.status !== 0 || !published.stdout.includes(`:${PORT}`)) return false;
+
   return psql(["-Atc", "select 1"]).status === 0;
 }
 
