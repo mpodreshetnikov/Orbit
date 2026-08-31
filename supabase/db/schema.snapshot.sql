@@ -292,7 +292,9 @@ CREATE TABLE "public"."medical_records" (
     "search_vector" "tsvector" GENERATED ALWAYS AS ((("setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("title", ''::"text")), 'A'::"char") || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("notes", ''::"text")), 'B'::"char")) || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("ocr_text", ''::"text")), 'C'::"char"))) STORED,
     "ocr_error" "text",
     "llm_suggested_checkup_completions" "jsonb",
-    "structure_error" "text"
+    "structure_error" "text",
+    "processing_run_id" "uuid",
+    "processing_started_at" timestamp with time zone
 );
 
 ALTER TABLE ONLY "public"."medical_records" REPLICA IDENTITY FULL;
@@ -1625,6 +1627,13 @@ CREATE INDEX "idx_medical_records_created_by" ON "public"."medical_records" USIN
 --
 
 CREATE INDEX "idx_medical_records_person_id" ON "public"."medical_records" USING "btree" ("person_id");
+
+
+--
+-- Name: idx_medical_records_processing_run_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_medical_records_processing_run_id" ON "public"."medical_records" USING "btree" ("processing_run_id") WHERE ("processing_run_id" IS NOT NULL);
 
 
 --

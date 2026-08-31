@@ -30,6 +30,7 @@ function createRepositoryMock(
     observationCatalog?: Awaited<ReturnType<HealthStructureRepository["fetchObservationCatalog"]>>;
     existingConditions?: Awaited<ReturnType<HealthStructureRepository["fetchPersonConditions"]>>;
     existingFindings?: Awaited<ReturnType<HealthStructureRepository["fetchPersonActiveFindings"]>>;
+    claimTaken?: boolean;
   } = {},
 ): { repository: HealthStructureRepository; state: ServiceState } {
   const state: ServiceState = {
@@ -118,6 +119,7 @@ function createRepositoryMock(
         next_due_at: "2026-02-01",
       },
     ],
+    claimRecord: async () => (options.claimTaken === false ? null : "run-1"),
     updateMedicalRecord: async (recordId, patch) => {
       state.updatedRecords.push({ recordId, patch });
     },
@@ -721,4 +723,49 @@ Deno.test("runHealthStructureService does not stamp a record it could not find",
     state.updatedRecords.some((update) => "structure_error" in update.patch),
     false,
   );
+});
+
+Deno.test("runHealthStructureService refuses a record another run already owns", async () => {
+  const { repository, state } = createRepositoryMock({ claimTaken: false });
+
+  const result = await runHealthStructureService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      parseStructuredData: async () => parsed(structuredData),
+      lookupIcdCode: async () => null,
+    },
+  );
+
+  assertEquals(result.status, 409);
+  // Nothing is written: the run that owns the record decides its status, and a structure_error
+  // here would report that run's progress as this caller's failure.
+  assertEquals(state.updatedRecords.length, 0);
+});
+
+Deno.test("runHealthStructureService writes its result under the claim it took", async () => {
+  const { repository, state } = createRepositoryMock();
+  const runIds: Array<string | undefined> = [];
+
+  const result = await runHealthStructureService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository: {
+        ...repository,
+        updateMedicalRecord: async (recordId, patch, options) => {
+          runIds.push(options?.runId);
+          await repository.updateMedicalRecord(recordId, patch, options);
+        },
+      },
+      parseStructuredData: async () => parsed(structuredData),
+      lookupIcdCode: async () => null,
+    },
+  );
+
+  assertEquals(result.status, 200);
+  assertEquals(runIds, ["run-1"]);
+  const patch = state.updatedRecords[0].patch;
+  // The finished run hands the record back rather than holding it until the lease expires.
+  assertEquals(patch.processing_run_id, null);
+  assertEquals(patch.processing_started_at, null);
 });

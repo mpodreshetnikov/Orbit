@@ -1,6 +1,7 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
 import { emptyLlmUsage } from "../_shared/llm-usage.ts";
+import { ClaimLostError } from "../_shared/processing-claim.ts";
 import { runHealthOcrService } from "./service.ts";
 import type { OpenRouterOcrClient } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
@@ -16,6 +17,7 @@ function createRepositoryMock(
     attachments?: OcrAttachment[];
     blobsByPath?: Record<string, Blob | null>;
     userAllowed?: boolean;
+    claimTaken?: boolean;
     authenticated?: boolean;
     recordExists?: boolean;
     updateFailureThrows?: boolean;
@@ -56,6 +58,7 @@ function createRepositoryMock(
             },
       getAttachments: async () => attachments,
       downloadAttachment: async (storagePath: string) => blobsByPath[storagePath] ?? null,
+      claimRecord: async () => (options.claimTaken === false ? null : "run-1"),
       updateRecordSuccess: async (recordId, payload) => {
         state.updatedSuccess.push({
           recordId,
@@ -451,3 +454,78 @@ Deno.test(
     assertEquals("llm_cost_usd" in (serviceSpan?.endAttrs ?? {}), false);
   },
 );
+
+Deno.test("runHealthOcrService refuses a record another run already owns", async () => {
+  const { repository, state } = createRepositoryMock({ claimTaken: false });
+  const openRouter = createOpenRouterMock(async () => {
+    throw new Error("the OCR provider must not be called for a record we do not own");
+  });
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    { repository, openRouterClient: openRouter },
+  );
+
+  assertEquals(result.status, 409);
+  // Not marked failed: the run that owns the record is still working on it.
+  assertEquals(state.updatedFailure.length, 0);
+  assertEquals(state.updatedSuccess.length, 0);
+});
+
+Deno.test("runHealthOcrService writes its result under the claim it took", async () => {
+  const { repository } = createRepositoryMock();
+  const runIds: Array<string | undefined> = [];
+  const openRouter = createOpenRouterMock(async () => ({
+    ocr_text: "page",
+    suggested_title: "t",
+    truncated: false,
+    usage: emptyLlmUsage(),
+  }));
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository: {
+        ...repository,
+        updateRecordSuccess: async (recordId, payload, options) => {
+          runIds.push(options?.runId);
+          await repository.updateRecordSuccess(recordId, payload, options);
+        },
+      },
+      openRouterClient: openRouter,
+    },
+  );
+
+  assertEquals(result.status, 200);
+  assertEquals(runIds, ["run-1"]);
+});
+
+Deno.test("runHealthOcrService discards its result when the claim was taken away", async () => {
+  const { repository, state } = createRepositoryMock();
+  const openRouter = createOpenRouterMock(async () => ({
+    ocr_text: "page",
+    suggested_title: "t",
+    truncated: false,
+    usage: emptyLlmUsage(),
+  }));
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository: {
+        ...repository,
+        // What a lost claim looks like from the worker's side: the conditional update matched
+        // nothing because another run owns the record now.
+        updateRecordSuccess: async () => {
+          throw new ClaimLostError("record-1");
+        },
+      },
+      openRouterClient: openRouter,
+      log: { log: () => {}, error: () => {} },
+    },
+  );
+
+  assertEquals(result.status, 400);
+  // The transcription is dropped rather than written over whatever replaced this run.
+  assertEquals(state.updatedSuccess.length, 0);
+});

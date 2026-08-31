@@ -81,6 +81,7 @@ export async function runHealthOcrService(
   const defaultTitle = deps.defaultTitle ?? DEFAULT_TITLE;
   const recordId = input.recordId;
   let shouldMarkFailure = false;
+  let runId: string | null = null;
   const serviceSpan = telemetry?.startSpan("edge.health_ocr.service", {
     attrs: {
       has_record_id: Boolean(recordId),
@@ -126,6 +127,24 @@ export async function runHealthOcrService(
       throw new Error("Record not found or access denied");
     }
     await recordSpan?.end({ status: "ok" });
+
+    // Ownership, server-side, before any work: two invocations for the same record used to run
+    // side by side, and the record's state was decided by whichever finished last.
+    const claimSpan = telemetry?.startSpan("edge.health_ocr.claim");
+    runId = await deps.repository.claimRecord(recordId);
+    if (!runId) {
+      await claimSpan?.end({ status: "ok", attrs: { claimed: false } });
+      telemetry?.info("health_ocr_already_running", { record_id: recordId });
+      // Another run owns the record; marking it failed here would report that run's progress
+      // as this caller's failure.
+      shouldMarkFailure = false;
+      await serviceSpan?.end({ status: "ok", attrs: { claimed: false } });
+      return {
+        status: 409,
+        payload: { success: false, error: "OCR is already running for this record" },
+      };
+    }
+    await claimSpan?.end({ status: "ok", attrs: { claimed: true } });
 
     const attachmentsSpan = telemetry?.startSpan("edge.health_ocr.get_attachments");
     const attachments = await deps.repository.getAttachments(recordId);
@@ -225,10 +244,11 @@ export async function runHealthOcrService(
 
     const fullOcrText = buildCombinedPageText(pageTexts);
     const persistSpan = telemetry?.startSpan("edge.health_ocr.persist_record");
-    await deps.repository.updateRecordSuccess(recordId, {
-      ocrText: fullOcrText,
-      title: suggestedTitle,
-    });
+    await deps.repository.updateRecordSuccess(
+      recordId,
+      { ocrText: fullOcrText, title: suggestedTitle },
+      { runId },
+    );
     await persistSpan?.end({
       status: "ok",
       attrs: {
@@ -286,7 +306,9 @@ export async function runHealthOcrService(
     if (recordId && shouldMarkFailure) {
       try {
         const failureSpan = telemetry?.startSpan("edge.health_ocr.persist_failure");
-        await deps.repository.updateRecordFailure(recordId, truncatedMessage);
+        await deps.repository.updateRecordFailure(recordId, truncatedMessage, {
+          runId: runId ?? undefined,
+        });
         await failureSpan?.end({ status: "ok" });
       } catch (updateError) {
         log.error("Failed to update record with ocr_failed:", updateError);

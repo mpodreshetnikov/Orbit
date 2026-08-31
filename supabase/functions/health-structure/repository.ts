@@ -8,6 +8,7 @@ import type {
   FindingTypeCatalogItem,
   ObservationCatalogItem,
 } from "./types.ts";
+import { ClaimLostError, newClaim, unclaimedOrExpired } from "../_shared/processing-claim.ts";
 import type { ResolutionRepository } from "./resolution.ts";
 
 interface AuthenticatedUser {
@@ -24,7 +25,17 @@ export interface HealthStructureRepository extends ResolutionRepository {
   fetchPersonConditions(personId: string): Promise<ExistingCondition[]>;
   fetchPersonActiveFindings(personId: string): Promise<ExistingFinding[]>;
   fetchUpcomingOverdueCheckupItems(personId: string): Promise<CheckupItemForContext[]>;
-  updateMedicalRecord(recordId: string, patch: Record<string, unknown>): Promise<void>;
+  /**
+   * Take ownership of the record for this run, or report that someone else has it.
+   * Returns the run id on success and null when the record is already claimed.
+   */
+  claimRecord(recordId: string): Promise<string | null>;
+  /** Terminal write, applied only while this run still owns the record. */
+  updateMedicalRecord(
+    recordId: string,
+    patch: Record<string, unknown>,
+    options?: { runId?: string },
+  ): Promise<void>;
   replaceRecordObservations(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   replaceRecordFindings(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   clearConditionRecords(recordId: string): Promise<void>;
@@ -235,16 +246,39 @@ export function createSupabaseHealthStructureRepository(
     return (data ?? []) as CheckupItemForContext[];
   }
 
+  async function claimRecord(recordId: string): Promise<string | null> {
+    const claim = newClaim();
+    const { data, error } = await admin
+      .from("medical_records")
+      .update({
+        processing_run_id: claim.runId,
+        processing_started_at: claim.startedAt,
+        status: "structuring",
+      } as Database["public"]["Tables"]["medical_records"]["Update"])
+      .eq("id", recordId)
+      .or(unclaimedOrExpired(claim.staleBefore))
+      .select("id");
+
+    if (error) throw new Error(`Failed to claim record: ${error.message}`);
+    // No row means the conditional update matched nothing: someone else owns this run.
+    return (data ?? []).length > 0 ? claim.runId : null;
+  }
+
   async function updateMedicalRecord(
     recordId: string,
     patch: Record<string, unknown>,
+    options: { runId?: string } = {},
   ): Promise<void> {
-    const { error } = await admin
+    let query = admin
       .from("medical_records")
       .update(patch as Database["public"]["Tables"]["medical_records"]["Update"])
       .eq("id", recordId);
+    // A worker that has lost its claim must not resurrect its result over whatever replaced it.
+    if (options.runId) query = query.eq("processing_run_id", options.runId);
+    const { data, error } = await query.select("id");
 
     if (error) throw new Error(`Failed to update record: ${error.message}`);
+    if (options.runId && (data ?? []).length === 0) throw new ClaimLostError(recordId);
   }
 
   async function replaceRecordObservations(
@@ -360,6 +394,7 @@ export function createSupabaseHealthStructureRepository(
     fetchPersonConditions,
     fetchPersonActiveFindings,
     fetchUpcomingOverdueCheckupItems,
+    claimRecord,
     updateMedicalRecord,
     replaceRecordObservations,
     replaceRecordFindings,

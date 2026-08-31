@@ -623,6 +623,8 @@ export type Database = {
           ocr_error: string | null
           ocr_text: string | null
           person_id: string
+          processing_run_id: string | null
+          processing_started_at: string | null
           record_date: string | null
           record_type: Database["public"]["Enums"]["record_type"]
           removed_at: string | null
@@ -643,6 +645,8 @@ export type Database = {
           ocr_error?: string | null
           ocr_text?: string | null
           person_id: string
+          processing_run_id?: string | null
+          processing_started_at?: string | null
           record_date?: string | null
           record_type?: Database["public"]["Enums"]["record_type"]
           removed_at?: string | null
@@ -663,6 +667,8 @@ export type Database = {
           ocr_error?: string | null
           ocr_text?: string | null
           person_id?: string
+          processing_run_id?: string | null
+          processing_started_at?: string | null
           record_date?: string | null
           record_type?: Database["public"]["Enums"]["record_type"]
           removed_at?: string | null
