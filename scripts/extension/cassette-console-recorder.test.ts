@@ -129,7 +129,8 @@ describe("cassette console recorder", () => {
       "/api/common/v1/operations",
       "/api/common/v1/operations",
       "/api/common/v1/operations",
-      "/api/common/v1/operation?operationId=auth-op-1",
+      // No detail request: `/api/common/v1/operation` is not a request type the bank has, so the
+      // connector stopped asking and the recorder follows it.
       "/api/common/v1/shopping_receipt?operationId=auth-op-1",
     ]);
   });
@@ -881,12 +882,22 @@ describe("cassette console recorder", () => {
     expect(params.get("wuid")).toBe("REDACTED");
   });
 
-  it("does not invent the detail endpoint the page never loaded", async () => {
-    // The connector's `discoverOperationDetailApiUrl` returns null and it skips detail
-    // enrichment. Defaulting the URL here would record one response per operation that the
-    // replay never asks for — hundreds of extra calls against a live session, for nothing.
+  it("records no operation detail request, because the bank has no such request type", async () => {
+    // `/api/common/v1/operation` answers every call with `INVALID_REQUEST_DATA` — "Неизвестный
+    // тип запроса operation" — which is a routing error and so cannot be account-specific. A HAR
+    // of the operations page confirms the other side: the web app issues no such request, and an
+    // operation's card is built from the list response plus `shopping_receipt`. The connector no
+    // longer asks and neither does this, so a recording made today carries none of them.
+    //
+    // The earlier version of this test guarded the recorder against *inventing* the URL when the
+    // page had not loaded it. That guard is now unnecessary in the strongest way: there is no URL
+    // to invent.
     const deps = makeDeps({
-      resourceUrls: () => [`${ORIGIN}/api/common/v1/operations?sessionid=${SESSION}&start=1&end=2`],
+      resourceUrls: () => [
+        `${ORIGIN}/api/common/v1/operations?sessionid=${SESSION}&start=1&end=2`,
+        // Offered deliberately: even handed the endpoint, the recorder must not use it.
+        `${ORIGIN}/api/common/v1/operation?sessionid=${SESSION}&operationId=1`,
+      ],
     });
 
     const result = await recordCassette({ name: "no-detail", pauseMs: 0, maxReceipts: 0 }, deps);
@@ -894,7 +905,6 @@ describe("cassette console recorder", () => {
     expect(
       result.cassette.entries.filter((entry) => entry.url.includes("/api/common/v1/operation?")),
     ).toHaveLength(0);
-    expect(result.warnings.join(" ")).toMatch(/detail endpoint/);
   });
 
   it("reads a date-string operation time the way the connector does", async () => {

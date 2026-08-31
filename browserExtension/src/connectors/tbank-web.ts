@@ -1353,7 +1353,16 @@ function extractOperationsInPage(input: {
     try {
       const operationsApiUrl =
         discoverOperationsApiUrl() || "https://www.tbank.ru/api/common/v1/operations";
-      const detailApiUrl = discoverOperationDetailApiUrl();
+      // `/api/common/v1/operation` is not a request type the bank has: it answers every call
+      // with HTTP 200 and `INVALID_REQUEST_DATA` / "Неизвестный тип запроса operation", which is
+      // a routing error and so cannot be account-specific. A HAR of the operations page confirms
+      // the other side of it — the web app issues no such request, and an operation's card is
+      // built from the list response plus `shopping_receipt` and `point_of_sales`. So there is
+      // nothing to restore here and the enrichment is removed rather than repaired; T-260829-g7i
+      // carries the evidence. `operationDetail` stays on the record shape, always null, because
+      // it reaches `raw_payload.operation_detail` on stored rows and the mapper's comment chain
+      // already falls through it to `operation.message`.
+      const detailApiUrl: string | null = null;
       const trancheOffersApiUrl = discoverTrancheOffersApiUrl();
       debugMeta.discovered_endpoints.operations_api = operationsApiUrl;
       debugMeta.discovered_endpoints.operation_detail_api = detailApiUrl;
@@ -1605,7 +1614,7 @@ function extractOperationsInPage(input: {
             };
           } else {
             [operationDetail, receiptResult, trancheOffers] = await Promise.all([
-              tryFetchOperationDetail(operation, detailApiUrl, sessionId),
+              Promise.resolve<JsonMap | null>(null),
               scheduleShoppingReceipt(operation),
               tryFetchTrancheOffers(operation, trancheOffersApiUrl, sessionId, trancheBaseParams),
             ]);
@@ -1803,18 +1812,6 @@ function extractOperationsInPage(input: {
         return false;
       }
     });
-  }
-
-  function discoverOperationDetailApiUrl(): string | null {
-    const resources = performance.getEntriesByType("resource");
-    const candidates = resources
-      .map((entry) => (entry as PerformanceResourceTiming).name)
-      .filter((name): name is string => typeof name === "string");
-    return findLatestResourceUrlByPath(
-      candidates,
-      "/api/common/v1/operation",
-      window.location.origin,
-    );
   }
 
   function discoverTrancheOffersApiUrl(): string | null {
@@ -2219,36 +2216,6 @@ function extractOperationsInPage(input: {
       receiptState.sharedRetriesRemaining -= 1;
       retryAttempts += 1;
     }
-  }
-
-  async function tryFetchOperationDetail(
-    operation: JsonMap,
-    detailApiUrl: string | null,
-    sessionId: string | null,
-  ): Promise<JsonMap | null> {
-    if (!detailApiUrl || !sessionId) return null;
-
-    const operationId =
-      text(operation.authorizationId) ||
-      text(asObj(operation.operationId)?.value) ||
-      text(operation.id);
-    if (!operationId) return null;
-
-    let url: URL;
-    try {
-      url = new URL(detailApiUrl, window.location.origin);
-    } catch {
-      return null;
-    }
-
-    url.searchParams.set("operationId", operationId);
-    url.searchParams.set("sessionid", sessionId);
-    const response = await fetch(url.toString(), {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-
-    return asObj(await response.json().catch(() => null));
   }
 
   function parseTrancheBaseParams(trancheApiUrl: string | null): {

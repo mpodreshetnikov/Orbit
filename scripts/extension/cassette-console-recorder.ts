@@ -25,7 +25,6 @@
 import { findCassetteLeaks, scrubCassette, type CassetteEntry } from "./cassette-scrub";
 
 const OPERATIONS_PATH = "/api/common/v1/operations";
-const OPERATION_DETAIL_PATH = "/api/common/v1/operation";
 const RECEIPT_PATH = "/api/common/v1/shopping_receipt";
 const TRANCHE_PATH = "/api/common/v1/tranche_offers";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,14 +52,6 @@ const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
 
 /** The connector's own pause between receipt requests (`receiptBasePauseBetweenRequestsMs`). */
 const RECEIPT_PAUSE_MS = 300;
-
-/**
- * Details are paced more lightly than receipts. The connector throttles receipts specifically —
- * they are what the bank limits hardest — while details carry no such window, and a real account
- * has hundreds of them: four hundred at the receipt pace is two minutes of waiting for requests
- * nothing is limiting.
- */
-const DETAIL_PAUSE_MS = 100;
 
 /** The connector's `DEFAULT_MAX_RECEIPTS_PER_RUN`. */
 const CONNECTOR_MAX_RECEIPTS_PER_RUN = 50;
@@ -700,7 +691,6 @@ export async function recordCassette(
   // `findLatestResourceUrlByPath`, which returns null when the page never loaded that endpoint,
   // and the connector then skips that enrichment entirely. Inventing a URL here would record a
   // request the replay never makes — and one per operation, at that, against a live session.
-  const detailApiUrl = findLatestByPath(urls, OPERATION_DETAIL_PATH, deps.origin);
   const trancheApiUrl = findLatestByPath(urls, TRANCHE_PATH, deps.origin);
   const trancheBaseParams = parseTrancheBaseParams(trancheApiUrl, deps.origin);
 
@@ -854,7 +844,6 @@ export async function recordCassette(
 
   const maxReceipts = options.maxReceipts ?? CONNECTOR_MAX_RECEIPTS_PER_RUN;
   const pauseMs = options.pauseMs ?? RECEIPT_PAUSE_MS;
-  const detailPauseMs = options.pauseMs ?? DETAIL_PAUSE_MS;
   let receipts = 0;
   let issuedReceiptRequests = 0;
 
@@ -881,8 +870,6 @@ export async function recordCassette(
   const connectorReceipts = Math.min(CONNECTOR_MAX_RECEIPTS_PER_RUN, receiptBearing.length);
   const budgetMismatch = recordedReceipts !== connectorReceipts;
 
-  let detailCount = 0;
-  let usableDetails = 0;
   let rateLimited = 0;
   let failedReceipts = 0;
   // The connector orders operations newest-first before it spends the receipt budget, so when a
@@ -906,29 +893,6 @@ export async function recordCassette(
     // The connector asks for the detail of every operation it has not already fulfilled; only
     // the receipt request is conditional. Recording details for receipt-bearing operations
     // alone would leave the replay without an answer for every other one.
-    if (detailApiUrl && requestKey !== null) {
-      const detailUrl = new URL(detailApiUrl, deps.origin);
-      detailUrl.searchParams.set("operationId", requestKey);
-      detailUrl.searchParams.set("sessionid", sessionId);
-
-      if (detailCount > 0) await sleep(detailPauseMs);
-      detailCount += 1;
-      report(`detail ${detailCount}/${operations.length}`);
-      const recordedDetail = await recordRequest(deps, detailUrl.toString());
-      entries.push(recordedDetail.entry);
-      // A 2xx with no parsed body — 204, or JSON that did not parse — is not an error envelope,
-      // so it used to count as usable and suppress the "no detail responses" warning. Replay
-      // then produces no `operationDetail` at all and the contract test rejects the cassette for
-      // a gap the recorder said was not there. Usable means there is something to replay.
-      const detailBody = asObject(recordedDetail.body);
-      if (
-        isSuccessStatus(recordedDetail.entry.status) &&
-        detailBody !== null &&
-        !isErrorEnvelope(recordedDetail.body)
-      ) {
-        usableDetails += 1;
-      }
-    }
 
     // The connector asks for tranche offers for every operation too, whenever the page has
     // loaded that endpoint. A cassette without them replays as one miss per operation.
@@ -1010,24 +974,6 @@ export async function recordCassette(
       `${failedReceipts} receipt request(s) came back without a receipt — a non-200 status or ` +
         "an empty envelope. Those entries are error bodies, not receipts; re-record if the " +
         "cassette needs them.",
-    );
-  }
-
-  if (detailCount > 0 && usableDetails === 0) {
-    warnings.push(
-      `All ${detailCount} operation detail response(s) came back as errors, so this cassette ` +
-        "exercises the range walk and the receipts but not one field that detail enrichment " +
-        "supplies. That is faithful — the connector sends the same request and gets the same " +
-        "answer — but it means a detail-mapping regression cannot be caught by replaying this " +
-        "recording, and it is worth finding out why the bank rejects the request.",
-    );
-  }
-
-  if (!detailApiUrl) {
-    warnings.push(
-      "This page had not loaded the operation detail endpoint, so no detail responses were " +
-        "recorded. The connector skips that enrichment under the same condition, so the " +
-        "cassette is consistent — but open one operation before recording if you want it.",
     );
   }
 

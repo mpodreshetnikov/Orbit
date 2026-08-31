@@ -298,8 +298,10 @@ describe("tbank-web connector", () => {
       });
 
       expect(fetchCalls.filter((url) => url.includes("/shopping_receipt"))).toHaveLength(1);
-      expect(fetchCalls.filter((url) => url.includes("/api/common/v1/operation?"))).toHaveLength(1);
       expect(fetchCalls.filter((url) => url.includes("/tranche_offers"))).toHaveLength(1);
+      // Never, for any operation: `/api/common/v1/operation` is not a request type the bank has,
+      // so the skip this test is about is no longer what stops the call — nothing issues it.
+      expect(fetchCalls.filter((url) => url.includes("/api/common/v1/operation?"))).toHaveLength(0);
       const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
       expect(records).toHaveLength(2);
       expect(records[0]?.shoppingReceiptMeta).toMatchObject({
