@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../_shared/database.types.ts";
-import { ClaimLostError, newClaim, unclaimedOrExpired } from "../_shared/processing-claim.ts";
+import { ClaimLostError, claimRecordViaRpc } from "../_shared/processing-claim.ts";
 
 const BUCKET_NAME = "medical-attachments";
 
@@ -125,20 +125,7 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
     },
 
     async claimRecord(recordId) {
-      const claim = newClaim();
-      const { data, error } = await admin
-        .from("medical_records")
-        .update({
-          processing_run_id: claim.runId,
-          processing_started_at: claim.startedAt,
-          status: "ocr_processing",
-        })
-        .eq("id", recordId)
-        .or(unclaimedOrExpired(claim.staleBefore))
-        .select("id");
-
-      if (error) throw new Error(`Failed to claim record: ${error.message}`);
-      return (data ?? []).length > 0 ? claim.runId : null;
+      return await claimRecordViaRpc(admin, recordId, "ocr_processing");
     },
 
     async updateRecordSuccess(recordId, payload, options = {}) {

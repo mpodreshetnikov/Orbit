@@ -8,7 +8,7 @@ import type {
   FindingTypeCatalogItem,
   ObservationCatalogItem,
 } from "./types.ts";
-import { ClaimLostError, newClaim, unclaimedOrExpired } from "../_shared/processing-claim.ts";
+import { ClaimLostError, claimRecordViaRpc } from "../_shared/processing-claim.ts";
 import type { ResolutionRepository } from "./resolution.ts";
 
 interface AuthenticatedUser {
@@ -247,21 +247,7 @@ export function createSupabaseHealthStructureRepository(
   }
 
   async function claimRecord(recordId: string): Promise<string | null> {
-    const claim = newClaim();
-    const { data, error } = await admin
-      .from("medical_records")
-      .update({
-        processing_run_id: claim.runId,
-        processing_started_at: claim.startedAt,
-        status: "structuring",
-      } as Database["public"]["Tables"]["medical_records"]["Update"])
-      .eq("id", recordId)
-      .or(unclaimedOrExpired(claim.staleBefore))
-      .select("id");
-
-    if (error) throw new Error(`Failed to claim record: ${error.message}`);
-    // No row means the conditional update matched nothing: someone else owns this run.
-    return (data ?? []).length > 0 ? claim.runId : null;
+    return await claimRecordViaRpc(admin, recordId, "structuring");
   }
 
   async function updateMedicalRecord(

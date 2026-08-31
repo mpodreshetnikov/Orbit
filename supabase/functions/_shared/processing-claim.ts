@@ -21,32 +21,42 @@
  */
 export const DEFAULT_CLAIM_LEASE_MS = 15 * 60 * 1000;
 
-export interface ClaimExpiry {
-  /** Rows whose claim started before this instant are abandoned and may be taken over. */
-  staleBefore: string;
-  runId: string;
-  startedAt: string;
-}
+/**
+ * How long a claim stays valid without being renewed, in seconds -- the database applies it
+ * against its own clock, so no timestamp has to survive a round trip through a query string.
+ */
+export const DEFAULT_CLAIM_LEASE_SECONDS = DEFAULT_CLAIM_LEASE_MS / 1000;
 
-export function newClaim(
-  now: Date = new Date(),
-  leaseMs: number = DEFAULT_CLAIM_LEASE_MS,
-): ClaimExpiry {
-  return {
-    runId: crypto.randomUUID(),
-    startedAt: now.toISOString(),
-    staleBefore: new Date(now.getTime() - leaseMs).toISOString(),
-  };
+interface ClaimRpcClient {
+  rpc(
+    name: string,
+    params: Record<string, unknown>,
+  ): PromiseLike<{ data: unknown; error: { message: string } | null }>;
 }
 
 /**
- * The PostgREST filter for "nobody owns this, or whoever did has gone away".
+ * Take the claim, or report that another run holds it.
  *
- * Written here rather than at each call site so the two functions cannot drift into disagreeing
- * about what an abandoned claim is.
+ * One statement, evaluated by the database: the predicate this rests on -- unclaimed, or the
+ * previous claim has outlived its lease -- must not be assembled from separate filters that can
+ * disagree about what "now" is.
  */
-export function unclaimedOrExpired(staleBefore: string): string {
-  return `processing_run_id.is.null,processing_started_at.lt.${staleBefore}`;
+export async function claimRecordViaRpc(
+  client: ClaimRpcClient,
+  recordId: string,
+  status: string,
+  leaseSeconds: number = DEFAULT_CLAIM_LEASE_SECONDS,
+): Promise<string | null> {
+  const runId = crypto.randomUUID();
+  const { data, error } = await client.rpc("claim_medical_record", {
+    p_record_id: recordId,
+    p_run_id: runId,
+    p_status: status,
+    p_lease_seconds: leaseSeconds,
+  });
+
+  if (error) throw new Error(`Failed to claim record: ${error.message}`);
+  return data === true ? runId : null;
 }
 
 /** Thrown by a worker that discovers the record is no longer its to write to. */

@@ -326,6 +326,7 @@ Deno.test("health-structure repository updates and replaces record rows", async 
       auth: { getUser: async () => ({ data: { user: null }, error: null }) },
     },
     adminClient: {
+      rpc: async () => ({ data: true, error: null }),
       from: (table: string) => {
         if (table === "medical_records") {
           const matched = { data: [{ id: "record-1" }], error: null };

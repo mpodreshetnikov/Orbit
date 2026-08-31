@@ -2286,6 +2286,15 @@ export type Database = {
         Args: { p_checkup_item_id: string }
         Returns: undefined
       }
+      claim_medical_record: {
+        Args: {
+          p_lease_seconds?: number
+          p_record_id: string
+          p_run_id: string
+          p_status: string
+        }
+        Returns: boolean
+      }
       clear_future_med_dose_events: {
         Args: { p_auth_user_id: string; p_horizon_days?: number }
         Returns: number
