@@ -55,6 +55,10 @@ const AUTH_IMAGE = process.env.ORBIT_AUTH_IMAGE ?? `${IMAGE_REGISTRY}/supabase/g
  */
 const JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 
+/** The two host processes, named by what they run so a leftover can be found by it. */
+const FUNCTIONS_ENTRY = "supabase/functions/_local/serve.ts";
+const GATEWAY_ENTRY = "scripts/local-api/gateway.cjs";
+
 const PID_FILE = path.join(repoRoot, "node_modules", ".cache", "orbit-local-api.json");
 
 function log(message) {
@@ -257,13 +261,7 @@ function startFunctions(secrets) {
   log(`starting edge functions on ${FUNCTIONS_PORT} (${deno})`);
   const pid = spawnDetached(
     deno,
-    [
-      "run",
-      "--allow-all",
-      "--config",
-      "supabase/functions/deno.json",
-      "supabase/functions/_local/serve.ts",
-    ],
+    ["run", "--allow-all", "--config", "supabase/functions/deno.json", FUNCTIONS_ENTRY],
     {
       ORBIT_FUNCTIONS_PORT: String(FUNCTIONS_PORT),
       // Every function reaches the rest of the stack through the gateway, the way it would
@@ -287,7 +285,7 @@ function startGateway() {
   log(`starting gateway on ${GATEWAY_PORT}`);
   return spawnDetached(
     process.execPath,
-    [path.join("scripts", "local-api", "gateway.cjs")],
+    [GATEWAY_ENTRY],
     {
       ORBIT_GATEWAY_PORT: String(GATEWAY_PORT),
       ORBIT_REST_PORT: String(REST_PORT),
@@ -330,6 +328,53 @@ function repairEmptyUserRoles() {
   }
 }
 
+/**
+ * Stops the two Node/Deno processes before starting them again.
+ *
+ * Their environment is baked in at spawn — the keys, the ports, the parser mode — so a server
+ * left over from an earlier `up` keeps serving the old one. Reusing it looks like success:
+ * the new process dies with `AddrInUse`, `up` reports ready because the port answers, and the
+ * stale server then refuses requests over an environment variable that was fixed hours ago.
+ * The containers are left alone; their configuration is passed at `docker run` and `startRest`
+ * and `startAuth` already reuse a healthy one.
+ */
+function stopHostProcesses() {
+  const pids = readPids();
+  stopPid("gateway", pids.gateway);
+  stopPid("functions", pids.functions);
+  writePids({});
+  for (const [label, port, pattern] of [
+    ["functions", FUNCTIONS_PORT, FUNCTIONS_ENTRY],
+    ["gateway", GATEWAY_PORT, GATEWAY_ENTRY],
+  ]) {
+    if (waitForPortFree(port, 3000)) continue;
+
+    // The pid file only knows about servers this script started. One started by hand, or by a
+    // run whose pid file was overwritten, holds the port just as firmly — and it is still ours,
+    // identified by the script it is running rather than by the port it happens to hold.
+    log(`${label} is still listening on ${port}; stopping the process running ${pattern}`);
+    run("pkill", ["-f", pattern]);
+    if (!waitForPortFree(port)) {
+      throw new Error(
+        `something is still listening on ${port} (${label}) and it is not ours. Stop it, or ` +
+          "set the matching ORBIT_*_PORT to run a second lane beside it.",
+      );
+    }
+  }
+}
+
+/** True once nothing answers on the port, so the next `listen` cannot lose to a leftover. */
+function waitForPortFree(port, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const probe = run("curl", ["-s", "-m", "1", "-o", "/dev/null", `http://127.0.0.1:${port}/`]);
+    // curl exits non-zero when it cannot connect, which is the state we want.
+    if (probe.status !== 0) return true;
+    sleepSync(250);
+  }
+  return false;
+}
+
 function up() {
   ensureDockerReady();
   const dbUp = run(process.execPath, [path.join(__dirname, "db-local-docker.cjs"), "up"], {
@@ -338,6 +383,7 @@ function up() {
   if (dbUp.status !== 0) throw new Error("the database did not come up");
 
   const secrets = keys();
+  stopHostProcesses();
   startRest();
   startAuth();
   repairEmptyUserRoles();
