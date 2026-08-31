@@ -36,6 +36,9 @@ import { getUnitIcon, getUnitLabel } from "./medication-units";
 import type {
   MedRegimen,
   MedSchedule,
+  MedScheduleDailyTimes,
+  MedScheduleDaysOfWeek,
+  MedScheduleIntervalDays,
   MedDuration,
   CreateMedRegimenInput,
   UpdateMedRegimenInput,
@@ -73,6 +76,44 @@ const DEFAULT_SCHEDULE: MedSchedule = {
 };
 
 const DEFAULT_DURATION: MedDuration = { type: "endless" };
+
+/** Index of the schedule step in the mobile wizard, where the slots are edited. */
+const SCHEDULE_WIZARD_STEP = 1;
+
+/** Schedules whose `times` carry a matching per-slot `amounts` array. */
+type MedSchedulePerSlot = MedScheduleDailyTimes | MedScheduleIntervalDays | MedScheduleDaysOfWeek;
+
+/**
+ * True for the schedule modes that `generate_med_dose_events_for_person_ids.sql`
+ * doses slot by slot, reading `amounts[i]` beside `times[i]` and falling back to
+ * the course's base amount when a slot has none.
+ */
+function hasPerSlotAmounts(s: MedSchedule): s is MedSchedulePerSlot {
+  return s.mode === "daily_times" || s.mode === "interval_days" || s.mode === "days_of_week";
+}
+
+/**
+ * `amounts` aligned one-to-one with `times`: overrides that exist are kept, and a
+ * slot without one takes the base dose the generator would fall back to for it.
+ */
+function alignAmounts(times: string[], amounts: number[] | undefined, base: number): number[] {
+  return times.map((_, i) => toPositiveAmount(amounts?.[i], base));
+}
+
+/**
+ * A time no slot uses yet. The generator inserts one event per regimen and minute,
+ * so two slots at the same time would show two doses in the form and produce one.
+ */
+function nextUnusedTime(times: string[]): string {
+  const used = new Set(times);
+  const preset = PRESET_INTAKE_TIMES.find((time) => !used.has(time));
+  if (preset) return preset;
+  for (let minutes = 0; minutes < 24 * 60; minutes += 30) {
+    const candidate = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return "08:00";
+}
 
 // Preset intake times: morning (9AM), midday (12), late afternoon (3PM), evening (8PM), night (11PM), plus extras for 6–10
 const PRESET_INTAKE_TIMES: string[] = [
@@ -134,12 +175,17 @@ export function getInitialSchedule(
     const amounts = sd.amounts?.length ? sd.amounts : times.map(() => 1);
     return { mode: "interval_days", interval: { every: sd.interval?.every ?? 1 }, times, amounts };
   }
-  if (s.mode === "days_of_week")
+  if (s.mode === "days_of_week") {
+    const sw = s as { days_of_week?: number[]; times?: string[]; amounts?: number[] };
     return {
       mode: "days_of_week",
-      days_of_week: (s as { days_of_week?: number[] }).days_of_week ?? [1, 2, 3, 4, 5],
-      times: (s as { times?: string[] }).times ?? ["09:00"],
+      days_of_week: sw.days_of_week ?? [1, 2, 3, 4, 5],
+      times: sw.times ?? ["09:00"],
+      // Carried verbatim: the generator doses these per slot, so rewriting or
+      // dropping them here silently replaces the course's weekly overrides.
+      ...(sw.amounts?.length ? { amounts: [...sw.amounts] } : {}),
     };
+  }
   return DEFAULT_SCHEDULE;
 }
 
@@ -212,6 +258,17 @@ export function MedicationForm({
   const [schedule, setSchedule] = useState<MedSchedule>(() =>
     getInitialSchedule(initial, defaultKind),
   );
+  /** The course's base dose, which the generator falls back to for a slot without its own amount. */
+  const baseIntakeAmount = toPositiveAmount(initial?.dose_definition?.intake?.amount);
+  /**
+   * The last weekly schedule this form held, so leaving `days_of_week` for another
+   * frequency and coming back restores its days, times and per-slot amounts rather
+   * than replacing a real plan with defaults.
+   */
+  const lastWeeklySchedule = React.useRef<MedScheduleDaysOfWeek | null>(null);
+  useEffect(() => {
+    if (schedule.mode === "days_of_week") lastWeeklySchedule.current = schedule;
+  }, [schedule]);
   const [duration, setDuration] = useState<MedDuration>(() => getInitialDuration(initial));
   const [startDate, setStartDate] = useState(() => getInitialStartDate(initial));
   const [inventoryEnabled, setInventoryEnabled] = useState(
@@ -225,6 +282,7 @@ export function MedicationForm({
   );
   const [notes, setNotes] = useState(() => initial?.notes ?? "");
   const [scheduleError, setScheduleError] = useState("");
+  const [slotsError, setSlotsError] = useState("");
   const [basicErrorType, setBasicErrorType] = useState<"" | "name" | "scheduled_at">("");
   const [oneTimeAmount, setOneTimeAmount] = useState(() =>
     toPositiveAmount(initial?.dose_definition?.intake?.amount),
@@ -253,6 +311,22 @@ export function MedicationForm({
   useEffect(() => {
     setWizardStep((s) => Math.min(s, totalWizardSteps - 1));
   }, [kind, totalWizardSteps]);
+
+  /**
+   * What is wrong with the slot times, if anything. A blank slot is cast to a
+   * timestamp by the generator and fails the whole regimen, and two slots at one
+   * time show a dose it never produces — it inserts one event per regimen and
+   * scheduled minute.
+   */
+  const reminderTimesError = (): string => {
+    if (!hasPerSlotAmounts(schedule)) return "";
+    const times = schedule.times ?? [];
+    if (times.some((time) => !/^\d{1,2}:\d{2}(:\d{2})?$/.test(time.trim()))) {
+      return t("medications.reminderTimeRequired");
+    }
+    if (new Set(times).size !== times.length) return t("medications.duplicateReminderTimes");
+    return "";
+  };
 
   const buildDoseDefinition = (amount: number): PlannedIntake => ({
     intake: { amount, unit },
@@ -348,15 +422,29 @@ export function MedicationForm({
       return;
     }
 
+    const timesError = reminderTimesError();
+    if (timesError) {
+      setSlotsError(timesError);
+      // On mobile the slots live on the schedule step, which is hidden once the
+      // wizard has moved on: go back to the message rather than refusing silently.
+      if (isMobile) setWizardStep(SCHEDULE_WIZARD_STEP);
+      return;
+    }
+
+    const scheduleAmounts = (schedule as { amounts?: number[] }).amounts;
+    // Only take the base dose from the slots when they all carry one. A partial
+    // array leaves the uncovered slots on the course's base dose, so overwriting
+    // it with the first override would quietly re-dose them.
+    const slotsCoverBaseDose =
+      hasPerSlotAmounts(schedule) &&
+      !!scheduleAmounts?.length &&
+      scheduleAmounts.length >= (schedule.times ?? []).length;
     const amount =
-      schedule.mode === "daily_times" && schedule.amounts?.length
-        ? toPositiveAmount(schedule.amounts[0])
-        : schedule.mode === "interval_hours"
-          ? toPositiveAmount((schedule as { amount?: number }).amount)
-          : schedule.mode === "interval_days" &&
-              (schedule as { amounts?: number[] }).amounts?.length
-            ? toPositiveAmount((schedule as { amounts: number[] }).amounts[0])
-            : 1;
+      schedule.mode === "interval_hours"
+        ? toPositiveAmount((schedule as { amount?: number }).amount)
+        : slotsCoverBaseDose
+          ? toPositiveAmount(scheduleAmounts![0])
+          : baseIntakeAmount;
 
     const durationToSubmit: MedDuration =
       duration.type === "for_days"
@@ -395,38 +483,50 @@ export function MedicationForm({
   };
 
   const updateReminderTime = (index: number, field: "time" | "amount", value: string | number) => {
+    setSlotsError("");
     setSchedule((prev) => {
-      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
+      if (!hasPerSlotAmounts(prev)) return prev;
       const times = [...(prev.times ?? [])];
-      const amounts = [...(prev.amounts ?? [])];
-      if (field === "time") times[index] = value as string;
-      else amounts[index] = toPositiveAmount(value);
+      if (field === "time") {
+        times[index] = value as string;
+        // Leave `amounts` untouched: a course that dosed its base amount on every
+        // slot keeps doing so instead of gaining overrides nobody asked for.
+        return { ...prev, times };
+      }
+      // Editing one amount materializes the whole array, aligned with `times`, so
+      // the generator pairs each slot with the amount shown beside it.
+      const amounts = alignAmounts(times, prev.amounts, baseIntakeAmount);
+      amounts[index] = toPositiveAmount(value);
       return { ...prev, times, amounts };
     });
   };
 
   const addReminderTime = () => {
+    setSlotsError("");
     setSchedule((prev) => {
-      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
-      const amount = toPositiveAmount(prev.amounts?.[0]);
-      return {
-        ...prev,
-        times: [...(prev.times ?? []), "08:00"],
-        amounts: [...(prev.amounts ?? []), amount],
-      };
+      if (!hasPerSlotAmounts(prev)) return prev;
+      const prevTimes = prev.times ?? [];
+      const times = [...prevTimes, nextUnusedTime(prevTimes)];
+      if (!prev.amounts?.length) return { ...prev, times };
+      // Align the existing slots first: appending to a partial array would shift
+      // every uncovered slot onto the amount beside it.
+      const amounts = [
+        ...alignAmounts(prevTimes, prev.amounts, baseIntakeAmount),
+        toPositiveAmount(prev.amounts[0], baseIntakeAmount),
+      ];
+      return { ...prev, times, amounts };
     });
   };
 
   const removeReminderTime = (index: number) => {
+    setSlotsError("");
     setSchedule((prev) => {
-      if (prev.mode !== "daily_times" && prev.mode !== "interval_days") return prev;
-      const times = (prev.times ?? []).filter((_, i) => i !== index);
-      const amounts = (prev.amounts ?? []).filter((_, i) => i !== index);
-      return {
-        ...prev,
-        times: times.length ? times : ["09:00"],
-        amounts: amounts.length ? amounts : [1],
-      };
+      if (!hasPerSlotAmounts(prev)) return prev;
+      const filtered = (prev.times ?? []).filter((_, i) => i !== index);
+      const times = filtered.length ? filtered : ["09:00"];
+      if (!prev.amounts?.length) return { ...prev, times };
+      const amounts = prev.amounts.filter((_, i) => i !== index);
+      return { ...prev, times, amounts: amounts.length ? amounts : [baseIntakeAmount] };
     });
   };
 
@@ -446,13 +546,13 @@ export function MedicationForm({
 
   const DAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-  const reminderSlots =
-    schedule.mode === "daily_times" || schedule.mode === "interval_days"
-      ? ((schedule as { times?: string[]; amounts?: number[] }).times ?? []).map((time, i) => ({
-          time,
-          amount: ((schedule as { amounts?: number[] }).amounts ?? [])[i] ?? 1,
-        }))
-      : [];
+  const reminderSlots = hasPerSlotAmounts(schedule)
+    ? ((schedule as { times?: string[]; amounts?: number[] }).times ?? []).map((time, i) => ({
+        time,
+        // No per-slot amount means the generator doses the base amount here, so show that.
+        amount: (schedule as { amounts?: number[] }).amounts?.[i] ?? baseIntakeAmount,
+      }))
+    : [];
 
   const currentStep = Math.min(wizardStep, totalWizardSteps - 1);
 
@@ -477,14 +577,16 @@ export function MedicationForm({
       }
       setBasicErrorType("");
     }
-    if (
-      kind === "regular" &&
-      currentStep === 1 &&
-      duration.type === "for_days" &&
-      (!duration.days || duration.days < 1)
-    ) {
-      setScheduleError(t("medications.daysCountRequired"));
-      return;
+    if (kind === "regular" && currentStep === SCHEDULE_WIZARD_STEP) {
+      if (duration.type === "for_days" && (!duration.days || duration.days < 1)) {
+        setScheduleError(t("medications.daysCountRequired"));
+        return;
+      }
+      const timesError = reminderTimesError();
+      if (timesError) {
+        setSlotsError(timesError);
+        return;
+      }
     }
     setScheduleError("");
     setWizardStep((s) => Math.min(s + 1, totalWizardSteps - 1));
@@ -751,20 +853,16 @@ export function MedicationForm({
                       times: prev?.times?.length ? prev.times : ["09:00"],
                       amounts: prev?.amounts?.length ? prev.amounts : [1],
                     });
-                  } else if (v === "days_of_week")
+                  } else if (v === "days_of_week") {
+                    const prev =
+                      schedule.mode === "days_of_week" ? schedule : lastWeeklySchedule.current;
                     setScheduleMode({
                       mode: "days_of_week",
-                      days_of_week:
-                        schedule.mode === "days_of_week"
-                          ? ((schedule as { days_of_week?: number[] }).days_of_week ?? [
-                              1, 2, 3, 4, 5,
-                            ])
-                          : [1, 2, 3, 4, 5],
-                      times:
-                        schedule.mode === "days_of_week"
-                          ? ((schedule as { times?: string[] }).times ?? ["09:00"])
-                          : ["09:00"],
+                      days_of_week: prev?.days_of_week ?? [1, 2, 3, 4, 5],
+                      times: prev?.times?.length ? prev.times : ["09:00"],
+                      ...(prev?.amounts?.length ? { amounts: prev.amounts } : {}),
                     });
+                  }
                 }}
               >
                 <SelectTrigger>
@@ -966,7 +1064,7 @@ export function MedicationForm({
               </div>
             )}
 
-            {(schedule.mode === "daily_times" || schedule.mode === "interval_days") && (
+            {hasPerSlotAmounts(schedule) && (
               <div className="space-y-2">
                 <Label>{t("medications.reminderTimes")}</Label>
                 <div className="space-y-1.5">
@@ -982,23 +1080,41 @@ export function MedicationForm({
                         size="sm"
                         className="min-w-8"
                         onClick={() => {
-                          const nextSlots = getReminderSlotsForIntakesPerDay(num);
-                          const amount = toPositiveAmount(
-                            (schedule as { amounts?: number[] }).amounts?.[0],
+                          const nextTimes = getReminderSlotsForIntakesPerDay(num).map(
+                            (s) => s.time,
                           );
-                          if (schedule.mode === "daily_times") {
-                            setSchedule({
-                              mode: "daily_times",
-                              times: nextSlots.map((s) => s.time),
-                              amounts: nextSlots.map(() => amount),
+                          setSchedule((prev) => {
+                            if (!hasPerSlotAmounts(prev)) return prev;
+                            const prevTimes = prev.times ?? [];
+                            // Re-picking the count the course already has changes nothing,
+                            // so it must not rewrite the doses either.
+                            if (
+                              prevTimes.length === nextTimes.length &&
+                              prevTimes.every((time, i) => time === nextTimes[i])
+                            ) {
+                              return prev;
+                            }
+                            const firstAmount = toPositiveAmount(
+                              prev.amounts?.[0],
+                              baseIntakeAmount,
+                            );
+                            // Preset times are sorted, so a new slot can land between
+                            // existing ones: pair doses by time, not by position, or a
+                            // surviving slot inherits its neighbour's dose.
+                            const doseByTime = new Map<string, number>();
+                            prevTimes.forEach((time, i) => {
+                              if (!doseByTime.has(time)) {
+                                doseByTime.set(
+                                  time,
+                                  toPositiveAmount(prev.amounts?.[i], baseIntakeAmount),
+                                );
+                              }
                             });
-                          } else {
-                            setSchedule({
-                              ...schedule,
-                              times: nextSlots.map((s) => s.time),
-                              amounts: nextSlots.map(() => amount),
-                            });
-                          }
+                            const amounts = nextTimes.map(
+                              (time) => doseByTime.get(time) ?? firstAmount,
+                            );
+                            return { ...prev, times: nextTimes, amounts };
+                          });
                         }}
                       >
                         {num}
@@ -1043,6 +1159,15 @@ export function MedicationForm({
                   <Plus className="h-4 w-4 mr-1" />
                   {t("medications.addReminder")}
                 </Button>
+                {slotsError && (
+                  <p
+                    id="med-reminder-times-error"
+                    className="text-sm text-destructive"
+                    role="alert"
+                  >
+                    {slotsError}
+                  </p>
+                )}
               </div>
             )}
 
