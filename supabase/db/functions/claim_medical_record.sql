@@ -44,3 +44,39 @@ GRANT EXECUTE ON FUNCTION public.claim_medical_record(uuid, uuid, text, integer)
 
 COMMENT ON FUNCTION public.claim_medical_record(uuid, uuid, text, integer) IS
   'Atomically claims a medical record for one pipeline run, returning false when another run already owns it and its lease has not expired.';
+
+-- Function: renew_medical_record_claim()
+-- Keep a live run's claim from expiring under it.
+--
+-- The lease exists to free a record from a worker that died, which means it has to be shorter
+-- than "however long the pipeline might take" -- and OCR over ten attachments, each with retries
+-- and provider-dictated backoff, can run longer than any lease worth setting. A run that is still
+-- working says so; one that stopped says nothing and loses the record, which is the point.
+
+CREATE OR REPLACE FUNCTION public.renew_medical_record_claim(
+  p_record_id uuid,
+  p_run_id uuid
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_renewed boolean;
+BEGIN
+  UPDATE public.medical_records
+  SET processing_started_at = now()
+  WHERE id = p_record_id
+    AND processing_run_id = p_run_id
+  RETURNING true INTO v_renewed;
+
+  RETURN COALESCE(v_renewed, false);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.renew_medical_record_claim(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.renew_medical_record_claim(uuid, uuid) TO service_role;
+
+COMMENT ON FUNCTION public.renew_medical_record_claim(uuid, uuid) IS
+  'Extends the lease on a claim this run still holds, returning false when the claim has been taken over.';

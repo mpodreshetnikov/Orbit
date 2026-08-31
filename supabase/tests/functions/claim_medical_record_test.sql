@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(6);
+SELECT plan(10);
 
 SELECT has_function(
   'public',
@@ -99,6 +99,46 @@ SELECT is(
   ),
   false,
   'claiming a record that does not exist reports failure rather than raising'
+);
+
+SELECT has_function(
+  'public',
+  'renew_medical_record_claim',
+  ARRAY['uuid', 'uuid'],
+  'a live run can extend its own lease'
+);
+
+-- The record is currently owned by bbbb... from the takeover above.
+UPDATE public.medical_records
+SET processing_started_at = now() - interval '2 hours'
+WHERE id = '99999999-3333-0000-0000-000000000000';
+
+SELECT is(
+  public.renew_medical_record_claim(
+    '99999999-3333-0000-0000-000000000000'::uuid,
+    'bbbbbbbb-3333-0000-0000-000000000000'::uuid
+  ),
+  true,
+  'the owning run can renew its lease'
+);
+
+SELECT is(
+  (
+    SELECT processing_started_at > now() - interval '1 minute'
+    FROM public.medical_records
+    WHERE id = '99999999-3333-0000-0000-000000000000'
+  ),
+  true,
+  'renewing moves the lease forward'
+);
+
+SELECT is(
+  public.renew_medical_record_claim(
+    '99999999-3333-0000-0000-000000000000'::uuid,
+    'aaaaaaaa-3333-0000-0000-000000000000'::uuid
+  ),
+  false,
+  'a run that lost the record cannot renew it back'
 );
 
 SELECT * FROM finish();

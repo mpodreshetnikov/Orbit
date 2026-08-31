@@ -372,7 +372,8 @@ Deno.test("runHealthStructureService persists successful extraction flow", async
 
   assertEquals(result.status, 200);
   assertEquals(result.payload.success, true);
-  assertEquals(state.updatedRecords.length, 1);
+  // The status write, then the claim release once every related row is persisted.
+  assertEquals(state.updatedRecords.length, 2);
   assertEquals(state.observationRows.length, 1);
   assertEquals(state.findingRows.length, 1);
   assertEquals(state.conditionRecords.length, 2);
@@ -763,9 +764,62 @@ Deno.test("runHealthStructureService writes its result under the claim it took",
   );
 
   assertEquals(result.status, 200);
-  assertEquals(runIds, ["run-1"]);
+  assertEquals(runIds, ["run-1", "run-1"]);
+  // The status write does not release the record: observations, findings and resolutions are
+  // still to come, and a second run must not start on top of them.
+  assertEquals("processing_run_id" in state.updatedRecords[0].patch, false);
+  // The release is its own write, after all of it.
+  const release = state.updatedRecords[1].patch;
+  assertEquals(release.processing_run_id, null);
+  assertEquals(release.processing_started_at, null);
+});
+
+Deno.test(
+  "runHealthStructureService does not stamp a record whose claim it never took",
+  async () => {
+    const { repository, state } = createRepositoryMock();
+
+    const result = await runHealthStructureService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository: {
+          ...repository,
+          // A transient failure while another worker owns the record.
+          claimRecord: async () => {
+            throw new Error("claim rpc unavailable");
+          },
+        },
+        parseStructuredData: async () => parsed(structuredData),
+        lookupIcdCode: async () => null,
+        log: { log: () => {}, warn: () => {}, error: () => {} },
+      },
+    );
+
+    assertEquals(result.status, 400);
+    // An unguarded write here would clear the owning run's claim and stamp its record.
+    assertEquals(state.updatedRecords.length, 0);
+  },
+);
+
+Deno.test("runHealthStructureService hands a failed record back to review", async () => {
+  const { repository, state } = createRepositoryMock();
+
+  const result = await runHealthStructureService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      parseStructuredData: async () => {
+        throw new Error("OpenRouter timeout");
+      },
+      lookupIcdCode: async () => null,
+    },
+  );
+
+  assertEquals(result.status, 400);
   const patch = state.updatedRecords[0].patch;
-  // The finished run hands the record back rather than holding it until the lease expires.
+  // Leaving `structuring` behind would show the record as worked on by a run that is gone; the
+  // client-side rollback only happens when a browser is still there to do it.
+  assertEquals(patch.status, "ocr_review");
+  assertEquals(patch.structure_error, "OpenRouter timeout");
   assertEquals(patch.processing_run_id, null);
-  assertEquals(patch.processing_started_at, null);
 });

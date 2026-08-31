@@ -18,6 +18,7 @@ function createRepositoryMock(
     blobsByPath?: Record<string, Blob | null>;
     userAllowed?: boolean;
     claimTaken?: boolean;
+    claimLost?: boolean;
     authenticated?: boolean;
     recordExists?: boolean;
     updateFailureThrows?: boolean;
@@ -59,6 +60,7 @@ function createRepositoryMock(
       getAttachments: async () => attachments,
       downloadAttachment: async (storagePath: string) => blobsByPath[storagePath] ?? null,
       claimRecord: async () => (options.claimTaken === false ? null : "run-1"),
+      renewClaim: async () => options.claimLost !== true,
       updateRecordSuccess: async (recordId, payload) => {
         state.updatedSuccess.push({
           recordId,
@@ -527,5 +529,35 @@ Deno.test("runHealthOcrService discards its result when the claim was taken away
 
   assertEquals(result.status, 400);
   // The transcription is dropped rather than written over whatever replaced this run.
+  assertEquals(state.updatedSuccess.length, 0);
+});
+
+Deno.test("runHealthOcrService stops when its claim is taken mid-document", async () => {
+  const { repository, state } = createRepositoryMock({
+    claimLost: true,
+    attachments: [
+      { id: "a1", storage_path: "a.png", mime_type: "image/png", original_filename: "a.png" },
+      { id: "a2", storage_path: "b.png", mime_type: "image/png", original_filename: "b.png" },
+    ],
+  });
+  let pages = 0;
+  const openRouter = createOpenRouterMock(async () => {
+    pages += 1;
+    return {
+      ocr_text: "page",
+      suggested_title: "t",
+      truncated: false,
+      usage: emptyLlmUsage(),
+    };
+  });
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    { repository, openRouterClient: openRouter, log: { log: () => {}, error: () => {} } },
+  );
+
+  assertEquals(result.status, 400);
+  // It stops paying the provider the moment the record stops being its to write to.
+  assertEquals(pages, 1);
   assertEquals(state.updatedSuccess.length, 0);
 });

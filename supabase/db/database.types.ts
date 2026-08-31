@@ -2681,6 +2681,10 @@ export type Database = {
         Args: { p_batch_id: string; p_payer_person_id: string; p_rows: Json }
         Returns: Json
       }
+      renew_medical_record_claim: {
+        Args: { p_record_id: string; p_run_id: string }
+        Returns: boolean
+      }
       run_med_event_generation_for_all_users: {
         Args: { p_horizon_days?: number }
         Returns: {

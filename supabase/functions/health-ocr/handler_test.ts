@@ -23,6 +23,7 @@ function createRepositoryMock(): HealthOcrRepository {
     ],
     downloadAttachment: async () => new Blob(["image"]),
     claimRecord: async () => "run-1",
+    renewClaim: async () => true,
     updateRecordSuccess: async () => {},
     updateRecordFailure: async () => {},
   };

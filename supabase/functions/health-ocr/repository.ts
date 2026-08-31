@@ -1,6 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../_shared/database.types.ts";
-import { ClaimLostError, claimRecordViaRpc } from "../_shared/processing-claim.ts";
+import {
+  ClaimLostError,
+  claimRecordViaRpc,
+  renewClaimViaRpc,
+} from "../_shared/processing-claim.ts";
 
 const BUCKET_NAME = "medical-attachments";
 
@@ -33,6 +37,8 @@ export interface HealthOcrRepository {
    * Returns the run id on success and null when the record is already claimed.
    */
   claimRecord(recordId: string): Promise<string | null>;
+  /** Extend this run's lease while it is still working; false once the claim has been taken. */
+  renewClaim(recordId: string, runId: string): Promise<boolean>;
   updateRecordSuccess(
     recordId: string,
     payload: { ocrText: string; title: string },
@@ -126,6 +132,10 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
 
     async claimRecord(recordId) {
       return await claimRecordViaRpc(admin, recordId, "ocr_processing");
+    },
+
+    async renewClaim(recordId, runId) {
+      return await renewClaimViaRpc(admin, recordId, runId);
     },
 
     async updateRecordSuccess(recordId, payload, options = {}) {

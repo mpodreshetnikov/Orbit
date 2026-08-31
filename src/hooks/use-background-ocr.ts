@@ -191,6 +191,14 @@ export function useBackgroundOCR() {
 
         updateJob(jobId, { progress: 80 });
 
+        if (response.status === 409) {
+          // Another run owns this record and is still working on it. Marking it failed here
+          // would overwrite the state of the worker that is actually processing it.
+          queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+          updateJob(jobId, { stage: "completed", progress: 100 });
+          return { success: false, error: "already_running" };
+        }
+
         if (!response.ok) {
           const errorText = await response.text();
           let errorMessage = response.statusText;
@@ -425,6 +433,13 @@ export function useBackgroundOCR() {
       clearTimeout(timeoutId);
 
       updateJob(jobId, { progress: 80 });
+
+      if (response.status === 409) {
+        // The record already has an owner; the run that holds it decides its status.
+        queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+        updateJob(jobId, { stage: "completed", progress: 100 });
+        return { success: false, error: "already_running" };
+      }
 
       if (!response.ok) {
         const errorText = await response.text();

@@ -239,8 +239,6 @@ export async function runHealthStructureService(
     if (!record) throw new Error("Record not found or access denied");
     const personId = asString(record.person_id);
     if (!personId) throw new Error("Record is missing person_id");
-    mayRecordFailure = true;
-
     // The claim is taken server-side, after the record is known to exist: the client used to
     // write `structuring` before invoking, which let two callers both believe they had the work.
     const claimSpan = telemetry?.startSpan("edge.health_structure.claim");
@@ -258,6 +256,9 @@ export async function runHealthStructureService(
       };
     }
     await claimSpan?.end({ status: "ok", attrs: { claimed: true } });
+    // Only a run that holds the claim may write a failure: before this point an error belongs to
+    // a caller that never owned the record, and stamping it would clear the owner's claim.
+    mayRecordFailure = true;
 
     const ocrText = asString(record.ocr_text);
     if (!ocrText) throw new Error("No OCR text found for this record. Run health-ocr first.");
@@ -338,9 +339,6 @@ export async function runHealthStructureService(
         status: "structure_review",
         // A previous failure is cleared by the run that succeeds, the way ocr_error is.
         structure_error: null,
-        // The run is over; the record is free for the next one.
-        processing_run_id: null,
-        processing_started_at: null,
       },
       { runId },
     );
@@ -437,6 +435,17 @@ export async function runHealthStructureService(
     );
     await resolutionSpan?.end({ status: "ok" });
 
+    // Only now is the record's content complete. Releasing the claim with the status write above
+    // would have opened the record to a second run while observations, findings and resolutions
+    // were still being written -- two workers deleting and inserting the same rows.
+    const releaseSpan = telemetry?.startSpan("edge.health_structure.release_claim");
+    await deps.repository.updateMedicalRecord(
+      input.recordId,
+      { processing_run_id: null, processing_started_at: null },
+      { runId },
+    );
+    await releaseSpan?.end({ status: "ok" });
+
     telemetry?.info("health_structure_service_completed", {
       record_id: input.recordId,
       observation_count: structuredData.observations.length,
@@ -467,6 +476,10 @@ export async function runHealthStructureService(
           input.recordId,
           {
             structure_error: message,
+            // Back to where a retry starts from. Leaving `structuring` behind would show the
+            // record as being worked on by a run that no longer exists -- the client-side
+            // rollback only happens when a browser is still there to do it.
+            status: "ocr_review",
             // Release the claim so a retry is not locked out until the lease expires.
             processing_run_id: null,
             processing_started_at: null,

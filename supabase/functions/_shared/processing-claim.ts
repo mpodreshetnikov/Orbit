@@ -59,6 +59,26 @@ export async function claimRecordViaRpc(
   return data === true ? runId : null;
 }
 
+/**
+ * Tell the database this run is still working.
+ *
+ * Returns false when the claim has already been taken over -- the caller has lost the record and
+ * should stop rather than keep paying a provider for a result it may not write.
+ */
+export async function renewClaimViaRpc(
+  client: ClaimRpcClient,
+  recordId: string,
+  runId: string,
+): Promise<boolean> {
+  const { data, error } = await client.rpc("renew_medical_record_claim", {
+    p_record_id: recordId,
+    p_run_id: runId,
+  });
+
+  if (error) throw new Error(`Failed to renew claim: ${error.message}`);
+  return data === true;
+}
+
 /** Thrown by a worker that discovers the record is no longer its to write to. */
 export class ClaimLostError extends Error {
   constructor(recordId: string) {
