@@ -23,6 +23,11 @@ interface RepositoryMockOptions {
   existingExternalIds?: string[];
   /** External ids that adopt a statement transaction instead of inserting a new row. */
   adoptedExternalIds?: string[];
+  /**
+   * External ids where two statement transactions match the operation, so the repository
+   * refuses to guess between them rather than adopting one.
+   */
+  ambiguousExternalIds?: string[];
   /** Repair verdict for a given transaction id. */
   blockedByManualEdit?: boolean;
 }
@@ -49,6 +54,7 @@ function createRepositoryMock(options: RepositoryMockOptions): {
   };
   const existingExternalIds = new Set(options.existingExternalIds ?? []);
   const adoptedExternalIds = new Set(options.adoptedExternalIds ?? []);
+  const ambiguousExternalIds = new Set(options.ambiguousExternalIds ?? []);
   let txCounter = 0;
   let lineCounter = 0;
 
@@ -85,6 +91,11 @@ function createRepositoryMock(options: RepositoryMockOptions): {
     findExistingLineItemId: async () => null,
     insertOrResolveTransaction: async (row) => {
       const externalId = row.external_id ?? "";
+      if (ambiguousExternalIds.has(externalId)) {
+        // The repository's own wording, because this is the string the batch report shows and
+        // a paraphrase here would let the two drift apart silently.
+        throw new Error("Multiple statement transactions match this operation");
+      }
       if (adoptedExternalIds.has(externalId)) {
         return {
           transactionId: `tx-statement-${externalId}`,
@@ -323,3 +334,59 @@ Deno.test("applyBatchAction adopts a statement transaction and fills in its rece
   assertEquals(state.repairCalls[0].transactionId, "tx-statement-op-7");
   assertEquals(state.insertedLineItems.length, 2);
 });
+
+Deno.test(
+  "applyBatchAction reports the refusal to guess without touching either match",
+  async () => {
+    // TC-3.2. `repository_test.ts` proves the refusal itself — two adoptable statement rows and
+    // the repository declines rather than picking one. What it cannot show is whether that
+    // refusal ever reaches the person: the batch report is where they see it, and a row that
+    // failed silently, or took the whole batch down with it, looks the same from inside the
+    // repository.
+    //
+    // So this drives the action. The ambiguous row must come out as `error` carrying the
+    // repository's own message, with no transaction id attached — and neither candidate may be
+    // repaired or given line items, because repair deletes the existing composition and there is
+    // no way back from having done that to the wrong transaction.
+    const { repository, state } = createRepositoryMock({
+      ambiguousExternalIds: ["op-8"],
+      storedRows: [
+        txRow({
+          external_id: "op-8",
+          amount: -1000,
+          line_items: [
+            { title: "Молоко", amount: -400 },
+            { title: "Хлеб", amount: -600 },
+          ],
+        }),
+        // A sound row in the same batch: one bad operation must not cost the person the rest of
+        // their import.
+        txRow({
+          external_id: "op-9",
+          amount: -500,
+          line_items: [{ title: "Кофе", amount: -500 }],
+        }),
+      ],
+    });
+
+    const response = await applyBatchAction({ batch_id: "batch-1" }, userAuth, { repository });
+    await assertJsonResponse(response, 200);
+
+    const reportRows = transactionReportRows(state);
+    assertEquals(reportRows.length, 2);
+
+    const [ambiguous, sound] = reportRows;
+    assertEquals(ambiguous.status, "error");
+    assertEquals(ambiguous.message, "Multiple statement transactions match this operation");
+    assertEquals(ambiguous.transaction_id, null);
+
+    assertEquals(sound.status, "inserted");
+    assertEquals(sound.transaction_id, "tx-1");
+
+    // Nothing was written for the ambiguous operation: no composition replaced, and the only
+    // line item inserted belongs to the sound row.
+    assertEquals(state.repairCalls.length, 0);
+    assertEquals(state.insertedLineItems.length, 1);
+    assertEquals(state.insertedLineItems[0].transactionId, "tx-1");
+  },
+);

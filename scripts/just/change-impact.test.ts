@@ -12,6 +12,15 @@ const { classifyChangedFiles } = require("./change-impact.cjs") as {
 };
 
 describe("change-impact", () => {
+  it("treats the database tooling as a database change", () => {
+    // Otherwise a change to the migration-check gate merges without the gate running — which is
+    // how the commit that introduced it slipped through.
+    expect(classifyChangedFiles(["scripts/just/db-data-migration-check.ts"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["scripts/just/db-local-docker.cjs"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["supabase/migrations/1_x.sql"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["scripts/just/coverage-report.cjs"]).dbImpact).toBe(false);
+  });
+
   it("treats extension build surfaces as extension impact", () => {
     expect(classifyChangedFiles(["scripts/extension/build.ts"]).extensionImpact).toBe(true);
     expect(classifyChangedFiles(["vite.config.extension.ts"]).extensionImpact).toBe(true);
@@ -39,5 +48,16 @@ describe("change-impact docsOnly", () => {
 
   it("is false when nothing changed, so an empty diff never skips the gates", () => {
     expect(classifyChangedFiles([]).docsOnly).toBe(false);
+  });
+
+  it("treats the shared dedupe formula as a database change", () => {
+    // The SQL migration reproduces `buildMoneyDedupeHash` character for character, and the only
+    // thing comparing them is the data migration check — which the workflow guards on dbImpact.
+    // Classified as web-only, a change to the formula merges without that comparison running.
+    expect(classifyChangedFiles(["shared/lib/money/dedupe.ts"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["shared/lib/money/other.ts"]).dbImpact).toBe(false);
+    // The preflight starts the daemon those checks run on, so a regression there stops all of
+    // them — and it is the file this branch changed to make them runnable in the first place.
+    expect(classifyChangedFiles(["scripts/just/docker-preflight.cjs"]).dbImpact).toBe(true);
   });
 });

@@ -192,9 +192,11 @@ quality-db-lint:
 quality-db-test:
   npx supabase test db --local supabase/tests
 
-# Start local Supabase stack.
+# Start local Supabase stack. Through the retry runner: the CLI's readiness probe reaches the
+# API gateway before the edge runtime is listening and calls the resulting 502 fatal, which fails
+# this lane roughly six times in ten. Only that signature is retried — see T-260829-hhj.
 supabase-local-start:
-  npx supabase start
+  node scripts/just/supabase-cli-retry.cjs start
 
 # Stop local Supabase stack.
 supabase-local-stop:
@@ -204,13 +206,34 @@ supabase-local-stop:
 supabase-local-status:
   npx supabase status
 
+# Bring up a Docker-only local DB for hosts where `supabase start` cannot run (no IPv6).
+supabase-docker-up:
+  node scripts/just/db-local-docker.cjs up
+
+# Tear the Docker-only local DB down.
+supabase-docker-down:
+  node scripts/just/db-local-docker.cjs down
+
+# Run pgTAP against the Docker-only local DB.
+supabase-docker-test *args:
+  node scripts/just/db-local-docker.cjs test {{args}}
+
+# Run DB lint against the Docker-only local DB.
+supabase-docker-lint:
+  node scripts/just/db-local-docker.cjs lint
+
+# Run the money data-repair migrations against rows in their pre-repair shape (needs Docker).
+db-data-migration-check:
+  npx tsx scripts/just/db-data-migration-check.ts
+
 # Apply pending local migrations without reset.
 supabase-local-migrate-only:
   npx supabase migration up
 
-# Reset local DB to migrations and seed (destructive).
+# Reset local DB to migrations and seed (destructive). Through the retry runner for the same
+# readiness 502 as `supabase-local-start`; every other failure still fails on the first attempt.
 supabase-local-reset-only:
-  npx supabase db reset --yes
+  node scripts/just/supabase-cli-retry.cjs db reset --yes
 
 # Apply idempotent SQL objects from supabase/db/deploy.sql to local DB.
 supabase-local-deploy-sql:

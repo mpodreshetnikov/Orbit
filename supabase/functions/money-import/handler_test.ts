@@ -683,3 +683,57 @@ Deno.test(
     assertEquals(generic.error, "Auth backend exploded");
   },
 );
+
+Deno.test("money-import handler runs the grant lifecycle: session, revoke, 401", async () => {
+  // Milestone 7's acceptance scenario, end to end through the handler rather than in pieces.
+  // `session-actions_test.ts` proves a grant can start a session and `auth_test.ts` proves a
+  // revoked grant is rejected, but the thing being promised is a *sequence*: the credential
+  // works, then it is revoked, and the very next request with it fails. Nothing tied those two
+  // ends together, and a revocation that took effect only on the next deploy — or not at all —
+  // would have passed both halves.
+  const grant: Record<string, unknown> = {
+    id: "grant-1",
+    person_id: "person-1",
+    created_by_auth_user_id: "user-1",
+    revoked_at: null,
+    expires_at: null,
+    allowed_sources: ["tbank_web"],
+  };
+  const markedGrants: string[] = [];
+
+  const handler = createMoneyImportHandler({
+    repository: {
+      ...createRepositoryMock(),
+      getGrantByToken: async (token: string) => (token === "grant-token" ? grant : null),
+      markGrantUsed: async (grantId: string) => {
+        markedGrants.push(grantId);
+      },
+    },
+    now: () => new Date("2026-08-23T10:00:00.000Z"),
+  });
+
+  const createSession = () =>
+    handler(
+      new Request("http://localhost/functions/v1/money-import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer grant-token",
+        },
+        body: JSON.stringify({ action: "create_session", source: "tbank_web" }),
+      }),
+    );
+
+  // The grant works, and fixes the payer itself rather than taking one from the body.
+  const started = await assertJsonResponse<{ payer_person_id: string }>(await createSession(), 200);
+  assertEquals(started.payer_person_id, "person-1");
+  assertEquals(markedGrants, ["grant-1"]);
+
+  // Revoked between the two requests, the way a person revokes it from the screen.
+  grant.revoked_at = "2026-08-23T10:05:00.000Z";
+
+  const afterRevoke = await assertJsonResponse<{ error: string }>(await createSession(), 401);
+  assertEquals(afterRevoke.error, "Unauthorized");
+  // And it bought nothing on the way out: no second session was marked against the grant.
+  assertEquals(markedGrants, ["grant-1"]);
+});

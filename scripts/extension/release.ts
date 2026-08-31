@@ -31,6 +31,9 @@ const EXTENSION_VERSIONED_SURFACE_PATTERNS = [
  * a test-only edit — and, because a version change also triggers the release
  * bundle job, turns a test fix into a publish.
  */
+// Mirrored in prose in docs/QUALITY.md under "Extension Release Policy". That document is the
+// canonical statement of the rule and this is what CI actually runs, so they have to agree:
+// change one and change the other.
 const EXTENSION_NON_PACKAGED_PATTERNS = [
   /\.(test|spec)\.[cm]?[jt]sx?$/,
   /(^|\/)__tests__\//,
@@ -41,6 +44,15 @@ const EXTENSION_NON_PACKAGED_PATTERNS = [
   // the version policy would require a version bump to land the change, which
   // is circular. The rest of scripts/extension/ stays governed.
   /^scripts\/extension\/release\.ts$/,
+  // The cassette tooling records and scrubs a bank session so the connector can
+  // be tested without one. It reaches the extension the same way the release
+  // tooling does — not at all: `build.ts` imports only `money-import-sources`
+  // and `esbuild-widget`, and nothing under browserExtension/ may import from
+  // scripts/ (ESLint forbids it), so none of these files can enter
+  // browserExtension/dist. Without this, adding a recording tool mints an
+  // extension release whose bundle is byte for byte the previous one, and
+  // publishes it.
+  /^scripts\/extension\/(build-)?cassette-[^/]+$/,
 ] as const;
 
 export interface ExtensionReleaseMetadata {

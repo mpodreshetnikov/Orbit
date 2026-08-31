@@ -29,8 +29,28 @@ function classifyChangedFiles(changedFiles) {
   const normalizedChangedFiles = uniq(changedFiles.map(normalizePath));
   const hasFiles = normalizedChangedFiles.length > 0;
 
-  const dbImpact = normalizedChangedFiles.some((filePath) =>
-    /^supabase\/(db|migrations|tests)\//.test(filePath),
+  const dbImpact = normalizedChangedFiles.some(
+    (filePath) =>
+      /^supabase\/(db|migrations|tests)\//.test(filePath) ||
+      // The tooling that runs the database checks counts as a database change: without this a
+      // regression in the migration-check gate merges without the gate ever executing, which is
+      // exactly what happened to the commit that introduced it.
+      /^scripts\/just\/db-[\w-]+\.(cjs|ts)$/.test(filePath) ||
+      // The preflight belongs with them: it starts the Docker daemon the database checks run
+      // on, so a regression there stops every one of them — and named by prefix alone it would
+      // be classified as no impact at all, which is how the gap it fixes went unnoticed.
+      /^scripts\/just\/docker-preflight\.cjs$/.test(filePath) ||
+      // The CSV parser's `extractAccountHint` is the function `20260814092000` reproduces in SQL,
+      // and the migration check imports the real one to derive what it expects. Change the parser
+      // without running that check and the migration silently stops matching the importer, which
+      // is a duplicate transaction past an index that cannot see it.
+      /^src\/lib\/import\/connectors\/tbank-csv\.ts$/.test(filePath) ||
+      // The dedupe formula is shared between TypeScript and a SQL migration that reproduces it
+      // character for character, and the only thing comparing the two is the data migration
+      // check — which runs behind this flag. Classified as web-only, a change to the formula
+      // merges without that comparison ever running, and re-importing a repaired statement
+      // duplicates every row the migration fixed.
+      /^shared\/lib\/money\/dedupe\.ts$/.test(filePath),
   );
   const webImpact = normalizedChangedFiles.some(
     (filePath) =>
