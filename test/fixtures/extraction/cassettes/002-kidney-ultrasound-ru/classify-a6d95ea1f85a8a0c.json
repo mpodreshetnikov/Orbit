@@ -3,9 +3,9 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1786021200-Mr8mGLZK07H2DPN46Am0",
+    "id": "gen-1786103234-BmDE2f9ZIi4JXYkMLsjS",
     "object": "chat.completion",
-    "created": 1786021200,
+    "created": 1786103234,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -18,27 +18,27 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"imaging\",\"title\":\"УЗИ почек — заключение\",\"record_date\":\"2026-03-05\",\"summary\":\"Ultrasound report of the kidneys performed on 2026-03-05. Findings describe generally normal kidneys without stones or masses, with noted excessive mobility of the right kidney and no urodynamic impairment.\",\"keywords\":[\"УЗИ\",\"почки\",\"ультразвук\",\"избыточная подвижность правой почки\",\"уродинамика\",\"надпочечники\",\"забрюшинное пространство\",\"заключение\"]}",
+          "content": "{\"record_type\":\"imaging\",\"title\":\"УЗИ почек — заключение врача\",\"record_date\":\"2026-03-05\",\"summary\":\"Ultrasound examination of the kidneys performed on 2026-03-05. The report describes generally satisfactory visualization with no stones, no masses, and no dilation of the collecting system, and notes increased mobility of the right kidney. The conclusion states no urodynamic disturbance and recommends follow-up ultrasound and a family doctor consultation.\",\"keywords\":[\"УЗИ\",\"почки\",\"правая почка\",\"избыточная подвижность\",\"уродинамика\",\"конкременты\",\"надпочечники\",\"забрюшинное пространство\"]}",
           "refusal": null
         }
       }
     ],
     "usage": {
       "prompt_tokens": 1442,
-      "completion_tokens": 131,
-      "total_tokens": 1573,
-      "cost": 0.004313925,
+      "completion_tokens": 154,
+      "total_tokens": 1596,
+      "cost": 0.002636865,
       "is_byok": false,
       "prompt_tokens_details": {
-        "cached_tokens": 0,
+        "cached_tokens": 1280,
         "cache_write_tokens": 0,
         "audio_tokens": 0,
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.0043575,
-        "upstream_inference_prompt_cost": 0.0025235,
-        "upstream_inference_completions_cost": 0.001834
+        "upstream_inference_cost": 0.0026635,
+        "upstream_inference_prompt_cost": 0.0005075,
+        "upstream_inference_completions_cost": 0.002156
       },
       "completion_tokens_details": {
         "reasoning_tokens": 0,

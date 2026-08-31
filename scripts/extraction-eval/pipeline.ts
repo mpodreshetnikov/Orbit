@@ -95,6 +95,7 @@ export async function runCasePipeline(
       size_mm: num(row.size_mm),
       severity: str(row.severity),
       laterality: str(row.laterality),
+      count: num(row.count),
     })),
     conditions: structured.conditions.map((condition) => ({
       name: condition.name,
@@ -125,6 +126,7 @@ export async function runCasePipeline(
       unresolvedCatalogCount: observations.unresolvedCatalogCount + findings.unresolvedCatalogCount,
       promptTokens: outcome.usage.promptTokens,
       completionTokens: outcome.usage.completionTokens,
+      costUsd: outcome.usage.costUsd,
     },
   };
 }

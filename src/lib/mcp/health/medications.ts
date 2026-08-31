@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { rowToDoseEvent, rowToInventoryTransaction, rowToRegimen } from "@/lib/regimen-mappers";
 import { getEffectiveStatus, getPlannedIntakeAmount, type PlannedIntake } from "@/types/regimen";
-import type { MedDoseEvent, MedRegimen } from "@/types/regimen";
+import type { MedDoseEvent, MedRegimen, MedSchedule } from "@/types/regimen";
 
 /**
  * Medications.
@@ -28,16 +28,50 @@ function withEffectiveStatus(regimen: MedRegimen): RegimenWithStatus {
   return { ...regimen, effective_status: getEffectiveStatus(regimen) };
 }
 
+/**
+ * Escapes every POSIX regex metacharacter, so a name is matched literally.
+ *
+ * The filter this replaced was a case-insensitive `String.includes`, and the
+ * search text is whatever the user said -- a name can legitimately contain `%`,
+ * `*`, `+` or a bracket. `ilike` was the obvious operator and the wrong one:
+ * PostgREST reads `*` in a `like`/`ilike` value as `%`, unconditionally and
+ * with no escape that survives the substitution, so `B*Complex` would silently
+ * widen into a wildcard search and inflate the count beside it.
+ */
+function regexLiteral(value: string): string {
+  return value.replace(/[.^$*+?()[\]{}|\\]/g, (match) => `\\${match}`);
+}
+
+/**
+ * One page of a person's regimens, with the total that matched.
+ *
+ * The name filter runs in the query rather than over the result: PostgREST caps
+ * a response at `max_rows` (1000 in `supabase/config.toml`), and filtering
+ * afterwards would page rows the database had already truncated -- so a person
+ * with a long history would find their oldest courses unreachable while the
+ * reply claimed there was nothing more.
+ */
 export async function listMedications(
   supabase: SupabaseClient<Database>,
-  params: { personId: string; status?: string; search?: string; includeArchived?: boolean },
-): Promise<RegimenWithStatus[]> {
+  params: {
+    personId: string;
+    status?: string;
+    search?: string;
+    includeArchived?: boolean;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<{ regimens: RegimenWithStatus[]; total: number }> {
   let query = supabase
     .from("med_regimens")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("person_id", params.personId)
     .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    // `created_at` is not unique -- four courses of one medication were created
+    // in the same minute in production -- and an unstable order under paging
+    // repeats one row while dropping another.
+    .order("id", { ascending: true });
 
   if (params.status) {
     query = query.eq("status", params.status as never);
@@ -45,31 +79,60 @@ export async function listMedications(
     query = query.neq("status", "archived");
   }
 
-  const { data, error } = await query;
+  const needle = params.search?.trim();
+  if (needle) {
+    // `imatch` is `~*`: a case-insensitive regex, with no wildcard aliasing of
+    // its own, so an escaped needle means exactly "contains this text".
+    query = query.regexIMatch("custom_name", regexLiteral(needle));
+  }
+
+  if (params.limit != null) {
+    const offset = params.offset ?? 0;
+    query = query.range(offset, offset + params.limit - 1);
+  }
+
+  const { data, error, count } = await query;
   if (error) {
     throw new Error(`Failed to load medications: ${error.message}`);
   }
 
-  let regimens = ((data ?? []) as unknown as Array<Record<string, unknown>>)
+  const regimens = ((data ?? []) as unknown as Array<Record<string, unknown>>)
     .map(rowToRegimen)
     .map(withEffectiveStatus);
 
-  if (params.search?.trim()) {
-    const needle = params.search.trim().toLowerCase();
-    regimens = regimens.filter((regimen) => regimen.custom_name.toLowerCase().includes(needle));
-  }
-
-  return regimens;
+  return { regimens, total: count ?? regimens.length };
 }
+
+/** How many of the newest stock movements `getMedication` returns. */
+export const INVENTORY_LIMIT = 20;
+
+/**
+ * Doses fetched either side of now for the detail tool.
+ *
+ * The text renders ten a side; the rest ride along in `structuredContent` for a
+ * client that wants them, and the exact totals say how many were left in the
+ * database either way.
+ */
+export const DETAIL_DOSE_FETCH = 50;
 
 export async function getMedication(
   supabase: SupabaseClient<Database>,
-  params: { regimenId: string; horizonDays: number },
+  params: {
+    regimenId: string;
+    horizonDays: number;
+    inventoryLimit?: number;
+    inventoryOffset?: number;
+  },
 ): Promise<{
   regimen: RegimenWithStatus | null;
   upcomingDoses: MedDoseEvent[];
   recentDoses: MedDoseEvent[];
+  /** How many doses the horizon holds either side of now, of which the nearest are returned. */
+  upcomingTotal: number;
+  recentTotal: number;
   inventoryTransactions: ReturnType<typeof rowToInventoryTransaction>[];
+  /** How many movements the ledger holds, of which the newest are returned. */
+  inventoryTotal: number;
 } | null> {
   const { data, error } = await supabase
     .from("med_regimens")
@@ -91,60 +154,168 @@ export async function getMedication(
   const horizonEnd = new Date(now.getTime() + params.horizonDays * 86_400_000);
   const recentStart = new Date(now.getTime() - params.horizonDays * 86_400_000);
 
-  const { data: events } = await supabase
-    .from("med_dose_events")
-    .select("*")
-    .eq("regimen_id", params.regimenId)
-    .is("deleted_at", null)
-    .gte("scheduled_at", recentStart.toISOString())
-    .lte("scheduled_at", horizonEnd.toISOString())
-    .order("scheduled_at", { ascending: true });
+  // Two queries, each counted and bounded, rather than one unbounded window
+  // split in memory. PostgREST caps a response at `max_rows` (1000), and an
+  // hourly course over a 30-day horizon has ~1440 events either side: a single
+  // ascending query would have been cut at the cap, reporting the truncation as
+  // the count and losing the upcoming tail entirely -- the same defect the two
+  // listings were fixed for.
+  //
+  // `actual_at`, not `scheduled_at`: `snooze_dose.sql` moves the first and
+  // leaves the second, and the effective time is what the reminder query fires
+  // on, what the dashboard sorts by and what these tools print. A dose snoozed
+  // across midnight belongs to the day it is now due on, and one snoozed past
+  // now is still upcoming.
+  const nowIso = now.toISOString();
+  const dosePage = (order: "recent" | "upcoming") => {
+    const query = supabase
+      .from("med_dose_events")
+      .select("*", { count: "exact" })
+      .eq("regimen_id", params.regimenId)
+      .is("deleted_at", null);
+    return order === "recent"
+      ? query
+          .gte("actual_at", recentStart.toISOString())
+          .lt("actual_at", nowIso)
+          // Newest first, so the page holds the intakes nearest now rather than
+          // the oldest in the window.
+          .order("actual_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(0, DETAIL_DOSE_FETCH - 1)
+      : query
+          .gte("actual_at", nowIso)
+          .lte("actual_at", horizonEnd.toISOString())
+          .order("actual_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(0, DETAIL_DOSE_FETCH - 1);
+  };
 
-  const doses = ((events ?? []) as unknown as Array<Record<string, unknown>>).map(rowToDoseEvent);
+  const [recent, upcoming] = await Promise.all([dosePage("recent"), dosePage("upcoming")]);
 
-  const { data: transactions } = await supabase
+  const toDoses = (rows: unknown) =>
+    ((rows ?? []) as unknown as Array<Record<string, unknown>>).map(rowToDoseEvent);
+  // Back to ascending, which is the order the renderer and the payload expect.
+  const recentDoses = toDoses(recent.data).reverse();
+  const upcomingDoses = toDoses(upcoming.data);
+
+  // Counted as well as capped: a caller told only "here are 20 movements"
+  // cannot tell a complete ledger from a truncated one, and stock questions are
+  // exactly where that matters.
+  const { data: transactions, count: inventoryTotal } = await supabase
     .from("med_inventory_transactions")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("regimen_id", params.regimenId)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .order("id", { ascending: true })
+    .range(
+      params.inventoryOffset ?? 0,
+      (params.inventoryOffset ?? 0) + (params.inventoryLimit ?? INVENTORY_LIMIT) - 1,
+    );
 
   return {
     regimen,
-    upcomingDoses: doses.filter((dose) => new Date(dose.scheduled_at) >= now),
-    recentDoses: doses.filter((dose) => new Date(dose.scheduled_at) < now),
+    upcomingDoses,
+    recentDoses,
+    upcomingTotal: upcoming.count ?? upcomingDoses.length,
+    recentTotal: recent.count ?? recentDoses.length,
     inventoryTransactions: ((transactions ?? []) as unknown as Array<Record<string, unknown>>).map(
       rowToInventoryTransaction,
     ),
+    inventoryTotal: inventoryTotal ?? (transactions ?? []).length,
   };
 }
 
+/**
+ * One page of intakes, with the total the range actually holds.
+ *
+ * The count comes from the database rather than the length of what was
+ * returned: PostgREST caps a response at `max_rows` (1000 in
+ * `supabase/config.toml`), so a wide range would otherwise report its own
+ * truncation as the total and declare there was nothing more to fetch.
+ */
 export async function listMedicationDoses(
   supabase: SupabaseClient<Database>,
-  params: { personId: string; from: string; to: string; status?: string },
-): Promise<Array<MedDoseEvent & { medication_name: string | null }>> {
+  params: {
+    personId: string;
+    from: string;
+    to: string;
+    status?: string;
+    regimenId?: string;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<{
+  doses: Array<
+    MedDoseEvent & {
+      medication_name: string | null;
+      medication_dose: PlannedIntake | null;
+      medication_schedule: MedSchedule | null;
+    }
+  >;
+  total: number;
+}> {
   let query = supabase
     .from("med_dose_events")
-    .select("*, regimen:med_regimens ( custom_name )")
+    // The course's own `dose_definition` rides along because an intake's
+    // milligrams are only meaningful beside the amount they were recorded for:
+    // nothing scales `active` when a slot or a correction changes the amount,
+    // so the renderer has to be able to say which amount the strength belongs
+    // to rather than implying it belongs to this one. The `schedule` comes with
+    // it because a per-slot amount is the other way an event's amount can
+    // differ from the definition the strength was recorded against.
+    .select("*, regimen:med_regimens ( custom_name, dose_definition, schedule )", {
+      count: "exact",
+    })
     .eq("person_id", params.personId)
     .is("deleted_at", null)
-    .gte("scheduled_at", params.from)
-    .lte("scheduled_at", params.to)
-    .order("scheduled_at", { ascending: true });
+    // Ranged and ordered by the effective time for the same reason the detail
+    // tool is: a dose snoozed to the next day is asked about, and answered for,
+    // the day it is actually due.
+    .gte("actual_at", params.from)
+    .lte("actual_at", params.to)
+    .order("actual_at", { ascending: true })
+    // Several medications commonly fall on the same minute, and ordering by a
+    // non-unique column alone lets successive pages return one of those rows
+    // twice and skip another.
+    .order("id", { ascending: true });
 
   if (params.status) {
     query = query.eq("status", params.status as never);
   }
 
-  const { data, error } = await query;
+  // Filtered in the query rather than by the caller: "when did this one course
+  // change dose" is the question that otherwise costs a scan of every
+  // medication in the window, which is how a titration history came to be
+  // reconstructed by binary search over 3-5 day ranges.
+  if (params.regimenId) {
+    query = query.eq("regimen_id", params.regimenId);
+  }
+
+  // Paged in the query, so the window is bounded by the database rather than
+  // sliced out of a response that may already be truncated.
+  if (params.limit != null) {
+    const offset = params.offset ?? 0;
+    query = query.range(offset, offset + params.limit - 1);
+  }
+
+  const { data, error, count } = await query;
   if (error) {
     throw new Error(`Failed to load medication intakes: ${error.message}`);
   }
 
-  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map((row) => ({
+  const doses = ((data ?? []) as unknown as Array<Record<string, unknown>>).map((row) => ({
     ...rowToDoseEvent(row),
     medication_name: (row.regimen as { custom_name?: string } | null)?.custom_name ?? null,
+    medication_dose:
+      ((row.regimen as { dose_definition?: PlannedIntake } | null)?.dose_definition as
+        | PlannedIntake
+        | undefined) ?? null,
+    medication_schedule:
+      ((row.regimen as { schedule?: MedSchedule } | null)?.schedule as MedSchedule | undefined) ??
+      null,
   }));
+
+  return { doses, total: count ?? doses.length };
 }
 
 export async function createRegimen(
@@ -211,9 +382,10 @@ export async function findRegimensByName(
     return [];
   }
 
-  const regimens = await listMedications(supabase, {
+  const { regimens } = await listMedications(supabase, {
     personId: params.personId,
     includeArchived: true,
+    search: needle,
   });
 
   return regimens.filter((regimen) => normalizeMedicationName(regimen.custom_name) === needle);
@@ -245,24 +417,56 @@ export interface LogDoseParams {
  * `mark_dose_skipped` takes `taken`, precisely so a resolution can be amended
  * in place.
  */
+/** The statuses that still owe an intake, per `snooze_dose.sql`'s own guard. */
+const OWED_STATUSES = new Set(["scheduled", "sent", "snoozed"]);
+
+/**
+ * The statuses each resolution RPC will move a dose out of, from their own
+ * `WHERE e.status IN (...)` guards.
+ *
+ * A row outside its target's set is not a candidate at all: the RPC selects no
+ * row, returns success, and the readback hands back the unchanged event -- so
+ * matching a `missed` or `cancelled` dose would report an intake as logged with
+ * nothing recorded. Leaving such a row alone lets the intake be inserted as its
+ * own event, which is what happens today when the minute holds nothing.
+ */
+const TRANSITIONS_INTO: Record<string, Set<string>> = {
+  taken: new Set(["scheduled", "sent", "snoozed", "skipped"]),
+  skipped: new Set(["scheduled", "sent", "snoozed", "taken"]),
+};
+
 async function findDoseInSameMinute(
   supabase: SupabaseClient<Database>,
   regimenId: string,
   at: Date,
+  requestedStatus?: string,
 ): Promise<Record<string, unknown> | null> {
   const minuteStart = new Date(Math.floor(at.getTime() / 60_000) * 60_000);
   const minuteEnd = new Date(minuteStart.getTime() + 60_000);
 
+  const from = minuteStart.toISOString();
+  const to = minuteEnd.toISOString();
+
+  // Either timestamp, because the caller may name either one. `scheduled_at` is
+  // the planned slot an off-plan intake attaches to; `actual_at` is where a
+  // snooze moved that slot to, and it is the time the read tools print, the app
+  // shows and the reminder fires on. Matching only the planned time meant a
+  // caller logging the 11:00 dose they had just been shown -- snoozed there
+  // from 09:00 -- inserted a second event, decremented stock for it, and left
+  // the snoozed reminder unresolved.
   const { data, error } = await supabase
     .from("med_dose_events")
     .select("*")
     .eq("regimen_id", regimenId)
     .is("deleted_at", null)
-    .gte("scheduled_at", minuteStart.toISOString())
-    .lt("scheduled_at", minuteEnd.toISOString())
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .or(
+      `and(scheduled_at.gte.${from},scheduled_at.lt.${to}),and(actual_at.gte.${from},actual_at.lt.${to})`,
+    )
+    // No limit: the ranking below decides which row this call belongs to, and a
+    // cap applied first could discard the dose still owed before the ranking
+    // ever sees it. The filter is one regimen inside one minute, so the set is
+    // small by construction, and PostgREST's own `max_rows` still bounds it.
+    .order("created_at", { ascending: true });
 
   // This read decides between resolving and inserting, so "the query failed"
   // must not be read as "nothing is there": that would take the insert branch
@@ -271,7 +475,42 @@ async function findDoseInSameMinute(
     throw new Error(`Failed to look for an existing dose at that time: ${error.message}`);
   }
 
-  return (data as Record<string, unknown> | null) ?? null;
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const byEffectiveTime = (row: Record<string, unknown>) =>
+    typeof row.actual_at === "string" && row.actual_at >= from && row.actual_at < to;
+
+  // Which candidate a minute's worth of doses deserves, best first:
+  //
+  //   0. still owed -- `scheduled`, `sent` or `snoozed`. Resolving one of these
+  //      is what logging an intake is for, and leaving it behind is what leaves
+  //      a reminder armed and a stock movement unwritten.
+  //   1. resolved the other way -- a correction of a real record, legitimate
+  //      but never at the cost of a dose still owed.
+  //   2. already in the requested status -- nothing to do, and choosing it
+  //      answers "already recorded".
+  //
+  // The three tiers matter because `snooze_dose` can move a dose onto a minute
+  // that already holds a resolved one, so all three can be present at once.
+  const rank = (row: Record<string, unknown>) => {
+    if (OWED_STATUSES.has(String(row.status))) return 0;
+    return requestedStatus == null || row.status !== requestedStatus ? 1 : 2;
+  };
+  // A row the RPC cannot move is not a candidate, whatever tier it would land
+  // in: choosing it would report the intake as logged while nothing changed.
+  const transitionable = requestedStatus == null ? null : TRANSITIONS_INTO[requestedStatus];
+  const candidates = rows.filter(
+    (row) =>
+      transitionable == null ||
+      row.status === requestedStatus ||
+      transitionable.has(String(row.status)),
+  );
+  const ranked = [...candidates].sort((a, b) => {
+    const byTier = rank(a) - rank(b);
+    if (byTier !== 0) return byTier;
+    // Then the effective time, because that is the one the caller was shown.
+    return Number(byEffectiveTime(b)) - Number(byEffectiveTime(a));
+  });
+  return ranked[0] ?? null;
 }
 
 /**
@@ -322,7 +561,12 @@ export async function logDose(
   const unit = regimen.dose_definition?.intake?.unit ?? regimen.intake_unit;
   const note = params.note?.trim() ? params.note.trim() : null;
 
-  const planned = await findDoseInSameMinute(supabase, regimen.id, new Date(params.at));
+  const planned = await findDoseInSameMinute(
+    supabase,
+    regimen.id,
+    new Date(params.at),
+    params.status,
+  );
 
   // Nothing to do when the minute already holds this very outcome. Re-running
   // the RPC would be a silent no-op anyway (it selects only rows in the other

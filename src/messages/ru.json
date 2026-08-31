@@ -766,6 +766,7 @@
     }
   },
   "common": {
+    "actions": "Действия",
     "loading": "Загрузка...",
     "error": "Что-то пошло не так",
     "retry": "Повторить",
@@ -1441,6 +1442,8 @@
     "daysCount": "Дней",
     "daysFromStartCount": "Принимать (дней)",
     "daysCountRequired": "Укажите количество дней (не менее 1).",
+    "duplicateReminderTimes": "Два приёма не могут быть в одно и то же время — укажите разное время.",
+    "reminderTimeRequired": "Укажите время для каждого приёма.",
     "scheduleAt": "в",
     "reminderTimes": "Время напоминаний",
     "quickSetIntakes": "Приёмов в день (быстро):",

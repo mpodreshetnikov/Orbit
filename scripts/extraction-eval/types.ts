@@ -21,6 +21,7 @@ export interface ExpectedFinding {
   size_mm?: number | null;
   severity?: string | null;
   laterality?: string | null;
+  count?: number | null;
 }
 
 export interface ExpectedCondition {
@@ -73,4 +74,12 @@ export interface CaseDiagnostics {
   unresolvedCatalogCount: number;
   promptTokens: number | null;
   completionTokens: number | null;
+  /**
+   * What this case cost to run, in USD, as priced by the router.
+   *
+   * Null rather than zero when unknown -- a replayed cassette recorded before usage accounting was
+   * requested has no price attached, and reporting that as $0.00 would understate a live run's real
+   * total by however many cases happened to be stale.
+   */
+  costUsd: number | null;
 }

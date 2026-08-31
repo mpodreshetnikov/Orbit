@@ -766,6 +766,7 @@
     }
   },
   "common": {
+    "actions": "Actions",
     "loading": "Loading...",
     "error": "Something went wrong",
     "retry": "Retry",
@@ -1441,6 +1442,8 @@
     "daysCount": "Days",
     "daysFromStartCount": "Take for (days)",
     "daysCountRequired": "Please enter the number of days (at least 1).",
+    "duplicateReminderTimes": "Two intakes cannot share the same time — each time must be unique.",
+    "reminderTimeRequired": "Enter a time for every intake.",
     "scheduleAt": "at",
     "reminderTimes": "Reminder times",
     "quickSetIntakes": "Intakes per day (quick set):",

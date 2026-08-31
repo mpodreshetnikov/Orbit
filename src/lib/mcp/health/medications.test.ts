@@ -90,34 +90,73 @@ describe("listMedications", () => {
       ],
     });
 
-    const rows = await listMedications(stub.client, { personId: "p-1" });
+    const { regimens } = await listMedications(stub.client, { personId: "p-1" });
 
-    expect(rows[0].effective_status).toBe("active");
+    expect(regimens[0].effective_status).toBe("active");
     // The UI shows this as completed; the tool must agree.
-    expect(rows[1].effective_status).toBe("completed");
-    expect(rows[1].status).toBe("active");
+    expect(regimens[1].effective_status).toBe("completed");
+    expect(regimens[1].status).toBe("active");
   });
 
-  it("filters by name in memory, case-insensitively", async () => {
+  it("filters by name in the query, case-insensitively", async () => {
+    // In memory this was a filter over a response PostgREST had already capped
+    // at `max_rows`, so a long history could hide its own oldest courses.
     const stub = createSupabaseStub({
-      med_regimens: [
-        {
-          data: [
-            regimen({ custom_name: "Ferrous sulfate" }),
-            regimen({ custom_name: "Vitamin D" }),
-          ],
-        },
-      ],
+      med_regimens: [{ data: [regimen({ custom_name: "Ferrous sulfate" })] }],
     });
 
-    const rows = await listMedications(stub.client, { personId: "p-1", search: "FERROUS" });
-    expect(rows.map((r) => r.custom_name)).toEqual(["Ferrous sulfate"]);
+    const { regimens } = await listMedications(stub.client, {
+      personId: "p-1",
+      search: "FERROUS",
+    });
+
+    expect(stub.argsFor("med_regimens", "regexIMatch")).toEqual([["custom_name", "FERROUS"]]);
+    expect(regimens.map((r) => r.custom_name)).toEqual(["Ferrous sulfate"]);
+  });
+
+  it("matches a name containing pattern characters literally", async () => {
+    // `ilike` was the wrong operator here: PostgREST reads `*` in its value as
+    // `%`, so "B*Complex" would have quietly become a wildcard search.
+    const stub = createSupabaseStub({ med_regimens: [{ data: [] }] });
+    await listMedications(stub.client, { personId: "p-1", search: "B*Complex (50%)" });
+
+    expect(stub.argsFor("med_regimens", "regexIMatch")).toEqual([
+      ["custom_name", "B\\*Complex \\(50%\\)"],
+    ]);
   });
 
   it("ignores a whitespace-only search", async () => {
     const stub = createSupabaseStub({ med_regimens: [{ data: [regimen(), regimen()] }] });
-    const rows = await listMedications(stub.client, { personId: "p-1", search: "  " });
-    expect(rows).toHaveLength(2);
+    const { regimens } = await listMedications(stub.client, { personId: "p-1", search: "  " });
+
+    expect(stub.argsFor("med_regimens", "regexIMatch")).toHaveLength(0);
+    expect(regimens).toHaveLength(2);
+  });
+
+  it("pages in the query and reports the count the database returned", async () => {
+    const stub = createSupabaseStub({ med_regimens: [{ data: [regimen()], count: 1200 }] });
+
+    const { regimens, total } = await listMedications(stub.client, {
+      personId: "p-1",
+      limit: 20,
+      offset: 60,
+    });
+
+    expect(stub.argsFor("med_regimens", "range")).toEqual([[60, 79]]);
+    expect(regimens).toHaveLength(1);
+    expect(total).toBe(1200);
+  });
+
+  it("orders by a unique column as well, so a page boundary cannot repeat a row", async () => {
+    // Four courses of one medication were created in the same minute in
+    // production, so `created_at` alone is not a stable order.
+    const stub = createSupabaseStub({ med_regimens: [{ data: [] }] });
+    await listMedications(stub.client, { personId: "p-1" });
+
+    expect(stub.argsFor("med_regimens", "order")).toEqual([
+      ["created_at", { ascending: false }],
+      ["id", { ascending: true }],
+    ]);
   });
 
   it("surfaces a query error", async () => {
@@ -129,27 +168,64 @@ describe("listMedications", () => {
 });
 
 describe("getMedication", () => {
-  it("splits doses into upcoming and recent around now", async () => {
+  it("asks for the doses either side of now separately, each counted", async () => {
+    // One unbounded window split in memory would be cut at PostgREST's
+    // `max_rows`: an hourly course over a 30-day horizon has ~1440 events a
+    // side, so the ascending page would have ended before "upcoming" began and
+    // the counts would have reported the truncation as the total.
     const past = new Date(Date.now() - 3_600_000).toISOString();
     const future = new Date(Date.now() + 3_600_000).toISOString();
 
     const stub = createSupabaseStub({
       med_regimens: [{ data: regimen() }],
       med_dose_events: [
+        // Newest first, as the recent query orders them.
         {
           data: [
-            doseEvent({ id: "past", scheduled_at: past }),
-            doseEvent({ id: "future", scheduled_at: future }),
+            doseEvent({ id: "yesterday", scheduled_at: past, actual_at: past }),
+            doseEvent({ id: "older", scheduled_at: past, actual_at: past }),
           ],
+          count: 812,
+        },
+        {
+          data: [
+            doseEvent({ id: "future", scheduled_at: future, actual_at: future }),
+            // Snoozed forward: still scheduled for an hour ago, but due in an
+            // hour, which is where the app and the reminder query place it.
+            doseEvent({
+              id: "snoozed",
+              scheduled_at: past,
+              actual_at: future,
+              status: "snoozed",
+            }),
+          ],
+          count: 1440,
         },
       ],
       med_inventory_transactions: [{ data: [] }],
     });
 
-    const result = await getMedication(stub.client, { regimenId: "r-1", horizonDays: 7 });
+    const result = await getMedication(stub.client, { regimenId: "r-1", horizonDays: 30 });
 
-    expect(result?.upcomingDoses.map((d) => d.id)).toEqual(["future"]);
-    expect(result?.recentDoses.map((d) => d.id)).toEqual(["past"]);
+    // The recent page comes back newest-first and is returned ascending, so the
+    // renderer's "last" slice really is the intakes nearest now.
+    expect(result?.recentDoses.map((d) => d.id)).toEqual(["older", "yesterday"]);
+    expect(result?.upcomingDoses.map((d) => d.id)).toEqual(["future", "snoozed"]);
+    expect(result?.recentTotal).toBe(812);
+    expect(result?.upcomingTotal).toBe(1440);
+
+    // Both pages are bounded in the database, and the boundary between them is
+    // now: the recent side ends strictly before it, the upcoming side starts at
+    // it, so no dose falls in both or neither.
+    expect(stub.argsFor("med_dose_events", "range")).toEqual([
+      [0, 49],
+      [0, 49],
+    ]);
+    const [[ltColumn, ltValue]] = stub.argsFor("med_dose_events", "lt") as [[string, string]];
+    const gte = stub.argsFor("med_dose_events", "gte") as Array<[string, string]>;
+    expect(ltColumn).toBe("actual_at");
+    expect(gte.map(([column]) => column)).toEqual(["actual_at", "actual_at"]);
+    expect(gte[1][1]).toBe(ltValue);
   });
 
   it("returns null for an unknown or deleted regimen without further queries", async () => {
@@ -183,10 +259,13 @@ describe("getMedication", () => {
 
     await getMedication(stub.client, { regimenId: "r-1", horizonDays: 3 });
 
-    const [[, lower]] = stub.argsFor("med_dose_events", "gte") as [[string, string]];
-    const [[, upper]] = stub.argsFor("med_dose_events", "lte") as [[string, string]];
+    const [[lowerColumn, lower]] = stub.argsFor("med_dose_events", "gte") as [[string, string]];
+    const [[upperColumn, upper]] = stub.argsFor("med_dose_events", "lte") as [[string, string]];
     const span = Date.parse(upper) - Date.parse(lower);
     expect(Math.round(span / 86_400_000)).toBe(6);
+    // The window is over the effective time, so a dose snoozed into or out of
+    // it is selected where it is now due rather than where it was planned.
+    expect([lowerColumn, upperColumn]).toEqual(["actual_at", "actual_at"]);
   });
 
   it("surfaces a query error", async () => {
@@ -205,25 +284,75 @@ describe("listMedicationDoses", () => {
       ],
     });
 
-    const rows = await listMedicationDoses(stub.client, {
+    const { doses } = await listMedicationDoses(stub.client, {
       personId: "p-1",
       from: "2026-06-15T00:00:00Z",
       to: "2026-06-15T23:59:59Z",
     });
 
-    expect(rows[0].medication_name).toBe("Ferrous sulfate");
+    expect(doses[0].medication_name).toBe("Ferrous sulfate");
   });
 
-  it("falls back to null when the join is missing", async () => {
+  it("pages in the query and reports the count the database returned", async () => {
+    // PostgREST caps a response at `max_rows` (1000 in supabase/config.toml),
+    // so counting the returned rows would report a truncated page as the whole
+    // range and declare there was nothing left to fetch.
+    const stub = createSupabaseStub({
+      med_dose_events: [{ data: [doseEvent()], count: 1743 }],
+    });
+
+    const { doses, total } = await listMedicationDoses(stub.client, {
+      personId: "p-1",
+      from: "a",
+      to: "b",
+      limit: 20,
+      offset: 40,
+    });
+
+    expect(doses).toHaveLength(1);
+    expect(total).toBe(1743);
+    expect(stub.argsFor("med_dose_events", "range")).toEqual([[40, 59]]);
+  });
+
+  it("ranges over the effective time, not the planned one", async () => {
+    // `snooze_dose.sql` moves `actual_at` and leaves `scheduled_at`, so asking
+    // by the planned time returns a dose snoozed into tomorrow on today's list
+    // and hides it from tomorrow's.
     const stub = createSupabaseStub({ med_dose_events: [{ data: [doseEvent()] }] });
 
-    const rows = await listMedicationDoses(stub.client, {
+    await listMedicationDoses(stub.client, {
+      personId: "p-1",
+      from: "2026-06-15T00:00:00Z",
+      to: "2026-06-15T23:59:59Z",
+    });
+
+    expect(stub.argsFor("med_dose_events", "gte")).toEqual([["actual_at", "2026-06-15T00:00:00Z"]]);
+    expect(stub.argsFor("med_dose_events", "lte")).toEqual([["actual_at", "2026-06-15T23:59:59Z"]]);
+  });
+
+  it("asks the database for no range when the caller wants everything", async () => {
+    const stub = createSupabaseStub({ med_dose_events: [{ data: [doseEvent()] }] });
+
+    const { total } = await listMedicationDoses(stub.client, {
       personId: "p-1",
       from: "a",
       to: "b",
     });
 
-    expect(rows[0].medication_name).toBeNull();
+    expect(stub.argsFor("med_dose_events", "range")).toEqual([]);
+    expect(total).toBe(1);
+  });
+
+  it("falls back to null when the join is missing", async () => {
+    const stub = createSupabaseStub({ med_dose_events: [{ data: [doseEvent()] }] });
+
+    const { doses } = await listMedicationDoses(stub.client, {
+      personId: "p-1",
+      from: "a",
+      to: "b",
+    });
+
+    expect(doses[0].medication_name).toBeNull();
   });
 
   it("applies the status filter and excludes deleted events", async () => {
@@ -334,12 +463,18 @@ describe("logDose", () => {
     rpc: Record<string, StubResult> = {},
     planned: StubResult = { data: null },
   ) {
+    // The probe matches either timestamp in the minute, so it reads rows rather
+    // than a single row; callers still pass the one planned dose they mean.
+    const probe: StubResult = {
+      ...planned,
+      data: planned.data == null ? [] : Array.isArray(planned.data) ? planned.data : [planned.data],
+    };
     return createSupabaseStub(
       {
         med_regimens: [{ data: regimen(overrides) }],
         med_dose_events: [
           // The same-minute planned-dose probe, then the insert, then the re-read.
-          planned,
+          probe,
           { data: doseEvent() },
           { data: doseEvent({ status: "taken", taken_at: "2026-06-15T08:00:00Z" }) },
         ],
@@ -404,11 +539,14 @@ describe("logDose", () => {
       status: "taken",
     });
 
-    expect(stub.argsFor("med_dose_events", "gte")).toEqual([
-      ["scheduled_at", "2026-06-15T08:00:00.000Z"],
-    ]);
-    expect(stub.argsFor("med_dose_events", "lt")).toEqual([
-      ["scheduled_at", "2026-06-15T08:01:00.000Z"],
+    // Both timestamps: `scheduled_at` is the planned slot, `actual_at` is where
+    // a snooze moved it to and the time the read tools print, so a caller
+    // logging the dose they were just shown finds it either way.
+    expect(stub.argsFor("med_dose_events", "or")).toEqual([
+      [
+        "and(scheduled_at.gte.2026-06-15T08:00:00.000Z,scheduled_at.lt.2026-06-15T08:01:00.000Z)," +
+          "and(actual_at.gte.2026-06-15T08:00:00.000Z,actual_at.lt.2026-06-15T08:01:00.000Z)",
+      ],
     ]);
     // No status filter: a dose already `taken` or `snoozed` at that minute is
     // outside the unique index, so only this probe can stop it duplicating.
@@ -592,6 +730,135 @@ describe("logDose", () => {
       expect(fake.events).toHaveLength(1);
       expect(fake.events[0].status).toBe("taken");
       expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("resolves a dose snoozed to the time the caller was shown", async () => {
+      // The read tools print `actual_at`, so this is the time a caller repeats:
+      // the 09:00 dose was snoozed to 11:00 and the owner logs it at 11:00.
+      // Probing only `scheduled_at` inserted a second event, decremented stock
+      // for it, and left the snoozed reminder armed.
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T09:00:00.000Z",
+          actual_at: "2026-06-15T11:00:00.000Z",
+        },
+      ]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: "2026-06-15T11:00:00.000Z",
+        status: "taken",
+      });
+
+      expect(result.planned).toBe(true);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("resolves the dose that still needs it when two share the minute", async () => {
+      // `snooze_dose` can move a dose onto a minute that already holds a
+      // resolved one. Picking the resolved row would answer "already recorded"
+      // and leave the other owing a dose, its reminder armed and its stock
+      // movement unwritten.
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "taken",
+          taken_at: AT,
+          scheduled_at: AT,
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:00.000Z",
+        },
+        {
+          id: "d-2",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T07:00:00.000Z",
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:01.000Z",
+        },
+      ]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.alreadyRecorded).toBeFalsy();
+      expect(fake.events).toHaveLength(2);
+      expect(fake.events.find((event) => event.id === "d-2")?.status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("prefers a dose still owed over one resolved the other way", async () => {
+      // Both differ from the requested status, so "needs the transition" alone
+      // ties them and the older skipped row would win — rewriting a real record
+      // while the snoozed dose kept its reminder armed.
+      const fake = fakeWith([
+        {
+          id: "d-1",
+          status: "skipped",
+          taken_at: AT,
+          scheduled_at: AT,
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:00.000Z",
+        },
+        {
+          id: "d-2",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T07:00:00.000Z",
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:01.000Z",
+        },
+      ]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(fake.events.find((event) => event.id === "d-2")?.status).toBe("taken");
+      expect(fake.events.find((event) => event.id === "d-1")?.status).toBe("skipped");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("records the intake rather than reporting a missed dose as logged", async () => {
+      // `mark_dose_taken` selects only scheduled/sent/snoozed/skipped rows, so a
+      // `missed` one is a silent no-op that the readback returns unchanged —
+      // "logged" with nothing recorded. It is left alone and the intake becomes
+      // its own event.
+      const fake = fakeWith([{ id: "d-1", status: "missed", scheduled_at: AT, actual_at: AT }]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(fake.events.find((event) => event.id === "d-1")?.status).toBe("missed");
+      expect(fake.events).toHaveLength(2);
+      expect(fake.events[1].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+    });
+
+    it("ranks every candidate on the minute, however many share it", async () => {
+      // A cap applied before the ranking could discard the dose still owed:
+      // eleven snoozed doses collide, ten are resolved, and the next call would
+      // see only resolved rows and answer "already recorded".
+      const fake = fakeWith([
+        ...Array.from({ length: 10 }, (_, index) => ({
+          id: `taken-${index}`,
+          status: "taken",
+          taken_at: AT,
+          scheduled_at: AT,
+          actual_at: AT,
+          created_at: `2026-06-01T00:00:0${index}.000Z`,
+        })),
+        {
+          id: "owed",
+          status: "snoozed",
+          scheduled_at: "2026-06-15T07:00:00.000Z",
+          actual_at: AT,
+          created_at: "2026-06-01T00:00:20.000Z",
+        },
+      ]);
+
+      const result = await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken" });
+
+      expect(result.alreadyRecorded).toBeFalsy();
+      expect(fake.events.find((event) => event.id === "owed")?.status).toBe("taken");
     });
 
     it("resolves the planned dose rather than colliding with the unique index", async () => {

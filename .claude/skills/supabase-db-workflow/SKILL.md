@@ -45,6 +45,7 @@ Additional DB-related locations:
 - Do **not** create migrations for routine DB logic edits (functions, triggers, policies, cron, grants, helper SQL).
 - For those changes, editing files in `supabase/db/` is sufficient.
 - Create/update a migration in `supabase/migrations/` only when table structure changes are required (for example table create/alter/drop, columns, constraints, indexes tied to table shape).
+- A new migration's timestamp must sort **after** every migration already on the base branch. Canonical policy, including the allowlisted exception, is `docs/QUALITY.md` under "Migration Order Policy"; `quality-migration-order` (part of `quality`) enforces it.
 
 ## Execution Flow
 

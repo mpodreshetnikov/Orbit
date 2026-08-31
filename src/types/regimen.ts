@@ -55,6 +55,15 @@ export type MedScheduleDaysOfWeek = {
   mode: "days_of_week";
   days_of_week: number[];
   times: string[];
+  /**
+   * Per-slot amounts, same length and order as `times`.
+   *
+   * The generator has always read these for this mode
+   * (`generate_med_dose_events_for_person_ids.sql`), and rows in the fixture
+   * corpus carry them; the type simply never said so, which is why the MCP
+   * renderer dropped them.
+   */
+  amounts?: number[];
 };
 
 export type MedScheduleOneOff = {
@@ -83,6 +92,108 @@ function todayDateString(): string {
 
 export type GetEffectiveStatusOptions = { today?: string };
 
+/** `date` shifted by whole days, as YYYY-MM-DD. */
+/**
+ * A stored duration date, or null when the value is not a calendar day.
+ *
+ * `duration` is jsonb with no shape constraint, so an imported row can carry a
+ * number where a date belongs, and reading it has to fail as "no date" rather
+ * than throwing -- one such row would otherwise take down every listing it
+ * appears in. Type and length are not enough either: `medDurationSchema`
+ * accepts any string, so "abcdefghij" is writable through the MCP tools as well
+ * as importable, and it would come back out of `shiftDate` as "NaN-NaN-NaN".
+ */
+function asDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const day = value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  // The rest has to be a time or nothing: the generator casts the whole stored
+  // value to `date`, so "2026-09-01garbage" fails regeneration outright and the
+  // course keeps a plausible window with no reminders behind it. A stored
+  // timestamp still passes, since Postgres casts that to a date happily.
+  const rest = value.slice(10);
+  if (rest !== "" && !/^[T ]\d{2}:\d{2}/.test(rest)) return null;
+  const parsed = new Date(`${day}T12:00:00Z`);
+  // The round trip rejects 2026-02-31, which `Date` rolls forward to 3 March
+  // rather than refusing.
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10) === day ? day : null;
+}
+
+function shiftDate(date: string, days: number): string | null {
+  // Midday, so a DST transition cannot push the arithmetic onto the wrong day.
+  const shifted = new Date(date + "T12:00:00");
+  shifted.setDate(shifted.getDate() + days);
+  // `medDurationSchema` puts no maximum on `days`, so a schema-valid
+  // `days: 1000000000` runs off the end of the `Date` range and every field
+  // reads NaN. Rendering "NaN-NaN-NaN" would be the least of it: `statusBoundary`
+  // shifts that end again, so the course would never complete and the
+  // duplicate-medication guard would keep offering it as running.
+  if (Number.isNaN(shifted.getTime())) return null;
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}-${String(shifted.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * The last day a course still counts as running, for status purposes.
+ *
+ * This is NOT the last day it doses. A `for_days` course stops generating on
+ * `start + days` -- `generate_med_dose_events_for_person_ids` skips any date at
+ * or after it -- but the status has always treated that boundary day as still
+ * active, and the dashboard is built on that. Keeping the two apart is
+ * deliberate: `getCourseWindow` answers "when was this taken", this answers
+ * "does it still count as running", and only the first is safe to show.
+ */
+function statusBoundary(duration: MedDuration): string | null {
+  const { start, end } = getCourseWindow(duration);
+  // Read from the stored end date rather than from the window: the window
+  // drops an end that precedes its start, because printing "2026-09-10 to
+  // 2026-09-01" would describe a course running backwards -- but that same row
+  // must still stop counting as active on 1 September. Letting the display
+  // rule reach the status would leave such a course running forever and keep
+  // the duplicate-medication guard treating it as current.
+  if (duration.type === "until_date") return asDate(duration.end_date);
+  // One day past the last dosing day, which is where the dashboard has always
+  // drawn this line.
+  if (duration.type === "for_days" && end != null && start != null) return shiftDate(end, 1);
+  return null;
+}
+
+/**
+ * The calendar days a course is planned to dose on, inclusive of both ends, as
+ * YYYY-MM-DD, or null where the duration does not bound that end.
+ *
+ * The MCP tools render this so that two courses of the same medication under
+ * one name can be told apart. The end is the last day a dose is generated for:
+ * a four-day course starting on the 26th doses on the 26th through the 29th,
+ * because the generator skips dates on or after `start + days`. Reporting the
+ * 30th here would put a one-day error into every answer about when a dose
+ * changed, which is exactly the kind of question this window exists to answer.
+ */
+export function getCourseWindow(duration?: MedDuration | null): {
+  start: string | null;
+  end: string | null;
+} {
+  if (!duration) return { start: null, end: null };
+
+  const start = asDate(duration.start_date);
+
+  if (duration.type === "until_date") {
+    const end = asDate(duration.end_date);
+    // An end before the start is not a window. Nothing forbids the pair on
+    // write -- the duration schema has no cross-field check -- and the
+    // generator answers it by producing no events at all, so rendering
+    // "2026-09-10 to 2026-09-01" would describe a course that never doses as if
+    // it ran backwards. The start is still true, so it is kept.
+    if (end != null && (start == null || end >= start)) return { start, end };
+  }
+
+  if (duration.type === "for_days" && start != null && typeof duration.days === "number") {
+    return { start, end: shiftDate(start, duration.days - 1) };
+  }
+
+  return { start, end: null };
+}
+
 /**
  * Returns the effective display status: "active" regimens with end_date (or for_days end) in the past
  * are treated as "completed" so they don't show as active in the list.
@@ -96,17 +207,8 @@ export function getEffectiveStatus(
   const duration = regimen.duration;
   if (!duration) return regimen.status;
   const today = options?.today ?? todayDateString();
-  if (duration.type === "until_date" && duration.end_date) {
-    const end = duration.end_date.slice(0, 10);
-    if (end < today) return "completed";
-  }
-  if (duration.type === "for_days" && duration.start_date != null && duration.days != null) {
-    const start = duration.start_date.slice(0, 10);
-    const d = new Date(start + "T12:00:00");
-    d.setDate(d.getDate() + duration.days);
-    const endStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    if (endStr < today) return "completed";
-  }
+  const boundary = statusBoundary(duration);
+  if (boundary != null && boundary < today) return "completed";
   return regimen.status;
 }
 

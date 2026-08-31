@@ -8,8 +8,11 @@ import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
 import Link from "next/link";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   MoreVertical,
+  Trash2,
   Pencil,
   AlertTriangle,
   Clock,
@@ -232,6 +235,47 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
               {t("medications.refillButton")}
             </Button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="px-2" aria-label={t("common.actions")}>
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {regimen.status !== "archived" ? (
+                <DropdownMenuItem
+                  disabled={archiveMutation.isPending}
+                  onClick={() => setArchiveConfirmOpen(true)}
+                >
+                  {archiveMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Archive className="h-4 w-4 mr-2" />
+                  )}
+                  {t("medications.archiveMedication")}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  disabled={unarchiveMutation.isPending}
+                  onClick={() => setUnarchiveConfirmOpen(true)}
+                >
+                  {unarchiveMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <ArchiveRestore className="h-4 w-4 mr-2" />
+                  )}
+                  {t("medications.unarchiveMedication")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setDeleteConfirmOpen(true)}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {t("medications.deleteMedication")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -545,36 +589,6 @@ export default function MedicationDetailPage({ params }: { params: Promise<{ id:
           )}
         </CardContent>
       </Card>
-
-      <div className="flex justify-end gap-2 flex-wrap">
-        {regimen.status !== "archived" && (
-          <Button
-            variant="ghost"
-            onClick={() => setArchiveConfirmOpen(true)}
-            disabled={archiveMutation.isPending}
-          >
-            {archiveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            {t("medications.archiveMedication")}
-          </Button>
-        )}
-        {regimen.status === "archived" && (
-          <Button
-            variant="ghost"
-            onClick={() => setUnarchiveConfirmOpen(true)}
-            disabled={unarchiveMutation.isPending}
-          >
-            {unarchiveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            {t("medications.unarchiveMedication")}
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          className="text-destructive hover:text-destructive"
-          onClick={() => setDeleteConfirmOpen(true)}
-        >
-          {t("medications.deleteMedication")}
-        </Button>
-      </div>
 
       <RefillDialog
         open={refillOpen}

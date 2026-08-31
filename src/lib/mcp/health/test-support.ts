@@ -14,7 +14,12 @@ import type { Database } from "@/types/database";
  * only treats `*.test.ts` as a suite, so this is never collected as one.
  */
 
-export type StubResult = { data?: unknown; error?: { message: string } | null };
+export type StubResult = {
+  data?: unknown;
+  error?: { message: string } | null;
+  /** PostgREST's exact count, for a query that asked for one. */
+  count?: number | null;
+};
 
 export interface RecordedCall {
   table: string;
@@ -71,6 +76,10 @@ export function createSupabaseStub(
       lte: record("lte"),
       in: record("in"),
       or: record("or"),
+      like: record("like"),
+      ilike: record("ilike"),
+      regexMatch: record("regexMatch"),
+      regexIMatch: record("regexIMatch"),
       order: record("order"),
       limit: record("limit"),
       range: record("range"),
@@ -78,7 +87,9 @@ export function createSupabaseStub(
       maybeSingle: settle("maybeSingle"),
       then: (resolve: (value: unknown) => unknown) => {
         const r = next();
-        return Promise.resolve(resolve({ data: r.data ?? null, error: r.error ?? null }));
+        return Promise.resolve(
+          resolve({ data: r.data ?? null, error: r.error ?? null, count: r.count ?? null }),
+        );
       },
     };
 

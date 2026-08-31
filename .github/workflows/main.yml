@@ -137,6 +137,22 @@ jobs:
           echo "Extension release surfaces changed without a browserExtension/manifest.json version bump."
           exit 1
       - name: Run quality (format, lint, typecheck)
+        # The migration-order gate inside `quality` compares against the state this change is added
+        # to. Pull requests may target any branch here, so that is the pull request's own base
+        # rather than a hard-coded main. On a push it is the commit the branch pointed at before,
+        # the same range basis the impact and extension-version checks above use: origin/main after
+        # checkout is the commit being pushed, so comparing against it would compare the migration
+        # directory with itself and report no additions, in the one run that also deploys. An empty
+        # value (workflow_dispatch), or the zero sha of a branch's first push, falls back to
+        # origin/main.
+        #
+        # The PR-size gate takes the same base, for the same reasons, and additionally the head
+        # branch name: a pull request run checks out a detached merge commit, where git names no
+        # branch and a `branch` allowlist entry could never match.
+        env:
+          MIGRATION_ORDER_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          PR_SIZE_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          PR_SIZE_BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
         run: just quality
       - name: Restore Supabase Docker image cache
         if: steps.impact.outputs.dbImpact == 'true'

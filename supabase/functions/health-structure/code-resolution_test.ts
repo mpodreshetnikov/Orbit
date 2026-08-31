@@ -135,3 +135,107 @@ Deno.test("resolveBodySiteCode matches a site by its printed label", () => {
   assertEquals(result.kind, "resolved");
   if (result.kind === "resolved") assertEquals(result.entry.site_code, "gallbladder");
 });
+
+/**
+ * The rest of this file works against small hand-written catalogues, which is right for behaviour
+ * that does not depend on the real vocabulary. These do: the discriminating-token rules were
+ * written against `Холестерин ЛПОНП` and `Витамин B12` as the production catalogue actually spells
+ * them, and a toy fixture would let the rule pass while the real catalogue still mis-filed. The
+ * corpus snapshot is the same data the eval scores against.
+ */
+const SNAPSHOT = JSON.parse(
+  await Deno.readTextFile(
+    new URL("../../../test/fixtures/extraction/shared/catalogs.json", import.meta.url),
+  ),
+) as {
+  observationCatalog: ObservationCatalogItem[];
+  findingTypeCatalog: FindingTypeCatalogItem[];
+};
+
+function observationCodeFor(label: string): string | null {
+  const result = resolveObservationCode(null, label, SNAPSHOT.observationCatalog);
+  return result.kind === "resolved" ? result.entry.obs_code : null;
+}
+
+function findingCodeFor(label: string): string | null {
+  const result = resolveFindingTypeCode(null, label, SNAPSHOT.findingTypeCatalog);
+  return result.kind === "resolved" ? result.entry.finding_code : null;
+}
+
+Deno.test("a lipid fraction the catalogue does not carry stays uncoded", () => {
+  // The defect: `холестерин` alone cleared the fuzzy threshold against `cholesterol_total`, so a
+  // VLDL result was written into total cholesterol's history and marked applied. There is no VLDL
+  // entry, so the only correct answer is no code — the row is then invisible to the chart rather
+  // than wrong in it.
+  assertEquals(observationCodeFor("Холестерин ЛПОНП"), null);
+  // Same shape, and the reason the fix cannot just be "reject anything with two words": these are
+  // genuinely distinct analytes from total bilirubin, not spellings of it.
+  assertEquals(observationCodeFor("Билирубин прямой"), null);
+  assertEquals(observationCodeFor("Билирубин непрямой"), null);
+});
+
+Deno.test("labels that resolve today still resolve", () => {
+  // The risk in tightening a matcher is silently losing the matches that already worked.
+  assertEquals(observationCodeFor("Гемоглобин"), "hemoglobin");
+  assertEquals(observationCodeFor("Глюкоза"), "glucose");
+  assertEquals(observationCodeFor("Холестерин общий"), "cholesterol_total");
+  assertEquals(observationCodeFor("Триглицериды"), "triglycerides");
+  assertEquals(observationCodeFor("Креатинин"), "creatinine");
+  assertEquals(observationCodeFor("Мочевина"), "urea");
+  assertEquals(observationCodeFor("Билирубин общий"), "bilirubin_total");
+  assertEquals(observationCodeFor("Гликированный гемоглобин"), "hba1c");
+});
+
+Deno.test("a homoglyph does not hide a match, and inflection does not either", () => {
+  // The catalogue spells it `Витамин B12 (кобаламин)` with a Latin B; a Russian lab prints
+  // `Витамин В12` with a Cyrillic В. The strings look identical and share almost no trigrams.
+  assertEquals(observationCodeFor("Витамин В12"), "vitamin_b12");
+  // Catalogue `Железо сывороточное`, document `Железо сыворотки` — same word, different case ending.
+  assertEquals(observationCodeFor("Железо сыворотки"), "serum_iron");
+});
+
+Deno.test("a named inflammation resolves through its diagnosis, however qualified", () => {
+  // `гастрит` and `Воспаление` share almost no trigrams; the link is semantic, so it lives in the
+  // catalogue's synonyms rather than in any threshold.
+  assertEquals(findingCodeFor("Гастрит"), "inflammation");
+  assertEquals(findingCodeFor("Эзофагит"), "inflammation");
+  // Qualifiers describe the same morphology rather than replacing it, unlike an analyte's.
+  assertEquals(findingCodeFor("Хронический активный гастрит"), "inflammation");
+  assertEquals(findingCodeFor("Хронический колит"), "inflammation");
+});
+
+Deno.test("a finding the catalogue does not carry still stays uncoded", () => {
+  assertEquals(findingCodeFor("Аденома"), null);
+});
+
+Deno.test("a word naming the specimen does not stop an analyte resolving", () => {
+  // `Глюкоза крови`, `Глюкоза плазмы` and `Глюкоза венозной крови` are all glucose, and are among
+  // the most common ways a Russian lab prints the line. A rule that required the catalogue entry to
+  // account for `крови` would leave all of them uncoded and would fire far more often than it
+  // helped.
+  assertEquals(observationCodeFor("Глюкоза крови"), "glucose");
+  assertEquals(observationCodeFor("Глюкоза плазмы"), "glucose");
+  assertEquals(observationCodeFor("Глюкоза венозной крови"), "glucose");
+  assertEquals(observationCodeFor("Гемоглобин крови"), "hemoglobin");
+  assertEquals(observationCodeFor("Железо сыворотки крови"), "serum_iron");
+
+  // The exemption covers specimens only. A fraction or a grade still changes which analyte it is,
+  // and folding those in would undo the whole point.
+  assertEquals(observationCodeFor("Холестерин ЛПОНП"), null);
+  assertEquals(observationCodeFor("Билирубин прямой"), null);
+});
+
+Deno.test("a lipid fraction resolves to its own analyte, and VLDL still to none", () => {
+  // A Russian panel prints `Холестерин ЛПВП`, while the catalogue carries the bare abbreviation.
+  // No algorithm can bridge that: `холестерин` names exactly one entry and `лпвп` names exactly one
+  // other, so neither is measurably the more decisive token. The printed forms are catalogue data.
+  assertEquals(observationCodeFor("Холестерин ЛПВП"), "hdl_c");
+  assertEquals(observationCodeFor("Холестерин ЛПНП"), "ldl_c");
+  assertEquals(observationCodeFor("ХС ЛПНП"), "ldl_c");
+  assertEquals(observationCodeFor("ЛПВП"), "hdl_c");
+
+  // And the reason those synonyms are dangerous to add carelessly: `лпонп` is one letter from
+  // `лпнп`, so a near-miss match would file VLDL into LDL's history. The catalogue has no VLDL
+  // entry, so the only correct answer is still no code.
+  assertEquals(observationCodeFor("Холестерин ЛПОНП"), null);
+});

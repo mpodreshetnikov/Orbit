@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMarkdown, type RunSummary } from "./report";
+import { formatCost, renderMarkdown, renderVariance, totalCost, type RunSummary } from "./report";
 import { aggregate, scoreCase } from "./score";
 import type { CaseSnapshot } from "./types";
 
@@ -124,5 +124,110 @@ describe("renderMarkdown", () => {
       summary({ cases: [{ caseId: "002", score }], aggregate: aggregate([score]) }),
     );
     expect(markdown).toContain("| findings_to_resolve |");
+  });
+});
+
+describe("renderVariance", () => {
+  function runOf(observations: CaseSnapshot["observations"]) {
+    return aggregate([scoreCase("001", snapshot({ observations }), snapshot(), [])]);
+  }
+
+  const observation = {
+    obs_name: "Гемоглобин",
+    obs_code: "hemoglobin",
+    value_numeric: 97,
+    unit: "г/л",
+    ref_range_low: null,
+    ref_range_high: null,
+    status: null,
+    value_canonical: 97,
+    unit_canonical: "g/L",
+    is_applied: true,
+  };
+
+  it("renders nothing for a single run, because one run has no spread", () => {
+    expect(renderVariance([runOf([])])).toBe("");
+  });
+
+  it("marks a dimension that agreed across every run as stable", () => {
+    const variance = renderVariance([runOf([]), runOf([]), runOf([])]);
+    expect(variance).toContain("Variance across 3 runs");
+    expect(variance).toContain("stable");
+  });
+
+  it("prints the range and every run when a dimension disagreed", () => {
+    // Two runs that found different numbers of observations: the recall differs, so the f1 does.
+    const variance = renderVariance([runOf([]), runOf([observation])]);
+    expect(variance).toContain("observations fn");
+    // The individual runs are printed, not just a summary — the point is to show the disagreement.
+    expect(variance).toMatch(/observations fn \| 0\.5 \| 0\.0 – 1\.0 \| 0\.0, 1\.0/);
+  });
+});
+
+describe("cost reporting", () => {
+  function withCost(caseId: string, costUsd: number | null) {
+    return {
+      caseId,
+      diagnostics: {
+        stagesRun: ["classify"],
+        rejected: [],
+        droppedInvalidCount: 0,
+        unresolvedCatalogCount: 0,
+        promptTokens: 10,
+        completionTokens: 5,
+        costUsd,
+      },
+    };
+  }
+
+  it("prints an unknown price as a dash, never as zero", () => {
+    // A replayed cassette carries no price. Rendering that as $0.0000 would claim a live run was
+    // free, and the whole point of the field is to be able to trust the total.
+    expect(formatCost(null)).toBe("—");
+    expect(formatCost(undefined)).toBe("—");
+    expect(formatCost(Number.NaN)).toBe("—");
+    expect(formatCost(0)).toBe("$0.0000");
+  });
+
+  it("keeps enough precision to distinguish cheap cases", () => {
+    // Two decimals would print $0.01 for everything and $0.00 for the rest.
+    expect(formatCost(0.0123)).toBe("$0.0123");
+    expect(formatCost(1.5)).toBe("$1.5000");
+  });
+
+  it("totals only the cases that reported a price, and counts the ones that did not", () => {
+    const result = totalCost([withCost("001", 0.01), withCost("002", 0.02), withCost("003", null)]);
+    expect(result.total).toBeCloseTo(0.03, 10);
+    expect(result.priced).toBe(2);
+    // Reporting 2-of-3 as the run's cost without saying so is how a number gets misread.
+    expect(result.unpriced).toBe(1);
+  });
+
+  it("reports a live run's cost as the run's cost", () => {
+    const score = scoreCase("001", snapshot(), snapshot(), []);
+    const markdown = renderMarkdown(
+      summary({
+        mode: "live",
+        cases: [{ ...withCost("001", 0.0421), score }],
+        aggregate: aggregate([score]),
+      }),
+    );
+    expect(markdown).toContain("$0.0421");
+    expect(markdown).toContain("across 1 case(s)");
+  });
+
+  it("says a replay's cost is what recording cost, not what the replay cost", () => {
+    // Replaying is free and offline. The price on a cassette belongs to the call that recorded it,
+    // and printing it unqualified is how it ends up in someone's budget as a recurring cost.
+    const score = scoreCase("001", snapshot(), snapshot(), []);
+    const markdown = renderMarkdown(
+      summary({
+        mode: "replay",
+        cases: [{ ...withCost("001", 0.0421), score }],
+        aggregate: aggregate([score]),
+      }),
+    );
+    expect(markdown).toContain("to record");
+    expect(markdown).toContain("replaying them is free");
   });
 });

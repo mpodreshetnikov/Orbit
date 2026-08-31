@@ -42,6 +42,29 @@ function run(cmd, cmdArgs, envOverride = {}) {
   return 1;
 }
 
+// Migrations are ordered by the timestamp in their filename, and a branch opened before another
+// branch merges produces a file that sorts before a migration already applied to production. Plain
+// `db push` refuses that file and keeps refusing it on every later push, so one out-of-order merge
+// wedges the deploy until someone intervenes by hand. `--include-all` applies it in place instead.
+// The full set is still proven to apply from scratch in filename order by the `db reset` CI lane.
+function buildSteps({ projectRef, databaseUrl }) {
+  return [
+    {
+      cmd: NPX_BIN,
+      args: ["supabase", "functions", "deploy", "--project-ref", projectRef],
+    },
+    {
+      cmd: NPX_BIN,
+      args: ["supabase", "db", "push", "--include-all", "--yes", "--db-url", databaseUrl],
+    },
+    {
+      cmd: "node",
+      args: ["supabase/db/run-deploy.js"],
+      env: { DATABASE_URL: databaseUrl },
+    },
+  ];
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const target = args.target || "unknown";
@@ -67,13 +90,9 @@ function main() {
   }
 
   try {
-    const steps = [
-      [NPX_BIN, ["supabase", "functions", "deploy", "--project-ref", projectRef]],
-      [NPX_BIN, ["supabase", "db", "push", "--yes", "--db-url", databaseUrl]],
-      ["node", ["supabase/db/run-deploy.js"], { DATABASE_URL: databaseUrl }],
-    ];
+    const steps = buildSteps({ projectRef, databaseUrl });
 
-    for (const [cmd, cmdArgs, envOverride] of steps) {
+    for (const { cmd, args: cmdArgs, env: envOverride } of steps) {
       const code = run(cmd, cmdArgs, envOverride || {});
       if (code !== 0) {
         process.exit(code);
@@ -86,9 +105,13 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(error.message);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
 }
+
+module.exports = { buildSteps, parseArgs };

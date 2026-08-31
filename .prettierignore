@@ -6,6 +6,7 @@ build/
 coverage/
 browserExtension/dist/
 browserExtension/*.zip
+ios/
 supabase/.temp/
 supabase/db/database.types.ts
 supabase/db/schema.snapshot.sql

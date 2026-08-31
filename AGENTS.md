@@ -26,6 +26,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `format-check`: `just quality-format-check`
 - `format-write`: `just quality-format-write`
 - `test`: `just quality-smoke-build` (smoke/integration build gate)
+- `ios-sync`: `just ios-sync` (copy web assets and native plugins into `ios/`; run after changing `capacitor.config.ts` or adding a Capacitor plugin)
+- `ios-open`: `just ios-open` (open the iOS app shell in Xcode; macOS only)
 - `test-unit-web`: `just test-unit-web`
 - `test-unit-ext`: `just test-unit-ext`
 - `test-unit-node`: `just test-unit-node`
@@ -59,6 +61,8 @@ Use these command IDs in plans, PRs, and handoffs:
 - `check`: `just check` (full local quality gate)
 - `agent-skills-sync`: `just agent-skills-sync` (mirror `.agents/skills` into `.claude/skills`)
 - `agent-skills-check`: `just agent-skills-check` (fail when `.claude/skills` has drifted from `.agents/skills`; included in `quality`)
+- `pr-size`: `just quality-pr-size` (fail when a branch adds more reviewable lines against its base than one automated review pass is worth; included in `quality`; canonical policy in `docs/QUALITY.md`)
+- `review-delta`: `just review-delta <reviewed-commit>` (report whether the change since the last automated review is worth requesting another review for; advisory, never gates CI; canonical policy in `docs/QUALITY.md`)
 - `mcp-sync`: `just mcp-sync` (regenerate local MCP client configs from canonical MCP config and local MCP env)
 - `mcp-grafana-token-create`: `just mcp-grafana-token-create [service_account_id] [token_name]` (create a local Grafana service account token for MCP via Grafana API; auto-creates `mcp-local` when id is omitted)
 - `mcp-grafana-token-list`: `just mcp-grafana-token-list [service_account_id]` (list local Grafana service account token metadata via Grafana API; defaults to `mcp-local`)
@@ -101,6 +105,10 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 
 All work — features, bugs, tech debt, chores, ideas, ExecPlans, and the reasoning behind decisions — is tracked in a private registry outside this repository, because it describes unreleased work and this repository is public. Nothing here is a second tracker: do not start one.
 
-A local checkout may have the registry linked in at `docs/tasks/`, along with `docs/PLANS.md` and the `task-registry` skill. All three paths are gitignored here. When they are present, read `docs/tasks/INDEX.md` before starting a task, grep `docs/tasks/` for prior decisions on the subject, and follow the skill; `docs/tasks/README.md` is canonical for the schema and lifecycle. Registry changes are committed in the registry repository, never here — a commit in this repository silently drops them.
+A local checkout may have the registry linked in at `docs/tasks/`, along with the `task-registry` and `task-status-sync` skills. Every linked path is gitignored here. `docs/tasks/PLANS.md` — canonical for how an ExecPlan body is written — arrives inside that one directory; it used to be linked separately at `docs/PLANS.md`, and an installation made before the move may still have a leftover file there, which the installer reports rather than deletes. When they are present, read `docs/tasks/INDEX.md` before starting a task, grep `docs/tasks/` for prior decisions on the subject, and follow the skill; `docs/tasks/README.md` is canonical for the schema and lifecycle. Registry changes are committed in the registry repository, never here — a commit in this repository silently drops them.
 
 When they are absent, the registry is simply unavailable in this checkout: say so rather than tracking the work somewhere else.
+
+### No Task, No Work
+
+**Nothing in this repository is changed until a task covering it exists in the registry and is `in-progress`** — the one rule from the registry that gates work in this tree, so it is stated here rather than only linked. Its scope, its exception for trivial changes, and the two gates on creating that task (a duplicate search, and the user's confirmation) are canonical in `docs/tasks/README.md` under `No Work Without A Task` and `Creating A Task`; the `task-registry` skill carries the applied workflow. When the registry is not linked into this checkout the gate cannot be satisfied — the paragraph above applies.

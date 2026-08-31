@@ -57,6 +57,51 @@ export function summarizeList(
   return [`${total} ${label}:`, ...lines].join("\n");
 }
 
+/**
+ * Renders one page of a list, naming the window and how to ask for the next.
+ *
+ * `summarizeList` truncates at its preview limit and says "...and N more" with
+ * no way to reach them, which left the rows past the cap unreachable except by
+ * guessing search terms. A tool that pages says which rows these are and what
+ * `offset` continues the listing, so the model can finish the job itself.
+ */
+export function summarizePage(
+  label: string,
+  items: string[],
+  page: { total: number; offset: number; has_more: boolean; next_offset: number | null },
+): string {
+  if (page.total === 0) {
+    return `No ${label} found.`;
+  }
+
+  // An offset past the end -- asked for directly, or reached after rows were
+  // removed between two calls -- returns nothing while the total stays
+  // positive. Rendering that as a window would print an impossible range like
+  // "showing 41-40", which reads as a broken tool rather than an exhausted
+  // page, so say what happened and where the last page starts.
+  if (items.length === 0) {
+    const lastPageOffset = Math.max(0, page.total - 1);
+    return (
+      `${page.total} ${label}, but offset ${page.offset} is past the end. ` +
+      `Pass an offset below ${page.total} — offset: 0 starts again from the first.` +
+      `${lastPageOffset > 0 ? ` The last row is at offset ${lastPageOffset}.` : ""}`
+    );
+  }
+
+  const window =
+    items.length === page.total
+      ? ""
+      : ` (showing ${page.offset + 1}-${page.offset + items.length})`;
+  const lines = items.map((item) => `- ${item}`);
+  if (page.has_more) {
+    lines.push(
+      `- ...${page.total - page.offset - items.length} more; pass offset: ${page.next_offset} to continue`,
+    );
+  }
+
+  return [`${page.total} ${label}${window}:`, ...lines].join("\n");
+}
+
 export function paginate<T>(
   items: T[],
   limit: number,

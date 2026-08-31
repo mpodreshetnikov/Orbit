@@ -310,7 +310,7 @@ Deno.test("reconcile stage is skipped when there is nothing to reconcile against
   }) as unknown as typeof fetch;
 
   const result = await runReconcileStage(
-    { observations: [], findings: [], conditions: [] },
+    { observations: [], findings: [], conditions: [], asserted_absences: [] },
     null,
     empty,
     { fetchFn, apiKey: "k", model: "m" },
@@ -386,7 +386,7 @@ Deno.test("reconcile stage discards ids it was never given", async () => {
   );
 
   const result = await runReconcileStage(
-    { observations: [], findings: [], conditions: [] },
+    { observations: [], findings: [], conditions: [], asserted_absences: [] },
     null,
     PATIENT,
     { fetchFn, apiKey: "k", model: "m" },
@@ -539,6 +539,34 @@ Deno.test("stage requests pin provider parameters and use a strict json schema",
   // to route to and every stage dies on a bare 404. Reinstating it as a determinism nicety would
   // be an easy and completely silent regression — the value was never honoured anyway.
   assertEquals("temperature" in body, false);
+});
+
+Deno.test(
+  "stage requests cap the output budget so the router reserves a realistic amount",
+  async () => {
+    const { bodies, fetchFn } = recordingFetch(() =>
+      jsonResponse({ observations: [], findings: [], conditions: [] }),
+    );
+
+    await runExtractStage("text", CATALOGS, { fetchFn, apiKey: "k", model: "m", effort: "high" });
+
+    // Omitting `max_tokens` makes OpenRouter reserve the model's full completion capacity (65,536
+    // tokens for the gpt-5.x family) against the account's remaining credit before dispatching, so
+    // an account with a small balance gets HTTP 402 on a call that would have cost a fraction of a
+    // cent. The failure is confusing rather than obvious, because a smaller request on the same key
+    // still returns 200. Dropping this field again would silently reintroduce that.
+    assertEquals(bodies[0].max_tokens, 16_000);
+  },
+);
+
+Deno.test("a stage honours an explicit output budget over the default", async () => {
+  const { bodies, fetchFn } = recordingFetch(() =>
+    jsonResponse({ observations: [], findings: [], conditions: [] }),
+  );
+
+  await runExtractStage("text", CATALOGS, { fetchFn, apiKey: "k", model: "m", maxTokens: 4_096 });
+
+  assertEquals(bodies[0].max_tokens, 4_096);
 });
 
 Deno.test("every stage schema satisfies strict json_schema mode", () => {
@@ -777,4 +805,210 @@ Deno.test("fallback models are sent so routing can move off an unavailable prima
   });
 
   assertEquals(bodies[0].models, ["primary", "secondary", "tertiary"]);
+});
+
+Deno.test("a negated sentence does not become a finding", async () => {
+  const { fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      observations: [],
+      findings: [
+        {
+          finding_code: null,
+          finding_type_text: "расширение",
+          site_code: null,
+          body_site_text: "ЛС",
+          severity: "unknown",
+          laterality: "none",
+          source_anchor: "ЛС не расширена",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+      asserted_absences: [],
+    }),
+  );
+
+  // The defect: "the pyelocaliceal system is NOT dilated" was recorded as a dilated pyelocaliceal
+  // system. A statement that nothing is wrong became a record that something is, and on the review
+  // screen the row looks like any other.
+  const result = await runExtractStage("ЛС не расширена", CATALOGS, {
+    fetchFn,
+    apiKey: "k",
+    model: "m",
+  });
+  assertEquals(result.value.findings.length, 0);
+  assertEquals(result.rejected[0].reason, "source anchor states the finding is absent");
+});
+
+Deno.test("a negation of something else does not delete a real finding", async () => {
+  const { fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      observations: [],
+      findings: [
+        {
+          finding_code: null,
+          finding_type_text: "гиперсигналы",
+          site_code: null,
+          body_site_text: "почечный синус",
+          severity: "unknown",
+          laterality: "bilateral",
+          // `без` here negates the acoustic shadow, not the hypersignals. A rule that rejected any
+          // anchor containing a negation would delete a finding case 002 requires.
+          source_anchor: "с обеих сторон единичные гиперсигналы 0,2 см, без эхотени",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+      asserted_absences: [],
+    }),
+  );
+
+  const result = await runExtractStage(
+    "с обеих сторон единичные гиперсигналы 0,2 см, без эхотени",
+    CATALOGS,
+    { fetchFn, apiKey: "k", model: "m" },
+  );
+  assertEquals(result.value.findings.length, 1);
+  assertEquals(result.value.findings[0].finding_type_text, "гиперсигналы");
+});
+
+Deno.test("an asserted absence survives, and a mislabelled presence does not", async () => {
+  const { fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      observations: [],
+      findings: [],
+      conditions: [],
+      asserted_absences: [
+        {
+          finding_code: "stone",
+          finding_type_text: "Конкремент",
+          site_code: "kidney_right",
+          body_site_text: "правая почка",
+          source_anchor: "Конкременты: нет",
+          confidence: 0.9,
+        },
+        {
+          // A presence that arrived in the wrong array. Letting it through would hand reconciliation
+          // grounds to close a finding the document reported as still there.
+          finding_code: "polyp",
+          finding_type_text: "Полип",
+          site_code: "gallbladder",
+          body_site_text: "желчного пузыря",
+          source_anchor: "полип желчного пузыря 4 мм",
+          confidence: 0.9,
+        },
+      ],
+    }),
+  );
+
+  const result = await runExtractStage("Конкременты: нет\nполип желчного пузыря 4 мм", CATALOGS, {
+    fetchFn,
+    apiKey: "k",
+    model: "m",
+  });
+  assertEquals(result.value.asserted_absences.length, 1);
+  assertEquals(result.value.asserted_absences[0].finding_code, "stone");
+  assertEquals(result.value.findings.length, 0);
+});
+
+Deno.test("reconcile sees asserted absences but still never sees the document", async () => {
+  const { bodies, fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    }),
+  );
+
+  await runReconcileStage(
+    {
+      observations: [],
+      findings: [],
+      conditions: [],
+      asserted_absences: [
+        {
+          finding_code: "stone",
+          finding_type_text: "Конкремент",
+          site_code: "kidney_right",
+          body_site_text: "правая почка",
+          source_anchor: "Конкременты: нет",
+          confidence: 0.9,
+        },
+      ],
+    },
+    "2026-03-06",
+    PATIENT,
+    { fetchFn, apiKey: "k", model: "m" },
+  );
+
+  const prompt = promptOf(bodies[0]);
+  // The signal it needs arrives...
+  assertEquals(prompt.includes("Конкременты: нет"), true);
+  assertEquals(prompt.includes("kidney_right"), true);
+  // ...and the document does not. Passing the text through would be the shortcut this stage exists
+  // to avoid; the anchor is evidence extraction already committed to, which is a different thing.
+  assertEquals(prompt.includes("НАДПОЧЕЧНИКИ"), false);
+});
+
+Deno.test("a negation of a different feature does not delete a present finding", async () => {
+  const { fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      observations: [],
+      findings: [
+        {
+          finding_code: "polyp",
+          finding_type_text: "Полип",
+          site_code: null,
+          body_site_text: "сигмовидной кишки",
+          severity: "unknown",
+          laterality: "none",
+          // Ordinary pathology phrasing: the polyp is present and simply lacks dysplasia. `без` is
+          // a preposition and governs only what follows it, so it negates `дисплазии` and says
+          // nothing about the polyp standing before it. Reading proximity alone deleted the polyp.
+          source_anchor: "Полип без дисплазии",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+      asserted_absences: [],
+    }),
+  );
+
+  const result = await runExtractStage("Полип без дисплазии", CATALOGS, {
+    fetchFn,
+    apiKey: "k",
+    model: "m",
+  });
+  assertEquals(result.value.findings.length, 1);
+  assertEquals(result.value.findings[0].finding_code, "polyp");
+});
+
+Deno.test("a negation standing before its own term still suppresses the finding", async () => {
+  const { fetchFn } = recordingFetch(() =>
+    jsonResponse({
+      observations: [],
+      findings: [
+        {
+          finding_code: "dysplasia",
+          finding_type_text: "Дисплазия",
+          site_code: null,
+          body_site_text: "слизистой",
+          severity: "unknown",
+          laterality: "none",
+          // Same preposition, now governing the finding itself, which follows it.
+          source_anchor: "без признаков дисплазии",
+          confidence: 0.9,
+        },
+      ],
+      conditions: [],
+      asserted_absences: [],
+    }),
+  );
+
+  const result = await runExtractStage("без признаков дисплазии", CATALOGS, {
+    fetchFn,
+    apiKey: "k",
+    model: "m",
+  });
+  assertEquals(result.value.findings.length, 0);
 });
