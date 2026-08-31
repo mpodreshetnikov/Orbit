@@ -78,7 +78,15 @@ function createRepositoryMock(
       return "batch-created";
     },
     getImportBatch: async () => batchBefore(),
-    getImportBatchForUser: async () => batchBefore(),
+    // The repository's own rule, restated: a batch stamped with someone else's user id is
+    // invisible. A mock that ignored `userId` would let the ownership test pass against an
+    // action that never checks ownership, which is the one thing it must not do.
+    getImportBatchForUser: async (_batchId, userId) => {
+      const batch = batchBefore();
+      if (!batch) return null;
+      const createdBy = batch.created_by_auth_user_id;
+      return typeof createdBy === "string" && createdBy && createdBy !== userId ? null : batch;
+    },
     updateImportBatch: async (batchId, patch) => {
       if (options.updateBatchError) throw new Error(options.updateBatchError);
       state.batchUpdates.push({ batchId, patch });
@@ -741,3 +749,34 @@ Deno.test(
     );
   },
 );
+
+Deno.test("applyRowsAction returns 404 for a batch belonging to someone else", async () => {
+  // T-260829-08d. Under user auth `batch_id` comes straight out of the request body, and the
+  // edge function reaches the database with the service role — RLS protects nothing here. This
+  // action used to look the batch up with `getImportBatch`, which does not ask whose it is, so
+  // an allowlisted person could name another person's batch and have their rows written into it.
+  //
+  // 404 rather than 403, matching the four actions that already check: a 403 would confirm the
+  // batch exists.
+  const { repository, state } = createRepositoryMock({
+    batchBefore: {
+      id: "batch-1",
+      status: "pending",
+      created_by_auth_user_id: "user-2",
+    },
+  });
+
+  const payload = await assertJsonResponse<{ error: string }>(
+    await applyRowsAction(
+      { rows: [txRow()], payer_person_id: "person-1", batch_id: "batch-1" },
+      userAuth,
+      { repository },
+    ),
+    404,
+  );
+
+  assertEquals(payload.error, "Batch not found");
+  // Refused before anything was written into the batch it does not own.
+  assertEquals(state.batchUpdates.length, 0);
+  assertEquals(state.reportRows.length, 0);
+});

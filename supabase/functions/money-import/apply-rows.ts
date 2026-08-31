@@ -156,7 +156,19 @@ export async function applyRowsAction(
     }
   }
 
-  const batchBefore = await deps.repository.getImportBatch(batchId);
+  // Ownership is checked on the path where the caller chose the batch. Under user auth `batchId`
+  // came straight out of `body.batch_id`, and this function reaches the database with the service
+  // role, so RLS protects nothing here: `getImportBatch` would happily return, and this action
+  // would happily write into, a batch belonging to somebody else. Under session auth the id came
+  // from the session, which is already bound to a person, and the session's own usability was
+  // checked above — there is no id for the caller to choose.
+  //
+  // 404 rather than 403 on someone else's batch, matching the four actions that already do this:
+  // a 403 would confirm that the batch exists.
+  const batchBefore =
+    auth.mode === "user"
+      ? await deps.repository.getImportBatchForUser(batchId, auth.userId)
+      : await deps.repository.getImportBatch(batchId);
   if (!batchBefore) {
     await actionSpan?.end({
       status: "error",
