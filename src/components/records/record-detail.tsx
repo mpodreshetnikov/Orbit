@@ -233,8 +233,11 @@ export function getComparisonForConditionData(input: {
   recordLoaded: boolean;
 }): ConditionComparison | null {
   if (!input.recordLoaded || input.personConditionRecordHistory === undefined) return null;
-  const recordIds = input.personConditionRecordHistory[input.conditionRecord.condition_id] ?? [];
-  const previousOccurrences = recordIds.filter((id) => id !== input.recordId).length;
+  // A proposal has no condition yet, so it has no history to compare against: it is new by
+  // construction.
+  const conditionId = input.conditionRecord.condition_id;
+  const recordIds = conditionId ? (input.personConditionRecordHistory[conditionId] ?? []) : [];
+  const previousOccurrences = recordIds.filter((id: string) => id !== input.recordId).length;
   return {
     isNew: previousOccurrences === 0,
     previousOccurrences,
@@ -563,7 +566,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           is_user_verified: true,
         },
         recordId: recordId,
-        conditionId: editingCondition.condition_id,
+        conditionId: editingCondition.condition_id ?? undefined,
         code: data.code,
         icd_name_en: data.icd_name_en,
       });

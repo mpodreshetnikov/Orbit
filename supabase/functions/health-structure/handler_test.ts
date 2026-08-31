@@ -25,10 +25,6 @@ function createRepositoryMock(): HealthStructureRepository {
     replaceRecordObservations: async () => {},
     replaceRecordFindings: async () => {},
     clearConditionRecords: async () => {},
-    findConditionByIcd: async () => null,
-    findConditionByName: async () => null,
-    createCondition: async () => ({ id: "cond-1" }),
-    updateCondition: async () => {},
     insertConditionRecord: async () => {},
     recomputeConditionCurrentStatus: async () => {},
     insertFinding: async () => {},
@@ -58,7 +54,6 @@ Deno.test("health-structure handler responds to OPTIONS", async () => {
     },
     repository: createRepositoryMock(),
     parseStructuredData: async () => minimalStructuredData,
-    lookupIcdCode: async () => null,
   });
   const response = await handler(
     new Request("http://localhost/functions/v1/health-structure", { method: "OPTIONS" }),
@@ -79,7 +74,6 @@ Deno.test("health-structure handler rejects non-POST methods", async () => {
     },
     repository: createRepositoryMock(),
     parseStructuredData: async () => minimalStructuredData,
-    lookupIcdCode: async () => null,
   });
   const payload = await assertJsonResponse<{ success: boolean; error: string }>(
     await handler(new Request("http://localhost/functions/v1/health-structure", { method: "GET" })),
@@ -98,7 +92,6 @@ Deno.test("health-structure handler validates env configuration", async () => {
     },
     repository: createRepositoryMock(),
     parseStructuredData: async () => minimalStructuredData,
-    lookupIcdCode: async () => null,
   });
 
   const payload1 = await assertJsonResponse<{ success: boolean; error: string }>(
@@ -121,7 +114,6 @@ Deno.test("health-structure handler validates env configuration", async () => {
     },
     repository: createRepositoryMock(),
     parseStructuredData: async () => minimalStructuredData,
-    lookupIcdCode: async () => null,
   });
 
   const payload2 = await assertJsonResponse<{ success: boolean; error: string }>(
@@ -149,7 +141,6 @@ Deno.test(
       },
       repository: createRepositoryMock(),
       parseStructuredData: async () => minimalStructuredData,
-      lookupIcdCode: async () => null,
     });
 
     const payload = await assertJsonResponse<{ success: boolean; structured_data: unknown }>(
@@ -179,7 +170,6 @@ Deno.test("health-structure handler executes success and auth-failure paths", as
     },
     repository: createRepositoryMock(),
     parseStructuredData: async () => minimalStructuredData,
-    lookupIcdCode: async () => null,
   });
 
   const successPayload = await assertJsonResponse<{ success: boolean; structured_data: unknown }>(
@@ -208,7 +198,6 @@ Deno.test("health-structure handler executes success and auth-failure paths", as
       authenticateAllowedUser: async () => null,
     },
     parseStructuredData: async () => minimalStructuredData,
-    lookupIcdCode: async () => null,
   });
 
   const failPayload = await assertJsonResponse<{ success: boolean; error: string }>(
@@ -239,7 +228,6 @@ Deno.test(
       },
       repository: createRepositoryMock(),
       parseStructuredData: async () => minimalStructuredData,
-      lookupIcdCode: async () => null,
     });
 
     const missingAuthPayload = await assertJsonResponse<{ success: boolean; error: string }>(

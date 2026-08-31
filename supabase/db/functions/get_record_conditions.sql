@@ -1,9 +1,9 @@
 -- Function: get_record_conditions()
--- Get conditions for a medical record with their details
--- Drop first when return type changed (normalized_name -> icd_name_en/icd_name_ru)
+-- Get condition mentions for a medical record: materialised links, and proposals awaiting review
+-- Drop first when the return type changed (is_proposal added with the proposal path)
 DROP FUNCTION IF EXISTS public.get_record_conditions(uuid);
 
-CREATE OR REPLACE FUNCTION public.get_record_conditions(p_record_id uuid)
+CREATE FUNCTION public.get_record_conditions(p_record_id uuid)
 RETURNS TABLE (
   id uuid,
   condition_id uuid,
@@ -21,13 +21,14 @@ RETURNS TABLE (
   condition_current_status text,
   condition_onset_date date,
   condition_resolved_date date,
-  condition_notes text
+  condition_notes text,
+  is_proposal boolean
 )
 LANGUAGE sql
 STABLE
 SET search_path = public
 AS $$
-  SELECT 
+  SELECT
     cr.id,
     cr.condition_id,
     cr.record_id,
@@ -37,20 +38,22 @@ AS $$
     cr.is_llm_extracted,
     cr.is_user_verified,
     cr.created_at,
-    c.name,
+    -- A proposal shows the name the document gave it; there is no condition row to read yet.
+    COALESCE(c.name, cr.proposed_name),
     c.icd_name_en,
     c.icd_name_ru,
-    c.code,
+    COALESCE(c.code, cr.proposed_icd_code),
     c.current_status,
     c.onset_date,
     c.resolved_date,
-    c.notes
+    c.notes,
+    cr.condition_id IS NULL
   FROM public.condition_records cr
-  JOIN public.conditions c ON c.id = cr.condition_id
+  LEFT JOIN public.conditions c ON c.id = cr.condition_id
   WHERE cr.record_id = p_record_id
-    AND c.deleted_at IS NULL
-  ORDER BY c.name;
+    AND (c.id IS NULL OR c.deleted_at IS NULL)
+  ORDER BY COALESCE(c.name, cr.proposed_name);
 $$;
 
 COMMENT ON FUNCTION public.get_record_conditions(uuid) IS
-  'Get conditions linked to a medical record with condition details.';
+  'Get condition mentions for a medical record: materialised links with their condition details, and proposals that name a condition not yet in the chart.';

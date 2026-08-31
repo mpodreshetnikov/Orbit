@@ -149,6 +149,16 @@ export function ConditionRecordRow({
 
         {/* Badges and actions - wrap on mobile, row on desktop */}
         <div className="flex flex-wrap items-center gap-2 shrink-0 sm:flex-nowrap">
+          {conditionRecord.is_proposal && (
+            <Badge
+              variant="outline"
+              className="text-xs bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20 gap-1"
+              title={t("conditions.proposalTitle")}
+            >
+              <CircleDot className="h-3 w-3" />
+              {t("conditions.proposal")}
+            </Badge>
+          )}
           {comparison && <ConditionComparisonBadge comparison={comparison} />}
           {!hasStatusChange && <ConditionStatusBadge status={conditionRecord.status_in_record} />}
 
@@ -161,17 +171,20 @@ export function ConditionRecordRow({
 
           {showActions && (
             <div className="flex items-center gap-0.5 ms-auto sm:ms-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                asChild
-                title={t("conditions.openDetails")}
-              >
-                <Link href={`/health/conditions/${conditionRecord.condition_id}`}>
-                  <ExternalLink className="h-4 w-4" />
-                </Link>
-              </Button>
+              {/* A proposal has no condition page to open yet: it is created on activation. */}
+              {conditionRecord.condition_id && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  asChild
+                  title={t("conditions.openDetails")}
+                >
+                  <Link href={`/health/conditions/${conditionRecord.condition_id}`}>
+                    <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
               {onEdit && (
                 <Button
                   variant="ghost"

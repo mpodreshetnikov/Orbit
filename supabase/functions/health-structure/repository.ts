@@ -276,55 +276,6 @@ export function createSupabaseHealthStructureRepository(
     await admin.from("condition_records").delete().eq("record_id", recordId);
   }
 
-  async function findConditionByIcd(
-    personId: string,
-    code: string,
-  ): Promise<{ id: string } | null> {
-    const { data } = await admin
-      .from("conditions")
-      .select("id")
-      .eq("person_id", personId)
-      .eq("code", code)
-      .is("deleted_at", null)
-      .maybeSingle();
-    return data ? { id: data.id } : null;
-  }
-
-  async function findConditionByName(
-    personId: string,
-    name: string,
-  ): Promise<{ id: string } | null> {
-    const { data } = await admin
-      .from("conditions")
-      .select("id")
-      .eq("person_id", personId)
-      .ilike("name", name)
-      .is("deleted_at", null)
-      .maybeSingle();
-    return data ? { id: data.id } : null;
-  }
-
-  async function createCondition(payload: Record<string, unknown>): Promise<{ id: string } | null> {
-    const { data, error } = await admin
-      .from("conditions")
-      .insert(payload as Database["public"]["Tables"]["conditions"]["Insert"])
-      .select("id")
-      .single();
-
-    if (error || !data) return null;
-    return { id: data.id };
-  }
-
-  async function updateCondition(
-    conditionId: string,
-    patch: Record<string, unknown>,
-  ): Promise<void> {
-    await admin
-      .from("conditions")
-      .update(patch as Database["public"]["Tables"]["conditions"]["Update"])
-      .eq("id", conditionId);
-  }
-
   async function insertConditionRecord(payload: Record<string, unknown>): Promise<void> {
     await admin
       .from("condition_records")
@@ -365,10 +316,6 @@ export function createSupabaseHealthStructureRepository(
     replaceRecordObservations,
     replaceRecordFindings,
     clearConditionRecords,
-    findConditionByIcd,
-    findConditionByName,
-    createCondition,
-    updateCondition,
     insertConditionRecord,
     recomputeConditionCurrentStatus,
     insertFinding,

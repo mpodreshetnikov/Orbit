@@ -6,7 +6,7 @@ import {
 } from "./resolution.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import type { HealthStructureRepository } from "./repository.ts";
-import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
+import type { StructuredDataWithEntities } from "./types.ts";
 import { convertRefRangeToCanonical, convertToCanonical } from "./unit-conversion.ts";
 
 export interface HealthStructureServiceInput {
@@ -29,7 +29,6 @@ export interface HealthStructureServiceDeps {
     ocrText: string,
     context: HealthStructureParseContext,
   ) => Promise<StructuredDataWithEntities>;
-  lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
   log?: Pick<Console, "log" | "warn" | "error">;
   telemetry?: EdgeTelemetry;
 }
@@ -361,7 +360,6 @@ export async function runHealthStructureService(
     await deps.repository.clearConditionRecords(input.recordId);
     await processExtractedConditions(input.recordId, personId, structuredData.conditions, {
       repository: deps.repository,
-      lookupIcdCode: deps.lookupIcdCode,
       log: deps.log,
     });
 
@@ -373,7 +371,6 @@ export async function runHealthStructureService(
       existingFindings,
       {
         repository: deps.repository,
-        lookupIcdCode: deps.lookupIcdCode,
         log: deps.log,
       },
     );
@@ -384,7 +381,6 @@ export async function runHealthStructureService(
       existingConditions,
       {
         repository: deps.repository,
-        lookupIcdCode: deps.lookupIcdCode,
         log: deps.log,
       },
     );

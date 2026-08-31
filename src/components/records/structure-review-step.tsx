@@ -3,6 +3,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { createClient } from "@/lib/supabase";
+import { lookupIcdCode } from "@/hooks/use-icd-lookup";
+import { materializeConditionProposals } from "@/lib/conditions/materialize-proposals";
 import {
   Save,
   FileCheck,
@@ -935,8 +939,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     cr: ConditionRecordWithDetails,
   ): ConditionComparison | null => {
     if (personConditionRecordHistory === undefined) return null;
-    const recordIds = personConditionRecordHistory[cr.condition_id] ?? [];
-    const previousOccurrences = recordIds.filter((id) => id !== record.id).length;
+    // A proposal names a condition the chart does not have; there is no history behind it.
+    const recordIds = cr.condition_id ? (personConditionRecordHistory[cr.condition_id] ?? []) : [];
+    const previousOccurrences = recordIds.filter((id: string) => id !== record.id).length;
     return {
       isNew: previousOccurrences === 0,
       previousOccurrences,
@@ -1025,6 +1030,9 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
     // When activating, mark all observations, findings, and conditions as verified, and apply suggested checkup completions
     if (activate) {
+      // Proposals become real conditions here and nowhere else: this is the moment a person
+      // approves what the model read, and the chart must not gain a diagnosis before it.
+      await materializeProposals();
       await Promise.all([verifyAllObservations(), verifyAllFindings(), verifyAllConditions()]);
       const suggested = record.llm_suggested_checkup_completions ?? [];
       if (suggested.length > 0) {
@@ -1268,7 +1276,8 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           is_user_verified: true,
         },
         recordId: record.id,
-        conditionId: editingCondition.condition_id,
+        // A proposal has no condition to update yet; only the mention itself changes.
+        conditionId: editingCondition.condition_id ?? undefined,
         code: data.code,
         icd_name_en: data.icd_name_en,
       });
@@ -1283,6 +1292,31 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
       id: cr.id,
       recordId: record.id,
     });
+  };
+
+  const materializeProposals = async () => {
+    const proposals = (conditionRecords ?? []).filter((cr) => cr.is_proposal);
+    if (proposals.length === 0) return;
+
+    const outcome = await materializeConditionProposals(proposals, {
+      supabase: createClient(),
+      personId: record.person_id,
+      lookupIcd: async (code) => {
+        try {
+          return await lookupIcdCode(code);
+        } catch {
+          // An unreachable catalogue must not block activation: the condition is created
+          // without official names rather than not at all.
+          return null;
+        }
+      },
+    });
+
+    if (outcome.skipped > 0) {
+      toast.warning(t("conditions.proposalsSkipped", { count: outcome.skipped }));
+    }
+    // The verification pass that follows runs through the mutation hooks, which invalidate the
+    // condition queries themselves, and activation then navigates away from this record.
   };
 
   const verifyAllConditions = async () => {

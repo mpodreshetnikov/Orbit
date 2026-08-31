@@ -6,7 +6,7 @@ import {
   type HealthStructureRepository,
 } from "./repository.ts";
 import type { HealthStructureParseContext } from "./service.ts";
-import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
+import type { StructuredDataWithEntities } from "./types.ts";
 
 export type HealthStructureParserMode = "openrouter" | "e2e_stub";
 
@@ -24,7 +24,6 @@ export interface HealthStructureDeps {
     ocrText: string,
     context: HealthStructureParseContext,
   ) => Promise<StructuredDataWithEntities>;
-  lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
   log?: Pick<Console, "log" | "warn" | "error">;
 }
 
@@ -45,10 +44,6 @@ function createMissingEnvRepository(): HealthStructureRepository {
     replaceRecordObservations: fail,
     replaceRecordFindings: fail,
     clearConditionRecords: fail,
-    findConditionByIcd: fail,
-    findConditionByName: fail,
-    createCondition: fail,
-    updateCondition: fail,
     insertConditionRecord: fail,
     recomputeConditionCurrentStatus: fail,
     insertFinding: fail,
@@ -154,24 +149,6 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
         timeoutMs: openRouterTimeoutMs,
         debugRawPayload,
       });
-    },
-    lookupIcdCode: async (code) => {
-      if (!supabaseUrl || !supabaseServiceRoleKey) return null;
-      try {
-        const response = await fetch(`${supabaseUrl}/functions/v1/icd-lookup`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${supabaseServiceRoleKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ code }),
-        });
-
-        if (!response.ok) return null;
-        return (await response.json()) as IcdLookupResult;
-      } catch {
-        return null;
-      }
     },
   };
 }

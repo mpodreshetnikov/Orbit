@@ -488,15 +488,13 @@ Deno.test("health-structure repository condition/finding helpers work", async ()
     },
   });
 
-  assertEquals((await repository.findConditionByIcd("person-1", "A00"))?.id, "cond-by-code");
-  assertEquals((await repository.findConditionByName("person-1", "Condition"))?.id, "cond-by-name");
-  assertEquals((await repository.createCondition({ name: "X" }))?.id, "cond-created");
-  await repository.updateCondition("cond-1", { name: "Updated" });
   await repository.insertConditionRecord({ condition_id: "cond-1" });
   await repository.recomputeConditionCurrentStatus("cond-1");
   await repository.insertFinding({ record_id: "record-1" });
 
-  assertEquals(updates.length >= 2, true);
+  // Only the status recompute writes to conditions now; creating and renaming them left the
+  // edge function with the proposal path.
+  assertEquals(updates.length, 1);
   assertEquals(updates[updates.length - 1].current_status, "resolved");
 });
 
@@ -557,9 +555,6 @@ Deno.test("health-structure repository condition helpers handle null paths", asy
     },
   });
 
-  assertEquals(await repository.findConditionByIcd("person-1", "A00"), null);
-  assertEquals(await repository.findConditionByName("person-1", "Condition"), null);
-  assertEquals(await repository.createCondition({ name: "x" }), null);
   await repository.recomputeConditionCurrentStatus("cond-1");
 });
 

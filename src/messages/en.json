@@ -1217,7 +1217,10 @@
     },
     "linkedCheckups": "Checkups linked to this condition",
     "linkedCheckupsEmpty": "No checkups linked to this condition",
-    "viewCheckup": "View checkup"
+    "viewCheckup": "View checkup",
+    "proposalsSkipped": "{count} condition proposal(s) could not be added to the chart and were left for review",
+    "proposal": "Proposed",
+    "proposalTitle": "Created in the chart when you activate this record"
   },
   "checkups": {
     "navTitle": "Checkups",

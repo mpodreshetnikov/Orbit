@@ -88,7 +88,6 @@ export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
         {
           repository: deps.repository,
           parseStructuredData: deps.parseStructuredData,
-          lookupIcdCode: deps.lookupIcdCode,
           log: deps.log,
           telemetry,
         },

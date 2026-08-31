@@ -118,10 +118,6 @@ function createRepositoryMock(
       state.findingRows = rows;
     },
     clearConditionRecords: async () => {},
-    findConditionByIcd: async () => null,
-    findConditionByName: async () => null,
-    createCondition: async () => ({ id: "cond-created" }),
-    updateCondition: async () => {},
     insertConditionRecord: async (payload) => {
       state.conditionRecords.push(payload);
     },
@@ -254,7 +250,6 @@ Deno.test("runHealthStructureService returns auth/guard errors", async () => {
     {
       repository: noUser.repository,
       parseStructuredData: async () => structuredData,
-      lookupIcdCode: async () => null,
     },
   );
   assertEquals(unauthorized.status, 400);
@@ -266,7 +261,6 @@ Deno.test("runHealthStructureService returns auth/guard errors", async () => {
     {
       repository: missingRecord.repository,
       parseStructuredData: async () => structuredData,
-      lookupIcdCode: async () => null,
     },
   );
   assertEquals(missingRecordResult.payload.error, "Missing required field: record_id");
@@ -276,7 +270,6 @@ Deno.test("runHealthStructureService returns auth/guard errors", async () => {
     {
       repository: missingRecord.repository,
       parseStructuredData: async () => structuredData,
-      lookupIcdCode: async () => null,
     },
   );
   assertEquals(noTokenResult.payload.error, "Missing authorization header");
@@ -289,7 +282,6 @@ Deno.test("runHealthStructureService handles missing record and missing OCR text
     {
       repository: noRecord.repository,
       parseStructuredData: async () => structuredData,
-      lookupIcdCode: async () => null,
     },
   );
   assertEquals(noRecordResult.payload.error, "Record not found or access denied");
@@ -307,7 +299,6 @@ Deno.test("runHealthStructureService handles missing record and missing OCR text
     {
       repository: noOcr.repository,
       parseStructuredData: async () => structuredData,
-      lookupIcdCode: async () => null,
     },
   );
   assertEquals(
@@ -328,7 +319,6 @@ Deno.test("runHealthStructureService handles missing record and missing OCR text
     {
       repository: missingPerson.repository,
       parseStructuredData: async () => structuredData,
-      lookupIcdCode: async () => null,
     },
   );
   assertEquals(missingPersonResult.payload.error, "Record is missing person_id");
@@ -341,12 +331,6 @@ Deno.test("runHealthStructureService persists successful extraction flow", async
     {
       repository,
       parseStructuredData: async () => structuredData,
-      lookupIcdCode: async (code) => ({
-        code,
-        found: true,
-        name_en: "EN",
-        name_ru: "RU",
-      }),
     },
   );
 
@@ -378,7 +362,6 @@ Deno.test(
           findings_to_resolve: [],
           conditions_to_resolve: [],
         }),
-        lookupIcdCode: async () => null,
       },
     );
 
@@ -396,7 +379,6 @@ Deno.test("runHealthStructureService returns error when parser fails", async () 
       parseStructuredData: async () => {
         throw new Error("OpenRouter timeout");
       },
-      lookupIcdCode: async () => null,
     },
   );
 
@@ -439,7 +421,6 @@ Deno.test("runHealthStructureService applies catalog/checkup fallback mappings",
           },
         ],
       }),
-      lookupIcdCode: async () => null,
     },
   );
 
@@ -473,7 +454,6 @@ Deno.test("runHealthStructureService handles non-Error parse failures", async ()
       parseStructuredData: async () => {
         throw "parser failed";
       },
-      lookupIcdCode: async () => null,
     },
   );
 
@@ -517,7 +497,6 @@ Deno.test(
             },
           ],
         }),
-        lookupIcdCode: async () => null,
       },
     );
 

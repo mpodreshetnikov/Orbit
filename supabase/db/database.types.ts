@@ -180,34 +180,40 @@ export type Database = {
       }
       condition_records: {
         Row: {
-          condition_id: string
+          condition_id: string | null
           confidence: number | null
           created_at: string
           id: string
           is_llm_extracted: boolean
           is_user_verified: boolean
+          proposed_icd_code: string | null
+          proposed_name: string | null
           record_id: string
           source_anchor: string | null
           status_in_record: string
         }
         Insert: {
-          condition_id: string
+          condition_id?: string | null
           confidence?: number | null
           created_at?: string
           id?: string
           is_llm_extracted?: boolean
           is_user_verified?: boolean
+          proposed_icd_code?: string | null
+          proposed_name?: string | null
           record_id: string
           source_anchor?: string | null
           status_in_record: string
         }
         Update: {
-          condition_id?: string
+          condition_id?: string | null
           confidence?: number | null
           created_at?: string
           id?: string
           is_llm_extracted?: boolean
           is_user_verified?: boolean
+          proposed_icd_code?: string | null
+          proposed_name?: string | null
           record_id?: string
           source_anchor?: string | null
           status_in_record?: string
@@ -238,6 +244,8 @@ export type Database = {
           icd_name_en: string | null
           icd_name_ru: string | null
           id: string
+          is_llm_extracted: boolean
+          is_user_verified: boolean
           name: string
           notes: string | null
           onset_date: string | null
@@ -253,6 +261,8 @@ export type Database = {
           icd_name_en?: string | null
           icd_name_ru?: string | null
           id?: string
+          is_llm_extracted?: boolean
+          is_user_verified?: boolean
           name: string
           notes?: string | null
           onset_date?: string | null
@@ -268,6 +278,8 @@ export type Database = {
           icd_name_en?: string | null
           icd_name_ru?: string | null
           id?: string
+          is_llm_extracted?: boolean
+          is_user_verified?: boolean
           name?: string
           notes?: string | null
           onset_date?: string | null
@@ -2445,6 +2457,7 @@ export type Database = {
           created_at: string
           id: string
           is_llm_extracted: boolean
+          is_proposal: boolean
           is_user_verified: boolean
           record_id: string
           source_anchor: string
