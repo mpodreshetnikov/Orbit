@@ -6,10 +6,17 @@ import { routeBackgroundMessage, type BackgroundMessage } from "./core/backgroun
 import { createImportDebugStore } from "./core/import-debug.js";
 import { createExtensionLogger } from "./core/observability.js";
 import { createSessionStore } from "./core/session-store.js";
+import { createGrantStore } from "./core/grant-store.js";
+import { createBackfillStore } from "./core/backfill-store.js";
+import { createAutoRunStore } from "./core/auto-run-store.js";
+import { nextAutoRunState, pickAutoRunTab, shouldAutoRun } from "./core/auto-run-policy.js";
+import { runScheduledImport } from "./core/import-runner.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
+  listMoneyImportSourceDefinitions,
   matchesKnownMoneyImportSourcePageUrl,
+  matchesMoneyImportSourcePageUrl,
   shouldShowMoneyImportSourcePageWidget,
 } from "./money-import-sources.js";
 
@@ -297,12 +304,81 @@ function extractErrorDiagnostics(error: unknown): Record<string, unknown> | null
 }
 
 const sessionStore = createSessionStore(chrome.storage.local);
+const grantStore = createGrantStore(chrome.storage.local);
+const backfillStore = createBackfillStore(chrome.storage.local);
+const autoRunStore = createAutoRunStore(chrome.storage.local);
 const debugStore = createImportDebugStore();
 const telemetry = createExtensionLogger("background");
 telemetry.info("extension_background_initialized", {
   dev_hot_reload: DEV_HOT_RELOAD,
   app_origin_pattern_count: Array.isArray(APP_ORIGIN_PATTERNS) ? APP_ORIGIN_PATTERNS.length : 0,
 });
+
+/**
+ * Starts an import when the person visits their bank for their own reasons.
+ *
+ * This is what removes the need to remember: the visit that was going to happen anyway is
+ * also the moment the extension has a live authorised page to work from, which is the one
+ * thing it cannot get on its own.
+ */
+async function maybeAutoRunOnSourcePage(tabUrl: string, tabId: number): Promise<void> {
+  const grant = await grantStore.getGrant();
+  if (!grant) return;
+
+  const definition = listMoneyImportSourceDefinitions().find((source) =>
+    matchesMoneyImportSourcePageUrl(source.sourceId, tabUrl),
+  );
+  if (!definition) return;
+  if (grant.allowedSources.length > 0 && !grant.allowedSources.includes(definition.sourceId)) {
+    return;
+  }
+  if (!grant.functionUrl) return;
+
+  // A manual run already in flight owns the tab; two runs racing over one bank page would
+  // only produce rate-limit errors for both.
+  const activeSession = await sessionStore.getSession();
+  if (activeSession) return;
+
+  const nowMs = Date.now();
+  const state = await autoRunStore.getState(definition.sourceId);
+  if (!shouldAutoRun(state, nowMs)) return;
+
+  try {
+    await runScheduledImport(
+      {
+        sourceId: definition.sourceId,
+        payerPersonId: grant.personId,
+        nowMs,
+        functionUrl: grant.functionUrl,
+        credentials: { grantToken: grant.token },
+        appOrigin: grant.appOrigin,
+        showSourcePageWidget: true,
+        // The tab whose navigation triggered this run is the one to work in; it is not
+        // necessarily the active tab of the last focused window.
+        tabId,
+      },
+      {
+        getConnector,
+        callEdge,
+        broadcastToAppTabs,
+        nowIso: () => new Date().toISOString(),
+        backfillStore,
+        sessionStore,
+      },
+    );
+    await autoRunStore.setState(definition.sourceId, nextAutoRunState(state, nowMs, "ok"));
+  } catch (error) {
+    // A signed-out bank page is the ordinary failure here, not an emergency: record it so
+    // the backoff widens, and say nothing to the user.
+    telemetry.warn("money_import_auto_run_failed", {
+      source_id: definition.sourceId,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
+    await autoRunStore.setState(definition.sourceId, nextAutoRunState(state, nowMs, "error"));
+  } finally {
+    await sessionStore.setSession(null);
+  }
+}
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const nextUrl = typeof changeInfo.url === "string" ? changeInfo.url : tab.url;
@@ -313,10 +389,129 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
   void (async () => {
     const session = await sessionStore.getSession();
-    if (!session) return;
+    if (!session) {
+      if (isComplete && matchesKnownMoneyImportSourcePageUrl(nextUrl)) {
+        await maybeAutoRunOnSourcePage(nextUrl, tabId);
+      }
+      return;
+    }
     await syncSourcePageWidgetForSession(session, { tabId, tabUrl: nextUrl });
   })();
 });
+
+const DAILY_IMPORT_ALARM = "money-import-daily";
+const DAILY_IMPORT_ALARM_PERIOD_MINUTES = 180;
+/** A visit-triggered run covers the day; the alarm exists for the days without a visit. */
+const DAILY_IMPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const BACKGROUND_TAB_LOAD_TIMEOUT_MS = 30_000;
+
+async function waitForTabComplete(tabId: number): Promise<boolean> {
+  const startedAtMs = Date.now();
+  while (Date.now() - startedAtMs < BACKGROUND_TAB_LOAD_TIMEOUT_MS) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return false;
+    if (tab.status === "complete") return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+/**
+ * The fallback for someone who has not opened their bank in days.
+ *
+ * The connector needs a live authorised bank page, and there is no way around that — so when
+ * no such tab is open, one is opened in the background, used, and closed again. Only a tab
+ * this function opened is ever closed; a tab the person had open is left exactly as it was.
+ */
+async function runDailyImportSweep(): Promise<void> {
+  const grant = await grantStore.getGrant();
+  if (!grant?.functionUrl) return;
+
+  const activeSession = await sessionStore.getSession();
+  if (activeSession) return;
+
+  for (const definition of listMoneyImportSourceDefinitions()) {
+    if (grant.allowedSources.length > 0 && !grant.allowedSources.includes(definition.sourceId)) {
+      continue;
+    }
+
+    const nowMs = Date.now();
+    const state = await autoRunStore.getState(definition.sourceId);
+    if (!shouldAutoRun(state, nowMs, { cooldownMs: DAILY_IMPORT_COOLDOWN_MS })) continue;
+
+    const patterns = getMoneyImportSourcePagePatterns(definition.sourceId);
+    const openTabs = patterns.length > 0 ? await chrome.tabs.query({ url: patterns }) : [];
+    const existingTab = pickAutoRunTab(openTabs, (url) =>
+      matchesMoneyImportSourcePageUrl(definition.sourceId, url),
+    );
+
+    let openedTabId: number | null = null;
+    if (!existingTab) {
+      if (!definition.targetUrl) continue;
+      const created = await chrome.tabs.create({ url: definition.targetUrl, active: false });
+      if (typeof created.id !== "number") continue;
+      openedTabId = created.id;
+      const loaded = await waitForTabComplete(openedTabId);
+      if (!loaded) {
+        await chrome.tabs.remove(openedTabId).catch(() => {});
+        await autoRunStore.setState(definition.sourceId, nextAutoRunState(state, nowMs, "error"));
+        continue;
+      }
+    }
+
+    // Whether the tab was found or opened, it is a background tab: the connector must be
+    // told which one, or it looks at the active tab instead and rejects it.
+    const targetTabId = openedTabId ?? existingTab?.id ?? null;
+    if (typeof targetTabId !== "number") continue;
+
+    try {
+      await runScheduledImport(
+        {
+          sourceId: definition.sourceId,
+          payerPersonId: grant.personId,
+          nowMs,
+          functionUrl: grant.functionUrl,
+          credentials: { grantToken: grant.token },
+          appOrigin: grant.appOrigin,
+          showSourcePageWidget: existingTab !== null,
+          tabId: targetTabId,
+        },
+        {
+          getConnector,
+          callEdge,
+          broadcastToAppTabs,
+          nowIso: () => new Date().toISOString(),
+          backfillStore,
+          sessionStore,
+        },
+      );
+      await autoRunStore.setState(definition.sourceId, nextAutoRunState(state, nowMs, "ok"));
+    } catch (error) {
+      // Landing on a sign-in screen is the expected failure here. It is recorded so the
+      // backoff widens, and nothing is shown to the user.
+      telemetry.warn("money_import_daily_sweep_failed", {
+        source_id: definition.sourceId,
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+      await autoRunStore.setState(definition.sourceId, nextAutoRunState(state, nowMs, "error"));
+    } finally {
+      await sessionStore.setSession(null);
+      if (openedTabId !== null) {
+        await chrome.tabs.remove(openedTabId).catch(() => {});
+      }
+    }
+  }
+}
+
+if (chrome.alarms?.create) {
+  void chrome.alarms.create(DAILY_IMPORT_ALARM, {
+    periodInMinutes: DAILY_IMPORT_ALARM_PERIOD_MINUTES,
+  });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== DAILY_IMPORT_ALARM) return;
+    void runDailyImportSweep();
+  });
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "money-import-source-widget") return;
@@ -333,6 +528,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         message,
         {
           sessionStore,
+          grantStore,
           debugStore,
           importRunnerDeps: {
             getConnector,

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(16);
 
 SELECT has_function(
   'public',
@@ -247,6 +247,91 @@ SELECT is(
     'source_comment', 'SOURCE COFFEE UPDATED'
   ),
   'replaying same rows updates the existing transaction payload'
+);
+
+-- Transaction identity is scoped to the payer (20260814093000_scope_money_transaction_identity).
+-- Before that migration both identity indexes were global, so a second person importing from
+-- the same bank landed on the first person's rows: the unique violation resolved to an UPDATE
+-- reported as a harmless-looking `skipped`, and one household member's operations overwrote
+-- another's. These rows repeat the first person's external id and dedupe hash exactly.
+INSERT INTO public.persons (id, name, kind)
+VALUES ('77777777-7777-7777-7777-777777777778', 'Other Money Person', 'human');
+
+INSERT INTO public.money_accounts (
+  id,
+  owner_person_id,
+  source,
+  account_kind,
+  account_label,
+  currency
+)
+VALUES (
+  '88888888-8888-8888-8888-888888888889',
+  '77777777-7777-7777-7777-777777777778',
+  'tbank',
+  'debit',
+  'Other Main',
+  'RUB'
+);
+
+CREATE TEMP TABLE _other_person_result AS
+SELECT public.money_upsert_transactions_batch(
+  '99999999-9999-9999-9999-99999999999a'::uuid,
+  '77777777-7777-7777-7777-777777777778'::uuid,
+  '[
+    {
+      "account_id":"88888888-8888-8888-8888-888888888889",
+      "source":"tbank",
+      "external_id":"ext-1",
+      "posted_at":"2026-02-01T10:00:00Z",
+      "amount":100,
+      "currency":"RUB",
+      "transaction_type":"expense",
+      "status":"posted",
+      "merchant_name":"Coffee Shop Other Person",
+      "dedupe_hash":"hash-ext-1"
+    },
+    {
+      "account_id":"88888888-8888-8888-8888-888888888889",
+      "source":"tbank",
+      "posted_at":"2026-02-01T11:00:00Z",
+      "amount":200,
+      "currency":"RUB",
+      "transaction_type":"expense",
+      "status":"posted",
+      "merchant_name":"Grocery Other Person",
+      "dedupe_hash":"hash-2"
+    }
+  ]'::jsonb
+) AS payload;
+
+SELECT is(
+  ((SELECT payload FROM _other_person_result)->>'inserted')::int,
+  2,
+  'another payer reusing the same external id and dedupe hash gets their own transactions'
+);
+
+SELECT is(
+  (SELECT count(*) FROM public.money_transactions WHERE payer_person_id = '77777777-7777-7777-7777-777777777778'),
+  2::bigint,
+  'the second payer keeps both of their rows'
+);
+
+SELECT is(
+  (
+    SELECT jsonb_build_object(
+      'merchant_name', merchant_name,
+      'source_comment', source_comment
+    )
+    FROM public.money_transactions
+    WHERE external_id = 'ext-1'
+      AND payer_person_id = '77777777-7777-7777-7777-777777777777'
+  ),
+  jsonb_build_object(
+    'merchant_name', 'Coffee Shop Replay',
+    'source_comment', 'SOURCE COFFEE UPDATED'
+  ),
+  'the first payer''s transaction is untouched by the second payer''s import'
 );
 
 SELECT * FROM finish();

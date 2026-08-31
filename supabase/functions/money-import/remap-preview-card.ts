@@ -25,7 +25,7 @@ export async function remapPreviewCardAction(
   if (!targetAccountId) return jsonResponse({ error: "target_account_id is required" }, 400);
   if (auth.mode !== "user") return jsonResponse({ error: "Unauthorized" }, 401);
 
-  const batch = await deps.repository.getImportBatch(batchId);
+  const batch = await deps.repository.getImportBatchForUser(batchId, auth.userId);
   if (!batch) return jsonResponse({ error: "Batch not found" }, 404);
   if (normalizeText(batch.status) !== "pending") {
     return jsonResponse({ error: "Batch is not awaiting review" }, 409);

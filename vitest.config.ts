@@ -125,6 +125,7 @@ export default defineConfig({
           include: [
             "scripts/**/*.{test,spec}.ts",
             "src/lib/**/*.{test,spec}.ts",
+            "shared/lib/**/*.{test,spec}.ts",
             "native/**/*.{test,spec}.ts",
           ],
         },

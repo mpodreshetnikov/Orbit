@@ -192,6 +192,10 @@ test-unit-coverage:
 test-e2e:
   node scripts/just/run-e2e.cjs
 
+# Run the e2e suite against the Docker-only stack instead of the Supabase CLI.
+test-e2e-local *ARGS:
+  ORBIT_LOCAL_API=docker node scripts/just/run-e2e.cjs {{ARGS}}
+
 # Score extraction quality against the fixture corpus (replays recordings; --live to call the model).
 test-extraction *args:
   npx tsx scripts/extraction-eval/run.ts {{args}}
@@ -216,9 +220,11 @@ quality-db-lint:
 quality-db-test:
   npx supabase test db --local supabase/tests
 
-# Start local Supabase stack.
+# Start local Supabase stack. Through the retry runner: the CLI's readiness probe reaches the
+# API gateway before the edge runtime is listening and calls the resulting 502 fatal, which fails
+# this lane roughly six times in ten. Only that signature is retried — see T-260829-hhj.
 supabase-local-start:
-  npx supabase start
+  node scripts/just/supabase-cli-retry.cjs start
 
 # Stop local Supabase stack.
 supabase-local-stop:
@@ -228,13 +234,51 @@ supabase-local-stop:
 supabase-local-status:
   npx supabase status
 
+# Bring up a Docker-only local DB for hosts where `supabase start` cannot run (no IPv6).
+supabase-docker-up:
+  node scripts/just/db-local-docker.cjs up
+
+# Tear the Docker-only local DB down.
+supabase-docker-down:
+  node scripts/just/db-local-docker.cjs down
+
+# Run pgTAP against the Docker-only local DB.
+supabase-docker-test *args:
+  node scripts/just/db-local-docker.cjs test {{args}}
+
+# Run DB lint against the Docker-only local DB.
+supabase-docker-lint:
+  node scripts/just/db-local-docker.cjs lint
+
+# Bring up the API layer on the Docker-only DB: PostgREST, GoTrue, the edge functions and a
+# gateway in front of them. This is what `supabase start` would have served.
+supabase-docker-api-up:
+  node scripts/just/api-local-docker.cjs up
+
+# Prove that lane answers a real round trip: GoTrue token -> edge function -> PostgREST.
+supabase-docker-api-smoke:
+  node scripts/just/api-local-docker.cjs smoke
+
+# Print that lane's environment in the same shape as `supabase status -o env`.
+supabase-docker-api-env:
+  node scripts/just/api-local-docker.cjs env
+
+# Stop the API layer. The database stays up; `supabase-docker-down` stops that.
+supabase-docker-api-down:
+  node scripts/just/api-local-docker.cjs down
+
+# Run the money data-repair migrations against rows in their pre-repair shape (needs Docker).
+db-data-migration-check:
+  npx tsx scripts/just/db-data-migration-check.ts
+
 # Apply pending local migrations without reset.
 supabase-local-migrate-only:
   npx supabase migration up
 
-# Reset local DB to migrations and seed (destructive).
+# Reset local DB to migrations and seed (destructive). Through the retry runner for the same
+# readiness 502 as `supabase-local-start`; every other failure still fails on the first attempt.
 supabase-local-reset-only:
-  npx supabase db reset --yes
+  node scripts/just/supabase-cli-retry.cjs db reset --yes
 
 # Apply idempotent SQL objects from supabase/db/deploy.sql to local DB.
 supabase-local-deploy-sql:

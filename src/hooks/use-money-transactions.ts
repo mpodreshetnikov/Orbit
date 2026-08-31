@@ -20,8 +20,6 @@ import type {
 import type { Database, Json } from "@/types/database";
 
 type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
-type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Insert"];
-type MoneyLineItemUpdate = Database["public"]["Tables"]["money_line_items"]["Update"];
 
 const MONEY_TRANSACTION_FEED_PAGE_SIZE = 50;
 
@@ -298,29 +296,46 @@ function ensureLineItems(
   return lineItems;
 }
 
-function toLineItemMutationPayload(
-  item: CreateMoneyLineItemInput,
-  transactionId: string,
-): MoneyLineItemInsert & MoneyLineItemUpdate {
-  return {
-    transaction_id: transactionId,
-    title: item.title,
-    amount: item.amount,
-    quantity: item.quantity ?? null,
-    unit: item.unit ?? null,
-    line_status: item.line_status ?? "final",
-    related_line_item_id: item.related_line_item_id ?? null,
-    category_id: item.category_id ?? null,
-    beneficiary_person_id: item.beneficiary_person_id ?? null,
-    assignment_method: item.assignment_method ?? "manual",
-    assignment_rule_id: item.assignment_rule_id ?? null,
-    assignment_confidence: item.assignment_confidence ?? null,
-    category_locked_by_user: item.category_locked_by_user ?? false,
-    raw_payload: toJsonOrNull(item.raw_payload) ?? null,
-    last_category_rule_id: item.last_category_rule_id ?? null,
-    last_category_rule_run_id: item.last_category_rule_run_id ?? null,
-    category_assigned_at: item.category_assigned_at ?? null,
-  };
+/**
+ * Saves a transaction and its whole composition through one database call.
+ *
+ * The previous shape — insert or update the header, then read, delete, update and insert
+ * line items one statement at a time — had no transaction around it, so a dropped connection
+ * left the registry half-changed with no rollback and no retry offered. The database function
+ * runs the same work inside one transaction, so it either all lands or none of it does.
+ */
+async function saveTransactionWithLineItems(
+  transactionId: string | null,
+  transactionPayload: Record<string, unknown>,
+  lineItems: CreateMoneyLineItemInput[],
+): Promise<MoneyTransactionDetail> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("money_save_transaction_with_line_items", {
+    p_transaction_id: transactionId,
+    p_transaction: transactionPayload as never,
+    p_line_items: lineItems.map((item) => ({
+      id: item.id ?? null,
+      title: item.title,
+      amount: item.amount,
+      quantity: item.quantity ?? null,
+      unit: item.unit ?? null,
+      line_status: item.line_status ?? "final",
+      related_line_item_id: item.related_line_item_id ?? null,
+      category_id: item.category_id ?? null,
+      beneficiary_person_id: item.beneficiary_person_id ?? null,
+      assignment_method: item.assignment_method ?? "manual",
+      assignment_rule_id: item.assignment_rule_id ?? null,
+      assignment_confidence: item.assignment_confidence ?? null,
+      category_locked_by_user: item.category_locked_by_user ?? false,
+      raw_payload: toJsonOrNull(item.raw_payload) ?? null,
+      last_category_rule_id: item.last_category_rule_id ?? null,
+      last_category_rule_run_id: item.last_category_rule_run_id ?? null,
+      category_assigned_at: item.category_assigned_at ?? null,
+    })) as never,
+  });
+
+  if (error) throw new Error(error.message);
+  return data as unknown as MoneyTransactionDetail;
 }
 
 async function createMoneyTransactionWithLines({
@@ -330,7 +345,6 @@ async function createMoneyTransactionWithLines({
   transaction: CreateMoneyTransactionInput;
   lineItems: CreateMoneyLineItemInput[];
 }): Promise<MoneyTransactionDetail> {
-  const supabase = createClient();
   const txPayload: MoneyTransactionInsert = {
     payer_person_id: transaction.payer_person_id,
     account_id: transaction.account_id,
@@ -357,14 +371,6 @@ async function createMoneyTransactionWithLines({
     dedupe_hash: transaction.dedupe_hash ?? null,
   } as MoneyTransactionInsert;
 
-  const { data: tx, error } = await supabase
-    .from("money_transactions")
-    .insert(txPayload)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-
   const fallbackItem: CreateMoneyLineItemInput = {
     title: transaction.merchant_name?.trim() || "Manual item",
     amount: transaction.amount,
@@ -372,21 +378,11 @@ async function createMoneyTransactionWithLines({
     assignment_method: "manual",
   };
 
-  const items: MoneyLineItemInsert[] = ensureLineItems(lineItems, fallbackItem).map((item) =>
-    toLineItemMutationPayload(item, tx.id),
+  return saveTransactionWithLineItems(
+    null,
+    txPayload as Record<string, unknown>,
+    ensureLineItems(lineItems, fallbackItem),
   );
-
-  const { data: lines, error: lineError } = await supabase
-    .from("money_line_items")
-    .insert(items)
-    .select();
-
-  if (lineError) throw new Error(lineError.message);
-
-  return {
-    ...(tx as MoneyTransaction),
-    line_items: (lines || []) as MoneyLineItem[],
-  };
 }
 
 export function useCreateMoneyTransaction() {
@@ -413,17 +409,6 @@ async function updateMoneyTransactionWithLines({
   updates: UpdateMoneyTransactionInput;
   lineItems: CreateMoneyLineItemInput[];
 }): Promise<MoneyTransactionDetail> {
-  const supabase = createClient();
-
-  const { data: tx, error } = await supabase
-    .from("money_transactions")
-    .update(updates)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-
   const fallbackItem: CreateMoneyLineItemInput = {
     title: updates.merchant_name?.trim() || "Manual item",
     amount: updates.amount ?? 0,
@@ -431,71 +416,11 @@ async function updateMoneyTransactionWithLines({
     assignment_method: "manual",
   };
 
-  const items = ensureLineItems(lineItems, fallbackItem);
-  const { data: currentLineRows, error: currentLineError } = await supabase
-    .from("money_line_items")
-    .select("id")
-    .eq("transaction_id", id);
-
-  if (currentLineError) throw new Error(currentLineError.message);
-
-  const currentLineIds = new Set((currentLineRows ?? []).map((row) => row.id));
-  const submittedExistingIds = new Set(
-    items.map((item) => item.id).filter((value): value is string => Boolean(value)),
+  return saveTransactionWithLineItems(
+    id,
+    updates as Record<string, unknown>,
+    ensureLineItems(lineItems, fallbackItem),
   );
-  const removedLineIds = [...currentLineIds].filter((lineId) => !submittedExistingIds.has(lineId));
-
-  if (removedLineIds.length > 0) {
-    const { error: deleteError } = await supabase
-      .from("money_line_items")
-      .delete()
-      .in("id", removedLineIds);
-
-    if (deleteError) throw new Error(deleteError.message);
-  }
-
-  const updatedLineMap = new Map<string, MoneyLineItem>();
-  const newItems = items.filter((item) => !item.id || !currentLineIds.has(item.id));
-
-  for (const item of items) {
-    if (!item.id || !currentLineIds.has(item.id)) {
-      continue;
-    }
-
-    const { data: updatedLine, error: updateLineError } = await supabase
-      .from("money_line_items")
-      .update(toLineItemMutationPayload(item, id))
-      .eq("id", item.id)
-      .select()
-      .single();
-
-    if (updateLineError) throw new Error(updateLineError.message);
-    updatedLineMap.set(item.id, updatedLine as MoneyLineItem);
-  }
-
-  let insertedLines: MoneyLineItem[] = [];
-  if (newItems.length > 0) {
-    const { data: insertedLineRows, error: lineError } = await supabase
-      .from("money_line_items")
-      .insert(newItems.map((item) => toLineItemMutationPayload(item, id)))
-      .select();
-
-    if (lineError) throw new Error(lineError.message);
-    insertedLines = (insertedLineRows ?? []) as MoneyLineItem[];
-  }
-
-  const insertedLineQueue = [...insertedLines];
-  const lines = items.map((item) => {
-    if (item.id && updatedLineMap.has(item.id)) {
-      return updatedLineMap.get(item.id)!;
-    }
-    return insertedLineQueue.shift() as MoneyLineItem;
-  });
-
-  return {
-    ...(tx as MoneyTransaction),
-    line_items: lines,
-  };
 }
 
 export function useUpdateMoneyTransaction() {

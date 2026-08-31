@@ -17,7 +17,7 @@ DECLARE
   v_operator text := COALESCE(p_filter->>'operator', 'equals');
   v_raw_value text;
   v_text_value text;
-  v_filter_value text := NULLIF(regexp_replace(lower(COALESCE(p_filter->>'value', '')), '\s+', ' ', 'g'), '');
+  v_filter_value text := NULLIF(btrim(regexp_replace(lower(COALESCE(p_filter->>'value', '')), '\s+', ' ', 'g')), '');
   v_number_value numeric;
   v_boolean_value boolean;
   v_set_values text[];
@@ -43,7 +43,9 @@ BEGIN
     ELSE ''
   END;
 
-  v_text_value := NULLIF(regexp_replace(lower(COALESCE(v_raw_value, '')), '\s+', ' ', 'g'), '');
+  -- Trimmed, so a field holding only whitespace reads as empty — the TypeScript engine
+  -- trims before it compares, and `is_empty` has to agree with it.
+  v_text_value := NULLIF(btrim(regexp_replace(lower(COALESCE(v_raw_value, '')), '\s+', ' ', 'g')), '');
   v_number_value := CASE
     WHEN v_field IN ('line_item_amount', 'transaction_amount') AND v_raw_value <> '' THEN v_raw_value::numeric
     ELSE NULL
@@ -53,11 +55,26 @@ BEGIN
     ELSE NULL
   END;
   v_set_values := ARRAY(
-    SELECT NULLIF(regexp_replace(lower(value), '\s+', ' ', 'g'), '')
+    SELECT NULLIF(btrim(regexp_replace(lower(value), '\s+', ' ', 'g')), '')
     FROM jsonb_array_elements_text(COALESCE(p_filter->'values', '[]'::jsonb)) AS value
   );
 
-  RETURN CASE v_operator
+  -- A regex typed by a user can fail to compile. Left inside the CASE below, that error
+  -- propagates out of money_run_category_rule_pipeline_internal and aborts categorisation
+  -- for the whole batch instead of just this one rule.
+  IF v_operator = 'regex' THEN
+    BEGIN
+      RETURN COALESCE(v_raw_value, '') ~ COALESCE(p_filter->>'value', '');
+    EXCEPTION
+      WHEN invalid_regular_expression THEN
+        RETURN false;
+    END;
+  END IF;
+
+  -- Every comparison below can yield NULL when the field is empty, and the pipeline reads
+  -- a NULL filter as neither matched nor rejected. The TypeScript engine has no such state:
+  -- unknown means the filter did not match.
+  RETURN COALESCE(CASE v_operator
     WHEN 'contains' THEN v_text_value IS NOT NULL AND v_filter_value IS NOT NULL
       AND POSITION(v_filter_value IN v_text_value) > 0
     WHEN 'not_contains' THEN v_text_value IS NULL OR v_filter_value IS NULL
@@ -73,7 +90,6 @@ BEGIN
       END
     WHEN 'starts_with' THEN v_text_value IS NOT NULL AND v_filter_value IS NOT NULL
       AND v_text_value LIKE CONCAT(v_filter_value, '%')
-    WHEN 'regex' THEN COALESCE(v_raw_value, '') ~ COALESCE(p_filter->>'value', '')
     WHEN 'contains_any_in_set' THEN
       EXISTS (
         SELECT 1
@@ -85,7 +101,17 @@ BEGIN
     WHEN 'equals_any_in_set' THEN
       CASE
         WHEN v_field IN ('line_item_amount', 'transaction_amount') THEN
-          to_char(v_number_value, 'FM999999999999999.################') = ANY(v_set_values)
+          -- Set membership on an amount is a text comparison against what the rule editor
+          -- stored, so the number has to be rendered the way the TypeScript engine renders
+          -- it: no padding and no trailing zeros. `#` is not a to_char template character —
+          -- it is copied through literally — so the previous mask produced values that could
+          -- never match anything.
+          (CASE
+            WHEN v_number_value IS NULL THEN NULL
+            WHEN strpos(v_number_value::text, '.') > 0
+              THEN rtrim(rtrim(v_number_value::text, '0'), '.')
+            ELSE v_number_value::text
+          END) = ANY(v_set_values)
         WHEN v_field = 'is_transfer' THEN
           COALESCE(v_boolean_value::text, '') = ANY(v_set_values)
         ELSE
@@ -94,7 +120,17 @@ BEGIN
     WHEN 'in_set' THEN
       CASE
         WHEN v_field IN ('line_item_amount', 'transaction_amount') THEN
-          to_char(v_number_value, 'FM999999999999999.################') = ANY(v_set_values)
+          -- Set membership on an amount is a text comparison against what the rule editor
+          -- stored, so the number has to be rendered the way the TypeScript engine renders
+          -- it: no padding and no trailing zeros. `#` is not a to_char template character —
+          -- it is copied through literally — so the previous mask produced values that could
+          -- never match anything.
+          (CASE
+            WHEN v_number_value IS NULL THEN NULL
+            WHEN strpos(v_number_value::text, '.') > 0
+              THEN rtrim(rtrim(v_number_value::text, '0'), '.')
+            ELSE v_number_value::text
+          END) = ANY(v_set_values)
         WHEN v_field = 'is_transfer' THEN
           COALESCE(v_boolean_value::text, '') = ANY(v_set_values)
         ELSE
@@ -106,7 +142,7 @@ BEGIN
     WHEN 'is_empty' THEN v_text_value IS NULL
     WHEN 'is_not_empty' THEN v_text_value IS NOT NULL
     ELSE false
-  END;
+  END, false);
 END;
 $$;
 

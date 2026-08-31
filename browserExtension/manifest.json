@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Orbit",
-  "version": "0.1.2",
+  "version": "0.2.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz84ynCFIwpvsQIcklAzf+8sVWXeZZocN8LTt6iEmtA8ZwHV0klI115PyOy4LlaEFEIp7YpwrfT5MaU+m9rbuCnhmOsK46omDGqM2eUnP4v3YGU3pMmyGcXvU6FGAIlelUlzkqKl5OzCnLdZKpJnVZSG2dcfCRINyp9MMI3209vgrqeqpmnCEMbr8JpMZ/+aAQLlMfOIIyYMcdP9Kr2DKbAZrm41lepCJOYdSGfy+HpO9Q1UB+XhSOq386hyhkK5LC3cfTGjlNApTHr3fzrMS/s04R/ACAR1BElRu8e32J2nOOtGm0LVW0XD9o53p1bok6nMtLawS4FUmWOPU7MdgrwIDAQAB",
   "description": "Bridge for Orbit web app (money import and more).",
   "icons": {
@@ -9,7 +9,7 @@
     "48": "icons/icon-128.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["storage", "tabs", "activeTab", "scripting"],
+  "permissions": ["storage", "tabs", "activeTab", "scripting", "alarms"],
   "host_permissions": [
     "http://localhost:3000/*",
     "http://127.0.0.1:3000/*",

@@ -623,6 +623,12 @@ export default function MoneyImportReportPage() {
   const filteredInvalidDateCount = parseFiniteNumber(batchMeta.filtered_invalid_date_count) ?? 0;
   const selectionMode = normalizeId(rangeSelectionMeta.selection_mode);
   const presetKey = normalizeId(rangeSelectionMeta.preset_key);
+  const completenessMeta = useMemo(() => asRecord(batchMeta.import_completeness), [batchMeta]);
+  // A window the connector could not fully read must say so here. Silence would let a
+  // partly loaded period pass as closed, and nobody comes back to a period that looks done.
+  const isPartialWindow = completenessMeta.partial === true;
+  const truncationUnresolvedCount =
+    parseFiniteNumber(completenessMeta.truncation_unresolved_count) ?? 0;
 
   const brandNameById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -836,6 +842,14 @@ export default function MoneyImportReportPage() {
           <div>{`Filtered out of range: ${filteredOutOfRangeCount}`}</div>
           <div>{`Invalid date rows: ${filteredInvalidDateCount}`}</div>
           {summaryWithoutFullDetails && <div>{summaryWithoutFullDetails}</div>}
+          {isPartialWindow && (
+            <div
+              className="sm:col-span-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-400"
+              data-testid="import-partial-window-warning"
+            >
+              {t("money.importPartialWindowWarning", { count: truncationUnresolvedCount })}
+            </div>
+          )}
           {batch.completed_at && (
             <div>{`Completed: ${format(new Date(batch.completed_at), "dd.MM.yyyy HH:mm")}`}</div>
           )}

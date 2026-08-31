@@ -27,7 +27,12 @@ export function createContentBridge(deps: ContentBridgeDeps) {
 
   function handleWindowMessage(event: MessageEvent): void {
     if (event.source !== window) return;
-    const data = event.data as { source?: string; type?: string; session?: unknown };
+    const data = event.data as {
+      source?: string;
+      type?: string;
+      session?: unknown;
+      grant?: unknown;
+    };
     if (!data || data.source !== WEBAPP_SOURCE) return;
 
     if (data.type === "MONEY_IMPORT_PING") {
@@ -47,6 +52,26 @@ export function createContentBridge(deps: ContentBridgeDeps) {
           "*",
         );
       });
+      return;
+    }
+
+    if (data.type === "MONEY_IMPORT_SET_GRANT") {
+      deps.runtimeSendMessage(
+        {
+          type: "MONEY_IMPORT_SET_GRANT",
+          grant: data.grant as Record<string, unknown>,
+        },
+        (response: { ok?: boolean } | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_GRANT_ACK",
+              ok: Boolean(response?.ok),
+            },
+            "*",
+          );
+        },
+      );
       return;
     }
 

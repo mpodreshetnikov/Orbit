@@ -1254,6 +1254,7 @@ export type Database = {
       money_import_batches: {
         Row: {
           completed_at: string | null
+          created_by_auth_user_id: string | null
           created_at: string
           error_count: number
           file_path: string | null
@@ -1273,6 +1274,7 @@ export type Database = {
         }
         Insert: {
           completed_at?: string | null
+          created_by_auth_user_id?: string | null
           created_at?: string
           error_count?: number
           file_path?: string | null
@@ -1292,6 +1294,7 @@ export type Database = {
         }
         Update: {
           completed_at?: string | null
+          created_by_auth_user_id?: string | null
           created_at?: string
           error_count?: number
           file_path?: string | null
@@ -1322,6 +1325,56 @@ export type Database = {
             columns: ["session_id"]
             isOneToOne: false
             referencedRelation: "money_import_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_import_grants: {
+        Row: {
+          allowed_sources: string[]
+          created_at: string
+          created_by_auth_user_id: string
+          expires_at: string | null
+          id: string
+          label: string
+          last_used_at: string | null
+          person_id: string
+          revoked_at: string | null
+          token_hash: string
+          updated_at: string
+        }
+        Insert: {
+          allowed_sources?: string[]
+          created_at?: string
+          created_by_auth_user_id: string
+          expires_at?: string | null
+          id?: string
+          label: string
+          last_used_at?: string | null
+          person_id: string
+          revoked_at?: string | null
+          token_hash: string
+          updated_at?: string
+        }
+        Update: {
+          allowed_sources?: string[]
+          created_at?: string
+          created_by_auth_user_id?: string
+          expires_at?: string | null
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          person_id?: string
+          revoked_at?: string | null
+          token_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_import_grants_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
             referencedColumns: ["id"]
           },
         ]
@@ -1405,6 +1458,7 @@ export type Database = {
           created_at: string
           id: string
           import_hash: string | null
+          is_placeholder: boolean
           last_category_rule_id: string | null
           last_category_rule_run_id: string | null
           line_status: Database["public"]["Enums"]["money_line_status"]
@@ -1428,6 +1482,7 @@ export type Database = {
           created_at?: string
           id?: string
           import_hash?: string | null
+          is_placeholder?: boolean
           last_category_rule_id?: string | null
           last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]
@@ -1451,6 +1506,7 @@ export type Database = {
           created_at?: string
           id?: string
           import_hash?: string | null
+          is_placeholder?: boolean
           last_category_rule_id?: string | null
           last_category_rule_run_id?: string | null
           line_status?: Database["public"]["Enums"]["money_line_status"]
@@ -2284,6 +2340,25 @@ export type Database = {
       }
       convert_to_canonical_unit: {
         Args: { p_obs_code: string; p_unit: string; p_value: number }
+        Returns: number
+      }
+      money_save_transaction_with_line_items: {
+        Args: { p_line_items: Json; p_transaction: Json; p_transaction_id: string | null }
+        Returns: Json
+      }
+      money_list_line_item_discrepancies: {
+        Args: { p_min_delta?: number; p_person_id: string }
+        Returns: {
+          amount: number
+          delta: number
+          line_items_sum: number
+          merchant_name: string | null
+          posted_at: string
+          transaction_id: string
+        }[]
+      }
+      create_money_import_stale_digests: {
+        Args: { p_stale_days?: number }
         Returns: number
       }
       create_medication_refill_digests: {

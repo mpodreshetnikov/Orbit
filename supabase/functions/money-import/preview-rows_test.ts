@@ -51,6 +51,8 @@ function createRepositoryMock(
   const repository: MoneyImportRepository = {
     authenticateAllowedUser: async () => null,
     getSessionByToken: async () => null,
+    getGrantByToken: async () => null,
+    markGrantUsed: async () => {},
     findLastImportedAt: async () => null,
     createImportSession: async () => ({ id: "session-1" }),
     getImportSessionForUser: async () => state.session,
@@ -75,6 +77,16 @@ function createRepositoryMock(
     },
     getImportBatch: async (batchId) =>
       state.batch && state.batch.id === batchId ? state.batch : null,
+    // The repository's own rule, restated: a batch stamped with someone else's user id is
+    // invisible. A mock that ignored `userId` would let the ownership test pass against an
+    // action that never checks ownership, which is the one thing it must not do.
+    getImportBatchForUser: async (batchId, userId) => {
+      if (!state.batch || state.batch.id !== batchId) return null;
+      const createdBy = state.batch.created_by_auth_user_id;
+      return typeof createdBy === "string" && createdBy && createdBy !== userId
+        ? null
+        : state.batch;
+    },
     updateImportBatch: async (batchId, patch) => {
       state.batchUpdates.push({ batchId, patch });
       if (state.batch && state.batch.id === batchId) {
@@ -104,11 +116,13 @@ function createRepositoryMock(
     listBatchBrandResolutions: async () => [],
     updateBatchBrandResolutionSelection: async () => {},
     findExistingTransactionId: async (row) => (row.external_id === "dup-tx" ? "tx-dup" : null),
+    findAdoptableTransactionId: async () => null,
     findExistingLineItemId: async () => null,
     repairExistingTransactionDetails: async () => ({
       replaced_synthetic_line_items: false,
       has_only_synthetic_line_items: false,
       has_real_line_items: false,
+      blocked_by_manual_edit: false,
     }),
     insertOrResolveTransaction: async () => ({ transactionId: "unused", inserted: true }),
     insertLineItemIfNew: async () => ({ lineItemId: "unused", inserted: true }),
@@ -361,3 +375,129 @@ Deno.test(
     assertEquals(state.session?.status, "running");
   },
 );
+
+Deno.test("previewRowsAction clears parsed rows once per preview attempt", async () => {
+  const { repository, state } = createRepositoryMock({
+    batch: {
+      id: "batch-1",
+      status: "running",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      meta: null,
+    },
+  });
+
+  const chunkZero = {
+    batch_id: "batch-1",
+    payer_person_id: "person-1",
+    source: "tbank_web",
+    rows: [txRow({ external_id: "ok-1" })],
+    chunk_index: 0,
+    chunk_count: 2,
+    row_offset: 0,
+    total_row_count: 2,
+    is_final_chunk: false,
+    preview_attempt_id: "attempt-1",
+  };
+
+  await assertJsonResponse(
+    await previewRowsAction(chunkZero, userAuth, {
+      repository,
+      now: () => new Date("2026-03-09T00:00:00.000Z"),
+    }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+
+  // A replay of chunk zero within the same attempt must not wipe what already landed.
+  await assertJsonResponse(
+    await previewRowsAction(chunkZero, userAuth, {
+      repository,
+      now: () => new Date("2026-03-09T00:00:00.000Z"),
+    }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 1);
+
+  // A genuinely new run carries a new attempt id and starts from a clean batch.
+  await assertJsonResponse(
+    await previewRowsAction({ ...chunkZero, preview_attempt_id: "attempt-2" }, userAuth, {
+      repository,
+      now: () => new Date("2026-03-09T00:00:00.000Z"),
+    }),
+    200,
+  );
+  assertEquals(state.deletedReportRowsCount, 2);
+
+  // Callers that send no attempt id keep the previous behaviour.
+  const { repository: legacyRepository, state: legacyState } = createRepositoryMock({
+    batch: {
+      id: "batch-1",
+      status: "running",
+      payer_person_id: "person-1",
+      source: "tbank_web",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      meta: null,
+    },
+  });
+  const legacyChunkZero = { ...chunkZero };
+  delete (legacyChunkZero as Record<string, unknown>).preview_attempt_id;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assertJsonResponse(
+      await previewRowsAction(legacyChunkZero, userAuth, {
+        repository: legacyRepository,
+        now: () => new Date("2026-03-09T00:00:00.000Z"),
+      }),
+      200,
+    );
+  }
+  assertEquals(legacyState.deletedReportRowsCount, 2);
+});
+
+Deno.test("previewRowsAction returns 404 for a batch belonging to someone else", async () => {
+  // T-260829-08d, the same hole as in `apply_rows`. Under user auth `batch_id` comes straight
+  // out of the request body and the edge function reads with the service role, so nothing but
+  // this check stands between an allowlisted person and another person's batch. A preview
+  // rewrites the batch's rows — it deletes the existing report rows first — so reaching the
+  // wrong one destroys what is in it, not merely reads it.
+  const { repository, state } = createRepositoryMock({
+    batch: {
+      id: "batch-1",
+      status: "running",
+      parsed_transactions_count: 0,
+      inserted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      meta: null,
+      created_by_auth_user_id: "user-2",
+    },
+  });
+
+  const payload = await assertJsonResponse<{ error: string }>(
+    await previewRowsAction(
+      {
+        payer_person_id: "person-1",
+        source: "tbank_web",
+        import_type: "file",
+        batch_id: "batch-1",
+        rows: [txRow({ external_id: "ok-1" })],
+      },
+      userAuth,
+      { repository, now: () => new Date("2026-03-09T00:00:00.000Z") },
+    ),
+    404,
+  );
+
+  assertEquals(payload.error, "Batch not found");
+  // Refused before the destructive step: the other person's rows are still there.
+  assertEquals(state.deletedReportRowsCount, 0);
+  assertEquals(state.batchUpdates.length, 0);
+  assertEquals(state.reportRows.length, 0);
+});

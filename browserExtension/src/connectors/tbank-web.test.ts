@@ -298,8 +298,10 @@ describe("tbank-web connector", () => {
       });
 
       expect(fetchCalls.filter((url) => url.includes("/shopping_receipt"))).toHaveLength(1);
-      expect(fetchCalls.filter((url) => url.includes("/api/common/v1/operation?"))).toHaveLength(1);
       expect(fetchCalls.filter((url) => url.includes("/tranche_offers"))).toHaveLength(1);
+      // Never, for any operation: `/api/common/v1/operation` is not a request type the bank has,
+      // so the skip this test is about is no longer what stops the call — nothing issues it.
+      expect(fetchCalls.filter((url) => url.includes("/api/common/v1/operation?"))).toHaveLength(0);
       const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
       expect(records).toHaveLength(2);
       expect(records[0]?.shoppingReceiptMeta).toMatchObject({
@@ -424,7 +426,8 @@ describe("tbank-web connector", () => {
       base_text_color: "FFFFFF",
     });
     expect((row?.raw_payload as Record<string, unknown>)?.account_hint).toBe("6986");
-    expect(row?.dedupe_hash).toMatch(/^tbw_/);
+    // The mapper leaves identity unset; applyMoneyDedupeHashes fills it for the whole run.
+    expect(row?.dedupe_hash).toBeNull();
     expect(row?.line_items).toHaveLength(2);
     expect((row?.line_items as Array<Record<string, unknown>>)[0]?.title).toBe("Chicken roll");
     expect((row?.line_items as Array<Record<string, unknown>>)[1]?.amount).toBe(-658);
@@ -432,6 +435,93 @@ describe("tbank-web connector", () => {
     expect((row?.raw_payload as Record<string, unknown>)?.operation_detail).toBeTruthy();
     expect((row?.raw_payload as Record<string, unknown>)?.shopping_receipt).toBeTruthy();
     expect((row?.raw_payload as Record<string, unknown>)?.all_details_captured).toBe(true);
+  });
+
+  it("parses the point of sale out of the operations list", () => {
+    // Everything here comes from the list response. The bank's own card adds a `point_of_sales`
+    // request on top, but the one recorded response from that endpoint is an empty payload, so
+    // the connector reads the terminal out of the operation instead of asking for it.
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "pos-1",
+          operationTime: { milliseconds: 1772680882000 },
+          amount: { value: 349, currency: { code: 643, name: "RUB", strCode: "RUB" } },
+          type: "Debit",
+          description: "Самокат",
+          posId: 30653366,
+          typeSerno: "991",
+          pointOfSaleId: 41405565,
+          merchant: {
+            name: "SAMOKAT",
+            id: "551000348027",
+            region: { country: "RUS", city: "SANKT-PETERBU" },
+          },
+          locations: [],
+        },
+      },
+      { extractionMethod: "api" },
+    );
+
+    expect((row?.raw_payload as Record<string, unknown>)?.point_of_sale).toEqual({
+      pos_id: "30653366",
+      point_of_sale_id: "41405565",
+      type_serno: "991",
+      merchant_id: "551000348027",
+      merchant_name: "SAMOKAT",
+      country: "RUS",
+      city: "SANKT-PETERBU",
+      location_count: 0,
+    });
+    // The acquirer's merchant record and the display title are different strings, and the row
+    // keeps using the display one.
+    expect(row?.merchant_name).toBe("Самокат");
+  });
+
+  it("reports no point of sale when the operation went through no terminal", () => {
+    // A transfer has a counterparty and no terminal. `merchant_name` on the row already carries
+    // the counterparty, so a point-of-sale object built from it would be an invention.
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "no-pos-1",
+          operationTime: { milliseconds: 1772680882000 },
+          amount: { value: 1000, currency: { code: 643, name: "RUB", strCode: "RUB" } },
+          type: "Credit",
+          description: "Ivan I.",
+          merchant: { name: "Ivan I.", id: "person-1" },
+          locations: [],
+        },
+      },
+      { extractionMethod: "api" },
+    );
+
+    expect((row?.raw_payload as Record<string, unknown>)?.point_of_sale).toBeNull();
+  });
+
+  it("counts the locations the bank filled in without inventing their shape", () => {
+    // Empty in every operation of the recorded cassette. The count is the signal that says when
+    // that stops being true, and the array itself stays in `raw_payload.operation`.
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "pos-located",
+          operationTime: { milliseconds: 1772680882000 },
+          amount: { value: 500, currency: { code: 643, name: "RUB", strCode: "RUB" } },
+          type: "Debit",
+          description: "Shop",
+          locations: [{ address: "Nevsky 1" }, { address: "Nevsky 2" }],
+        },
+      },
+      { extractionMethod: "api" },
+    );
+
+    const pointOfSale = (row?.raw_payload as Record<string, unknown>)?.point_of_sale as Record<
+      string,
+      unknown
+    >;
+    expect(pointOfSale?.location_count).toBe(2);
+    expect(pointOfSale?.pos_id).toBeNull();
   });
 
   it("drops bank-native source brands for internal transfer operations", () => {
@@ -702,6 +792,7 @@ describe("tbank-web connector", () => {
     expect(executeScript).toHaveBeenCalledOnce();
     expect(executeScript.mock.calls[0]?.[0]?.args?.[0]).toEqual({
       parseStrategy: "fast",
+      maxReceiptsPerRun: 50,
       payerPersonId: null,
       sessionId: null,
       sourceId: "tbank_web",
@@ -1025,6 +1116,7 @@ describe("tbank-web connector", () => {
       windowFromIso?: string;
       sessionId?: string | null;
       parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
     }) => Promise<Record<string, unknown>>;
     const isolatedExtractor = isolatedFactory();
 
@@ -1227,6 +1319,7 @@ describe("tbank-web connector", () => {
       windowFromIso?: string;
       sessionId?: string | null;
       parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
     }) => Promise<Record<string, unknown>>;
     const isolatedExtractor = isolatedFactory();
 
@@ -1360,6 +1453,9 @@ describe("tbank-web connector", () => {
         windowFromIso: "2026-03-01T00:00:00.000Z",
         sessionId: "abc",
         parseStrategy: "full",
+        // This case is about the bank's request window, not the per-run receipt budget, so
+        // the budget is lifted out of the way.
+        maxReceiptsPerRun: 1000,
       });
 
       expect(requestTimes).toEqual([
@@ -1417,6 +1513,7 @@ describe("tbank-web connector", () => {
       windowFromIso?: string;
       sessionId?: string | null;
       parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
     }) => Promise<Record<string, unknown>>;
     const isolatedExtractor = isolatedFactory();
 
@@ -1521,6 +1618,9 @@ describe("tbank-web connector", () => {
         windowFromIso: "2026-03-01T00:00:00.000Z",
         sessionId: "abc",
         parseStrategy: "full",
+        // This case is about the bank's request window, not the per-run receipt budget, so
+        // the budget is lifted out of the way.
+        maxReceiptsPerRun: 1000,
       });
 
       expect(requestTimes).toHaveLength(71);
@@ -1551,6 +1651,309 @@ describe("tbank-web connector", () => {
       (globalThis as Record<string, unknown>).chrome = originalChrome;
       Date.now = originalDateNow;
       globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  describe("range truncation", () => {
+    function runInPageExtractor(options: {
+      windowFromIso: string;
+      nowIso: string;
+      /** Operations the bank returns for a given [start, end] range. */
+      operationsFor: (start: number, end: number) => Array<Record<string, unknown>>;
+    }) {
+      const isolatedFactory = new Function(
+        `return (${__test__.extractOperationsInPage.toString()});`,
+      ) as () => (input: {
+        windowFromIso?: string;
+        sessionId?: string | null;
+        parseStrategy?: string | null;
+      }) => Promise<Record<string, unknown>>;
+      const isolatedExtractor = isolatedFactory();
+
+      const originals = {
+        window: (globalThis as Record<string, unknown>).window,
+        document: (globalThis as Record<string, unknown>).document,
+        performance: (globalThis as Record<string, unknown>).performance,
+        fetch: (globalThis as Record<string, unknown>).fetch,
+        URL: (globalThis as Record<string, unknown>).URL,
+        chrome: (globalThis as Record<string, unknown>).chrome,
+        dateNow: Date.now,
+        setTimeout: globalThis.setTimeout,
+      };
+
+      const requestedRanges: Array<{ start: number; end: number }> = [];
+
+      (globalThis as Record<string, unknown>).window = {
+        location: {
+          href: "https://www.tbank.ru/mybank/operations/",
+          origin: "https://www.tbank.ru",
+        },
+      };
+      (globalThis as Record<string, unknown>).document = {
+        body: { innerText: "" },
+        querySelectorAll: vi.fn().mockReturnValue([]),
+      };
+      (globalThis as Record<string, unknown>).performance = {
+        getEntriesByType: vi.fn().mockImplementation((type: string) => {
+          if (type !== "resource") return [];
+          return [
+            {
+              name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2",
+            },
+          ];
+        }),
+      };
+      (globalThis as Record<string, unknown>).URL = URL;
+      (globalThis as Record<string, unknown>).chrome = { runtime: { sendMessage: vi.fn() } };
+      Date.now = () => Date.parse(options.nowIso);
+      globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
+        callback();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+      (globalThis as Record<string, unknown>).fetch = vi
+        .fn()
+        .mockImplementation(async (input: string) => {
+          const url = new URL(input);
+          if (url.pathname !== "/api/common/v1/operations") {
+            return { ok: false, status: 404, json: async () => null };
+          }
+          const start = Number(url.searchParams.get("start"));
+          const end = Number(url.searchParams.get("end"));
+          requestedRanges.push({ start, end });
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ payload: options.operationsFor(start, end) }),
+          };
+        });
+
+      const restore = () => {
+        (globalThis as Record<string, unknown>).window = originals.window;
+        (globalThis as Record<string, unknown>).document = originals.document;
+        (globalThis as Record<string, unknown>).performance = originals.performance;
+        (globalThis as Record<string, unknown>).fetch = originals.fetch;
+        (globalThis as Record<string, unknown>).URL = originals.URL;
+        (globalThis as Record<string, unknown>).chrome = originals.chrome;
+        Date.now = originals.dateNow;
+        globalThis.setTimeout = originals.setTimeout;
+      };
+
+      return {
+        requestedRanges,
+        restore,
+        run: () =>
+          isolatedExtractor({
+            windowFromIso: options.windowFromIso,
+            sessionId: "abc",
+            parseStrategy: "fast",
+          }),
+      };
+    }
+
+    function operation(index: number, atMs: number): Record<string, unknown> {
+      return {
+        id: `op-${index}-${atMs}`,
+        authorizationId: `auth-${index}-${atMs}`,
+        operationTime: { milliseconds: atMs },
+        type: "Debit",
+        status: "OK",
+        amount: { value: 100 + index, currency: { strCode: "RUB" } },
+        accountAmount: { value: 100 + index, currency: { strCode: "RUB" } },
+        description: `Merchant ${index}`,
+        documents: [],
+      };
+    }
+
+    it("splits a range whose response came back at the page limit", async () => {
+      const dayMs = 24 * 60 * 60 * 1000;
+      const harness = runInPageExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        nowIso: "2026-03-08T00:00:00.000Z",
+        operationsFor: (start, end) => {
+          const span = end - start + 1;
+          // A wide range comes back capped; each half fits comfortably.
+          const count = span > 4 * dayMs ? 100 : 10;
+          return Array.from({ length: count }, (_, index) =>
+            operation(index, end - index * 60_000),
+          );
+        },
+      });
+
+      try {
+        const result = (await harness.run()) as Record<string, unknown>;
+        const debug = (result.debug ?? {}) as Record<string, unknown>;
+
+        expect(debug.range_split_count).toBeGreaterThan(0);
+        expect(debug.truncation_suspected_count).toBeGreaterThan(0);
+        expect(debug.truncation_unresolved_count).toBe(0);
+        expect(debug.partial_result).toBe(false);
+
+        // Halves were re-requested, so more ranges were fetched than were planned.
+        expect(harness.requestedRanges.length).toBeGreaterThan(1);
+
+        // Operations gathered across the halves are deduplicated, not doubled.
+        const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
+        const ids = records.map((record) => {
+          const operationRecord = record.operation as Record<string, unknown>;
+          return operationRecord.id;
+        });
+        expect(new Set(ids).size).toBe(ids.length);
+      } finally {
+        harness.restore();
+      }
+    });
+
+    it("reports a single day it cannot get past instead of looking complete", async () => {
+      const harness = runInPageExtractor({
+        windowFromIso: "2026-03-06T00:00:00.000Z",
+        nowIso: "2026-03-08T00:00:00.000Z",
+        // Every range stays at the cap, so splitting bottoms out at one day.
+        operationsFor: (_start, end) =>
+          Array.from({ length: 100 }, (_, index) => operation(index, end - index * 1000)),
+      });
+
+      try {
+        const result = (await harness.run()) as Record<string, unknown>;
+        const debug = (result.debug ?? {}) as Record<string, unknown>;
+
+        expect(debug.truncation_unresolved_count).toBeGreaterThan(0);
+        expect(debug.partial_result).toBe(true);
+      } finally {
+        harness.restore();
+      }
+    });
+
+    it("leaves an unremarkable window alone", async () => {
+      const harness = runInPageExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        nowIso: "2026-03-08T00:00:00.000Z",
+        operationsFor: (_start, end) =>
+          Array.from({ length: 5 }, (_, index) => operation(index, end - index * 60_000)),
+      });
+
+      try {
+        const result = (await harness.run()) as Record<string, unknown>;
+        const debug = (result.debug ?? {}) as Record<string, unknown>;
+
+        expect(debug.range_split_count).toBe(0);
+        expect(debug.truncation_suspected_count).toBe(0);
+        expect(debug.truncation_unresolved_count).toBe(0);
+        expect(debug.partial_result).toBe(false);
+      } finally {
+        harness.restore();
+      }
+    });
+  });
+
+  it("stops fetching receipts once the run budget is spent", async () => {
+    const isolatedFactory = new Function(
+      `return (${__test__.extractOperationsInPage.toString()});`,
+    ) as () => (input: {
+      windowFromIso?: string;
+      sessionId?: string | null;
+      parseStrategy?: string | null;
+      maxReceiptsPerRun?: number | null;
+    }) => Promise<Record<string, unknown>>;
+    const isolatedExtractor = isolatedFactory();
+
+    const originals = {
+      window: (globalThis as Record<string, unknown>).window,
+      document: (globalThis as Record<string, unknown>).document,
+      performance: (globalThis as Record<string, unknown>).performance,
+      fetch: (globalThis as Record<string, unknown>).fetch,
+      URL: (globalThis as Record<string, unknown>).URL,
+      chrome: (globalThis as Record<string, unknown>).chrome,
+      setTimeout: globalThis.setTimeout,
+    };
+
+    const receiptRequests: string[] = [];
+    const operationsPayload = Array.from({ length: 3 }, (_, index) => ({
+      id: `op-${index + 1}`,
+      authorizationId: `auth-${index + 1}`,
+      operationTime: { milliseconds: Date.parse("2026-03-08T12:00:00.000Z") - index * 60_000 },
+      type: "Debit",
+      status: "OK",
+      amount: { value: 100 + index, currency: { strCode: "RUB" } },
+      accountAmount: { value: 100 + index, currency: { strCode: "RUB" } },
+      description: `Receipt ${index + 1}`,
+      documents: ["ShoppingReceipt"],
+    }));
+
+    (globalThis as Record<string, unknown>).window = {
+      location: {
+        href: "https://www.tbank.ru/mybank/operations/",
+        origin: "https://www.tbank.ru",
+      },
+    };
+    (globalThis as Record<string, unknown>).document = {
+      body: { innerText: "" },
+      querySelectorAll: vi.fn().mockReturnValue([]),
+    };
+    (globalThis as Record<string, unknown>).performance = {
+      getEntriesByType: vi.fn().mockImplementation((type: string) => {
+        if (type !== "resource") return [];
+        return [
+          { name: "https://www.tbank.ru/api/common/v1/operations?sessionid=abc&start=1&end=2" },
+        ];
+      }),
+    };
+    (globalThis as Record<string, unknown>).URL = URL;
+    (globalThis as Record<string, unknown>).chrome = { runtime: { sendMessage: vi.fn() } };
+    globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
+      callback();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockImplementation(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === "/api/common/v1/operations") {
+          return { ok: true, status: 200, json: async () => ({ payload: operationsPayload }) };
+        }
+        if (url.pathname === "/api/common/v1/shopping_receipt") {
+          receiptRequests.push(url.searchParams.get("operationId") ?? "");
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resultCode: "OK",
+              payload: { receipt: { items: [{ name: "item", sum: 100, quantity: 1 }] } },
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => null };
+      });
+
+    try {
+      const result = (await isolatedExtractor({
+        windowFromIso: "2026-03-01T00:00:00.000Z",
+        sessionId: "abc",
+        parseStrategy: "fast",
+        maxReceiptsPerRun: 2,
+      })) as Record<string, unknown>;
+
+      // Only the budget is spent; nothing is requested for the third operation.
+      expect(receiptRequests).toHaveLength(2);
+
+      const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
+      const statuses = records.map((record) => {
+        const meta = record.shoppingReceiptMeta as Record<string, unknown>;
+        return meta.receipt_enrichment_status;
+      });
+      expect(statuses.filter((status) => status === "skipped_after_budget")).toHaveLength(1);
+
+      const debug = (result.debug ?? {}) as Record<string, unknown>;
+      const receiptDebug = (debug.receipt_enrichment ?? {}) as Record<string, unknown>;
+      expect(receiptDebug.skipped_after_budget_count).toBe(1);
+      expect(receiptDebug.stopped_after_budget).toBe(true);
+    } finally {
+      (globalThis as Record<string, unknown>).window = originals.window;
+      (globalThis as Record<string, unknown>).document = originals.document;
+      (globalThis as Record<string, unknown>).performance = originals.performance;
+      (globalThis as Record<string, unknown>).fetch = originals.fetch;
+      (globalThis as Record<string, unknown>).URL = originals.URL;
+      (globalThis as Record<string, unknown>).chrome = originals.chrome;
+      globalThis.setTimeout = originals.setTimeout;
     }
   });
 });

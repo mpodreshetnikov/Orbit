@@ -3,7 +3,7 @@
  * Format: semicolon-delimited, double-quoted fields, Russian locale numbers.
  */
 
-import { buildDedupeHash } from "../dedupe";
+import { buildMoneyDedupeHash } from "@shared/lib/money/dedupe";
 import { registerConnector } from "../connector-types";
 import type { CanonicalTransactionRow, ImportParseResult } from "@/types";
 
@@ -58,6 +58,16 @@ export function parseCSV(text: string): string[][] {
   return rows;
 }
 
+/**
+ * A T-Bank statement prints wall-clock time in Moscow, with no offset in the text. Moscow
+ * has been a fixed UTC+03:00 with no daylight saving since 2014, so the offset can be
+ * written down rather than looked up — this is deliberate, not an oversight. Reading the
+ * statement as UTC (the old behaviour) shifted every operation three hours back, which
+ * moved late-evening purchases into the previous calendar day in reports and put statement
+ * rows a fixed three hours away from the same operation seen through the bank's API.
+ */
+export const TBANK_STATEMENT_TIMEZONE_OFFSET = "+03:00";
+
 export function parseTBankDate(s: string): string | null {
   const t = s.trim();
   if (!t) return null;
@@ -66,12 +76,14 @@ export function parseTBankDate(s: string): string | null {
   let m = t.match(withTime);
   if (m) {
     const [, d, mo, y, h, min, sec] = m;
-    return `${y}-${mo}-${d}T${h}:${min}:${sec}.000Z`;
+    return new Date(
+      `${y}-${mo}-${d}T${h}:${min}:${sec}${TBANK_STATEMENT_TIMEZONE_OFFSET}`,
+    ).toISOString();
   }
   m = t.match(dateOnly);
   if (m) {
     const [, d, mo, y] = m;
-    return `${y}-${mo}-${d}T00:00:00.000Z`;
+    return new Date(`${y}-${mo}-${d}T00:00:00${TBANK_STATEMENT_TIMEZONE_OFFSET}`).toISOString();
   }
   return null;
 }
@@ -118,6 +130,7 @@ async function parse(file: File): Promise<ImportParseResult> {
 
   const transactions: CanonicalTransactionRow[] = [];
   const errors: string[] = [];
+  const occurrenceCounts = new Map<string, number>();
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
@@ -150,14 +163,23 @@ async function parse(file: File): Promise<ImportParseResult> {
       if (row[j] !== undefined) rawPayload[h] = row[j];
     });
 
-    const dedupe_hash = await buildDedupeHash(
-      SOURCE_ID,
-      postedAt,
+    // Two identical purchases on the same day at the same merchant for the same amount
+    // would otherwise hash alike and the second would vanish as a duplicate. Statement
+    // rows arrive in a stable order, so numbering repeats by position reproduces on a
+    // re-import of the same period.
+    const occurrenceKey = [postedAt, amount, currency, merchantName ?? "", accountHint].join("|");
+    const occurrence = occurrenceCounts.get(occurrenceKey) ?? 0;
+    occurrenceCounts.set(occurrenceKey, occurrence + 1);
+
+    const dedupe_hash = await buildMoneyDedupeHash({
+      source: SOURCE_ID,
+      postedAtIso: postedAt,
       amount,
       currency,
       merchantName,
-      accountHint || null,
-    );
+      accountHint: accountHint || null,
+      occurrence,
+    });
 
     transactions.push({
       account_hint: accountHint || null,
@@ -181,10 +203,14 @@ async function parse(file: File): Promise<ImportParseResult> {
       raw_payload: rawPayload,
       dedupe_hash,
       line_items: [
+        // A statement carries no receipt composition, so this single line is a
+        // placeholder for the whole operation and must be replaced — not joined — once
+        // the extension fetches the real receipt.
         {
           title: merchantName || "T-Bank",
           amount,
           raw_payload: rawPayload,
+          is_placeholder: true,
         },
       ],
     });

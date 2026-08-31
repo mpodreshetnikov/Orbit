@@ -1,4 +1,5 @@
 import { registerConnector } from "./registry.js";
+import { applyMoneyDedupeHashes } from "./dedupe-hashes.js";
 import type {
   Connector,
   ConnectorParseInput,
@@ -74,6 +75,10 @@ interface PageExtraction {
     }>;
     range_request_count?: number;
     effective_chunk_span_days?: number | null;
+    range_split_count?: number;
+    truncation_suspected_count?: number;
+    truncation_unresolved_count?: number;
+    partial_result?: boolean;
     first_operation_posted_at?: string | null;
     last_operation_posted_at?: string | null;
     page_originated_operations_request_seen?: boolean;
@@ -114,6 +119,26 @@ type MapOperationDropReason = "invalid_record" | "invalid_operation" | "missing_
 
 function normalizeParseStrategy(value: unknown): ConnectorParseStrategy | null {
   return value === "fast" || value === "full" ? value : null;
+}
+
+/**
+ * How many receipts one run may fetch.
+ *
+ * A receipt costs a four-second pause and counts against a hard window of seventy requests
+ * per ten minutes, so a year of history is thousands of requests and hours of work — which
+ * the bank does not tolerate and no one waits through. Fifty receipts is about three and a
+ * half minutes and fits inside that window with room to spare; at fifty a day, half a year
+ * of history closes in roughly eighteen visits.
+ */
+const DEFAULT_MAX_RECEIPTS_PER_RUN = 50;
+
+function resolveMaxReceiptsPerRun(session?: Record<string, unknown>): number {
+  const candidates = [session?.max_receipts_per_run, asObject(session?.meta)?.max_receipts_per_run];
+  for (const candidate of candidates) {
+    const parsed = toFiniteNumber(candidate);
+    if (parsed !== null && parsed > 0) return Math.floor(parsed);
+  }
+  return DEFAULT_MAX_RECEIPTS_PER_RUN;
 }
 
 function resolveParseStrategy(session?: Record<string, unknown>): ConnectorParseStrategy {
@@ -377,6 +402,7 @@ function mapOperationRecordToRowWithReason(
   const postedAt = new Date(postedAtMs).toISOString();
   const sourceBrand = extractSourceBrand(operation);
   const sourceCategory = extractSourceCategory(operation);
+  const pointOfSale = extractPointOfSale(operation);
   const operationIconUrl = extractAbsoluteUrl(operation.icon);
   const allDetailsCaptured =
     !shoppingReceiptMeta.expected || shoppingReceiptMeta.receipt_enrichment_status === "ok";
@@ -416,6 +442,7 @@ function mapOperationRecordToRowWithReason(
         extraction_method: options.extractionMethod,
         all_details_captured: allDetailsCaptured,
         account_hint: accountHint,
+        point_of_sale: pointOfSale,
         operation,
         operation_detail: operationDetail,
         shopping_receipt: shoppingReceipt,
@@ -436,15 +463,9 @@ function mapOperationRecordToRowWithReason(
           },
         },
       },
-      dedupe_hash: buildDedupeHash({
-        external_id: externalId,
-        posted_at: postedAt,
-        amount: signedAmount,
-        merchant_name: merchantName,
-        account_hint: accountHint,
-        operation_id: normalizeText(asObject(operation.operationId)?.value),
-        authorization_id: normalizeText(operation.authorizationId),
-      }),
+      // dedupe_hash is filled in by applyMoneyDedupeHashes once the whole run is mapped:
+      // the shared formula needs to see sibling rows to number repeats, and it is async.
+      dedupe_hash: null,
       line_items: buildLineItemsFromReceipt(shoppingReceipt, signedAmount, merchantName),
     },
   };
@@ -490,6 +511,61 @@ function extractSourceBrand(operation: JsonMap): JsonMap | null {
     logo_url: extractAbsoluteUrl(brand.logo) ?? extractAbsoluteUrl(brand.fileLink),
     base_color: normalizeText(brand.baseColor),
     base_text_color: normalizeText(brand.baseTextColor),
+  };
+}
+
+/**
+ * The point of sale, out of the operations list.
+ *
+ * The bank's own operation card is built from three things: the list response, `shopping_receipt`
+ * and `point_of_sales`. The third one is the only piece the connector does not ask for, and the
+ * reason is that everything it would identify is already in the list — `posId`, `pointOfSaleId`,
+ * `typeSerno`, the acquirer's `merchant` record and its region — while the one recorded response
+ * from that endpoint is `resultCode: OK` with an empty payload. Asking would cost one request per
+ * point of sale against the rate limit this whole import is built to stay inside, and nothing in
+ * the recording says what it would buy. T-260829-g7i carries the evidence; the note there is what
+ * to reopen if a card ever shows a shop address the list does not have.
+ *
+ * So this is a normalisation, not an enrichment: the fields exist on every operation the bank
+ * routed through a terminal, and the point of naming them here is that consumers read
+ * `raw_payload.point_of_sale` instead of digging through the bank's own shape, and that the
+ * contract test can hold the mapping to the recorded cassette.
+ *
+ * `merchant_name` is not the row's `merchant_name`. The row's is the display title, which prefers
+ * the operation's `description` ("Самокат"); this one is the acquirer's merchant record as the
+ * terminal reports it ("SAMOKAT"), and the two disagree often enough to be worth keeping apart.
+ *
+ * `locations` is passed through as a count rather than a shape. It is an array on every operation
+ * in the recording and empty in every one of them, so there is no observed shape to normalise and
+ * inventing one would be the same guess that put a dead endpoint in this file. The count is the
+ * signal that the guess is finally worth making; the array itself stays in `raw_payload.operation`.
+ */
+function extractPointOfSale(operation: JsonMap): JsonMap | null {
+  const merchant = asObject(operation.merchant);
+  const region = asObject(merchant?.region);
+  const posId = normalizeIdentifier(operation.posId);
+  const pointOfSaleId = normalizeIdentifier(operation.pointOfSaleId);
+  const typeSerno = normalizeIdentifier(operation.typeSerno);
+  const merchantId = normalizeIdentifier(merchant?.id);
+  const merchantName = normalizeText(merchant?.name);
+  const country = normalizeText(region?.country);
+  const city = normalizeText(region?.city);
+  const locationCount = Array.isArray(operation.locations) ? operation.locations.length : 0;
+
+  // A merchant is not a point of sale. Only the three terminal identifiers — or a location the
+  // bank actually filled in — say that this operation went through one; without them there is a
+  // counterparty and nothing more, which is what `merchant_name` on the row is already for.
+  if (!posId && !pointOfSaleId && !typeSerno && locationCount === 0) return null;
+
+  return {
+    pos_id: posId,
+    point_of_sale_id: pointOfSaleId,
+    type_serno: typeSerno,
+    merchant_id: merchantId,
+    merchant_name: merchantName,
+    country,
+    city,
+    location_count: locationCount,
   };
 }
 
@@ -562,6 +638,10 @@ function summarizeExtractionDiagnostics(
     },
     range_attempts: debug?.range_attempts ?? [],
     range_request_count: debug?.range_request_count ?? debug?.range_attempts?.length ?? 0,
+    range_split_count: debug?.range_split_count ?? 0,
+    truncation_suspected_count: debug?.truncation_suspected_count ?? 0,
+    truncation_unresolved_count: debug?.truncation_unresolved_count ?? 0,
+    partial_result: debug?.partial_result ?? false,
     effective_chunk_span_days:
       debug?.effective_chunk_span_days ??
       (firstRangeAttempt
@@ -625,6 +705,7 @@ const connector: Connector = {
       Date.now() - DEFAULT_LOOKBACK_DAYS * DAY_MS,
     ).toISOString();
     const parseStrategy = resolveParseStrategy(session);
+    const maxReceiptsPerRun = resolveMaxReceiptsPerRun(session);
     const normalizedWindowFrom =
       toIsoString(windowFrom) || toIsoString(session?.last_imported_at) || fallbackWindowFromIso;
 
@@ -655,6 +736,7 @@ const connector: Connector = {
       typeof session?.source === "string" ? session.source : "tbank_web",
       typeof session?.payer_person_id === "string" ? session.payer_person_id : null,
       parseStrategy,
+      maxReceiptsPerRun,
     );
     if (extraction.blocked_reason) {
       throw formatDiagnosticError(extraction.blocked_reason, {
@@ -693,6 +775,10 @@ const connector: Connector = {
         : Array.isArray(extraction.rows)
           ? extraction.rows
           : [];
+
+    // Both extraction paths get their identity from the one formula the web app and the
+    // database migration also use, so the same operation hashes alike wherever it is seen.
+    await applyMoneyDedupeHashes(rows, "tbank");
 
     const debugSummary = summarizeExtractionDiagnostics(
       extraction,
@@ -855,6 +941,7 @@ async function extractOperationsWithRetry(
   sourceId: string | null,
   payerPersonId: string | null,
   parseStrategy: ConnectorParseStrategy,
+  maxReceiptsPerRun: number,
 ): Promise<PageExtraction> {
   const attemptDetails: Array<Record<string, unknown>> = [];
 
@@ -873,7 +960,9 @@ async function extractOperationsWithRetry(
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         func: extractOperationsInPage,
-        args: [{ windowFromIso, sessionId, sourceId, payerPersonId, parseStrategy }],
+        args: [
+          { windowFromIso, sessionId, sourceId, payerPersonId, parseStrategy, maxReceiptsPerRun },
+        ],
       });
       const extraction = injected?.[0]?.result as PageExtraction | undefined;
       if (extraction) {
@@ -934,6 +1023,7 @@ function extractOperationsInPage(input: {
   sourceId?: string | null;
   payerPersonId?: string | null;
   parseStrategy?: ConnectorParseStrategy | null;
+  maxReceiptsPerRun?: number | null;
 }): Promise<PageExtraction> {
   const fullReceiptBasePauseMs = 4000;
   const receiptParseStrategy =
@@ -950,6 +1040,15 @@ function extractOperationsInPage(input: {
   const receiptRetryStrategy: "shared_budget" | "progressive_backoff" =
     receiptParseStrategy === "full" ? "progressive_backoff" : "shared_budget";
   const progressSessionId = input.sessionId ?? null;
+  // The receipt budget is what makes history importable at all: one run takes a bite it can
+  // finish inside the bank's rate window, and what it leaves stays unfulfilled so the next
+  // pass over the same slice picks it up.
+  const maxReceiptsPerRun =
+    typeof input.maxReceiptsPerRun === "number" &&
+    Number.isFinite(input.maxReceiptsPerRun) &&
+    input.maxReceiptsPerRun > 0
+      ? Math.floor(input.maxReceiptsPerRun)
+      : 50;
 
   function computeReceiptRetryPauseMs(retryAttempts: number): number {
     if (receiptParseStrategy !== "full") return receiptRetryPauseMs;
@@ -1226,6 +1325,10 @@ function extractOperationsInPage(input: {
       }>,
       range_request_count: 0,
       effective_chunk_span_days: null as number | null,
+      range_split_count: 0,
+      truncation_suspected_count: 0,
+      truncation_unresolved_count: 0,
+      partial_result: false,
       first_operation_posted_at: null as string | null,
       last_operation_posted_at: null as string | null,
       page_originated_operations_request_seen: false,
@@ -1276,6 +1379,10 @@ function extractOperationsInPage(input: {
           range_attempts: debugMeta.range_attempts,
           range_request_count: debugMeta.range_request_count,
           effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          range_split_count: debugMeta.range_split_count,
+          truncation_suspected_count: debugMeta.truncation_suspected_count,
+          truncation_unresolved_count: debugMeta.truncation_unresolved_count,
+          partial_result: debugMeta.partial_result,
           first_operation_posted_at: debugMeta.first_operation_posted_at,
           last_operation_posted_at: debugMeta.last_operation_posted_at,
           page_originated_operations_request_seen:
@@ -1303,7 +1410,20 @@ function extractOperationsInPage(input: {
     try {
       const operationsApiUrl =
         discoverOperationsApiUrl() || "https://www.tbank.ru/api/common/v1/operations";
-      const detailApiUrl = discoverOperationDetailApiUrl();
+      // `/api/common/v1/operation` is not a request type the bank has: it answers every call
+      // with HTTP 200 and `INVALID_REQUEST_DATA` / "Неизвестный тип запроса operation", which is
+      // a routing error and so cannot be account-specific. A HAR of the operations page confirms
+      // the other side of it — the web app issues no such request, and an operation's card is
+      // built from the list response plus `shopping_receipt` and `point_of_sales`. So there is
+      // nothing to restore here and the enrichment is removed rather than repaired; T-260829-g7i
+      // carries the evidence. `operationDetail` stays on the record shape, always null, because
+      // it reaches `raw_payload.operation_detail` on stored rows and the mapper's comment chain
+      // already falls through it to `operation.message`.
+      //
+      // The receipt is fetched (`scheduleShoppingReceipt`, below) and the point of sale is read
+      // out of the list rather than fetched — see `extractPointOfSale` for why the third request
+      // buys nothing that is not already here.
+      const detailApiUrl: string | null = null;
       const trancheOffersApiUrl = discoverTrancheOffersApiUrl();
       debugMeta.discovered_endpoints.operations_api = operationsApiUrl;
       debugMeta.discovered_endpoints.operation_detail_api = detailApiUrl;
@@ -1323,13 +1443,27 @@ function extractOperationsInPage(input: {
       let oldestSeenMs = Number.POSITIVE_INFINITY;
       let newestSeenMs = 0;
 
-      ranges.forEach((_range, index) => {
-        if (index === 0) {
-          reportProgress("parse_fetching_ranges", 20);
-        }
-      });
+      // The bank returns one response per range and tells us nothing about whether more
+      // was available. If a response is capped, the rest of that range is lost silently —
+      // and the denser the spending, the more is lost, so exactly the periods that matter
+      // most suffer. Rather than guess how the bank paginates (a contract we do not
+      // control and would not be told about if it changed), a range whose response looks
+      // capped is halved and re-requested until each half comes back short of the cap.
+      //
+      // TODO: re-derive SUSPECTED_PAGE_LIMIT from a recorded cassette (see the connector
+      // cassette work) — until then it is set to the smallest page size worth suspecting,
+      // which errs towards extra requests rather than towards silent loss.
+      const SUSPECTED_PAGE_LIMIT = 100;
+      const MIN_RANGE_SPAN_MS = pageDayMs;
 
-      for (const [index, range] of ranges.entries()) {
+      reportProgress("parse_fetching_ranges", 20);
+
+      const pendingRanges = ranges.slice();
+      let processedRangeCount = 0;
+      let plannedRangeCount = pendingRanges.length;
+
+      while (pendingRanges.length > 0) {
+        const range = pendingRanges.shift() as { start: number; end: number };
         const rangeUrl = buildRangeUrl(operationsApiUrl, range.start, range.end);
         const response = await fetch(rangeUrl, {
           credentials: "include",
@@ -1344,6 +1478,7 @@ function extractOperationsInPage(input: {
         const histogramKey = String(response.status);
         debugMeta.response_status_histogram[histogramKey] =
           (debugMeta.response_status_histogram[histogramKey] ?? 0) + 1;
+        processedRangeCount += 1;
         if (!response.ok) continue;
 
         const json = asObj(await response.json().catch(() => null));
@@ -1355,12 +1490,16 @@ function extractOperationsInPage(input: {
         }
         const payload = Array.isArray(json?.payload) ? json.payload : [];
         attempt.payload_count = payload.length;
+
+        let oldestInResponseMs: number | null = null;
         for (const rawItem of payload) {
           const operation = asObj(rawItem);
           if (!operation) continue;
 
           const operationMs = extractTimeMs(operation);
           if (operationMs === null) continue;
+          oldestInResponseMs =
+            oldestInResponseMs === null ? operationMs : Math.min(oldestInResponseMs, operationMs);
           if (operationMs < windowFromMs) {
             debugMeta.out_of_range_skip_count += 1;
             debugMeta.preflight_enrichment_skip_count += 1;
@@ -1377,9 +1516,43 @@ function extractOperationsInPage(input: {
           newestSeenMs = Math.max(newestSeenMs, operationMs);
         }
 
-        const rangeProgress = 20 + Math.round(((index + 1) / Math.max(1, ranges.length)) * 20);
-        reportProgress("parse_fetching_ranges", rangeProgress, operationMap.size);
+        // Two signatures of a response that did not carry its whole range: it came back at
+        // the page limit, or it came back nearly full while its oldest operation still sits
+        // well inside the range, which is what a cap applied from the newer end looks like.
+        const rangeSpanMs = range.end - range.start + 1;
+        const hitPageLimit = payload.length >= SUSPECTED_PAGE_LIMIT;
+        const nearlyFull = payload.length >= Math.floor(SUSPECTED_PAGE_LIMIT * 0.9);
+        const coverageGap =
+          nearlyFull &&
+          oldestInResponseMs !== null &&
+          oldestInResponseMs - range.start > rangeSpanMs / 2;
+
+        if (hitPageLimit || coverageGap) {
+          debugMeta.truncation_suspected_count += 1;
+          if (rangeSpanMs > MIN_RANGE_SPAN_MS) {
+            // Re-requesting both halves can only add operations: buildOperationKey already
+            // deduplicates, so what this response did carry is kept either way.
+            const midpoint = range.start + Math.floor(rangeSpanMs / 2);
+            pendingRanges.unshift(
+              { start: midpoint, end: range.end },
+              { start: range.start, end: midpoint - 1 },
+            );
+            plannedRangeCount += 2;
+            debugMeta.range_split_count += 1;
+          } else {
+            // A single day still at the cap is the one case the connector cannot resolve.
+            // Saying so is the point: a partly loaded window that looks complete is never
+            // revisited, and the missing operations are lost for good.
+            debugMeta.truncation_unresolved_count += 1;
+            debugMeta.partial_result = true;
+          }
+        }
+
+        const rangeProgress =
+          20 + Math.round((processedRangeCount / Math.max(1, plannedRangeCount)) * 20);
+        reportProgress("parse_fetching_ranges", Math.min(40, rangeProgress), operationMap.size);
       }
+      debugMeta.range_request_count = debugMeta.range_attempts.length;
 
       if (operationMap.size === 0) {
         throw new Error("No operations returned by API");
@@ -1396,6 +1569,7 @@ function extractOperationsInPage(input: {
         hasRequestedReceipt: false,
         sharedRetriesRemaining: receiptMaxSharedRetries,
         stoppedAfterBudget: false,
+        issuedReceiptRequestCount: 0,
         requestStartedAtMs: [] as number[],
       };
       const detailStageStartedAtMs = Date.now();
@@ -1501,7 +1675,7 @@ function extractOperationsInPage(input: {
             };
           } else {
             [operationDetail, receiptResult, trancheOffers] = await Promise.all([
-              tryFetchOperationDetail(operation, detailApiUrl, sessionId),
+              Promise.resolve<JsonMap | null>(null),
               scheduleShoppingReceipt(operation),
               tryFetchTrancheOffers(operation, trancheOffersApiUrl, sessionId, trancheBaseParams),
             ]);
@@ -1551,6 +1725,10 @@ function extractOperationsInPage(input: {
           range_attempts: debugMeta.range_attempts,
           range_request_count: debugMeta.range_request_count,
           effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          range_split_count: debugMeta.range_split_count,
+          truncation_suspected_count: debugMeta.truncation_suspected_count,
+          truncation_unresolved_count: debugMeta.truncation_unresolved_count,
+          partial_result: debugMeta.partial_result,
           first_operation_posted_at: debugMeta.first_operation_posted_at,
           last_operation_posted_at: debugMeta.last_operation_posted_at,
           page_originated_operations_request_seen:
@@ -1574,6 +1752,12 @@ function extractOperationsInPage(input: {
       const domStartedMs = Date.now();
       const rows = parseDomFallbackRows(windowFromMs);
       debugMeta.dom_row_count = rows.length;
+      // The fallback reads the rendered feed once and does not scroll it, so it sees only
+      // what the page had already drawn — typically the first screen. Marking the run
+      // partial is what makes the window get asked for again instead of counted as closed;
+      // the rows it did produce are placeholders, replaceable on the next API pass.
+      debugMeta.partial_result = true;
+      debugMeta.truncation_unresolved_count += 1;
       reportProgress("parse_dom_rows_ready", 54, rows.length);
       debugMeta.stage_timings_ms.dom = Date.now() - domStartedMs;
       debugMeta.stage_timings_ms.total = Date.now() - startedAtMs;
@@ -1594,6 +1778,10 @@ function extractOperationsInPage(input: {
           range_attempts: debugMeta.range_attempts,
           range_request_count: debugMeta.range_request_count,
           effective_chunk_span_days: debugMeta.effective_chunk_span_days,
+          range_split_count: debugMeta.range_split_count,
+          truncation_suspected_count: debugMeta.truncation_suspected_count,
+          truncation_unresolved_count: debugMeta.truncation_unresolved_count,
+          partial_result: debugMeta.partial_result,
           first_operation_posted_at: debugMeta.first_operation_posted_at,
           last_operation_posted_at: debugMeta.last_operation_posted_at,
           page_originated_operations_request_seen:
@@ -1685,18 +1873,6 @@ function extractOperationsInPage(input: {
         return false;
       }
     });
-  }
-
-  function discoverOperationDetailApiUrl(): string | null {
-    const resources = performance.getEntriesByType("resource");
-    const candidates = resources
-      .map((entry) => (entry as PerformanceResourceTiming).name)
-      .filter((name): name is string => typeof name === "string");
-    return findLatestResourceUrlByPath(
-      candidates,
-      "/api/common/v1/operation",
-      window.location.origin,
-    );
   }
 
   function discoverTrancheOffersApiUrl(): string | null {
@@ -1822,6 +1998,7 @@ function extractOperationsInPage(input: {
       hasRequestedReceipt: boolean;
       sharedRetriesRemaining: number;
       stoppedAfterBudget: boolean;
+      issuedReceiptRequestCount: number;
       requestStartedAtMs: number[];
     },
     receiptDebug: {
@@ -1911,6 +2088,32 @@ function extractOperationsInPage(input: {
         },
       };
     }
+
+    // Once this run has spent its receipt budget, the remaining operations are left with
+    // `skipped_after_budget`. That status is deliberately not one of the two that count as
+    // fulfilled, so the next pass over this slice takes them again — which is what makes a
+    // long history close a bite at a time instead of failing as one impossible run.
+    if (receiptState.issuedReceiptRequestCount >= maxReceiptsPerRun) {
+      receiptState.stoppedAfterBudget = true;
+      receiptDebug.stopped_after_budget = true;
+      receiptDebug.skipped_after_budget_count += 1;
+      return {
+        shoppingReceipt: null,
+        shoppingReceiptMeta: {
+          receipt_request_key: receiptRequestKey,
+          receipt_enrichment_status: "skipped_after_budget",
+          receipt_line_items_skipped: true,
+          receipt_retryable: true,
+          receipt_retry_attempts: 0,
+          receipt_result_code: null,
+          receipt_tracking_id: null,
+          receipt_message: `Receipt budget for this run is spent (${maxReceiptsPerRun} receipts).`,
+          expected: true,
+          requested: false,
+        },
+      };
+    }
+    receiptState.issuedReceiptRequestCount += 1;
 
     const url = new URL("https://www.tbank.ru/api/common/v1/shopping_receipt");
     url.searchParams.set("operationId", receiptRequestKey);
@@ -2074,36 +2277,6 @@ function extractOperationsInPage(input: {
       receiptState.sharedRetriesRemaining -= 1;
       retryAttempts += 1;
     }
-  }
-
-  async function tryFetchOperationDetail(
-    operation: JsonMap,
-    detailApiUrl: string | null,
-    sessionId: string | null,
-  ): Promise<JsonMap | null> {
-    if (!detailApiUrl || !sessionId) return null;
-
-    const operationId =
-      text(operation.authorizationId) ||
-      text(asObj(operation.operationId)?.value) ||
-      text(operation.id);
-    if (!operationId) return null;
-
-    let url: URL;
-    try {
-      url = new URL(detailApiUrl, window.location.origin);
-    } catch {
-      return null;
-    }
-
-    url.searchParams.set("operationId", operationId);
-    url.searchParams.set("sessionid", sessionId);
-    const response = await fetch(url.toString(), {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-
-    return asObj(await response.json().catch(() => null));
   }
 
   function parseTrancheBaseParams(trancheApiUrl: string | null): {
@@ -2425,6 +2598,16 @@ function normalizeText(value: unknown): string | null {
   return normalized || null;
 }
 
+/**
+ * An identifier the bank may send either way. `posId` and `typeSerno` arrive as numbers on some
+ * operations and as strings on others, and a scrubbed cassette turns both into "REDACTED"; all
+ * three have to come out as the same kind of value.
+ */
+function normalizeIdentifier(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return normalizeText(value);
+}
+
 function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value;
@@ -2712,27 +2895,4 @@ function buildLineItemsFromReceipt(
       raw_payload: { source: "fallback" },
     },
   ];
-}
-
-function hashString(input: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-function buildDedupeHash(row: JsonMap): string {
-  return `tbw_${hashString(
-    [
-      row.external_id || "",
-      row.operation_id || "",
-      row.authorization_id || "",
-      row.posted_at || "",
-      row.amount || "",
-      row.merchant_name || "",
-      row.account_hint || "",
-    ].join("|"),
-  )}`;
 }

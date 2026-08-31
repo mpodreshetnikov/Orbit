@@ -153,6 +153,23 @@ describe("extension release", () => {
     }
   });
 
+  it("does not require a version bump for the cassette recording tooling", () => {
+    // These record and scrub a bank session for the connector's tests. build.ts
+    // imports neither, and browserExtension/ cannot import from scripts/ at all,
+    // so none of them can enter the bundle — a bump here would publish a release
+    // identical to the one before it.
+    for (const changed of [
+      "scripts/extension/cassette-scrub.ts",
+      "scripts/extension/cassette-console-recorder.ts",
+      "scripts/extension/cassette-console-recorder.browser.ts",
+      "scripts/extension/build-cassette-recorder.ts",
+    ]) {
+      expect(
+        shouldRequireExtensionVersionBump({ changedFiles: [changed], versionChanged: false }),
+      ).toBe(false);
+    }
+  });
+
   it("builds public download URLs and zip archives for release artifacts", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "extension-release-archive-test-"));
     const sourceDir = path.join(tempDir, "source");

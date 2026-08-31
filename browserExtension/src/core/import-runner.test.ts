@@ -112,12 +112,15 @@ describe("import-runner", () => {
       }),
     );
     expect(debugEmit).toHaveBeenCalledWith("complete_session_completed", expect.any(Object));
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       batch_id: "batch-2",
       inserted: 1,
       skipped: 0,
       error_count: 0,
     });
+    // A scheduled run reads these to decide whether the backfill cursor may move on.
+    expect(result.import_completeness).toMatchObject({ partial: false });
+    expect(result.receipt_enrichment).toMatchObject({ skipped_after_budget_count: 0 });
   });
 
   it("chunks preview rows requests and aggregates totals before completion", async () => {
@@ -218,12 +221,15 @@ describe("import-runner", () => {
         progress_percent: 89,
       }),
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       batch_id: "batch-2",
       inserted: 9,
       skipped: 3,
       error_count: 3,
     });
+    // A scheduled run reads these to decide whether the backfill cursor may move on.
+    expect(result.import_completeness).toMatchObject({ partial: false });
+    expect(result.receipt_enrichment).toMatchObject({ skipped_after_budget_count: 0 });
   });
 
   it("aborts chunked preview on the first failing chunk and skips successful completion", async () => {

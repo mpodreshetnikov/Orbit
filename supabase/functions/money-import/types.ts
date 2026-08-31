@@ -16,6 +16,7 @@ export interface ImportLineItemInput {
   quantity?: number | null;
   unit?: string | null;
   raw_payload?: Record<string, unknown> | null;
+  is_placeholder?: boolean;
 }
 
 export interface ExistingTransactionStateCandidate {
@@ -123,4 +124,15 @@ export interface SessionAuthContext {
   session: Record<string, unknown>;
 }
 
-export type AuthContext = UserAuthContext | SessionAuthContext;
+/**
+ * A long-lived credential the extension holds so it can start an import without a person
+ * being there. Narrower than a user token: it may only create sessions, and only for the
+ * person and sources it was issued for.
+ */
+export interface GrantAuthContext {
+  mode: "grant";
+  token: string;
+  grant: Record<string, unknown>;
+}
+
+export type AuthContext = UserAuthContext | SessionAuthContext | GrantAuthContext;

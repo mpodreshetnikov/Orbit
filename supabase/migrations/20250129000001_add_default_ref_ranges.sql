@@ -4,8 +4,6 @@
 -- Used when specific document reference ranges are not available
 -- ============================================================================
 
-BEGIN;
-
 -- Add columns for default reference ranges
 ALTER TABLE public.observation_catalog 
   ADD COLUMN IF NOT EXISTS default_ref_low numeric,
@@ -145,5 +143,3 @@ BEGIN
   ORDER BY ro.created_at;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
-COMMIT;

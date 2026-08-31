@@ -110,6 +110,9 @@ BEGIN;
 \i functions/money_budget_targets_enforce_invariants.sql
 \i functions/money_resolve_fx_rate.sql
 \i functions/money_get_budget_report.sql
+\i functions/money_list_line_item_discrepancies.sql
+\i functions/create_money_import_stale_digests.sql
+\i functions/money_save_transaction_with_line_items.sql
 
 -- Cron entry point functions
 \i functions/run_med_event_generation_for_all_users.sql

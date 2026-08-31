@@ -469,7 +469,8 @@ describe("alfa-web connector", () => {
     expect(row?.receipt_request_key).toBe("465307132020");
     expect(row?.receipt_enrichment_status).toBe("ok");
     expect(row?.receipt_line_items_skipped).toBe(false);
-    expect(row?.dedupe_hash).toMatch(/^afw_/);
+    // The mapper leaves identity unset; applyMoneyDedupeHashes fills it for the whole run.
+    expect(row?.dedupe_hash).toBeNull();
     expect(row?.line_items).toHaveLength(3);
     expect((row?.line_items as Array<Record<string, unknown>>)[0]?.title).toContain(
       "МЕТРОКСИДИН ДЕНТА",

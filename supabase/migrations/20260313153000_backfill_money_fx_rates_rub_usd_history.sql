@@ -1,5 +1,3 @@
-BEGIN;
-
 -- Backfill daily USD/RUB and RUB/USD history from Central Bank of Russia official
 -- USD fixings. Weekend and holiday gaps are filled by carrying forward the latest
 -- published official rate so every calendar day is available for reporting.
@@ -329,5 +327,3 @@ SELECT
 FROM daily_rates AS daily
 ON CONFLICT (rate_date, base_currency, quote_currency) DO UPDATE
 SET rate = EXCLUDED.rate;
-
-COMMIT;

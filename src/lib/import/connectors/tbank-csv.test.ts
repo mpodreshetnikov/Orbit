@@ -1,4 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import {
   COL,
   extractAccountHint,
@@ -68,8 +70,11 @@ describe("tbank-csv connector", () => {
       ["c", "d"],
     ]);
 
-    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T12:30:05.000Z");
-    expect(parseTBankDate("01.02.2026")).toBe("2026-02-01T00:00:00.000Z");
+    // Statement times are Moscow wall clock (UTC+03:00), not UTC.
+    expect(parseTBankDate("01.02.2026 12:30:05")).toBe("2026-02-01T09:30:05.000Z");
+    expect(parseTBankDate("01.02.2026")).toBe("2026-01-31T21:00:00.000Z");
+    // A late-evening purchase must stay on its own calendar day in Moscow.
+    expect(parseTBankDate("01.02.2026 23:30:00")).toBe("2026-02-01T20:30:00.000Z");
     expect(parseTBankDate("")).toBeNull();
     expect(parseTBankDate("2026-02-01")).toBeNull();
 
@@ -133,7 +138,7 @@ describe("tbank-csv connector", () => {
 
     expect(result.transactions[0]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-01T12:30:00.000Z",
+        posted_at: "2026-02-01T09:30:00.000Z",
         transaction_type: "expense",
         status: "posted",
         account_hint: "1234",
@@ -150,7 +155,7 @@ describe("tbank-csv connector", () => {
     );
     expect(result.transactions[1]).toEqual(
       expect.objectContaining({
-        posted_at: "2026-02-02T00:00:00.000Z",
+        posted_at: "2026-02-01T21:00:00.000Z",
         currency: "RUB",
         transaction_type: "income",
         status: "pending",
@@ -173,5 +178,79 @@ describe("tbank-csv connector", () => {
     );
     expect(result.transactions[1].line_items[0].title).toBe("T-Bank");
     expect(result.transactions[0].dedupe_hash).toEqual(expect.any(String));
+    // Statement rows are placeholders: they carry no receipt composition and must be
+    // replaced when the extension fetches the real one.
+    expect(result.transactions[0].line_items[0].is_placeholder).toBe(true);
+  });
+
+  it("gives repeated identical purchases distinct dedupe hashes", async () => {
+    const header = [
+      COL.DATE_OP,
+      COL.DATE_PAY,
+      COL.CARD,
+      COL.STATUS,
+      COL.AMOUNT_OP,
+      COL.CURRENCY_OP,
+      COL.CATEGORY,
+      COL.MCC,
+      COL.DESCRIPTION,
+    ].join(";");
+
+    const identicalRow = [
+      "01.02.2026 12:30:00",
+      "",
+      "**** 1234",
+      "OK",
+      "-120,50",
+      "RUB",
+      "Food",
+      "5812",
+      "Coffee",
+    ].join(";");
+
+    const file = new File([`${header}\n${identicalRow}\n${identicalRow}\n`], "sample.csv", {
+      type: "text/csv",
+    });
+    const result = await tbankConnector.parse(file);
+
+    expect(result.transactions).toHaveLength(2);
+    expect(result.transactions[0].dedupe_hash).not.toBe(result.transactions[1].dedupe_hash);
+
+    // Re-parsing the same statement must reproduce both hashes, or a second import
+    // would create copies instead of recognising duplicates.
+    const again = await tbankConnector.parse(
+      new File([`${header}\n${identicalRow}\n${identicalRow}\n`], "sample.csv", {
+        type: "text/csv",
+      }),
+    );
+    expect(again.transactions.map((row) => row.dedupe_hash)).toEqual(
+      result.transactions.map((row) => row.dedupe_hash),
+    );
+  });
+
+  it("parses the committed statement fixture end to end", () => {
+    // test/fixtures/tbank/sample.csv had been sitting unused since it was added, and its
+    // contents had been double-encoded along the way — the header row no longer matched the
+    // statement columns at all. Recovered and wired in here, it is now a real regression
+    // guard on the exact file shape the bank produces.
+    const fixturePath = path.resolve(__dirname, "../../../../test/fixtures/tbank/sample.csv");
+    const csv = fs.readFileSync(fixturePath, "utf8");
+    const rows = parseCSV(csv);
+
+    expect(rows[0]).toEqual([
+      COL.DATE_OP,
+      COL.DATE_PAY,
+      COL.CARD,
+      COL.STATUS,
+      COL.AMOUNT_OP,
+      COL.CURRENCY_OP,
+      COL.CATEGORY,
+      COL.MCC,
+      COL.DESCRIPTION,
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[1][0]).toBe("01.02.2026 12:30:00");
+    expect(parseAmount(rows[1][4])).toBe(-120.5);
+    expect(extractAccountHint(rows[1][2])).toBe("1234");
   });
 });

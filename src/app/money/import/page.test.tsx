@@ -62,6 +62,14 @@ vi.mock("@/hooks", () => ({
   useCreateMoneyCard: (...args: unknown[]) => hookMocks.useCreateMoneyCard(...args),
 }));
 
+// The grants section owns its own data fetching; this page's tests are about the import
+// flow, so it is stubbed rather than given a query client.
+vi.mock("@/hooks/use-money-import-grants", () => ({
+  useMoneyImportGrants: () => ({ data: [], isLoading: false }),
+  useCreateMoneyImportGrant: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRevokeMoneyImportGrant: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 vi.mock("@/lib/supabase", () => ({
   createClient: () => ({
     auth: {

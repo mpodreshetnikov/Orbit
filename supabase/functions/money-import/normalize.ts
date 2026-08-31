@@ -359,6 +359,7 @@ export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLin
       title: row.merchant_name || "Imported",
       amount: row.amount,
       raw_payload: row.raw_payload ?? null,
+      is_placeholder: true,
     },
   ];
 }
@@ -366,6 +367,10 @@ export function normalizeLineItems(row: CanonicalTransactionRowInput): ImportLin
 export function isSyntheticImportLineItem(
   lineItem: ImportLineItemInput | null | undefined,
 ): boolean {
+  // The explicit flag is authoritative for anything written after the placeholder
+  // migration. The raw_payload probe stays for rows already in the registry that
+  // predate the column, and for extension payloads that still carry the marker.
+  if (lineItem?.is_placeholder === true) return true;
   const rawPayload = toObject(lineItem?.raw_payload);
   const source = normalizeText(rawPayload?.source)?.toLowerCase();
   return source === "fallback" || source === "dom_fallback";
@@ -384,6 +389,48 @@ export function hasOnlySyntheticImportLineItems(
   lineItems: Array<ImportLineItemInput | null | undefined>,
 ): boolean {
   return lineItems.length > 0 && lineItems.every((lineItem) => isSyntheticImportLineItem(lineItem));
+}
+
+/** Money is stored to the kopeck, so sums are rounded there before comparison. */
+function roundToKopecks(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export const BALANCING_LINE_ITEM_SOURCE = "balancing";
+export const BALANCING_LINE_ITEM_TITLE = "Прочее по операции";
+/** Differences at or below one kopeck are rounding noise, not a real discrepancy. */
+export const BALANCING_TOLERANCE = 0.01;
+/**
+ * A receipt that explains less than half of the operation is not this operation's
+ * receipt. Balancing such a gap would silently invent a line item larger than the
+ * evidence, so the row is rejected instead.
+ */
+export const BALANCING_MAX_SHARE = 0.5;
+
+export function buildBalancingLineItem(
+  row: CanonicalTransactionRowInput,
+  lineItems: Array<ImportLineItemInput | null | undefined>,
+): ImportLineItemInput | null {
+  const transactionAmount = toNumberOrNull(row.amount);
+  if (transactionAmount === null) return null;
+
+  const lineItemsSum = lineItems.reduce((total, lineItem) => {
+    if (!lineItem) return total;
+    return total + (toNumberOrNull(lineItem.amount) ?? 0);
+  }, 0);
+
+  const delta = roundToKopecks(transactionAmount - lineItemsSum);
+  if (Math.abs(delta) < BALANCING_TOLERANCE) return null;
+
+  if (Math.abs(delta) > Math.abs(transactionAmount) * BALANCING_MAX_SHARE) {
+    throw new Error("Receipt total does not match transaction amount");
+  }
+
+  return {
+    title: BALANCING_LINE_ITEM_TITLE,
+    amount: delta,
+    raw_payload: { source: BALANCING_LINE_ITEM_SOURCE, delta },
+  };
 }
 
 export function normalizeTransactionRow(

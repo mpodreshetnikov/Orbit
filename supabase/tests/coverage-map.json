@@ -78,7 +78,8 @@
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],
     "supabase/db/functions/money_evaluate_category_rule_filter.sql": [
-      "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+      "supabase/tests/functions/money_category_rule_pipeline_test.sql",
+      "supabase/tests/functions/money_rule_filter_conformance_test.sql"
     ],
     "supabase/db/functions/money_get_budget_report.sql": [
       "supabase/tests/functions/money_budget_reporting_test.sql"
@@ -88,6 +89,15 @@
     ],
     "supabase/db/functions/money_get_category_rule_debug.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
+    ],
+    "supabase/db/functions/create_money_import_stale_digests.sql": [
+      "supabase/tests/functions/money_import_stale_digests_test.sql"
+    ],
+    "supabase/db/functions/money_save_transaction_with_line_items.sql": [
+      "supabase/tests/functions/money_save_transaction_with_line_items_test.sql"
+    ],
+    "supabase/db/functions/money_list_line_item_discrepancies.sql": [
+      "supabase/tests/functions/money_line_item_discrepancies_test.sql"
     ],
     "supabase/db/functions/money_list_transactions_feed.sql": [
       "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"

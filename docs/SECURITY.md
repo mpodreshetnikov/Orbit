@@ -35,6 +35,9 @@ Common variables used by this repo:
   - `VAPID_PUBLIC_KEY`
   - `VAPID_PRIVATE_KEY`
   - `SUPABASE_SERVICE_ROLE_KEY`
+  - `MONEY_FX_SYNC_TOKEN` (shared secret the `money-fx-sync` function requires; the same
+    value is stored in Supabase Vault as `money_fx_sync_token` so the `pg_cron` job can
+    present it)
 - GitHub Actions deploy pipeline (`.github/workflows/main.yml`):
   - Secrets: `VERCEL_TOKEN`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASS`
   - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `SUPABASE_PROJECT_REF`
@@ -43,7 +46,7 @@ Common variables used by this repo:
 
 - Service-role credentials are allowed only in server contexts (Next API routes, Edge Functions, deploy scripts).
 - Never expose service-role keys to client bundles.
-- Functions with `verify_jwt = false` must validate bearer tokens manually unless they are strictly internal cron-style endpoints.
+- Functions with `verify_jwt = false` must validate bearer tokens manually unless they are strictly internal cron-style endpoints. "Internal" means unreachable from the internet — a cron-triggered function on a public URL still needs a manual check, because the schedule does not restrict who else can call it.
 
 ## MCP Connector
 

@@ -84,6 +84,7 @@ Deno.test("resolveAuth rejects unusable session and throws Unauthorized", async 
       resolveAuth(
         new Request("http://localhost", { headers: { Authorization: "Bearer session-token" } }),
         {
+          getGrantByToken: async () => null,
           authenticateAllowedUser: async () => null,
           getSessionByToken: async () => ({
             status: "running",
@@ -147,5 +148,93 @@ Deno.test("isSessionUsable handles revoked, missing expiry, status and valid sta
       nowMs,
     ),
     true,
+  );
+});
+
+function grantDeps(grant: Record<string, unknown> | null) {
+  return {
+    authenticateAllowedUser: async () => null,
+    getSessionByToken: async () => null,
+    getGrantByToken: async (token: string) => (token === "grant-token" ? grant : null),
+    now: () => new Date("2026-08-23T00:00:00.000Z").getTime(),
+  };
+}
+
+function grantRequest(): Request {
+  return new Request("http://localhost", {
+    headers: { Authorization: "Bearer grant-token" },
+  });
+}
+
+Deno.test("resolveAuth accepts a live grant", async () => {
+  const grant = {
+    id: "grant-1",
+    person_id: "person-1",
+    revoked_at: null,
+    expires_at: null,
+    allowed_sources: ["tbank_web"],
+  };
+
+  const auth = await resolveAuth(grantRequest(), grantDeps(grant), {
+    allowUser: false,
+    allowSession: false,
+    allowGrant: true,
+  });
+
+  assertEquals(auth.mode, "grant");
+  if (auth.mode !== "grant") throw new Error("Expected grant auth context");
+  assertEquals(auth.grant, grant);
+});
+
+Deno.test("resolveAuth rejects a revoked grant", async () => {
+  await assertThrowsWithMessage(
+    () =>
+      resolveAuth(
+        grantRequest(),
+        grantDeps({
+          id: "grant-1",
+          person_id: "person-1",
+          revoked_at: "2026-08-01T00:00:00.000Z",
+          expires_at: null,
+        }),
+        { allowUser: false, allowSession: false, allowGrant: true },
+      ),
+    "Unauthorized",
+  );
+});
+
+Deno.test("resolveAuth rejects an expired grant", async () => {
+  await assertThrowsWithMessage(
+    () =>
+      resolveAuth(
+        grantRequest(),
+        grantDeps({
+          id: "grant-1",
+          person_id: "person-1",
+          revoked_at: null,
+          expires_at: "2026-08-01T00:00:00.000Z",
+        }),
+        { allowUser: false, allowSession: false, allowGrant: true },
+      ),
+    "Unauthorized",
+  );
+});
+
+Deno.test("resolveAuth ignores a grant for actions that do not accept one", async () => {
+  // Only create_session passes allowGrant. Every later action runs on the short-lived
+  // session token, so a leaked grant cannot reach the registry directly.
+  await assertThrowsWithMessage(
+    () =>
+      resolveAuth(
+        grantRequest(),
+        grantDeps({
+          id: "grant-1",
+          person_id: "person-1",
+          revoked_at: null,
+          expires_at: null,
+        }),
+        { allowUser: true, allowSession: true },
+      ),
+    "Unauthorized",
   );
 });

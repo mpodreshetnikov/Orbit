@@ -1,0 +1,1867 @@
+[
+  {
+    "name": "contains matches a substring of the line item title",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains",
+      "value": "latte"
+    },
+    "expected": true
+  },
+  {
+    "name": "contains is case and whitespace insensitive",
+    "context": {
+      "line_item": {
+        "title": "  LATTE   GRANDE ",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains",
+      "value": "latte grande"
+    },
+    "expected": true
+  },
+  {
+    "name": "contains does not match a different substring",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains",
+      "value": "espresso"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains never matches an empty field",
+    "context": {
+      "line_item": {
+        "title": null,
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains",
+      "value": "latte"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains never matches an empty needle",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains",
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "not_contains passes when the substring is absent",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "merchant_name",
+      "operator": "not_contains",
+      "value": "bakery"
+    },
+    "expected": true
+  },
+  {
+    "name": "not_contains fails when the substring is present",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "merchant_name",
+      "operator": "not_contains",
+      "value": "coffee"
+    },
+    "expected": false
+  },
+  {
+    "name": "not_contains passes on an empty field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": null,
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "merchant_name",
+      "operator": "not_contains",
+      "value": "coffee"
+    },
+    "expected": true
+  },
+  {
+    "name": "equals matches the whole text",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "source",
+      "operator": "equals",
+      "value": "tbank"
+    },
+    "expected": true
+  },
+  {
+    "name": "equals ignores case",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "TBank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "source",
+      "operator": "equals",
+      "value": "tbank"
+    },
+    "expected": true
+  },
+  {
+    "name": "equals rejects a different value",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "source",
+      "operator": "equals",
+      "value": "alfa"
+    },
+    "expected": false
+  },
+  {
+    "name": "equals rejects an empty field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": null,
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "source",
+      "operator": "equals",
+      "value": "tbank"
+    },
+    "expected": false
+  },
+  {
+    "name": "equals compares amounts numerically",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "equals",
+      "value": "-320"
+    },
+    "expected": true
+  },
+  {
+    "name": "equals rejects a different amount",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "equals",
+      "value": "-100"
+    },
+    "expected": false
+  },
+  {
+    "name": "equals compares the transfer flag as a boolean",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": true,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "is_transfer",
+      "operator": "equals",
+      "value": "true"
+    },
+    "expected": true
+  },
+  {
+    "name": "equals rejects the opposite transfer flag",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": true,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "is_transfer",
+      "operator": "equals",
+      "value": "false"
+    },
+    "expected": false
+  },
+  {
+    "name": "starts_with matches a prefix",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "starts_with",
+      "value": "latte"
+    },
+    "expected": true
+  },
+  {
+    "name": "starts_with rejects a non-prefix substring",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "starts_with",
+      "value": "grande"
+    },
+    "expected": false
+  },
+  {
+    "name": "starts_with rejects an empty field",
+    "context": {
+      "line_item": {
+        "title": null,
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "starts_with",
+      "value": "latte"
+    },
+    "expected": false
+  },
+  {
+    "name": "regex matches the raw value",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "regex",
+      "value": "^Latte"
+    },
+    "expected": true
+  },
+  {
+    "name": "regex is applied to the raw value, not the lowered one",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "regex",
+      "value": "^latte"
+    },
+    "expected": false
+  },
+  {
+    "name": "regex does not match a different pattern",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "regex",
+      "value": "^Espresso"
+    },
+    "expected": false
+  },
+  {
+    "name": "regex on an empty field only matches an empty-tolerant pattern",
+    "context": {
+      "line_item": {
+        "title": null,
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "regex",
+      "value": "^$"
+    },
+    "expected": true
+  },
+  {
+    "name": "an uncompilable regex is a non-match, not a failure",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "regex",
+      "value": "["
+    },
+    "expected": false
+  },
+  {
+    "name": "contains_any_in_set matches when one entry is a substring",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains_any_in_set",
+      "values": ["espresso", "latte"]
+    },
+    "expected": true
+  },
+  {
+    "name": "contains_any_in_set rejects when no entry matches",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains_any_in_set",
+      "values": ["espresso", "americano"]
+    },
+    "expected": false
+  },
+  {
+    "name": "contains_any_in_set rejects an empty field",
+    "context": {
+      "line_item": {
+        "title": null,
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains_any_in_set",
+      "values": ["latte"]
+    },
+    "expected": false
+  },
+  {
+    "name": "contains_any_in_set rejects an empty set",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "contains_any_in_set",
+      "values": []
+    },
+    "expected": false
+  },
+  {
+    "name": "equals_any_in_set matches an exact member",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "mcc",
+      "operator": "equals_any_in_set",
+      "values": ["5411", "5812"]
+    },
+    "expected": true
+  },
+  {
+    "name": "equals_any_in_set rejects a non-member",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "mcc",
+      "operator": "equals_any_in_set",
+      "values": ["5411", "5999"]
+    },
+    "expected": false
+  },
+  {
+    "name": "equals_any_in_set rejects an empty field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": null,
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "mcc",
+      "operator": "equals_any_in_set",
+      "values": ["5812"]
+    },
+    "expected": false
+  },
+  {
+    "name": "equals_any_in_set compares amounts as numbers",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "transaction_amount",
+      "operator": "equals_any_in_set",
+      "values": ["-320", "-100"]
+    },
+    "expected": true
+  },
+  {
+    "name": "equals_any_in_set compares the transfer flag as text",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": true,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "is_transfer",
+      "operator": "equals_any_in_set",
+      "values": ["true"]
+    },
+    "expected": true
+  },
+  {
+    "name": "in_set matches an exact member",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "account_kind",
+      "operator": "in_set",
+      "values": ["debit", "credit"]
+    },
+    "expected": true
+  },
+  {
+    "name": "in_set rejects a non-member",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "account_kind",
+      "operator": "in_set",
+      "values": ["credit", "cash"]
+    },
+    "expected": false
+  },
+  {
+    "name": "in_set rejects an empty field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": null
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "account_kind",
+      "operator": "in_set",
+      "values": ["debit"]
+    },
+    "expected": false
+  },
+  {
+    "name": "in_set matches a decimal amount",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -120.5
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "in_set",
+      "values": ["-120.5"]
+    },
+    "expected": true
+  },
+  {
+    "name": "range matches inside both bounds",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "range",
+      "min": -500,
+      "max": -100
+    },
+    "expected": true
+  },
+  {
+    "name": "range matches on the lower bound",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "range",
+      "min": -320,
+      "max": 0
+    },
+    "expected": true
+  },
+  {
+    "name": "range rejects below the lower bound",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "range",
+      "min": -100,
+      "max": 0
+    },
+    "expected": false
+  },
+  {
+    "name": "range with only a maximum matches anything below it",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "range",
+      "max": 0
+    },
+    "expected": true
+  },
+  {
+    "name": "range with only a minimum rejects anything below it",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_amount",
+      "operator": "range",
+      "min": 0
+    },
+    "expected": false
+  },
+  {
+    "name": "range rejects a non-numeric field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "merchant_name",
+      "operator": "range",
+      "min": -500,
+      "max": 0
+    },
+    "expected": false
+  },
+  {
+    "name": "is_empty matches a null field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": null,
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "transaction_comment",
+      "operator": "is_empty"
+    },
+    "expected": true
+  },
+  {
+    "name": "is_empty matches a whitespace-only field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "   ",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "transaction_comment",
+      "operator": "is_empty"
+    },
+    "expected": true
+  },
+  {
+    "name": "is_empty rejects a filled field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "transaction_comment",
+      "operator": "is_empty"
+    },
+    "expected": false
+  },
+  {
+    "name": "is_not_empty matches a filled field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "transaction_comment",
+      "operator": "is_not_empty"
+    },
+    "expected": true
+  },
+  {
+    "name": "is_not_empty rejects a null field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": null,
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "transaction_comment",
+      "operator": "is_not_empty"
+    },
+    "expected": false
+  },
+  {
+    "name": "is_not_empty rejects a whitespace-only field",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "  ",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "transaction_comment",
+      "operator": "is_not_empty"
+    },
+    "expected": false
+  },
+  {
+    "name": "current_category_id compares the state category",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": "aa000000-0000-0000-0000-000000000001",
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "current_category_id",
+      "operator": "equals",
+      "value": "aa000000-0000-0000-0000-000000000001"
+    },
+    "expected": true
+  },
+  {
+    "name": "current_category_id is empty when nothing is assigned",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "current_category_id",
+      "operator": "is_empty"
+    },
+    "expected": true
+  },
+  {
+    "name": "canonical_branch_system_key compares the state branch",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": "food",
+    "filter": {
+      "field": "canonical_branch_system_key",
+      "operator": "equals",
+      "value": "food"
+    },
+    "expected": true
+  },
+  {
+    "name": "canonical_branch_system_key is empty when nothing is assigned",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "canonical_branch_system_key",
+      "operator": "is_empty"
+    },
+    "expected": true
+  },
+  {
+    "name": "an unknown field never matches",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "not_a_field",
+      "operator": "is_not_empty"
+    },
+    "expected": false
+  },
+  {
+    "name": "an unknown operator never matches",
+    "context": {
+      "line_item": {
+        "title": "Latte Grande",
+        "amount": -320
+      },
+      "transaction": {
+        "merchant_name": "Coffee Shop",
+        "comment": "Morning run",
+        "source_comment": "CAFE 12",
+        "source": "tbank",
+        "source_category_id": "bank-food",
+        "source_category_name": "Food",
+        "mcc": "5812",
+        "transaction_type": "expense",
+        "payer_person_id": "bb000000-0000-0000-0000-000000000001",
+        "is_transfer": false,
+        "amount": -320
+      },
+      "account": {
+        "source": "tbank",
+        "account_kind": "debit"
+      }
+    },
+    "current_category_id": null,
+    "current_canonical_system_key": null,
+    "filter": {
+      "field": "line_item_title",
+      "operator": "not_an_operator",
+      "value": "latte"
+    },
+    "expected": false
+  }
+]
