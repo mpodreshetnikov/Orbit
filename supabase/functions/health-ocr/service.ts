@@ -1,5 +1,6 @@
 import { encodeBase64 } from "std/encoding/base64";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
+import { type LlmUsage, sumLlmUsage, usageAttrs } from "../_shared/llm-usage.ts";
 import { selectSuggestedTitle } from "./title.ts";
 import type { OpenRouterOcrClient, OcrAttachmentPayload } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
@@ -141,6 +142,7 @@ export async function runHealthOcrService(
     });
 
     const pageTexts: string[] = [];
+    const pageUsage: LlmUsage[] = [];
     let suggestedTitle = defaultTitle;
 
     for (let index = 0; index < attachments.length; index++) {
@@ -186,6 +188,7 @@ export async function runHealthOcrService(
             }),
           );
         }
+        pageUsage.push(result.usage);
         await pageSpan?.end({
           status: "ok",
           attrs: {
@@ -193,6 +196,9 @@ export async function runHealthOcrService(
             ocr_input_type: ocrInputType,
             ocr_chars: result.ocr_text.length,
             ocr_truncated: result.truncated,
+            // OCR runs once per attachment and structuring once per record, so on a multi-page
+            // document this is the larger half of what the record cost.
+            ...usageAttrs(result.usage),
           },
         });
       } catch (error) {
@@ -245,6 +251,9 @@ export async function runHealthOcrService(
       status: "ok",
       attrs: {
         duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+        // The record's whole OCR cost, so a multi-page document does not have to be summed
+        // page span by page span.
+        ...usageAttrs(sumLlmUsage(pageUsage)),
       },
     });
 

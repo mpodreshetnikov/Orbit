@@ -1,3 +1,5 @@
+import type { LlmUsage } from "../_shared/llm-usage.ts";
+
 export interface StructureRequest {
   record_id: string;
 }
@@ -147,4 +149,18 @@ export interface IcdLookupResult {
   name_en: string | null;
   name_ru: string | null;
   found: boolean;
+}
+
+/**
+ * What one structuring pass produced, and what it cost.
+ *
+ * The cost travels with the result rather than being logged where it is measured: a loose log
+ * line carries no trace id, so per-record cost cannot be read off the record's own span. The
+ * service puts these on `edge.health_structure.parse_llm`.
+ */
+export interface StructuredParseOutcome {
+  structured: StructuredDataWithEntities;
+  usage: LlmUsage;
+  /** Which stages actually ran. Empty for the non-staged parser and the E2E stub. */
+  stagesRun: string[];
 }

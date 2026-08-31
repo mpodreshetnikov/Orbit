@@ -40,7 +40,12 @@ export function useStructureExtraction() {
         }
 
         // Update record status to "structuring"
-        await supabase.from("medical_records").update({ status: "structuring" }).eq("id", recordId);
+        // A previous failure belongs to the previous run; the retry clears it the way the edge
+        // function clears it on success.
+        await supabase
+          .from("medical_records")
+          .update({ status: "structuring", structure_error: null })
+          .eq("id", recordId);
 
         // Call health-structure edge function
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -120,9 +125,14 @@ export function useStructureExtraction() {
           description: errorMessage,
         });
 
-        // Update record status back to ocr_review (so user can try again)
+        // Update record status back to ocr_review (so user can try again), and leave the reason
+        // on the record: the toast is gone on the next refresh, and the failures that never
+        // reached the edge function (network, auth, a non-2xx body) are not written there.
         const supabase = createClient();
-        await supabase.from("medical_records").update({ status: "ocr_review" }).eq("id", recordId);
+        await supabase
+          .from("medical_records")
+          .update({ status: "ocr_review", structure_error: errorMessage })
+          .eq("id", recordId);
 
         // Invalidate queries
         queryClient.invalidateQueries({

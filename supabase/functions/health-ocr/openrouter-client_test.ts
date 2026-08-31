@@ -506,3 +506,48 @@ Deno.test("content delivered as typed parts is not read as an empty page", async
   );
   assertEquals(result.ocr_text, "parts");
 });
+
+Deno.test("createOpenRouterOcrClient reports what the transcription cost", async () => {
+  const client = createOpenRouterOcrClient({
+    fetchFn: async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { content: JSON.stringify({ ocr_text: "hello", suggested_title: "t" }) },
+            },
+          ],
+          usage: { prompt_tokens: 2100, completion_tokens: 640, cost: 0.011 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    apiKey: "key",
+    referer: "https://example.com",
+  });
+
+  const result = await client.callVisionOcrSingle(
+    { url: "data:image/png;base64,AAA", mimeType: "image/png" },
+    { requestTitle: true },
+  );
+
+  assertEquals(result.usage.promptTokens, 2100);
+  assertEquals(result.usage.completionTokens, 640);
+  assertEquals(result.usage.costUsd, 0.011);
+});
+
+Deno.test("createOpenRouterOcrClient reports unknown cost as null, not zero", async () => {
+  const client = createOpenRouterOcrClient({
+    fetchFn: async () => okResponse({ ocr_text: "hello", suggested_title: "t" }),
+    apiKey: "key",
+    referer: "https://example.com",
+  });
+
+  const result = await client.callVisionOcrSingle(
+    { url: "data:image/png;base64,AAA", mimeType: "image/png" },
+    { requestTitle: false },
+  );
+
+  assertEquals(result.usage.promptTokens, null);
+  assertEquals(result.usage.costUsd, null);
+});

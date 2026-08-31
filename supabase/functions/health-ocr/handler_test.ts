@@ -1,5 +1,6 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
+import { emptyLlmUsage } from "../_shared/llm-usage.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { withEnv } from "../_shared/testing/env.ts";
 import { assertJsonResponse } from "../_shared/testing/response.ts";
@@ -32,6 +33,7 @@ function createOpenRouterMock(): OpenRouterOcrClient {
       ocr_text: "text",
       suggested_title: "title",
       truncated: false,
+      usage: emptyLlmUsage(),
     }),
   };
 }

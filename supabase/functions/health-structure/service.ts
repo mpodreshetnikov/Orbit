@@ -6,7 +6,12 @@ import {
 } from "./resolution.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import type { HealthStructureRepository } from "./repository.ts";
-import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
+import { usageAttrs } from "../_shared/llm-usage.ts";
+import type {
+  IcdLookupResult,
+  StructuredDataWithEntities,
+  StructuredParseOutcome,
+} from "./types.ts";
 import { convertRefRangeToCanonical, convertToCanonical } from "./unit-conversion.ts";
 
 export interface HealthStructureServiceInput {
@@ -28,7 +33,7 @@ export interface HealthStructureServiceDeps {
   parseStructuredData: (
     ocrText: string,
     context: HealthStructureParseContext,
-  ) => Promise<StructuredDataWithEntities>;
+  ) => Promise<StructuredParseOutcome>;
   lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
   log?: Pick<Console, "log" | "warn" | "error">;
   telemetry?: EdgeTelemetry;
@@ -273,13 +278,20 @@ export async function runHealthStructureService(
     };
 
     const parseSpan = telemetry?.startSpan("edge.health_structure.parse_llm");
-    const structuredData = await deps.parseStructuredData(ocrText, context);
+    const parseOutcome = await deps.parseStructuredData(ocrText, context);
+    const structuredData = parseOutcome.structured;
     await parseSpan?.end({
       status: "ok",
       attrs: {
         observation_count: structuredData.observations.length,
         finding_count: structuredData.findings.length,
         condition_count: structuredData.conditions.length,
+        // On the record's own span, so per-record cost is readable off the trace rather than
+        // off an uncorrelated log line. Absent values are omitted, never sent as zero.
+        ...usageAttrs(parseOutcome.usage),
+        ...(parseOutcome.stagesRun.length > 0
+          ? { stages_run: parseOutcome.stagesRun.join(",") }
+          : {}),
       },
     });
     const checkupSuggestions = buildCheckupSuggestions(structuredData, checkupItems);
@@ -296,6 +308,8 @@ export async function runHealthStructureService(
       llm_keywords: structuredData.keywords,
       llm_suggested_checkup_completions: checkupSuggestions,
       status: "structure_review",
+      // A previous failure is cleared by the run that succeeds, the way ocr_error is.
+      structure_error: null,
     });
     await updateRecordSpan?.end({ status: "ok" });
 
@@ -411,6 +425,16 @@ export async function runHealthStructureService(
       record_id: input.recordId ?? "missing",
       error_message: message,
     });
+    // Durable trace of the failure. Best-effort on purpose: the original error is what the
+    // caller must see, so a record that cannot be written (missing id, auth refused, the
+    // database itself being the failure) must not replace it with a second one.
+    if (input.recordId) {
+      try {
+        await deps.repository.updateMedicalRecord(input.recordId, { structure_error: message });
+      } catch (writeError) {
+        deps.log?.error?.("[health-structure] failed to persist structure_error:", writeError);
+      }
+    }
     await serviceSpan?.end({
       status: "error",
       statusMessage: message,

@@ -291,7 +291,8 @@ CREATE TABLE "public"."medical_records" (
     "llm_keywords" "text"[],
     "search_vector" "tsvector" GENERATED ALWAYS AS ((("setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("title", ''::"text")), 'A'::"char") || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("notes", ''::"text")), 'B'::"char")) || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("ocr_text", ''::"text")), 'C'::"char"))) STORED,
     "ocr_error" "text",
-    "llm_suggested_checkup_completions" "jsonb"
+    "llm_suggested_checkup_completions" "jsonb",
+    "structure_error" "text"
 );
 
 ALTER TABLE ONLY "public"."medical_records" REPLICA IDENTITY FULL;

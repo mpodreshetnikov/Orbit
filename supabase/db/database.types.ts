@@ -628,6 +628,7 @@ export type Database = {
           removed_at: string | null
           search_vector: unknown
           status: Database["public"]["Enums"]["record_status"]
+          structure_error: string | null
           title: string
           updated_at: string
         }
@@ -647,6 +648,7 @@ export type Database = {
           removed_at?: string | null
           search_vector?: unknown
           status?: Database["public"]["Enums"]["record_status"]
+          structure_error?: string | null
           title: string
           updated_at?: string
         }
@@ -666,6 +668,7 @@ export type Database = {
           removed_at?: string | null
           search_vector?: unknown
           status?: Database["public"]["Enums"]["record_status"]
+          structure_error?: string | null
           title?: string
           updated_at?: string
         }

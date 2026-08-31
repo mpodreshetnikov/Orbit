@@ -1,4 +1,5 @@
 import { extractContentText, parseJsonObject } from "../_shared/llm-json.ts";
+import { type LlmUsage, parseLlmUsage } from "../_shared/llm-usage.ts";
 import {
   DEFAULT_MAX_ATTEMPTS,
   isRetryableStatus,
@@ -21,6 +22,12 @@ export interface OcrResult {
    * page as a complete transcription — everything downstream reads it as the whole document.
    */
   truncated: boolean;
+  /**
+   * What the provider charged for the attempt that produced this text. A retried page reports
+   * the successful attempt only, so this is the cost of the transcription returned, not of every
+   * attempt made.
+   */
+  usage: LlmUsage;
 }
 
 export interface OpenRouterOcrClient {
@@ -195,6 +202,7 @@ export function createOpenRouterOcrClient(
 
             const payload = (await response.json()) as {
               choices?: Array<{ finish_reason?: string; message?: Record<string, unknown> }>;
+              usage?: Record<string, unknown>;
             };
             const choice = payload.choices?.[0];
             const contentText = extractContentText(choice?.message ?? {});
@@ -208,6 +216,7 @@ export function createOpenRouterOcrClient(
               ocr_text: ocrText,
               suggested_title: suggestedTitle || DEFAULT_FALLBACK_TITLE,
               truncated: choice?.finish_reason === "length",
+              usage: parseLlmUsage(payload),
             };
 
             // Retried for the larger budget, not because the answer was malformed. Once the
