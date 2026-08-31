@@ -9,14 +9,14 @@ SELECT col_default_is(
   'public',
   'conditions',
   'is_llm_extracted',
-  'false',
+  false,
   'a condition is not assumed to be LLM-created'
 );
 SELECT col_default_is(
   'public',
   'conditions',
   'is_user_verified',
-  'true',
+  true,
   'a condition is not assumed to be unreviewed'
 );
 
@@ -25,6 +25,14 @@ SELECT col_is_null(
   'condition_records',
   'condition_id',
   'a mention can exist before the condition does'
+);
+
+INSERT INTO auth.users (id, email, aud, role)
+VALUES (
+  '77777777-2222-0000-0000-000000000000',
+  'proposal-user@example.com',
+  'authenticated',
+  'authenticated'
 );
 
 INSERT INTO public.allowed_users (auth_user_id, email)
