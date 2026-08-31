@@ -5,6 +5,16 @@ const fs = require("fs");
 const path = require("path");
 
 const REQUIRED_PARSER_MODE = "e2e_stub";
+
+/**
+ * Which stack serves the suite.
+ *
+ * `cli` is the default and is what CI runs: `supabase start`, unchanged. `docker` is the lane
+ * for hosts the CLI cannot serve — an agent container, where `supabase start` dies seeding
+ * Realtime on a kernel with IPv6 disabled. It is opt-in rather than a fallback on purpose: a
+ * silent switch would let CI pass on a stack nobody meant to test.
+ */
+const LOCAL_API_MODE = process.env.ORBIT_LOCAL_API === "docker" ? "docker" : "cli";
 const NPX_BIN = resolveNpxBin();
 
 function resolveNpxBin() {
@@ -169,7 +179,34 @@ function restartSupabase() {
   startSupabase();
 }
 
+/**
+ * Brings up the PostgREST + GoTrue + functions + gateway lane and reads its environment. The
+ * script prints the same `KEY="value"` lines as `supabase status -o env`, which is the whole
+ * point of its `env` command: everything downstream of here stays identical.
+ */
+function loadDockerApiEnv() {
+  const script = path.join(__dirname, "api-local-docker.cjs");
+  const up = runInherited(process.execPath, [script, "up"]);
+  if (up.status !== 0) {
+    throw new Error("Failed to start the local Docker API lane for e2e tests");
+  }
+  const env = run(process.execPath, [script, "env"]);
+  if (env.status !== 0) {
+    throw new Error("The local Docker API lane started but its environment could not be read");
+  }
+  const vars = parseSupabaseEnv(env.stdout);
+  if (!vars.API_URL || !vars.ANON_KEY || !vars.SERVICE_ROLE_KEY) {
+    throw new Error("The local Docker API lane printed an incomplete environment");
+  }
+  return { shouldStop: false, vars };
+}
+
 function loadSupabaseEnv() {
+  if (LOCAL_API_MODE === "docker") {
+    console.log("[test-e2e] Using the local Docker API lane (ORBIT_LOCAL_API=docker).");
+    return loadDockerApiEnv();
+  }
+
   const status = runNpx(["supabase", "status", "-o", "env"]);
   if (status.status === 0) {
     const projectId = readSupabaseProjectId();
@@ -227,6 +264,13 @@ function applyE2EEnv(vars) {
 }
 
 function ensureLocalDbReady() {
+  if (LOCAL_API_MODE === "docker") {
+    // `db-local-docker.cjs up`, which the lane runs first, already applies the migrations and
+    // the deploy SQL in the same order the CLI would. Running the CLI's versions here would
+    // fail on a machine where the CLI cannot reach a stack at all.
+    return;
+  }
+
   const migrate = runNpxInherited(["supabase", "migration", "up"]);
   if (migrate.status !== 0) {
     throw new Error("Failed to apply local Supabase migrations for e2e tests");
