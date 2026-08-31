@@ -814,6 +814,10 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const [keywords, setKeywords] = useState<string[]>(record.llm_keywords || []);
   const [newKeyword, setNewKeyword] = useState("");
   const [showOcrText, setShowOcrText] = useState(false);
+  // Held for the whole of handleSave, not just the record mutation: materialising proposals
+  // outlives that mutation, and a second activation started in the gap would race it into
+  // creating the same condition twice.
+  const [isSaving, setIsSaving] = useState(false);
 
   // Observations
   const { data: observations, isLoading: observationsLoading } = useRecordObservations(record.id);
@@ -854,6 +858,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const linkConditionToRecordMutation = useLinkConditionToRecord();
 
   const isProcessing =
+    isSaving ||
     updateMutation.isPending ||
     updateObsMutation.isPending ||
     deleteObsMutation.isPending ||
@@ -1006,7 +1011,25 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
   const handleSave = async (activate: boolean) => {
     if (!title.trim()) return;
+    if (isSaving) return;
 
+    // The proposal list has to be loaded before activation can act on it: an undefined query is
+    // an unanswered question, not an empty answer, and treating it as empty would activate a
+    // record whose diagnoses never reached the chart.
+    if (activate && (conditionsLoading || conditionRecords === undefined)) {
+      toast.error(t("conditions.proposalsNotLoaded"));
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await runSave(activate);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const runSave = async (activate: boolean) => {
     // Drop observations the user left unapplied rather than persisting rows that would be
     // filtered out of history anyway. The predicate must match the one the row renders with
     // (is_applied alone); keying it on obs_code too meant coded-but-unresolved rows escaped the
@@ -1015,6 +1038,20 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     await Promise.all(
       unapplied.map((obs) => deleteObsMutation.mutateAsync({ id: obs.id, recordId: record.id })),
     );
+
+    // Proposals become real conditions here and nowhere else: this is the moment a person
+    // approves what the model read. It runs before the record is activated, so a write that
+    // fails leaves the record in review rather than active with half its diagnoses missing.
+    if (activate) {
+      try {
+        await materializeProposals();
+      } catch (error) {
+        toast.error(t("conditions.proposalsFailed"), {
+          description: error instanceof Error ? error.message : undefined,
+        });
+        return;
+      }
+    }
 
     await updateMutation.mutateAsync({
       id: record.id,
@@ -1030,9 +1067,6 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
 
     // When activating, mark all observations, findings, and conditions as verified, and apply suggested checkup completions
     if (activate) {
-      // Proposals become real conditions here and nowhere else: this is the moment a person
-      // approves what the model read, and the chart must not gain a diagnosis before it.
-      await materializeProposals();
       await Promise.all([verifyAllObservations(), verifyAllFindings(), verifyAllConditions()]);
       const suggested = record.llm_suggested_checkup_completions ?? [];
       if (suggested.length > 0) {
@@ -1266,6 +1300,19 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
           source_anchor: data.source_anchor || undefined,
         });
       }
+    } else if (editingCondition?.is_proposal) {
+      // Correcting the proposal itself: what the reviewer types replaces what the model read,
+      // and it is that corrected text which is materialised on activation.
+      await updateConditionRecordMutation.mutateAsync({
+        id: editingCondition.id,
+        updates: {
+          status_in_record: data.status_in_record,
+          source_anchor: data.source_anchor,
+          proposed_name: data.name ?? editingCondition.condition_name,
+          proposed_icd_code: data.code ?? null,
+        },
+        recordId: record.id,
+      });
     } else if (editingCondition) {
       // Editing existing condition record (auto-updates current_status if most recent)
       await updateConditionRecordMutation.mutateAsync({

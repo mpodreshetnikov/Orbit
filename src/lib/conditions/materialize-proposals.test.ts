@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { materializeConditionProposals } from "./materialize-proposals";
+import {
+  materializeConditionProposals,
+  ProposalMaterializationError,
+} from "./materialize-proposals";
 import type { ConditionRecordWithDetails } from "@/types";
 
 type Row = Record<string, unknown> | null;
@@ -8,9 +11,15 @@ type Row = Record<string, unknown> | null;
  * A Supabase stub narrow enough to be read: it records what was written and answers the two
  * lookups this path makes.
  */
-function createSupabaseStub(options: { byCode?: Row; byName?: Row; createdId?: string | null }) {
+function createSupabaseStub(options: {
+  byCode?: Row;
+  byName?: Row;
+  createdId?: string | null;
+  linkError?: string;
+}) {
   const inserted: Record<string, unknown>[] = [];
   const updated: Array<{ id: unknown; patch: Record<string, unknown> }> = [];
+  const statusUpdates: Array<Record<string, unknown>> = [];
   const lookups: string[] = [];
 
   const client = {
@@ -41,6 +50,12 @@ function createSupabaseStub(options: { byCode?: Row; byName?: Row; createdId?: s
               },
             }),
           }),
+          update: (patch: Record<string, unknown>) => ({
+            eq: async () => {
+              statusUpdates.push(patch);
+              return { error: null };
+            },
+          }),
           insert: (payload: Record<string, unknown>) => {
             inserted.push(payload);
             return {
@@ -60,8 +75,21 @@ function createSupabaseStub(options: { byCode?: Row; byName?: Row; createdId?: s
           update: (patch: Record<string, unknown>) => ({
             eq: async (_column: string, id: unknown) => {
               updated.push({ id, patch });
-              return { error: null };
+              return { error: options.linkError ? { message: options.linkError } : null };
             },
+          }),
+          // The status recompute reads the condition's most recent mention.
+          select: () => ({
+            eq: () => ({
+              order: () => ({
+                limit: () => ({
+                  maybeSingle: async () => ({
+                    data: { status_in_record: "resolved" },
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
           }),
         };
       }
@@ -70,7 +98,7 @@ function createSupabaseStub(options: { byCode?: Row; byName?: Row; createdId?: s
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { client: client as any, inserted, updated, lookups };
+  return { client: client as any, inserted, updated, statusUpdates, lookups };
 }
 
 function proposal(overrides: Partial<ConditionRecordWithDetails> = {}): ConditionRecordWithDetails {
@@ -195,5 +223,34 @@ describe("materializeConditionProposals", () => {
     expect(lookupIcd).toHaveBeenCalledWith("J45");
     // An unverified code is not written to the chart as if it were checked.
     expect(stub.inserted[0]).toMatchObject({ code: null, icd_name_en: null });
+  });
+
+  it("brings the reused condition's status in line with the approved mention", async () => {
+    const stub = createSupabaseStub({ byCode: { id: "cond-existing" } });
+
+    await materializeConditionProposals([proposal({ status_in_record: "resolved" })], {
+      supabase: stub.client,
+      personId: "person-1",
+      lookupIcd: foundIcd,
+    });
+
+    // Nothing in the database recomputes this; without it an approved "resolved" proposal leaves
+    // the chart still showing the condition as active.
+    expect(stub.statusUpdates).toEqual([{ current_status: "resolved" }]);
+  });
+
+  it("throws when the link is refused rather than reporting it as materialised", async () => {
+    const stub = createSupabaseStub({
+      createdId: "cond-new",
+      linkError: "duplicate key value violates unique constraint",
+    });
+
+    await expect(
+      materializeConditionProposals([proposal()], {
+        supabase: stub.client,
+        personId: "person-1",
+        lookupIcd: foundIcd,
+      }),
+    ).rejects.toBeInstanceOf(ProposalMaterializationError);
   });
 });

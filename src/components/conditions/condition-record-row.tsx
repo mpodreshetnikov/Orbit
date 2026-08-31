@@ -77,7 +77,10 @@ export function ConditionRecordRow({
   const t = useTranslations();
   const [showAnchor, setShowAnchor] = useState(false);
 
+  // A proposal has no condition behind it, so there is no previous status to have changed from:
+  // rendering the comparison would print an empty badge before the real status.
   const hasStatusChange =
+    conditionRecord.condition_current_status !== null &&
     conditionRecord.status_in_record !== conditionRecord.condition_current_status;
   const isActiveOrSuspected =
     conditionRecord.status_in_record === "active" ||
@@ -120,7 +123,7 @@ export function ConditionRecordRow({
           )}
 
           {/* Status change indicator */}
-          {hasStatusChange && (
+          {hasStatusChange && conditionRecord.condition_current_status && (
             <div className="flex items-center gap-2 mt-1 text-sm flex-wrap">
               <ConditionStatusBadge status={conditionRecord.condition_current_status} />
               <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />

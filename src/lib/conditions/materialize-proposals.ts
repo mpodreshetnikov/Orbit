@@ -29,6 +29,18 @@ export interface MaterializationOutcome {
   skipped: number;
 }
 
+/**
+ * A write that did not land. Thrown rather than counted, because the caller must not activate a
+ * record whose proposals are only half in the chart: a created condition with no mention pointing
+ * at it is exactly the orphan this whole change exists to prevent.
+ */
+export class ProposalMaterializationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProposalMaterializationError";
+  }
+}
+
 function normalize(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -38,7 +50,7 @@ async function findByIcdCode(
   deps: ProposalMaterializationDeps,
   code: string,
 ): Promise<string | null> {
-  const { data } = await deps.supabase
+  const { data, error } = await deps.supabase
     .from("conditions")
     .select("id")
     .eq("person_id", deps.personId)
@@ -46,11 +58,12 @@ async function findByIcdCode(
     .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
+  if (error) throw new ProposalMaterializationError(error.message);
   return (data as { id: string } | null)?.id ?? null;
 }
 
 async function findByName(deps: ProposalMaterializationDeps, name: string): Promise<string | null> {
-  const { data } = await deps.supabase
+  const { data, error } = await deps.supabase
     .from("conditions")
     .select("id")
     .eq("person_id", deps.personId)
@@ -58,7 +71,38 @@ async function findByName(deps: ProposalMaterializationDeps, name: string): Prom
     .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
+  if (error) throw new ProposalMaterializationError(error.message);
   return (data as { id: string } | null)?.id ?? null;
+}
+
+/**
+ * Bring a condition's current status in line with its most recent mention.
+ *
+ * The edge function does this for every mention it links; the activation path has to do the same
+ * for a condition it reuses, or an approved `resolved` proposal leaves the chart still showing
+ * the condition as active. Nothing in the database does it for us.
+ */
+async function recomputeCurrentStatus(
+  deps: ProposalMaterializationDeps,
+  conditionId: string,
+): Promise<void> {
+  const { data, error } = await deps.supabase
+    .from("condition_records")
+    .select("status_in_record, medical_records!inner(record_date)")
+    .eq("condition_id", conditionId)
+    .order("medical_records(record_date)", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new ProposalMaterializationError(error.message);
+
+  const status = (data as { status_in_record?: string } | null)?.status_in_record;
+  if (!status) return;
+
+  const { error: updateError } = await deps.supabase
+    .from("conditions")
+    .update({ current_status: status })
+    .eq("id", conditionId);
+  if (updateError) throw new ProposalMaterializationError(updateError.message);
 }
 
 async function resolveOrCreateCondition(
@@ -76,7 +120,7 @@ async function resolveOrCreateCondition(
   const byName = await findByName(deps, proposal.name);
   if (byName) return byName;
 
-  const { data } = await deps.supabase
+  const { data, error } = await deps.supabase
     .from("conditions")
     .insert({
       person_id: deps.personId,
@@ -92,6 +136,7 @@ async function resolveOrCreateCondition(
     })
     .select("id")
     .single();
+  if (error) throw new ProposalMaterializationError(error.message);
 
   return (data as { id: string } | null)?.id ?? null;
 }
@@ -127,7 +172,7 @@ export async function materializeConditionProposals(
       continue;
     }
 
-    await deps.supabase
+    const { error } = await deps.supabase
       .from("condition_records")
       .update({
         condition_id: conditionId,
@@ -136,6 +181,13 @@ export async function materializeConditionProposals(
         is_user_verified: true,
       })
       .eq("id", proposal.id);
+    // A refused link -- the record already mentions this condition, say, which the
+    // (condition_id, record_id) unique constraint rejects -- must stop activation rather than be
+    // counted as done. Otherwise the condition exists and nothing points at it.
+    if (error) throw new ProposalMaterializationError(error.message);
+
+    // The reused or created condition now has a newer mention; its status follows from it.
+    await recomputeCurrentStatus(deps, conditionId);
 
     materialized += 1;
   }

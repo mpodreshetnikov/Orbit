@@ -90,7 +90,7 @@ CREATE TABLE "public"."checkup_completions" (
 
 CREATE TABLE "public"."condition_records" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "condition_id" "uuid" NOT NULL,
+    "condition_id" "uuid",
     "record_id" "uuid" NOT NULL,
     "status_in_record" "text" NOT NULL,
     "source_anchor" "text",
@@ -98,7 +98,10 @@ CREATE TABLE "public"."condition_records" (
     "is_llm_extracted" boolean DEFAULT true NOT NULL,
     "is_user_verified" boolean DEFAULT false NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "proposed_name" "text",
+    "proposed_icd_code" "text",
     CONSTRAINT "condition_records_confidence_check" CHECK ((("confidence" >= (0)::numeric) AND ("confidence" <= (1)::numeric))),
+    CONSTRAINT "condition_records_link_or_proposal_check" CHECK ((("condition_id" IS NOT NULL) OR (("proposed_name" IS NOT NULL) AND ("btrim"("proposed_name") <> ''::"text")))),
     CONSTRAINT "condition_records_status_in_record_check" CHECK (("status_in_record" = ANY (ARRAY['active'::"text", 'resolved'::"text", 'suspected'::"text", 'history'::"text"])))
 );
 
@@ -121,6 +124,8 @@ CREATE TABLE "public"."conditions" (
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "deleted_at" timestamp with time zone,
     "icd_name_ru" "text",
+    "is_llm_extracted" boolean DEFAULT false NOT NULL,
+    "is_user_verified" boolean DEFAULT true NOT NULL,
     CONSTRAINT "conditions_current_status_check" CHECK (("current_status" = ANY (ARRAY['active'::"text", 'resolved'::"text", 'suspected'::"text", 'history'::"text"])))
 );
 
@@ -1408,10 +1413,24 @@ CREATE INDEX "idx_condition_records_condition_id" ON "public"."condition_records
 
 
 --
+-- Name: idx_condition_records_proposals; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_condition_records_proposals" ON "public"."condition_records" USING "btree" ("record_id") WHERE ("condition_id" IS NULL);
+
+
+--
 -- Name: idx_condition_records_record_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX "idx_condition_records_record_id" ON "public"."condition_records" USING "btree" ("record_id");
+
+
+--
+-- Name: idx_condition_records_unique_proposal; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_condition_records_unique_proposal" ON "public"."condition_records" USING "btree" ("record_id", "lower"("btrim"("proposed_name"))) WHERE ("condition_id" IS NULL);
 
 
 --

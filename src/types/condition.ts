@@ -74,7 +74,8 @@ export interface ConditionRecordWithDetails extends ConditionRecord {
   condition_icd_name_en: string | null; // Official ICD name in English
   condition_icd_name_ru: string | null; // Official ICD name in Russian
   condition_code: string | null; // ICD-10 code
-  condition_current_status: ConditionStatus;
+  /** Null for a proposal: there is no condition row to have a current status yet. */
+  condition_current_status: ConditionStatus | null;
   condition_onset_date: string | null;
   condition_resolved_date: string | null;
   condition_notes: string | null;
@@ -96,6 +97,9 @@ export interface UpdateConditionRecordInput {
   status_in_record?: ConditionStatus;
   source_anchor?: string | null;
   is_user_verified?: boolean;
+  /** Correcting a proposal before it is materialised. */
+  proposed_name?: string | null;
+  proposed_icd_code?: string | null;
 }
 
 // ============================================================================

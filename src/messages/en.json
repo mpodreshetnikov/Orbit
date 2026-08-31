@@ -1220,7 +1220,9 @@
     "viewCheckup": "View checkup",
     "proposalsSkipped": "{count} condition proposal(s) could not be added to the chart and were left for review",
     "proposal": "Proposed",
-    "proposalTitle": "Created in the chart when you activate this record"
+    "proposalTitle": "Created in the chart when you activate this record",
+    "proposalsNotLoaded": "Conditions are still loading — try again in a moment",
+    "proposalsFailed": "Could not add the proposed conditions to the chart; the record was left in review"
   },
   "checkups": {
     "navTitle": "Checkups",
