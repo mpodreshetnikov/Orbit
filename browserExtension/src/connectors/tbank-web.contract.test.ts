@@ -316,6 +316,19 @@ const OPERATION_DETAIL_PATH = "/api/common/v1/operation";
 const SHOPPING_RECEIPT_PATH = "/api/common/v1/shopping_receipt";
 const TRANCHE_OFFERS_PATH = "/api/common/v1/tranche_offers";
 
+/** An identifier the bank sends as a number on some operations and a string on others. */
+const hasIdentifier = (value: unknown): boolean =>
+  (typeof value === "number" && Number.isFinite(value)) || hasText(value);
+
+const hasTerminal = (operation: Record<string, unknown>): boolean =>
+  hasIdentifier(operation.posId) ||
+  hasIdentifier(operation.pointOfSaleId) ||
+  hasIdentifier(operation.typeSerno) ||
+  (Array.isArray(operation.locations) && operation.locations.length > 0);
+
+const pointOfSaleOf = (row: Record<string, unknown>) =>
+  asRecord(asRecord(row.raw_payload)?.point_of_sale);
+
 const operationOf = (record: Record<string, unknown>) => asRecord(record.operation) ?? {};
 const brandOf = (record: Record<string, unknown>) => asRecord(operationOf(record).brand);
 const sourceBrandOf = (row: Record<string, unknown>) => asRecord(row.source_brand);
@@ -420,6 +433,22 @@ const ENRICHED_SURFACES: EnrichedSurface[] = [
     derivedFrom: TRANCHE_OFFERS_PATH,
     recorded: (record) => asRecord(record.trancheOffers) !== null,
     mapped: (row) => asRecord(asRecord(row.raw_payload)?.tranche_offers) !== null,
+  },
+  {
+    // The point of sale is read out of the list rather than fetched, so `point_of_sales` is not
+    // its endpoint — `operations` is, and the recording always has that. Scrubbing turns the
+    // terminal identifiers into "REDACTED", which is why this checks that they arrived at all
+    // and not what they say.
+    name: "raw_payload.point_of_sale",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record) => hasTerminal(operationOf(record)),
+    mapped: (row) => pointOfSaleOf(row) !== null,
+  },
+  {
+    name: "raw_payload.point_of_sale.pos_id",
+    derivedFrom: OPERATIONS_PATH,
+    recorded: (record) => hasIdentifier(operationOf(record).posId),
+    mapped: (row) => hasText(pointOfSaleOf(row)?.pos_id),
   },
 ];
 

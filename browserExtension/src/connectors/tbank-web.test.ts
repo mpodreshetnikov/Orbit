@@ -298,8 +298,10 @@ describe("tbank-web connector", () => {
       });
 
       expect(fetchCalls.filter((url) => url.includes("/shopping_receipt"))).toHaveLength(1);
-      expect(fetchCalls.filter((url) => url.includes("/api/common/v1/operation?"))).toHaveLength(1);
       expect(fetchCalls.filter((url) => url.includes("/tranche_offers"))).toHaveLength(1);
+      // Never, for any operation: `/api/common/v1/operation` is not a request type the bank has,
+      // so the skip this test is about is no longer what stops the call — nothing issues it.
+      expect(fetchCalls.filter((url) => url.includes("/api/common/v1/operation?"))).toHaveLength(0);
       const records = (result.operation_records ?? []) as Array<Record<string, unknown>>;
       expect(records).toHaveLength(2);
       expect(records[0]?.shoppingReceiptMeta).toMatchObject({
@@ -433,6 +435,93 @@ describe("tbank-web connector", () => {
     expect((row?.raw_payload as Record<string, unknown>)?.operation_detail).toBeTruthy();
     expect((row?.raw_payload as Record<string, unknown>)?.shopping_receipt).toBeTruthy();
     expect((row?.raw_payload as Record<string, unknown>)?.all_details_captured).toBe(true);
+  });
+
+  it("parses the point of sale out of the operations list", () => {
+    // Everything here comes from the list response. The bank's own card adds a `point_of_sales`
+    // request on top, but the one recorded response from that endpoint is an empty payload, so
+    // the connector reads the terminal out of the operation instead of asking for it.
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "pos-1",
+          operationTime: { milliseconds: 1772680882000 },
+          amount: { value: 349, currency: { code: 643, name: "RUB", strCode: "RUB" } },
+          type: "Debit",
+          description: "Самокат",
+          posId: 30653366,
+          typeSerno: "991",
+          pointOfSaleId: 41405565,
+          merchant: {
+            name: "SAMOKAT",
+            id: "551000348027",
+            region: { country: "RUS", city: "SANKT-PETERBU" },
+          },
+          locations: [],
+        },
+      },
+      { extractionMethod: "api" },
+    );
+
+    expect((row?.raw_payload as Record<string, unknown>)?.point_of_sale).toEqual({
+      pos_id: "30653366",
+      point_of_sale_id: "41405565",
+      type_serno: "991",
+      merchant_id: "551000348027",
+      merchant_name: "SAMOKAT",
+      country: "RUS",
+      city: "SANKT-PETERBU",
+      location_count: 0,
+    });
+    // The acquirer's merchant record and the display title are different strings, and the row
+    // keeps using the display one.
+    expect(row?.merchant_name).toBe("Самокат");
+  });
+
+  it("reports no point of sale when the operation went through no terminal", () => {
+    // A transfer has a counterparty and no terminal. `merchant_name` on the row already carries
+    // the counterparty, so a point-of-sale object built from it would be an invention.
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "no-pos-1",
+          operationTime: { milliseconds: 1772680882000 },
+          amount: { value: 1000, currency: { code: 643, name: "RUB", strCode: "RUB" } },
+          type: "Credit",
+          description: "Ivan I.",
+          merchant: { name: "Ivan I.", id: "person-1" },
+          locations: [],
+        },
+      },
+      { extractionMethod: "api" },
+    );
+
+    expect((row?.raw_payload as Record<string, unknown>)?.point_of_sale).toBeNull();
+  });
+
+  it("counts the locations the bank filled in without inventing their shape", () => {
+    // Empty in every operation of the recorded cassette. The count is the signal that says when
+    // that stops being true, and the array itself stays in `raw_payload.operation`.
+    const row = __test__.mapOperationRecordToRow(
+      {
+        operation: {
+          id: "pos-located",
+          operationTime: { milliseconds: 1772680882000 },
+          amount: { value: 500, currency: { code: 643, name: "RUB", strCode: "RUB" } },
+          type: "Debit",
+          description: "Shop",
+          locations: [{ address: "Nevsky 1" }, { address: "Nevsky 2" }],
+        },
+      },
+      { extractionMethod: "api" },
+    );
+
+    const pointOfSale = (row?.raw_payload as Record<string, unknown>)?.point_of_sale as Record<
+      string,
+      unknown
+    >;
+    expect(pointOfSale?.location_count).toBe(2);
+    expect(pointOfSale?.pos_id).toBeNull();
   });
 
   it("drops bank-native source brands for internal transfer operations", () => {

@@ -402,6 +402,7 @@ function mapOperationRecordToRowWithReason(
   const postedAt = new Date(postedAtMs).toISOString();
   const sourceBrand = extractSourceBrand(operation);
   const sourceCategory = extractSourceCategory(operation);
+  const pointOfSale = extractPointOfSale(operation);
   const operationIconUrl = extractAbsoluteUrl(operation.icon);
   const allDetailsCaptured =
     !shoppingReceiptMeta.expected || shoppingReceiptMeta.receipt_enrichment_status === "ok";
@@ -441,6 +442,7 @@ function mapOperationRecordToRowWithReason(
         extraction_method: options.extractionMethod,
         all_details_captured: allDetailsCaptured,
         account_hint: accountHint,
+        point_of_sale: pointOfSale,
         operation,
         operation_detail: operationDetail,
         shopping_receipt: shoppingReceipt,
@@ -509,6 +511,61 @@ function extractSourceBrand(operation: JsonMap): JsonMap | null {
     logo_url: extractAbsoluteUrl(brand.logo) ?? extractAbsoluteUrl(brand.fileLink),
     base_color: normalizeText(brand.baseColor),
     base_text_color: normalizeText(brand.baseTextColor),
+  };
+}
+
+/**
+ * The point of sale, out of the operations list.
+ *
+ * The bank's own operation card is built from three things: the list response, `shopping_receipt`
+ * and `point_of_sales`. The third one is the only piece the connector does not ask for, and the
+ * reason is that everything it would identify is already in the list — `posId`, `pointOfSaleId`,
+ * `typeSerno`, the acquirer's `merchant` record and its region — while the one recorded response
+ * from that endpoint is `resultCode: OK` with an empty payload. Asking would cost one request per
+ * point of sale against the rate limit this whole import is built to stay inside, and nothing in
+ * the recording says what it would buy. T-260829-g7i carries the evidence; the note there is what
+ * to reopen if a card ever shows a shop address the list does not have.
+ *
+ * So this is a normalisation, not an enrichment: the fields exist on every operation the bank
+ * routed through a terminal, and the point of naming them here is that consumers read
+ * `raw_payload.point_of_sale` instead of digging through the bank's own shape, and that the
+ * contract test can hold the mapping to the recorded cassette.
+ *
+ * `merchant_name` is not the row's `merchant_name`. The row's is the display title, which prefers
+ * the operation's `description` ("Самокат"); this one is the acquirer's merchant record as the
+ * terminal reports it ("SAMOKAT"), and the two disagree often enough to be worth keeping apart.
+ *
+ * `locations` is passed through as a count rather than a shape. It is an array on every operation
+ * in the recording and empty in every one of them, so there is no observed shape to normalise and
+ * inventing one would be the same guess that put a dead endpoint in this file. The count is the
+ * signal that the guess is finally worth making; the array itself stays in `raw_payload.operation`.
+ */
+function extractPointOfSale(operation: JsonMap): JsonMap | null {
+  const merchant = asObject(operation.merchant);
+  const region = asObject(merchant?.region);
+  const posId = normalizeIdentifier(operation.posId);
+  const pointOfSaleId = normalizeIdentifier(operation.pointOfSaleId);
+  const typeSerno = normalizeIdentifier(operation.typeSerno);
+  const merchantId = normalizeIdentifier(merchant?.id);
+  const merchantName = normalizeText(merchant?.name);
+  const country = normalizeText(region?.country);
+  const city = normalizeText(region?.city);
+  const locationCount = Array.isArray(operation.locations) ? operation.locations.length : 0;
+
+  // A merchant is not a point of sale. Only the three terminal identifiers — or a location the
+  // bank actually filled in — say that this operation went through one; without them there is a
+  // counterparty and nothing more, which is what `merchant_name` on the row is already for.
+  if (!posId && !pointOfSaleId && !typeSerno && locationCount === 0) return null;
+
+  return {
+    pos_id: posId,
+    point_of_sale_id: pointOfSaleId,
+    type_serno: typeSerno,
+    merchant_id: merchantId,
+    merchant_name: merchantName,
+    country,
+    city,
+    location_count: locationCount,
   };
 }
 
@@ -1353,7 +1410,20 @@ function extractOperationsInPage(input: {
     try {
       const operationsApiUrl =
         discoverOperationsApiUrl() || "https://www.tbank.ru/api/common/v1/operations";
-      const detailApiUrl = discoverOperationDetailApiUrl();
+      // `/api/common/v1/operation` is not a request type the bank has: it answers every call
+      // with HTTP 200 and `INVALID_REQUEST_DATA` / "Неизвестный тип запроса operation", which is
+      // a routing error and so cannot be account-specific. A HAR of the operations page confirms
+      // the other side of it — the web app issues no such request, and an operation's card is
+      // built from the list response plus `shopping_receipt` and `point_of_sales`. So there is
+      // nothing to restore here and the enrichment is removed rather than repaired; T-260829-g7i
+      // carries the evidence. `operationDetail` stays on the record shape, always null, because
+      // it reaches `raw_payload.operation_detail` on stored rows and the mapper's comment chain
+      // already falls through it to `operation.message`.
+      //
+      // The receipt is fetched (`scheduleShoppingReceipt`, below) and the point of sale is read
+      // out of the list rather than fetched — see `extractPointOfSale` for why the third request
+      // buys nothing that is not already here.
+      const detailApiUrl: string | null = null;
       const trancheOffersApiUrl = discoverTrancheOffersApiUrl();
       debugMeta.discovered_endpoints.operations_api = operationsApiUrl;
       debugMeta.discovered_endpoints.operation_detail_api = detailApiUrl;
@@ -1605,7 +1675,7 @@ function extractOperationsInPage(input: {
             };
           } else {
             [operationDetail, receiptResult, trancheOffers] = await Promise.all([
-              tryFetchOperationDetail(operation, detailApiUrl, sessionId),
+              Promise.resolve<JsonMap | null>(null),
               scheduleShoppingReceipt(operation),
               tryFetchTrancheOffers(operation, trancheOffersApiUrl, sessionId, trancheBaseParams),
             ]);
@@ -1803,18 +1873,6 @@ function extractOperationsInPage(input: {
         return false;
       }
     });
-  }
-
-  function discoverOperationDetailApiUrl(): string | null {
-    const resources = performance.getEntriesByType("resource");
-    const candidates = resources
-      .map((entry) => (entry as PerformanceResourceTiming).name)
-      .filter((name): name is string => typeof name === "string");
-    return findLatestResourceUrlByPath(
-      candidates,
-      "/api/common/v1/operation",
-      window.location.origin,
-    );
   }
 
   function discoverTrancheOffersApiUrl(): string | null {
@@ -2221,36 +2279,6 @@ function extractOperationsInPage(input: {
     }
   }
 
-  async function tryFetchOperationDetail(
-    operation: JsonMap,
-    detailApiUrl: string | null,
-    sessionId: string | null,
-  ): Promise<JsonMap | null> {
-    if (!detailApiUrl || !sessionId) return null;
-
-    const operationId =
-      text(operation.authorizationId) ||
-      text(asObj(operation.operationId)?.value) ||
-      text(operation.id);
-    if (!operationId) return null;
-
-    let url: URL;
-    try {
-      url = new URL(detailApiUrl, window.location.origin);
-    } catch {
-      return null;
-    }
-
-    url.searchParams.set("operationId", operationId);
-    url.searchParams.set("sessionid", sessionId);
-    const response = await fetch(url.toString(), {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-
-    return asObj(await response.json().catch(() => null));
-  }
-
   function parseTrancheBaseParams(trancheApiUrl: string | null): {
     appName: string;
     appVersion: string;
@@ -2568,6 +2596,16 @@ function normalizeText(value: unknown): string | null {
     .replace(/\s+/g, " ")
     .trim();
   return normalized || null;
+}
+
+/**
+ * An identifier the bank may send either way. `posId` and `typeSerno` arrive as numbers on some
+ * operations and as strings on others, and a scrubbed cassette turns both into "REDACTED"; all
+ * three have to come out as the same kind of value.
+ */
+function normalizeIdentifier(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return normalizeText(value);
 }
 
 function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
