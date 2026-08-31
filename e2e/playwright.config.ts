@@ -18,6 +18,13 @@ export default defineConfig({
   use: {
     baseURL,
     headless: true,
+    // Normally unset: Playwright uses the browser it downloaded for its own version. A host
+    // that ships a Chromium of a different build — an agent container with a pre-installed
+    // one, where `playwright install` is refused — sets this rather than having the suite fail
+    // on a missing `chrome-headless-shell`. CI leaves it unset and is unaffected.
+    launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
+      : undefined,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

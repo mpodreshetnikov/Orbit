@@ -168,6 +168,10 @@ test-unit-coverage:
 test-e2e:
   node scripts/just/run-e2e.cjs
 
+# Run the e2e suite against the Docker-only stack instead of the Supabase CLI.
+test-e2e-local *ARGS:
+  ORBIT_LOCAL_API=docker node scripts/just/run-e2e.cjs {{ARGS}}
+
 # Score extraction quality against the fixture corpus (replays recordings; --live to call the model).
 test-extraction *args:
   npx tsx scripts/extraction-eval/run.ts {{args}}
@@ -221,6 +225,23 @@ supabase-docker-test *args:
 # Run DB lint against the Docker-only local DB.
 supabase-docker-lint:
   node scripts/just/db-local-docker.cjs lint
+
+# Bring up the API layer on the Docker-only DB: PostgREST, GoTrue, the edge functions and a
+# gateway in front of them. This is what `supabase start` would have served.
+supabase-docker-api-up:
+  node scripts/just/api-local-docker.cjs up
+
+# Prove that lane answers a real round trip: GoTrue token -> edge function -> PostgREST.
+supabase-docker-api-smoke:
+  node scripts/just/api-local-docker.cjs smoke
+
+# Print that lane's environment in the same shape as `supabase status -o env`.
+supabase-docker-api-env:
+  node scripts/just/api-local-docker.cjs env
+
+# Stop the API layer. The database stays up; `supabase-docker-down` stops that.
+supabase-docker-api-down:
+  node scripts/just/api-local-docker.cjs down
 
 # Run the money data-repair migrations against rows in their pre-repair shape (needs Docker).
 db-data-migration-check:
