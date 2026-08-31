@@ -6,7 +6,6 @@ import {
 } from "./import-runner.js";
 import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
-import extensionManifest from "../../manifest.json";
 
 export interface BackgroundMessage {
   type: string;
@@ -48,8 +47,29 @@ export interface BackgroundRouterContext {
 }
 
 const activeImportRunsBySessionId = new Set<string>();
-const EXTENSION_VERSION =
-  typeof extensionManifest.version === "string" ? extensionManifest.version : "0.0.0";
+/**
+ * The extension's own version, asked of the runtime rather than imported.
+ *
+ * This used to be `import extensionManifest from "../../manifest.json"`, and that one line
+ * stopped the background service worker from starting at all. Two things were wrong with it.
+ * A JSON import in a browser needs `with { type: "json" }`; without it the file is fetched and
+ * parsed as JavaScript, and a manifest is not valid JavaScript, so the module threw while it
+ * was being evaluated — before any statement of the background ran, which is why nothing was
+ * logged and no listener was ever registered. And the path pointed outside the packaged
+ * extension: from `dist/core/` it resolves to `browserExtension/manifest.json`, while the
+ * extension's root is `dist/`, so the file it named was not in the package at all.
+ *
+ * `chrome.runtime.getManifest()` is what the platform offers for this, needs no bundler step,
+ * and cannot point outside the extension.
+ */
+function resolveExtensionVersion(): string {
+  try {
+    const version = chrome?.runtime?.getManifest?.()?.version;
+    return typeof version === "string" && version ? version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
 type ActiveImportRunSnapshot = {
   running: boolean;
   phase: string | null;
@@ -238,7 +258,7 @@ export async function routeBackgroundMessage(
     return {
       ok: true,
       extension_id: resolveRuntimeExtensionId(),
-      extension_version: EXTENSION_VERSION,
+      extension_version: resolveExtensionVersion(),
     };
   }
 
