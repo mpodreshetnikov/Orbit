@@ -59,7 +59,12 @@ const JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 const FUNCTIONS_ENTRY = "supabase/functions/_local/serve.ts";
 const GATEWAY_ENTRY = "scripts/local-api/gateway.cjs";
 
-const PID_FILE = path.join(repoRoot, "node_modules", ".cache", "orbit-local-api.json");
+const PID_FILE = path.join(
+  repoRoot,
+  "node_modules",
+  ".cache",
+  `orbit-local-api-${DB_CONTAINER}.json`,
+);
 
 function log(message) {
   console.log(`[api-local-docker] ${message}`);
@@ -141,6 +146,37 @@ function resolveDeno() {
   );
 }
 
+/** The `docker run` arguments for PostgREST, named so the bind can be asserted, not just meant. */
+function restContainerArgs() {
+  return [
+    "run",
+    "-d",
+    "--name",
+    REST_CONTAINER,
+    "--network",
+    "host",
+    "-e",
+    `PGRST_DB_URI=postgresql://authenticator:postgres@127.0.0.1:${DB_PORT}/postgres`,
+    "-e",
+    "PGRST_DB_SCHEMAS=public,graphql_public",
+    "-e",
+    "PGRST_DB_ANON_ROLE=anon",
+    "-e",
+    `PGRST_JWT_SECRET=${JWT_SECRET}`,
+    "-e",
+    "PGRST_DB_USE_LEGACY_GUCS=false",
+    "-e",
+    `PGRST_SERVER_PORT=${REST_PORT}`,
+    "-e",
+    // Loopback, not PostgREST's wildcard default. The container runs with host networking, so
+    // a wildcard listener is reachable from anywhere that can reach this machine — and this
+    // lane signs its keys with a secret published in this repository, so anyone who got there
+    // could mint a service_role token. The gateway is the only way in, and it is loopback too.
+    "PGRST_SERVER_HOST=127.0.0.1",
+    REST_IMAGE,
+  ];
+}
+
 function startRest() {
   if (isRunning(REST_CONTAINER)) {
     log(`${REST_CONTAINER} already running`);
@@ -148,30 +184,57 @@ function startRest() {
   }
   docker(["rm", "-f", REST_CONTAINER]);
   log(`starting postgrest on ${REST_PORT}`);
-  dockerOrThrow(
-    [
-      "run",
-      "-d",
-      "--name",
-      REST_CONTAINER,
-      "--network",
-      "host",
-      "-e",
-      `PGRST_DB_URI=postgresql://authenticator:postgres@127.0.0.1:${DB_PORT}/postgres`,
-      "-e",
-      "PGRST_DB_SCHEMAS=public,graphql_public",
-      "-e",
-      "PGRST_DB_ANON_ROLE=anon",
-      "-e",
-      `PGRST_JWT_SECRET=${JWT_SECRET}`,
-      "-e",
-      "PGRST_DB_USE_LEGACY_GUCS=false",
-      "-e",
-      `PGRST_SERVER_PORT=${REST_PORT}`,
-      REST_IMAGE,
-    ],
-    `starting ${REST_CONTAINER}`,
-  );
+  dockerOrThrow(restContainerArgs(), `starting ${REST_CONTAINER}`);
+}
+
+/** The same for GoTrue. */
+function authContainerArgs() {
+  return [
+    "run",
+    "-d",
+    "--name",
+    AUTH_CONTAINER,
+    "--network",
+    "host",
+    "-e",
+    "GOTRUE_DB_DRIVER=postgres",
+    "-e",
+    `GOTRUE_DB_DATABASE_URL=postgresql://supabase_auth_admin:postgres@127.0.0.1:${DB_PORT}/postgres`,
+    "-e",
+    `GOTRUE_SITE_URL=${process.env.E2E_BASE_URL ?? "http://localhost:3100"}`,
+    "-e",
+    // Loopback, for the same reason as PostgREST above: host networking plus a wildcard
+    // listener would publish the admin API of an auth service whose signing secret is
+    // in this repository.
+    "GOTRUE_API_HOST=127.0.0.1",
+    "-e",
+    `PORT=${AUTH_PORT}`,
+    "-e",
+    `API_EXTERNAL_URL=http://127.0.0.1:${GATEWAY_PORT}/auth/v1`,
+    "-e",
+    `GOTRUE_JWT_SECRET=${JWT_SECRET}`,
+    "-e",
+    "GOTRUE_JWT_EXP=3600",
+    "-e",
+    "GOTRUE_JWT_AUD=authenticated",
+    "-e",
+    "GOTRUE_JWT_ADMIN_ROLES=service_role",
+    "-e",
+    // Deprecated by GoTrue and still load-bearing: it is what a new user's `role` is set to,
+    // and `role` is the claim PostgREST runs `set role` on. Without it every user this lane
+    // creates gets an empty role, authenticates perfectly, and is then refused by PostgREST
+    // with `role "" does not exist` — which surfaces three layers up as "Access Not Granted".
+    "GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated",
+    "-e",
+    "GOTRUE_DISABLE_SIGNUP=false",
+    // No mail server in this lane, so a sign-up that waited for confirmation would hang a
+    // test on a link nobody can click.
+    "-e",
+    "GOTRUE_MAILER_AUTOCONFIRM=true",
+    "-e",
+    "GOTRUE_EXTERNAL_EMAIL_ENABLED=true",
+    AUTH_IMAGE,
+  ];
 }
 
 function startAuth() {
@@ -181,52 +244,7 @@ function startAuth() {
   }
   docker(["rm", "-f", AUTH_CONTAINER]);
   log(`starting gotrue on ${AUTH_PORT}`);
-  dockerOrThrow(
-    [
-      "run",
-      "-d",
-      "--name",
-      AUTH_CONTAINER,
-      "--network",
-      "host",
-      "-e",
-      "GOTRUE_DB_DRIVER=postgres",
-      "-e",
-      `GOTRUE_DB_DATABASE_URL=postgresql://supabase_auth_admin:postgres@127.0.0.1:${DB_PORT}/postgres`,
-      "-e",
-      `GOTRUE_SITE_URL=${process.env.E2E_BASE_URL ?? "http://localhost:3100"}`,
-      "-e",
-      "GOTRUE_API_HOST=0.0.0.0",
-      "-e",
-      `PORT=${AUTH_PORT}`,
-      "-e",
-      `API_EXTERNAL_URL=http://127.0.0.1:${GATEWAY_PORT}/auth/v1`,
-      "-e",
-      `GOTRUE_JWT_SECRET=${JWT_SECRET}`,
-      "-e",
-      "GOTRUE_JWT_EXP=3600",
-      "-e",
-      "GOTRUE_JWT_AUD=authenticated",
-      "-e",
-      "GOTRUE_JWT_ADMIN_ROLES=service_role",
-      "-e",
-      // Deprecated by GoTrue and still load-bearing: it is what a new user's `role` is set to,
-      // and `role` is the claim PostgREST runs `set role` on. Without it every user this lane
-      // creates gets an empty role, authenticates perfectly, and is then refused by PostgREST
-      // with `role "" does not exist` — which surfaces three layers up as "Access Not Granted".
-      "GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated",
-      "-e",
-      "GOTRUE_DISABLE_SIGNUP=false",
-      // No mail server in this lane, so a sign-up that waited for confirmation would hang a
-      // test on a link nobody can click.
-      "-e",
-      "GOTRUE_MAILER_AUTOCONFIRM=true",
-      "-e",
-      "GOTRUE_EXTERNAL_EMAIL_ENABLED=true",
-      AUTH_IMAGE,
-    ],
-    `starting ${AUTH_CONTAINER}`,
-  );
+  dockerOrThrow(authContainerArgs(), `starting ${AUTH_CONTAINER}`);
 }
 
 function spawnDetached(command, args, env, logPath) {
@@ -581,4 +599,13 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { envLines, signKey, keys, JWT_SECRET, GATEWAY_PORT };
+module.exports = {
+  envLines,
+  signKey,
+  keys,
+  restContainerArgs,
+  authContainerArgs,
+  PID_FILE,
+  JWT_SECRET,
+  GATEWAY_PORT,
+};
