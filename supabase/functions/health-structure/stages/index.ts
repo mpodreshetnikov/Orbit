@@ -93,7 +93,8 @@ export async function runStagedParse(
     patient,
     stageContext(deps, deps.models?.reconcile ?? deps.defaultModel),
   );
-  if (!hasNothingToReconcile(patient)) stagesRun.push("reconcile");
+  const reconciled = !hasNothingToReconcile(patient);
+  if (reconciled) stagesRun.push("reconcile");
 
   const structured: StructuredDataWithEntities = {
     ...classify.value,
@@ -105,7 +106,13 @@ export async function runStagedParse(
 
   return {
     structured,
-    usage: sumUsage([classify.usage, extract.usage, reconcile.usage]),
+    // Only the stages that ran: a skipped reconcile made no call, so its placeholder must not
+    // make the total read as unknown.
+    usage: sumUsage(
+      reconciled
+        ? [classify.usage, extract.usage, reconcile.usage]
+        : [classify.usage, extract.usage],
+    ),
     rejected: [...classify.rejected, ...extract.rejected, ...reconcile.rejected],
     stagesRun,
   };

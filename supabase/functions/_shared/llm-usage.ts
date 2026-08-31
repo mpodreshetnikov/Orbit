@@ -38,16 +38,30 @@ export function parseLlmUsage(responseBody: unknown): LlmUsage {
   };
 }
 
+/**
+ * Total the cost of calls that were actually made.
+ *
+ * One unknown component makes that component of the total unknown, because a total is read as
+ * the whole cost: summing only the parts that reported would publish a confident number that is
+ * quietly too low. Pass in the calls that happened and nothing else -- a stage that was skipped
+ * has no cost to be unknown about, and including its placeholder would poison the total.
+ */
 export function sumLlmUsage(parts: LlmUsage[]): LlmUsage {
-  let prompt: number | null = null;
-  let completion: number | null = null;
-  let cost: number | null = null;
-  for (const part of parts) {
-    if (part.promptTokens !== null) prompt = (prompt ?? 0) + part.promptTokens;
-    if (part.completionTokens !== null) completion = (completion ?? 0) + part.completionTokens;
-    if (part.costUsd !== null) cost = (cost ?? 0) + part.costUsd;
-  }
-  return { promptTokens: prompt, completionTokens: completion, costUsd: cost };
+  if (parts.length === 0) return emptyLlmUsage();
+  const total = (pick: (usage: LlmUsage) => number | null): number | null => {
+    let sum = 0;
+    for (const part of parts) {
+      const value = pick(part);
+      if (value === null) return null;
+      sum += value;
+    }
+    return sum;
+  };
+  return {
+    promptTokens: total((usage) => usage.promptTokens),
+    completionTokens: total((usage) => usage.completionTokens),
+    costUsd: total((usage) => usage.costUsd),
+  };
 }
 
 /**

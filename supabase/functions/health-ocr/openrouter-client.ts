@@ -1,5 +1,5 @@
 import { extractContentText, parseJsonObject } from "../_shared/llm-json.ts";
-import { type LlmUsage, parseLlmUsage } from "../_shared/llm-usage.ts";
+import { type LlmUsage, parseLlmUsage, sumLlmUsage } from "../_shared/llm-usage.ts";
 import {
   DEFAULT_MAX_ATTEMPTS,
   isRetryableStatus,
@@ -23,9 +23,8 @@ export interface OcrResult {
    */
   truncated: boolean;
   /**
-   * What the provider charged for the attempt that produced this text. A retried page reports
-   * the successful attempt only, so this is the cost of the transcription returned, not of every
-   * attempt made.
+   * What the provider charged for this page, across every attempt that reached the model --
+   * a truncated answer is a billed call even though it is thrown away and retried.
    */
   usage: LlmUsage;
 }
@@ -138,6 +137,10 @@ export function createOpenRouterOcrClient(
       // Built before the retry loop so an unsupported MIME type fails once rather than three times.
       const attachmentPart = buildAttachmentContentPart(attachment);
       const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+      // Every attempt that reached the model was billed, the truncated ones that are retried for
+      // a larger budget included. Reporting only the last would understate exactly the long
+      // documents that retry most.
+      const billed: LlmUsage[] = [];
 
       const outcome = await withLlmRetry(
         async (attempt) => {
@@ -212,11 +215,12 @@ export function createOpenRouterOcrClient(
             const ocrText = typeof parsed.ocr_text === "string" ? parsed.ocr_text : "";
             const suggestedTitle =
               typeof parsed.suggested_title === "string" ? parsed.suggested_title.trim() : "";
+            billed.push(parseLlmUsage(payload));
             const result: OcrResult = {
               ocr_text: ocrText,
               suggested_title: suggestedTitle || DEFAULT_FALLBACK_TITLE,
               truncated: choice?.finish_reason === "length",
-              usage: parseLlmUsage(payload),
+              usage: sumLlmUsage(billed),
             };
 
             // Retried for the larger budget, not because the answer was malformed. Once the

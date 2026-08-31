@@ -551,3 +551,44 @@ Deno.test("createOpenRouterOcrClient reports unknown cost as null, not zero", as
   assertEquals(result.usage.promptTokens, null);
   assertEquals(result.usage.costUsd, null);
 });
+
+Deno.test("createOpenRouterOcrClient counts the truncated attempt it paid for", async () => {
+  let call = 0;
+  const client = createOpenRouterOcrClient({
+    fetchFn: async () => {
+      call += 1;
+      const truncated = call === 1;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: truncated ? "length" : "stop",
+              message: {
+                content: JSON.stringify({
+                  ocr_text: truncated ? "half a page" : "the whole page",
+                  suggested_title: "t",
+                }),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 1000, completion_tokens: 500, cost: 0.01 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    },
+    apiKey: "key",
+    referer: "https://example.com",
+    ...NO_WAIT,
+  });
+
+  const result = await client.callVisionOcrSingle(
+    { url: "data:image/png;base64,AAA", mimeType: "image/png" },
+    { requestTitle: false },
+  );
+
+  assertEquals(result.ocr_text, "the whole page");
+  // Both attempts reached the model, so both were billed.
+  assertEquals(result.usage.promptTokens, 2000);
+  assertEquals(result.usage.completionTokens, 1000);
+  assertEquals(result.usage.costUsd, 0.02);
+});

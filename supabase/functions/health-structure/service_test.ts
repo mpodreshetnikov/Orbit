@@ -677,3 +677,46 @@ Deno.test(
     assertEquals(result.payload.error, "OpenRouter timeout");
   },
 );
+
+Deno.test(
+  "runHealthStructureService does not stamp a record for an unauthenticated caller",
+  async () => {
+    const { repository, state } = createRepositoryMock({ user: null });
+
+    // health-structure runs with verify_jwt = false and writes with the service-role client, so a
+    // caller who merely knows a record id must not be able to reach the failure write.
+    const result = await runHealthStructureService(
+      { authToken: "not-a-token", recordId: "record-1" },
+      {
+        repository,
+        parseStructuredData: async () => parsed(structuredData),
+        lookupIcdCode: async () => null,
+      },
+    );
+
+    assertEquals(result.status, 400);
+    assertEquals(
+      state.updatedRecords.some((update) => "structure_error" in update.patch),
+      false,
+    );
+  },
+);
+
+Deno.test("runHealthStructureService does not stamp a record it could not find", async () => {
+  const { repository, state } = createRepositoryMock({ record: null });
+
+  const result = await runHealthStructureService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      parseStructuredData: async () => parsed(structuredData),
+      lookupIcdCode: async () => null,
+    },
+  );
+
+  assertEquals(result.status, 400);
+  assertEquals(
+    state.updatedRecords.some((update) => "structure_error" in update.patch),
+    false,
+  );
+});

@@ -203,6 +203,10 @@ export async function runHealthStructureService(
 ): Promise<ServiceResult> {
   const telemetry = deps.telemetry;
   const serviceSpan = telemetry?.startSpan("edge.health_structure.service");
+  // The failure write below uses the service-role client and this function runs with
+  // verify_jwt = false, so it must not be reachable before the caller has been authenticated
+  // and the record resolved -- otherwise anyone who guesses a record id could stamp it.
+  let mayRecordFailure = false;
   try {
     telemetry?.info("health_structure_service_started", {
       has_record_id: Boolean(input.recordId),
@@ -233,6 +237,7 @@ export async function runHealthStructureService(
     if (!record) throw new Error("Record not found or access denied");
     const personId = asString(record.person_id);
     if (!personId) throw new Error("Record is missing person_id");
+    mayRecordFailure = true;
     const ocrText = asString(record.ocr_text);
     if (!ocrText) throw new Error("No OCR text found for this record. Run health-ocr first.");
     await recordSpan?.end({
@@ -425,10 +430,10 @@ export async function runHealthStructureService(
       record_id: input.recordId ?? "missing",
       error_message: message,
     });
-    // Durable trace of the failure. Best-effort on purpose: the original error is what the
-    // caller must see, so a record that cannot be written (missing id, auth refused, the
-    // database itself being the failure) must not replace it with a second one.
-    if (input.recordId) {
+    // Durable trace of the failure, and only for a caller who got past authentication and whose
+    // record was found. Best-effort on purpose: the original error is what the caller must see,
+    // so a record that cannot be written must not replace it with a second one.
+    if (mayRecordFailure && input.recordId) {
       try {
         await deps.repository.updateMedicalRecord(input.recordId, { structure_error: message });
       } catch (writeError) {
