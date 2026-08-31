@@ -145,8 +145,14 @@ jobs:
         # directory with itself and report no additions, in the one run that also deploys. An empty
         # value (workflow_dispatch), or the zero sha of a branch's first push, falls back to
         # origin/main.
+        #
+        # The PR-size gate takes the same base, for the same reasons, and additionally the head
+        # branch name: a pull request run checks out a detached merge commit, where git names no
+        # branch and a `branch` allowlist entry could never match.
         env:
           MIGRATION_ORDER_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          PR_SIZE_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          PR_SIZE_BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
         run: just quality
       - name: Restore Supabase Docker image cache
         if: steps.impact.outputs.dbImpact == 'true'

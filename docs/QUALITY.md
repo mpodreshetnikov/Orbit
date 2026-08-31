@@ -134,6 +134,73 @@ A new migration's timestamp must sort **after** every migration already on the b
 - `supabase/migrations/.out-of-order-allowlist` is the reviewed exception for ordering only. Each entry is `<14-digit version> # <why it is safe against the newer schema>`; the rationale is required and an entry without one fails the check.
 - A duplicate timestamp is never allowlistable. The remote migration history is keyed by version, so a second file carrying one another migration already uses cannot be recorded as its own migration and its SQL silently never runs. Give it a timestamp nothing else uses.
 
+## Automated Review Policy
+
+Codex reviews a pull request **once, when it is opened**, and does not look again unless asked with an `@codex review` comment. Pushing afterwards reviews nothing: a branch can change completely between the opening review and the merge, and the reviewer will never see it.
+
+So the failure mode is not spending rounds — it is merging code no reviewer read. On PR #20, under the previous `New commits` trigger, twenty-one rounds went by and two thirds of the findings were one defect class re-found in a new field. Under this trigger the same branch would have had **one** review, of its first commit, and the twenty rounds' worth of real findings — including four `P1`s — would have merged unseen.
+
+A requested review still costs from the allowance the security review draws on, so it is bought deliberately rather than asked for by reflex. These rules say when it is worth buying.
+
+### The reviewed commit is a watermark
+
+The review reads one commit and names it: `Reviewed commit` in the review body, and the `Commit` column of its review summary comment. Everything pushed after that commit is unreviewed.
+
+The question at handoff is therefore never "has this been reviewed" but "has **this head** been reviewed", and the gap between the two is what the rules below measure. Record which commit the review read, so the gap can be measured later by someone who was not there.
+
+### Request another review when any of these holds
+
+Measure the change since the watermark with `review-delta`, which reports the first two:
+
+1. **New surface** — more than **200 reviewable added lines** since the reviewed commit. Below that the sample here has yielded nothing: #19's entire 194-line change drew no findings, while #21's 651 drew eight.
+2. **A sensitive surface, at any size** — migrations, `supabase/db`, edge functions, the OAuth and auth routes, the workflows that deploy and hold secrets, the connector that scrapes and scrubs upstream data, and recorded fixtures. Each is on the list because a reviewer caught something there, or because the failure is unrecoverable once merged. Recorded fixtures are on it precisely because they are excluded from the line count: nobody reads them in sequence, which is how #18 put thirteen phone numbers, fourteen counterparty names and ten personal messages into one that the repository's own leak scan had cleared.
+3. **A shape changed** — the fixes since the last review moved the column a value is read from, the order rows are selected in, the key a lookup uses, or a signature other code depends on. No script sees this; it is the class that produced nine of #20's findings and four of its six `P1`s, each one the previous fix leaking into a reader it had not updated.
+
+### Do not request one when
+
+- The change is only the last review's findings, fixed locally and in place.
+- It is only documentation, comments, formatting, or test names.
+- It is only a merge of the base branch with no conflict resolved.
+- Nothing has been pushed since the watermark, or a review is already running or already requested for this head.
+
+A review that reads a change it has already seen returns findings you have already answered, and spends the lane that reads the next branch for leaked data.
+
+### The request budget
+
+**At most two requested reviews beyond the one the pull request opened with.** After the second, hand the pull request to its owner with what is unreviewed, why another pass looked worthwhile, and what it would cost.
+
+The budget is per pull request. Rebasing does not reset it, reopening does not reset it, and a requested review that returned no finding still counts — it was still a review.
+
+### Answer a review by class, not by finding
+
+A finding is one instance of a rule. Fix the rule, everywhere in the change it reaches, before pushing.
+
+- `Bound notes rendered into MCP text responses` is not a defect about notes. It is "every unbounded value rendered into a text response", and it also covers the ingredients, the schedule slots, the units and the intervals. Applying it to notes alone is what turned one rule into seven rounds on #20; date validation took five more the same way.
+- The reviewer names one occurrence because it read one file. After fixing, re-read the whole diff for other occurrences of the same class, and fix those in the same push.
+- Push the whole answer at once, and request any further review only on a finished state. A review asked for mid-fix reads a half-answered branch and spends a round saying so.
+
+Not every finding needs a push, and these cost no round at all — answer them on the thread instead: a finding that is real but not this branch's (record it as a task and say where), a finding whose premise does not hold (say which part, with the evidence), and a finding deliberately not taken (say why). Resolve the threads you addressed either way.
+
+## Reviewable Change Size
+
+A pull request gets one review pass on open, so its size decides how much of it that single pass has to carry. Under the previous `New commits` trigger the same relationship showed up as rounds, which grew superlinearly with the diff — the measurement that set this limit:
+
+| PR  | Files | Added lines | Rounds |
+| --- | ----- | ----------- | ------ |
+| #17 | 3     | 46          | 0      |
+| #19 | 5     | 194         | 0      |
+| #21 | 9     | 651         | 5      |
+| #20 | 11    | 3011        | 21     |
+
+A pull request may add at most **1500 reviewable lines** against its base branch. Reviewable excludes recorded fixtures, lockfiles, generated artifacts and the generated skill mirror — content no reviewer reads line by line, and which would otherwise let a cassette recording fail a check aimed at hand-written code.
+
+- CI enforces the rule with `quality-pr-size`, which runs inside `quality` and compares against the pull request's actual base branch.
+- `.large-change-allowlist` is the reviewed exception. An entry is `path <glob> # <why this content is not reviewable>` or `branch <name> # <why this change cannot be split>`; the rationale is required and an entry without one fails the check.
+- The limit is a backstop, not a guarantee. No number here makes one pass sufficient: 651 lines still took five passes to converge, so a change of any real size outgrows its opening review. What the limit marks is the point above which the unreviewed remainder is too large to compensate for at all. Below it, the compensation is **Automated Review Policy** above — measure the gap, request a second pass when it earns one.
+- It sits well above the change that converged in a handful of passes and well below the one that took twenty-one, rather than just above the former: a limit set close to ordinary well-tested work is a gate somebody turns off.
+- Splitting is no longer automatically cheaper. Under the previous `New commits` trigger, a smaller branch meant fewer rounds; now every pull request costs one opening review, so splitting one change into two spends two. Split when the halves are genuinely separate work, not to get under this number.
+- The rounds column is history rather than a forecast — reviews no longer arrive per push. It is kept because it is the evidence the limit rests on.
+
 ## Change-Type Check Matrix
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.

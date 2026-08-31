@@ -141,10 +141,21 @@ agent-skills-check:
 quality-migration-order *base:
   node scripts/just/check-migration-order.cjs {{ if base == "" { "" } else { "--base " + base } }}
 
-# All static quality checks: skill sync, migration order, format, lint, typecheck (no builds, DB,
-# tests). The skill and migration-order checks run first because they finish in milliseconds, so a
-# drifted skill mirror or a misordered migration is reported before the slow lanes start.
-quality: agent-skills-check quality-migration-order quality-format-check quality-lint-parallel quality-typecheck
+# Fail when a branch adds more reviewable lines against its base than one automated review pass is
+# worth. Defaults to origin/main; pass a ref for a branch that targets something else.
+quality-pr-size *base:
+  node scripts/just/check-pr-size.cjs {{ if base == "" { "" } else { "--base " + base } }}
+
+# Report whether the change made since the last automated review is worth requesting another one.
+# Pass the commit that review read (Codex names it as "Reviewed commit"). Advisory, not a gate.
+review-delta since:
+  node scripts/just/check-review-delta.cjs --since {{ since }}
+
+# All static quality checks: skill sync, migration order, PR size, format, lint, typecheck (no
+# builds, DB, tests). The skill, migration-order and size checks run first because they finish in
+# milliseconds, so a drifted skill mirror, a misordered migration or a branch too large to review
+# is reported before the slow lanes start.
+quality: agent-skills-check quality-migration-order quality-pr-size quality-format-check quality-lint-parallel quality-typecheck
 
 # Run current smoke gate (web production build).
 quality-smoke-build: web-build-production

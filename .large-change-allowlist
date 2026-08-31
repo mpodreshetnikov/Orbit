@@ -1,0 +1,15 @@
+# Exceptions to the reviewable change size limit in docs/QUALITY.md.
+#
+#   path <glob>    # why this content is not reviewable
+#   branch <name>  # why this change cannot be split
+#
+# `*` stops at a slash, `**` crosses them. The rationale is required: a reason nothing checks for
+# is a reason that stops being written. Prefer splitting the branch to allowlisting it -- a `path`
+# entry says the content is not read line by line, and a `branch` entry says a reviewer will read
+# more in one pass than the limit assumes.
+#
+# Repository-layout exclusions -- lockfiles, generated DB artifacts, the generated skill mirror --
+# are in scripts/just/check-pr-size.cjs instead. They are properties of the tree, not exceptions
+# anyone reviewed.
+
+path test/fixtures/** # recorded upstream responses and sample documents, verified by replay rather than by reading
