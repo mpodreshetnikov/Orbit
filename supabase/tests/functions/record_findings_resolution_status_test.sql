@@ -28,6 +28,14 @@ SELECT has_index(
   'resolution_status is indexed for the active-findings read'
 );
 
+INSERT INTO auth.users (id, email, aud, role)
+VALUES (
+  '77777777-1111-0000-0000-000000000000',
+  'resolution-user@example.com',
+  'authenticated',
+  'authenticated'
+);
+
 INSERT INTO public.allowed_users (auth_user_id, email)
 VALUES ('77777777-1111-0000-0000-000000000000', 'resolution-user@example.com');
 
