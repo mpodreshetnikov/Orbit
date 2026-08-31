@@ -176,7 +176,7 @@ export function createSupabaseHealthStructureRepository(
     const { data, error } = await admin
       .from("record_findings")
       .select(
-        "finding_code,finding_type_text,site_code,body_site_text,finding_type_id,body_site_id,size_mm,count,medical_records!inner(person_id,status)",
+        "finding_code,finding_type_text,site_code,body_site_text,finding_type_id,body_site_id,resolution_status,medical_records!inner(person_id,status)",
       )
       .eq("medical_records.person_id", personId)
       .eq("medical_records.status", "active")
@@ -192,9 +192,8 @@ export function createSupabaseHealthStructureRepository(
 
     for (const raw of data as unknown[]) {
       const row = raw as Record<string, unknown>;
-      const sizeMm = typeof row.size_mm === "number" ? row.size_mm : null;
-      const count = typeof row.count === "number" ? row.count : null;
-      if (sizeMm === 0 || count === 0) continue;
+      // A resolution row closes the finding it names; it is not itself an active finding.
+      if (row.resolution_status === "resolved") continue;
 
       const findingCode = normalizeText(row.finding_code);
       const findingTypeText = normalizeText(row.finding_type_text) ?? "Unknown finding";

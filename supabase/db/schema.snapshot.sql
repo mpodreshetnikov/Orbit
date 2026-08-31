@@ -798,7 +798,9 @@ CREATE TABLE "public"."record_findings" (
     "confidence" numeric,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "resolution_status" "text" DEFAULT 'observed'::"text" NOT NULL,
     CONSTRAINT "record_findings_laterality_check" CHECK (("laterality" = ANY (ARRAY['left'::"text", 'right'::"text", 'bilateral'::"text", 'none'::"text"]))),
+    CONSTRAINT "record_findings_resolution_status_check" CHECK (("resolution_status" = ANY (ARRAY['observed'::"text", 'resolved'::"text"]))),
     CONSTRAINT "record_findings_severity_check" CHECK (("severity" = ANY (ARRAY['mild'::"text", 'moderate'::"text", 'severe'::"text", 'unknown'::"text"])))
 );
 
@@ -2120,6 +2122,13 @@ CREATE INDEX "idx_record_findings_person_id" ON "public"."record_findings" USING
 --
 
 CREATE INDEX "idx_record_findings_record_id" ON "public"."record_findings" USING "btree" ("record_id");
+
+
+--
+-- Name: idx_record_findings_resolution_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_record_findings_resolution_status" ON "public"."record_findings" USING "btree" ("resolution_status");
 
 
 --

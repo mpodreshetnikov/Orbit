@@ -180,7 +180,8 @@ export function buildFindingRows(
       site_code: bodySiteEntry?.site_code ?? null,
       body_site_text: item.body_site_text,
       size_mm: item.size_mm,
-      count: item.count || 1,
+      // A real zero is a real count. It used to be coerced to 1 because zero meant "resolved".
+      count: item.count ?? null,
       severity: item.severity,
       laterality: item.laterality,
       morphology: item.morphology,

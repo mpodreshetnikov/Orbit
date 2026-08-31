@@ -2057,6 +2057,7 @@ export type Database = {
           morphology: string | null
           person_id: string
           record_id: string
+          resolution_status: string
           severity: string
           site_code: string | null
           size_mm: number | null
@@ -2082,6 +2083,7 @@ export type Database = {
           morphology?: string | null
           person_id: string
           record_id: string
+          resolution_status?: string
           severity?: string
           site_code?: string | null
           size_mm?: number | null
@@ -2107,6 +2109,7 @@ export type Database = {
           morphology?: string | null
           person_id?: string
           record_id?: string
+          resolution_status?: string
           severity?: string
           site_code?: string | null
           size_mm?: number | null

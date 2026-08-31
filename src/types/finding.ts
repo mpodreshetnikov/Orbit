@@ -1,3 +1,5 @@
+export type FindingResolutionStatus = "observed" | "resolved";
+
 // ============================================================================
 // FINDING TYPES
 // Types for medical findings (polyps, stones, cysts, etc.)
@@ -147,6 +149,7 @@ export interface CreateRecordFindingInput {
   description?: string | null;
   histology?: string | null;
   finding_date?: string | null;
+  resolution_status?: FindingResolutionStatus;
   source_anchor: string;
   is_llm_extracted?: boolean;
   is_user_verified?: boolean;
@@ -184,6 +187,8 @@ export interface FindingHistoryPoint {
   record_date: string | null;
   size_mm: number | null;
   count: number | null;
+  /** 'resolved' marks a row that closes an earlier finding rather than measuring one. */
+  resolution_status: FindingResolutionStatus;
   severity: FindingSeverity;
   laterality: FindingLaterality;
   morphology: string | null;

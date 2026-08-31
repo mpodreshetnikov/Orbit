@@ -475,7 +475,9 @@ Deno.test("runHealthStructureService applies catalog/checkup fallback mappings",
   // The stored code is the resolved one, never the model's guess.
   assertEquals(state.findingRows[0].finding_code, "F1");
   assertEquals(state.findingRows[0].site_code, "LUNG");
-  assertEquals(state.findingRows[0].count, 1);
+  // A zero the document really printed survives: it is no longer coerced to 1 to keep it out of
+  // the resolved sentinel's way.
+  assertEquals(state.findingRows[0].count, 0);
   assertEquals(state.findingRows[0].finding_date, "2026-01-05");
 
   const updatedPatch = state.updatedRecords[0]?.patch as

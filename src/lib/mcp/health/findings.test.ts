@@ -19,6 +19,7 @@ function finding(overrides: Record<string, unknown> = {}) {
     histology: null,
     finding_date: "2026-02-01",
     is_user_verified: true,
+    resolution_status: "observed",
     ...overrides,
   };
 }
@@ -33,14 +34,15 @@ describe("searchFindings", () => {
     expect(stub.argsFor("record_findings", "select")[0][0]).not.toContain("medical_records");
   });
 
-  it("derives is_resolved from a zero size or count", async () => {
+  it("derives is_resolved from the resolution status, not from zeros", async () => {
     const stub = createSupabaseStub({
       record_findings: [
         {
           data: [
             finding({ id: "open", size_mm: 4, count: 1 }),
-            finding({ id: "zero-size", size_mm: 0, count: 1 }),
-            finding({ id: "zero-count", size_mm: 4, count: 0 }),
+            // A measurement that really was zero: still an observed finding.
+            finding({ id: "measured-zero", size_mm: 0, count: 0 }),
+            finding({ id: "closed", size_mm: null, count: null, resolution_status: "resolved" }),
           ],
         },
       ],
@@ -48,8 +50,7 @@ describe("searchFindings", () => {
 
     const rows = await searchFindings(stub.client, { personId: "p-1", limit: 20, offset: 0 });
 
-    // The app records resolution as a new zero-valued entry rather than deleting.
-    expect(rows.map((r) => r.is_resolved)).toEqual([false, true, true]);
+    expect(rows.map((r) => r.is_resolved)).toEqual([false, false, true]);
   });
 
   it("treats a null size as unresolved", async () => {
@@ -160,7 +161,9 @@ describe("getFindingHistory", () => {
 
   it("flags resolution in history too", async () => {
     const stub = createSupabaseStub({
-      record_findings: [{ data: [finding(), finding({ id: "f-2", size_mm: 0 })] }],
+      record_findings: [
+        { data: [finding(), finding({ id: "f-2", resolution_status: "resolved" })] },
+      ],
     });
 
     const rows = await getFindingHistory(stub.client, {
