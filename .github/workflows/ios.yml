@@ -3,9 +3,10 @@
 # Two jobs, deliberately separated by what they require:
 #
 #   build      compiles the Xcode project with signing switched off. It needs no Apple account and
-#              no secrets, so it runs on every pull request that touches the shell. This is the
-#              only gate in the repository that proves ios/ actually compiles — everything else
-#              about the shell is checked by unit tests that never invoke a compiler.
+#              no secrets. This is the only gate in the repository that proves ios/ actually
+#              compiles — everything else about the shell is checked by unit tests that never
+#              invoke a compiler — but its automatic triggers are commented out for now; see the
+#              note above `on:` below.
 #
 #   testflight archives, signs and uploads. It runs only when someone dispatches it deliberately,
 #              because it needs the Apple Developer membership and the App Store Connect
@@ -16,18 +17,25 @@
 
 name: iOS
 
+# Temporarily reduced to manual runs only. The `build` job needs no Apple account and was green on
+# every run, but the whole iOS lane is parked while enrolment in the Apple Developer Program is
+# unresolved: nothing downstream of a compile can happen without a membership, so a green macOS
+# build on every pull request touching the shell proves something nobody can act on yet. Dispatch
+# the workflow by hand to compile the project on demand in the meantime.
+#
+# To restore, uncomment the two triggers. Nothing else here changed. See T-0024.
 on:
-  pull_request:
-    paths: &ios-paths
-      - "ios/**"
-      - "native/**"
-      - "capacitor.config.ts"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/ios.yml"
-  push:
-    branches: [main]
-    paths: *ios-paths
+  # pull_request:
+  #   paths: &ios-paths
+  #     - "ios/**"
+  #     - "native/**"
+  #     - "capacitor.config.ts"
+  #     - "package.json"
+  #     - "package-lock.json"
+  #     - ".github/workflows/ios.yml"
+  # push:
+  #   branches: [main]
+  #   paths: *ios-paths
   workflow_dispatch:
     inputs:
       upload_to_testflight:
