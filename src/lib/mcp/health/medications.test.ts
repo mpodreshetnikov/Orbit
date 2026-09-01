@@ -7,6 +7,7 @@ import {
   listMedications,
   logDose,
   updateRegimen,
+  inventoryToStore,
 } from "./medications";
 import { createSupabaseStub, type StubResult } from "./test-support";
 import { createDoseEventsFake } from "./dose-events-fake";
@@ -391,6 +392,22 @@ describe("createRegimen / updateRegimen", () => {
     });
   });
 
+  it("gives a new course with tracking on the decrement its owner asked for", async () => {
+    // An absent flag reads as false in every function that reads it, and the
+    // web form always writes true -- so a course created over MCP without one
+    // tracked a figure that never moved.
+    const stub = createSupabaseStub({ med_regimens: [{ data: regimen() }] });
+
+    await createRegimen(stub.client, {
+      custom_name: "X",
+      inventory: { enabled: true, current_amount: 10 },
+    });
+
+    expect(stub.argsFor("med_regimens", "insert")[0][0]).toMatchObject({
+      inventory: { enabled: true, current_amount: 10, auto_decrement_on_taken: true },
+    });
+  });
+
   it("surfaces a create error", async () => {
     const stub = createSupabaseStub({ med_regimens: [{ error: { message: "boom" } }] });
     await expect(createRegimen(stub.client, {})).rejects.toThrow(/Failed to create medication/);
@@ -408,6 +425,52 @@ describe("createRegimen / updateRegimen", () => {
 
     expect(stub.argsFor("med_regimens", "eq")).toEqual([["id", "r-1"]]);
     expect(stub.argsFor("med_regimens", "is")).toEqual([["deleted_at", null]]);
+  });
+
+  it("keeps the stock fields an update did not name", async () => {
+    // One jsonb column and every key optional, so "set the stock to 20" used to
+    // drop the threshold, the unit and the decrement flag with it -- the refill
+    // reminder went quiet and the figure stopped moving, silently.
+    const stored = {
+      enabled: true,
+      current_amount: 4,
+      unit: "pill",
+      refill_threshold_amount: 2,
+      capacity_amount: 30,
+      auto_decrement_on_taken: true,
+    };
+    const stub = createSupabaseStub({
+      med_regimens: [{ data: { inventory: stored } }, { data: regimen() }],
+    });
+
+    await updateRegimen(stub.client, "r-1", {
+      inventory: { enabled: true, current_amount: 20 },
+    });
+
+    expect(stub.argsFor("med_regimens", "update")[0][0]).toMatchObject({
+      inventory: { ...stored, current_amount: 20 },
+    });
+  });
+
+  it("refuses rather than replacing when the stored stock cannot be read", async () => {
+    // Treating an unreadable row as an empty one would store the supplied
+    // object alone, which is the replacement the merge exists to prevent.
+    const stub = createSupabaseStub({
+      med_regimens: [{ error: { message: "connection reset" } }],
+    });
+
+    await expect(
+      updateRegimen(stub.client, "r-1", { inventory: { current_amount: 20 } }),
+    ).rejects.toThrow(/before updating it: connection reset/);
+    expect(stub.argsFor("med_regimens", "update")).toHaveLength(0);
+  });
+
+  it("reads nothing extra when the update does not touch stock", async () => {
+    const stub = createSupabaseStub({ med_regimens: [{ data: regimen() }] });
+
+    await updateRegimen(stub.client, "r-1", { custom_name: "Y" });
+
+    expect(stub.argsFor("med_regimens", "select")).toHaveLength(1);
   });
 
   it("reports a missing regimen on update", async () => {
@@ -953,5 +1016,36 @@ describe("logDose", () => {
     await expect(
       logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
     ).rejects.toThrow(/Failed to record the intake/);
+  });
+});
+
+describe("inventoryToStore", () => {
+  it("means yes when tracking is on and nobody said otherwise", () => {
+    // The only surface that writes the flag always writes true, and turning
+    // tracking on is a request for the number to go down.
+    expect(inventoryToStore(null, { enabled: true, current_amount: 10 })).toEqual({
+      enabled: true,
+      current_amount: 10,
+      auto_decrement_on_taken: true,
+    });
+  });
+
+  it("leaves an explicit refusal alone", () => {
+    expect(inventoryToStore(null, { enabled: true, auto_decrement_on_taken: false })).toMatchObject(
+      { auto_decrement_on_taken: false },
+    );
+  });
+
+  it("adds no default where tracking is off", () => {
+    expect(inventoryToStore(null, { enabled: false })).toEqual({ enabled: false });
+  });
+
+  it("clears the whole thing on an explicit null, which is how tracking is turned off", () => {
+    expect(inventoryToStore({ enabled: true, current_amount: 5 }, null)).toBeNull();
+  });
+
+  it("leaves the stored object alone when the caller named no stock at all", () => {
+    const stored = { enabled: true, current_amount: 5 };
+    expect(inventoryToStore(stored, undefined)).toEqual(stored);
   });
 });
