@@ -108,10 +108,16 @@ same phone, that is the point at which renting a Mac for a day earns its cost.
 `.github/workflows/ios.yml` has two jobs, split by what they require.
 
 **`build`** compiles the project with `CODE_SIGNING_ALLOWED=NO`. It needs no Apple account and no
-secrets, and runs on every pull request that touches `ios/`, `native/`, `capacitor.config.ts` or
-the lockfile. It is the only gate in this repository that proves the Xcode project compiles at all
-— the unit tests around the shell never invoke a compiler. It also fails if `npx cap sync ios`
-changes a committed file, which catches a Capacitor upgrade that nobody re-synced.
+secrets. It is the only gate in this repository that proves the Xcode project compiles at all — the
+unit tests around the shell never invoke a compiler. It also fails if `npx cap sync ios` changes a
+committed file, which catches a Capacitor upgrade that nobody re-synced.
+
+> **Currently manual only.** The `pull_request` and `push` triggers are commented out while
+> enrolment in the Apple Developer Program is unresolved. **Neither the compile nor the drift check
+> above runs automatically**: a pull request touching `ios/`, `native/`, `capacitor.config.ts` or
+> the lockfile gets no native validation at all unless someone dispatches the workflow by hand from
+> the Actions tab. Restore it by uncommenting the two triggers in `.github/workflows/ios.yml` once
+> a membership exists. See T-0024.
 
 **`testflight`** archives, signs, exports and uploads. It runs only on a deliberate
 `workflow_dispatch` with the `upload_to_testflight` input set, because it spends the Apple account
