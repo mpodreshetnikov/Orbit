@@ -72,7 +72,7 @@ function createHarness(
     closeTab: vi.fn(async (tabId: number) => {
       closedTabs.push(tabId);
     }),
-    runImport: overrides.runImport ?? vi.fn(async () => ({ ok: true })),
+    runImport: overrides.runImport ?? vi.fn(async () => undefined),
     now: () => NOW,
     onWarning: (event, attrs) => warnings.push({ event, attrs }),
   };
@@ -174,7 +174,7 @@ describe("createAutoImportSweep", () => {
         await new Promise<void>((resolve) => {
           releaseRun = resolve;
         });
-        return { ok: true };
+        return undefined;
       }),
     });
 
@@ -216,7 +216,7 @@ describe("createAutoImportSweep", () => {
     const runImport = vi
       .fn()
       .mockRejectedValueOnce(new Error("signed out"))
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce(undefined);
     const harness = createHarness({
       grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
       sources: () => [
@@ -271,5 +271,23 @@ describe("createAutoImportSweep", () => {
 
     expect(harness.openedTabs).toHaveLength(1);
     expect(harness.states["tbank::person-2"].lastResult).toBe("ok");
+  });
+
+  it("says so when the history slice failed but the catch-up did not", async () => {
+    const harness = createHarness({
+      runImport: vi.fn(async () => ({ backfillError: { message: "markup changed" } })),
+    });
+    await harness.sweep.run("alarm");
+
+    // Not a failed run -- the catch-up landed and the cursor holds -- but a connector that has
+    // stopped working should not retry for weeks in silence.
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
+    expect(
+      harness.warnings.some(
+        (w) =>
+          w.event === "money_import_auto_backfill_failed" &&
+          w.attrs.error_message === "markup changed",
+      ),
+    ).toBe(true);
   });
 });

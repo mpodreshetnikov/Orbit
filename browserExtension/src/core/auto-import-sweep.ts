@@ -32,7 +32,7 @@ export interface AutoImportSweepDeps {
     sourceId: string;
     tabId: number;
     nowMs: number;
-  }) => Promise<unknown>;
+  }) => Promise<{ backfillError?: { message: string } } | undefined>;
   now: () => number;
   onWarning: (event: string, attrs: Record<string, unknown>) => void;
 }
@@ -93,7 +93,18 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       if (!(await deps.waitForTabComplete(tabId))) {
         throw new Error(`${source.sourceId} did not finish loading`);
       }
-      await deps.runImport({ grant, sourceId: source.sourceId, tabId, nowMs });
+      const outcome = await deps.runImport({ grant, sourceId: source.sourceId, tabId, nowMs });
+
+      // A history slice can fail while the catch-up window succeeds. That is not a failed run --
+      // the cursor holds and the slice is taken again -- but it must not be silent either, or a
+      // connector that has stopped working retries for weeks with nothing to say so.
+      if (outcome?.backfillError) {
+        deps.onWarning("money_import_auto_backfill_failed", {
+          source_id: source.sourceId,
+          error_message: outcome.backfillError.message,
+        });
+      }
+
       await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "ok"));
     } catch (error) {
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
