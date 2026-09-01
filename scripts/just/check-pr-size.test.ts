@@ -3,7 +3,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as checkPrSize from "./check-pr-size.cjs";
 
-const { evaluateChangeSize, globToRegExp, isReviewable, parseAllowlist, parseArgs } = checkPrSize;
+const {
+  evaluateChangeSize,
+  formatFailure,
+  formatWarning,
+  globToRegExp,
+  isReviewable,
+  parseAllowlist,
+  parseArgs,
+} = checkPrSize;
 
 const CASSETTE_RATIONALE = "recorded upstream responses, verified by replay rather than by reading";
 const SPLIT_RATIONALE = "one migration and the code that reads it; splitting ships a broken schema";
@@ -15,13 +23,19 @@ function numstat(rows: [number | "-", number | "-", string][]) {
 
 function evaluate(
   rows: [number | "-", number | "-", string][],
-  options: { allowlist?: string; branch?: string | null; limit?: number } = {},
+  options: {
+    allowlist?: string;
+    branch?: string | null;
+    limit?: number;
+    warnAt?: number;
+  } = {},
 ) {
   return evaluateChangeSize({
     numstat: numstat(rows),
     allowlist: parseAllowlist(options.allowlist),
     branch: options.branch === undefined ? "feature/x" : options.branch,
     limit: options.limit,
+    warnAt: options.warnAt,
   });
 }
 
@@ -171,6 +185,82 @@ describe("change size evaluation", () => {
   });
 });
 
+describe("the warning band below the limit", () => {
+  it("warns while the branch still fits, which is while the cut can still be changed", () => {
+    const result = evaluate([[1200, 0, "src/a.ts"]]);
+
+    expect(result.overLimit).toBe(false);
+    expect(result.nearLimit).toBe(true);
+  });
+
+  it("stays quiet below the mark", () => {
+    expect(evaluate([[1125, 0, "src/a.ts"]]).nearLimit).toBe(false);
+    expect(evaluate([[1126, 0, "src/a.ts"]]).nearLimit).toBe(true);
+  });
+
+  it("reports over the limit as over, not as near it", () => {
+    const result = evaluate([[1501, 0, "src/a.ts"]]);
+
+    expect(result.overLimit).toBe(true);
+    expect(result.nearLimit).toBe(false);
+  });
+
+  it("defaults the mark to three quarters of the limit", () => {
+    expect(checkPrSize.WARNING_FRACTION).toBe(0.75);
+    expect(evaluate([[10, 0, "src/a.ts"]]).warnAt).toBe(1125);
+  });
+
+  it("takes an explicit mark", () => {
+    expect(evaluate([[20, 0, "src/a.ts"]], { warnAt: 10 }).nearLimit).toBe(true);
+  });
+});
+
+describe("what the failure tells the agent to do", () => {
+  const failure = formatFailure(evaluate([[1501, 0, "src/a.ts"]]), "origin/main");
+
+  // This text is the only part of the policy an agent reliably reads, because it arrives at the
+  // moment the decision is made. An earlier version opened with "Split the branch", which is the
+  // move docs/QUALITY.md rules out -- and the reason branches came out sliced into pieces that did
+  // not stand on their own.
+  it("names the milestone as the unit, before any move", () => {
+    expect(failure).toContain("One pull request is one milestone");
+    expect(failure.indexOf("One pull request is one milestone")).toBeLessThan(
+      failure.indexOf("Re-cut on a milestone boundary"),
+    );
+  });
+
+  it("gives the three moves in the order the policy puts them", () => {
+    expect(failure.indexOf("Re-cut on a milestone boundary")).toBeLessThan(
+      failure.indexOf("Stack --"),
+    );
+    expect(failure.indexOf("Stack --")).toBeLessThan(failure.indexOf("Allowlist the branch"));
+  });
+
+  it("rules out slicing a finished branch, and says splitting is not free", () => {
+    expect(failure).toContain("Do not slice a finished branch");
+    expect(failure).toContain("one opening review");
+  });
+
+  it("still names the largest files and the base it measured against", () => {
+    expect(failure).toContain("src/a.ts");
+    expect(failure).toContain("origin/main");
+  });
+
+  it("warns with the room left, and with the same moves", () => {
+    const warning = formatWarning(evaluate([[1200, 0, "src/a.ts"]]), "origin/main");
+
+    expect(warning).toContain("[pr-size]");
+    expect(warning).toContain("300 short of the limit");
+    expect(warning).toContain("Re-cut on a milestone boundary");
+  });
+
+  it("says CI will fail when an advisory run is already over the limit", () => {
+    expect(formatWarning(evaluate([[1501, 0, "src/a.ts"]]), "origin/main")).toContain(
+      "CI will fail on it",
+    );
+  });
+});
+
 describe("glob matching", () => {
   it("stops a single star at a slash", () => {
     expect(globToRegExp("test/*.json").test("test/a.json")).toBe(true);
@@ -289,6 +379,18 @@ describe("base ref resolution", () => {
   it("falls back to the default base when none is requested", () => {
     expect(resolvedAgainst(runScript([]))).toMatch(/against origin\/main|reviewable lines against/);
   });
+
+  // Whatever this tree happens to measure: an advisory run is a hook, and a hook that can fail a
+  // commit or an edit is one somebody uninstalls. Enforcement is pre-push and CI.
+  it("never fails in advisory mode, whatever the branch measures", () => {
+    const result = runScript(["--advisory", "--warn-at", "0"]);
+
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("keeps advisory output off stdout, so a hook can parse its own", () => {
+    expect(runScript(["--advisory", "--warn-at", "0"]).stdout).toBe("");
+  });
 });
 
 describe("argument parsing", () => {
@@ -301,6 +403,13 @@ describe("argument parsing", () => {
 
   it("defaults to no explicit base or branch", () => {
     expect(parseArgs([])).toEqual({});
+  });
+
+  it("reads the advisory flag and the warning mark", () => {
+    expect(parseArgs(["--advisory", "--warn-at", "800"])).toEqual({
+      advisory: true,
+      warnAt: "800",
+    });
   });
 
   it("rejects a flag with no value", () => {

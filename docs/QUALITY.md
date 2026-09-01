@@ -195,11 +195,36 @@ A pull request gets one review pass on open, so its size decides how much of it 
 A pull request may add at most **1500 reviewable lines** against its base branch. Reviewable excludes recorded fixtures, lockfiles, generated artifacts and the generated skill mirror — content no reviewer reads line by line, and which would otherwise let a cassette recording fail a check aimed at hand-written code.
 
 - CI enforces the rule with `quality-pr-size`, which runs inside `quality` and compares against the pull request's actual base branch.
+- The same check runs long before CI, so the limit is met while the cut can still be changed rather than after the work is finished: advisory on every agent file edit through the `PostToolUse` hook in `.claude/settings.json`, advisory again on `pre-commit`, and as the real gate on `pre-push`. Advisory runs never block; they print the remaining budget once the branch passes three quarters of the limit. Install the hooks with `just git-hooks-install`.
 - `.large-change-allowlist` is the reviewed exception. An entry is `path <glob> # <why this content is not reviewable>` or `branch <name> # <why this change cannot be split>`; the rationale is required and an entry without one fails the check.
 - The limit is a backstop, not a guarantee. No number here makes one pass sufficient: 651 lines still took five passes to converge, so a change of any real size outgrows its opening review. What the limit marks is the point above which the unreviewed remainder is too large to compensate for at all. Below it, the compensation is **Automated Review Policy** above — measure the gap, request a second pass when it earns one.
 - It sits well above the change that converged in a handful of passes and well below the one that took twenty-one, rather than just above the former: a limit set close to ordinary well-tested work is a gate somebody turns off.
-- Splitting is no longer automatically cheaper. Under the previous `New commits` trigger, a smaller branch meant fewer rounds; now every pull request costs one opening review, so splitting one change into two spends two. Split when the halves are genuinely separate work, not to get under this number.
 - The rounds column is history rather than a forecast — reviews no longer arrive per push. It is kept because it is the evidence the limit rests on.
+
+### The unit of a pull request is a milestone, not a line count
+
+**One pull request is one milestone** — one item of the task's `## Progress` that ships and reviews on its own. The size limit is a consequence of choosing that unit well, never the thing that chooses it.
+
+The test, before opening anything: **if this pull request merged and the rest of the task never did, would `main` still stand up?** A milestone answers yes — the tree runs, the change is usable or invisible, and a reviewer can judge it without reading a branch that does not exist yet. A slice answers no: an interface with no caller, a migration with no code, half a rename. A slice is not a small pull request; it is a large one with its reviewer removed, because the seam between the halves is where nobody looks and where the expensive class of defect lives. Nine of #20's findings and four of its six `P1`s were one fix leaking into a reader it had not updated — a class that is invisible by construction when the fix and the reader are in different pull requests.
+
+So the size gate firing is a signal that the **cut** is wrong, not that the branch needs dividing by line count. Splitting is no longer automatically cheaper either: under the previous `New commits` trigger a smaller branch meant fewer rounds, but now every pull request costs one opening review out of the same Codex allowance the security review draws on, so splitting one change into two spends two.
+
+### When a branch is over the limit
+
+In this order. The first that applies is the answer, and cutting the branch anywhere other than a milestone boundary is not on the list.
+
+1. **Re-cut on a milestone boundary** — the branch carries two things that ship independently, so land them as two pull requests, each named for what it delivers.
+2. **Stack** — the halves are ordered rather than independent, so open the second with the first as its base. Each diff is small against its own base, review order matches merge order, and nothing merges out of sequence. `T-0006` did this for its OCR chain (Orbit #33 → #34 → #35).
+3. **Allowlist the branch** — one change that genuinely does not divide (a mechanical rename, a generated surface, one indivisible migration). Add `branch <name> # <why this change cannot be split>` to `.large-change-allowlist` and say so in the pull request. This is a normal outcome, not a defeat: one connected change reviewed in one pass beats three fragments reviewed in isolation.
+
+If none of the three fits, the limit has fired on ordinary work and the number is the thing to argue with — say so in the task's Decision Log rather than reaching for the scissors.
+
+### Many pull requests on one task is not itself a problem
+
+The count is not the metric. `T-0006` merged as seven (#28, #30, #33, #34, #35, #38, #39) and each is named for something that ships. What makes a set of pull requests healthy is that every one of them passes the test above on its own, and that the set is traceable:
+
+- The **task id leads the pull request title** — `T-0006: take OCR off the request path` — so every pull request says which task it belongs to.
+- The task's `## Progress` line for that milestone **carries the pull request link**, so the task is the one place the whole set is visible. The registry is where a task's pull requests are grouped; GitHub has nowhere to put that.
 
 ## Change-Type Check Matrix
 

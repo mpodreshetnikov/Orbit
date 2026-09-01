@@ -9,3 +9,8 @@ if ! command -v just >/dev/null 2>&1; then
 fi
 
 just secrets-preflight
+
+# The same gate CI runs, one step earlier: a branch pushed over the limit has already been opened as
+# a pull request by the time CI says so, and re-cutting it then costs the opening review too.
+echo "[pre-push] Checking reviewable change size..."
+just quality-pr-size

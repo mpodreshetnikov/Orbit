@@ -8,14 +8,21 @@
  * carry. The measurement this limit rests on was taken under the previous `New commits` trigger,
  * where the same relationship showed up as rounds: 46 added lines drew none, 651 drew five, and
  * 3011 drew twenty-one over nineteen hours. A change that needed twenty-one passes to converge is
- * not one a single pass reads adequately, and here the fix is free -- split the branch.
+ * not one a single pass reads adequately. The answer is a different cut -- one pull request per
+ * milestone, something that ships and reviews on its own -- rather than a finished branch divided
+ * by line count; docs/QUALITY.md under `Reviewable Change Size` is canonical.
  *
  * "Reviewable" excludes recorded fixtures, lockfiles, generated artifacts and the generated skill
  * mirror. Nobody reads those line by line, and counting them would fail a cassette recording with a
  * limit aimed at hand-written code.
  *
  * Usage:
- *   node check-pr-size.cjs [--base <git-ref>] [--branch <name>]
+ *   node check-pr-size.cjs [--base <git-ref>] [--branch <name>] [--warn-at <lines>] [--advisory]
+ *
+ * `--advisory` never fails: it warns from the warning mark on and is otherwise silent, which is how
+ * the editor and pre-commit hooks run it. The point of running it there is that the limit is met
+ * while the cut can still be changed; met for the first time in CI, the work is already finished and
+ * the cheapest-looking answer is to slice it into pieces that do not stand on their own.
  *
  * The base defaults to origin/main. CI passes the pull request's real base through PR_SIZE_BASE and
  * its head branch through PR_SIZE_BRANCH, so a branch targeting something other than main is
@@ -32,6 +39,12 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const ALLOWLIST_PATH = path.join(REPO_ROOT, ".large-change-allowlist");
 const BASE_REF_CANDIDATES = ["origin/main", "main"];
 const MAX_REVIEWABLE_ADDED_LINES = 1500;
+
+// The band below the limit where a branch is told it is running out of room. It exists because the
+// limit fires at the worst possible moment -- the work is finished, so the cheapest-looking answer
+// is to slice the finished branch until the pieces fit, which is the one answer the policy forbids.
+// Three quarters leaves roughly a milestone's worth of room to change the cut instead.
+const WARNING_FRACTION = 0.75;
 
 // A push event reports this as the previous commit when a branch has no previous commit. It means
 // "no baseline", not "a ref that failed to resolve", so it takes the fallback rather than the error.
@@ -53,20 +66,31 @@ const NON_REVIEWABLE = [
   /(^|\/)__snapshots__\//,
 ];
 
-/** @param {string[]} argv @returns {{ base?: string, branch?: string }} */
+/**
+ * @param {string[]} argv
+ * @returns {{ base?: string, branch?: string, warnAt?: string, advisory?: true }}
+ */
 function parseArgs(argv) {
-  /** @type {{ base?: string, branch?: string }} */
+  /** @type {{ base?: string, branch?: string, warnAt?: string, advisory?: true }} */
   const parsed = {};
-  for (const name of /** @type {const} */ (["base", "branch"])) {
-    const index = argv.indexOf(`--${name}`);
+  for (const [flag, key] of /** @type {const} */ ([
+    ["base", "base"],
+    ["branch", "branch"],
+    ["warn-at", "warnAt"],
+  ])) {
+    const index = argv.indexOf(`--${flag}`);
     if (index === -1) {
       continue;
     }
     const value = argv[index + 1];
     if (!value || value.startsWith("--")) {
-      throw new Error(`Missing value for argument --${name}`);
+      throw new Error(`Missing value for argument --${flag}`);
     }
-    parsed[name] = value;
+    parsed[key] = value;
+  }
+  // Absent rather than false, so a caller passing nothing parses to an empty object.
+  if (argv.includes("--advisory")) {
+    parsed.advisory = true;
   }
   return parsed;
 }
@@ -168,7 +192,13 @@ function parseNumstat(numstat) {
   return files;
 }
 
-function evaluateChangeSize({ numstat, allowlist, branch, limit = MAX_REVIEWABLE_ADDED_LINES }) {
+function evaluateChangeSize({
+  numstat,
+  allowlist,
+  branch,
+  limit = MAX_REVIEWABLE_ADDED_LINES,
+  warnAt = Math.floor(MAX_REVIEWABLE_ADDED_LINES * WARNING_FRACTION),
+}) {
   /** @type {{ path: string, added: number }[]} */
   const reviewable = [];
   let excludedAdded = 0;
@@ -191,9 +221,11 @@ function evaluateChangeSize({ numstat, allowlist, branch, limit = MAX_REVIEWABLE
     addedLines,
     excludedAdded,
     limit,
+    warnAt,
     files: reviewable.length,
     largest: [...reviewable].sort((a, b) => b.added - a.added).slice(0, 5),
     overLimit: addedLines > limit,
+    nearLimit: addedLines > warnAt && addedLines <= limit,
     branchExemption: branchEntry,
   };
 }
@@ -295,59 +327,138 @@ function resolveBranch(explicitBranch) {
   return current && current !== "HEAD" ? current : null;
 }
 
-function formatFailure({ addedLines, limit, files, largest, excludedAdded }, baseRef) {
+/**
+ * The largest reviewable files, as the failure and the warning both print them.
+ *
+ * @param {{ files: number, largest: { path: string, added: number }[], excludedAdded: number }} result
+ * @returns {string[]}
+ */
+function formatLargest({ files, largest, excludedAdded }) {
   return [
-    `This branch adds ${addedLines} reviewable lines against ${baseRef}, over the limit of ${limit}.`,
-    "",
     `${files} reviewable file(s) changed${
       excludedAdded > 0 ? `; ${excludedAdded} added line(s) excluded as not reviewable` : ""
     }. Largest:`,
     ...largest.map((file) => `  ${String(file.added).padStart(6)}  ${file.path}`),
+  ];
+}
+
+/**
+ * The moves this failure allows, in the order docs/QUALITY.md puts them, because this text is the
+ * only part of that policy an agent reliably reads: it arrives at the moment the decision is made,
+ * and the document does not. An earlier version opened with "Split the branch", which is the one
+ * move the policy rules out -- a branch cut anywhere other than a milestone boundary leaves pieces
+ * that cannot stand on their own, and puts the seam between them where no reviewer looks.
+ */
+function formatOptions() {
+  return [
+    "One pull request is one milestone: one thing that ships and reviews on its own. The test is",
+    "whether main would still stand up if this merged and the rest of the task never did. Being over",
+    "the limit means the cut is wrong, not that the branch needs dividing by line count. In order:",
+    "",
+    "  1. Re-cut on a milestone boundary -- two things that ship independently become two pull",
+    "     requests, each named for what it delivers.",
+    "  2. Stack -- ordered rather than independent work: open the second with the first as its base,",
+    "     so each diff is small against its own base and merge order is review order.",
+    "  3. Allowlist the branch -- one change that genuinely does not divide. Add the entry with its",
+    "     reason; this is a normal outcome, not a defeat.",
+    "",
+    "Do not slice a finished branch into pieces that only exist to fit this number. Splitting is not",
+    "free either: every pull request spends one opening review from the allowance the security",
+    "review draws on.",
+    "",
+    "  path <glob> # why this content is not reviewable",
+    "  branch <name> # why this change cannot be split",
+  ];
+}
+
+function formatFailure(result, baseRef) {
+  const { addedLines, limit } = result;
+  return [
+    `This branch adds ${addedLines} reviewable lines against ${baseRef}, over the limit of ${limit}.`,
+    "",
+    ...formatLargest(result),
     "",
     "A pull request is reviewed once, on open, so this whole diff gets one pass. Measured here,",
     "651 added lines took five passes to converge and 3011 took twenty-one -- a change this size",
     "is not one a single review reads adequately, and what it misses merges unseen.",
     "",
-    "Split the branch into changes that land on their own. If this content is not read line by",
-    "line, exempt its path in .large-change-allowlist with the reason; if the change genuinely",
-    "cannot be split, exempt the branch there instead:",
-    "",
-    "  path <glob> # why this content is not reviewable",
-    "  branch <name> # why this change cannot be split",
+    ...formatOptions(),
   ].join("\n");
+}
+
+/**
+ * Printed while the branch still fits, which is the only point at which the cut is cheap to change.
+ * Past the limit the same text follows the failure, so an advisory run says what a blocking one
+ * would.
+ */
+function formatWarning(result, baseRef) {
+  const { addedLines, limit, warnAt } = result;
+  const headline = result.overLimit
+    ? `This branch adds ${addedLines} reviewable lines against ${baseRef}, over the limit of ${limit}. ` +
+      "CI will fail on it."
+    : `This branch adds ${addedLines} reviewable lines against ${baseRef}, past the ${warnAt}-line ` +
+      `warning mark and ${limit - addedLines} short of the limit of ${limit}.`;
+
+  return [`[pr-size] ${headline}`, "", ...formatLargest(result), "", ...formatOptions()].join("\n");
 }
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  const advisory = args.advisory === true;
   const envBase = (process.env.PR_SIZE_BASE || "").trim();
   const requestedBase = args.base || (envBase === ZERO_SHA ? "" : envBase);
   const baseRef = requestedBase ? resolveExplicitBaseRef(requestedBase) : resolveDefaultBaseRef();
 
   if (!baseRef) {
-    console.log(
-      `PR size check skipped: no base ref to compare against (tried ${BASE_REF_CANDIDATES.join(", ")}).`,
-    );
+    // An advisory run happens on every file edit, so it says nothing when there is nothing to
+    // measure against; the gate keeps reporting the skip, where it is the only trace it ran.
+    if (!advisory) {
+      console.log(
+        `PR size check skipped: no base ref to compare against (tried ${BASE_REF_CANDIDATES.join(", ")}).`,
+      );
+    }
     return 0;
+  }
+
+  const warnAt = args.warnAt === undefined ? undefined : Number(args.warnAt);
+  if (warnAt !== undefined && !Number.isFinite(warnAt)) {
+    throw new Error(`--warn-at expects a number of lines, got '${args.warnAt}'.`);
   }
 
   const result = evaluateChangeSize({
     numstat: readNumstat(baseRef),
     allowlist: readAllowlist(),
     branch: resolveBranch(args.branch),
+    ...(warnAt === undefined ? {} : { warnAt }),
   });
 
   if (result.overLimit && result.branchExemption) {
-    console.log(
-      `PR size ${result.addedLines} is over the limit of ${result.limit} but branch ` +
-        `'${result.branchExemption.value}' is allowlisted; not failing. ` +
-        `Reason: ${result.branchExemption.rationale}`,
-    );
+    if (!advisory) {
+      console.log(
+        `PR size ${result.addedLines} is over the limit of ${result.limit} but branch ` +
+          `'${result.branchExemption.value}' is allowlisted; not failing. ` +
+          `Reason: ${result.branchExemption.rationale}`,
+      );
+    }
+    return 0;
+  }
+
+  // Advisory runs are hooks: they warn from the warning mark on and are otherwise silent, and they
+  // never block. A commit or an edit is not the place to stop the work -- pre-push and CI are.
+  if (advisory) {
+    if (result.overLimit || result.nearLimit) {
+      console.error(formatWarning(result, baseRef));
+    }
     return 0;
   }
 
   if (result.overLimit) {
     console.error(formatFailure(result, baseRef));
     return 1;
+  }
+
+  if (result.nearLimit) {
+    console.error(formatWarning(result, baseRef));
   }
 
   console.log(
@@ -368,12 +479,19 @@ if (require.main === module) {
 
 module.exports = {
   MAX_REVIEWABLE_ADDED_LINES,
+  WARNING_FRACTION,
   ZERO_SHA,
   evaluateChangeSize,
+  formatFailure,
+  formatWarning,
   globToRegExp,
   parseNumstat,
   readUntrackedNumstat,
   isReviewable,
   parseAllowlist,
   parseArgs,
+  readAllowlist,
+  readNumstat,
+  resolveBranch,
+  resolveDefaultBaseRef,
 };
