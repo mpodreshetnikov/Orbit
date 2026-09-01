@@ -590,13 +590,14 @@
     "importGrantRevoke": "Revoke",
     "importGrantRevokeFailed": "Could not revoke the grant.",
     "importGrantRevoked": "Revoked",
-    "importGrantSendToExtension": "Send to extension",
-    "importGrantSentToExtension": "Key sent to the extension.",
     "importGrantSourcesRequired": "Pick at least one source.",
-    "importGrantTokenShownOnce": "The key is shown once — only its hash is stored. Hand it to the extension now, or copy it.",
+    "importGrantTokenShownOnce": "The key is shown once — only its hash is stored. Copy it now; the extension will ask for it when unattended import ships.",
     "importGrantsDescription": "A grant is a long-lived, revocable key for the extension. With one, the extension starts an import by itself when you visit the bank site, so you no longer have to start each one by hand.",
     "importGrantsEmpty": "No grants yet.",
-    "importGrantsTitle": "Automatic import"
+    "importGrantsTitle": "Automatic import",
+    "importGrantCopy": "Copy key",
+    "importGrantCopied": "Key copied.",
+    "importGrantCopyFailed": "Could not copy the key. Select it and copy manually."
   },
   "records": {
     "title": "Medical Records",

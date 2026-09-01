@@ -423,19 +423,39 @@ export function createSupabaseMoneyImportRepository(
    * Whether this auth user may still import. Asked of a grant's issuer on every use, so that
    * removing someone from `allowed_users` takes their extension's credential with it.
    *
+   * The allowlist is matched the same two ways everything else matches it -- by `auth_user_id`
+   * or by email. `public.is_allowed_user()` and `authenticateAllowedUser` both accept either,
+   * and a row pre-approved by email keeps a null `auth_user_id` until the signup trigger links
+   * it. Checking only the UUID here would let such a person create a grant through the app and
+   * then get 401 on every use of it.
+   *
    * Failure answers "no". The alternative -- letting a transport error stand in for permission
-   * -- would turn any outage of this one query into a grant that authorises itself.
+   * -- would turn any outage of this lookup into a grant that authorises itself.
    */
   async function isAuthUserAllowed(authUserId: string): Promise<boolean> {
     if (!authUserId) return false;
     try {
-      const { data, error } = await getAdminClient()
+      const admin = getAdminClient();
+      const { data: byId, error: byIdError } = await admin
         .from("allowed_users")
         .select("id")
         .eq("auth_user_id", authUserId)
         .maybeSingle();
 
-      if (error || !data) return false;
+      if (byIdError) return false;
+      if (byId) return true;
+
+      const { data: userData, error: userError } = await admin.auth.admin.getUserById(authUserId);
+      const email = normalizeText(userData?.user?.email)?.trim();
+      if (userError || !email) return false;
+
+      const { data: byEmail, error: byEmailError } = await admin
+        .from("allowed_users")
+        .select("id")
+        .ilike("email", email)
+        .maybeSingle();
+
+      if (byEmailError || !byEmail) return false;
       return true;
     } catch {
       return false;
@@ -544,6 +564,41 @@ export function createSupabaseMoneyImportRepository(
     if (error) throw new Error(error.message);
   }
 
+  async function assertAccountBelongsToPayer(
+    accountId: string,
+    payerPersonId: string,
+  ): Promise<void> {
+    const { data, error } = await getAdminClient()
+      .from("money_accounts")
+      .select("id")
+      .eq("id", accountId)
+      .eq("owner_person_id", payerPersonId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Failed to verify money account ownership");
+    }
+    if (!data) {
+      throw new Error(`Money account ${accountId} does not belong to this import`);
+    }
+  }
+
+  async function assertCardBelongsToAccount(cardId: string, accountId: string): Promise<void> {
+    const { data, error } = await getAdminClient()
+      .from("money_cards")
+      .select("id")
+      .eq("id", cardId)
+      .eq("account_id", accountId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Failed to verify money card ownership");
+    }
+    if (!data) {
+      throw new Error(`Money card ${cardId} does not belong to this import`);
+    }
+  }
+
   async function resolveAccountIdForRow(
     payerPersonId: string,
     row: CanonicalTransactionRowInput,
@@ -551,7 +606,15 @@ export function createSupabaseMoneyImportRepository(
     defaultAccountId?: string | null,
   ): Promise<string> {
     const explicitAccountId = normalizeText(row.account_id);
-    if (explicitAccountId) return explicitAccountId;
+    if (explicitAccountId) {
+      // An id supplied in the row is a claim, not a fact. Everything below is already scoped to
+      // the payer, and this branch used to skip that scoping entirely -- so a caller holding any
+      // session could write against another household member's account by naming its uuid, and
+      // the service-role client would persist it. A grant makes that reachable with nobody
+      // present, which is the whole reason its person is fixed by the credential.
+      await assertAccountBelongsToPayer(explicitAccountId, payerPersonId);
+      return explicitAccountId;
+    }
 
     const sourceForAccounts = normalizeSourceForTransactions(
       normalizeText(row.source) ?? fallbackSource,
@@ -780,7 +843,12 @@ export function createSupabaseMoneyImportRepository(
     createIfMissing = true,
   ): Promise<string | null> {
     const explicitCardId = normalizeText(row.card_id);
-    if (explicitCardId) return explicitCardId;
+    if (explicitCardId) {
+      // Same claim, one level down: the account is now known to be the payer's, so the card has
+      // to be that account's or it reaches outside the payer again.
+      await assertCardBelongsToAccount(explicitCardId, accountId);
+      return explicitCardId;
+    }
 
     const accountHint = extractAccountHintFromRow(row);
     if (!accountHint) return null;

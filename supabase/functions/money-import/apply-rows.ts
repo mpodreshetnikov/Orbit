@@ -201,7 +201,15 @@ export async function applyRowsAction(
   };
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
-    const raw = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    const rawInput = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    // A session is opened for one source, and under session auth that source is the session's,
+    // not the caller's -- the same way payer_person_id is taken from the session above. Without
+    // this a row could carry its own `source`, which account resolution and the written
+    // transaction both honour, so a session opened for one source could import under another.
+    // For a grant that matters twice over: allowed_sources is checked when the session is
+    // created and never again.
+    const raw: CanonicalTransactionRowInput =
+      auth.mode === "session" ? { ...rawInput, source } : rawInput;
     const rowSpan = deps.telemetry?.startSpan("edge.money_import.apply_rows.row", {
       attrs: {
         row_index: rowIndex,

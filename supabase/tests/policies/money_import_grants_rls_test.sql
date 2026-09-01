@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(15);
 
 SELECT has_table('public', 'money_import_grants', 'money_import_grants table exists');
 
@@ -113,6 +113,29 @@ SELECT lives_ok(
 -- of it. These prove what they refuse, which is the half that matters for a table of long-lived
 -- credentials.
 
+-- The issuer is what resolveAuth re-checks against allowed_users on every use of a grant, so a
+-- caller who could name someone else there could mint a credential that survives their own
+-- removal by pointing at a person who stays.
+SELECT throws_ok(
+  $$
+    INSERT INTO public.money_import_grants (
+      person_id,
+      created_by_auth_user_id,
+      label,
+      token_hash
+    )
+    VALUES (
+      '7d000000-0000-0000-0000-000000000010',
+      '7d000000-0000-0000-0000-0000000000ff',
+      'Attributed to someone else',
+      'hash-money-grants-rls-foreign-issuer'
+    )
+  $$,
+  '42501',
+  NULL,
+  'a grant cannot be issued in another user''s name'
+);
+
 INSERT INTO public.money_import_grants (
   id,
   person_id,
@@ -134,6 +157,19 @@ SELECT is(
   (SELECT count(*) FROM public.money_import_grants),
   1::bigint,
   'an allowlisted user sees the grant that exists'
+);
+
+-- Revoking stays open to the whole household on purpose, and that same UPDATE could otherwise
+-- repoint the issuer at someone still allowed, restoring the credential the check above expires.
+SELECT throws_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET created_by_auth_user_id = '7d000000-0000-0000-0000-0000000000ff'
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  NULL,
+  'created_by_auth_user_id is fixed at issue time and cannot be changed',
+  'the issuer of an existing grant cannot be changed'
 );
 
 SET LOCAL ROLE anon;

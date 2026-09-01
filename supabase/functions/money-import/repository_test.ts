@@ -4,6 +4,27 @@ import { createClient } from "@supabase/supabase-js";
 import { createSupabaseMoneyImportRepository, type MoneyImportRepository } from "./repository.ts";
 import type { CanonicalTransactionRowInput } from "./types.ts";
 
+/**
+ * Only `assert-equals` is in this project's import map, so rejection is asserted here the same
+ * way `auth_test.ts` does it rather than by widening the map for one call.
+ */
+async function assertRejectsWith(run: () => Promise<unknown>, expectedFragment: string) {
+  let caught: unknown = null;
+  try {
+    await run();
+  } catch (error) {
+    caught = error;
+  }
+  if (!(caught instanceof Error)) {
+    throw new Error(`Expected a rejection containing ${JSON.stringify(expectedFragment)}`);
+  }
+  if (!caught.message.includes(expectedFragment)) {
+    throw new Error(
+      `Expected ${JSON.stringify(caught.message)} to contain ${JSON.stringify(expectedFragment)}`,
+    );
+  }
+}
+
 function createRepositoryWithClients(clients: {
   anonClient?: Record<string, unknown>;
   adminClient?: Record<string, unknown>;
@@ -742,12 +763,36 @@ Deno.test("repository manages sessions, batches and last imported lookup", async
 Deno.test(
   "repository resolveAccountIdForRow handles explicit/single/ambiguous and card errors",
   async () => {
-    const explicitRepository = createRepositoryWithClients({
-      adminClient: {
-        from: () => {
-          throw new Error("no db call expected");
+    // An explicit account id is now verified against the payer rather than trusted. The stub
+    // answers as the database would: the row exists when the pair matches, and nothing comes
+    // back when it does not.
+    function explicitAccountClient(ownerPersonId: string) {
+      return {
+        from: (table: string) => {
+          if (table === "money_accounts") {
+            return {
+              select: () => ({
+                eq: (_idColumn: string, accountId: string) => ({
+                  eq: (_ownerColumn: string, personId: string) => ({
+                    maybeSingle: async () => ({
+                      data:
+                        accountId === "acc-explicit" && personId === ownerPersonId
+                          ? { id: accountId }
+                          : null,
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            };
+          }
+          throw new Error(`Unexpected table ${table}`);
         },
-      },
+      };
+    }
+
+    const explicitRepository = createRepositoryWithClients({
+      adminClient: explicitAccountClient("person-1"),
     });
     assertEquals(
       await explicitRepository.resolveAccountIdForRow(
@@ -761,6 +806,26 @@ Deno.test(
         "manual",
       ),
       "acc-explicit",
+    );
+
+    // The account belongs to someone else in the household. Before this check the id was
+    // returned as given and the transaction was written against another person's account.
+    const foreignAccountRepository = createRepositoryWithClients({
+      adminClient: explicitAccountClient("person-2"),
+    });
+    await assertRejectsWith(
+      () =>
+        foreignAccountRepository.resolveAccountIdForRow(
+          "person-1",
+          {
+            posted_at: "2026-01-01T00:00:00.000Z",
+            amount: 10,
+            transaction_type: "expense",
+            account_id: "acc-explicit",
+          },
+          "manual",
+        ),
+      "does not belong to this import",
     );
 
     const singleRepository = createRepositoryWithClients({
@@ -1164,8 +1229,17 @@ Deno.test(
           if (table !== "money_cards") throw new Error(`Unexpected table ${table}`);
           return {
             select: () => ({
-              eq: () => ({
-                eq: () => ({
+              eq: (_column: string, cardOrAccountId: string) => ({
+                eq: (_second: string, accountId: string) => ({
+                  // The ownership check for an explicit card id stops here; the hint lookup
+                  // below it goes on through limit().
+                  maybeSingle: async () => ({
+                    data:
+                      cardOrAccountId === "card-explicit" && accountId === "acc-1"
+                        ? { id: cardOrAccountId }
+                        : null,
+                    error: null,
+                  }),
                   limit: () => ({
                     maybeSingle: async () => ({ data: { id: "card-existing" }, error: null }),
                   }),
@@ -1191,6 +1265,19 @@ Deno.test(
         raw_payload: { account_hint: "**** 9999" },
       }),
       "card-explicit",
+    );
+
+    // A card id from another account is refused rather than written through.
+    await assertRejectsWith(
+      () =>
+        repository.resolveCardIdForRow("acc-2", {
+          posted_at: "2026-01-01T00:00:00.000Z",
+          amount: 10,
+          transaction_type: "expense",
+          card_id: "card-explicit",
+          raw_payload: { account_hint: "**** 9999" },
+        }),
+      "does not belong to this import",
     );
 
     assertEquals(

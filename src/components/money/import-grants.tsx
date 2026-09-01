@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,9 +14,6 @@ import {
   useRevokeMoneyImportGrant,
   type MoneyImportGrant,
 } from "@/hooks/use-money-import-grants";
-import { getFunctionUrl } from "@/app/money/import/money-import-client";
-
-const EXTENSION_WEBAPP_SOURCE = "orbit-webapp";
 
 interface MoneyImportGrantsProps {
   t: (key: string, values?: Record<string, string | number>) => string;
@@ -53,7 +50,14 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
   );
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
 
-  const nowMs = useMemo(() => Date.now(), []);
+  // Frozen at first render this reported an expired grant as Active for as long as the page
+  // stayed open, while the backend had already begun refusing it. A minute is finer than any
+  // expiry a person would set and costs one comparison.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const visibleGrants = useMemo(
     () => (personId ? (grants ?? []).filter((grant) => grant.person_id === personId) : []),
     [grants, personId],
@@ -92,26 +96,16 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
     }
   };
 
-  const handleSendToExtension = () => {
+  const handleCopyToken = async () => {
     if (!issuedToken) return;
-    window.postMessage(
-      {
-        source: EXTENSION_WEBAPP_SOURCE,
-        type: "MONEY_IMPORT_SET_GRANT",
-        grant: {
-          token: issuedToken,
-          person_id: personId,
-          allowed_sources: selectedSources,
-          app_origin: window.location.origin,
-          // Without this the extension stores the grant with no endpoint to call, and both
-          // the visit-triggered run and the daily sweep return immediately — the grant would
-          // exist and never do anything.
-          function_url: getFunctionUrl("money-import"),
-        },
-      },
-      "*",
-    );
-    toast.success(t("money.importGrantSentToExtension"));
+    try {
+      await navigator.clipboard.writeText(issuedToken);
+      toast.success(t("money.importGrantCopied"));
+    } catch {
+      // A refused clipboard is not a failure worth a red toast: the token is on screen and can
+      // be selected. Saying nothing would be worse than saying it did not copy.
+      toast.error(t("money.importGrantCopyFailed"));
+    }
   };
 
   const handleRevoke = async (grantId: string) => {
@@ -172,8 +166,8 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
               {issuedToken}
             </code>
             <div className="flex gap-2">
-              <Button type="button" size="sm" onClick={handleSendToExtension}>
-                {t("money.importGrantSendToExtension")}
+              <Button type="button" size="sm" onClick={handleCopyToken}>
+                {t("money.importGrantCopy")}
               </Button>
               <Button
                 type="button"

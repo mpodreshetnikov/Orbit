@@ -590,13 +590,14 @@
     "importGrantRevoke": "Отозвать",
     "importGrantRevokeFailed": "Не удалось отозвать грант.",
     "importGrantRevoked": "Отозван",
-    "importGrantSendToExtension": "Передать расширению",
-    "importGrantSentToExtension": "Ключ отправлен расширению.",
     "importGrantSourcesRequired": "Выберите хотя бы один источник.",
-    "importGrantTokenShownOnce": "Ключ показывается один раз — в базе хранится только его хеш. Передайте его расширению сейчас или скопируйте.",
+    "importGrantTokenShownOnce": "Ключ показывается один раз — в базе хранится только его хеш. Скопируйте его сейчас; расширение попросит его, когда появится автозапуск импорта.",
     "importGrantsDescription": "Грант — долгоживущий отзываемый ключ для расширения. С ним расширение начинает импорт само, когда вы заходите на сайт банка, и вам не нужно каждый раз запускать его вручную.",
     "importGrantsEmpty": "Грантов пока нет.",
-    "importGrantsTitle": "Автоимпорт"
+    "importGrantsTitle": "Автоимпорт",
+    "importGrantCopy": "Скопировать ключ",
+    "importGrantCopied": "Ключ скопирован.",
+    "importGrantCopyFailed": "Не удалось скопировать ключ. Выделите его и скопируйте вручную."
   },
   "records": {
     "title": "Медицинские записи",
