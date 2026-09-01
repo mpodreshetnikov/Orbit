@@ -9,6 +9,7 @@ import {
   deriveChromeExtensionIdFromKey,
   detectManifestVersionChange,
   evaluateExtensionVersionPolicy,
+  fetchPublishedExtensionVersion,
   getExtensionReleaseArtifactName,
   readExtensionManifestVersion,
   shouldRequireExtensionVersionBump,
@@ -75,9 +76,204 @@ describe("extension release", () => {
     ).toEqual({
       changedFiles: ["browserExtension/src/content-script.ts", "docs/QUALITY.md"],
       versionChanged: false,
+      manifestVersionChanged: false,
       previousVersion: "1.2.2",
       nextVersion: "1.2.2",
+      publishedVersion: undefined,
       requiresVersionBump: true,
+    });
+  });
+
+  describe("publish decision against the published release", () => {
+    const unchangedManifests = {
+      previousManifestContent: JSON.stringify({ version: "0.1.3", key: "test-key" }),
+      nextManifestContent: JSON.stringify({ version: "0.1.3", key: "test-key" }),
+    };
+
+    it("publishes when nothing has been published yet, though the manifest did not change", () => {
+      // The failure this fixes: 0.1.3 was bumped in one push and its publish
+      // failed, so every later push that left the manifest alone reported
+      // "nothing changed" and skipped -- forever.
+      const result = evaluateExtensionVersionPolicy({
+        changedFiles: ["docs/QUALITY.md"],
+        ...unchangedManifests,
+        published: { status: "absent" },
+      });
+
+      expect(result.versionChanged).toBe(true);
+      expect(result.manifestVersionChanged).toBe(false);
+      expect(result.publishedVersion).toBeNull();
+    });
+
+    it("publishes when the published release is behind the manifest", () => {
+      const result = evaluateExtensionVersionPolicy({
+        changedFiles: ["docs/QUALITY.md"],
+        ...unchangedManifests,
+        published: { status: "published", version: "0.1.2" },
+      });
+
+      expect(result.versionChanged).toBe(true);
+      expect(result.publishedVersion).toBe("0.1.2");
+    });
+
+    it("skips when the published release already matches the manifest", () => {
+      const result = evaluateExtensionVersionPolicy({
+        changedFiles: ["browserExtension/src/background.ts"],
+        ...unchangedManifests,
+        published: { status: "published", version: "0.1.3" },
+      });
+
+      expect(result.versionChanged).toBe(false);
+      // The bump is still owed: a packaged surface changed with no new version,
+      // and production being up to date does not excuse that.
+      expect(result.requiresVersionBump).toBe(true);
+    });
+
+    it("falls back to the commit range when the lookup failed", () => {
+      // A Storage outage must not turn into a publish on every push, so an
+      // unknown answer leaves the previous behaviour in place.
+      const unknown = { status: "unknown", reason: "network" } as const;
+
+      expect(
+        evaluateExtensionVersionPolicy({
+          changedFiles: ["docs/QUALITY.md"],
+          ...unchangedManifests,
+          published: unknown,
+        }),
+      ).toMatchObject({ versionChanged: false, publishedVersion: undefined });
+
+      expect(
+        evaluateExtensionVersionPolicy({
+          changedFiles: ["docs/QUALITY.md"],
+          previousManifestContent: JSON.stringify({ version: "0.1.2" }),
+          nextManifestContent: JSON.stringify({ version: "0.1.3" }),
+          published: unknown,
+        }),
+      ).toMatchObject({ versionChanged: true });
+    });
+
+    it("does not let a lagging published version excuse a missing version bump", () => {
+      const result = evaluateExtensionVersionPolicy({
+        changedFiles: ["browserExtension/src/background.ts"],
+        ...unchangedManifests,
+        published: { status: "absent" },
+      });
+
+      expect(result.versionChanged).toBe(true);
+      expect(result.requiresVersionBump).toBe(true);
+    });
+  });
+
+  describe("reading the published version", () => {
+    const supabaseUrl = "https://project.supabase.test";
+
+    it("reads the version from the bucket's latest.json", async () => {
+      const requested: string[] = [];
+      const fetchImpl = (async (url: string | URL) => {
+        requested.push(String(url));
+        return new Response(JSON.stringify({ version: "0.1.3" }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      await expect(fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl })).resolves.toEqual({
+        status: "published",
+        version: "0.1.3",
+      });
+      expect(requested).toEqual([
+        "https://project.supabase.test/storage/v1/object/public/extension-releases/latest.json",
+      ]);
+    });
+
+    it("reports absent for the answer Storage actually gives when nothing is published", async () => {
+      // Recorded from the live project on 2026-09-01: Storage answers HTTP 400
+      // and puts the real status in the body. Reading response.status alone
+      // reports this as a failed lookup, which is how the missing release stayed
+      // invisible.
+      const fetchImpl = (async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: "404",
+            error: "not_found",
+            message: "Object not found",
+            code: "NoSuchKey",
+          }),
+          { status: 400 },
+        )) as unknown as typeof fetch;
+
+      await expect(fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl })).resolves.toEqual({
+        status: "absent",
+      });
+    });
+
+    it("reports absent when the bucket itself is not there yet", async () => {
+      // A fresh project: deploy-supabase creates the bucket and runs before the
+      // publish, so "no bucket" still means "nothing published".
+      const fetchImpl = (async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: "404",
+            error: "Bucket not found",
+            message: "Bucket not found",
+            code: "NoSuchBucket",
+          }),
+          { status: 400 },
+        )) as unknown as typeof fetch;
+
+      await expect(fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl })).resolves.toEqual({
+        status: "absent",
+      });
+    });
+
+    it("still honours a plain 404, which a proxy in front of Storage may send", async () => {
+      const fetchImpl = (async () => new Response("", { status: 404 })) as unknown as typeof fetch;
+
+      await expect(fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl })).resolves.toEqual({
+        status: "absent",
+      });
+    });
+
+    it("reports unknown on a failed request, a bad status, and unusable metadata", async () => {
+      const throwing = (async () => {
+        throw new Error("ECONNRESET");
+      }) as unknown as typeof fetch;
+      await expect(
+        fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl: throwing }),
+      ).resolves.toMatchObject({ status: "unknown" });
+
+      const serverError = (async () =>
+        new Response("", { status: 503 })) as unknown as typeof fetch;
+      await expect(
+        fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl: serverError }),
+      ).resolves.toMatchObject({ status: "unknown" });
+
+      // An error body that is not a missing-object report stays unknown: a
+      // permission failure must not read as "nothing published".
+      const denied = (async () =>
+        new Response(JSON.stringify({ statusCode: "403", error: "Unauthorized" }), {
+          status: 400,
+        })) as unknown as typeof fetch;
+      await expect(
+        fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl: denied }),
+      ).resolves.toMatchObject({ status: "unknown" });
+
+      const notJson = (async () =>
+        new Response("<html>proxy</html>", { status: 200 })) as unknown as typeof fetch;
+      await expect(
+        fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl: notJson }),
+      ).resolves.toMatchObject({ status: "unknown" });
+
+      const noVersion = (async () =>
+        new Response(JSON.stringify({ published_at: "now" }), {
+          status: 200,
+        })) as unknown as typeof fetch;
+      await expect(
+        fetchPublishedExtensionVersion({ supabaseUrl, fetchImpl: noVersion }),
+      ).resolves.toMatchObject({ status: "unknown" });
+    });
+
+    it("reports unknown rather than guessing when no Supabase URL is configured", async () => {
+      await expect(fetchPublishedExtensionVersion({ supabaseUrl: "  " })).resolves.toMatchObject({
+        status: "unknown",
+      });
     });
   });
 
