@@ -1060,7 +1060,7 @@ export function registerMedicationTools(server: McpToolServer): void {
     {
       title: "Log a medication intake",
       description:
-        "Record that a dose of a medication the person already has was taken, or skipped. Covers both a scheduled intake and an unplanned one outside the schedule — a dose already on the plan at that time is resolved rather than duplicated. Use this, not add_medication, whenever a course for that medication already exists; find its regimen_id with list_medications. Taking a dose decrements the stock if the medication tracks one.",
+        "Record that a dose of a medication the person already has was taken, or skipped. Covers both a scheduled intake and an unplanned one outside the schedule — a dose already on the plan at that time is resolved rather than duplicated. Use this, not add_medication, whenever a course for that medication already exists; find its regimen_id with list_medications. Taking a dose decrements the stock if the medication tracks one. Call it again for the same time to correct an intake already recorded — a different amount, or a different status — and the stock moves by the difference.",
       inputSchema: z.object({
         regimen_id: uuidSchema.describe("The existing medication this intake belongs to."),
         taken_at: z
@@ -1073,7 +1073,9 @@ export function registerMedicationTools(server: McpToolServer): void {
           .number()
           .positive()
           .optional()
-          .describe("Amount taken; halves are allowed. Defaults to the medication's planned dose."),
+          .describe(
+            "Amount taken; halves are allowed. Defaults to the medication's planned dose. Pass it to correct an intake already recorded at that time.",
+          ),
         status: z.enum(["taken", "skipped"]).default("taken"),
         note: z.string().optional(),
         timezone: z
@@ -1134,7 +1136,7 @@ export function registerMedicationTools(server: McpToolServer): void {
         readAsLocal = parsed.zoneApplied;
       }
 
-      const { regimen, dose, planned, alreadyRecorded } = await logDose(supabase, {
+      const { regimen, dose, planned, alreadyRecorded, corrected } = await logDose(supabase, {
         regimenId: args.regimen_id,
         at: at.toISOString(),
         amount: args.amount ?? null,
@@ -1158,15 +1160,36 @@ export function registerMedicationTools(server: McpToolServer): void {
       // one stock decrement too many.
       if (alreadyRecorded) {
         return ok(
-          `${regimen.custom_name} was already recorded as ${dose.status} at ${when}` +
-            `, so nothing was written. Pass a different taken_at for a separate ` +
-            `intake, or status: "${args.status === "taken" ? "skipped" : "taken"}" to correct it.`,
+          `${regimen.custom_name} was already recorded as ${dose.status} at ${when} for the same ` +
+            `amount, so nothing was written. Pass a different amount to correct it, a different ` +
+            `taken_at for a separate intake, or status: ` +
+            `"${args.status === "taken" ? "skipped" : "taken"}" to change the outcome.`,
           {
             medication: regimen,
             dose: zonedDose,
             planned,
             timezone,
             already_recorded: true,
+            corrected: false,
+          },
+        );
+      }
+
+      // A correction is not a fresh intake, and saying "logged" for one invites
+      // the caller to think a second dose went on the record.
+      if (corrected) {
+        return ok(
+          `Corrected ${regimen.custom_name} at ${when} to ` +
+            `${intake ? `${intake.amount} ${intake.unit}` : "the amount given"}, still ` +
+            `${dose.status}.` +
+            `${dose.status === "taken" ? " Stock was adjusted by the difference." : ""}`,
+          {
+            medication: regimen,
+            dose: zonedDose,
+            planned,
+            timezone,
+            already_recorded: false,
+            corrected: true,
           },
         );
       }
@@ -1181,6 +1204,7 @@ export function registerMedicationTools(server: McpToolServer): void {
           planned,
           timezone,
           already_recorded: false,
+          corrected: false,
         },
       );
     }, WRITE_SCOPE),

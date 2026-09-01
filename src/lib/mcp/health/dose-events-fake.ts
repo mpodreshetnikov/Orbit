@@ -15,9 +15,11 @@ import type { Database } from "@/types/database";
  * either, which is how a duplicate-intake defect survived a green suite.
  *
  * So this models the rows: filters are applied for real, the unique index
- * rejects a second unresolved row in the same regimen-minute, and the two RPCs
- * follow `supabase/db/functions/mark_dose_*.sql` including their inventory
- * side effects.
+ * rejects a second unresolved row in the same regimen-minute, and the resolution
+ * RPCs follow `supabase/db/functions/mark_dose_*.sql` and
+ * `update_dose_event_resolution_details.sql` including their inventory side
+ * effects -- which is where the order between amending an amount and moving the
+ * ledger becomes visible at all.
  *
  * Only the query shapes `logDose` uses are implemented; anything else throws
  * loudly rather than quietly returning nothing.
@@ -258,60 +260,108 @@ export function createDoseEventsFake(params: {
     return builder;
   }
 
-  /** `mark_dose_taken` / `mark_dose_skipped`, per `supabase/db/functions`. */
-  const rpc = vi.fn(async (name: string, args: { p_dose_event_id: string; p_note?: string }) => {
-    const failure = takeFailure("rpc");
-    if (failure) {
-      return { data: null, error: { message: failure } };
-    }
+  /**
+   * `mark_dose_taken`, `mark_dose_skipped` and
+   * `update_dose_event_resolution_details`, per `supabase/db/functions`.
+   */
+  const rpc = vi.fn(
+    async (
+      name: string,
+      args: { p_dose_event_id: string; p_note?: string; p_amount_taken?: number },
+    ) => {
+      const failure = takeFailure("rpc");
+      if (failure) {
+        return { data: null, error: { message: failure } };
+      }
 
-    const accepts =
-      name === "mark_dose_taken"
-        ? ["scheduled", "sent", "snoozed", "skipped"]
-        : ["scheduled", "sent", "snoozed", "taken"];
+      if (name === "update_dose_event_resolution_details") {
+        const target = events.find((event) => event.id === args.p_dose_event_id);
+        if (target && (target.status === "taken" || target.status === "skipped")) {
+          const details = (
+            target.planned_intake as { intake?: { amount?: number; unit?: string } } | null
+          )?.intake;
+          const before = details?.amount ?? 1;
+          const unit = details?.unit ?? "pill";
+          const after = args.p_amount_taken;
 
-    const row = events.find((event) => event.id === args.p_dose_event_id);
+          if (target.status === "taken" && after != null && after !== before) {
+            // Reverse what was decremented, then decrement the new amount --
+            // the RPC's own two ledger rows, in its own order.
+            inventory.push({
+              regimen_id: target.regimen_id,
+              event_id: target.id,
+              type: "correction",
+              amount: before,
+              unit,
+            });
+            inventory.push({
+              regimen_id: target.regimen_id,
+              event_id: target.id,
+              type: "decrement",
+              amount: after,
+              unit,
+            });
+            target.planned_intake = {
+              ...((target.planned_intake as Record<string, unknown> | null) ?? {}),
+              intake: { amount: after, unit },
+            };
+          }
+          if (args.p_note !== undefined) {
+            target.note = args.p_note?.trim() || null;
+          }
+        }
+        return { data: null, error: null };
+      }
 
-    // `IF NOT FOUND THEN RETURN` -- a silent no-op, not an error.
-    if (row && accepts.includes(row.status)) {
-      const intake = (row.planned_intake as { intake?: { amount?: number; unit?: string } } | null)
-        ?.intake;
-      const amount = intake?.amount ?? 1;
-      const unit = intake?.unit ?? "pill";
+      const accepts =
+        name === "mark_dose_taken"
+          ? ["scheduled", "sent", "snoozed", "skipped"]
+          : ["scheduled", "sent", "snoozed", "taken"];
 
-      if (name === "mark_dose_taken") {
-        inventory.push({
-          regimen_id: row.regimen_id,
-          event_id: row.id,
-          type: "decrement",
-          amount,
-          unit,
-        });
-        row.status = "taken";
-      } else {
-        if (row.status === "taken") {
+      const row = events.find((event) => event.id === args.p_dose_event_id);
+
+      // `IF NOT FOUND THEN RETURN` -- a silent no-op, not an error.
+      if (row && accepts.includes(row.status)) {
+        const intake = (
+          row.planned_intake as { intake?: { amount?: number; unit?: string } } | null
+        )?.intake;
+        const amount = intake?.amount ?? 1;
+        const unit = intake?.unit ?? "pill";
+
+        if (name === "mark_dose_taken") {
           inventory.push({
             regimen_id: row.regimen_id,
             event_id: row.id,
-            type: "correction",
+            type: "decrement",
             amount,
             unit,
           });
+          row.status = "taken";
+        } else {
+          if (row.status === "taken") {
+            inventory.push({
+              regimen_id: row.regimen_id,
+              event_id: row.id,
+              type: "correction",
+              amount,
+              unit,
+            });
+          }
+          row.status = "skipped";
         }
-        row.status = "skipped";
+        row.taken_at = row.actual_at;
+        row.note = args.p_note?.trim() || null;
       }
-      row.taken_at = row.actual_at;
-      row.note = args.p_note?.trim() || null;
-    }
 
-    if (loseResponse) {
-      const message = loseResponse;
-      loseResponse = null;
-      return { data: null, error: { message } };
-    }
+      if (loseResponse) {
+        const message = loseResponse;
+        loseResponse = null;
+        return { data: null, error: { message } };
+      }
 
-    return { data: null, error: null };
-  });
+      return { data: null, error: null };
+    },
+  );
 
   const client = {
     from: vi.fn((table: string) => builderFor(table)),

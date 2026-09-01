@@ -1984,6 +1984,33 @@ describe("log_dose", () => {
     expect(result.structuredContent).toMatchObject({ already_recorded: true });
   });
 
+  it("reports a corrected amount as a correction rather than a fresh intake", async () => {
+    // "Logged ... as taken" for a correction reads as a second dose on the
+    // record, which is the one thing the caller must not believe.
+    meds.logDose.mockResolvedValue({
+      regimen: { id: "r-1", custom_name: "Атаракс", effective_status: "active" },
+      dose: {
+        id: "d-1",
+        status: "taken",
+        planned_intake: { intake: { amount: 0.5, unit: "pill" } },
+      },
+      planned: true,
+      alreadyRecorded: false,
+      corrected: true,
+    });
+
+    const result = await (await handlers()).get("log_dose")!(
+      { regimen_id: "r-1", taken_at: "2026-08-19T23:10:00Z", status: "taken", amount: 0.5 },
+      ctx(),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Corrected");
+    expect(result.content[0].text).toContain("0.5 pill");
+    expect(result.content[0].text).not.toContain("nothing was written");
+    expect(result.structuredContent).toMatchObject({ corrected: true, already_recorded: false });
+  });
+
   it("says whether the intake resolved a planned dose or was an extra", async () => {
     meds.logDose.mockResolvedValue({
       regimen: { id: "r-1", custom_name: "Атаракс", effective_status: "active" },

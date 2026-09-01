@@ -540,6 +540,8 @@ export async function logDose(
   dose: MedDoseEvent;
   planned: boolean;
   alreadyRecorded: boolean;
+  /** The call changed the amount on a dose already resolved the way it asked. */
+  corrected: boolean;
 }> {
   const { data: regimenRow, error: regimenError } = await supabase
     .from("med_regimens")
@@ -568,24 +570,123 @@ export async function logDose(
     params.status,
   );
 
-  // Nothing to do when the minute already holds this very outcome. Re-running
-  // the RPC would be a silent no-op anyway (it selects only rows in the other
-  // statuses), so the caller would be told "recorded" with nothing recorded and
-  // no way to tell the two apart.
-  if (planned && planned.status === params.status) {
-    return {
-      regimen,
-      dose: rowToDoseEvent(planned),
-      planned: true,
-      alreadyRecorded: true,
-    };
-  }
-
   // A per-slot amount on the planned event beats the regimen's default: a
   // `daily_times` schedule can carry a different amount per time of day.
   const plannedIntake = (planned?.planned_intake ?? null) as PlannedIntake | null;
   const plannedAmount = plannedIntake?.intake?.amount;
   const amount = params.amount ?? plannedAmount ?? getPlannedIntakeAmount(regimen.dose_definition);
+
+  // A caller naming an amount that differs from the one on record is
+  // correcting the dose, whatever its status already says.
+  const correctsAmount = params.amount != null && params.amount !== plannedAmount;
+
+  const amendPlannedAmount = async (doseEventId: string) => {
+    const { error } = await supabase
+      .from("med_dose_events")
+      .update({
+        // Spread rather than rebuild: `planned_intake` also carries the
+        // active ingredients this dose delivers, which the generator
+        // deliberately preserves and which are the only record of what was
+        // actually taken. Keep the slot's own unit for the same reason --
+        // `mark_dose_taken` copies it straight into the inventory ledger.
+        planned_intake: {
+          ...(plannedIntake ?? {}),
+          intake: { amount, unit: plannedIntake?.intake?.unit ?? unit },
+        },
+      } as never)
+      .eq("id", doseEventId);
+    return error;
+  };
+
+  const readResolved = async (doseEventId: string): Promise<Record<string, unknown>> => {
+    const { data, error } = await supabase
+      .from("med_dose_events")
+      .select("*")
+      .eq("id", doseEventId)
+      .maybeSingle();
+
+    // Falling back to the pre-write snapshot here would report a dose as still
+    // `scheduled` when it was in fact recorded, and a caller reading that would
+    // reasonably log it again. The write succeeded; say so, and say that only
+    // the read-back did not.
+    if (error || !data) {
+      throw new Error(
+        `The intake was recorded as ${params.status} on ${regimen.custom_name} (dose event ` +
+          `${doseEventId}), but reading it back failed ` +
+          `(${error?.message ?? "no row returned"}). Do not record it again.`,
+      );
+    }
+    return data as Record<string, unknown>;
+  };
+
+  // Nothing to do when the minute already holds this very outcome and the
+  // amount is the one on record. Re-running the RPC would be a silent no-op
+  // anyway (it selects only rows in the other statuses), so the caller would be
+  // told "recorded" with nothing recorded and no way to tell the two apart.
+  if (planned && planned.status === params.status && !correctsAmount) {
+    return {
+      regimen,
+      dose: rowToDoseEvent(planned),
+      planned: true,
+      alreadyRecorded: true,
+      corrected: false,
+    };
+  }
+
+  // Same status, different amount: a correction, not a repeat. A matching
+  // status is not a matching outcome, and refusing here left the record
+  // disagreeing with what the person reported and sent them round the
+  // toggle-to-skipped-and-back workaround, which walks into the ordering defect
+  // below.
+  if (planned && planned.status === params.status) {
+    const doseEventId = planned.id as string;
+
+    if (params.status === "taken") {
+      // The resolution RPCs will not touch a row already in their target
+      // status, so the correction goes through the one the app's own edit
+      // dialog uses: it reverses the decrement it finds and writes the new one
+      // in a single transaction, which two calls from here could not.
+      const { error: correctError } = await supabase.rpc("update_dose_event_resolution_details", {
+        p_dose_event_id: doseEventId,
+        p_amount_taken: amount,
+        ...(note ? { p_note: note } : {}),
+      } as never);
+
+      // Safe to repeat, unlike the resolution path: the RPC compares the amount
+      // it finds against the one passed, so a call that did land is a no-op the
+      // second time round.
+      if (correctError) {
+        throw new Error(
+          `Failed to correct the intake on ${regimen.custom_name}: ${correctError.message}. ` +
+            `Nothing may have changed; the same call can safely be repeated.`,
+        );
+      }
+    } else {
+      // A skipped dose moved no stock, so there is no ledger entry to move with
+      // it -- only the amount the record says was due.
+      const amendError = await amendPlannedAmount(doseEventId);
+      if (amendError) {
+        throw new Error(`Failed to correct the intake: ${amendError.message}`);
+      }
+    }
+
+    return {
+      regimen,
+      dose: rowToDoseEvent(await readResolved(doseEventId)),
+      planned: true,
+      alreadyRecorded: false,
+      corrected: true,
+    };
+  }
+
+  // Which side of the RPC the corrected amount is written on. `mark_dose_skipped`
+  // reverses a taken dose by the amount it reads off the row, so amending first
+  // makes it restore the corrected amount instead of the one that was actually
+  // decremented -- a dose taken as 1 pill and corrected to "skipped, 0.5" put
+  // 0.5 back and left the other half missing from stock for good. Every other
+  // direction decrements what it reads, so there the correction has to be on the
+  // row before the RPC looks at it.
+  const reversesDecrement = planned?.status === "taken" && params.status === "skipped";
 
   let row: Record<string, unknown>;
   // Set when the planned event's `planned_intake` was rewritten, so the
@@ -596,22 +697,8 @@ export async function logDose(
     row = planned;
     // Only when the caller corrected the amount -- otherwise leave the planned
     // intake untouched rather than rewriting it with an identical value.
-    if (params.amount != null && params.amount !== plannedAmount) {
-      const { error: amendError } = await supabase
-        .from("med_dose_events")
-        .update({
-          // Spread rather than rebuild: `planned_intake` also carries the
-          // active ingredients this dose delivers, which the generator
-          // deliberately preserves and which are the only record of what was
-          // actually taken. Keep the slot's own unit for the same reason --
-          // `mark_dose_taken` copies it straight into the inventory ledger.
-          planned_intake: {
-            ...(plannedIntake ?? {}),
-            intake: { amount, unit: plannedIntake?.intake?.unit ?? unit },
-          },
-        } as never)
-        .eq("id", planned.id as string);
-
+    if (correctsAmount && !reversesDecrement) {
+      const amendError = await amendPlannedAmount(planned.id as string);
       if (amendError) {
         throw new Error(`Failed to record the intake: ${amendError.message}`);
       }
@@ -665,6 +752,7 @@ export async function logDose(
         dose: rowToDoseEvent(after),
         planned: planned !== null,
         alreadyRecorded: false,
+        corrected: false,
       };
     }
 
@@ -725,28 +813,25 @@ export async function logDose(
     throw new Error(`Failed to mark the intake as ${params.status}: ${resolveError.message}`);
   }
 
-  const { data: resolved, error: resolvedError } = await supabase
-    .from("med_dose_events")
-    .select("*")
-    .eq("id", doseEventId)
-    .maybeSingle();
-
-  // Falling back to `row` here would report the pre-RPC snapshot -- still
-  // `scheduled` -- for a dose that was in fact recorded, and a caller reading
-  // that would reasonably log it again. The write succeeded; say so, and say
-  // that only the read-back did not.
-  if (resolvedError || !resolved) {
-    throw new Error(
-      `The intake was recorded as ${params.status} on ${regimen.custom_name} (dose event ` +
-        `${doseEventId}), but reading it back failed ` +
-        `(${resolvedError?.message ?? "no row returned"}). Do not record it again.`,
-    );
+  // Now, and only now, is the corrected amount safe to write: the reversal it
+  // would otherwise have shrunk has already been made against the amount that
+  // was really decremented.
+  if (correctsAmount && reversesDecrement) {
+    const amendError = await amendPlannedAmount(doseEventId);
+    if (amendError) {
+      throw new Error(
+        `The intake was recorded as skipped on ${regimen.custom_name} and the stock it had taken ` +
+          `was put back, but writing the corrected amount failed (${amendError.message}), so dose ` +
+          `event ${doseEventId} still shows the amount it was taken as. Do not record it again.`,
+      );
+    }
   }
 
   return {
     regimen,
-    dose: rowToDoseEvent(resolved as Record<string, unknown>),
+    dose: rowToDoseEvent(await readResolved(doseEventId)),
     planned: planned !== null,
     alreadyRecorded: false,
+    corrected: false,
   };
 }
