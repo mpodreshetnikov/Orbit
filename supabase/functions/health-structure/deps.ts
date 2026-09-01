@@ -6,7 +6,8 @@ import {
   type HealthStructureRepository,
 } from "./repository.ts";
 import type { HealthStructureParseContext } from "./service.ts";
-import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
+import { emptyLlmUsage } from "../_shared/llm-usage.ts";
+import type { IcdLookupResult, StructuredParseOutcome } from "./types.ts";
 
 export type HealthStructureParserMode = "openrouter" | "e2e_stub";
 
@@ -23,7 +24,7 @@ export interface HealthStructureDeps {
   parseStructuredData: (
     ocrText: string,
     context: HealthStructureParseContext,
-  ) => Promise<StructuredDataWithEntities>;
+  ) => Promise<StructuredParseOutcome>;
   lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
   log?: Pick<Console, "log" | "warn" | "error">;
 }
@@ -109,7 +110,11 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
       : createMissingEnvRepository(),
     parseStructuredData: async (ocrText, context) => {
       if (parseMode === "e2e_stub") {
-        return await parseStructuredDataE2EStub(ocrText, context);
+        return {
+          structured: await parseStructuredDataE2EStub(ocrText, context),
+          usage: emptyLlmUsage(),
+          stagesRun: [],
+        };
       }
       if (!openRouterApiKey) {
         throw new Error("OPENROUTER_API_KEY is required");
@@ -124,16 +129,6 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
           timeoutMs: openRouterTimeoutMs,
           debugRawPayload,
         });
-        // Per-record cost visibility. money-categorize already captures usage; the health
-        // functions previously discarded it entirely.
-        console.log(
-          JSON.stringify({
-            health_structure_stage_usage: true,
-            stages_run: outcome.stagesRun,
-            prompt_tokens: outcome.usage.promptTokens,
-            completion_tokens: outcome.usage.completionTokens,
-          }),
-        );
         if (outcome.rejected.length > 0) {
           // Counts and reasons only — reasons are fixed strings, never entity content.
           console.log(
@@ -145,15 +140,25 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
             }),
           );
         }
-        return outcome.structured;
+        // Cost travels with the result so the service can put it on the record's own span.
+        // It used to be a standalone log line, which carried no trace id and so could not be
+        // read as per-record cost.
+        return {
+          structured: outcome.structured,
+          usage: outcome.usage,
+          stagesRun: outcome.stagesRun,
+        };
       }
-      return await callOpenRouterParse(ocrText, context, {
+      const structured = await callOpenRouterParse(ocrText, context, {
         fetchFn: globalThis.fetch,
         apiKey: openRouterApiKey,
         model: openRouterModel,
         timeoutMs: openRouterTimeoutMs,
         debugRawPayload,
       });
+      // The pre-staged parser never read the provider's usage object; it is kept only as the
+      // fallback pipeline, so its cost stays unknown rather than being reported as zero.
+      return { structured, usage: emptyLlmUsage(), stagesRun: [] };
     },
     lookupIcdCode: async (code) => {
       if (!supabaseUrl || !supabaseServiceRoleKey) return null;

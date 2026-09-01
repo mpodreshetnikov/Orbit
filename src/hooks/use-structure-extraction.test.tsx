@@ -79,7 +79,8 @@ describe("use-structure-extraction", () => {
     });
 
     expect(fromMock).toHaveBeenCalledWith("medical_records");
-    expect(updateMock).toHaveBeenCalledWith({ status: "structuring" });
+    // The retry clears the previous failure, the way the edge function clears it on success.
+    expect(updateMock).toHaveBeenCalledWith({ status: "structuring", structure_error: null });
     expect(eqMock).toHaveBeenCalledWith("id", "record-1");
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-records"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-record", "record-1"] });
@@ -125,7 +126,11 @@ describe("use-structure-extraction", () => {
         description: "Not authenticated",
       }),
     );
-    expect(updateMock).toHaveBeenCalledWith({ status: "ocr_review" });
+    // The reason outlives the toast: a failure that never reached the edge function is written here.
+    expect(updateMock).toHaveBeenCalledWith({
+      status: "ocr_review",
+      structure_error: "Not authenticated",
+    });
     expect(eqMock).toHaveBeenCalledWith("id", "record-1");
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-records"] });
     expect(response).toEqual({

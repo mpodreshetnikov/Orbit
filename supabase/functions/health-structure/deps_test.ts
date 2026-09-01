@@ -106,7 +106,7 @@ Deno.test(
           const { createDefaultHealthStructureDeps } = await importDepsModule("present");
           const deps = createDefaultHealthStructureDeps();
 
-          const structured = await deps.parseStructuredData("ocr", {
+          const outcome = await deps.parseStructuredData("ocr", {
             observationCatalog: [],
             findingTypeCatalog: [],
             bodySiteCatalog: [],
@@ -114,7 +114,7 @@ Deno.test(
             existingFindings: [],
             checkupItems: [],
           });
-          assertEquals(structured.title, "Doc");
+          assertEquals(outcome.structured.title, "Doc");
 
           const icd = await deps.lookupIcdCode("A00");
           assertEquals(icd?.found, true);
@@ -152,7 +152,7 @@ Deno.test(
           assertEquals(deps.config.openRouterApiKey, undefined);
           assertEquals(deps.config.parseMode, "e2e_stub");
 
-          const structured = await deps.parseStructuredData("Hemoglobin 142 g/L", {
+          const outcome = await deps.parseStructuredData("Hemoglobin 142 g/L", {
             observationCatalog: [],
             findingTypeCatalog: [],
             bodySiteCatalog: [],
@@ -160,7 +160,9 @@ Deno.test(
             existingFindings: [],
             checkupItems: [],
           });
-          assertEquals(structured.title, "Hemoglobin 142 g/L");
+          assertEquals(outcome.structured.title, "Hemoglobin 142 g/L");
+          // The stub makes no provider call, so its cost is unknown rather than zero.
+          assertEquals(outcome.usage.promptTokens, null);
           assertEquals(fetchCalls, 0);
 
           let parseError: unknown = null;

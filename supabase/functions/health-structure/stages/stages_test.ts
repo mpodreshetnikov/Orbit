@@ -1012,3 +1012,38 @@ Deno.test("a negation standing before its own term still suppresses the finding"
   });
   assertEquals(result.value.findings.length, 0);
 });
+
+Deno.test("a skipped reconcile leaves the total known, not unknown", async () => {
+  const { bodies, fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: ["cbc"],
+      });
+    }
+    return jsonResponse({ observations: [], findings: [], conditions: [] });
+  });
+
+  const context = {
+    ...CATALOGS,
+    existingConditions: [],
+    existingFindings: [],
+    checkupItems: [],
+  } as unknown as HealthStructureParseContext;
+
+  const outcome = await runStagedParse("Гемоглобин 97", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "default-model",
+  });
+
+  assertEquals(bodies.length, 2);
+  assertEquals(outcome.stagesRun, ["classify", "extract"]);
+  // The stage that never ran has no cost to be unknown about.
+  assertEquals(outcome.usage.promptTokens, 20);
+  assertEquals(outcome.usage.completionTokens, 10);
+});

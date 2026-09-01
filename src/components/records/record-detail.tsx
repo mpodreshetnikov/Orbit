@@ -792,6 +792,14 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           </Button>
           <h1 className="text-2xl font-bold tracking-tight">{t("records.ocr.pageTitle")}</h1>
         </div>
+        {record.structure_error ? (
+          // The last structuring attempt failed. The toast that announced it is long gone, so the
+          // reason is shown here until a run succeeds and clears it.
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+            <p className="text-sm font-medium">{t("processing.structureFailed")}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{record.structure_error}</p>
+          </div>
+        ) : null}
         <OcrReviewStep
           recordId={recordId}
           ocrText={record.ocr_text || ""}

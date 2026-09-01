@@ -183,8 +183,12 @@ export async function processFindingsToResolve(
         body_site_id: matching.body_site_id,
         site_code: matching.site_code,
         body_site_text: matching.body_site_text,
-        size_mm: 0,
-        count: 0,
+        // The row records a resolution, not a measurement: no size, no count, and the status
+        // says so explicitly. Zeros here used to mean "resolved", which made a real measured
+        // zero vanish from the active list.
+        size_mm: null,
+        count: null,
+        resolution_status: "resolved",
         severity: "unknown",
         laterality: "none",
         finding_date: recordDate,

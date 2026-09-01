@@ -309,8 +309,12 @@ Deno.test("processFindingsToResolve matches by code/site and text fallback", asy
   );
 
   assertEquals(state.insertedFindings.length, 2);
-  assertEquals(state.insertedFindings[0].size_mm, 0);
-  assertEquals(state.insertedFindings[1].count, 0);
+  // A resolution row says so explicitly and measures nothing; zeros here used to carry that
+  // meaning, which made a real measured zero read as resolved.
+  assertEquals(state.insertedFindings[0].resolution_status, "resolved");
+  assertEquals(state.insertedFindings[0].size_mm, null);
+  assertEquals(state.insertedFindings[1].resolution_status, "resolved");
+  assertEquals(state.insertedFindings[1].count, null);
 });
 
 Deno.test("processFindingsToResolve continues when insert fails", async () => {

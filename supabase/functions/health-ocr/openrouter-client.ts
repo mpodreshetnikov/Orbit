@@ -1,4 +1,5 @@
 import { extractContentText, parseJsonObject } from "../_shared/llm-json.ts";
+import { type LlmUsage, parseLlmUsage, sumLlmUsage } from "../_shared/llm-usage.ts";
 import {
   DEFAULT_MAX_ATTEMPTS,
   isRetryableStatus,
@@ -21,6 +22,11 @@ export interface OcrResult {
    * page as a complete transcription — everything downstream reads it as the whole document.
    */
   truncated: boolean;
+  /**
+   * What the provider charged for this page, across every attempt that reached the model --
+   * a truncated answer is a billed call even though it is thrown away and retried.
+   */
+  usage: LlmUsage;
 }
 
 export interface OpenRouterOcrClient {
@@ -131,6 +137,10 @@ export function createOpenRouterOcrClient(
       // Built before the retry loop so an unsupported MIME type fails once rather than three times.
       const attachmentPart = buildAttachmentContentPart(attachment);
       const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+      // Every attempt that reached the model was billed, the truncated ones that are retried for
+      // a larger budget included. Reporting only the last would understate exactly the long
+      // documents that retry most.
+      const billed: LlmUsage[] = [];
 
       const outcome = await withLlmRetry(
         async (attempt) => {
@@ -195,6 +205,7 @@ export function createOpenRouterOcrClient(
 
             const payload = (await response.json()) as {
               choices?: Array<{ finish_reason?: string; message?: Record<string, unknown> }>;
+              usage?: Record<string, unknown>;
             };
             const choice = payload.choices?.[0];
             const contentText = extractContentText(choice?.message ?? {});
@@ -204,10 +215,12 @@ export function createOpenRouterOcrClient(
             const ocrText = typeof parsed.ocr_text === "string" ? parsed.ocr_text : "";
             const suggestedTitle =
               typeof parsed.suggested_title === "string" ? parsed.suggested_title.trim() : "";
+            billed.push(parseLlmUsage(payload));
             const result: OcrResult = {
               ocr_text: ocrText,
               suggested_title: suggestedTitle || DEFAULT_FALLBACK_TITLE,
               truncated: choice?.finish_reason === "length",
+              usage: sumLlmUsage(billed),
             };
 
             // Retried for the larger budget, not because the answer was malformed. Once the

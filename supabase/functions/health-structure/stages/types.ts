@@ -1,3 +1,4 @@
+import { emptyLlmUsage, type LlmUsage, sumLlmUsage } from "../../_shared/llm-usage.ts";
 import type {
   BodySiteCatalogItem,
   CheckupItemForContext,
@@ -36,12 +37,8 @@ export interface StageContext {
   jitterFn?: () => number;
 }
 
-export interface StageUsage {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  /** What the router charged for this call, in USD. Null when unknown -- never assume zero. */
-  costUsd: number | null;
-}
+/** One shape for what a model call cost, shared with the other edge functions. */
+export type StageUsage = LlmUsage;
 
 export interface StageRejection {
   entityKind: string;
@@ -114,17 +111,9 @@ export const EMPTY_RECONCILE: ReconcileResult = {
 };
 
 export function emptyUsage(): StageUsage {
-  return { promptTokens: null, completionTokens: null, costUsd: null };
+  return emptyLlmUsage();
 }
 
 export function sumUsage(parts: StageUsage[]): StageUsage {
-  let prompt: number | null = null;
-  let completion: number | null = null;
-  let cost: number | null = null;
-  for (const part of parts) {
-    if (part.promptTokens !== null) prompt = (prompt ?? 0) + part.promptTokens;
-    if (part.completionTokens !== null) completion = (completion ?? 0) + part.completionTokens;
-    if (part.costUsd !== null) cost = (cost ?? 0) + part.costUsd;
-  }
-  return { promptTokens: prompt, completionTokens: completion, costUsd: cost };
+  return sumLlmUsage(parts);
 }

@@ -6,7 +6,12 @@ import {
 } from "./resolution.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import type { HealthStructureRepository } from "./repository.ts";
-import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
+import { usageAttrs } from "../_shared/llm-usage.ts";
+import type {
+  IcdLookupResult,
+  StructuredDataWithEntities,
+  StructuredParseOutcome,
+} from "./types.ts";
 import { convertRefRangeToCanonical, convertToCanonical } from "./unit-conversion.ts";
 
 export interface HealthStructureServiceInput {
@@ -28,7 +33,7 @@ export interface HealthStructureServiceDeps {
   parseStructuredData: (
     ocrText: string,
     context: HealthStructureParseContext,
-  ) => Promise<StructuredDataWithEntities>;
+  ) => Promise<StructuredParseOutcome>;
   lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
   log?: Pick<Console, "log" | "warn" | "error">;
   telemetry?: EdgeTelemetry;
@@ -175,7 +180,8 @@ export function buildFindingRows(
       site_code: bodySiteEntry?.site_code ?? null,
       body_site_text: item.body_site_text,
       size_mm: item.size_mm,
-      count: item.count || 1,
+      // A real zero is a real count. It used to be coerced to 1 because zero meant "resolved".
+      count: item.count ?? null,
       severity: item.severity,
       laterality: item.laterality,
       morphology: item.morphology,
@@ -198,6 +204,10 @@ export async function runHealthStructureService(
 ): Promise<ServiceResult> {
   const telemetry = deps.telemetry;
   const serviceSpan = telemetry?.startSpan("edge.health_structure.service");
+  // The failure write below uses the service-role client and this function runs with
+  // verify_jwt = false, so it must not be reachable before the caller has been authenticated
+  // and the record resolved -- otherwise anyone who guesses a record id could stamp it.
+  let mayRecordFailure = false;
   try {
     telemetry?.info("health_structure_service_started", {
       has_record_id: Boolean(input.recordId),
@@ -228,6 +238,7 @@ export async function runHealthStructureService(
     if (!record) throw new Error("Record not found or access denied");
     const personId = asString(record.person_id);
     if (!personId) throw new Error("Record is missing person_id");
+    mayRecordFailure = true;
     const ocrText = asString(record.ocr_text);
     if (!ocrText) throw new Error("No OCR text found for this record. Run health-ocr first.");
     await recordSpan?.end({
@@ -273,13 +284,20 @@ export async function runHealthStructureService(
     };
 
     const parseSpan = telemetry?.startSpan("edge.health_structure.parse_llm");
-    const structuredData = await deps.parseStructuredData(ocrText, context);
+    const parseOutcome = await deps.parseStructuredData(ocrText, context);
+    const structuredData = parseOutcome.structured;
     await parseSpan?.end({
       status: "ok",
       attrs: {
         observation_count: structuredData.observations.length,
         finding_count: structuredData.findings.length,
         condition_count: structuredData.conditions.length,
+        // On the record's own span, so per-record cost is readable off the trace rather than
+        // off an uncorrelated log line. Absent values are omitted, never sent as zero.
+        ...usageAttrs(parseOutcome.usage),
+        ...(parseOutcome.stagesRun.length > 0
+          ? { stages_run: parseOutcome.stagesRun.join(",") }
+          : {}),
       },
     });
     const checkupSuggestions = buildCheckupSuggestions(structuredData, checkupItems);
@@ -296,6 +314,8 @@ export async function runHealthStructureService(
       llm_keywords: structuredData.keywords,
       llm_suggested_checkup_completions: checkupSuggestions,
       status: "structure_review",
+      // A previous failure is cleared by the run that succeeds, the way ocr_error is.
+      structure_error: null,
     });
     await updateRecordSpan?.end({ status: "ok" });
 
@@ -411,6 +431,16 @@ export async function runHealthStructureService(
       record_id: input.recordId ?? "missing",
       error_message: message,
     });
+    // Durable trace of the failure, and only for a caller who got past authentication and whose
+    // record was found. Best-effort on purpose: the original error is what the caller must see,
+    // so a record that cannot be written must not replace it with a second one.
+    if (mayRecordFailure && input.recordId) {
+      try {
+        await deps.repository.updateMedicalRecord(input.recordId, { structure_error: message });
+      } catch (writeError) {
+        deps.log?.error?.("[health-structure] failed to persist structure_error:", writeError);
+      }
+    }
     await serviceSpan?.end({
       status: "error",
       statusMessage: message,

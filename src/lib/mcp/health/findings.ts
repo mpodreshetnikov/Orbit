@@ -8,9 +8,8 @@ import type { Database } from "@/types/database";
  * Unlike observations, `record_findings` carries its own `person_id`, so these
  * queries filter directly rather than joining through the parent record.
  *
- * The app treats a later finding recorded with `size_mm = 0` or `count = 0` as
- * "this resolved", rather than deleting history, so that convention is surfaced
- * here as `is_resolved`.
+ * A later record can close an earlier finding rather than deleting history; such a row carries
+ * `resolution_status = 'resolved'`, which is surfaced here as `is_resolved`.
  */
 
 export interface FindingRow {
@@ -35,13 +34,15 @@ export interface FindingRow {
 const FINDING_SELECT = `
   id, record_id, finding_code, finding_type_text, site_code, body_site_text,
   size_mm, count, severity, laterality, morphology, description, histology,
-  finding_date, is_user_verified
+  finding_date, is_user_verified, resolution_status
 `;
 
-function withResolvedFlag(rows: Array<Omit<FindingRow, "is_resolved">>): FindingRow[] {
-  return rows.map((row) => ({
+type FindingRowWithStatus = Omit<FindingRow, "is_resolved"> & { resolution_status: string };
+
+function withResolvedFlag(rows: FindingRowWithStatus[]): FindingRow[] {
+  return rows.map(({ resolution_status, ...row }) => ({
     ...row,
-    is_resolved: row.size_mm === 0 || row.count === 0,
+    is_resolved: resolution_status === "resolved",
   }));
 }
 
@@ -87,7 +88,7 @@ export async function searchFindings(
     throw new Error(`Failed to search findings: ${error.message}`);
   }
 
-  return withResolvedFlag((data ?? []) as unknown as Array<Omit<FindingRow, "is_resolved">>);
+  return withResolvedFlag((data ?? []) as unknown as FindingRowWithStatus[]);
 }
 
 /** All records of one finding at one site over time, oldest first. */
@@ -113,5 +114,5 @@ export async function getFindingHistory(
     throw new Error(`Failed to load finding history: ${error.message}`);
   }
 
-  return withResolvedFlag((data ?? []) as unknown as Array<Omit<FindingRow, "is_resolved">>);
+  return withResolvedFlag((data ?? []) as unknown as FindingRowWithStatus[]);
 }

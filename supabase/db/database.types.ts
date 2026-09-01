@@ -628,6 +628,7 @@ export type Database = {
           removed_at: string | null
           search_vector: unknown
           status: Database["public"]["Enums"]["record_status"]
+          structure_error: string | null
           title: string
           updated_at: string
         }
@@ -647,6 +648,7 @@ export type Database = {
           removed_at?: string | null
           search_vector?: unknown
           status?: Database["public"]["Enums"]["record_status"]
+          structure_error?: string | null
           title: string
           updated_at?: string
         }
@@ -666,6 +668,7 @@ export type Database = {
           removed_at?: string | null
           search_vector?: unknown
           status?: Database["public"]["Enums"]["record_status"]
+          structure_error?: string | null
           title?: string
           updated_at?: string
         }
@@ -2054,6 +2057,7 @@ export type Database = {
           morphology: string | null
           person_id: string
           record_id: string
+          resolution_status: string
           severity: string
           site_code: string | null
           size_mm: number | null
@@ -2079,6 +2083,7 @@ export type Database = {
           morphology?: string | null
           person_id: string
           record_id: string
+          resolution_status?: string
           severity?: string
           site_code?: string | null
           size_mm?: number | null
@@ -2104,6 +2109,7 @@ export type Database = {
           morphology?: string | null
           person_id?: string
           record_id?: string
+          resolution_status?: string
           severity?: string
           site_code?: string | null
           size_mm?: number | null

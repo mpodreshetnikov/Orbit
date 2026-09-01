@@ -9,6 +9,7 @@ import {
   RetryableLlmError,
   withLlmRetry,
 } from "../../_shared/llm-retry.ts";
+import { parseLlmUsage } from "../../_shared/llm-usage.ts";
 import type { StageContext, StageUsage } from "./types.ts";
 
 /**
@@ -54,10 +55,6 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
-}
-
-function asNumberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -146,17 +143,12 @@ export async function callStageJson(
         }
 
         const contentText = extractContentText(asObject(firstChoice.message));
-        const usageRaw = asObject(payload.usage);
 
         return {
           parsed: parseJsonObject(contentText),
-          usage: {
-            promptTokens: asNumberOrNull(usageRaw.prompt_tokens),
-            completionTokens: asNumberOrNull(usageRaw.completion_tokens),
-            // Null on a replayed cassette recorded before usage accounting was requested, and null
-            // on any provider that does not price the call. Null means "unknown", never "free".
-            costUsd: asNumberOrNull(usageRaw.cost),
-          },
+          // Null on a replayed cassette recorded before usage accounting was requested, and null
+          // on any provider that does not price the call. Null means "unknown", never "free".
+          usage: parseLlmUsage(payload),
           finishReason,
         };
       } catch (error) {

@@ -307,6 +307,7 @@ function baseRecord(overrides: Record<string, unknown> = {}) {
     attachments: [],
     ocr_text: "Scanned OCR text",
     ocr_error: null,
+    structure_error: null,
     ...overrides,
   };
 }
@@ -566,6 +567,34 @@ describe("RecordDetail", () => {
     });
     render(<RecordDetail recordId="record-1" />);
     expect(screen.getByText("structure-review-step")).toBeInTheDocument();
+  });
+
+  it("keeps a failed structuring visible on the OCR review screen", async () => {
+    const { RecordDetail } = await import("./record-detail");
+
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({
+        status: "ocr_review",
+        structure_error: "Structure extraction failed: 502",
+      }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const view = render(<RecordDetail recordId="record-1" />);
+    // The toast that announced it is long gone; the reason has to survive a refresh.
+    expect(screen.getByText("processing.structureFailed")).toBeInTheDocument();
+    expect(screen.getByText("Structure extraction failed: 502")).toBeInTheDocument();
+    view.unmount();
+
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({ status: "ocr_review" }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<RecordDetail recordId="record-1" />);
+    expect(screen.queryByText("processing.structureFailed")).not.toBeInTheDocument();
   });
 
   it("renders active detail and opens add observation dialog", async () => {

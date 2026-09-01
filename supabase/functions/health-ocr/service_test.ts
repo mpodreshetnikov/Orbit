@@ -1,5 +1,6 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
+import { emptyLlmUsage } from "../_shared/llm-usage.ts";
 import { runHealthOcrService } from "./service.ts";
 import type { OpenRouterOcrClient } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
@@ -163,9 +164,19 @@ Deno.test("runHealthOcrService succeeds with multi-page OCR and updates record",
   const openRouter = createOpenRouterMock(async () => {
     callIndex += 1;
     if (callIndex === 1) {
-      return { ocr_text: "First page text", suggested_title: " Blood panel ", truncated: false };
+      return {
+        ocr_text: "First page text",
+        suggested_title: " Blood panel ",
+        truncated: false,
+        usage: emptyLlmUsage(),
+      };
     }
-    return { ocr_text: "Second page text", suggested_title: "ignored", truncated: false };
+    return {
+      ocr_text: "Second page text",
+      suggested_title: "ignored",
+      truncated: false,
+      usage: emptyLlmUsage(),
+    };
   });
 
   const result = await runHealthOcrService(
@@ -191,6 +202,7 @@ Deno.test("runHealthOcrService returns error when no attachments exist", async (
     ocr_text: "unused",
     suggested_title: "unused",
     truncated: false,
+    usage: emptyLlmUsage(),
   }));
 
   const result = await runHealthOcrService(
@@ -250,6 +262,7 @@ Deno.test(
       ocr_text: "usable text",
       suggested_title: "Title",
       truncated: false,
+      usage: emptyLlmUsage(),
     }));
 
     const result = await runHealthOcrService(
@@ -296,6 +309,7 @@ Deno.test(
       ocr_text: "usable text",
       suggested_title: "Title",
       truncated: false,
+      usage: emptyLlmUsage(),
     }));
 
     const result = await runHealthOcrService(
@@ -319,6 +333,7 @@ Deno.test("runHealthOcrService returns auth and guard errors before marking fail
     ocr_text: "unused",
     suggested_title: "unused",
     truncated: false,
+    usage: emptyLlmUsage(),
   }));
 
   const unauthorizedResult = await runHealthOcrService(
@@ -361,6 +376,7 @@ Deno.test("runHealthOcrService handles missing record and updateRecordFailure er
     ocr_text: "unused",
     suggested_title: "unused",
     truncated: false,
+    usage: emptyLlmUsage(),
   }));
 
   const missingRecordResult = await runHealthOcrService(
@@ -397,3 +413,41 @@ Deno.test("runHealthOcrService handles missing record and updateRecordFailure er
   assertEquals(result.status, 400);
   assertEquals(result.payload.error, "Failed to extract text from any attachment");
 });
+
+Deno.test(
+  "runHealthOcrService puts each page's cost on its span and the record's total on the service span",
+  async () => {
+    const { repository } = createRepositoryMock({
+      attachments: [
+        { id: "a1", storage_path: "a.png", mime_type: "image/png", original_filename: "a.png" },
+        { id: "a2", storage_path: "b.png", mime_type: "image/png", original_filename: "b.png" },
+      ],
+    });
+    const { telemetry, spans } = createTelemetryMock();
+    let page = 0;
+    const openRouter = createOpenRouterMock(async () => {
+      page += 1;
+      return {
+        ocr_text: `page ${page}`,
+        suggested_title: "t",
+        truncated: false,
+        usage: { promptTokens: 1000 * page, completionTokens: 100 * page, costUsd: null },
+      };
+    });
+
+    const result = await runHealthOcrService(
+      { authToken: "token", recordId: "record-1" },
+      { repository, openRouterClient: openRouter, telemetry },
+    );
+
+    assertEquals(result.status, 200);
+    const pageSpans = spans.filter((span) => span.name === "edge.health_ocr.page");
+    assertEquals(pageSpans[0]?.endAttrs?.llm_prompt_tokens, 1000);
+    assertEquals(pageSpans[1]?.endAttrs?.llm_prompt_tokens, 2000);
+    const serviceSpan = spans.find((span) => span.name === "edge.health_ocr.service");
+    // The record's whole OCR cost, summed across pages; the unreported cost stays absent.
+    assertEquals(serviceSpan?.endAttrs?.llm_prompt_tokens, 3000);
+    assertEquals(serviceSpan?.endAttrs?.llm_completion_tokens, 300);
+    assertEquals("llm_cost_usd" in (serviceSpan?.endAttrs ?? {}), false);
+  },
+);
