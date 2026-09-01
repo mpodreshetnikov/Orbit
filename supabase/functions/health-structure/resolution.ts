@@ -1,8 +1,11 @@
+import { foldForMatch } from "./code-resolution.ts";
+import type { StageRejection } from "./stages/types.ts";
 import type {
   ConditionToResolve,
   ExistingCondition,
   ExistingFinding,
   ExtractedCondition,
+  ExtractedObservation,
   FindingToResolve,
 } from "./types.ts";
 export interface ResolutionRepository {
@@ -150,16 +153,209 @@ export async function processFindingsToResolve(
     }
   }
 }
+/**
+ * One analyte that can close a condition, and what it takes.
+ *
+ * `requires` names every observation code that must be present in *this* document and in range;
+ * an entry needing two measurements is not satisfied by one of them. `icdPrefixes` and
+ * `namePatterns` are the condition matcher: the condition being closed must satisfy at least one
+ * of the two, and both lists exist because `conditions.code` is nullable and routinely null —
+ * ICD is the strong signal where it exists, the name pattern is what remains where it does not.
+ *
+ * `confident` is a claim about clinical certainty, and it is written by a non-clinician. It means
+ * only that the entry could ever be promoted to closing a condition without a person; nothing in
+ * this milestone reads it, because today every entry proposes and a person confirms.
+ */
+export interface ResolvingAnalyte {
+  requires: string[];
+  icdPrefixes: string[];
+  namePatterns: string[];
+  confident: boolean;
+}
+
+/**
+ * Which analytes returning to their reference range close which conditions.
+ *
+ * Keyed on the observation catalogue — thirty-eight entries the team owns — rather than on ICD,
+ * which is nullable on conditions, unbounded in size and inconsistently formatted. It lives in
+ * code rather than in a table because it is policy about when the system may write to someone's
+ * medical record, and the reference catalogues are world-readable, one of them world-writable.
+ *
+ * The set is small on purpose. A deficiency named after a substance ends when that substance is
+ * measured back in range; almost nothing else about a chronic condition is settled by one number.
+ *
+ * **Before adding an entry, read the exclusions below.** Three of them are the corpus's own traps,
+ * and each is a condition that an in-range value looks like it should close and must not.
+ */
+export const RESOLVING_ANALYTES: Record<string, ResolvingAnalyte> = {
+  // A B12 deficiency is the statement that B12 is low. A normal level ends it.
+  vitamin_b12: {
+    requires: ["vitamin_b12"],
+    icdPrefixes: ["E53"],
+    namePatterns: ["b12", "в12", "кобаламин"],
+    confident: true,
+  },
+  // Same shape: the deficiency is defined by the measurement.
+  vitamin_d_25oh: {
+    requires: ["vitamin_d_25oh"],
+    icdPrefixes: ["E55"],
+    namePatterns: ["витамин d", "витамин д", "25-oh"],
+    confident: true,
+  },
+  // Iron-deficiency anaemia needs both. Haemoglobin is what makes it anaemia and ferritin is what
+  // makes it iron deficiency; either alone leaves half the diagnosis unaddressed. Marked uncertain
+  // because replete iron stores under active supplementation read as resolution when they are
+  // maintenance.
+  ferritin: {
+    requires: ["ferritin", "hemoglobin"],
+    icdPrefixes: ["D50", "E61.1"],
+    namePatterns: ["железодефицит", "жда", "iron deficiency"],
+    confident: false,
+  },
+
+  // Deliberately excluded, and each exclusion is the whole point of the table being curated.
+  // Adding any of these is a clinical decision and needs a clinician, not a reviewer who noticed
+  // the value was in range:
+  //
+  //   tsh            — treated hypothyroidism has a normal TSH precisely because it is treated.
+  //   glucose, hba1c — controlled diabetes is not resolved diabetes.
+  //   lipids         — an in-range panel under management is control rather than cure, so it does
+  //                    not close dyslipidaemia.
+  //   alt, ast, ggt  — non-alcoholic fatty liver disease is an imaging and histology diagnosis;
+  //                    normal enzymes cannot exclude steatosis.
+  //   anything       — for chronic gastritis, which is endoscopic. Nothing in a biochemistry panel
+  //                    bears on it.
+};
+
+/**
+ * Why a cited resolution was refused. Fixed strings: these reach logs, so they name the check
+ * that failed and never the entity that failed it.
+ */
+export const LAB_RESOLUTION_REJECTIONS = {
+  noCitation: "no supporting observation cited",
+  analyteCannotResolve: "analyte cannot resolve a condition",
+  analyteConditionMismatch: "analyte does not match this condition",
+  observationAbsent: "required observation absent from this document",
+  observationOutOfRange: "supporting observation is not in range",
+} as const;
+
+/** Upper-case and strip everything but letters and digits: `D50.9`, `d50.9` and `D509` are one code. */
+function normalizeIcd(code: string): string {
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function conditionMatchesAnalyte(condition: ExistingCondition, entry: ResolvingAnalyte): boolean {
+  const code = condition.code ? normalizeIcd(condition.code) : "";
+  if (code && entry.icdPrefixes.some((prefix) => code.startsWith(normalizeIcd(prefix)))) {
+    return true;
+  }
+  const name = foldForMatch(condition.name ?? "");
+  if (!name) return false;
+  return entry.namePatterns.some((pattern) => {
+    const folded = foldForMatch(pattern);
+    return folded.length > 0 && name.includes(folded);
+  });
+}
+
+/**
+ * Is this value inside the range the document printed for it?
+ *
+ * Numeric when the document printed a range, because a printed range is the document's own
+ * statement about this value and needs no interpretation. The extracted `status` is the fallback
+ * only when no range was printed, and only the exact value `normal` passes: `unknown` and null
+ * are not evidence of anything. A missing or unparseable number is treated as out of range rather
+ * than as passing — the whole gate exists so that an unchecked claim cannot close a condition.
+ */
+export function isObservationInRange(observation: ExtractedObservation): boolean {
+  const low = observation.ref_range_low;
+  const high = observation.ref_range_high;
+  const hasLow = typeof low === "number" && Number.isFinite(low);
+  const hasHigh = typeof high === "number" && Number.isFinite(high);
+  if (hasLow || hasHigh) {
+    const value = observation.value_numeric;
+    if (typeof value !== "number" || !Number.isFinite(value)) return false;
+    if (hasLow && value < (low as number)) return false;
+    if (hasHigh && value > (high as number)) return false;
+    return true;
+  }
+  return observation.status === "normal";
+}
+
+/**
+ * Decide whether a proposed lab-driven resolution may be written, and say why not when it may not.
+ *
+ * Four checks, and the third is the one that makes the other three mean anything. Without it a
+ * model citing `vitamin_b12` — cited, permitted, present and in range — closes dyslipidaemia,
+ * because nothing has asked whether that analyte has anything to do with that condition. The gate
+ * would then accept the exact wrongful proposal it exists to reject.
+ *
+ * This is a floor, not the discriminator. It rejects a resolution that cites nothing, cites an
+ * analyte no entry covers, cites one unrelated to the condition, or cites one absent or out of
+ * range. It cannot tell a well-formed wrong entry from a right one — that is what marking an entry
+ * uncertain, proposing rather than closing, and a person confirming are for.
+ *
+ * Returns null when the resolution passes, or one of `LAB_RESOLUTION_REJECTIONS` when it does not.
+ */
+export function checkLabResolution(
+  toResolve: Pick<ConditionToResolve, "supporting_obs_code">,
+  condition: ExistingCondition,
+  observations: ExtractedObservation[],
+): string | null {
+  const cited = normalizeText(toResolve.supporting_obs_code);
+  if (!cited) return LAB_RESOLUTION_REJECTIONS.noCitation;
+
+  const entry = RESOLVING_ANALYTES[cited];
+  if (!entry) return LAB_RESOLUTION_REJECTIONS.analyteCannotResolve;
+
+  if (!conditionMatchesAnalyte(condition, entry)) {
+    return LAB_RESOLUTION_REJECTIONS.analyteConditionMismatch;
+  }
+
+  for (const required of entry.requires) {
+    const matching = observations.filter((item) => item.obs_code === required);
+    if (matching.length === 0) return LAB_RESOLUTION_REJECTIONS.observationAbsent;
+    // Every row carrying this code, not merely one of them: a panel that printed the analyte twice
+    // with disagreeing values has not established that it is in range.
+    if (!matching.every(isObservationInRange)) {
+      return LAB_RESOLUTION_REJECTIONS.observationOutOfRange;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Record the resolutions this document supports, as proposals a person still has to confirm.
+ *
+ * Every resolution passes `checkLabResolution` first, against the observations extracted from
+ * *this* document. One that fails is dropped rather than written, and the drop is returned as a
+ * rejection naming the check — the model does not get to talk past a check that runs after it.
+ *
+ * The row is written with `review_decision: "pending"` and `is_user_verified: false`, which after
+ * Milestone 1 means it is recorded and visible but cannot move `conditions.current_status`. The
+ * recompute still runs, because it is what applies a *verified* row that this insert may have
+ * reordered; it is not what applies this one.
+ */
 export async function processConditionsToResolve(
   recordId: string,
   conditionsToResolve: ConditionToResolve[],
   existingConditions: ExistingCondition[],
+  observations: ExtractedObservation[],
   deps: ResolutionDeps,
-): Promise<void> {
+): Promise<StageRejection[]> {
+  const rejected: StageRejection[] = [];
   for (const toResolve of conditionsToResolve) {
     if (!toResolve.condition_id) continue;
     const existing = existingConditions.find((item) => item.id === toResolve.condition_id);
     if (!existing) continue;
+
+    const rejection = checkLabResolution(toResolve, existing, observations);
+    if (rejection) {
+      rejected.push({ entityKind: "condition_to_resolve", reason: rejection });
+      deps.log?.warn?.("Dropped condition resolution:", rejection);
+      continue;
+    }
+
     try {
       await deps.repository.insertConditionRecord({
         condition_id: toResolve.condition_id,
@@ -167,6 +363,8 @@ export async function processConditionsToResolve(
         status_in_record: "resolved",
         source_anchor: toResolve.source_anchor,
         confidence: toResolve.confidence,
+        supporting_obs_code: normalizeText(toResolve.supporting_obs_code),
+        review_decision: "pending",
         is_llm_extracted: true,
         is_user_verified: false,
       });
@@ -175,4 +373,5 @@ export async function processConditionsToResolve(
       deps.log?.error?.("Failed to resolve condition:", error);
     }
   }
+  return rejected;
 }

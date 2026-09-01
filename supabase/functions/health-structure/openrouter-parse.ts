@@ -210,6 +210,7 @@ function normalizeStructuredOutput(raw: Record<string, unknown>): StructuredData
       const obj = asObject(item);
       return {
         condition_id: asString(obj.condition_id, ""),
+        supporting_obs_code: asNullableString(obj.supporting_obs_code),
         reason: asString(obj.reason, ""),
         source_anchor: asString(obj.source_anchor, ""),
         confidence: asNumber(obj.confidence) ?? 0,

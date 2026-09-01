@@ -3,13 +3,13 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1786103234-BmDE2f9ZIi4JXYkMLsjS",
+    "id": "gen-1788282636-kHnLax2qarT8nHuFdM5D",
     "object": "chat.completion",
-    "created": 1786103234,
+    "created": 1788282636,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
-    "service_tier": "default",
+    "service_tier": "priority",
     "choices": [
       {
         "index": 0,
@@ -18,30 +18,30 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"imaging\",\"title\":\"УЗИ почек — заключение врача\",\"record_date\":\"2026-03-05\",\"summary\":\"Ultrasound examination of the kidneys performed on 2026-03-05. The report describes generally satisfactory visualization with no stones, no masses, and no dilation of the collecting system, and notes increased mobility of the right kidney. The conclusion states no urodynamic disturbance and recommends follow-up ultrasound and a family doctor consultation.\",\"keywords\":[\"УЗИ\",\"почки\",\"правая почка\",\"избыточная подвижность\",\"уродинамика\",\"конкременты\",\"надпочечники\",\"забрюшинное пространство\"]}",
+          "content": "{\"record_type\":\"imaging\",\"title\":\"УЗИ почек (заключение)\",\"record_date\":\"2026-03-05\",\"summary\":\"Ultrasound examination of the kidneys performed during a consultation on 2026-03-05. The report describes no urinary outflow (urodynamic) impairment and notes excessive mobility of the right kidney. No stones or additional masses are reported; adrenal glands are not enlarged.\",\"keywords\":[\"renal ultrasound\",\"kidneys\",\"right kidney mobility\",\"urodynamics\",\"no stones\",\"retroperitoneal space\",\"adrenal glands\",\"parenchyma\",\"renal sinus\",\"Z01.8\"]}",
           "refusal": null
         }
       }
     ],
     "usage": {
       "prompt_tokens": 1442,
-      "completion_tokens": 154,
-      "total_tokens": 1596,
-      "cost": 0.002636865,
+      "completion_tokens": 180,
+      "total_tokens": 1622,
+      "cost": 0.00998613,
       "is_byok": false,
       "prompt_tokens_details": {
-        "cached_tokens": 1280,
+        "cached_tokens": 0,
         "cache_write_tokens": 0,
         "audio_tokens": 0,
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.0026635,
-        "upstream_inference_prompt_cost": 0.0005075,
-        "upstream_inference_completions_cost": 0.002156
+        "upstream_inference_cost": 0.010087,
+        "upstream_inference_prompt_cost": 0.005047,
+        "upstream_inference_completions_cost": 0.00504
       },
       "completion_tokens_details": {
-        "reasoning_tokens": 0,
+        "reasoning_tokens": 38,
         "image_tokens": 0,
         "audio_tokens": 0
       }

@@ -205,9 +205,13 @@ const structuredData: StructuredDataWithEntities = {
       confidence: 0.8,
     },
   ],
+  // Cites nothing, so the gate in `processConditionsToResolve` drops it. Left that way on
+  // purpose: this fixture is what proves the service applies the gate at all, and the resolution
+  // that passes it is exercised by its own test below.
   conditions_to_resolve: [
     {
       condition_id: "cond-existing",
+      supporting_obs_code: null,
       reason: "resolved",
       source_anchor: "line",
       confidence: 0.7,
@@ -364,9 +368,73 @@ Deno.test("runHealthStructureService persists successful extraction flow", async
   assertEquals(state.updatedRecords.length, 2);
   assertEquals(state.observationRows.length, 1);
   assertEquals(state.findingRows.length, 1);
-  assertEquals(state.conditionRecords.length, 2);
+  // One: the extracted condition's own mention. The resolution cites no observation and is
+  // dropped rather than written.
+  assertEquals(state.conditionRecords.length, 1);
   assertEquals(state.insertedFindings.length, 1);
 });
+
+Deno.test(
+  "runHealthStructureService writes a resolution the document's own values support",
+  async () => {
+    const { repository, state } = createRepositoryMock({
+      existingConditions: [
+        {
+          id: "cond-b12",
+          name: "Дефицит витамина B12",
+          code: "E53.8",
+          current_status: "active",
+          onset_date: null,
+          resolved_date: null,
+        },
+      ],
+    });
+
+    const result = await runHealthStructureService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository,
+        parseStructuredData: async () =>
+          parsed({
+            ...structuredData,
+            conditions: [],
+            observations: [
+              {
+                obs_code: "vitamin_b12",
+                obs_name: "Витамин B12",
+                value: "704",
+                value_numeric: 704,
+                unit: "пг/мл",
+                ref_range: "187-883",
+                ref_range_low: 187,
+                ref_range_high: 883,
+                status: "normal",
+                confidence: 0.9,
+              },
+            ],
+            conditions_to_resolve: [
+              {
+                condition_id: "cond-b12",
+                supporting_obs_code: "vitamin_b12",
+                reason: "B12 back in range",
+                source_anchor: "Витамин B12: 704",
+                confidence: 0.9,
+              },
+            ],
+          }),
+      },
+    );
+
+    assertEquals(result.status, 200);
+    assertEquals(state.conditionRecords.length, 1);
+    assertEquals(state.conditionRecords[0].status_in_record, "resolved");
+    assertEquals(state.conditionRecords[0].supporting_obs_code, "vitamin_b12");
+    // Written as a proposal: after Milestone 1 this row is recorded and visible but cannot move
+    // the condition's status until a person confirms it.
+    assertEquals(state.conditionRecords[0].review_decision, "pending");
+    assertEquals(state.conditionRecords[0].is_user_verified, false);
+  },
+);
 
 Deno.test(
   "runHealthStructureService filters empty finding anchors and empty checkup suggestions",
