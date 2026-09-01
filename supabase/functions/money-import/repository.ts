@@ -25,6 +25,37 @@ import type {
   UserAuthContext,
 } from "./types.ts";
 
+/**
+ * Quotes a value for a PostgREST filter string, where an unquoted value would let a comma,
+ * parenthesis or dot in the data be read as filter grammar. Backslash escapes itself and the
+ * quote, so it has to be escaped first.
+ */
+export function postgrestFilterValue(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The filter that finds a transaction by whichever of its identities exists.
+ *
+ * A row can carry both -- every T-Bank row does -- and the two unique indexes are independent,
+ * so an insert can violate `dedupe_hash` while its `(source, external_id)` is new. Checking only
+ * one of them then finds nothing and reports a duplicate it cannot resolve, for a row whose
+ * duplicate is sitting right there under the other key.
+ */
+function transactionIdentityFilter(row: CanonicalTransactionRowInput): string | null {
+  const clauses: string[] = [];
+  const externalId = normalizeText(row.external_id);
+  if (externalId) {
+    const source = postgrestFilterValue(row.source ?? "manual");
+    clauses.push(`and(source.eq.${source},external_id.eq.${postgrestFilterValue(externalId)})`);
+  }
+  const dedupeHash = normalizeText(row.dedupe_hash);
+  if (dedupeHash) {
+    clauses.push(`dedupe_hash.eq.${postgrestFilterValue(dedupeHash)}`);
+  }
+  return clauses.length > 0 ? clauses.join(",") : null;
+}
+
 export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
@@ -586,16 +617,15 @@ export function createSupabaseMoneyImportRepository(
   async function findTransactionOwnerIgnoringPayer(
     row: CanonicalTransactionRowInput,
   ): Promise<string | null> {
-    let query = getAdminClient().from("money_transactions").select("payer_person_id").limit(1);
-    if (row.external_id) {
-      query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
-    } else if (row.dedupe_hash) {
-      query = query.eq("dedupe_hash", row.dedupe_hash);
-    } else {
-      return null;
-    }
+    const identityFilter = transactionIdentityFilter(row);
+    if (!identityFilter) return null;
 
-    const { data, error } = await query.maybeSingle();
+    const { data, error } = await getAdminClient()
+      .from("money_transactions")
+      .select("payer_person_id")
+      .or(identityFilter)
+      .limit(1)
+      .maybeSingle();
     if (error || !data) return null;
     return normalizeText((data as Record<string, unknown>).payer_person_id);
   }
@@ -608,20 +638,16 @@ export function createSupabaseMoneyImportRepository(
     // service-role client. `(source, external_id)` and `dedupe_hash` are unique across the whole
     // table, not per person, so without this predicate a caller could reuse another payer's
     // external id, let the insert conflict, and have their row resolved and overwritten here.
-    let query = getAdminClient()
+    const identityFilter = transactionIdentityFilter(row);
+    if (!identityFilter) return null;
+
+    const { data, error } = await getAdminClient()
       .from("money_transactions")
       .select("id")
       .eq("payer_person_id", payerPersonId)
-      .limit(1);
-    if (row.external_id) {
-      query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
-    } else if (row.dedupe_hash) {
-      query = query.eq("dedupe_hash", row.dedupe_hash);
-    } else {
-      return null;
-    }
-
-    const { data, error } = await query.maybeSingle();
+      .or(identityFilter)
+      .limit(1)
+      .maybeSingle();
     if (error || !data) return null;
     return normalizeText((data as Record<string, unknown>).id);
   }
