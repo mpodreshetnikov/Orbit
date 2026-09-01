@@ -15,6 +15,7 @@ export interface HealthOcrHandlerDeps {
   defaultTitle: string;
   createRepository: (authToken: string) => HealthOcrRepository;
   openRouterClient: HealthOcrDeps["openRouterClient"];
+  preprocessImage?: HealthOcrDeps["preprocessImage"];
   log?: Pick<Console, "log" | "error">;
   now?: () => number;
   /**
@@ -105,6 +106,7 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
           maxAttachmentBytes: deps.maxAttachmentBytes,
           maxOcrErrorLength: deps.maxOcrErrorLength,
           defaultTitle: deps.defaultTitle,
+          preprocessImage: deps.preprocessImage,
           log: deps.log,
           now: deps.now,
           telemetry,

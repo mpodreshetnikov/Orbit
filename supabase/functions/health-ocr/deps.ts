@@ -1,3 +1,4 @@
+import { preprocessOcrImage } from "./image-preprocess.ts";
 import { createOpenRouterOcrClient } from "./openrouter-client.ts";
 import { createSupabaseHealthOcrRepository } from "./repository.ts";
 
@@ -49,6 +50,9 @@ export function createDefaultHealthOcrDeps() {
           log: console,
         })
       : null,
+    // The deployed function is the only caller that reaches the image codec; tests that want
+    // preprocessing inject their own.
+    preprocessImage: preprocessOcrImage,
     log: console,
     now: () => Date.now(),
   };

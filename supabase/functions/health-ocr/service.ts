@@ -2,6 +2,7 @@ import { encodeBase64 } from "std/encoding/base64";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import { type LlmUsage, sumLlmUsage, usageAttrs } from "../_shared/llm-usage.ts";
 import { ClaimLostError } from "../_shared/processing-claim.ts";
+import type { PreprocessedImage } from "./image-preprocess.ts";
 import { selectSuggestedTitle } from "./title.ts";
 import type { OpenRouterOcrClient, OcrAttachmentPayload } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
@@ -15,6 +16,19 @@ export interface HealthOcrServiceDeps {
   now?: () => number;
   log?: Pick<Console, "log" | "error">;
   telemetry?: EdgeTelemetry;
+  /** How many pages are transcribed at once. */
+  pageConcurrency?: number;
+  /**
+   * Normalise a raster page before it is encoded, or report that it cannot be normalised.
+   *
+   * Injected rather than imported so the codec -- a wasm one, fetched on first use -- is
+   * reached only by the deployed function. Absent, pages are sent exactly as they were stored.
+   */
+  preprocessImage?: (
+    bytes: Uint8Array,
+    mimeType: string,
+    options?: { log?: Pick<Console, "log" | "error"> },
+  ) => Promise<PreprocessedImage | null>;
 }
 
 export interface HealthOcrServiceInput {
@@ -42,10 +56,27 @@ const DEFAULT_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_OCR_ERROR_LENGTH = 500;
 const DEFAULT_TITLE = "Медицинский документ";
 
-async function downloadOneDataUrl(
+/**
+ * How many pages are in flight at once.
+ *
+ * Three, because the ceiling is the provider's rate limit rather than this function's CPU, and
+ * because each page in flight is a decoded image and its base64 body held in memory at the same
+ * time. It is the difference between a five-page document taking five page-times and two.
+ */
+const DEFAULT_PAGE_CONCURRENCY = 3;
+
+/** One page, ready to send, and what preparing it did to its size. */
+interface PreparedPage {
+  payload: OcrAttachmentPayload;
+  sourceBytes: number;
+  sentBytes: number;
+  preprocessed: boolean;
+}
+
+async function prepareOnePage(
   deps: HealthOcrServiceDeps,
   attachment: OcrAttachment,
-): Promise<OcrAttachmentPayload | null> {
+): Promise<PreparedPage | null> {
   const log = deps.log ?? console;
   const maxAttachmentBytes = deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
   const blob = await deps.repository.downloadAttachment(attachment.storage_path);
@@ -61,11 +92,54 @@ async function downloadOneDataUrl(
     return null;
   }
 
-  const base64 = encodeBase64(new Uint8Array(await blob.arrayBuffer()));
+  const sourceBytes = new Uint8Array(await blob.arrayBuffer());
+  // A page that cannot be normalised is sent as it arrived: a slightly worse transcription is
+  // better than none, and a PDF has no raster to normalise in the first place.
+  const preprocessed =
+    (await deps.preprocessImage?.(sourceBytes, attachment.mime_type, { log })) ?? null;
+  const sentBytes = preprocessed?.bytes ?? sourceBytes;
+  const mimeType = preprocessed?.mimeType ?? attachment.mime_type;
+
   return {
-    url: `data:${attachment.mime_type};base64,${base64}`,
-    mimeType: attachment.mime_type,
+    payload: {
+      url: `data:${mimeType};base64,${encodeBase64(sentBytes)}`,
+      mimeType,
+    },
+    sourceBytes: sourceBytes.byteLength,
+    sentBytes: sentBytes.byteLength,
+    preprocessed: preprocessed !== null,
   };
+}
+
+/**
+ * Run `count` pages at most `limit` at a time.
+ *
+ * The attachment loop used to be strictly sequential, which made a five-page document take five
+ * times one page for no reason -- the time is spent waiting on a provider, not on this function.
+ * Bounded rather than unbounded: ten pages fired at once is a rate-limit response and ten images
+ * held in memory at the same time.
+ */
+async function forEachPage(
+  count: number,
+  limit: number,
+  worker: (index: number) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runners: Promise<void>[] = [];
+
+  for (let slot = 0; slot < Math.min(limit, count); slot++) {
+    runners.push(
+      (async () => {
+        while (true) {
+          const index = next++;
+          if (index >= count) return;
+          await worker(index);
+        }
+      })(),
+    );
+  }
+
+  await Promise.all(runners);
 }
 
 function getOcrInputType(mimeType: string): "image_url" | "file" {
@@ -121,91 +195,104 @@ async function transcribeClaimedRecord(
       attrs: { attachment_count: attachments.length },
     });
 
-    const pageTexts: string[] = [];
+    // Indexed, not appended: pages finish out of order now, and their order is the document's.
+    const pageTexts: string[] = new Array(attachments.length).fill("");
     const pageUsage: LlmUsage[] = [];
     let suggestedTitle = defaultTitle;
 
-    for (let index = 0; index < attachments.length; index++) {
-      const attachment = attachments[index];
-      const ocrInputType = getOcrInputType(attachment.mime_type);
-      const pageSpan = telemetry?.startSpan("edge.health_ocr.page", {
-        attrs: {
-          attachment_index: index,
-          attachment_mime_type: attachment.mime_type,
-          ocr_input_type: ocrInputType,
-        },
-      });
-      const dataUrl = await downloadOneDataUrl(deps, attachment);
-      if (!dataUrl) {
-        await pageSpan?.end({
-          status: "error",
-          statusMessage: "Attachment download failed",
+    await forEachPage(
+      attachments.length,
+      deps.pageConcurrency ?? DEFAULT_PAGE_CONCURRENCY,
+      async (index) => {
+        const attachment = attachments[index];
+        const ocrInputType = getOcrInputType(attachment.mime_type);
+        const pageSpan = telemetry?.startSpan("edge.health_ocr.page", {
           attrs: {
+            attachment_index: index,
             attachment_mime_type: attachment.mime_type,
             ocr_input_type: ocrInputType,
           },
         });
-        pageTexts.push("");
-        continue;
-      }
-
-      try {
-        const result = await deps.openRouterClient.callVisionOcrSingle(dataUrl, {
-          requestTitle: index === 0,
-        });
-        pageTexts.push(result.ocr_text);
-        if (index === 0) {
-          suggestedTitle = selectSuggestedTitle(result.suggested_title, suggestedTitle);
+        const page = await prepareOnePage(deps, attachment);
+        if (!page) {
+          await pageSpan?.end({
+            status: "error",
+            statusMessage: "Attachment download failed",
+            attrs: {
+              attachment_mime_type: attachment.mime_type,
+              ocr_input_type: ocrInputType,
+            },
+          });
+          return;
         }
-        if (result.truncated) {
-          // The page was transcribed only as far as the completion budget allowed. Everything
-          // downstream reads this text as the whole document, so the shortfall has to be visible.
-          log.log(
-            JSON.stringify({
-              health_ocr_truncated: true,
-              // Length only — the transcription itself is the patient's document.
+
+        const sizeAttrs = {
+          // What normalising the page saved, in the units the provider bills and the function
+          // holds in memory.
+          image_source_bytes: page.sourceBytes,
+          image_sent_bytes: page.sentBytes,
+          image_preprocessed: page.preprocessed ? 1 : 0,
+        };
+
+        try {
+          const result = await deps.openRouterClient.callVisionOcrSingle(page.payload, {
+            requestTitle: index === 0,
+          });
+          pageTexts[index] = result.ocr_text;
+          if (index === 0) {
+            suggestedTitle = selectSuggestedTitle(result.suggested_title, suggestedTitle);
+          }
+          if (result.truncated) {
+            // The page was transcribed only as far as the completion budget allowed. Everything
+            // downstream reads this text as the whole document, so the shortfall has to be visible.
+            log.log(
+              JSON.stringify({
+                health_ocr_truncated: true,
+                // Length only — the transcription itself is the patient's document.
+                ocr_chars: result.ocr_text.length,
+              }),
+            );
+          }
+          pageUsage.push(result.usage);
+          await pageSpan?.end({
+            status: "ok",
+            attrs: {
+              attachment_mime_type: attachment.mime_type,
+              ocr_input_type: ocrInputType,
               ocr_chars: result.ocr_text.length,
-            }),
-          );
+              ocr_truncated: result.truncated,
+              ...sizeAttrs,
+              // OCR runs once per attachment and structuring once per record, so on a multi-page
+              // document this is the larger half of what the record cost.
+              ...usageAttrs(result.usage),
+            },
+          });
+        } catch (error) {
+          log.error(`OCR failed for ${attachment.storage_path}:`, {
+            mime_type: attachment.mime_type,
+            ocr_input_type: ocrInputType,
+            error,
+          });
+          await pageSpan?.end({
+            status: "error",
+            statusMessage: error instanceof Error ? error.message : "OCR failed",
+            attrs: {
+              attachment_mime_type: attachment.mime_type,
+              ocr_input_type: ocrInputType,
+              ...sizeAttrs,
+            },
+          });
         }
-        pageUsage.push(result.usage);
-        await pageSpan?.end({
-          status: "ok",
-          attrs: {
-            attachment_mime_type: attachment.mime_type,
-            ocr_input_type: ocrInputType,
-            ocr_chars: result.ocr_text.length,
-            ocr_truncated: result.truncated,
-            // OCR runs once per attachment and structuring once per record, so on a multi-page
-            // document this is the larger half of what the record cost.
-            ...usageAttrs(result.usage),
-          },
-        });
-      } catch (error) {
-        log.error(`OCR failed for ${attachment.storage_path}:`, {
-          mime_type: attachment.mime_type,
-          ocr_input_type: ocrInputType,
-          error,
-        });
-        await pageSpan?.end({
-          status: "error",
-          statusMessage: error instanceof Error ? error.message : "OCR failed",
-          attrs: {
-            attachment_mime_type: attachment.mime_type,
-            ocr_input_type: ocrInputType,
-          },
-        });
-        pageTexts.push("");
-      }
 
-      // A ten-page document with retries and provider backoff can outlive any lease short enough
-      // to free a record from a dead worker, so a live run says after each page that it is still
-      // here. Outside the per-page catch on purpose: losing the record is not a page that failed,
-      // it is the end of this run's right to write anything.
-      if (!(await deps.repository.renewClaim(recordId, runId))) {
-        throw new ClaimLostError(recordId);
-      }
-    }
+        // A ten-page document with retries and provider backoff can outlive any lease short enough
+        // to free a record from a dead worker, so a live run says after each page that it is still
+        // here. Outside the per-page catch on purpose: losing the record is not a page that failed,
+        // it is the end of this run's right to write anything.
+        if (!(await deps.repository.renewClaim(recordId, runId))) {
+          throw new ClaimLostError(recordId);
+        }
+      },
+    );
 
     if (pageTexts.every((text) => !text.trim())) {
       throw new Error("Failed to extract text from any attachment");
