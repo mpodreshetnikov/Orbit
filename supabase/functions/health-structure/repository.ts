@@ -8,7 +8,11 @@ import type {
   FindingTypeCatalogItem,
   ObservationCatalogItem,
 } from "./types.ts";
-import { ClaimLostError, claimRecordViaRpc } from "../_shared/processing-claim.ts";
+import {
+  ClaimLostError,
+  claimRecordViaRpc,
+  renewClaimViaRpc,
+} from "../_shared/processing-claim.ts";
 import type { ResolutionRepository } from "./resolution.ts";
 
 interface AuthenticatedUser {
@@ -36,6 +40,8 @@ export interface HealthStructureRepository extends ResolutionRepository {
    * Returns the run id on success and null when the record is already claimed.
    */
   claimRecord(recordId: string): Promise<string | null>;
+  /** Extend this run's lease while it is still working; false once the claim has been taken. */
+  renewClaim(recordId: string, runId: string): Promise<boolean>;
   /** Terminal write, applied only while this run still owns the record. */
   updateMedicalRecord(
     recordId: string,
@@ -44,6 +50,8 @@ export interface HealthStructureRepository extends ResolutionRepository {
   ): Promise<void>;
   replaceRecordObservations(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   replaceRecordFindings(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
+  /** Replace the record's extraction issues, so a re-run does not stack yesterday's. */
+  replaceRecordExtractionIssues(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   clearConditionRecords(recordId: string): Promise<void>;
 }
 
@@ -277,6 +285,10 @@ export function createSupabaseHealthStructureRepository(
     return await claimRecordViaRpc(admin, recordId, "structuring");
   }
 
+  async function renewClaim(recordId: string, runId: string): Promise<boolean> {
+    return await renewClaimViaRpc(admin, recordId, runId);
+  }
+
   async function updateMedicalRecord(
     recordId: string,
     patch: Record<string, unknown>,
@@ -316,6 +328,27 @@ export function createSupabaseHealthStructureRepository(
       .from("record_findings")
       .insert(rows as Database["public"]["Tables"]["record_findings"]["Insert"][]);
     if (error) throw new Error(`Failed to insert findings: ${error.message}`);
+  }
+
+  async function replaceRecordExtractionIssues(
+    recordId: string,
+    rows: Record<string, unknown>[],
+  ): Promise<void> {
+    // Checked, unlike a fire-and-forget delete: a delete that failed turns "replace" into
+    // "append" for a run with corrections, and into "keep the old warnings" for a clean one --
+    // and the clean case is the one that would silently report a problem that no longer exists.
+    const { error: deleteError } = await admin
+      .from("record_extraction_issues")
+      .delete()
+      .eq("record_id", recordId);
+    if (deleteError) {
+      throw new Error(`Failed to clear extraction issues: ${deleteError.message}`);
+    }
+    if (rows.length === 0) return;
+    const { error } = await admin
+      .from("record_extraction_issues")
+      .insert(rows as Database["public"]["Tables"]["record_extraction_issues"]["Insert"][]);
+    if (error) throw new Error(`Failed to insert extraction issues: ${error.message}`);
   }
 
   async function clearConditionRecords(recordId: string): Promise<void> {
@@ -410,9 +443,11 @@ export function createSupabaseHealthStructureRepository(
     fetchPersonActiveFindings,
     fetchUpcomingOverdueCheckupItems,
     claimRecord,
+    renewClaim,
     updateMedicalRecord,
     replaceRecordObservations,
     replaceRecordFindings,
+    replaceRecordExtractionIssues,
     clearConditionRecords,
     findConditionByIcd,
     findConditionByName,

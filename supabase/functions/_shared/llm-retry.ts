@@ -19,6 +19,10 @@ export interface RetryOptions {
   /** Injected so backoff jitter is deterministic under test. */
   jitterFn?: () => number;
   log?: Pick<Console, "log" | "warn" | "error">;
+  /** Cap on the delay between attempts, however long the provider asked for. */
+  maxRetryAfterMs?: number;
+  /** Run after each backoff and before the next attempt; throwing abandons the retry. */
+  onBeforeRetry?: (attempt: number) => Promise<void>;
 }
 
 export const DEFAULT_MAX_ATTEMPTS = 3;
@@ -60,6 +64,16 @@ export function parseRetryAfterMs(headerValue: string | null, nowMs: number): nu
   return null;
 }
 
+/**
+ * The longest a provider may make us wait between attempts.
+ *
+ * `Retry-After` is a provider's number, not ours, and it is unbounded: an overloaded endpoint can
+ * ask for ten minutes. Obeying that silently means a worker holding a record's claim sits idle
+ * past the lease that says it is alive, and the record is released out from under it. Waiting
+ * less than asked risks another rate-limited attempt, which is the cheaper mistake.
+ */
+export const MAX_RETRY_AFTER_MS = 60_000;
+
 /** Exponential backoff with full jitter, so concurrent retries do not resynchronise. */
 export function backoffDelayMs(attempt: number, baseDelayMs: number, jitter: number): number {
   const exponential = baseDelayMs * Math.pow(2, attempt);
@@ -90,7 +104,8 @@ export async function withLlmRetry<T>(
       const hasNextAttempt = attempt < maxAttempts - 1;
       if (!retryable || !hasNextAttempt) break;
 
-      const delay = error.retryAfterMs ?? backoffDelayMs(attempt, baseDelayMs, jitter());
+      const requested = error.retryAfterMs ?? backoffDelayMs(attempt, baseDelayMs, jitter());
+      const delay = Math.min(requested, options.maxRetryAfterMs ?? MAX_RETRY_AFTER_MS);
       options.log?.warn?.(
         JSON.stringify({
           llm_retry: true,
@@ -102,6 +117,10 @@ export async function withLlmRetry<T>(
         }),
       );
       await sleep(delay);
+      // After the wait, before the next attempt: whatever the caller has to do to stay alive
+      // while this loop is idle. Throwing here abandons the retry, which is the point when the
+      // caller discovers it no longer owns the work.
+      await options.onBeforeRetry?.(attempt + 1);
     }
   }
 

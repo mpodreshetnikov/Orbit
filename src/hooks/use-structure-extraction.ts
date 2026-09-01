@@ -99,6 +99,9 @@ export function useStructureExtraction() {
           queryKey: ["medical-record", recordId],
         });
         queryClient.invalidateQueries({
+          queryKey: ["record-extraction-issues", recordId],
+        });
+        queryClient.invalidateQueries({
           queryKey: ["record-observations", recordId],
         });
         queryClient.invalidateQueries({

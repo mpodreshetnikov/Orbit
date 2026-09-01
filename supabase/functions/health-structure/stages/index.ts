@@ -1,9 +1,17 @@
 import { runClassifyStage } from "./classify.ts";
 import { runExtractStage } from "./extract.ts";
 import { hasNothingToReconcile, runReconcileStage } from "./reconcile.ts";
-import { sumUsage, type StageContext, type StageRejection, type StageUsage } from "./types.ts";
+import {
+  StagedParseClaimLostError,
+  sumUsage,
+  type StageContext,
+  type StageRejection,
+  type StageUsage,
+} from "./types.ts";
+
+export { StagedParseClaimLostError };
 import type { HealthStructureParseContext } from "../service.ts";
-import type { StructuredDataWithEntities } from "../types.ts";
+import type { ExtractionIssue, StructuredDataWithEntities } from "../types.ts";
 
 export interface StagedParseDeps {
   fetchFn: typeof fetch;
@@ -19,6 +27,16 @@ export interface StagedParseDeps {
   jitterFn?: () => number;
   log?: Pick<Console, "log" | "warn" | "error">;
   debugRawPayload?: boolean;
+  /**
+   * Tell the caller this run is still working, between stages.
+   *
+   * The whole parse is one claim, and three staged calls with retries and provider backoff can
+   * run for many minutes. Without this the lease has to be long enough for the worst case, which
+   * is the same as saying a dead structuring worker holds its record for an hour. Returning false
+   * means the record has been taken over, and the run stops rather than paying for a result it
+   * may not write.
+   */
+  renewClaim?: () => Promise<boolean>;
 }
 
 export interface StagedParseOutcome {
@@ -26,6 +44,8 @@ export interface StagedParseOutcome {
   usage: StageUsage;
   rejected: StageRejection[];
   stagesRun: string[];
+  /** Value-level corrections, for the record rather than for a log line. */
+  issues: ExtractionIssue[];
 }
 
 function stageContext(deps: StagedParseDeps, model: string, effort?: StageContext["effort"]) {
@@ -41,6 +61,7 @@ function stageContext(deps: StagedParseDeps, model: string, effort?: StageContex
     debugRawPayload: deps.debugRawPayload,
     sleepFn: deps.sleepFn,
     jitterFn: deps.jitterFn,
+    renewClaim: deps.renewClaim,
   } satisfies StageContext;
 }
 
@@ -83,6 +104,10 @@ export async function runStagedParse(
   ]);
   stagesRun.push("classify", "extract");
 
+  // Between stages, not inside one: a stage is a single call whose length the provider decides,
+  // and the point of renewing is to say the run as a whole is still alive.
+  if (deps.renewClaim && !(await deps.renewClaim())) throw new StagedParseClaimLostError();
+
   const patient = {
     existingConditions: context.existingConditions,
     existingFindings: context.existingFindings,
@@ -97,6 +122,8 @@ export async function runStagedParse(
   );
   const reconciled = !hasNothingToReconcile(patient);
   if (reconciled) stagesRun.push("reconcile");
+
+  if (deps.renewClaim && !(await deps.renewClaim())) throw new StagedParseClaimLostError();
 
   const structured: StructuredDataWithEntities = {
     ...classify.value,
@@ -117,5 +144,6 @@ export async function runStagedParse(
     ),
     rejected: [...classify.rejected, ...extract.rejected, ...reconcile.rejected],
     stagesRun,
+    issues: [...(classify.issues ?? []), ...(extract.issues ?? []), ...(reconcile.issues ?? [])],
   };
 }

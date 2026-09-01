@@ -683,3 +683,30 @@ Deno.test("health-structure repository replaceRecordObservations handles empty r
   await repository.replaceRecordObservations("record-1", []);
   assertEquals(insertCalled, false);
 });
+
+// A delete that failed turns "replace" into "append" for a run with corrections, and into "keep
+// the old warnings" for a clean one -- and the clean case would report a problem that is gone.
+Deno.test("replaceRecordExtractionIssues refuses to proceed when the clear failed", async () => {
+  const repository = createSupabaseHealthStructureRepository({
+    supabaseUrl: "https://example.supabase.co",
+    supabaseServiceRoleKey: "service-role-key",
+    createClientFn: (() => ({
+      from: () => ({
+        delete: () => ({
+          eq: async () => ({ error: { message: "permission denied" } }),
+        }),
+        insert: async () => {
+          throw new Error("must not insert after a failed clear");
+        },
+      }),
+    })) as unknown as typeof createClient,
+  });
+
+  let caught: unknown = null;
+  try {
+    await repository.replaceRecordExtractionIssues("record-1", []);
+  } catch (error) {
+    caught = error;
+  }
+  assertEquals((caught as Error)?.message, "Failed to clear extraction issues: permission denied");
+});

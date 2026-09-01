@@ -2,6 +2,7 @@
 import { assertEquals } from "std/assert/assert-equals";
 import {
   backoffDelayMs,
+  MAX_RETRY_AFTER_MS,
   isRetryableStatus,
   parseRetryAfterMs,
   RetryableLlmError,
@@ -143,4 +144,80 @@ Deno.test("withLlmRetry logs retries without including model output", async () =
   assertEquals(lines.length, 1);
   assertEquals(lines[0].includes('"llm_retry":true'), true);
   assertEquals(lines[0].includes("429"), true);
+});
+
+// `Retry-After` is the provider's number and it is unbounded: an overloaded endpoint can ask for
+// ten minutes. A worker that obeys sits idle past the lease saying it is alive, and its record is
+// released out from under it.
+Deno.test(
+  "withLlmRetry will not wait longer than the cap, whatever the provider asks",
+  async () => {
+    const delays: number[] = [];
+    let calls = 0;
+    await withLlmRetry(
+      async () => {
+        calls += 1;
+        if (calls === 1) throw new RetryableLlmError("rate limited", 10 * 60_000);
+        return "ok";
+      },
+      {
+        sleepFn: async (ms) => {
+          delays.push(ms);
+        },
+        jitterFn: () => 0,
+      },
+    );
+    assertEquals(delays, [MAX_RETRY_AFTER_MS]);
+  },
+);
+
+// A stage that is retrying is a run that is alive but silent, and silence is what a lease reads
+// as death. The hook is where a caller says otherwise.
+Deno.test("withLlmRetry runs its hook after each backoff, before the next attempt", async () => {
+  const order: string[] = [];
+  let calls = 0;
+  await withLlmRetry(
+    async () => {
+      order.push("attempt");
+      calls += 1;
+      if (calls < 3) throw new RetryableLlmError("rate limited");
+      return "ok";
+    },
+    {
+      sleepFn: async () => {
+        order.push("sleep");
+      },
+      jitterFn: () => 0,
+      onBeforeRetry: async () => {
+        order.push("hook");
+      },
+    },
+  );
+  assertEquals(order, ["attempt", "sleep", "hook", "attempt", "sleep", "hook", "attempt"]);
+});
+
+Deno.test("a hook that throws abandons the retry rather than attempting again", async () => {
+  let attempts = 0;
+  let caught: unknown = null;
+  try {
+    await withLlmRetry(
+      async () => {
+        attempts += 1;
+        throw new RetryableLlmError("rate limited");
+      },
+      {
+        sleepFn: noSleep,
+        jitterFn: () => 0,
+        onBeforeRetry: async () => {
+          throw new Error("claim lost");
+        },
+      },
+    );
+  } catch (error) {
+    caught = error;
+  }
+
+  // The caller discovered mid-loop that the work is no longer theirs; nothing more is paid for.
+  assertEquals((caught as Error).message, "claim lost");
+  assertEquals(attempts, 1);
 });

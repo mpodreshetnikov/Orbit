@@ -34,6 +34,7 @@ BEGIN;
 \i policies/finding_type_catalog.sql
 \i policies/body_site_catalog.sql
 \i policies/record_findings.sql
+\i policies/record_extraction_issues.sql
 
 -- ============================================================================
 -- Conditions
