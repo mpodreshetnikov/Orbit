@@ -18,6 +18,9 @@ Deno.test("createDefaultHealthOcrDeps reflects missing env configuration", async
       const deps = createDefaultHealthOcrDeps();
       assertEquals(deps.config.openRouterApiKey, undefined);
       assertEquals(deps.openRouterClient, null);
+      // Preprocessing is reached only through the deps, so the deployed function is the one
+      // place that has to carry it -- a missing wire here is silently unnormalised pages.
+      assertEquals(typeof deps.preprocessImage, "function");
 
       let caught: unknown = null;
       try {
