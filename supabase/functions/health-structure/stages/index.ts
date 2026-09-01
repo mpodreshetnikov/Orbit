@@ -1,7 +1,15 @@
 import { runClassifyStage } from "./classify.ts";
 import { runExtractStage } from "./extract.ts";
 import { hasNothingToReconcile, runReconcileStage } from "./reconcile.ts";
-import { sumUsage, type StageContext, type StageRejection, type StageUsage } from "./types.ts";
+import {
+  StagedParseClaimLostError,
+  sumUsage,
+  type StageContext,
+  type StageRejection,
+  type StageUsage,
+} from "./types.ts";
+
+export { StagedParseClaimLostError };
 import type { HealthStructureParseContext } from "../service.ts";
 import type { StructuredDataWithEntities } from "../types.ts";
 
@@ -31,14 +39,6 @@ export interface StagedParseDeps {
   renewClaim?: () => Promise<boolean>;
 }
 
-/** Thrown when a renewal reports the record now belongs to another run. */
-export class StagedParseClaimLostError extends Error {
-  constructor() {
-    super("Another run owns this record");
-    this.name = "StagedParseClaimLostError";
-  }
-}
-
 export interface StagedParseOutcome {
   structured: StructuredDataWithEntities;
   usage: StageUsage;
@@ -59,6 +59,7 @@ function stageContext(deps: StagedParseDeps, model: string, effort?: StageContex
     debugRawPayload: deps.debugRawPayload,
     sleepFn: deps.sleepFn,
     jitterFn: deps.jitterFn,
+    renewClaim: deps.renewClaim,
   } satisfies StageContext;
 }
 

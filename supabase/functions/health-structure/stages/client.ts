@@ -10,7 +10,7 @@ import {
   withLlmRetry,
 } from "../../_shared/llm-retry.ts";
 import { parseLlmUsage } from "../../_shared/llm-usage.ts";
-import type { StageContext, StageUsage } from "./types.ts";
+import { StagedParseClaimLostError, type StageContext, type StageUsage } from "./types.ts";
 
 /**
  * 60s was marginal for a real document: the three-specimen histology case in the eval corpus
@@ -182,6 +182,11 @@ export async function callStageJson(
       sleepFn: ctx.sleepFn,
       jitterFn: ctx.jitterFn,
       log: ctx.log,
+      // A stage that is retrying is a run that is alive but silent, and silence is what the
+      // lease reads as death. Renew in the gap rather than only between stages.
+      onBeforeRetry: async () => {
+        if (ctx.renewClaim && !(await ctx.renewClaim())) throw new StagedParseClaimLostError();
+      },
     },
   );
 

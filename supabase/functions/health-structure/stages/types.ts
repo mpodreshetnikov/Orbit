@@ -35,6 +35,14 @@ export interface StageContext {
   /** Injected in tests so retries do not actually wait. */
   sleepFn?: (ms: number) => Promise<void>;
   jitterFn?: () => number;
+  /**
+   * Say the run is still working, while this stage waits.
+   *
+   * Renewing only between stages is not enough: one stage can be three attempts and their
+   * backoff, so the gap between renewals could outrun the lease and the reaper would release a
+   * live run. This is called during that waiting, and a false answer stops the stage.
+   */
+  renewClaim?: () => Promise<boolean>;
 }
 
 /** One shape for what a model call cost, shared with the other edge functions. */
@@ -43,6 +51,14 @@ export type StageUsage = LlmUsage;
 export interface StageRejection {
   entityKind: string;
   reason: string;
+}
+
+/** Thrown when a renewal reports the record now belongs to another run. */
+export class StagedParseClaimLostError extends Error {
+  constructor() {
+    super("Another run owns this record");
+    this.name = "StagedParseClaimLostError";
+  }
 }
 
 export interface StageResult<T> {

@@ -1223,3 +1223,78 @@ Deno.test("a run that lost its record stops rather than finishing the parse", as
   // nowhere to be written.
   assertEquals(bodies.length, 2);
 });
+
+// Between stages is not enough on its own: one stage is up to three attempts and their backoff,
+// so the gap between renewals could outrun the lease and the reaper would release a live run.
+Deno.test("a retrying stage renews while it waits", async () => {
+  let calls = 0;
+  const renewals: string[] = [];
+  const fetchFn = (async (_url: string, init?: RequestInit) => {
+    calls += 1;
+    const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    // Rate-limit the very first classify attempt, then answer everything normally.
+    if (calls === 1) return new Response("rate limited", { status: 429 });
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    if (prompt.includes("Extract clinical entities")) {
+      return jsonResponse({ observations: [], findings: [], conditions: [] });
+    }
+    return jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    });
+  }) as unknown as typeof fetch;
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  await runStagedParse("Гемоглобин 97 г/л", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "m",
+    sleepFn: () => Promise.resolve(),
+    jitterFn: () => 0,
+    renewClaim: () => {
+      renewals.push("renewed");
+      return Promise.resolve(true);
+    },
+  });
+
+  // Three: one inside the retrying stage, then the two between stages.
+  assertEquals(renewals.length, 3);
+});
+
+Deno.test("a stage stops mid-retry when the record has been taken over", async () => {
+  let calls = 0;
+  const fetchFn = (async () => {
+    calls += 1;
+    return new Response("rate limited", { status: 429 });
+  }) as unknown as typeof fetch;
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  let caught: unknown = null;
+  try {
+    await runStagedParse("Гемоглобин 97 г/л", context, {
+      fetchFn,
+      apiKey: "k",
+      defaultModel: "m",
+      sleepFn: () => Promise.resolve(),
+      jitterFn: () => 0,
+      renewClaim: () => Promise.resolve(false),
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assertEquals((caught as Error)?.name, "StagedParseClaimLostError");
+  // Classify and extract each made their first attempt and then stopped; neither retried into a
+  // record it no longer owns.
+  assertEquals(calls, 2);
+});
