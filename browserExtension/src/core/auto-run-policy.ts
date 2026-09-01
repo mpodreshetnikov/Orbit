@@ -20,7 +20,13 @@ export interface AutoRunOptions {
   maxConsecutiveFailures?: number;
 }
 
-/** A successful run covers the day; a visit the next day is what should pick things up. */
+/**
+ * A successful run covers the day, with four hours to spare so a visit at roughly the same hour
+ * the next day still counts rather than being turned away for being an hour early. That slack is
+ * why the screen says "every 20 hours" and not "once a day": on a machine left running, two runs
+ * can fall inside one calendar day, and promising otherwise would be promising what this does
+ * not enforce.
+ */
 export const DEFAULT_AUTO_RUN_COOLDOWN_MS = 20 * 60 * 60 * 1000;
 export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
 

@@ -39,6 +39,17 @@ export interface AutoImportSweepDeps {
 
 export type AutoImportTrigger = "visit" | "alarm";
 
+/**
+ * Whether the server refused the credential itself, rather than failing for any other reason.
+ *
+ * Matched on the status the edge function returns, because everything else -- a signed-out bank,
+ * a page that would not load, a rate limit -- must widen the backoff and keep the grant.
+ */
+export function isCredentialRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /\b(401|403)\b/.test(message) || /unauthorized|forbidden/i.test(message);
+}
+
 export interface AutoImportSweep {
   run: (trigger: AutoImportTrigger) => Promise<void>;
 }
@@ -71,7 +82,8 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
     if (!source.targetUrl) return;
 
     const nowMs = deps.now();
-    const state = await deps.autoRunStore.getState(source.sourceId);
+    const scope = { sourceId: source.sourceId, payerPersonId: grant.person_id };
+    const state = await deps.autoRunStore.getState(scope);
     if (!shouldAutoRun(state, nowMs)) return;
 
     const tabId = await deps.openTab(source.targetUrl);
@@ -82,7 +94,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
         throw new Error(`${source.sourceId} did not finish loading`);
       }
       await deps.runImport({ grant, sourceId: source.sourceId, tabId, nowMs });
-      await deps.autoRunStore.setState(source.sourceId, nextAutoRunState(state, nowMs, "ok"));
+      await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "ok"));
     } catch (error) {
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
       // backoff widens and the attempts stop after a few, and the person is told nothing: they
@@ -91,7 +103,16 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
         source_id: source.sourceId,
         error_message: error instanceof Error ? error.message : String(error),
       });
-      await deps.autoRunStore.setState(source.sourceId, nextAutoRunState(state, nowMs, "error"));
+      await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "error"));
+
+      // Revoking a grant happens in the app and reaches the database, not this extension -- so
+      // the only way the extension learns is the server refusing it. Holding on to a credential
+      // the server has finished with means opening bank tabs to make doomed requests, so the
+      // refusal is taken at its word and the grant is dropped.
+      if (isCredentialRefusal(error)) {
+        deps.onWarning("money_import_auto_grant_dropped", { source_id: source.sourceId });
+        await deps.grantStore.setGrant(null);
+      }
     } finally {
       // However the attempt ended: a tab left open is a bank page the person never asked for.
       // The session field is cleared by the run itself, which is the only party that knows

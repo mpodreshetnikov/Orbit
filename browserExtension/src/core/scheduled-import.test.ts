@@ -67,6 +67,9 @@ function createHarness(
           batch_id: `batch-${createdWindows.length}`,
           source: "tbank",
           payer_person_id: "person-1",
+          // The edge function echoes the window back, as `createSessionAction` does.
+          window_from: payload.window_from,
+          window_to: payload.window_to,
         };
       }
       sessionTokensUsed.push(token);
@@ -101,6 +104,8 @@ function createHarness(
     },
   };
 }
+
+const SCOPE = { sourceId: "tbank", payerPersonId: "person-1" };
 
 const INPUT = {
   sourceId: "tbank",
@@ -161,7 +166,10 @@ describe("runScheduledImport", () => {
     const harness = createHarness();
     const planned = await runScheduledImport(INPUT, harness.deps);
 
-    const state = await harness.backfillStore.getState("tbank");
+    const state = await harness.backfillStore.getState({
+      sourceId: "tbank",
+      payerPersonId: "person-1",
+    });
     expect(state.cursorMs).not.toBeNull();
     expect(new Date(planned.backfill?.window.windowFromIso ?? "").getTime()).toBe(state.cursorMs);
   });
@@ -177,7 +185,10 @@ describe("runScheduledImport", () => {
 
     // The walk passes each slice once. Advancing past a slice whose receipts were left behind
     // would mean nothing ever collects them.
-    const state = await harness.backfillStore.getState("tbank");
+    const state = await harness.backfillStore.getState({
+      sourceId: "tbank",
+      payerPersonId: "person-1",
+    });
     expect(state.cursorMs).toBeNull();
   });
 
@@ -187,7 +198,10 @@ describe("runScheduledImport", () => {
     });
     await runScheduledImport(INPUT, harness.deps);
 
-    const state = await harness.backfillStore.getState("tbank");
+    const state = await harness.backfillStore.getState({
+      sourceId: "tbank",
+      payerPersonId: "person-1",
+    });
     expect(state.cursorMs).toBeNull();
   });
 
@@ -197,7 +211,10 @@ describe("runScheduledImport", () => {
 
     expect(result.incremental).not.toBeNull();
     expect(result.backfill).toBeNull();
-    const state = await harness.backfillStore.getState("tbank");
+    const state = await harness.backfillStore.getState({
+      sourceId: "tbank",
+      payerPersonId: "person-1",
+    });
     expect(state.cursorMs).toBeNull();
   });
 
@@ -211,7 +228,7 @@ describe("runScheduledImport", () => {
     const harness = createHarness({
       storage: {
         money_import_backfill_state: {
-          tbank: {
+          "tbank::person-1": {
             cursorMs: horizonReachedMs,
             horizonMonths: DEFAULT_BACKFILL_HORIZON_MONTHS,
             completedAtMs: null,
@@ -223,7 +240,10 @@ describe("runScheduledImport", () => {
 
     expect(result.backfill).toBeNull();
     expect(harness.createdWindows).toHaveLength(1);
-    const state = await harness.backfillStore.getState("tbank");
+    const state = await harness.backfillStore.getState({
+      sourceId: "tbank",
+      payerPersonId: "person-1",
+    });
     expect(state.completedAtMs).toBe(NOW);
   });
 
@@ -261,7 +281,7 @@ describe("runScheduledImport", () => {
     const harness = createHarness({
       storage: {
         money_import_backfill_state: {
-          tbank: {
+          "tbank::person-1": {
             cursorMs: horizonReachedMs,
             horizonMonths: DEFAULT_BACKFILL_HORIZON_MONTHS,
             completedAtMs: null,
@@ -292,7 +312,7 @@ describe("runScheduledImport", () => {
     const harness = createHarness({
       storage: {
         money_import_backfill_state: {
-          tbank: {
+          "tbank::person-1": {
             cursorMs: horizonReachedMs,
             horizonMonths: DEFAULT_BACKFILL_HORIZON_MONTHS,
             completedAtMs: null,
@@ -303,5 +323,124 @@ describe("runScheduledImport", () => {
 
     await runScheduledImport(INPUT, harness.deps);
     expect(harness.getSession()).toBeNull();
+  });
+
+  it("bounds the history slice at both ends", async () => {
+    const harness = createHarness();
+    await runScheduledImport(INPUT, harness.deps);
+
+    // The connectors read `windowTo`; until they did, a slice planned as one month read from its
+    // start through to today, so every run grew and re-imported everything newer.
+    const backfillParse = harness.connector.parse.mock.calls[1]?.[0] as {
+      windowFrom?: string;
+      windowTo?: string;
+    };
+    expect(backfillParse.windowTo).toBeTruthy();
+    expect(new Date(backfillParse.windowTo as string).getTime()).toBeLessThan(NOW);
+    expect(new Date(backfillParse.windowFrom as string).getTime()).toBeLessThan(
+      new Date(backfillParse.windowTo as string).getTime(),
+    );
+  });
+
+  it("holds the cursor when a receipt was rate-limited rather than skipped for budget", async () => {
+    const harness = createHarness({
+      debugPerWindow: [
+        undefined,
+        { receipt_enrichment: { skipped_after_budget_count: 0, rate_limited_count: 2 } },
+      ],
+    });
+    await runScheduledImport(INPUT, harness.deps);
+
+    const state = await harness.backfillStore.getState(SCOPE);
+    expect(state.cursorMs).toBeNull();
+  });
+
+  it("holds the cursor when the run stopped on its receipt budget", async () => {
+    const harness = createHarness({
+      debugPerWindow: [
+        undefined,
+        { receipt_enrichment: { skipped_after_budget_count: 0, stopped_after_budget: true } },
+      ],
+    });
+    await runScheduledImport(INPUT, harness.deps);
+
+    const state = await harness.backfillStore.getState(SCOPE);
+    expect(state.cursorMs).toBeNull();
+  });
+
+  it("reports a failed history slice rather than passing it off as a finished walk", async () => {
+    const harness = createHarness({ throwOnWindowIndex: 1 });
+    const result = await runScheduledImport(INPUT, harness.deps);
+
+    expect(result.backfill).toBeNull();
+    expect(result.backfillError?.message).toContain("history slice failed");
+    expect(result.backfillError?.window.windowFromIso).toBeTruthy();
+  });
+
+  it("keeps one person's walk out of another's", async () => {
+    const harness = createHarness();
+    await runScheduledImport(INPUT, harness.deps);
+    const first = await harness.backfillStore.getState(SCOPE);
+    expect(first.cursorMs).not.toBeNull();
+
+    // A grant reissued for someone else at the same bank starts its own history, rather than
+    // inheriting a cursor that would skip everything already walked for the first person.
+    const second = await harness.backfillStore.getState({
+      sourceId: "tbank",
+      payerPersonId: "person-2",
+    });
+    expect(second.cursorMs).toBeNull();
+    expect(second.completedAtMs).toBeNull();
+  });
+
+  it("reaches back to the last catch-up when runs have been paused", async () => {
+    const pausedSinceMs = NOW - 30 * DAY_MS;
+    const harness = createHarness({
+      storage: {
+        money_import_backfill_state: {
+          "tbank::person-1": {
+            cursorMs: NOW - 60 * DAY_MS,
+            horizonMonths: DEFAULT_BACKFILL_HORIZON_MONTHS,
+            completedAtMs: null,
+            lastIncrementalToMs: pausedSinceMs,
+          },
+        },
+      },
+    });
+    await runScheduledImport(INPUT, harness.deps);
+
+    // Without this the catch-up would start three days ago and the month between would belong to
+    // no window at all: the history walk only ever goes deeper than where it began.
+    const incrementalFrom = new Date(harness.createdWindows[0].from as string).getTime();
+    expect(incrementalFrom).toBeLessThan(pausedSinceMs);
+  });
+
+  it("refuses a window rather than overwriting a session the person just started", async () => {
+    const harness = createHarness();
+    // Stored after the sweep's opening check and before the run claims the field -- the case the
+    // start-of-sweep snapshot cannot see.
+    await harness.deps.sessionStore.setSession({ session_id: "manual-1" });
+
+    await expect(runScheduledImport(INPUT, harness.deps)).rejects.toThrow(
+      "A session started by the person is in progress",
+    );
+    expect(harness.getSession()).toEqual({ session_id: "manual-1" });
+
+    const completions = harness.callEdge.mock.calls
+      .map((call) => call[2] as Record<string, unknown>)
+      .filter((payload) => payload.action === "complete_session");
+    // The session it opened and could not use is closed, not left running.
+    expect(completions.some((payload) => payload.status === "failed")).toBe(true);
+  });
+
+  it("marks its runs unattended so the app does not navigate on them", async () => {
+    const harness = createHarness();
+    await runScheduledImport(INPUT, harness.deps);
+
+    const done = harness.deps.broadcastToAppTabs.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .filter((message) => message.type === "MONEY_IMPORT_DONE");
+    expect(done.length).toBeGreaterThan(0);
+    expect(done.every((message) => message.unattended === true)).toBe(true);
   });
 });

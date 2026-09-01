@@ -10,14 +10,14 @@ const NOW = Date.parse("2026-08-23T12:00:00.000Z");
 
 describe("planIncrementalWindow", () => {
   it("covers the last few days up to now", () => {
-    expect(planIncrementalWindow(NOW)).toEqual({
+    expect(planIncrementalWindow(null, NOW)).toEqual({
       windowFromIso: "2026-08-20T12:00:00.000Z",
       windowToIso: "2026-08-23T12:00:00.000Z",
     });
   });
 
   it("honours a custom lookback", () => {
-    expect(planIncrementalWindow(NOW, 1).windowFromIso).toBe("2026-08-22T12:00:00.000Z");
+    expect(planIncrementalWindow(null, NOW, 1).windowFromIso).toBe("2026-08-22T12:00:00.000Z");
   });
 });
 
@@ -75,28 +75,28 @@ describe("planBackfillSlice", () => {
 
 describe("shouldAdvanceBackfillCursor", () => {
   it("advances only on a slice that is genuinely finished", () => {
-    expect(
-      shouldAdvanceBackfillCursor({ ok: true, skippedAfterBudgetCount: 0, partial: false }),
-    ).toBe(true);
+    expect(shouldAdvanceBackfillCursor({ ok: true, unreadReceiptCount: 0, partial: false })).toBe(
+      true,
+    );
   });
 
   it("holds the cursor when receipts were left for next time", () => {
-    expect(
-      shouldAdvanceBackfillCursor({ ok: true, skippedAfterBudgetCount: 4, partial: false }),
-    ).toBe(false);
+    expect(shouldAdvanceBackfillCursor({ ok: true, unreadReceiptCount: 4, partial: false })).toBe(
+      false,
+    );
   });
 
   it("holds the cursor when the connector could not read the whole slice", () => {
     // The walk passes each slice once. Moving past a slice it could not read in full would
     // leave that gap unfilled by anything, forever.
-    expect(
-      shouldAdvanceBackfillCursor({ ok: true, skippedAfterBudgetCount: 0, partial: true }),
-    ).toBe(false);
+    expect(shouldAdvanceBackfillCursor({ ok: true, unreadReceiptCount: 0, partial: true })).toBe(
+      false,
+    );
   });
 
   it("holds the cursor when the run failed", () => {
-    expect(
-      shouldAdvanceBackfillCursor({ ok: false, skippedAfterBudgetCount: 0, partial: false }),
-    ).toBe(false);
+    expect(shouldAdvanceBackfillCursor({ ok: false, unreadReceiptCount: 0, partial: false })).toBe(
+      false,
+    );
   });
 });

@@ -747,6 +747,7 @@ describe("background-router", () => {
       .mockResolvedValueOnce({ ok: true });
     deps.sessionStore.getSession.mockResolvedValue({
       source: "tbank",
+      payer_person_id: "person-1",
       session_id: "session-1",
       batch_id: "batch-1",
       function_url: "https://example.com/fn",
@@ -758,7 +759,7 @@ describe("background-router", () => {
     );
 
     expect(deps.autoRunStore.setState).toHaveBeenCalledWith(
-      "tbank",
+      { sourceId: "tbank", payerPersonId: "person-1" },
       expect.objectContaining({ lastResult: "ok", consecutiveFailures: 0 }),
     );
   });

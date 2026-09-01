@@ -619,7 +619,14 @@ export default function MoneyImportPage() {
         });
       }
 
-      if (data.type === "MONEY_IMPORT_DONE" && typeof data.batch_id === "string") {
+      // An unattended run says so, and is not followed. Navigating on it would take the person
+      // off whatever they were doing -- a manual import included -- and onto a report for a run
+      // they never started.
+      if (
+        data.type === "MONEY_IMPORT_DONE" &&
+        typeof data.batch_id === "string" &&
+        data.unattended !== true
+      ) {
         router.push(`/money/import/reports/${data.batch_id}`);
       }
 

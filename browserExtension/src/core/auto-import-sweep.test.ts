@@ -41,13 +41,18 @@ function createHarness(
       return 77;
     });
 
+  let storedGrant: StoredImportGrant | null =
+    overrides.grant === undefined ? createGrant() : overrides.grant;
+
   const deps: AutoImportSweepDeps = {
     listSources:
       overrides.sources ??
       (() => [{ sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" }]),
     grantStore: {
-      getGrant: async () => (overrides.grant === undefined ? createGrant() : overrides.grant),
-      setGrant: async () => {},
+      getGrant: async () => storedGrant,
+      setGrant: async (grant) => {
+        storedGrant = grant;
+      },
     },
     sessionStore: {
       getSession: async () => session,
@@ -56,9 +61,10 @@ function createHarness(
       },
     },
     autoRunStore: {
-      getState: async (sourceId) => states[sourceId] ?? createInitialAutoRunState(),
-      setState: async (sourceId, state) => {
-        states[sourceId] = state;
+      getState: async (scope) =>
+        states[`${scope.sourceId}::${scope.payerPersonId}`] ?? createInitialAutoRunState(),
+      setState: async (scope, state) => {
+        states[`${scope.sourceId}::${scope.payerPersonId}`] = state;
       },
     },
     openTab,
@@ -79,6 +85,7 @@ function createHarness(
     warnings,
     sweep: createAutoImportSweep(deps),
     getSession: () => session,
+    getGrant: () => storedGrant,
   };
 }
 
@@ -92,7 +99,7 @@ describe("createAutoImportSweep", () => {
     expect(harness.deps.runImport).toHaveBeenCalledWith(
       expect.objectContaining({ sourceId: "tbank", tabId: 77 }),
     );
-    expect(harness.states.tbank).toEqual({
+    expect(harness.states["tbank::person-1"]).toEqual({
       lastRunAtMs: NOW,
       lastResult: "ok",
       consecutiveFailures: 0,
@@ -108,7 +115,7 @@ describe("createAutoImportSweep", () => {
     await harness.sweep.run("visit");
 
     expect(harness.closedTabs).toEqual([77]);
-    expect(harness.states.tbank.consecutiveFailures).toBe(1);
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(1);
     expect(harness.warnings[0]?.event).toBe("money_import_auto_run_failed");
   });
 
@@ -118,7 +125,7 @@ describe("createAutoImportSweep", () => {
 
     expect(harness.deps.runImport).not.toHaveBeenCalled();
     expect(harness.closedTabs).toEqual([77]);
-    expect(harness.states.tbank.consecutiveFailures).toBe(1);
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(1);
   });
 
   it("runs nothing without a grant", async () => {
@@ -149,7 +156,9 @@ describe("createAutoImportSweep", () => {
 
   it("respects the cooldown of a source that ran recently", async () => {
     const harness = createHarness({
-      states: { tbank: { lastRunAtMs: NOW - 1000, lastResult: "ok", consecutiveFailures: 0 } },
+      states: {
+        "tbank::person-1": { lastRunAtMs: NOW - 1000, lastResult: "ok", consecutiveFailures: 0 },
+      },
     });
     await harness.sweep.run("alarm");
 
@@ -199,8 +208,8 @@ describe("createAutoImportSweep", () => {
       "https://www.tbank.ru/mybank/operations/",
       "https://web.alfabank.ru/",
     ]);
-    expect(harness.states.tbank.lastResult).toBe("ok");
-    expect(harness.states.alfabank.lastResult).toBe("ok");
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
+    expect(harness.states["alfabank::person-1"].lastResult).toBe("ok");
   });
 
   it("lets a later source run after an earlier one fails", async () => {
@@ -219,7 +228,48 @@ describe("createAutoImportSweep", () => {
     await harness.sweep.run("alarm");
 
     expect(runImport).toHaveBeenCalledTimes(2);
-    expect(harness.states.tbank.lastResult).toBe("error");
-    expect(harness.states.alfabank.lastResult).toBe("ok");
+    expect(harness.states["tbank::person-1"].lastResult).toBe("error");
+    expect(harness.states["alfabank::person-1"].lastResult).toBe("ok");
+  });
+
+  it("drops a grant the server has stopped accepting", async () => {
+    const harness = createHarness({
+      runImport: vi.fn(async () => {
+        throw new Error("money-import responded 401 Unauthorized");
+      }),
+    });
+    await harness.sweep.run("alarm");
+
+    // Revocation happens in the app and never reaches the extension, so a refusal is the only
+    // way it learns. Keeping the credential would mean opening bank tabs for doomed requests
+    // until the backoff ran out.
+    expect(harness.getGrant()).toBeNull();
+    expect(harness.warnings.some((w) => w.event === "money_import_auto_grant_dropped")).toBe(true);
+  });
+
+  it("keeps the grant when the bank, not the credential, is the problem", async () => {
+    const harness = createHarness({
+      runImport: vi.fn(async () => {
+        throw new Error("tbank page did not finish loading");
+      }),
+    });
+    await harness.sweep.run("alarm");
+
+    expect(harness.getGrant()).not.toBeNull();
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(1);
+  });
+
+  it("does not hand a replacement grant the old one's failures", async () => {
+    const harness = createHarness({
+      grant: createGrant({ person_id: "person-2" }),
+      states: {
+        // Three is the point at which shouldAutoRun gives up entirely.
+        "tbank::person-1": { lastRunAtMs: NOW - 1000, lastResult: "error", consecutiveFailures: 3 },
+      },
+    });
+    await harness.sweep.run("visit");
+
+    expect(harness.openedTabs).toHaveLength(1);
+    expect(harness.states["tbank::person-2"].lastResult).toBe("ok");
   });
 });

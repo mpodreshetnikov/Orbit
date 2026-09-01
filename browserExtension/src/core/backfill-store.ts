@@ -4,8 +4,24 @@ import { createInitialBackfillState, type BackfillState } from "./backfill-sched
 const BACKFILL_STORAGE_KEY = "money_import_backfill_state";
 
 export interface BackfillStore {
-  getState(sourceId: string): Promise<BackfillState>;
-  setState(sourceId: string, state: BackfillState): Promise<void>;
+  getState(key: BackfillScope): Promise<BackfillState>;
+  setState(key: BackfillScope, state: BackfillState): Promise<void>;
+}
+
+/**
+ * A walk belongs to one person at one bank, not to the bank alone.
+ *
+ * Keying on the source alone meant a grant reissued for another family member inherited the
+ * first person's cursor: a completed walk skipped their history entirely, and a half-finished
+ * one started them in the middle of it.
+ */
+export interface BackfillScope {
+  sourceId: string;
+  payerPersonId: string;
+}
+
+function scopeKey(scope: BackfillScope): string {
+  return `${scope.sourceId}::${scope.payerPersonId}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -18,25 +34,32 @@ function readState(value: unknown): BackfillState | null {
   const cursorMs = typeof record.cursorMs === "number" ? record.cursorMs : null;
   const horizonMonths = typeof record.horizonMonths === "number" ? record.horizonMonths : undefined;
   const completedAtMs = typeof record.completedAtMs === "number" ? record.completedAtMs : null;
-  return { ...createInitialBackfillState(horizonMonths), cursorMs, completedAtMs };
+  const lastIncrementalToMs =
+    typeof record.lastIncrementalToMs === "number" ? record.lastIncrementalToMs : null;
+  return {
+    ...createInitialBackfillState(horizonMonths),
+    cursorMs,
+    completedAtMs,
+    lastIncrementalToMs,
+  };
 }
 
 /**
- * Per-source backfill state, kept under one storage key. Deleting that key restarts the walk
- * from the most recent month, which is the documented way to redo a history.
+ * Backfill state per person per source, kept under one storage key. Deleting that key restarts
+ * every walk from the most recent month, which is the documented way to redo a history.
  */
 export function createBackfillStore(storage: LocalStorageLike): BackfillStore {
   return {
-    async getState(sourceId) {
+    async getState(scope) {
       const data = await storage.get([BACKFILL_STORAGE_KEY]);
       const bySource = asRecord(data[BACKFILL_STORAGE_KEY]);
-      return readState(bySource[sourceId]) ?? createInitialBackfillState();
+      return readState(bySource[scopeKey(scope)]) ?? createInitialBackfillState();
     },
-    async setState(sourceId, state) {
+    async setState(scope, state) {
       const data = await storage.get([BACKFILL_STORAGE_KEY]);
       const bySource = asRecord(data[BACKFILL_STORAGE_KEY]);
       await storage.set({
-        [BACKFILL_STORAGE_KEY]: { ...bySource, [sourceId]: state },
+        [BACKFILL_STORAGE_KEY]: { ...bySource, [scopeKey(scope)]: state },
       });
     },
   };

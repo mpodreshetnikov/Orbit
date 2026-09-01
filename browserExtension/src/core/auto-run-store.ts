@@ -4,8 +4,24 @@ import { createInitialAutoRunState, type AutoRunState } from "./auto-run-policy.
 const AUTO_RUN_STORAGE_KEY = "money_import_auto_state";
 
 export interface AutoRunStore {
-  getState(sourceId: string): Promise<AutoRunState>;
-  setState(sourceId: string, state: AutoRunState): Promise<void>;
+  getState(scope: AutoRunScope): Promise<AutoRunState>;
+  setState(scope: AutoRunScope, state: AutoRunState): Promise<void>;
+}
+
+/**
+ * Attempt history belongs to one person at one bank.
+ *
+ * Keyed on the source alone, a grant reissued after the old one had failed its three attempts
+ * handed the new credential the old one's despair: `shouldAutoRun` refused every unattended run
+ * for a working grant, and only a manual import could clear it.
+ */
+export interface AutoRunScope {
+  sourceId: string;
+  payerPersonId: string;
+}
+
+function scopeKey(scope: AutoRunScope): string {
+  return `${scope.sourceId}::${scope.payerPersonId}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -24,18 +40,18 @@ function readState(value: unknown): AutoRunState | null {
   };
 }
 
-/** Per-source auto-run history, so one bank going quiet does not hold up another. */
+/** Auto-run history per person per source, so one going quiet does not hold up another. */
 export function createAutoRunStore(storage: LocalStorageLike): AutoRunStore {
   return {
-    async getState(sourceId) {
+    async getState(scope) {
       const data = await storage.get([AUTO_RUN_STORAGE_KEY]);
       const bySource = asRecord(data[AUTO_RUN_STORAGE_KEY]);
-      return readState(bySource[sourceId]) ?? createInitialAutoRunState();
+      return readState(bySource[scopeKey(scope)]) ?? createInitialAutoRunState();
     },
-    async setState(sourceId, state) {
+    async setState(scope, state) {
       const data = await storage.get([AUTO_RUN_STORAGE_KEY]);
       const bySource = asRecord(data[AUTO_RUN_STORAGE_KEY]);
-      await storage.set({ [AUTO_RUN_STORAGE_KEY]: { ...bySource, [sourceId]: state } });
+      await storage.set({ [AUTO_RUN_STORAGE_KEY]: { ...bySource, [scopeKey(scope)]: state } });
     },
   };
 }

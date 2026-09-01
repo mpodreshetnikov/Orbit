@@ -259,6 +259,26 @@ function buildActiveRunSnapshot(
   };
 }
 
+async function resetAutoRunBackoff(
+  deps: BackgroundRouterDeps,
+  session: Record<string, unknown>,
+): Promise<void> {
+  if (!deps.autoRunStore) return;
+  const sourceId = typeof session.source === "string" ? session.source.trim() : "";
+  const payerPersonId =
+    typeof session.payer_person_id === "string" ? session.payer_person_id.trim() : "";
+  if (!sourceId || !payerPersonId) return;
+
+  try {
+    const scope = { sourceId, payerPersonId };
+    const autoState = await deps.autoRunStore.getState(scope);
+    await deps.autoRunStore.setState(scope, nextAutoRunState(autoState, Date.now(), "ok"));
+  } catch {
+    // Swallowed on purpose: see the call site. The worst case is that automatic import stays
+    // backed off a while longer, which the next successful manual run clears.
+  }
+}
+
 export async function routeBackgroundMessage(
   message: BackgroundMessage,
   deps: BackgroundRouterDeps,
@@ -518,14 +538,12 @@ export async function routeBackgroundMessage(
       // enough consecutive failures `shouldAutoRun` stops trying entirely, and without this
       // nothing ever cleared that count -- so a fortnight signed out of the bank would have
       // ended automatic import permanently, with no way back short of reinstalling.
-      const runSourceId = typeof session.source === "string" ? session.source.trim() : "";
-      if (deps.autoRunStore && runSourceId) {
-        const autoState = await deps.autoRunStore.getState(runSourceId);
-        await deps.autoRunStore.setState(
-          runSourceId,
-          nextAutoRunState(autoState, Date.now(), "ok"),
-        );
-      }
+      //
+      // Best-effort, and deliberately so. The import above has already completed its session on
+      // the server; letting a storage failure here fall into the catch below would mark that
+      // finished session failed, clear it, and tell the person their successful import errored.
+      // Local bookkeeping does not get to fail a transaction that has already committed.
+      await resetAutoRunBackoff(deps, session);
 
       const response: Record<string, unknown> = {
         ok: true,

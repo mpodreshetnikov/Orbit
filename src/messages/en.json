@@ -592,7 +592,7 @@
     "importGrantRevoked": "Revoked",
     "importGrantSourcesRequired": "Pick at least one source.",
     "importGrantTokenShownOnce": "The key is shown once — only its hash is stored. Hand it to the extension now, or copy it.",
-    "importGrantsDescription": "A grant is a long-lived, revocable key for the extension. With one, the extension imports on its own: once a day at most, when you open your bank or in a tab it opens and closes by itself. Revoking the grant stops it.",
+    "importGrantsDescription": "A grant is a long-lived, revocable key for the extension. With one, the extension imports on its own: no more than once every 20 hours, when you open your bank or in a tab it opens and closes by itself. Revoking the grant stops it.",
     "importGrantsEmpty": "No grants yet.",
     "importGrantsTitle": "Automatic import",
     "importGrantCopy": "Copy key",
