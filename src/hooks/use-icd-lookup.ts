@@ -6,48 +6,54 @@ import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-functio
 import type { IcdLookupResult, IcdSearchResult } from "@/types";
 
 /**
- * Hook to lookup ICD-10 code via the icd-lookup edge function.
- * Returns official names in both English and Russian.
+ * Look up one ICD-10 code via the icd-lookup edge function, with official names in both
+ * English and Russian.
+ *
+ * Exported as a plain function as well as a hook: the activation path materialises condition
+ * proposals imperatively, and a second copy of this call would be a second thing to keep in step
+ * with the edge function's contract.
  */
+export async function lookupIcdCode(code: string): Promise<IcdLookupResult> {
+  const supabase = createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error("Not authenticated");
+  }
+
+  const res = await fetchEdgeFunctionWithTelemetry(
+    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ code }),
+    },
+    {
+      component: "use-icd-lookup",
+      operation: "icd-lookup-code",
+      attrs: {
+        has_code: Boolean(code),
+      },
+    },
+  );
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`ICD lookup failed: ${error}`);
+  }
+
+  return await res.json();
+}
+
 export function useIcdLookup(code: string | null) {
   return useQuery({
     queryKey: ["icd-lookup", code],
-    queryFn: async (): Promise<IcdLookupResult> => {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Not authenticated");
-      }
-
-      const res = await fetchEdgeFunctionWithTelemetry(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/icd-lookup`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ code }),
-        },
-        {
-          component: "use-icd-lookup",
-          operation: "icd-lookup-code",
-          attrs: {
-            has_code: Boolean(code),
-          },
-        },
-      );
-
-      if (!res.ok) {
-        const error = await res.text();
-        throw new Error(`ICD lookup failed: ${error}`);
-      }
-
-      return await res.json();
-    },
+    queryFn: () => lookupIcdCode(code!),
     enabled: !!code && code.length >= 2,
     staleTime: Infinity, // ICD codes don't change
     gcTime: 1000 * 60 * 60 * 24, // Cache for 24 hours

@@ -7,11 +7,7 @@ import {
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import type { HealthStructureRepository } from "./repository.ts";
 import { usageAttrs } from "../_shared/llm-usage.ts";
-import type {
-  IcdLookupResult,
-  StructuredDataWithEntities,
-  StructuredParseOutcome,
-} from "./types.ts";
+import type { StructuredDataWithEntities, StructuredParseOutcome } from "./types.ts";
 import { convertRefRangeToCanonical, convertToCanonical } from "./unit-conversion.ts";
 
 export interface HealthStructureServiceInput {
@@ -45,7 +41,6 @@ export interface HealthStructureServiceDeps {
     ocrText: string,
     context: HealthStructureParseContext,
   ) => Promise<StructuredParseOutcome>;
-  lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
   /**
    * Load the record's pages for the extraction stage. Absent, structuring sees only the text --
    * which is what it saw before, and what the E2E stub and the unit tests want.
@@ -459,7 +454,6 @@ export async function runHealthStructureService(
     await deps.repository.clearConditionRecords(input.recordId);
     await processExtractedConditions(input.recordId, personId, structuredData.conditions, {
       repository: deps.repository,
-      lookupIcdCode: deps.lookupIcdCode,
       log: deps.log,
     });
 
@@ -471,7 +465,6 @@ export async function runHealthStructureService(
       existingFindings,
       {
         repository: deps.repository,
-        lookupIcdCode: deps.lookupIcdCode,
         log: deps.log,
       },
     );
@@ -482,7 +475,6 @@ export async function runHealthStructureService(
       existingConditions,
       {
         repository: deps.repository,
-        lookupIcdCode: deps.lookupIcdCode,
         log: deps.log,
       },
     );

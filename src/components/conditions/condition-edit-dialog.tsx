@@ -102,7 +102,16 @@ export function ConditionEditDialog({
   // Initialize form when dialog opens
   useEffect(() => {
     if (open) {
-      if (conditionRecord) {
+      if (conditionRecord?.is_proposal) {
+        // A proposal names a condition the chart does not have yet, so it is edited the way a
+        // new one is: the reviewer can correct the model's name and code before approving it.
+        setMode("new");
+        setSelectedConditionId(null);
+        setName(conditionRecord.condition_name);
+        setIcdCode(conditionRecord.condition_code || "");
+        setStatusInRecord(conditionRecord.status_in_record);
+        setSourceAnchor(conditionRecord.source_anchor || "");
+      } else if (conditionRecord) {
         // Editing existing condition record
         setMode("existing");
         setSelectedConditionId(conditionRecord.condition_id);
