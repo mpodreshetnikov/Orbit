@@ -58,11 +58,38 @@ export interface ExtensionReleaseManifest {
 
 export interface ExtensionVersionPolicyResult {
   changedFiles: string[];
+  /**
+   * Whether a release should be published. On its own this is not "the manifest
+   * version changed in this push": a publish that failed leaves the released
+   * version behind the manifest for every later push that does not touch it, and
+   * comparing against the previous commit reports those pushes as "nothing
+   * changed" forever. When the published version is known, this compares against
+   * that instead, so a failed publish is retried by the next push. T-260901-0dr.
+   */
   versionChanged: boolean;
+  /**
+   * Whether the manifest version differs between the two refs. This is a
+   * property of the change, not of production, and it is what decides whether a
+   * change to a packaged surface owes a version bump.
+   */
+  manifestVersionChanged: boolean;
   previousVersion: string;
   nextVersion: string;
+  /** Version currently published, `null` when nothing is, `undefined` when not looked up. */
+  publishedVersion: string | null | undefined;
   requiresVersionBump: boolean;
 }
+
+/**
+ * What a lookup of the published release found. "absent" and "unknown" are kept
+ * apart deliberately: nothing published means publish, while a failed lookup
+ * means decide by the commit range, because a Storage outage must not turn into
+ * a publish on every push.
+ */
+export type PublishedExtensionVersion =
+  | { status: "published"; version: string }
+  | { status: "absent" }
+  | { status: "unknown"; reason: string };
 
 export interface PreparedExtensionRelease {
   artifactDir: string;
@@ -198,6 +225,7 @@ export function evaluateExtensionVersionPolicy(input: {
   changedFiles: string[];
   previousManifestContent: string;
   nextManifestContent: string;
+  published?: PublishedExtensionVersion;
 }): ExtensionVersionPolicyResult {
   const normalizedChangedFiles = normalizeChangedFiles(input.changedFiles);
   const versionDelta = detectManifestVersionChange(
@@ -205,16 +233,125 @@ export function evaluateExtensionVersionPolicy(input: {
     input.nextManifestContent,
   );
 
+  const published = input.published;
+  const publishedVersion =
+    published === undefined || published.status === "unknown"
+      ? undefined
+      : published.status === "absent"
+        ? null
+        : published.version;
+
   return {
     changedFiles: normalizedChangedFiles,
-    versionChanged: versionDelta.changed,
+    // Undefined means the lookup did not produce an answer, so the commit range
+    // is all there is to go on -- the behaviour this had before.
+    versionChanged:
+      publishedVersion === undefined
+        ? versionDelta.changed
+        : publishedVersion !== versionDelta.nextVersion,
+    manifestVersionChanged: versionDelta.changed,
     previousVersion: versionDelta.previousVersion,
     nextVersion: versionDelta.nextVersion,
+    publishedVersion,
+    // Deliberately the commit-range delta, not the publish decision above. This
+    // asks whether this change owes a version bump, which is about the change;
+    // reading it off the published version would excuse a missing bump whenever
+    // production happened to be behind.
     requiresVersionBump: shouldRequireExtensionVersionBump({
       changedFiles: normalizedChangedFiles,
       versionChanged: versionDelta.changed,
     }),
   };
+}
+
+const STORAGE_MISSING_CODES = new Set(["NoSuchKey", "NoSuchBucket"]);
+
+/**
+ * Whether a Storage error body means "this is not there" rather than "something
+ * went wrong". Storage sends these under HTTP 400 with the real status inside
+ * the body, so the HTTP status alone cannot tell the two apart.
+ */
+function isStorageObjectMissing(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const body = payload as { statusCode?: unknown; code?: unknown };
+  if (typeof body.code === "string" && STORAGE_MISSING_CODES.has(body.code)) return true;
+  return String(body.statusCode ?? "") === "404";
+}
+
+/**
+ * Reads the version of the currently published release from the bucket's
+ * `latest.json`, which is what the publish itself writes -- so the signal that
+ * decides whether to publish reads exactly the state it manages. The bucket is
+ * public, so this needs no key and runs in the quality-gates job.
+ */
+export async function fetchPublishedExtensionVersion(input: {
+  supabaseUrl: string;
+  bucketName?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<PublishedExtensionVersion> {
+  const supabaseUrl = input.supabaseUrl.trim();
+  if (!supabaseUrl) {
+    return { status: "unknown", reason: "no Supabase URL was provided" };
+  }
+
+  const url = buildSupabaseStoragePublicUrl({
+    supabaseUrl,
+    bucketName: input.bucketName,
+    objectPath: EXTENSION_RELEASE_LATEST_PATH,
+  });
+  const fetchImpl = input.fetchImpl ?? fetch;
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      signal: AbortSignal.timeout(input.timeoutMs ?? 15_000),
+    });
+  } catch (error) {
+    return {
+      status: "unknown",
+      reason: `request to ${url} failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  // A project that has published nothing is the ordinary case, not a failure --
+  // and Supabase Storage does not report it as 404. Against the live project it
+  // answers HTTP 400 with a JSON body carrying `statusCode: "404"` and
+  // `code: "NoSuchKey"`; a bucket that does not exist yet answers the same way
+  // with `NoSuchBucket`. Both mean nothing is published: the publish job runs
+  // after deploy-supabase, which is what creates the bucket. A plain 404 is
+  // still honoured, since a CDN or proxy in front of Storage may report one.
+  if (response.status === 404) return { status: "absent" };
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    return {
+      status: "unknown",
+      reason: response.ok
+        ? `${url} is not JSON: ${error instanceof Error ? error.message : String(error)}`
+        : `${url} answered ${response.status}`,
+    };
+  }
+
+  if (!response.ok) {
+    if (isStorageObjectMissing(payload)) return { status: "absent" };
+    return {
+      status: "unknown",
+      reason: `${url} answered ${response.status}: ${JSON.stringify(payload)}`,
+    };
+  }
+
+  const version = (payload as { version?: unknown } | null)?.version;
+  if (typeof version !== "string" || !version.trim()) {
+    // Malformed metadata is reported as unknown rather than absent: a proxy
+    // error page and an actually empty release read the same here, and only one
+    // of them means "publish".
+    return { status: "unknown", reason: `${url} carries no version string` };
+  }
+
+  return { status: "published", version: version.trim() };
 }
 
 export function buildSupabaseStoragePublicUrl(input: {
@@ -234,9 +371,11 @@ export function buildSupabaseStoragePublicUrl(input: {
 function boolLines(result: ExtensionVersionPolicyResult): string {
   return [
     `versionChanged=${result.versionChanged}`,
+    `manifestVersionChanged=${result.manifestVersionChanged}`,
     `requiresVersionBump=${result.requiresVersionBump}`,
     `previousVersion=${result.previousVersion}`,
     `nextVersion=${result.nextVersion}`,
+    `publishedVersion=${result.publishedVersion ?? ""}`,
   ].join("\n");
 }
 
@@ -606,25 +745,41 @@ export async function evaluateExtensionVersionPolicyFromGit(input: {
   rootDir?: string;
   fromRef: string;
   toRef: string;
+  /** When given, the publish decision is taken against the published release. */
+  supabaseUrl?: string;
+  fetchImpl?: typeof fetch;
 }): Promise<ExtensionVersionPolicyResult> {
   const rootDir = input.rootDir ?? REPO_ROOT;
   const previousRef = input.fromRef || ZERO_SHA;
   const nextRef = input.toRef || "HEAD";
 
-  const [changedFiles, previousManifestContent, nextManifestContent] = await Promise.all([
-    listChangedFilesFromRange(rootDir, previousRef, nextRef),
-    readGitFileAtRef(
-      rootDir,
-      previousRef === ZERO_SHA ? nextRef : previousRef,
-      EXTENSION_RELEASE_MANIFEST_PATH,
-    ),
-    readGitFileAtRef(rootDir, nextRef, EXTENSION_RELEASE_MANIFEST_PATH),
-  ]);
+  const [changedFiles, previousManifestContent, nextManifestContent, published] = await Promise.all(
+    [
+      listChangedFilesFromRange(rootDir, previousRef, nextRef),
+      readGitFileAtRef(
+        rootDir,
+        previousRef === ZERO_SHA ? nextRef : previousRef,
+        EXTENSION_RELEASE_MANIFEST_PATH,
+      ),
+      readGitFileAtRef(rootDir, nextRef, EXTENSION_RELEASE_MANIFEST_PATH),
+      input.supabaseUrl
+        ? fetchPublishedExtensionVersion({
+            supabaseUrl: input.supabaseUrl,
+            fetchImpl: input.fetchImpl,
+          })
+        : Promise.resolve(undefined),
+    ],
+  );
+
+  if (published?.status === "unknown") {
+    console.warn(`[extension-release] published version unknown: ${published.reason}`);
+  }
 
   return evaluateExtensionVersionPolicy({
     changedFiles,
     previousManifestContent,
     nextManifestContent,
+    published,
   });
 }
 
@@ -658,6 +813,11 @@ async function runCli(): Promise<void> {
   const result = await evaluateExtensionVersionPolicyFromGit({
     fromRef: requiredOption(parsed.options, "from"),
     toRef: requiredOption(parsed.options, "to"),
+    supabaseUrl: optionalOption(
+      parsed.options,
+      "supabase-url",
+      process.env.EXTENSION_RELEASE_SUPABASE_URL?.trim(),
+    ),
   });
   const format = optionalOption(parsed.options, "format", "json");
 
