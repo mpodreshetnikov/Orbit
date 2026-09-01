@@ -7,6 +7,8 @@ import {
 import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
 import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
+import type { AutoRunStore } from "./auto-run-store.js";
+import { nextAutoRunState } from "./auto-run-policy.js";
 
 export interface BackgroundMessage {
   type: string;
@@ -41,6 +43,11 @@ type BackgroundImportRunnerDeps = ImportRunnerDeps & {
 export interface BackgroundRouterDeps {
   sessionStore: SessionStore;
   grantStore: GrantStore;
+  /**
+   * Optional so the router stays usable without it, but when it is wired a manual run is the
+   * only way back from an automatic run that has failed itself into silence.
+   */
+  autoRunStore?: AutoRunStore;
   importRunnerDeps: BackgroundImportRunnerDeps;
   debugStore: ImportDebugStore;
 }
@@ -507,6 +514,19 @@ export async function routeBackgroundMessage(
           debug_run_id: run.debug_run_id,
         });
       }
+      // A run the person started is the documented way out of the automatic backoff: after
+      // enough consecutive failures `shouldAutoRun` stops trying entirely, and without this
+      // nothing ever cleared that count -- so a fortnight signed out of the bank would have
+      // ended automatic import permanently, with no way back short of reinstalling.
+      const runSourceId = typeof session.source === "string" ? session.source.trim() : "";
+      if (deps.autoRunStore && runSourceId) {
+        const autoState = await deps.autoRunStore.getState(runSourceId);
+        await deps.autoRunStore.setState(
+          runSourceId,
+          nextAutoRunState(autoState, Date.now(), "ok"),
+        );
+      }
+
       const response: Record<string, unknown> = {
         ok: true,
         result,

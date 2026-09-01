@@ -3,6 +3,7 @@ import extensionManifest from "../../manifest.json";
 import { createImportDebugStore } from "./import-debug.js";
 import { routeBackgroundMessage } from "./background-router.js";
 import type { StoredImportGrant } from "./grant-store.js";
+import { createInitialAutoRunState } from "./auto-run-policy.js";
 
 describe("background-router", () => {
   function createDeferred<T>() {
@@ -31,6 +32,10 @@ describe("background-router", () => {
         broadcastToAppTabs: vi.fn().mockResolvedValue(undefined),
         broadcastToSourceTab: vi.fn().mockResolvedValue(undefined),
         nowIso: vi.fn(() => "2026-01-01T00:00:00.000Z"),
+      },
+      autoRunStore: {
+        getState: vi.fn(async () => createInitialAutoRunState()),
+        setState: vi.fn(async () => {}),
       },
       debugStore: createImportDebugStore(),
     };
@@ -716,5 +721,66 @@ describe("background-router", () => {
 
     await expect(firstRunPromise).resolves.toMatchObject({ ok: true });
     expect(deps.importRunnerDeps.callEdge).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the automatic backoff when a run the person started succeeds", async () => {
+    const deps = createDeps();
+    deps.autoRunStore.getState = vi.fn(async () => ({
+      lastRunAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      lastResult: "error" as const,
+      // Three is the point at which `shouldAutoRun` stops trying at all. Without this reset a
+      // spell of being signed out would end automatic import for good.
+      consecutiveFailures: 3,
+    }));
+    deps.importRunnerDeps.getConnector.mockReturnValue({
+      sourceId: "tbank",
+      parse: vi.fn().mockResolvedValue({
+        rows: [{ id: 1 }],
+        windowTo: "2026-08-23T00:00:00.000Z",
+        parsedThroughAt: "2026-08-23T00:00:00.000Z",
+        parsedTransactionsCount: 1,
+      }),
+    });
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-2" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+    });
+
+    await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).resolves.toMatchObject(
+      { ok: true },
+    );
+
+    expect(deps.autoRunStore.setState).toHaveBeenCalledWith(
+      "tbank",
+      expect.objectContaining({ lastResult: "ok", consecutiveFailures: 0 }),
+    );
+  });
+
+  it("leaves the automatic backoff alone when a run fails", async () => {
+    const deps = createDeps();
+    deps.importRunnerDeps.getConnector.mockReturnValue({
+      sourceId: "tbank",
+      parse: vi.fn().mockRejectedValue(new Error("still signed out")),
+    });
+    deps.importRunnerDeps.callEdge = vi.fn().mockResolvedValue({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+    });
+
+    await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
+      "still signed out",
+    );
+    expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
   });
 });
