@@ -77,7 +77,10 @@ export interface MoneyImportRepository {
     payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]>;
-  findExistingTransactionId(row: CanonicalTransactionRowInput): Promise<string | null>;
+  findExistingTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<string | null>;
   findExistingLineItemId(transactionId: string, importHash: string): Promise<string | null>;
   repairExistingTransactionDetails(
     transactionId: string,
@@ -466,6 +469,41 @@ export function createSupabaseMoneyImportRepository(
     if (error) throw new Error(error.message);
   }
 
+  async function assertAccountBelongsToPayer(
+    accountId: string,
+    payerPersonId: string,
+  ): Promise<void> {
+    const { data, error } = await getAdminClient()
+      .from("money_accounts")
+      .select("id")
+      .eq("id", accountId)
+      .eq("owner_person_id", payerPersonId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Failed to verify money account ownership");
+    }
+    if (!data) {
+      throw new Error(`Money account ${accountId} does not belong to this import`);
+    }
+  }
+
+  async function assertCardBelongsToAccount(cardId: string, accountId: string): Promise<void> {
+    const { data, error } = await getAdminClient()
+      .from("money_cards")
+      .select("id")
+      .eq("id", cardId)
+      .eq("account_id", accountId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Failed to verify money card ownership");
+    }
+    if (!data) {
+      throw new Error(`Money card ${cardId} does not belong to this import`);
+    }
+  }
+
   async function resolveAccountIdForRow(
     payerPersonId: string,
     row: CanonicalTransactionRowInput,
@@ -473,7 +511,14 @@ export function createSupabaseMoneyImportRepository(
     defaultAccountId?: string | null,
   ): Promise<string> {
     const explicitAccountId = normalizeText(row.account_id);
-    if (explicitAccountId) return explicitAccountId;
+    if (explicitAccountId) {
+      // An id supplied in the row is a claim, not a fact. Everything below is already scoped to
+      // the payer, and this branch skipped that scoping entirely -- so a caller holding any
+      // session could write against another household member's account by naming its uuid, and
+      // the service-role client would persist it.
+      await assertAccountBelongsToPayer(explicitAccountId, payerPersonId);
+      return explicitAccountId;
+    }
 
     const sourceForAccounts = normalizeSourceForTransactions(
       normalizeText(row.source) ?? fallbackSource,
@@ -533,8 +578,17 @@ export function createSupabaseMoneyImportRepository(
 
   async function findExistingTransactionId(
     row: CanonicalTransactionRowInput,
+    payerPersonId: string,
   ): Promise<string | null> {
-    let query = getAdminClient().from("money_transactions").select("id").limit(1);
+    // Scoped to the payer, because the row this returns is then updated through the
+    // service-role client. `(source, external_id)` and `dedupe_hash` are unique across the whole
+    // table, not per person, so without this predicate a caller could reuse another payer's
+    // external id, let the insert conflict, and have their row resolved and overwritten here.
+    let query = getAdminClient()
+      .from("money_transactions")
+      .select("id")
+      .eq("payer_person_id", payerPersonId)
+      .limit(1);
     if (row.external_id) {
       query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
     } else if (row.dedupe_hash) {
@@ -702,7 +756,12 @@ export function createSupabaseMoneyImportRepository(
     createIfMissing = true,
   ): Promise<string | null> {
     const explicitCardId = normalizeText(row.card_id);
-    if (explicitCardId) return explicitCardId;
+    if (explicitCardId) {
+      // Same claim, one level down: the account is now known to be the payer's, so the card has
+      // to be that account's or it reaches outside the payer again.
+      await assertCardBelongsToAccount(explicitCardId, accountId);
+      return explicitCardId;
+    }
 
     const accountHint = extractAccountHintFromRow(row);
     if (!accountHint) return null;
@@ -1463,7 +1522,7 @@ export function createSupabaseMoneyImportRepository(
       throw new Error((error as { message?: string })?.message || "Failed to insert transaction");
     }
 
-    const existingId = await findExistingTransactionId(row);
+    const existingId = await findExistingTransactionId(row, payerPersonId);
     if (!existingId) {
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
