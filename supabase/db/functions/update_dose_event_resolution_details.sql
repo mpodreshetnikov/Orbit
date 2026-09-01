@@ -47,8 +47,15 @@ BEGIN
       INSERT INTO public.med_inventory_transactions (regimen_id, event_id, type, amount, unit, note)
       VALUES (v_event.regimen_id, p_dose_event_id, 'correction', v_old_amount, v_unit, 'Edit amount taken');
 
+      -- Gated on `auto_decrement_on_taken` as well as `enabled`, because that
+      -- is the pair the decrement being reversed was written under: with
+      -- automatic decrementing off the intake never reduced `current_amount`,
+      -- so adding the old amount back here would create stock out of nothing
+      -- and suppress the refill reminder that stock drives.
       SELECT r.inventory INTO v_inv FROM public.med_regimens r WHERE r.id = v_event.regimen_id;
-      IF v_inv IS NOT NULL AND (v_inv->>'enabled')::boolean IS TRUE THEN
+      IF v_inv IS NOT NULL
+         AND (v_inv->>'enabled')::boolean IS TRUE
+         AND (v_inv->>'auto_decrement_on_taken')::boolean IS TRUE THEN
         v_inv := jsonb_set(
           v_inv,
           '{current_amount}',

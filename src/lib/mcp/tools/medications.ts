@@ -1176,13 +1176,15 @@ export function registerMedicationTools(server: McpToolServer): void {
       }
 
       // A correction is not a fresh intake, and saying "logged" for one invites
-      // the caller to think a second dose went on the record.
+      // the caller to think a second dose went on the record -- as does
+      // "resolved the dose already on the plan" for one that was resolved long
+      // before this call.
       if (corrected) {
         return ok(
-          `Corrected ${regimen.custom_name} at ${when} to ` +
-            `${intake ? `${intake.amount} ${intake.unit}` : "the amount given"}, still ` +
-            `${dose.status}.` +
-            `${dose.status === "taken" ? " Stock was adjusted by the difference." : ""}`,
+          `Corrected the intake already recorded for ${regimen.custom_name} at ${when}: now ` +
+            `${dose.status}${intake ? `, ${intake.amount} ${intake.unit}` : ""}. ` +
+            `The record was changed in place, not duplicated.` +
+            `${regimen.inventory?.enabled ? " Stock was moved to match." : ""}`,
           {
             medication: regimen,
             dose: zonedDose,

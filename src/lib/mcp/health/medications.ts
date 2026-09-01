@@ -580,7 +580,10 @@ export async function logDose(
   // correcting the dose, whatever its status already says.
   const correctsAmount = params.amount != null && params.amount !== plannedAmount;
 
-  const amendPlannedAmount = async (doseEventId: string) => {
+  // `withNote` only where no RPC follows to write it: everywhere else the RPC
+  // is what records the note, and writing it here too would set it before a
+  // call that may never land.
+  const amendPlannedAmount = async (doseEventId: string, options?: { withNote?: boolean }) => {
     const { error } = await supabase
       .from("med_dose_events")
       .update({
@@ -593,6 +596,9 @@ export async function logDose(
           ...(plannedIntake ?? {}),
           intake: { amount, unit: plannedIntake?.intake?.unit ?? unit },
         },
+        // Left alone when the caller passed none, so a correction of the amount
+        // does not erase the note the intake was recorded with.
+        ...(options?.withNote && note ? { note } : {}),
       } as never)
       .eq("id", doseEventId);
     return error;
@@ -663,8 +669,9 @@ export async function logDose(
       }
     } else {
       // A skipped dose moved no stock, so there is no ledger entry to move with
-      // it -- only the amount the record says was due.
-      const amendError = await amendPlannedAmount(doseEventId);
+      // it -- only the amount the record says was due, and the note that came
+      // with the correction, which no RPC is here to write.
+      const amendError = await amendPlannedAmount(doseEventId, { withNote: true });
       if (amendError) {
         throw new Error(`Failed to correct the intake: ${amendError.message}`);
       }
@@ -678,6 +685,12 @@ export async function logDose(
       corrected: true,
     };
   }
+
+  // A dose already resolved either way is being corrected, not logged, whichever
+  // direction it moves: answering "Logged ..." for one reads as a second intake
+  // on the record.
+  const wasResolved =
+    planned != null && (planned.status === "taken" || planned.status === "skipped");
 
   // Which side of the RPC the corrected amount is written on. `mark_dose_skipped`
   // reverses a taken dose by the amount it reads off the row, so amending first
@@ -725,6 +738,29 @@ export async function logDose(
   }
 
   const doseEventId = row.id as string;
+
+  /**
+   * The half of a correction that had to wait for the RPC.
+   *
+   * Owed on every path where the resolution committed -- including the one
+   * where only its response was lost -- because the ledger has by then been put
+   * right by the amount that was really decremented, and leaving the event at
+   * that amount would let a later status change move stock by the wrong figure.
+   */
+  const applyDeferredAmendment = async () => {
+    if (!correctsAmount || !reversesDecrement) {
+      return;
+    }
+    const amendError = await amendPlannedAmount(doseEventId);
+    if (amendError) {
+      throw new Error(
+        `The intake was recorded as skipped on ${regimen.custom_name} and the stock it had taken ` +
+          `was put back, but writing the corrected amount failed (${amendError.message}), so dose ` +
+          `event ${doseEventId} still shows the amount it was taken as. Do not record it again.`,
+      );
+    }
+  };
+
   const { error: resolveError } = await supabase.rpc(
     params.status === "skipped" ? "mark_dose_skipped" : "mark_dose_taken",
     { p_dose_event_id: doseEventId, ...(note ? { p_note: note } : {}) } as never,
@@ -747,12 +783,13 @@ export async function logDose(
     const after = (afterRow as Record<string, unknown> | null) ?? null;
 
     if (!afterError && after && after.status === params.status) {
+      await applyDeferredAmendment();
       return {
         regimen,
-        dose: rowToDoseEvent(after),
+        dose: rowToDoseEvent(await readResolved(doseEventId)),
         planned: planned !== null,
         alreadyRecorded: false,
-        corrected: false,
+        corrected: wasResolved,
       };
     }
 
@@ -816,22 +853,13 @@ export async function logDose(
   // Now, and only now, is the corrected amount safe to write: the reversal it
   // would otherwise have shrunk has already been made against the amount that
   // was really decremented.
-  if (correctsAmount && reversesDecrement) {
-    const amendError = await amendPlannedAmount(doseEventId);
-    if (amendError) {
-      throw new Error(
-        `The intake was recorded as skipped on ${regimen.custom_name} and the stock it had taken ` +
-          `was put back, but writing the corrected amount failed (${amendError.message}), so dose ` +
-          `event ${doseEventId} still shows the amount it was taken as. Do not record it again.`,
-      );
-    }
-  }
+  await applyDeferredAmendment();
 
   return {
     regimen,
     dose: rowToDoseEvent(await readResolved(doseEventId)),
     planned: planned !== null,
     alreadyRecorded: false,
-    corrected: false,
+    corrected: wasResolved,
   };
 }
