@@ -21,6 +21,9 @@ function createRepositoryMock(
   return {
     authenticateAllowedUser: async () => null,
     getSessionByToken: async () => null,
+    getGrantByToken: async () => null,
+    isAuthUserAllowed: async () => false,
+    markGrantUsed: async () => {},
     findLastImportedAt: async () => null,
     createImportSession: async () => ({ id: "session-1" }),
     getImportSessionForUser: async () => null,

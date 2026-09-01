@@ -11,6 +11,8 @@ function createRepositoryMock(
   options: {
     sessionForUser?: Record<string, unknown> | null;
     sessionByToken?: Record<string, unknown> | null;
+    grantByToken?: Record<string, unknown> | null;
+    issuerIsAllowed?: boolean;
   } = {},
 ): MoneyImportRepository {
   return {
@@ -39,6 +41,12 @@ function createRepositoryMock(
     },
     findLastImportedAt: async () => null,
     createImportSession: async () => ({ id: "session-1" }),
+    getGrantByToken: async (token: string) => {
+      if (token !== "grant-token") return null;
+      return options.grantByToken ?? null;
+    },
+    isAuthUserAllowed: async () => options.issuerIsAllowed ?? true,
+    markGrantUsed: async () => {},
     getImportSessionForUser: async () => options.sessionForUser ?? null,
     getImportSessionById: async () => options.sessionForUser ?? null,
     updateImportSession: async () => {},
@@ -676,3 +684,79 @@ Deno.test(
     assertEquals(generic.error, "Auth backend exploded");
   },
 );
+
+const LIVE_GRANT_ROW = {
+  id: "grant-1",
+  person_id: "person-grant",
+  created_by_auth_user_id: "user-grant",
+  allowed_sources: ["tbank_web"],
+  revoked_at: null,
+  expires_at: null,
+};
+
+function grantSessionRequest(): Request {
+  return new Request("http://localhost/functions/v1/money-import", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer grant-token",
+    },
+    body: JSON.stringify({
+      action: "create_session",
+      source: "tbank_web",
+      payer_person_id: "person-somebody-else",
+    }),
+  });
+}
+
+Deno.test("money-import handler starts a session from a grant", async () => {
+  const handler = createMoneyImportHandler({
+    repository: createRepositoryMock({ grantByToken: LIVE_GRANT_ROW }),
+  });
+
+  const payload = await assertJsonResponse<{ payer_person_id: string }>(
+    await handler(grantSessionRequest()),
+    200,
+  );
+  // The grant names the payer, not the request body.
+  assertEquals(payload.payer_person_id, "person-grant");
+});
+
+Deno.test("money-import handler refuses a grant whose issuer lost access", async () => {
+  // The end-to-end shape of the same rule auth_test covers directly: taking the issuer out of
+  // allowed_users has to stop the extension importing, and the only thing that changes here is
+  // the allowlist answer -- the grant row is untouched, neither revoked nor expired.
+  const handler = createMoneyImportHandler({
+    repository: createRepositoryMock({
+      grantByToken: LIVE_GRANT_ROW,
+      issuerIsAllowed: false,
+    }),
+  });
+
+  const payload = await assertJsonResponse<{ error: string }>(
+    await handler(grantSessionRequest()),
+    401,
+  );
+  assertEquals(payload.error, "Unauthorized");
+});
+
+Deno.test("money-import handler does not accept a grant for a later action", async () => {
+  const handler = createMoneyImportHandler({
+    repository: createRepositoryMock({ grantByToken: LIVE_GRANT_ROW }),
+  });
+
+  const payload = await assertJsonResponse<{ error: string }>(
+    await handler(
+      new Request("http://localhost/functions/v1/money-import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer grant-token",
+        },
+        body: JSON.stringify({ action: "preview_rows", session_id: "session-1", rows: [] }),
+      }),
+    ),
+    401,
+  );
+  assertEquals(payload.error, "Unauthorized");
+});

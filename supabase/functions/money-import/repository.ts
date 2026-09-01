@@ -25,9 +25,33 @@ import type {
   UserAuthContext,
 } from "./types.ts";
 
+/**
+ * The slice of `money_import_grants` this repository reads and writes. Declared here because the
+ * table is absent from the generated `Database` types; see `grantsTable` for why.
+ */
+interface MoneyImportGrantsTableQuery {
+  select(columns: string): {
+    eq(
+      column: string,
+      value: string,
+    ): {
+      single(): Promise<{
+        data: Record<string, unknown> | null;
+        error: { message?: string } | null;
+      }>;
+    };
+  };
+  update(values: { last_used_at: string }): {
+    eq(column: string, value: string): Promise<{ error: { message?: string } | null }>;
+  };
+}
+
 export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
+  getGrantByToken(token: string): Promise<Record<string, unknown> | null>;
+  isAuthUserAllowed(authUserId: string): Promise<boolean>;
+  markGrantUsed(grantId: string, usedAtIso: string): Promise<void>;
   findLastImportedAt(source: string, payerPersonId: string): Promise<string | null>;
   createImportSession(payload: Record<string, unknown>): Promise<{ id: string }>;
   getImportSessionForUser(
@@ -368,6 +392,60 @@ export function createSupabaseMoneyImportRepository(
 
     if (error || !data) return null;
     return data as Record<string, unknown>;
+  }
+
+  /**
+   * `money_import_grants` is not in the generated `Database` types. It is not alone in that --
+   * `money_fx_rates` and the `mcp_oauth_*` tables are missing too, though their migrations are
+   * on main and `db-artifacts-verify` is green -- so this is a standing property of the
+   * generated artifacts rather than something this table did. `money-fx-sync/handler.ts`
+   * already answers it by describing the table it needs where it needs it, and this follows
+   * that: the shape below is what these two queries actually read and write, and it is checked
+   * against the real table by `money_import_grants_rls_test.sql`.
+   */
+  function grantsTable() {
+    return (
+      getAdminClient() as unknown as {
+        from(table: "money_import_grants"): MoneyImportGrantsTableQuery;
+      }
+    ).from("money_import_grants");
+  }
+
+  async function getGrantByToken(token: string): Promise<Record<string, unknown> | null> {
+    const tokenHash = await sha256Hex(token);
+    const { data, error } = await grantsTable().select("*").eq("token_hash", tokenHash).single();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  }
+
+  /**
+   * Whether this auth user may still import. Asked of a grant's issuer on every use, so that
+   * removing someone from `allowed_users` takes their extension's credential with it.
+   *
+   * Failure answers "no". The alternative -- letting a transport error stand in for permission
+   * -- would turn any outage of this one query into a grant that authorises itself.
+   */
+  async function isAuthUserAllowed(authUserId: string): Promise<boolean> {
+    if (!authUserId) return false;
+    try {
+      const { data, error } = await getAdminClient()
+        .from("allowed_users")
+        .select("id")
+        .eq("auth_user_id", authUserId)
+        .maybeSingle();
+
+      if (error || !data) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function markGrantUsed(grantId: string, usedAtIso: string): Promise<void> {
+    // Best effort: knowing when a grant was last used is worth having, but failing to
+    // record it must not cost the import that is starting.
+    await grantsTable().update({ last_used_at: usedAtIso }).eq("id", grantId);
   }
 
   async function findLastImportedAt(source: string, payerPersonId: string): Promise<string | null> {
@@ -1603,6 +1681,9 @@ export function createSupabaseMoneyImportRepository(
   return {
     authenticateAllowedUser,
     getSessionByToken,
+    getGrantByToken,
+    isAuthUserAllowed,
+    markGrantUsed,
     findLastImportedAt,
     createImportSession,
     getImportSessionForUser,
