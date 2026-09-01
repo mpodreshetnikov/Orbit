@@ -13,3 +13,4 @@
 # anyone reviewed.
 
 path test/fixtures/** # recorded upstream responses and sample documents, verified by replay rather than by reading
+branch claude/task-t-0021-dm659m # T-0021 is one milestone: the browser is the last writer on every OCR failure path, so a service-only change is overwritten before anyone sees it and a client-only change has no cause to render -- the halves do not ship independently
