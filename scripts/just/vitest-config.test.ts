@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import config from "../../vitest.config";
+import config, { sharedTestOptions } from "../../vitest.config";
 
 /**
  * The root `test` block is not inherited by entries in `projects`.
@@ -17,11 +17,20 @@ describe("vitest project configuration", () => {
     expect(projects?.length).toBeGreaterThan(0);
   });
 
-  it("gives every project its own timeouts rather than relying on the root block", () => {
+  it("gives every project the shared options rather than relying on the root block", () => {
+    // Compared against the shared values rather than against a floor: the point is that each
+    // project carries them, whatever they are. A minimum of its own would break a deliberate
+    // override -- `VITEST_TEST_TIMEOUT_MS=3000` to hunt slow tests is a legitimate thing to do.
+    const shared = sharedTestOptions();
     for (const project of projects ?? []) {
       const name = project.test?.name;
-      expect(project.test?.testTimeout, `project ${name} has no testTimeout`).toBeGreaterThan(5000);
-      expect(project.test?.hookTimeout, `project ${name} has no hookTimeout`).toBeGreaterThan(5000);
+      expect(project.test?.testTimeout, `project ${name} has no testTimeout`).toBe(
+        shared.testTimeout,
+      );
+      expect(project.test?.hookTimeout, `project ${name} has no hookTimeout`).toBe(
+        shared.hookTimeout,
+      );
+      expect(project.test?.retry, `project ${name} has no retry`).toBe(shared.retry);
     }
   });
 });

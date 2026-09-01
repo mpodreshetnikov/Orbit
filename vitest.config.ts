@@ -43,7 +43,7 @@ function readIntEnv(name: string, fallback: number): number {
  * is a handful of the slowest tests timing out on CI under load, in whichever files happen to be
  * slowest, unrelated to the change being tested, which reads exactly like flakiness.
  */
-function sharedTestOptions() {
+export function sharedTestOptions() {
   return {
     testTimeout: readIntEnv("VITEST_TEST_TIMEOUT_MS", isCi ? 10_000 : 7_000),
     hookTimeout: readIntEnv("VITEST_HOOK_TIMEOUT_MS", isCi ? 15_000 : 12_000),
