@@ -25,6 +25,51 @@ import type {
   UserAuthContext,
 } from "./types.ts";
 
+/**
+ * Quotes a value for a PostgREST filter string, where an unquoted value would let a comma,
+ * parenthesis or dot in the data be read as filter grammar. Backslash escapes itself and the
+ * quote, so it has to be escaped first.
+ */
+export function postgrestFilterValue(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The filter that finds a transaction by one identity.
+ *
+ * The two are not interchangeable and must not be OR-ed. `(source, external_id)` is what the
+ * bank calls the operation; `dedupe_hash` is a fallback for rows that have no external id, and
+ * the extension computes it as FNV-1a folded to 32 bits -- eight hex characters, where a
+ * collision between two genuinely different transactions is a matter of scale rather than of
+ * bad luck. Resolving a row to a transaction whose hash matches while its external id differs
+ * would merge two unrelated operations and overwrite one of them.
+ */
+function transactionIdentityFilter(
+  row: CanonicalTransactionRowInput,
+  identity: "external_id" | "dedupe_hash",
+): string | null {
+  if (identity === "external_id") {
+    const externalId = normalizeText(row.external_id);
+    if (!externalId) return null;
+    const source = postgrestFilterValue(row.source ?? "manual");
+    return `and(source.eq.${source},external_id.eq.${postgrestFilterValue(externalId)})`;
+  }
+  const dedupeHash = normalizeText(row.dedupe_hash);
+  return dedupeHash ? `dedupe_hash.eq.${postgrestFilterValue(dedupeHash)}` : null;
+}
+
+/**
+ * The identity a row is resolved by: what the bank calls it, or the hash when it has no name.
+ * Precedence, not alternatives -- see `transactionIdentityFilter`.
+ */
+function resolvingIdentity(
+  row: CanonicalTransactionRowInput,
+): "external_id" | "dedupe_hash" | null {
+  if (normalizeText(row.external_id)) return "external_id";
+  if (normalizeText(row.dedupe_hash)) return "dedupe_hash";
+  return null;
+}
+
 export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
@@ -77,7 +122,10 @@ export interface MoneyImportRepository {
     payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]>;
-  findExistingTransactionId(row: CanonicalTransactionRowInput): Promise<string | null>;
+  findExistingTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<string | null>;
   findExistingLineItemId(transactionId: string, importHash: string): Promise<string | null>;
   repairExistingTransactionDetails(
     transactionId: string,
@@ -466,6 +514,41 @@ export function createSupabaseMoneyImportRepository(
     if (error) throw new Error(error.message);
   }
 
+  async function assertAccountBelongsToPayer(
+    accountId: string,
+    payerPersonId: string,
+  ): Promise<void> {
+    const { data, error } = await getAdminClient()
+      .from("money_accounts")
+      .select("id")
+      .eq("id", accountId)
+      .eq("owner_person_id", payerPersonId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Failed to verify money account ownership");
+    }
+    if (!data) {
+      throw new Error(`Money account ${accountId} does not belong to this import`);
+    }
+  }
+
+  async function assertCardBelongsToAccount(cardId: string, accountId: string): Promise<void> {
+    const { data, error } = await getAdminClient()
+      .from("money_cards")
+      .select("id")
+      .eq("id", cardId)
+      .eq("account_id", accountId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Failed to verify money card ownership");
+    }
+    if (!data) {
+      throw new Error(`Money card ${cardId} does not belong to this import`);
+    }
+  }
+
   async function resolveAccountIdForRow(
     payerPersonId: string,
     row: CanonicalTransactionRowInput,
@@ -473,7 +556,14 @@ export function createSupabaseMoneyImportRepository(
     defaultAccountId?: string | null,
   ): Promise<string> {
     const explicitAccountId = normalizeText(row.account_id);
-    if (explicitAccountId) return explicitAccountId;
+    if (explicitAccountId) {
+      // An id supplied in the row is a claim, not a fact. Everything below is already scoped to
+      // the payer, and this branch skipped that scoping entirely -- so a caller holding any
+      // session could write against another household member's account by naming its uuid, and
+      // the service-role client would persist it.
+      await assertAccountBelongsToPayer(explicitAccountId, payerPersonId);
+      return explicitAccountId;
+    }
 
     const sourceForAccounts = normalizeSourceForTransactions(
       normalizeText(row.source) ?? fallbackSource,
@@ -531,19 +621,49 @@ export function createSupabaseMoneyImportRepository(
     throw new Error("account_id is required and could not be resolved");
   }
 
+  /**
+   * Who owns the row a duplicate collided with, ignoring the payer.
+   *
+   * Only ever used to explain a failure. It deliberately does not feed resolution: returning
+   * this id to the caller is exactly the cross-payer write that `findExistingTransactionId`
+   * refuses.
+   */
+  async function findTransactionOwnerIgnoringPayer(
+    row: CanonicalTransactionRowInput,
+    identity: "external_id" | "dedupe_hash",
+  ): Promise<string | null> {
+    const identityFilter = transactionIdentityFilter(row, identity);
+    if (!identityFilter) return null;
+
+    const { data, error } = await getAdminClient()
+      .from("money_transactions")
+      .select("payer_person_id")
+      .or(identityFilter)
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    return normalizeText((data as Record<string, unknown>).payer_person_id);
+  }
+
   async function findExistingTransactionId(
     row: CanonicalTransactionRowInput,
+    payerPersonId: string,
   ): Promise<string | null> {
-    let query = getAdminClient().from("money_transactions").select("id").limit(1);
-    if (row.external_id) {
-      query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
-    } else if (row.dedupe_hash) {
-      query = query.eq("dedupe_hash", row.dedupe_hash);
-    } else {
-      return null;
-    }
+    // Scoped to the payer, because the row this returns is then updated through the
+    // service-role client. `(source, external_id)` and `dedupe_hash` are unique across the whole
+    // table, not per person, so without this predicate a caller could reuse another payer's
+    // external id, let the insert conflict, and have their row resolved and overwritten here.
+    const identity = resolvingIdentity(row);
+    const identityFilter = identity ? transactionIdentityFilter(row, identity) : null;
+    if (!identityFilter) return null;
 
-    const { data, error } = await query.maybeSingle();
+    const { data, error } = await getAdminClient()
+      .from("money_transactions")
+      .select("id")
+      .eq("payer_person_id", payerPersonId)
+      .or(identityFilter)
+      .limit(1)
+      .maybeSingle();
     if (error || !data) return null;
     return normalizeText((data as Record<string, unknown>).id);
   }
@@ -702,7 +822,12 @@ export function createSupabaseMoneyImportRepository(
     createIfMissing = true,
   ): Promise<string | null> {
     const explicitCardId = normalizeText(row.card_id);
-    if (explicitCardId) return explicitCardId;
+    if (explicitCardId) {
+      // Same claim, one level down: the account is now known to be the payer's, so the card has
+      // to be that account's or it reaches outside the payer again.
+      await assertCardBelongsToAccount(explicitCardId, accountId);
+      return explicitCardId;
+    }
 
     const accountHint = extractAccountHintFromRow(row);
     if (!accountHint) return null;
@@ -1463,8 +1588,38 @@ export function createSupabaseMoneyImportRepository(
       throw new Error((error as { message?: string })?.message || "Failed to insert transaction");
     }
 
-    const existingId = await findExistingTransactionId(row);
+    const existingId = await findExistingTransactionId(row, payerPersonId);
     if (!existingId) {
+      // The unique indexes on `(source, external_id)` and `dedupe_hash` are global, not per
+      // payer, so a conflict can be with a row belonging to somebody else. Resolving it would
+      // mean updating their transaction, which is the hole this payer predicate closes -- but
+      // "could not be resolved" alone reads like a bug in the importer rather than the real
+      // condition, and the real condition is fixable: scoping those indexes by payer is what
+      // `scope_money_transaction_identity` does in the money-identity work.
+      // Diagnosis only, and it probes both identities because either index can be the one that
+      // was violated. Nothing here feeds resolution: a row found under an identity this row is
+      // not resolved by is, by definition, a different transaction.
+      for (const identity of ["external_id", "dedupe_hash"] as const) {
+        const owner = await findTransactionOwnerIgnoringPayer(row, identity);
+        if (!owner) continue;
+
+        if (owner !== payerPersonId) {
+          throw new Error(
+            `Duplicate transaction belongs to another payer (matched on ${identity}); the ` +
+              "money_transactions uniqueness indexes are not scoped by payer, so this row " +
+              "cannot be imported without overwriting theirs",
+          );
+        }
+
+        if (identity === "dedupe_hash" && normalizeText(row.external_id)) {
+          throw new Error(
+            "Duplicate transaction matched only on dedupe_hash while carrying a different " +
+              "external_id; the extension folds that hash to 32 bits, so this is a collision " +
+              "between two different operations rather than the same one twice",
+          );
+        }
+      }
+
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 

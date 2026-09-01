@@ -1,8 +1,70 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
 import { createClient } from "@supabase/supabase-js";
-import { createSupabaseMoneyImportRepository, type MoneyImportRepository } from "./repository.ts";
+import {
+  createSupabaseMoneyImportRepository,
+  postgrestFilterValue,
+  type MoneyImportRepository,
+} from "./repository.ts";
 import type { CanonicalTransactionRowInput } from "./types.ts";
+
+/**
+ * Only `assert-equals` is in this project's import map, so rejection is asserted here the same
+ * way `auth_test.ts` does it rather than by widening the map for one call.
+ */
+async function assertRejectsWith(run: () => Promise<unknown>, expectedFragment: string) {
+  let caught: unknown = null;
+  try {
+    await run();
+  } catch (error) {
+    caught = error;
+  }
+  if (!(caught instanceof Error)) {
+    throw new Error(`Expected a rejection containing ${JSON.stringify(expectedFragment)}`);
+  }
+  if (!caught.message.includes(expectedFragment)) {
+    throw new Error(
+      `Expected ${JSON.stringify(caught.message)} to contain ${JSON.stringify(expectedFragment)}`,
+    );
+  }
+}
+
+/**
+ * A PostgREST-shaped query stub whose filters chain in any order.
+ *
+ * The hand-nested `select().limit().eq().eq()` shapes these tests used had the real builder's
+ * call order baked in, so adding one filter to a query broke tests that were not about it --
+ * and, worse, made the shape of the stub the thing under test. This records the filters instead,
+ * so a test can assert the ones it cares about.
+ */
+function queryStub(result: { data: unknown; error: unknown }) {
+  const filters: Array<{ column: string; value: unknown }> = [];
+  const orFilters: string[] = [];
+  const chain: Record<string, unknown> = {
+    filters,
+    orFilters,
+    eq(column: string, value: unknown) {
+      filters.push({ column, value });
+      return chain;
+    },
+    or(filter: string) {
+      orFilters.push(filter);
+      return chain;
+    },
+    limit() {
+      return chain;
+    },
+    order() {
+      return chain;
+    },
+    maybeSingle: async () => result,
+    single: async () => result,
+  };
+  return chain as typeof chain & {
+    filters: Array<{ column: string; value: unknown }>;
+    orFilters: string[];
+  };
+}
 
 function createRepositoryWithClients(clients: {
   anonClient?: Record<string, unknown>;
@@ -500,6 +562,7 @@ Deno.test(
   "repository insertOrResolveTransaction handles inserted and duplicate-update paths",
   async () => {
     let insertCalls = 0;
+    const duplicateLookup = queryStub({ data: { id: "tx-existing" }, error: null });
     const updatedTransactions: Array<{ id: string; payload: Record<string, unknown> }> = [];
     const repository = createRepositoryWithClients({
       adminClient: {
@@ -517,15 +580,7 @@ Deno.test(
                   },
                 }),
               }),
-              select: () => ({
-                limit: () => ({
-                  eq: () => ({
-                    eq: () => ({
-                      maybeSingle: async () => ({ data: { id: "tx-existing" }, error: null }),
-                    }),
-                  }),
-                }),
-              }),
+              select: () => duplicateLookup,
               update: (payload: Record<string, unknown>) => ({
                 eq: (column: string, value: string) => {
                   assertEquals(column, "id");
@@ -557,6 +612,14 @@ Deno.test(
     assertEquals(updatedTransactions.length, 1);
     assertEquals(updatedTransactions[0]?.id, "tx-existing");
     assertEquals(updatedTransactions[0]?.payload.external_id, "ext-1");
+    // The row that gets overwritten has to be the payer's own. Without this predicate a caller
+    // could reuse another payer's external id and have their transaction resolved here.
+    assertEquals(
+      duplicateLookup.filters.some(
+        (filter) => filter.column === "payer_person_id" && filter.value === "person-1",
+      ),
+      true,
+    );
   },
 );
 
@@ -742,12 +805,36 @@ Deno.test("repository manages sessions, batches and last imported lookup", async
 Deno.test(
   "repository resolveAccountIdForRow handles explicit/single/ambiguous and card errors",
   async () => {
-    const explicitRepository = createRepositoryWithClients({
-      adminClient: {
-        from: () => {
-          throw new Error("no db call expected");
+    // An explicit account id is now verified against the payer rather than trusted. The stub
+    // answers as the database would: the row exists when the pair matches, and nothing comes
+    // back when it does not.
+    function explicitAccountClient(ownerPersonId: string) {
+      return {
+        from: (table: string) => {
+          if (table === "money_accounts") {
+            return {
+              select: () => ({
+                eq: (_idColumn: string, accountId: string) => ({
+                  eq: (_ownerColumn: string, personId: string) => ({
+                    maybeSingle: async () => ({
+                      data:
+                        accountId === "acc-explicit" && personId === ownerPersonId
+                          ? { id: accountId }
+                          : null,
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            };
+          }
+          throw new Error(`Unexpected table ${table}`);
         },
-      },
+      };
+    }
+
+    const explicitRepository = createRepositoryWithClients({
+      adminClient: explicitAccountClient("person-1"),
     });
     assertEquals(
       await explicitRepository.resolveAccountIdForRow(
@@ -761,6 +848,26 @@ Deno.test(
         "manual",
       ),
       "acc-explicit",
+    );
+
+    // The account belongs to someone else in the household. Before this check the id was
+    // returned as given and the transaction was written against another person's account.
+    const foreignAccountRepository = createRepositoryWithClients({
+      adminClient: explicitAccountClient("person-2"),
+    });
+    await assertRejectsWith(
+      () =>
+        foreignAccountRepository.resolveAccountIdForRow(
+          "person-1",
+          {
+            posted_at: "2026-01-01T00:00:00.000Z",
+            amount: 10,
+            transaction_type: "expense",
+            account_id: "acc-explicit",
+          },
+          "manual",
+        ),
+      "does not belong to this import",
     );
 
     const singleRepository = createRepositoryWithClients({
@@ -1027,6 +1134,7 @@ Deno.test(
   "repository duplicate transaction handling covers dedupe and unresolved duplicate branches",
   async () => {
     let insertCall = 0;
+    const dedupeLookup = queryStub({ data: { id: "tx-dedupe" }, error: null });
     let dedupeQueryUsed = false;
 
     const repository = createRepositoryWithClients({
@@ -1047,19 +1155,7 @@ Deno.test(
             update: () => ({
               eq: async () => ({ error: null }),
             }),
-            select: () => ({
-              limit: () => ({
-                eq: (column: string) => {
-                  if (column === "dedupe_hash") dedupeQueryUsed = true;
-                  return {
-                    eq: () => ({
-                      maybeSingle: async () => ({ data: { id: "tx-dedupe" }, error: null }),
-                    }),
-                    maybeSingle: async () => ({ data: { id: "tx-dedupe" }, error: null }),
-                  };
-                },
-              }),
-            }),
+            select: () => dedupeLookup,
           };
         },
       },
@@ -1076,6 +1172,15 @@ Deno.test(
       "person-1",
     );
     assertEquals(dedupeResolved, { transactionId: "tx-dedupe", inserted: false });
+    dedupeQueryUsed = dedupeLookup.orFilters.some((filter) => filter.includes("dedupe_hash"));
+    // Resolution by dedupe hash is scoped to the payer for the same reason resolution by
+    // external id is: the hash is unique across the table, not per person.
+    assertEquals(
+      dedupeLookup.filters.some(
+        (filter) => filter.column === "payer_person_id" && filter.value === "person-1",
+      ),
+      true,
+    );
     assertEquals(dedupeQueryUsed, true);
 
     await assertThrowsWithMessage(
@@ -1164,8 +1269,17 @@ Deno.test(
           if (table !== "money_cards") throw new Error(`Unexpected table ${table}`);
           return {
             select: () => ({
-              eq: () => ({
-                eq: () => ({
+              eq: (_column: string, cardOrAccountId: string) => ({
+                eq: (_second: string, accountId: string) => ({
+                  // The ownership check for an explicit card id stops here; the hint lookup
+                  // below it goes on through limit().
+                  maybeSingle: async () => ({
+                    data:
+                      cardOrAccountId === "card-explicit" && accountId === "acc-1"
+                        ? { id: cardOrAccountId }
+                        : null,
+                    error: null,
+                  }),
                   limit: () => ({
                     maybeSingle: async () => ({ data: { id: "card-existing" }, error: null }),
                   }),
@@ -1191,6 +1305,19 @@ Deno.test(
         raw_payload: { account_hint: "**** 9999" },
       }),
       "card-explicit",
+    );
+
+    // A card id from another account is refused rather than written through.
+    await assertRejectsWith(
+      () =>
+        repository.resolveCardIdForRow("acc-2", {
+          posted_at: "2026-01-01T00:00:00.000Z",
+          amount: 10,
+          transaction_type: "expense",
+          card_id: "card-explicit",
+          raw_payload: { account_hint: "**** 9999" },
+        }),
+      "does not belong to this import",
     );
 
     assertEquals(
@@ -1872,3 +1999,104 @@ Deno.test(
     assertEquals(resolution, null);
   },
 );
+
+Deno.test(
+  "repository names a cross-payer duplicate instead of reporting it unresolvable",
+  async () => {
+    // The uniqueness indexes are global, so an insert can collide with a row belonging to
+    // somebody else. Resolving that row is the cross-payer write the payer predicate refuses --
+    // but the failure has to say so, or it reads as a bug in the importer rather than as the
+    // real and fixable condition it is.
+    const scopedLookup = queryStub({ data: null, error: null });
+    const ownerLookup = queryStub({ data: { payer_person_id: "person-2" }, error: null });
+
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+          return {
+            insert: () => ({
+              select: () => ({
+                single: async () => ({ data: null, error: { code: "23505", message: "dup" } }),
+              }),
+            }),
+            select: (columns: string) =>
+              columns === "payer_person_id" ? ownerLookup : scopedLookup,
+          };
+        },
+      },
+    });
+
+    await assertRejectsWith(
+      () =>
+        repository.insertOrResolveTransaction(
+          {
+            posted_at: "2026-01-01T00:00:00.000Z",
+            amount: 10,
+            transaction_type: "expense",
+            source: "tbank",
+            external_id: "ext-shared",
+            account_id: "acc-1",
+          },
+          "person-1",
+        ),
+      "belongs to another payer",
+    );
+  },
+);
+
+Deno.test("postgrestFilterValue quotes values so data cannot be read as filter grammar", () => {
+  assertEquals(postgrestFilterValue("plain"), '"plain"');
+  // A comma or a parenthesis in an external id would otherwise end the clause.
+  assertEquals(postgrestFilterValue("a,b(c)"), '"a,b(c)"');
+  // The backslash has to be escaped before the quote, or the escape escapes itself away.
+  assertEquals(postgrestFilterValue('a"b\\c'), '"a\\"b\\\\c"');
+});
+
+Deno.test("repository refuses a hash-only match when the external id differs", async () => {
+  // Every T-Bank row carries both an external_id and a dedupe_hash, and the two unique indexes
+  // are independent, so an insert can violate dedupe_hash while its (source, external_id) is
+  // new. Resolving to the hash-matching row and updating it would be wrong, not merely blunt:
+  // the extension folds that hash to 32 bits, so a collision between two different operations
+  // is a matter of scale. The row is refused, and the message says which case it is.
+  const scoped = queryStub({ data: null, error: null });
+  const owner = queryStub({ data: { payer_person_id: "person-1" }, error: null });
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+        return {
+          insert: () => ({
+            select: () => ({
+              single: async () => ({ data: null, error: { code: "23505", message: "dup" } }),
+            }),
+          }),
+          select: (columns: string) => (columns === "payer_person_id" ? owner : scoped),
+          update: () => ({ eq: async () => ({ error: null }) }),
+        };
+      },
+    },
+  });
+
+  await assertRejectsWith(
+    () =>
+      repository.insertOrResolveTransaction(
+        {
+          posted_at: "2026-01-01T00:00:00.000Z",
+          amount: 10,
+          transaction_type: "expense",
+          source: "tbank",
+          external_id: "ext-new",
+          dedupe_hash: "tbw_deadbeef",
+          account_id: "acc-1",
+        },
+        "person-1",
+      ),
+    "collision between two different operations",
+  );
+
+  // Resolution asked about the external id alone; the hash only ever reached the diagnosis.
+  assertEquals(scoped.orFilters.length, 1);
+  assertEquals(scoped.orFilters[0]?.includes("external_id"), true);
+  assertEquals(scoped.orFilters[0]?.includes("dedupe_hash"), false);
+});
