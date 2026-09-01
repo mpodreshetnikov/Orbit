@@ -6,6 +6,7 @@ import { routeBackgroundMessage, type BackgroundMessage } from "./core/backgroun
 import { createImportDebugStore } from "./core/import-debug.js";
 import { createExtensionLogger } from "./core/observability.js";
 import { createSessionStore } from "./core/session-store.js";
+import { createGrantStore } from "./core/grant-store.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
@@ -297,6 +298,7 @@ function extractErrorDiagnostics(error: unknown): Record<string, unknown> | null
 }
 
 const sessionStore = createSessionStore(chrome.storage.local);
+const grantStore = createGrantStore(chrome.storage.local);
 const debugStore = createImportDebugStore();
 const telemetry = createExtensionLogger("background");
 telemetry.info("extension_background_initialized", {
@@ -333,6 +335,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         message,
         {
           sessionStore,
+          grantStore,
           debugStore,
           importRunnerDeps: {
             getConnector,

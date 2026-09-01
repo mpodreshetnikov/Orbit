@@ -39,6 +39,13 @@ vi.mock("@/hooks", () => ({
   useMoneyCardsByAccountIds: (...args: unknown[]) => hookMocks.useMoneyCardsByAccountIds(...args),
 }));
 
+// The grants section fetches its own data; this suite is about extension release UX.
+vi.mock("@/hooks/use-money-import-grants", () => ({
+  useMoneyImportGrants: () => ({ data: [], isLoading: false }),
+  useCreateMoneyImportGrant: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRevokeMoneyImportGrant: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 vi.mock("@/lib/supabase", () => ({
   createClient: () => ({
     auth: {

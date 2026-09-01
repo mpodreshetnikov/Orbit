@@ -10,6 +10,7 @@ import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } fro
 import { useUIStore } from "@/stores/ui-store";
 import { useMoneyAccounts, useCreateMoneyAccount, useMoneyCardsByAccountIds } from "@/hooks";
 import { getConnectors } from "@/lib/import/connector-types";
+import { MoneyImportGrants } from "@/components/money";
 import {
   isExtensionOutdated,
   normalizeExtensionRelease,
@@ -435,6 +436,17 @@ export default function MoneyImportPage() {
   const selectedConnector = useMemo(
     () => connectors.find((c) => c.sourceId === selectedSourceId),
     [connectors, selectedSourceId],
+  );
+  // Only extension-backed sources can run unattended, so only they are worth granting.
+  const extensionConnectorOptions = useMemo(
+    () =>
+      connectors
+        .filter((connector) => connector.kind !== "file")
+        .map((connector) => ({
+          sourceId: connector.sourceId,
+          label: connector.displayName,
+        })),
+    [connectors],
   );
   const selectedConnectorSourceLabel = useMemo(
     () => resolveConnectorSourceLabel(t, selectedConnector),
@@ -932,6 +944,53 @@ export default function MoneyImportPage() {
     [installedExtensionVersion, latestExtensionRelease?.version],
   );
 
+  const sendGrantToExtension = useCallback(
+    async (grant: {
+      token: string;
+      personId: string;
+      allowedSources: string[];
+    }): Promise<boolean> => {
+      // Resolves on the extension's ack, never on the post. The panel reports delivery from
+      // this, because the key it is delivering exists in exactly one place and closing the
+      // panel is the end of it.
+      return await new Promise<boolean>((resolve) => {
+        const timeout = window.setTimeout(() => {
+          window.removeEventListener("message", onMessage);
+          resolve(false);
+        }, 3000);
+
+        const onMessage = (event: MessageEvent) => {
+          const data = event.data as Record<string, unknown> | null;
+          if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
+          if (data.type !== "MONEY_IMPORT_GRANT_ACK") return;
+
+          window.clearTimeout(timeout);
+          window.removeEventListener("message", onMessage);
+          resolve(Boolean(data.ok));
+        };
+
+        window.addEventListener("message", onMessage);
+        window.postMessage(
+          {
+            source: EXTENSION_WEBAPP_SOURCE,
+            type: "MONEY_IMPORT_SET_GRANT",
+            grant: {
+              token: grant.token,
+              person_id: grant.personId,
+              allowed_sources: grant.allowedSources,
+              app_origin: window.location.origin,
+              // Without this the extension stores a credential with no endpoint to call. The
+              // extension checks it against its own host permissions before keeping it.
+              function_url: getFunctionUrl("money-import"),
+            },
+          },
+          window.location.origin,
+        );
+      });
+    },
+    [],
+  );
+
   const sendSessionToExtension = useCallback(
     async (
       payload: MoneyImportSessionCreateResult,
@@ -1131,6 +1190,13 @@ export default function MoneyImportPage() {
           <Link href="/money/import/history">{t("money.importViewHistory")}</Link>
         </Button>
       </div>
+
+      <MoneyImportGrants
+        t={t}
+        personId={selectedPersonId}
+        availableSources={extensionConnectorOptions}
+        onSendToExtension={sendGrantToExtension}
+      />
 
       <Card>
         <CardHeader>
