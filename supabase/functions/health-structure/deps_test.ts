@@ -26,7 +26,6 @@ Deno.test("createDefaultHealthStructureDeps handles missing env values", async (
       assertEquals(deps.config.openRouterApiKey, undefined);
       assertEquals(deps.config.openRouterTimeoutMs, undefined);
       assertEquals(deps.config.parseMode, "openrouter");
-      assertEquals(await deps.lookupIcdCode("A00"), null);
 
       let parseError: unknown = null;
       try {
@@ -115,10 +114,9 @@ Deno.test(
             checkupItems: [],
           });
           assertEquals(outcome.structured.title, "Doc");
-
-          const icd = await deps.lookupIcdCode("A00");
-          assertEquals(icd?.found, true);
-          assertEquals(fetchCalls >= 2, true);
+          // One call, not two: the function no longer looks codes up, because it no longer
+          // creates conditions.
+          assertEquals(fetchCalls >= 1, true);
         } finally {
           globalThis.fetch = originalFetch;
         }
@@ -239,9 +237,6 @@ Deno.test(
             existingFindings: [],
             checkupItems: [],
           });
-
-          assertEquals(await deps.lookupIcdCode("A00"), null);
-          assertEquals(await deps.lookupIcdCode("A01"), null);
         } finally {
           globalThis.fetch = originalFetch;
         }
