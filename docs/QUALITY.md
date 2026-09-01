@@ -79,7 +79,7 @@ Automation and agent skills must reference this section and the matrix instead o
 
 ## Canonical Command Policy
 
-Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `dev`, `ci`, `ci-fast`, `test-e2e`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`. Full list: **AGENTS.md** and `just --list --unsorted`.
+Use command IDs from **AGENTS.md**; do not invent ad-hoc alternatives when an equivalent ID exists. IDs referenced in this document: `dev`, `ci`, `ci-fast`, `test-e2e`, `quality`, `secrets-preflight`, `db-lint`, `db-test`, `db-run`, `db-reset`, `pr-size`, `review-delta`, `hooks-install`. Full list: **AGENTS.md** and `just --list --unsorted`.
 
 ## Local stack reuse (agents and parallel runs)
 
@@ -195,7 +195,7 @@ A pull request gets one review pass on open, so its size decides how much of it 
 A pull request may add at most **1500 reviewable lines** against its base branch. Reviewable excludes recorded fixtures, lockfiles, generated artifacts and the generated skill mirror — content no reviewer reads line by line, and which would otherwise let a cassette recording fail a check aimed at hand-written code.
 
 - CI enforces the rule with `quality-pr-size`, which runs inside `quality` and compares against the pull request's actual base branch.
-- The same check runs long before CI, so the limit is met while the cut can still be changed rather than after the work is finished: advisory on every agent file edit through the `PostToolUse` hook in `.claude/settings.json`, advisory again on `pre-commit`, and as the real gate on `pre-push`. Advisory runs never block; they print the remaining budget once the branch passes three quarters of the limit. Install the hooks with `just git-hooks-install`.
+- The same check runs long before CI, so the limit is met while the cut can still be changed rather than after the work is finished: advisory on every agent file edit through the `PostToolUse` hook in `.claude/settings.json`, advisory again on `pre-commit`, and as the real gate on `pre-push`. Advisory runs never block; they print the remaining budget once the branch passes three quarters of the limit. Install the hooks with `hooks-install`.
 - `.large-change-allowlist` is the reviewed exception. An entry is `path <glob> # <why this content is not reviewable>` or `branch <name> # <why this change cannot be split>`; the rationale is required and an entry without one fails the check.
 - The limit is a backstop, not a guarantee. No number here makes one pass sufficient: 651 lines still took five passes to converge, so a change of any real size outgrows its opening review. What the limit marks is the point above which the unreviewed remainder is too large to compensate for at all. Below it, the compensation is **Automated Review Policy** above — measure the gap, request a second pass when it earns one.
 - It sits well above the change that converged in a handful of passes and well below the one that took twenty-one, rather than just above the former: a limit set close to ordinary well-tested work is a gate somebody turns off.
@@ -214,7 +214,7 @@ So the size gate firing is a signal that the **cut** is wrong, not that the bran
 In this order. The first that applies is the answer, and cutting the branch anywhere other than a milestone boundary is not on the list.
 
 1. **Re-cut on a milestone boundary** — the branch carries two things that ship independently, so land them as two pull requests, each named for what it delivers.
-2. **Stack** — the halves are ordered rather than independent, so open the second with the first as its base. Each diff is small against its own base, review order matches merge order, and nothing merges out of sequence. `T-0006` did this for its OCR chain (Orbit #33 → #34 → #35).
+2. **Stack** — the halves are ordered rather than independent, so open the second with the first as its base. Each diff is small against its own base, review order matches merge order, and nothing merges out of sequence. `T-0006` did this for its OCR chain (Orbit #33 → #34 → #35). Tell the local checks where the branch actually points — `git config branch.<name>.prBase <base branch>` — or they measure it against `main` and count the branch below it as well; CI already knows, because it passes the pull request's real base.
 3. **Allowlist the branch** — one change that genuinely does not divide (a mechanical rename, a generated surface, one indivisible migration). Add `branch <name> # <why this change cannot be split>` to `.large-change-allowlist` and say so in the pull request. This is a normal outcome, not a defeat: one connected change reviewed in one pass beats three fragments reviewed in isolation.
 
 If none of the three fits, the limit has fired on ordinary work and the number is the thing to argue with — say so in the task's Decision Log rather than reaching for the scissors.

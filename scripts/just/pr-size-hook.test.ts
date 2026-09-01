@@ -11,29 +11,49 @@ function statePath() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pr-size-hook-")), "pr-size-hook-state");
 }
 
+const KEY = "feature/x\torigin/main";
+
 describe("how often the editor hook repeats itself", () => {
   it("reports the first time it has anything to say", () => {
-    expect(shouldReport(1200, statePath())).toBe(true);
+    expect(shouldReport(1200, KEY, statePath())).toBe(true);
   });
 
   it("stays quiet until the branch has grown another step, so the warning keeps being read", () => {
     const state = statePath();
 
-    expect(shouldReport(1200, state)).toBe(true);
-    expect(shouldReport(1201, state)).toBe(false);
-    expect(shouldReport(1299, state)).toBe(false);
-    expect(shouldReport(1200 + REPORT_STEP, state)).toBe(true);
+    expect(shouldReport(1200, KEY, state)).toBe(true);
+    expect(shouldReport(1201, KEY, state)).toBe(false);
+    expect(shouldReport(1299, KEY, state)).toBe(false);
+    expect(shouldReport(1200 + REPORT_STEP, KEY, state)).toBe(true);
   });
 
   it("does not report again when the branch shrinks back", () => {
     const state = statePath();
 
-    expect(shouldReport(1400, state)).toBe(true);
-    expect(shouldReport(1100, state)).toBe(false);
+    expect(shouldReport(1400, KEY, state)).toBe(true);
+    expect(shouldReport(1100, KEY, state)).toBe(false);
+  });
+
+  // Without this, one large branch would silence the warning for every branch checked out after it,
+  // which is the case the warning exists for.
+  it("starts again on a different branch", () => {
+    const state = statePath();
+
+    expect(shouldReport(1400, KEY, state)).toBe(true);
+    expect(shouldReport(1200, "feature/y\torigin/main", state)).toBe(true);
+  });
+
+  it("starts again when the same branch is measured against a different base", () => {
+    const state = statePath();
+
+    expect(shouldReport(1400, KEY, state)).toBe(true);
+    expect(shouldReport(1200, "feature/x\torigin/release", state)).toBe(true);
   });
 
   it("reports when the state file cannot be read", () => {
-    expect(shouldReport(1200, path.join(os.tmpdir(), "no", "such", "dir", "state"))).toBe(true);
+    expect(shouldReport(1200, KEY, path.join(os.tmpdir(), "no", "such", "dir", "state"))).toBe(
+      true,
+    );
   });
 });
 

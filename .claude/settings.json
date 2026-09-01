@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/just/pr-size-hook.cjs",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/pr-size-hook.cjs\"",
             "timeout": 15
           }
         ]

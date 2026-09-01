@@ -11,6 +11,10 @@
  * Reported once per hundred lines of growth, tracked in .git/pr-size-hook-state. Repeating the same
  * warning on every file edit is how a warning stops being read.
  *
+ * The state is keyed by branch and base, and a different key starts again from nothing. Without the
+ * key, a branch that once reached a high bucket would silence the warning for every branch checked
+ * out after it -- suppressing exactly the early warning this exists to give.
+ *
  * Any failure here is silent and exits 0. This runs on every edit; a hook that breaks the session
  * because a base ref is missing would be worse than the problem it reports.
  */
@@ -24,6 +28,7 @@ const {
   readAllowlist,
   readNumstat,
   resolveBranch,
+  resolveConfiguredBaseRef,
   resolveDefaultBaseRef,
 } = require("./check-pr-size.cjs");
 
@@ -33,14 +38,18 @@ const REPORT_STEP = 100;
 
 /**
  * @param {number} addedLines
+ * @param {string} key identity of what was measured: the branch and the base it was measured against
  * @param {string} [statePath]
  * @returns {boolean}
  */
-function shouldReport(addedLines, statePath = STATE_PATH) {
+function shouldReport(addedLines, key, statePath = STATE_PATH) {
   const bucket = Math.floor(addedLines / REPORT_STEP);
   let previous = -1;
   try {
-    previous = Number(fs.readFileSync(statePath, "utf8").trim());
+    // Split on the last tab, not the first: the key is composed of fields and carries its own.
+    const stored = fs.readFileSync(statePath, "utf8").trim();
+    const separator = stored.lastIndexOf("\t");
+    previous = stored.slice(0, separator) === key ? Number(stored.slice(separator + 1)) : -1;
   } catch {
     previous = -1;
   }
@@ -48,7 +57,7 @@ function shouldReport(addedLines, statePath = STATE_PATH) {
     return false;
   }
   try {
-    fs.writeFileSync(statePath, String(bucket));
+    fs.writeFileSync(statePath, `${key}\t${bucket}`);
   } catch {
     // A read-only .git is not a reason to withhold the warning; it only costs a repeat.
   }
@@ -56,7 +65,9 @@ function shouldReport(addedLines, statePath = STATE_PATH) {
 }
 
 function main() {
-  const baseRef = resolveDefaultBaseRef();
+  const branch = resolveBranch(undefined);
+  // Same order as the gate, so the hook and the check never measure against different bases.
+  const baseRef = resolveConfiguredBaseRef(branch) || resolveDefaultBaseRef();
   if (!baseRef) {
     return;
   }
@@ -64,13 +75,13 @@ function main() {
   const result = evaluateChangeSize({
     numstat: readNumstat(baseRef),
     allowlist: readAllowlist(),
-    branch: resolveBranch(undefined),
+    branch,
   });
 
   if (result.branchExemption || (!result.overLimit && !result.nearLimit)) {
     return;
   }
-  if (!shouldReport(result.addedLines)) {
+  if (!shouldReport(result.addedLines, `${branch ?? "HEAD"}\t${baseRef}`)) {
     return;
   }
 

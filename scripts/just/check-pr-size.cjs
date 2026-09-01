@@ -17,14 +17,21 @@
  * limit aimed at hand-written code.
  *
  * Usage:
- *   node check-pr-size.cjs [--base <git-ref>] [--branch <name>] [--warn-at <lines>] [--advisory]
+ *   node check-pr-size.cjs [--base <git-ref>] [--branch <name>] [--head <git-rev>]
+ *                          [--warn-at <lines>] [--advisory]
+ *
+ * `--head` measures that revision against where it diverged from the base, rather than the working
+ * tree. The pre-push hook passes it, because the ref being pushed is not always the checkout:
+ * `git push origin some-other-branch` would otherwise measure the wrong thing and report success.
  *
  * `--advisory` never fails: it warns from the warning mark on and is otherwise silent, which is how
  * the editor and pre-commit hooks run it. The point of running it there is that the limit is met
  * while the cut can still be changed; met for the first time in CI, the work is already finished and
  * the cheapest-looking answer is to slice it into pieces that do not stand on their own.
  *
- * The base defaults to origin/main. CI passes the pull request's real base through PR_SIZE_BASE and
+ * The base is the first of: --base, PR_SIZE_BASE, `git config branch.<name>.prBase` (which is where
+ * a stacked branch records the branch it actually targets), then origin/main. CI passes the pull
+ * request's real base through PR_SIZE_BASE and
  * its head branch through PR_SIZE_BRANCH, so a branch targeting something other than main is
  * measured against the branch it will actually merge into. A base that is asked for and cannot be
  * resolved is an error, not a skip: a gate that reports "skipped" and exits 0 is the one failure
@@ -68,15 +75,16 @@ const NON_REVIEWABLE = [
 
 /**
  * @param {string[]} argv
- * @returns {{ base?: string, branch?: string, warnAt?: string, advisory?: true }}
+ * @returns {{ base?: string, branch?: string, warnAt?: string, head?: string, advisory?: true }}
  */
 function parseArgs(argv) {
-  /** @type {{ base?: string, branch?: string, warnAt?: string, advisory?: true }} */
+  /** @type {{ base?: string, branch?: string, warnAt?: string, head?: string, advisory?: true }} */
   const parsed = {};
   for (const [flag, key] of /** @type {const} */ ([
     ["base", "base"],
     ["branch", "branch"],
     ["warn-at", "warnAt"],
+    ["head", "head"],
   ])) {
     const index = argv.indexOf(`--${flag}`);
     if (index === -1) {
@@ -258,6 +266,24 @@ function resolveExplicitBaseRef(explicitBase) {
   );
 }
 
+/**
+ * A stacked pull request has a base that is not main, and nothing in the tree knows which. Measuring
+ * it against main would count the branch below it too, so two 800-line milestones stacked in the
+ * order the policy recommends would be rejected as one 1600-line change. `git config
+ * branch.<name>.prBase <branch>` records the real base once, where git already keeps per-branch
+ * settings, and both the local gate and the hooks read it.
+ *
+ * @param {string | null} branch
+ * @returns {string | null}
+ */
+function resolveConfiguredBaseRef(branch) {
+  if (!branch) {
+    return null;
+  }
+  const configured = runGit(["config", "--get", `branch.${branch}.prBase`]).stdout.trim();
+  return configured || null;
+}
+
 function resolveDefaultBaseRef() {
   return BASE_REF_CANDIDATES.find((candidate) => refExists(candidate)) ?? null;
 }
@@ -299,10 +325,24 @@ function readUntrackedNumstat() {
     .join("\n");
 }
 
-function readNumstat(baseRef) {
-  const result = runGit(["diff", "--numstat", "--find-renames", baseRef]);
+/**
+ * With no head revision this measures the working tree, which is what a local run wants. With one --
+ * pre-push, measuring a ref that is not the checkout -- it measures that revision against where it
+ * diverged from the base, which is the diff a pull request would show, and untracked files are not
+ * part of it because they are not being pushed.
+ *
+ * @param {string} baseRef
+ * @param {string} [headRev]
+ * @returns {string}
+ */
+function readNumstat(baseRef, headRev) {
+  const range = headRev ? `${baseRef}...${headRev}` : baseRef;
+  const result = runGit(["diff", "--numstat", "--find-renames", range]);
   if (result.status !== 0) {
-    throw new Error(`Could not diff against ${baseRef}: ${(result.stderr || "").trim()}`);
+    throw new Error(`Could not diff against ${range}: ${(result.stderr || "").trim()}`);
+  }
+  if (headRev) {
+    return result.stdout;
   }
   return [result.stdout, readUntrackedNumstat()].filter(Boolean).join("\n");
 }
@@ -406,7 +446,9 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const advisory = args.advisory === true;
   const envBase = (process.env.PR_SIZE_BASE || "").trim();
-  const requestedBase = args.base || (envBase === ZERO_SHA ? "" : envBase);
+  const branch = resolveBranch(args.branch);
+  const requestedBase =
+    args.base || (envBase === ZERO_SHA ? "" : envBase) || resolveConfiguredBaseRef(branch) || "";
   const baseRef = requestedBase ? resolveExplicitBaseRef(requestedBase) : resolveDefaultBaseRef();
 
   if (!baseRef) {
@@ -426,9 +468,9 @@ function main() {
   }
 
   const result = evaluateChangeSize({
-    numstat: readNumstat(baseRef),
+    numstat: readNumstat(baseRef, args.head),
     allowlist: readAllowlist(),
-    branch: resolveBranch(args.branch),
+    branch,
     ...(warnAt === undefined ? {} : { warnAt }),
   });
 
@@ -491,6 +533,7 @@ module.exports = {
   parseAllowlist,
   parseArgs,
   readAllowlist,
+  resolveConfiguredBaseRef,
   readNumstat,
   resolveBranch,
   resolveDefaultBaseRef,

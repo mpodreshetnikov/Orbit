@@ -382,6 +382,29 @@ describe("base ref resolution", () => {
 
   // Whatever this tree happens to measure: an advisory run is a hook, and a hook that can fail a
   // commit or an edit is one somebody uninstalls. Enforcement is pre-push and CI.
+  // `git push origin some-other-branch` pushes a ref that is not HEAD. Measuring the working tree
+  // there reports on the wrong change, and the oversized ref goes out with the gate green.
+  it("measures a head revision that is not the checkout", () => {
+    const head = spawnSync("git", ["rev-parse", "HEAD~1"], { encoding: "utf8" }).stdout.trim();
+    const result = runScript(["--base", "origin/main", "--head", head]);
+
+    expect(result.status, result.stderr).toBeLessThan(2);
+    expect(`${result.stdout}${result.stderr}`).toContain("origin/main");
+  });
+
+  it("takes the base a stacked branch records in git config", () => {
+    const branch = `pr-size-test-${process.pid}`;
+    spawnSync("git", ["config", `branch.${branch}.prBase`, "origin/main"]);
+    try {
+      const result = runScript(["--branch", branch]);
+
+      expect(result.status, result.stderr).toBeLessThan(2);
+      expect(`${result.stdout}${result.stderr}`).toContain("origin/main");
+    } finally {
+      spawnSync("git", ["config", "--remove-section", `branch.${branch}`]);
+    }
+  });
+
   it("never fails in advisory mode, whatever the branch measures", () => {
     const result = runScript(["--advisory", "--warn-at", "0"]);
 
@@ -403,6 +426,13 @@ describe("argument parsing", () => {
 
   it("defaults to no explicit base or branch", () => {
     expect(parseArgs([])).toEqual({});
+  });
+
+  it("reads the head revision, so a pushed ref that is not the checkout can be measured", () => {
+    expect(parseArgs(["--head", "abc123", "--branch", "feature/x"])).toEqual({
+      head: "abc123",
+      branch: "feature/x",
+    });
   });
 
   it("reads the advisory flag and the warning mark", () => {
