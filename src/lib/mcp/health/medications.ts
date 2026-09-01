@@ -642,11 +642,24 @@ export async function logDose(
     return data as Record<string, unknown>;
   };
 
-  // Nothing to do when the minute already holds this very outcome and the
-  // amount is the one on record. Re-running the RPC would be a silent no-op
-  // anyway (it selects only rows in the other statuses), so the caller would be
-  // told "recorded" with nothing recorded and no way to tell the two apart.
-  if (planned && planned.status === params.status && !correctsAmount) {
+  // A taken time is a correction too. "The 8 o'clock dose -- I actually took it
+  // at quarter past" changes neither status nor amount, and treating that as
+  // nothing to do left the record saying 08:00 while the reply said 08:15.
+  // Compared as instants: the column comes back with whatever offset PostgREST
+  // renders it in, which is not the string that was sent.
+  const instant = (value: unknown) =>
+    typeof value === "string" ? new Date(value).getTime() : null;
+  const correctsTakenAt =
+    params.status === "taken" &&
+    params.takenAt != null &&
+    instant(params.takenAt) !== instant(planned?.taken_at);
+
+  // Nothing to do when the minute already holds this very outcome, for the
+  // amount and at the time already on record. Re-running the RPC would be a
+  // silent no-op anyway (it selects only rows in the other statuses), so the
+  // caller would be told "recorded" with nothing recorded and no way to tell
+  // the two apart.
+  if (planned && planned.status === params.status && !correctsAmount && !correctsTakenAt) {
     return {
       regimen,
       dose: rowToDoseEvent(planned),
@@ -656,11 +669,11 @@ export async function logDose(
     };
   }
 
-  // Same status, different amount: a correction, not a repeat. A matching
-  // status is not a matching outcome, and refusing here left the record
-  // disagreeing with what the person reported and sent them round the
-  // toggle-to-skipped-and-back workaround, which walks into the ordering defect
-  // below.
+  // Same status, different amount or a different time: a correction, not a
+  // repeat. A matching status is not a matching outcome, and refusing here left
+  // the record disagreeing with what the person reported and sent them round
+  // the toggle-to-skipped-and-back workaround, which walks into the ordering
+  // defect below.
   if (planned && planned.status === params.status) {
     const doseEventId = planned.id as string;
 
@@ -671,6 +684,9 @@ export async function logDose(
       // in a single transaction, which two calls from here could not.
       const { error: correctError } = await supabase.rpc("update_dose_event_resolution_details", {
         p_dose_event_id: doseEventId,
+        // Passed even when unchanged: the RPC compares it against the amount on
+        // the row and moves the ledger only on a difference, so a time-only
+        // correction goes through it without touching stock.
         p_amount_taken: amount,
         ...(note ? { p_note: note } : {}),
         ...(params.takenAt ? { p_taken_at: params.takenAt } : {}),

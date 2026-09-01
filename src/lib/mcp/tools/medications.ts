@@ -1163,17 +1163,29 @@ export function registerMedicationTools(server: McpToolServer): void {
       const { regimen, dose, planned, alreadyRecorded, corrected } = await logDose(supabase, {
         regimenId: args.regimen_id,
         at: slot.toISOString(),
-        takenAt: due.at ? at.toISOString() : null,
+        // Only for an intake that has one. `mark_dose_skipped` takes no such
+        // argument, so offering it there would promise a time the record will
+        // not carry.
+        takenAt: due.at && args.status === "taken" ? at.toISOString() : null,
         amount: args.amount ?? null,
         status: args.status,
         note: args.note ?? null,
       });
 
       const intake = dose.planned_intake?.intake;
+      // What the row ended up carrying, not what was asked for: a skipped dose
+      // keeps the slot's own time whatever `taken_at` said, and quoting the
+      // request back described a dose as skipped at 08:15 while the record --
+      // returned in the same reply -- said 08:00.
+      const resolvedAt = dose.taken_at ? new Date(dose.taken_at) : at;
       // The time goes back in the caller's zone, carrying its offset, and names
       // the zone -- an intake quoted in UTC reads to the person as a dose taken
-      // seven hours from when they took it.
-      const when = `${formatZoned(at, timezone)} (${timezone}${readAsLocal ? ", as given" : ""})`;
+      // seven hours from when they took it. "as given" only while the stored
+      // time is still the one that was given.
+      const storedAsAsked = resolvedAt.getTime() === at.getTime();
+      const when =
+        `${formatZoned(resolvedAt, timezone)} ` +
+        `(${timezone}${readAsLocal && storedAsAsked ? ", as given" : ""})`;
       // Named only when the caller separated the two, so an ordinary intake
       // does not gain a second timestamp it never asked about.
       const dueWhen = due.at ? formatZoned(slot, timezone) : null;

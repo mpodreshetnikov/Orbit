@@ -881,6 +881,44 @@ describe("logDose", () => {
       });
     });
 
+    it("corrects the time a dose was taken, with the amount unchanged", async () => {
+      // "The 8 o'clock one -- I actually took it at quarter past." Neither
+      // status nor amount moves, and reading that as nothing to do left the
+      // record saying 08:00 while the reply said 08:15.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        takenAt: "2026-06-15T08:15:00.000Z",
+        status: "taken",
+      });
+
+      expect(result.alreadyRecorded).toBe(false);
+      expect(result.corrected).toBe(true);
+      expect(fake.events[0].taken_at).toBe("2026-06-15T08:15:00.000Z");
+      // The amount did not change, so nothing moves in the ledger.
+      expect(fake.inventory).toHaveLength(0);
+    });
+
+    it("still says nothing was written when the time is the one on record", async () => {
+      // The column comes back with whatever offset PostgREST renders it in, so
+      // the comparison is between instants rather than between strings.
+      const fake = fakeWith([
+        { id: "d-1", status: "taken", taken_at: "2026-06-15T08:00:00+00:00" },
+      ]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        takenAt: AT,
+        status: "taken",
+      });
+
+      expect(result.alreadyRecorded).toBe(true);
+      expect(fake.rpc).not.toHaveBeenCalled();
+    });
+
     it("still says nothing was written when the amount is the one on record", async () => {
       const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
 
