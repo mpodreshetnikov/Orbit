@@ -242,7 +242,11 @@ const MAX_EXTENSION_VERSION_COMPONENT = 65535;
  */
 export function compareExtensionVersions(left: string, right: string): number | null {
   const parse = (value: string): number[] | null => {
-    const parts = value.trim().split(".");
+    // Deliberately not trimmed. The published value is the untrusted side here,
+    // and normalising it before validating would accept `" 65535 "` as a version
+    // Chrome would reject -- ordering metadata that should have taken the
+    // malformed fallback instead.
+    const parts = value.split(".");
     if (parts.length === 0 || parts.length > 4) return null;
     const numbers: number[] = [];
     for (const part of parts) {
@@ -282,6 +286,47 @@ export function compareExtensionVersions(left: string, right: string): number | 
  * moved past. Only an absent release, or one genuinely older than this
  * manifest, is a reason to publish. T-260901-0dr.
  */
+/**
+ * Flattens a lookup into the shape the publish decision takes: a version, `null`
+ * for nothing published, `undefined` for an answer that is not evidence.
+ */
+export function publishedVersionOf(
+  published: PublishedExtensionVersion | undefined,
+): string | null | undefined {
+  if (published === undefined || published.status === "unknown") return undefined;
+  if (published.status === "absent") return null;
+  return published.version;
+}
+
+/**
+ * Whether the release may still be uploaded, re-asked at the moment of upload.
+ *
+ * The publish decision taken in `quality-gates` is a sample of production taken
+ * minutes earlier, and ordering a stale sample does not prevent the rollback it
+ * was meant to prevent: if a 0.1.3 run and a 0.1.4 run both read "published
+ * 0.1.2" before either uploads, both are told to go, and whichever finishes
+ * second wins regardless of age. So the state is read again here, where the
+ * upload actually happens, and the older run stands down. The workflow
+ * serialises the publish job as well -- neither is sufficient alone, because a
+ * guard on a stale read still races and serialisation without a re-read still
+ * lets the second run overwrite with the older bundle.
+ *
+ * A lookup that fails does not block the upload: that is the behaviour without
+ * this guard, and a transient Storage error is not a reason to drop a release.
+ */
+export function mayPublishOverPublished(input: {
+  published: PublishedExtensionVersion | undefined;
+  releaseVersion: string;
+}): boolean {
+  return shouldPublishRelease({
+    publishedVersion: publishedVersionOf(input.published),
+    manifestVersion: input.releaseVersion,
+    // There is no commit range at upload time; the answer is production state
+    // alone, and an unusable answer means "do not block".
+    manifestVersionChanged: true,
+  });
+}
+
 export function shouldPublishRelease(input: {
   /** `null` when nothing is published, `undefined` when the lookup failed. */
   publishedVersion: string | null | undefined;
@@ -316,13 +361,7 @@ export function evaluateExtensionVersionPolicy(input: {
     input.nextManifestContent,
   );
 
-  const published = input.published;
-  const publishedVersion =
-    published === undefined || published.status === "unknown"
-      ? undefined
-      : published.status === "absent"
-        ? null
-        : published.version;
+  const publishedVersion = publishedVersionOf(input.published);
 
   return {
     changedFiles: normalizedChangedFiles,
@@ -433,7 +472,10 @@ export async function fetchPublishedExtensionVersion(input: {
     return { status: "unknown", reason: `${url} carries no version string` };
   }
 
-  return { status: "published", version: version.trim() };
+  // Returned as written, not trimmed: whether it is a version at all is the
+  // comparison's judgement to make, and it cannot make it on a value this
+  // function has already tidied up.
+  return { status: "published", version };
 }
 
 export function buildSupabaseStoragePublicUrl(input: {
@@ -740,6 +782,15 @@ export async function publishPreparedExtensionRelease(
     supabaseUrl,
     serviceRoleKey,
   });
+
+  const published = await fetchPublishedExtensionVersion({ supabaseUrl });
+  if (!mayPublishOverPublished({ published, releaseVersion: metadata.version })) {
+    throw new Error(
+      `Refusing to publish ${metadata.version}: ${
+        published.status === "published" ? published.version : "an unknown version"
+      } is already published. A newer release must not be overwritten by an older run.`,
+    );
+  }
 
   const artifactContent = await fs.readFile(artifactPath);
   const latestMetadataContent = await fs.readFile(metadataPath);

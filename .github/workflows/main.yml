@@ -304,6 +304,16 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Extension Release
     environment: production
+    # Serialised across main runs. Two runs that both sampled production before
+    # either uploaded would both be told to publish, and the one finishing last
+    # would win regardless of which release is older. The guard in
+    # `publishPreparedExtensionRelease` re-reads the published version at upload
+    # time, and this makes that read meaningful by keeping two uploads out of the
+    # same window. Neither is sufficient alone. `cancel-in-progress` is left off
+    # so a queued newer run waits its turn rather than being dropped.
+    concurrency:
+      group: publish-extension-release
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_APP_ORIGIN: ${{ vars.NEXT_PUBLIC_APP_ORIGIN }}

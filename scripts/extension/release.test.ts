@@ -6,6 +6,7 @@ import {
   buildExtensionReleaseMetadata,
   buildSupabaseStoragePublicUrl,
   compareExtensionVersions,
+  mayPublishOverPublished,
   EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
   EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
   createZipArchive,
@@ -417,6 +418,15 @@ describe("ordering the published release against the manifest", () => {
     }
   });
 
+  it("rejects a published version that is padded rather than tidying it up", () => {
+    // The published value is the untrusted side. Trimming it before validating
+    // would accept " 65535 " as a version Chrome rejects, and order metadata
+    // that should have taken the malformed fallback.
+    expect(compareExtensionVersions(" 1.0.0 ", "1.0.0")).toBeNull();
+    expect(compareExtensionVersions("1.0.0", "1.0 ")).toBeNull();
+    expect(compareExtensionVersions(" 65535 ", "2.0.0")).toBeNull();
+  });
+
   it("rejects all-numeric strings Chrome's grammar does not accept", () => {
     // A component above 65535, or one written with leading zeros, is not a
     // version Chrome would take. Ordering it anyway is worse than refusing:
@@ -493,5 +503,32 @@ describe("the content types the publish sends", () => {
       expect(contentType).not.toContain(";");
       expect(contentType.trim()).toBe(contentType);
     }
+  });
+});
+
+describe("re-reading production at upload time", () => {
+  const releaseVersion = "0.1.3";
+  const may = (published: Parameters<typeof mayPublishOverPublished>[0]["published"]) =>
+    mayPublishOverPublished({ published, releaseVersion });
+
+  it("stands down when a newer release is already published", () => {
+    // The decision taken in quality-gates is a sample minutes old. If a 0.1.3 run
+    // and a 0.1.4 run both read "published 0.1.2" before either uploaded, both
+    // were told to go — so the older one has to be stopped here, at the upload.
+    expect(may({ status: "published", version: "0.1.4" })).toBe(false);
+    expect(may({ status: "published", version: "0.1.3" })).toBe(false);
+  });
+
+  it("proceeds when production is behind, or has nothing", () => {
+    expect(may({ status: "published", version: "0.1.2" })).toBe(true);
+    expect(may({ status: "absent" })).toBe(true);
+  });
+
+  it("does not block the upload on an answer it cannot use", () => {
+    // A transient Storage error is not a reason to drop a release: without this
+    // guard the upload would simply have happened.
+    expect(may({ status: "unknown", reason: "network" })).toBe(true);
+    expect(may({ status: "published", version: "not-a-version" })).toBe(true);
+    expect(may(undefined)).toBe(true);
   });
 });
