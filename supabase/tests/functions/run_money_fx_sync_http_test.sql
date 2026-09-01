@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(6);
+SELECT plan(9);
 
 SELECT has_function('public', 'run_money_fx_sync_http', ARRAY[]::text[]);
 
@@ -80,6 +80,25 @@ SELECT is(
   ),
   'Bearer fx-sync-token-for-tests',
   'the configured token is presented as a bearer credential'
+);
+
+-- The wrapper carries a Vault credential, and `public` is exposed over PostgREST,
+-- so who may execute it is part of the boundary rather than a detail. Revoking
+-- only from PUBLIC is not enough here: Supabase grants anon and authenticated
+-- explicitly by default, and those grants survive it.
+SELECT ok(
+  NOT has_function_privilege('anon', 'public.run_money_fx_sync_http()', 'EXECUTE'),
+  'anon cannot execute the cron wrapper'
+);
+
+SELECT ok(
+  NOT has_function_privilege('authenticated', 'public.run_money_fx_sync_http()', 'EXECUTE'),
+  'authenticated cannot execute the cron wrapper'
+);
+
+SELECT ok(
+  has_function_privilege('postgres', 'public.run_money_fx_sync_http()', 'EXECUTE'),
+  'the owner, which is what the cron job runs as, still can'
 );
 
 SELECT * FROM finish();

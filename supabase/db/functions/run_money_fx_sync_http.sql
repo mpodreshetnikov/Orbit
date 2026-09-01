@@ -46,5 +46,20 @@ BEGIN
 END;
 $$;
 
+-- `public` is an exposed API schema, so anything executable here is reachable at
+-- /rest/v1/rpc/<name> with the anon key. This wrapper is SECURITY DEFINER and now
+-- presents the Vault token on the caller's behalf, so leaving it callable would
+-- hand every anonymous client an authenticated sync -- the caller boundary the
+-- token exists to draw, bypassed through the wrapper that carries it.
+--
+-- The roles are named rather than relying on `FROM PUBLIC` alone. Checked against
+-- the live project: functions in this repository that revoke only from PUBLIC
+-- still carry `anon=X` and `authenticated=X`, because Supabase's default
+-- privileges grant those explicitly and revoking PUBLIC does not touch them.
+--
+-- No GRANT follows. The pg_cron job runs as postgres, which owns this function
+-- and keeps EXECUTE as its owner.
+REVOKE ALL ON FUNCTION public.run_money_fx_sync_http() FROM PUBLIC, anon, authenticated, service_role;
+
 COMMENT ON FUNCTION public.run_money_fx_sync_http() IS
-  'Call money-fx-sync Edge Function via pg_net. URL and token from vault (project_url, money_fx_sync_token). No-op if either is unset.';
+  'Call money-fx-sync Edge Function via pg_net. URL and token from vault (project_url, money_fx_sync_token). No-op if either is unset. Executable only by its owner: the cron job.';
