@@ -221,6 +221,69 @@ export function shouldRequireExtensionVersionBump(input: {
   return input.changedFiles.some((filePath) => isExtensionVersionedSurface(filePath));
 }
 
+/**
+ * Compares two extension versions the way Chrome orders them: one to four
+ * dot-separated integers, compared numerically component by component, a
+ * missing component reading as zero. Returns null when either side is not a
+ * version at all, so a caller can tell "older" from "cannot tell".
+ */
+export function compareExtensionVersions(left: string, right: string): number | null {
+  const parse = (value: string): number[] | null => {
+    const parts = value.trim().split(".");
+    if (parts.length === 0 || parts.length > 4) return null;
+    const numbers: number[] = [];
+    for (const part of parts) {
+      if (!/^\d+$/.test(part)) return null;
+      numbers.push(Number(part));
+    }
+    return numbers;
+  };
+
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return null;
+
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Whether this run should publish a release.
+ *
+ * The comparison is deliberately ordered, not an inequality. Workflow runs for
+ * consecutive pushes to main are not serialised, so a docs-only run carrying an
+ * older manifest can reach this check after a newer run has already published.
+ * "Differs from what is published" is true there too, and acting on it would
+ * rebuild the older bundle and overwrite `latest.json` through the publish
+ * step's `upsert: true` -- rolling production back to a release it had already
+ * moved past. Only an absent release, or one genuinely older than this
+ * manifest, is a reason to publish. T-260901-0dr.
+ */
+export function shouldPublishRelease(input: {
+  /** `null` when nothing is published, `undefined` when the lookup failed. */
+  publishedVersion: string | null | undefined;
+  manifestVersion: string;
+  manifestVersionChanged: boolean;
+}): boolean {
+  // The lookup produced no answer, so the commit range is all there is to go on
+  // -- the behaviour this had before the published comparison existed.
+  if (input.publishedVersion === undefined) return input.manifestVersionChanged;
+
+  // Nothing published yet: the first release is always worth making.
+  if (input.publishedVersion === null) return true;
+
+  const order = compareExtensionVersions(input.publishedVersion, input.manifestVersion);
+
+  // Published metadata that is not a version is not evidence of anything. Fall
+  // back rather than guess, for the same reason a failed lookup does.
+  if (order === null) return input.manifestVersionChanged;
+
+  return order < 0;
+}
+
 export function evaluateExtensionVersionPolicy(input: {
   changedFiles: string[];
   previousManifestContent: string;
@@ -243,12 +306,11 @@ export function evaluateExtensionVersionPolicy(input: {
 
   return {
     changedFiles: normalizedChangedFiles,
-    // Undefined means the lookup did not produce an answer, so the commit range
-    // is all there is to go on -- the behaviour this had before.
-    versionChanged:
-      publishedVersion === undefined
-        ? versionDelta.changed
-        : publishedVersion !== versionDelta.nextVersion,
+    versionChanged: shouldPublishRelease({
+      publishedVersion,
+      manifestVersion: versionDelta.nextVersion,
+      manifestVersionChanged: versionDelta.changed,
+    }),
     manifestVersionChanged: versionDelta.changed,
     previousVersion: versionDelta.previousVersion,
     nextVersion: versionDelta.nextVersion,

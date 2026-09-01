@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildExtensionReleaseMetadata,
   buildSupabaseStoragePublicUrl,
+  compareExtensionVersions,
   createZipArchive,
   deriveChromeExtensionIdFromKey,
   detectManifestVersionChange,
@@ -12,6 +13,7 @@ import {
   fetchPublishedExtensionVersion,
   getExtensionReleaseArtifactName,
   readExtensionManifestVersion,
+  shouldPublishRelease,
   shouldRequireExtensionVersionBump,
 } from "./release";
 
@@ -103,6 +105,22 @@ describe("extension release", () => {
       expect(result.versionChanged).toBe(true);
       expect(result.manifestVersionChanged).toBe(false);
       expect(result.publishedVersion).toBeNull();
+    });
+
+    it("does NOT publish when the published release is newer than this manifest", () => {
+      // Runs for consecutive pushes to main are not serialised, so a docs-only
+      // run carrying 0.1.3 can reach this check after a newer run published
+      // 0.1.4. "Differs from what is published" is true there, and acting on it
+      // would rebuild 0.1.3 and overwrite latest.json through the publish
+      // step's upsert -- rolling production back.
+      const result = evaluateExtensionVersionPolicy({
+        changedFiles: ["docs/QUALITY.md"],
+        ...unchangedManifests,
+        published: { status: "published", version: "0.1.4" },
+      });
+
+      expect(result.versionChanged).toBe(false);
+      expect(result.publishedVersion).toBe("0.1.4");
     });
 
     it("publishes when the published release is behind the manifest", () => {
@@ -371,4 +389,62 @@ describe("extension release", () => {
       "https://project.supabase.co/storage/v1/object/public/extension-releases/releases/1.2.3/orbit%20extension.zip",
     );
   }, 15_000);
+});
+
+describe("ordering the published release against the manifest", () => {
+  it("compares versions numerically, component by component", () => {
+    expect(compareExtensionVersions("0.1.3", "0.1.4")).toBe(-1);
+    expect(compareExtensionVersions("0.1.4", "0.1.3")).toBe(1);
+    expect(compareExtensionVersions("0.1.3", "0.1.3")).toBe(0);
+    // Not lexicographic: "0.1.10" is after "0.1.9", though it sorts before it
+    // as a string.
+    expect(compareExtensionVersions("0.1.9", "0.1.10")).toBe(-1);
+    // A missing component reads as zero, the way Chrome orders them.
+    expect(compareExtensionVersions("1", "1.0.0")).toBe(0);
+    expect(compareExtensionVersions("1.2", "1.2.1")).toBe(-1);
+  });
+
+  it("reports null for anything that is not a version", () => {
+    for (const [left, right] of [
+      ["1.0.0", "not-a-version"],
+      ["", "1.0.0"],
+      ["1.0.0-beta", "1.0.0"],
+      ["1.2.3.4.5", "1.0.0"],
+    ]) {
+      expect(compareExtensionVersions(left, right)).toBeNull();
+    }
+  });
+
+  it("publishes only for an absent or older release", () => {
+    const manifestVersion = "0.1.3";
+    const publish = (publishedVersion: string | null | undefined, changed = false) =>
+      shouldPublishRelease({ publishedVersion, manifestVersion, manifestVersionChanged: changed });
+
+    expect(publish(null)).toBe(true);
+    expect(publish("0.1.2")).toBe(true);
+    expect(publish("0.1.3")).toBe(false);
+    expect(publish("0.1.4")).toBe(false);
+    expect(publish("0.2.0")).toBe(false);
+    expect(publish("1.0.0")).toBe(false);
+  });
+
+  it("falls back to the commit range when there is no usable answer", () => {
+    const fallback = (publishedVersion: string | null | undefined) => [
+      shouldPublishRelease({
+        publishedVersion,
+        manifestVersion: "0.1.3",
+        manifestVersionChanged: true,
+      }),
+      shouldPublishRelease({
+        publishedVersion,
+        manifestVersion: "0.1.3",
+        manifestVersionChanged: false,
+      }),
+    ];
+
+    // A failed lookup, and published metadata that is not a version: neither is
+    // evidence, so neither may decide.
+    expect(fallback(undefined)).toEqual([true, false]);
+    expect(fallback("garbage")).toEqual([true, false]);
+  });
 });
