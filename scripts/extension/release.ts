@@ -231,6 +231,9 @@ export function shouldRequireExtensionVersionBump(input: {
   return input.changedFiles.some((filePath) => isExtensionVersionedSurface(filePath));
 }
 
+/** Chrome rejects a version component above this. */
+const MAX_EXTENSION_VERSION_COMPONENT = 65535;
+
 /**
  * Compares two extension versions the way Chrome orders them: one to four
  * dot-separated integers, compared numerically component by component, a
@@ -243,8 +246,15 @@ export function compareExtensionVersions(left: string, right: string): number | 
     if (parts.length === 0 || parts.length > 4) return null;
     const numbers: number[] = [];
     for (const part of parts) {
-      if (!/^\d+$/.test(part)) return null;
-      numbers.push(Number(part));
+      // Chrome's grammar, not "digits": one to four integers between 0 and
+      // 65535, written without leading zeros. Accepting a number outside that
+      // range would order metadata Chrome itself would reject -- 65536 would
+      // read as newer than the manifest and suppress the publish, leaving the
+      // release stuck instead of taking the malformed-metadata fallback.
+      if (!/^(0|[1-9]\d*)$/.test(part)) return null;
+      const parsed = Number(part);
+      if (parsed > MAX_EXTENSION_VERSION_COMPONENT) return null;
+      numbers.push(parsed);
     }
     return numbers;
   };

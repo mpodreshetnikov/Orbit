@@ -417,6 +417,30 @@ describe("ordering the published release against the manifest", () => {
     }
   });
 
+  it("rejects all-numeric strings Chrome's grammar does not accept", () => {
+    // A component above 65535, or one written with leading zeros, is not a
+    // version Chrome would take. Ordering it anyway is worse than refusing:
+    // published "65536" would read as newer than a 2.0.0 manifest and suppress
+    // the publish, leaving the release stuck rather than falling back.
+    expect(compareExtensionVersions("65536", "2.0.0")).toBeNull();
+    expect(compareExtensionVersions("1.65536", "1.0")).toBeNull();
+    expect(compareExtensionVersions("01.0", "1.0")).toBeNull();
+    expect(compareExtensionVersions("1.00", "1.0")).toBeNull();
+    // The boundary itself is legal.
+    expect(compareExtensionVersions("65535", "65535")).toBe(0);
+    expect(compareExtensionVersions("0.0.0.0", "0")).toBe(0);
+  });
+
+  it("falls back rather than suppressing the publish on metadata Chrome would reject", () => {
+    expect(
+      shouldPublishRelease({
+        publishedVersion: "65536",
+        manifestVersion: "2.0.0",
+        manifestVersionChanged: true,
+      }),
+    ).toBe(true);
+  });
+
   it("publishes only for an absent or older release", () => {
     const manifestVersion = "0.1.3";
     const publish = (publishedVersion: string | null | undefined, changed = false) =>
