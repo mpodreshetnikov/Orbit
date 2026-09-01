@@ -54,7 +54,8 @@ export interface UpdateConditionInput {
 
 export interface ConditionRecord {
   id: string;
-  condition_id: string;
+  /** Null while the mention is still a proposal: nothing has been written to the chart yet. */
+  condition_id: string | null;
   record_id: string;
   status_in_record: ConditionStatus;
   source_anchor: string | null;
@@ -66,18 +67,24 @@ export interface ConditionRecord {
 
 // Extended type with condition details (from get_record_conditions function)
 export interface ConditionRecordWithDetails extends ConditionRecord {
+  /** True while this mention proposes a condition the chart does not have yet. */
+  is_proposal: boolean;
+  /** For a proposal this is the name the document gave it, not a stored condition's name. */
   condition_name: string;
   condition_icd_name_en: string | null; // Official ICD name in English
   condition_icd_name_ru: string | null; // Official ICD name in Russian
   condition_code: string | null; // ICD-10 code
-  condition_current_status: ConditionStatus;
+  /** Null for a proposal: there is no condition row to have a current status yet. */
+  condition_current_status: ConditionStatus | null;
   condition_onset_date: string | null;
   condition_resolved_date: string | null;
   condition_notes: string | null;
 }
 
 export interface CreateConditionRecordInput {
-  condition_id: string;
+  condition_id?: string | null;
+  proposed_name?: string | null;
+  proposed_icd_code?: string | null;
   record_id: string;
   status_in_record: ConditionStatus;
   source_anchor?: string | null;
@@ -90,6 +97,9 @@ export interface UpdateConditionRecordInput {
   status_in_record?: ConditionStatus;
   source_anchor?: string | null;
   is_user_verified?: boolean;
+  /** Correcting a proposal before it is materialised. */
+  proposed_name?: string | null;
+  proposed_icd_code?: string | null;
 }
 
 // ============================================================================

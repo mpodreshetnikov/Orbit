@@ -138,6 +138,7 @@ function conditionRecord(
   return {
     id: "record-cond-1",
     condition_id: "cond-1",
+    is_proposal: false,
     record_id: "record-1",
     status_in_record: "active",
     source_anchor: "source text",

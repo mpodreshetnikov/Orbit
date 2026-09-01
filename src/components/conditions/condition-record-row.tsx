@@ -77,7 +77,10 @@ export function ConditionRecordRow({
   const t = useTranslations();
   const [showAnchor, setShowAnchor] = useState(false);
 
+  // A proposal has no condition behind it, so there is no previous status to have changed from:
+  // rendering the comparison would print an empty badge before the real status.
   const hasStatusChange =
+    conditionRecord.condition_current_status !== null &&
     conditionRecord.status_in_record !== conditionRecord.condition_current_status;
   const isActiveOrSuspected =
     conditionRecord.status_in_record === "active" ||
@@ -120,7 +123,7 @@ export function ConditionRecordRow({
           )}
 
           {/* Status change indicator */}
-          {hasStatusChange && (
+          {hasStatusChange && conditionRecord.condition_current_status && (
             <div className="flex items-center gap-2 mt-1 text-sm flex-wrap">
               <ConditionStatusBadge status={conditionRecord.condition_current_status} />
               <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -149,6 +152,16 @@ export function ConditionRecordRow({
 
         {/* Badges and actions - wrap on mobile, row on desktop */}
         <div className="flex flex-wrap items-center gap-2 shrink-0 sm:flex-nowrap">
+          {conditionRecord.is_proposal && (
+            <Badge
+              variant="outline"
+              className="text-xs bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20 gap-1"
+              title={t("conditions.proposalTitle")}
+            >
+              <CircleDot className="h-3 w-3" />
+              {t("conditions.proposal")}
+            </Badge>
+          )}
           {comparison && <ConditionComparisonBadge comparison={comparison} />}
           {!hasStatusChange && <ConditionStatusBadge status={conditionRecord.status_in_record} />}
 
@@ -161,17 +174,20 @@ export function ConditionRecordRow({
 
           {showActions && (
             <div className="flex items-center gap-0.5 ms-auto sm:ms-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                asChild
-                title={t("conditions.openDetails")}
-              >
-                <Link href={`/health/conditions/${conditionRecord.condition_id}`}>
-                  <ExternalLink className="h-4 w-4" />
-                </Link>
-              </Button>
+              {/* A proposal has no condition page to open yet: it is created on activation. */}
+              {conditionRecord.condition_id && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  asChild
+                  title={t("conditions.openDetails")}
+                >
+                  <Link href={`/health/conditions/${conditionRecord.condition_id}`}>
+                    <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
               {onEdit && (
                 <Button
                   variant="ghost"
