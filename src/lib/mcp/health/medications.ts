@@ -391,52 +391,106 @@ export async function updateRegimen(
   regimenId: string,
   values: Record<string, unknown>,
 ): Promise<RegimenWithStatus> {
-  // Only when the caller named `inventory` at all: reading and rewriting it
-  // otherwise would turn every unrelated update into a stock write.
-  if ("inventory" in values) {
-    const { data: current, error: readError } = await supabase
-      .from("med_regimens")
-      .select("inventory")
-      .eq("id", regimenId)
-      .is("deleted_at", null)
-      .maybeSingle();
+  // A stock write is read-modify-write: `inventory` is one column, so merging
+  // means reading it first, and between that read and the write a dose or a
+  // refill can move `current_amount` through one of the RPCs. Writing the
+  // merged object then carries the figure from before their change and undoes
+  // it -- a decrement silently given back, which is the failure this whole area
+  // exists to prevent.
+  //
+  // So the write is conditional on the row not having moved. Every function
+  // that touches `med_regimens.inventory` sets `updated_at = now()` in the same
+  // statement, which makes it a version to match on: the update matches nothing
+  // if somebody got there first, and the merge is taken again against what they
+  // left. Only when the caller named `inventory` at all -- reading and
+  // rewriting it otherwise would turn every unrelated update into a stock
+  // write.
+  const mergesInventory = "inventory" in values;
+  // Three is generous for a race this narrow; a fourth collision is a caller
+  // hammering the same course, and answering that with an error is better than
+  // spinning.
+  const attempts = mergesInventory ? 3 : 1;
 
-    // Failing here is the safe direction. Treating an unreadable row as an
-    // empty one would store the supplied object alone, which is the very
-    // replacement this merge exists to prevent.
-    if (readError) {
-      throw new Error(
-        `Failed to read the medication's stock before updating it: ${readError.message}`,
-      );
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let write = values;
+    let version: string | null = null;
+
+    if (mergesInventory) {
+      const { data: current, error: readError } = await supabase
+        .from("med_regimens")
+        .select("inventory, updated_at")
+        .eq("id", regimenId)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+      // Failing here is the safe direction. Treating an unreadable row as an
+      // empty one would store the supplied object alone, which is the very
+      // replacement this merge exists to prevent.
+      if (readError) {
+        throw new Error(
+          `Failed to read the medication's stock before updating it: ${readError.message}`,
+        );
+      }
+      if (!current) {
+        throw new Error(`No medication with id ${regimenId}.`);
+      }
+
+      const row = current as { inventory?: unknown; updated_at?: string | null };
+      version = row.updated_at ?? null;
+      write = {
+        ...values,
+        inventory: inventoryToStore(
+          row.inventory,
+          values.inventory as RegimenInventory | null | undefined,
+        ),
+      };
     }
-    if (!current) {
+
+    let query = supabase
+      .from("med_regimens")
+      .update(write as never)
+      .eq("id", regimenId)
+      .is("deleted_at", null);
+
+    if (version !== null) {
+      query = query.eq("updated_at", version);
+    }
+
+    const { data, error } = await query.select("*").maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to update medication: ${error.message}`);
+    }
+    if (data) {
+      return withEffectiveStatus(rowToRegimen(data as unknown as Record<string, unknown>));
+    }
+
+    // No row came back. Without a version guard that can only mean the
+    // medication is not there; with one it usually means somebody wrote to it
+    // between the read and the write, so take the merge again against what they
+    // left. On the last attempt, say which of the two it was rather than
+    // guessing.
+    if (version === null || attempt === attempts) {
+      if (version !== null) {
+        const { data: still } = await supabase
+          .from("med_regimens")
+          .select("id")
+          .eq("id", regimenId)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (still) {
+          throw new Error(
+            `The stock on medication ${regimenId} kept changing while this update was being ` +
+              `applied, so nothing was written. Read it back and try again.`,
+          );
+        }
+      }
       throw new Error(`No medication with id ${regimenId}.`);
     }
-
-    values = {
-      ...values,
-      inventory: inventoryToStore(
-        (current as { inventory?: unknown }).inventory,
-        values.inventory as RegimenInventory | null | undefined,
-      ),
-    };
   }
 
-  const { data, error } = await supabase
-    .from("med_regimens")
-    .update(values as never)
-    .eq("id", regimenId)
-    .is("deleted_at", null)
-    .select("*")
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to update medication: ${error.message}`);
-  }
-  if (!data) {
-    throw new Error(`No medication with id ${regimenId}.`);
-  }
-  return withEffectiveStatus(rowToRegimen(data as unknown as Record<string, unknown>));
+  // Unreachable: the loop returns or throws on its last attempt.
+  throw new Error(`No medication with id ${regimenId}.`);
 }
 
 /**
