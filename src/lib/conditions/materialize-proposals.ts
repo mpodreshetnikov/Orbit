@@ -187,6 +187,8 @@ export async function materializeConditionProposals(
         proposed_name: null,
         proposed_icd_code: null,
         is_user_verified: true,
+        // Approving the record is the ruling; the row must not stay `pending` behind it.
+        review_decision: "confirmed",
       })
       .eq("id", proposal.id);
     // A refused link -- the record already mentions this condition, say, which the

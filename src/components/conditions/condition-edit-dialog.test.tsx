@@ -143,6 +143,8 @@ function conditionRecord(
     status_in_record: "active",
     source_anchor: "source text",
     confidence: 0.9,
+    supporting_obs_code: null,
+    review_decision: "pending",
     is_llm_extracted: true,
     is_user_verified: true,
     created_at: "2026-01-01T00:00:00.000Z",

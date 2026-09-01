@@ -189,9 +189,16 @@ export interface ResolvingAnalyte {
  */
 export const RESOLVING_ANALYTES: Record<string, ResolvingAnalyte> = {
   // A B12 deficiency is the statement that B12 is low. A normal level ends it.
+  //
+  // `E53.8` and not `E53`: the parent covers `E53.0` riboflavin and `E53.1` pyridoxine, which are
+  // different vitamins entirely, and a prefix that reaches them would let an in-range B12 close a
+  // deficiency nothing in this document measured. Every prefix below is chosen the same way —
+  // narrow enough that everything under it is the condition the analyte speaks to. `E55` is
+  // vitamin D throughout (`E55.0` rickets, `E55.9` unspecified), `D50` is iron-deficiency anaemia
+  // throughout, and `E61.1` is iron deficiency itself.
   vitamin_b12: {
     requires: ["vitamin_b12"],
-    icdPrefixes: ["E53"],
+    icdPrefixes: ["E53.8"],
     namePatterns: ["b12", "в12", "кобаламин"],
     confident: true,
   },

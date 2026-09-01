@@ -1,6 +1,7 @@
 -- Function: get_record_conditions()
 -- Get condition mentions for a medical record: materialised links, and proposals awaiting review
--- Drop first when the return type changed (is_proposal added with the proposal path)
+-- Drop first when the return type changed (is_proposal added with the proposal path;
+-- supporting_obs_code and review_decision added with lab-driven resolution proposals)
 DROP FUNCTION IF EXISTS public.get_record_conditions(uuid);
 
 CREATE FUNCTION public.get_record_conditions(p_record_id uuid)
@@ -22,7 +23,9 @@ RETURNS TABLE (
   condition_onset_date date,
   condition_resolved_date date,
   condition_notes text,
-  is_proposal boolean
+  is_proposal boolean,
+  supporting_obs_code text,
+  review_decision text
 )
 LANGUAGE sql
 STABLE
@@ -47,7 +50,13 @@ AS $$
     c.onset_date,
     c.resolved_date,
     c.notes,
-    cr.condition_id IS NULL
+    cr.condition_id IS NULL,
+    -- What a proposed closure rests on, and whether anyone has ruled on it. A reader that cannot
+    -- see the analyte cannot re-check the claim against the observations a person has since
+    -- corrected, and a reader that cannot see the decision cannot tell a rejection from a
+    -- proposal nobody has opened.
+    cr.supporting_obs_code,
+    cr.review_decision
   FROM public.condition_records cr
   LEFT JOIN public.conditions c ON c.id = cr.condition_id
   WHERE cr.record_id = p_record_id

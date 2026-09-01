@@ -367,7 +367,9 @@ async function createConditionRecord(input: CreateConditionRecordInput): Promise
     throw new Error(error.message);
   }
 
-  return data as ConditionRecord;
+  // Through `unknown` for the same reason as the other two casts here: the generated DB types do
+  // not carry the two review columns yet.
+  return data as unknown as ConditionRecord;
 }
 
 export function useCreateConditionRecord() {
@@ -403,10 +405,21 @@ async function updateConditionRecord({
 }): Promise<ConditionRecord> {
   const supabase = createClient();
 
+  // A verification is a person ruling on the mention, so it carries the ruling. Recorded here
+  // rather than at each call site because the two must never disagree: `is_user_verified` says a
+  // person approved the row and `review_decision` says what they decided, and a row that is
+  // verified while still reading `pending` would count as "nobody looked" in the counts that
+  // decide whether an analyte may ever close a condition unattended. A caller that states its own
+  // decision -- a dismissal -- keeps it.
+  const verifiedUpdates: UpdateConditionRecordInput =
+    updates.is_user_verified === true && updates.review_decision === undefined
+      ? { ...updates, review_decision: "confirmed" }
+      : updates;
+
   // Perform update first
   const { error: updateError } = await supabase
     .from("condition_records")
-    .update(updates)
+    .update(verifiedUpdates)
     .eq("id", id);
 
   if (updateError) {
@@ -424,7 +437,11 @@ async function updateConditionRecord({
     throw new Error(selectError.message);
   }
 
-  const conditionRecord = data as ConditionRecord;
+  // Through `unknown` because the generated DB types do not carry `supporting_obs_code` or
+  // `review_decision` yet: `supabase/db/database.types.ts` is regenerated from a local stack and
+  // is already behind the migrations on main (T-260829-el7 tracks the same staleness for the
+  // money tables). The row selected here does have both columns.
+  const conditionRecord = data as unknown as ConditionRecord;
 
   // When status_in_record changed, recompute condition's current_status from history
   // (status of the most recent mention by record_date). This avoids leaving a condition
@@ -612,6 +629,8 @@ export function useCreateConditionWithRecord() {
         source_anchor: input.source_anchor || null,
         is_llm_extracted: false,
         is_user_verified: true,
+        // A person wrote this row; it is not waiting on anyone's review.
+        review_decision: "confirmed",
       });
 
       if (crError) {
@@ -659,6 +678,7 @@ export function useLinkConditionToRecord() {
           source_anchor: input.source_anchor || null,
           is_llm_extracted: false,
           is_user_verified: true,
+          review_decision: "confirmed",
         })
         .select()
         .single();
@@ -715,7 +735,8 @@ export function useLinkConditionToRecord() {
         await supabase.from("conditions").update(conditionUpdates).eq("id", input.condition_id);
       }
 
-      return conditionRecord as ConditionRecord;
+      // Through `unknown` for the same reason as above: the generated types lag the migration.
+      return conditionRecord as unknown as ConditionRecord;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({

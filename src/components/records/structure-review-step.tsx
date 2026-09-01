@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase";
 import { lookupIcdCode } from "@/hooks/use-icd-lookup";
 import { materializeConditionProposals } from "@/lib/conditions/materialize-proposals";
+import { proposedClosureStillHolds } from "@/lib/conditions/resolution-proposal";
 import {
   Save,
   FileCheck,
@@ -1411,12 +1412,20 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const verifyAllConditions = async () => {
     if (!conditionRecords || conditionRecords.length === 0) return;
 
+    // Approving the record confirms every mention on it -- except a proposed closure whose
+    // measurement no longer stands. The person may have corrected the cited value, recoded it, or
+    // left it unapplied, and `runSave` deletes unapplied observations before this runs. Verifying
+    // such a row would close a condition on evidence the same person just withdrew, so it is left
+    // unverified and pending: suppressed by the closure guard, and still visible as a proposal.
     const unverified = conditionRecords.filter((cr) => !cr.is_user_verified);
+    const confirmable = unverified.filter((cr) =>
+      proposedClosureStillHolds(cr, observations ?? []),
+    );
     await Promise.all(
-      unverified.map((cr) =>
+      confirmable.map((cr) =>
         updateConditionRecordMutation.mutateAsync({
           id: cr.id,
-          updates: { is_user_verified: true },
+          updates: { is_user_verified: true, review_decision: "confirmed" },
         }),
       ),
     );

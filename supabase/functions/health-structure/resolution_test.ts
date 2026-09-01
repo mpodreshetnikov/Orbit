@@ -343,6 +343,24 @@ async function runGate(
   return { rejected, state };
 }
 
+Deno.test("a sibling ICD code under the same parent does not match", async () => {
+  // E53.0 is riboflavin and E53.1 is pyridoxine. Both sit under E53 with B12, and neither is
+  // measured by a B12 assay, so a prefix wide enough to reach them would close a deficiency this
+  // document says nothing about. The name has to be foreign to B12 as well, or the second list
+  // would permit what the first refused.
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition({ id: "cond-b6", name: "Дефицит пиридоксина", code: "E53.1" })],
+    [observation({ obs_code: "vitamin_b12", value_numeric: 704 })],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["analyte does not match this condition"],
+  );
+});
+
 Deno.test("a resolution citing nothing is dropped", async () => {
   const { rejected, state } = await runGate(
     { supporting_obs_code: null },

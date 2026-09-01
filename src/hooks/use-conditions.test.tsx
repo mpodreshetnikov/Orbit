@@ -267,6 +267,46 @@ describe("use-conditions", () => {
     });
 
     expect(conditionsBuilder.update).toHaveBeenCalledWith({ current_status: "resolved" });
+    // The ruling travels with the verification. A row that is verified while still reading
+    // `pending` would count as "nobody looked" in the counts that decide whether an analyte may
+    // one day close a condition unattended.
+    expect(conditionRecordsBuilder.update).toHaveBeenCalledWith({
+      is_user_verified: true,
+      review_decision: "confirmed",
+    });
+  });
+
+  it("keeps a decision the caller stated rather than overwriting it", async () => {
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: { status_in_record: "active" },
+      error: null,
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "condition_records" ? conditionRecordsBuilder : conditionsBuilder,
+      ),
+    });
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { is_user_verified: true, review_decision: "dismissed" },
+      });
+    });
+
+    expect(conditionRecordsBuilder.update).toHaveBeenCalledWith({
+      is_user_verified: true,
+      review_decision: "dismissed",
+    });
   });
 
   it("excludes unconfirmed machine closures from the recompute", async () => {
