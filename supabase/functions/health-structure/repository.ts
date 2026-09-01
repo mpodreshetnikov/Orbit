@@ -8,7 +8,11 @@ import type {
   FindingTypeCatalogItem,
   ObservationCatalogItem,
 } from "./types.ts";
-import { ClaimLostError, claimRecordViaRpc } from "../_shared/processing-claim.ts";
+import {
+  ClaimLostError,
+  claimRecordViaRpc,
+  renewClaimViaRpc,
+} from "../_shared/processing-claim.ts";
 import type { ResolutionRepository } from "./resolution.ts";
 
 interface AuthenticatedUser {
@@ -36,6 +40,8 @@ export interface HealthStructureRepository extends ResolutionRepository {
    * Returns the run id on success and null when the record is already claimed.
    */
   claimRecord(recordId: string): Promise<string | null>;
+  /** Extend this run's lease while it is still working; false once the claim has been taken. */
+  renewClaim(recordId: string, runId: string): Promise<boolean>;
   /** Terminal write, applied only while this run still owns the record. */
   updateMedicalRecord(
     recordId: string,
@@ -277,6 +283,10 @@ export function createSupabaseHealthStructureRepository(
     return await claimRecordViaRpc(admin, recordId, "structuring");
   }
 
+  async function renewClaim(recordId: string, runId: string): Promise<boolean> {
+    return await renewClaimViaRpc(admin, recordId, runId);
+  }
+
   async function updateMedicalRecord(
     recordId: string,
     patch: Record<string, unknown>,
@@ -410,6 +420,7 @@ export function createSupabaseHealthStructureRepository(
     fetchPersonActiveFindings,
     fetchUpcomingOverdueCheckupItems,
     claimRecord,
+    renewClaim,
     updateMedicalRecord,
     replaceRecordObservations,
     replaceRecordFindings,

@@ -44,6 +44,7 @@ function createRepositoryMock(
   const repository: HealthStructureRepository = {
     authenticateAllowedUser: async () =>
       options.user !== undefined ? options.user : { id: "user-1", email: "user@example.com" },
+    renewClaim: async () => true,
     getAttachments: async () => [],
     downloadAttachment: async () => null,
     getRecord: async () =>
@@ -871,3 +872,32 @@ Deno.test(
     assertEquals(seenPages, []);
   },
 );
+
+// The renewal has to name the run that holds the claim; one that named anything else would
+// renew nothing and the record would be reaped out from under a live parse.
+Deno.test("runHealthStructureService renews under the claim it took", async () => {
+  const { repository } = createRepositoryMock();
+  const renewals: Array<{ recordId: string; runId: string }> = [];
+
+  const result = await runHealthStructureService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository: {
+        ...repository,
+        renewClaim: async (recordId, runId) => {
+          renewals.push({ recordId, runId });
+          return true;
+        },
+      },
+      parseStructuredData: async (_ocrText, context) => {
+        // Whatever the parser does with it, it must reach the record's own claim.
+        assertEquals(await context.renewClaim?.(), true);
+        return parsed(structuredData);
+      },
+      lookupIcdCode: async () => null,
+    },
+  );
+
+  assertEquals(result.status, 200);
+  assertEquals(renewals, [{ recordId: "record-1", runId: "run-1" }]);
+});
