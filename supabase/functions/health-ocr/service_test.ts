@@ -683,3 +683,63 @@ Deno.test(
     assertEquals(sent[1].url, `data:application/pdf;base64,${btoa("pdf-bytes")}`);
   },
 );
+
+// A compressed size says nothing about pixel dimensions: three ordinary phone photographs, or
+// one decompression bomb, are far more RGBA at once than the function has.
+Deno.test("pages are decoded one at a time even while three are in flight", async () => {
+  const { repository } = createRepositoryMock({
+    attachments: ["a", "b", "c"].map((name) => ({
+      id: name,
+      storage_path: `${name}.png`,
+      mime_type: "image/png",
+      original_filename: `${name}.png`,
+    })),
+    blobsByPath: {
+      "a.png": new Blob(["a"]),
+      "b.png": new Blob(["b"]),
+      "c.png": new Blob(["c"]),
+    },
+  });
+
+  let decodingNow = 0;
+  let peakDecoding = 0;
+  let callsInFlight = 0;
+  let peakCallsInFlight = 0;
+
+  await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      pageConcurrency: 3,
+      preprocessImage: async () => {
+        decodingNow += 1;
+        peakDecoding = Math.max(peakDecoding, decodingNow);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        decodingNow -= 1;
+        return {
+          bytes: new TextEncoder().encode("small"),
+          mimeType: "image/jpeg",
+          width: 10,
+          height: 10,
+        };
+      },
+      openRouterClient: createOpenRouterMock(async () => {
+        callsInFlight += 1;
+        peakCallsInFlight = Math.max(peakCallsInFlight, callsInFlight);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        callsInFlight -= 1;
+        return {
+          ocr_text: "page",
+          suggested_title: "t",
+          truncated: false,
+          usage: emptyLlmUsage(),
+        };
+      }),
+      log: { log: () => {}, error: () => {} },
+    },
+  );
+
+  // Memory is the ceiling for decoding; the provider is the ceiling for the calls.
+  assertEquals(peakDecoding, 1);
+  assertEquals(peakCallsInFlight > 1, true, `expected overlapping calls, saw ${peakCallsInFlight}`);
+});

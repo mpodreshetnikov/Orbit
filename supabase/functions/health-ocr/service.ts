@@ -73,9 +73,27 @@ interface PreparedPage {
   preprocessed: boolean;
 }
 
+/**
+ * Run work one call at a time, however many callers there are.
+ *
+ * Decoding is the one step here that is bounded by memory rather than by the provider: a
+ * compressed size says nothing about pixel dimensions, so three ordinary phone photographs --
+ * or one decompression bomb -- can be far more RGBA than the function has, all at once. The
+ * provider calls still overlap; only the decoding is single file.
+ */
+function createSerialQueue(): <T>(work: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(work: () => Promise<T>): Promise<T> => {
+    const result = tail.then(work, work);
+    tail = result.catch(() => {});
+    return result;
+  };
+}
+
 async function prepareOnePage(
   deps: HealthOcrServiceDeps,
   attachment: OcrAttachment,
+  serially: <T>(work: () => Promise<T>) => Promise<T>,
 ): Promise<PreparedPage | null> {
   const log = deps.log ?? console;
   const maxAttachmentBytes = deps.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
@@ -95,8 +113,9 @@ async function prepareOnePage(
   const sourceBytes = new Uint8Array(await blob.arrayBuffer());
   // A page that cannot be normalised is sent as it arrived: a slightly worse transcription is
   // better than none, and a PDF has no raster to normalise in the first place.
-  const preprocessed =
-    (await deps.preprocessImage?.(sourceBytes, attachment.mime_type, { log })) ?? null;
+  const preprocessed = deps.preprocessImage
+    ? await serially(() => deps.preprocessImage!(sourceBytes, attachment.mime_type, { log }))
+    : null;
   const sentBytes = preprocessed?.bytes ?? sourceBytes;
   const mimeType = preprocessed?.mimeType ?? attachment.mime_type;
 
@@ -195,6 +214,10 @@ async function transcribeClaimedRecord(
       attrs: { attachment_count: attachments.length },
     });
 
+    // Pages are transcribed in parallel but decoded one at a time: the provider is the ceiling
+    // for the first and memory is the ceiling for the second.
+    const decodeSerially = createSerialQueue();
+
     // Indexed, not appended: pages finish out of order now, and their order is the document's.
     const pageTexts: string[] = new Array(attachments.length).fill("");
     const pageUsage: LlmUsage[] = [];
@@ -213,7 +236,7 @@ async function transcribeClaimedRecord(
             ocr_input_type: ocrInputType,
           },
         });
-        const page = await prepareOnePage(deps, attachment);
+        const page = await prepareOnePage(deps, attachment, decodeSerially);
         if (!page) {
           await pageSpan?.end({
             status: "error",

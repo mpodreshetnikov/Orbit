@@ -15,6 +15,8 @@
  * because a slightly worse transcription beats no transcription.
  */
 
+import { ORIENTATION_NORMAL, readJpegOrientation } from "../_shared/exif-orientation.ts";
+
 /**
  * The longest edge a page is reduced to.
  *
@@ -68,6 +70,8 @@ export interface RasterImage {
   readonly bitmap: Uint8ClampedArray;
   /** Scale to exactly these dimensions. */
   resize(width: number, height: number): void;
+  /** Swap in a differently shaped bitmap -- what turning a sideways photograph upright needs. */
+  replace(width: number, height: number, bitmap: Uint8ClampedArray): void;
   encodeJpeg(quality: number): Promise<Uint8Array>;
 }
 
@@ -88,7 +92,7 @@ export interface PreprocessOptions {
  */
 const decodeWithImageScript: ImageDecoder = async (bytes) => {
   const { Image } = await import("imagescript");
-  const image = await Image.decode(bytes);
+  let image = await Image.decode(bytes);
   return {
     get width() {
       return image.width;
@@ -101,6 +105,11 @@ const decodeWithImageScript: ImageDecoder = async (bytes) => {
     },
     resize(width: number, height: number) {
       image.resize(width, height);
+    },
+    replace(width: number, height: number, bitmap: Uint8ClampedArray) {
+      const replacement = new Image(width, height);
+      replacement.bitmap.set(bitmap);
+      image = replacement;
     },
     encodeJpeg(quality: number) {
       return image.encodeJPEG(quality);
@@ -128,8 +137,15 @@ function greyscaleAndNormalise(bitmap: Uint8ClampedArray): void {
 
   for (let pixel = 0; pixel < pixelCount; pixel++) {
     const offset = pixel * 4;
-    const value =
-      (bitmap[offset] * 299 + bitmap[offset + 1] * 587 + bitmap[offset + 2] * 114) / 1000;
+    const alpha = bitmap[offset + 3];
+    let value = (bitmap[offset] * 299 + bitmap[offset + 1] * 587 + bitmap[offset + 2] * 114) / 1000;
+    if (alpha < 255) {
+      // JPEG has no alpha, so a transparent pixel would be encoded as whatever RGB was hiding
+      // under it -- usually zero, turning a transparent scan background into black. Composited
+      // onto white, which is what a document's background is.
+      const opacity = alpha / 255;
+      value = value * opacity + 255 * (1 - opacity);
+    }
     const rounded = value < 0 ? 0 : value > 255 ? 255 : Math.round(value);
     luma[pixel] = rounded;
     histogram[rounded]++;
@@ -171,8 +187,81 @@ function greyscaleAndNormalise(bitmap: Uint8ClampedArray): void {
     bitmap[offset] = grey;
     bitmap[offset + 1] = grey;
     bitmap[offset + 2] = grey;
-    // Alpha is left alone: flattening it here would turn a transparent scan black.
+    // Opaque, because the transparency has already been resolved against white above. Leaving
+    // the alpha byte would preserve a channel the JPEG encoder is about to discard anyway.
+    bitmap[offset + 3] = 255;
   }
+}
+
+/**
+ * Turn a bitmap the way its EXIF tag says it should be viewed.
+ *
+ * The eight orientations are the eight ways a sensor can be held: four rotations, each optionally
+ * mirrored. Done here rather than through the codec because it is a pixel move like every other
+ * step in this file, and because it can then be tested without a decoder.
+ */
+function applyOrientation(
+  bitmap: Uint8ClampedArray,
+  width: number,
+  height: number,
+  orientation: number,
+): { bitmap: Uint8ClampedArray; width: number; height: number } {
+  if (orientation === ORIENTATION_NORMAL) return { bitmap, width, height };
+
+  // Orientations 5-8 put the sensor on its side, so the page's width and height swap.
+  const swapsAxes = orientation >= 5;
+  const outWidth = swapsAxes ? height : width;
+  const outHeight = swapsAxes ? width : height;
+  const out = new Uint8ClampedArray(bitmap.length);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let targetX: number;
+      let targetY: number;
+      switch (orientation) {
+        case 2: // mirrored
+          targetX = width - 1 - x;
+          targetY = y;
+          break;
+        case 3: // upside down
+          targetX = width - 1 - x;
+          targetY = height - 1 - y;
+          break;
+        case 4: // mirrored upside down
+          targetX = x;
+          targetY = height - 1 - y;
+          break;
+        case 5: // mirrored, quarter turn
+          targetX = y;
+          targetY = x;
+          break;
+        case 6: // quarter turn clockwise
+          targetX = height - 1 - y;
+          targetY = x;
+          break;
+        case 7: // mirrored, three quarter turn
+          targetX = height - 1 - y;
+          targetY = width - 1 - x;
+          break;
+        case 8: // three quarter turn clockwise
+          targetX = y;
+          targetY = width - 1 - x;
+          break;
+        default:
+          targetX = x;
+          targetY = y;
+      }
+
+      const from = (y * width + x) * 4;
+      const to = (targetY * outWidth + targetX) * 4;
+      out[to] = bitmap[from];
+      out[to + 1] = bitmap[from + 1];
+      out[to + 2] = bitmap[from + 2];
+      out[to + 3] = bitmap[from + 3];
+    }
+  }
+
+  return { bitmap: out, width: outWidth, height: outHeight };
 }
 
 /**
@@ -194,6 +283,19 @@ export async function preprocessOcrImage(
 
   try {
     const image = await (options.decode ?? decodeWithImageScript)(bytes);
+
+    // Before anything else, because every later step assumes the page is the right way up. A
+    // phone writes the sensor's pixels and records how to turn them; re-encoding drops that tag,
+    // and a page that looked upright everywhere would reach the model on its side.
+    const oriented = applyOrientation(
+      image.bitmap,
+      image.width,
+      image.height,
+      readJpegOrientation(bytes),
+    );
+    if (oriented.width !== image.width || oriented.bitmap !== image.bitmap) {
+      image.replace(oriented.width, oriented.height, oriented.bitmap);
+    }
 
     const longestEdge = Math.max(image.width, image.height);
     if (longestEdge > maxEdge) {
