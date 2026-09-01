@@ -281,7 +281,11 @@ jobs:
           if-no-files-found: error
 
   publish-extension-release:
-    needs: [secrets-scan, quality-gates, extension-release-bundle]
+    # After deploy-supabase, not before it: the publish uploads into a Storage bucket that
+    # `20260314000000_extension_release_bucket.sql` creates, and that migration is applied by
+    # deploy-supabase. The old order ran the upload first, which only worked because the bucket
+    # already existed in the live project.
+    needs: [secrets-scan, quality-gates, extension-release-bundle, deploy-supabase]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Extension Release
     environment: production
@@ -313,7 +317,10 @@ jobs:
         run: just extension-release-publish
 
   deploy-vercel-production:
-    needs: [secrets-scan, quality-gates, publish-extension-release]
+    # Not gated on the extension publish. Publishing a browser extension is an optional artifact
+    # of a release; on 2026-08-31 its failure on an unset secret skipped both production deploys
+    # for a merge that carried nothing either of them would have shipped. T-260901-w78.
+    needs: [secrets-scan, quality-gates]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -337,7 +344,8 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
-    needs: [secrets-scan, quality-gates, publish-extension-release]
+    # Same as above, and this is also the job the publish now waits for.
+    needs: [secrets-scan, quality-gates]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production
