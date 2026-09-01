@@ -773,6 +773,25 @@ CREATE TABLE "public"."record_attachments" (
 
 
 --
+-- Name: record_extraction_issues; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."record_extraction_issues" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "record_id" "uuid" NOT NULL,
+    "entity_kind" "text" NOT NULL,
+    "entity_label" "text",
+    "field" "text",
+    "received" "text",
+    "resolution" "text" NOT NULL,
+    "applied_fallback" "text",
+    "detail" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_extraction_issues_resolution_check" CHECK (("resolution" = ANY (ARRAY['replaced_with_default'::"text", 'dropped'::"text"])))
+);
+
+
+--
 -- Name: record_findings; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1288,6 +1307,14 @@ ALTER TABLE ONLY "public"."push_subscriptions"
 
 ALTER TABLE ONLY "public"."record_attachments"
     ADD CONSTRAINT "record_attachments_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: record_extraction_issues record_extraction_issues_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."record_extraction_issues"
+    ADD CONSTRAINT "record_extraction_issues_pkey" PRIMARY KEY ("id");
 
 
 --
@@ -2092,6 +2119,13 @@ CREATE INDEX "idx_record_attachments_sort_order" ON "public"."record_attachments
 
 
 --
+-- Name: idx_record_extraction_issues_record; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_record_extraction_issues_record" ON "public"."record_extraction_issues" USING "btree" ("record_id");
+
+
+--
 -- Name: idx_record_findings_body_site_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2808,6 +2842,14 @@ ALTER TABLE ONLY "public"."push_subscriptions"
 
 ALTER TABLE ONLY "public"."record_attachments"
     ADD CONSTRAINT "record_attachments_record_id_fkey" FOREIGN KEY ("record_id") REFERENCES "public"."medical_records"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: record_extraction_issues record_extraction_issues_record_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."record_extraction_issues"
+    ADD CONSTRAINT "record_extraction_issues_record_id_fkey" FOREIGN KEY ("record_id") REFERENCES "public"."medical_records"("id") ON DELETE CASCADE;
 
 
 --

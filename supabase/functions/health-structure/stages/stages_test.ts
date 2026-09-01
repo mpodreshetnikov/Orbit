@@ -1224,6 +1224,67 @@ Deno.test("a run that lost its record stops rather than finishing the parse", as
   assertEquals(bodies.length, 2);
 });
 
+// The defect this replaced: an out-of-vocabulary enum used to reject the whole insert. Now it
+// falls back and the correction is recorded, so the review screen can say what was substituted.
+Deno.test(
+  "a corrected value is reported as an issue, and the entity is still extracted",
+  async () => {
+    const { fetchFn } = recordingFetch((body) => {
+      const prompt = promptOf(body);
+      if (prompt.includes("describe it as a whole")) {
+        return jsonResponse({
+          record_type: "lab",
+          title: "CBC",
+          record_date: "2026-01-05",
+          summary: "s",
+          keywords: [],
+        });
+      }
+      if (prompt.includes("Extract clinical entities")) {
+        return jsonResponse({
+          observations: [
+            {
+              obs_name_text: "Гемоглобин",
+              value: "97",
+              status: "borderline",
+              source_anchor: "Гемоглобин 97 г/л",
+              confidence: 0.9,
+            },
+            // No analyte label at all: this one cannot be saved, only reported.
+            { value: "5", source_anchor: "Гемоглобин 97 г/л", confidence: 0.9 },
+          ],
+          findings: [],
+          conditions: [],
+        });
+      }
+      return jsonResponse({
+        findings_to_resolve: [],
+        conditions_to_resolve: [],
+        checkups_to_complete: [],
+      });
+    });
+
+    const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+    const outcome = await runStagedParse("Гемоглобин 97 г/л", context, {
+      fetchFn,
+      apiKey: "k",
+      defaultModel: "m",
+    });
+
+    // The good observation survived the bad status, which is the whole point.
+    assertEquals(outcome.structured.observations.length, 1);
+
+    const replaced = outcome.issues.find((issue) => issue.resolution === "replaced_with_default");
+    assertEquals(replaced?.entityKind, "observation");
+    assertEquals(replaced?.field, "observation.status");
+    assertEquals(replaced?.received, "borderline");
+
+    const dropped = outcome.issues.find((issue) => issue.resolution === "dropped");
+    assertEquals(dropped?.entityKind, "observation");
+    assertEquals(dropped?.field, null);
+    assertEquals(typeof dropped?.detail, "string");
+  },
+);
 // Between stages is not enough on its own: one stage is up to three attempts and their backoff,
 // so the gap between renewals could outrun the lease and the reaper would release a live run.
 Deno.test("a retrying stage renews while it waits", async () => {
@@ -1297,4 +1358,138 @@ Deno.test("a stage stops mid-retry when the record has been taken over", async (
   // Classify and extract each made their first attempt and then stopped; neither retried into a
   // record it no longer owns.
   assertEquals(calls, 2);
+});
+
+// A shared issue list cannot tell "corrected" from "never written": an entity whose value was
+// coerced and which is then dropped would be reported as both, which contradicts itself.
+Deno.test("a dropped entity reports no correction for a value that was never saved", async () => {
+  const { fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "imaging",
+        title: "US",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    if (prompt.includes("Extract clinical entities")) {
+      return jsonResponse({
+        observations: [],
+        findings: [
+          {
+            // A severity outside the vocabulary *and* an anchor that is not in the document.
+            finding_type_text: "Полип",
+            severity: "catastrophic",
+            source_anchor: "нет такой строки в документе",
+            confidence: 0.9,
+          },
+        ],
+        conditions: [],
+      });
+    }
+    return jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    });
+  });
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  const outcome = await runStagedParse("Гемоглобин 97 г/л", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "m",
+  });
+
+  assertEquals(outcome.structured.findings.length, 0);
+  const forFinding = outcome.issues.filter((issue) => issue.entityKind === "finding");
+  assertEquals(forFinding.length, 1);
+  assertEquals(forFinding[0].resolution, "dropped");
+  // And the drop names which finding it was, so the reviewer can look for it in the document.
+  assertEquals(forFinding[0].entityLabel, "Полип");
+});
+
+// The document's own date decides where the record sits in the patient's timeline, and nothing
+// else in the record says it was discarded.
+Deno.test("a discarded document date is reported like any other correction", async () => {
+  const { fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "March 2026",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    if (prompt.includes("Extract clinical entities")) {
+      return jsonResponse({ observations: [], findings: [], conditions: [] });
+    }
+    return jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    });
+  });
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  const outcome = await runStagedParse("Гемоглобин 97 г/л", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "m",
+  });
+
+  assertEquals(outcome.structured.record_date, null);
+  const forRecord = outcome.issues.find((issue) => issue.entityKind === "record");
+  assertEquals(forRecord?.field, "record.record_date");
+  assertEquals(forRecord?.received, "March 2026");
+});
+
+// An analyte's name is what a reviewer scans the panel for; a field name is not.
+Deno.test("a correction names the row it was made on", async () => {
+  const { fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    if (prompt.includes("Extract clinical entities")) {
+      return jsonResponse({
+        observations: [
+          {
+            obs_name_text: "Гемоглобин",
+            value: "97",
+            status: "borderline",
+            source_anchor: "Гемоглобин 97 г/л",
+            confidence: 0.9,
+          },
+        ],
+        findings: [],
+        conditions: [],
+      });
+    }
+    return jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    });
+  });
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  const outcome = await runStagedParse("Гемоглобин 97 г/л", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "m",
+  });
+
+  const issue = outcome.issues.find((candidate) => candidate.field === "observation.status");
+  assertEquals(issue?.entityLabel, "Гемоглобин");
 });

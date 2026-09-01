@@ -20,6 +20,7 @@ function createRepositoryMock(): HealthStructureRepository {
   return {
     authenticateAllowedUser: async () => ({ id: "user-1", email: "user@example.com" }),
     renewClaim: async () => true,
+    replaceRecordExtractionIssues: async () => {},
     getAttachments: async () => [],
     downloadAttachment: async () => null,
     getRecord: async () => ({

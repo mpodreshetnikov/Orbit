@@ -11,7 +11,7 @@ import {
 
 export { StagedParseClaimLostError };
 import type { HealthStructureParseContext } from "../service.ts";
-import type { StructuredDataWithEntities } from "../types.ts";
+import type { ExtractionIssue, StructuredDataWithEntities } from "../types.ts";
 
 export interface StagedParseDeps {
   fetchFn: typeof fetch;
@@ -44,6 +44,8 @@ export interface StagedParseOutcome {
   usage: StageUsage;
   rejected: StageRejection[];
   stagesRun: string[];
+  /** Value-level corrections, for the record rather than for a log line. */
+  issues: ExtractionIssue[];
 }
 
 function stageContext(deps: StagedParseDeps, model: string, effort?: StageContext["effort"]) {
@@ -142,5 +144,6 @@ export async function runStagedParse(
     ),
     rejected: [...classify.rejected, ...extract.rejected, ...reconcile.rejected],
     stagesRun,
+    issues: [...(classify.issues ?? []), ...(extract.issues ?? []), ...(reconcile.issues ?? [])],
   };
 }

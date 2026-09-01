@@ -50,6 +50,8 @@ export interface HealthStructureRepository extends ResolutionRepository {
   ): Promise<void>;
   replaceRecordObservations(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   replaceRecordFindings(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
+  /** Replace the record's extraction issues, so a re-run does not stack yesterday's. */
+  replaceRecordExtractionIssues(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   clearConditionRecords(recordId: string): Promise<void>;
 }
 
@@ -328,6 +330,27 @@ export function createSupabaseHealthStructureRepository(
     if (error) throw new Error(`Failed to insert findings: ${error.message}`);
   }
 
+  async function replaceRecordExtractionIssues(
+    recordId: string,
+    rows: Record<string, unknown>[],
+  ): Promise<void> {
+    // Checked, unlike a fire-and-forget delete: a delete that failed turns "replace" into
+    // "append" for a run with corrections, and into "keep the old warnings" for a clean one --
+    // and the clean case is the one that would silently report a problem that no longer exists.
+    const { error: deleteError } = await admin
+      .from("record_extraction_issues")
+      .delete()
+      .eq("record_id", recordId);
+    if (deleteError) {
+      throw new Error(`Failed to clear extraction issues: ${deleteError.message}`);
+    }
+    if (rows.length === 0) return;
+    const { error } = await admin
+      .from("record_extraction_issues")
+      .insert(rows as Database["public"]["Tables"]["record_extraction_issues"]["Insert"][]);
+    if (error) throw new Error(`Failed to insert extraction issues: ${error.message}`);
+  }
+
   async function clearConditionRecords(recordId: string): Promise<void> {
     await admin.from("condition_records").delete().eq("record_id", recordId);
   }
@@ -424,6 +447,7 @@ export function createSupabaseHealthStructureRepository(
     updateMedicalRecord,
     replaceRecordObservations,
     replaceRecordFindings,
+    replaceRecordExtractionIssues,
     clearConditionRecords,
     findConditionByIcd,
     findConditionByName,
