@@ -6,10 +6,12 @@ import {
 } from "./import-runner.js";
 import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
+import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
 
 export interface BackgroundMessage {
   type: string;
   session?: Record<string, unknown>;
+  grant?: unknown;
   session_id?: string;
   source?: string;
   payer_person_id?: string;
@@ -38,6 +40,7 @@ type BackgroundImportRunnerDeps = ImportRunnerDeps & {
 
 export interface BackgroundRouterDeps {
   sessionStore: SessionStore;
+  grantStore: GrantStore;
   importRunnerDeps: BackgroundImportRunnerDeps;
   debugStore: ImportDebugStore;
 }
@@ -260,6 +263,39 @@ export async function routeBackgroundMessage(
       extension_id: resolveRuntimeExtensionId(),
       extension_version: resolveExtensionVersion(),
     };
+  }
+
+  if (message.type === "MONEY_IMPORT_SET_GRANT") {
+    const hostPermissions = chrome?.runtime?.getManifest?.()?.host_permissions ?? [];
+    const grant = parseIncomingGrant(message.grant, hostPermissions, new Date().toISOString());
+    // Refusing is the whole point of the parse: the bridge listens on window.postMessage, so
+    // anything on the app's page can send one of these, and the function_url is where the token
+    // would later be sent.
+    if (!grant) return { ok: false, error: "Grant payload was rejected" };
+
+    await deps.grantStore.setGrant(grant);
+    return { ok: true };
+  }
+
+  if (message.type === "MONEY_IMPORT_GET_GRANT") {
+    const grant = await deps.grantStore.getGrant();
+    // The token is deliberately not returned. The app has no use for it -- it issued it -- and
+    // a reply carrying it would put the secret back on a page it has already left.
+    return {
+      ok: true,
+      grant: grant
+        ? {
+            person_id: grant.person_id,
+            allowed_sources: grant.allowed_sources,
+            received_at: grant.received_at,
+          }
+        : null,
+    };
+  }
+
+  if (message.type === "MONEY_IMPORT_CLEAR_GRANT") {
+    await deps.grantStore.setGrant(null);
+    return { ok: true };
   }
 
   if (message.type === "MONEY_IMPORT_START_SESSION") {

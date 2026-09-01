@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import extensionManifest from "../../manifest.json";
 import { createImportDebugStore } from "./import-debug.js";
 import { routeBackgroundMessage } from "./background-router.js";
+import type { StoredImportGrant } from "./grant-store.js";
 
 describe("background-router", () => {
   function createDeferred<T>() {
@@ -16,6 +17,10 @@ describe("background-router", () => {
 
   function createDeps() {
     return {
+      grantStore: {
+        getGrant: vi.fn(async (): Promise<StoredImportGrant | null> => null),
+        setGrant: vi.fn(async () => {}),
+      },
       sessionStore: {
         getSession: vi.fn(),
         setSession: vi.fn(),
@@ -30,6 +35,79 @@ describe("background-router", () => {
       debugStore: createImportDebugStore(),
     };
   }
+
+  it("stores a grant the app sends, and refuses one pointed elsewhere", async () => {
+    const deps = createDeps();
+    const permitted = extensionManifest.host_permissions?.[0] ?? "";
+    const host = /^https:\/\/([^/]+)\//.exec(permitted)?.[1];
+    // Skip rather than assert a false thing if the manifest ever ships without one.
+    if (!host) return;
+
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_SET_GRANT",
+          grant: {
+            token: "plain-token",
+            person_id: "person-1",
+            allowed_sources: ["tbank_web"],
+            function_url: `https://${host}/functions/v1/money-import`,
+          },
+        },
+        deps,
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(deps.grantStore.setGrant).toHaveBeenCalledTimes(1);
+
+    // Anything on the app's page can post one of these; the url is where the token would go.
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_SET_GRANT",
+          grant: {
+            token: "plain-token",
+            person_id: "person-1",
+            allowed_sources: ["tbank_web"],
+            function_url: "https://attacker.example/functions/v1/money-import",
+          },
+        },
+        deps,
+      ),
+    ).resolves.toEqual({ ok: false, error: "Grant payload was rejected" });
+    expect(deps.grantStore.setGrant).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a held grant without handing the token back to the page", async () => {
+    const deps = createDeps();
+    deps.grantStore.getGrant.mockResolvedValue({
+      token: "plain-token",
+      person_id: "person-1",
+      allowed_sources: ["tbank_web"],
+      function_url: "https://example.supabase.co/functions/v1/money-import",
+      app_origin: "https://orbit.example",
+      received_at: "2026-09-01T12:00:00.000Z",
+    });
+
+    const reply = await routeBackgroundMessage({ type: "MONEY_IMPORT_GET_GRANT" }, deps);
+    expect(reply).toEqual({
+      ok: true,
+      grant: {
+        person_id: "person-1",
+        allowed_sources: ["tbank_web"],
+        received_at: "2026-09-01T12:00:00.000Z",
+      },
+    });
+    // The secret has already left the page once. It does not go back.
+    expect(JSON.stringify(reply)).not.toContain("plain-token");
+  });
+
+  it("clears a grant on request", async () => {
+    const deps = createDeps();
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_CLEAR_GRANT" }, deps),
+    ).resolves.toEqual({ ok: true });
+    expect(deps.grantStore.setGrant).toHaveBeenCalledWith(null);
+  });
 
   it("handles ping + unsupported message", async () => {
     const deps = createDeps();

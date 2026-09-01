@@ -20,6 +20,16 @@ interface MoneyImportGrantsProps {
   personId: string | null;
   /** Extension-backed sources a grant may be issued for. */
   availableSources: Array<{ sourceId: string; label: string }>;
+  /**
+   * Hands the key to the extension, resolving on its acknowledgement. False means the extension
+   * did not take it -- not installed, too old, or it refused the payload -- and the key is then
+   * only recoverable from this screen, so the panel says so instead of claiming delivery.
+   */
+  onSendToExtension: (grant: {
+    token: string;
+    personId: string;
+    allowedSources: string[];
+  }) => Promise<boolean>;
 }
 
 function describeGrantState(
@@ -45,7 +55,12 @@ function describeGrantState(
  * own. The token is shown exactly once — only its hash is stored — so the only recovery from
  * losing it is issuing another one.
  */
-export function MoneyImportGrants({ t, personId, availableSources }: MoneyImportGrantsProps) {
+export function MoneyImportGrants({
+  t,
+  personId,
+  availableSources,
+  onSendToExtension,
+}: MoneyImportGrantsProps) {
   const { data: grants, isLoading, isError, refetch } = useMoneyImportGrants();
   const createGrant = useCreateMoneyImportGrant();
   const revokeGrant = useRevokeMoneyImportGrant();
@@ -120,6 +135,28 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
       toast.success(t("money.importGrantCreated"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("money.importGrantCreateFailed"));
+    }
+  };
+
+  const [sending, setSending] = useState(false);
+
+  const handleSendToExtension = async () => {
+    if (!issuedToken || !personId) return;
+    setSending(true);
+    try {
+      const delivered = await onSendToExtension({
+        token: issuedToken,
+        personId,
+        allowedSources: selectedSources,
+      });
+      if (delivered) {
+        toast.success(t("money.importGrantSentToExtension"));
+        setIssuedToken(null);
+        return;
+      }
+      toast.error(t("money.importGrantSendFailed"));
+    } finally {
+      setSending(false);
     }
   };
 
@@ -201,7 +238,15 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
               {issuedToken}
             </code>
             <div className="flex gap-2">
-              <Button type="button" size="sm" onClick={handleCopyToken}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleSendToExtension()}
+                disabled={sending}
+              >
+                {t("money.importGrantSendToExtension")}
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={handleCopyToken}>
                 {t("money.importGrantCopy")}
               </Button>
               <Button
