@@ -78,10 +78,9 @@ describe("use-structure-extraction", () => {
       response = await result.current.extractStructure({ recordId: "record-1" });
     });
 
-    expect(fromMock).toHaveBeenCalledWith("medical_records");
-    // The retry clears the previous failure, the way the edge function clears it on success.
-    expect(updateMock).toHaveBeenCalledWith({ status: "structuring", structure_error: null });
-    expect(eqMock).toHaveBeenCalledWith("id", "record-1");
+    // The status transition belongs to the edge function, which takes its owning claim in the
+    // same update; writing `structuring` here first would defeat that claim.
+    expect(updateMock).not.toHaveBeenCalled();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-records"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-record", "record-1"] });
     expect(response).toEqual({
@@ -137,5 +136,44 @@ describe("use-structure-extraction", () => {
       success: false,
       error: "Not authenticated",
     });
+  });
+
+  it("stands down when another run already owns the record", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example";
+    const eqMock = vi.fn().mockResolvedValue({ error: null });
+    const updateMock = vi.fn(() => ({ eq: eqMock }));
+    createClientMock.mockReturnValue({
+      auth: {
+        getSession: vi.fn().mockResolvedValue({
+          data: { session: { access_token: "token-1" } },
+        }),
+      },
+      from: vi.fn(() => ({ update: updateMock })),
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        statusText: "Conflict",
+        text: async () => "Structuring is already running for this record",
+        json: async () => ({ success: false }),
+      })),
+    );
+
+    const { useStructureExtraction } = await import("./use-structure-extraction");
+    const { result } = renderHookWithQueryClient(() => useStructureExtraction());
+
+    let response: { success: boolean; alreadyRunning?: boolean } | undefined;
+    await act(async () => {
+      response = await result.current.extractStructure({ recordId: "record-1" });
+    });
+
+    // Not an error the user caused, and not a reason to roll the record back: the owning run
+    // decides its status.
+    expect(response?.alreadyRunning).toBe(true);
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
   });
 });

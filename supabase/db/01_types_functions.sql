@@ -45,6 +45,8 @@ BEGIN;
 
 -- Conditions functions
 \i functions/get_record_conditions.sql
+\i functions/claim_medical_record.sql
+\i functions/release_abandoned_record_processing.sql
 \i functions/get_person_conditions_with_history.sql
 
 -- Notification routing functions

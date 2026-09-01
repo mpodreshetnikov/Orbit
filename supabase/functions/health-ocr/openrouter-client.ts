@@ -95,6 +95,12 @@ function createSystemPrompt(requestTitle: boolean): string {
     "Preserve numbers, units and reference ranges character for character — they are lab values and a changed digit is a changed diagnosis.",
     "Do not translate, correct, summarise, reorder or complete anything. Transcribe only what is visible.",
     "Where text is illegible, write [нрзб] rather than guessing at it.",
+    // A lab report is a table, and flattening one to prose is where a value ends up beside the
+    // wrong analyte's unit or reference range. The structure is part of what is printed.
+    "Write the transcription as GitHub-flavoured Markdown.",
+    "Where the document lays content out as a table, transcribe it as a Markdown table with the same rows and columns, so each value stays with its own analyte, unit and reference range.",
+    "Keep a cell empty when the document leaves it empty. Never move a value into a neighbouring column to fill a gap.",
+    "Text that is not tabular stays plain text. Do not invent headings, bullets or emphasis the document does not have.",
   ];
   lines.push(
     requestTitle

@@ -135,6 +135,11 @@ export interface OcrResult {
 
 export interface HealthOcrResponse {
   success: boolean;
+  /**
+   * The request was accepted and the transcription is running server-side. The text is not in
+   * this response and never will be: the record's status is what reports the outcome.
+   */
+  accepted?: boolean;
   ocr_text?: string;
   char_count?: number;
   /** Document name suggested by OCR LLM; shown instead of "Processing" */

@@ -1,6 +1,8 @@
 import { callOpenRouterParse } from "./openrouter-parse.ts";
 import { runStagedParse } from "./stages/index.ts";
+import { preprocessOcrImage } from "../_shared/image-preprocess.ts";
 import { parseStructuredDataE2EStub } from "./e2e-stub-parse.ts";
+import { loadRecordPageImages } from "./page-images.ts";
 import {
   createSupabaseHealthStructureRepository,
   type HealthStructureRepository,
@@ -26,6 +28,8 @@ export interface HealthStructureDeps {
     context: HealthStructureParseContext,
   ) => Promise<StructuredParseOutcome>;
   lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
+  /** Load the record's pages for the extraction stage; absent when there is nothing to load. */
+  loadPageImages?: (recordId: string) => Promise<string[]>;
   log?: Pick<Console, "log" | "warn" | "error">;
 }
 
@@ -36,6 +40,8 @@ function createMissingEnvRepository(): HealthStructureRepository {
   return {
     authenticateAllowedUser: () => Promise.resolve(null),
     getRecord: fail,
+    getAttachments: fail,
+    downloadAttachment: fail,
     fetchObservationCatalog: fail,
     fetchFindingTypeCatalog: fail,
     fetchBodySiteCatalog: fail,
@@ -93,6 +99,13 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
     rawParseMode === "e2e_stub" ? "e2e_stub" : "openrouter";
   const hasSupabaseEnv = Boolean(supabaseUrl && supabaseServiceRoleKey);
 
+  const repository = hasSupabaseEnv
+    ? createSupabaseHealthStructureRepository({
+        supabaseUrl: supabaseUrl ?? undefined,
+        supabaseServiceRoleKey: supabaseServiceRoleKey ?? undefined,
+      })
+    : createMissingEnvRepository();
+
   return {
     config: {
       openRouterApiKey: openRouterApiKey ?? undefined,
@@ -102,12 +115,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
       openRouterTimeoutMs,
       parseMode,
     },
-    repository: hasSupabaseEnv
-      ? createSupabaseHealthStructureRepository({
-          supabaseUrl: supabaseUrl ?? undefined,
-          supabaseServiceRoleKey: supabaseServiceRoleKey ?? undefined,
-        })
-      : createMissingEnvRepository(),
+    repository,
     parseStructuredData: async (ocrText, context) => {
       if (parseMode === "e2e_stub") {
         return {
@@ -160,6 +168,20 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
       // fallback pipeline, so its cost stays unknown rather than being reported as zero.
       return { structured, usage: emptyLlmUsage(), stagesRun: [] };
     },
+    // Only the staged pipeline reads them. The E2E stub structures from a marker in the text and
+    // never calls a model, and the monolithic fallback is text-only -- downloading and decoding
+    // four attachments for either would be latency and memory spent on nothing, and the
+    // monolithic path is the rollout escape hatch, where that matters most.
+    loadPageImages:
+      parseMode === "e2e_stub" || pipelineMode !== "staged" || !hasSupabaseEnv
+        ? undefined
+        : (recordId: string) =>
+            loadRecordPageImages(recordId, {
+              getAttachments: (id) => repository.getAttachments(id),
+              downloadAttachment: (path) => repository.downloadAttachment(path),
+              preprocessImage: preprocessOcrImage,
+              log: console,
+            }),
     lookupIcdCode: async (code) => {
       if (!supabaseUrl || !supabaseServiceRoleKey) return null;
       try {

@@ -271,3 +271,34 @@ Deno.test(
     );
   },
 );
+
+// Only the staged pipeline reads the pages. Wiring the loader for the other modes would download
+// and decode four attachments before a call that ignores them -- and the monolithic path is the
+// rollout escape hatch, where that latency is least welcome.
+Deno.test("page images are loaded only for the staged pipeline", async () => {
+  await withEnv(
+    {
+      OPENROUTER_API_KEY: "key",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+      HEALTH_STRUCTURE_PIPELINE_MODE: "staged",
+    },
+    async () => {
+      const { createDefaultHealthStructureDeps } = await importDepsModule("staged-pages");
+      assertEquals(typeof createDefaultHealthStructureDeps().loadPageImages, "function");
+    },
+  );
+
+  await withEnv(
+    {
+      OPENROUTER_API_KEY: "key",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+      HEALTH_STRUCTURE_PIPELINE_MODE: "monolithic",
+    },
+    async () => {
+      const { createDefaultHealthStructureDeps } = await importDepsModule("monolithic-pages");
+      assertEquals(createDefaultHealthStructureDeps().loadPageImages, undefined);
+    },
+  );
+});

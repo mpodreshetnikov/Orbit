@@ -16,6 +16,8 @@ interface StructureExtractionResult {
   success: boolean;
   structured_data?: StructuredData;
   error?: string;
+  /** The edge function refused because another run already owns this record. */
+  alreadyRunning?: boolean;
 }
 
 export function useStructureExtraction() {
@@ -40,12 +42,9 @@ export function useStructureExtraction() {
         }
 
         // Update record status to "structuring"
-        // A previous failure belongs to the previous run; the retry clears it the way the edge
-        // function clears it on success.
-        await supabase
-          .from("medical_records")
-          .update({ status: "structuring", structure_error: null })
-          .eq("id", recordId);
+        // The status transition belongs to the edge function: it takes an owning claim in the
+        // same conditional update, which a client-side write ahead of the call would defeat --
+        // both callers would already see `structuring` and both would proceed.
 
         // Call health-structure edge function
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -71,6 +70,13 @@ export function useStructureExtraction() {
             },
           },
         );
+
+        if (response.status === 409) {
+          // Another run already owns this record. Not this caller's failure, and not something
+          // to roll the record back over: the run that owns it decides its status.
+          queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+          return { success: false, error: "already_running", alreadyRunning: true };
+        }
 
         if (!response.ok) {
           const errorText = await response.text();

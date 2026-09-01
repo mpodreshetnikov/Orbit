@@ -19,6 +19,8 @@ function parsed(
 function createRepositoryMock(): HealthStructureRepository {
   return {
     authenticateAllowedUser: async () => ({ id: "user-1", email: "user@example.com" }),
+    getAttachments: async () => [],
+    downloadAttachment: async () => null,
     getRecord: async () => ({
       id: "record-1",
       person_id: "person-1",
@@ -31,6 +33,7 @@ function createRepositoryMock(): HealthStructureRepository {
     fetchPersonConditions: async () => [],
     fetchPersonActiveFindings: async () => [],
     fetchUpcomingOverdueCheckupItems: async () => [],
+    claimRecord: async () => "run-1",
     updateMedicalRecord: async () => {},
     replaceRecordObservations: async () => {},
     replaceRecordFindings: async () => {},
