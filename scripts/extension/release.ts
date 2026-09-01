@@ -15,6 +15,16 @@ const CHROME_EXTENSION_ID_ALPHABET = "abcdefghijklmnop";
 const EXTENSION_RELEASE_BUCKET = "extension-releases";
 const EXTENSION_RELEASE_LATEST_PATH = "latest.json";
 const EXTENSION_RELEASE_MANIFEST_PATH = "browserExtension/manifest.json";
+/**
+ * The bucket's `allowed_mime_types` is an exact-match list of
+ * `["application/zip", "application/json"]`, and Storage compares the whole
+ * header including its parameters. Sending `application/json; charset=utf-8`
+ * is therefore rejected -- which is what left 0.1.3 published as a zip with no
+ * latest.json pointing at it. The parameter carried nothing anyway: JSON is
+ * UTF-8 by definition (RFC 8259 section 8.1).
+ */
+const EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE = "application/zip";
+const EXTENSION_RELEASE_METADATA_CONTENT_TYPE = "application/json";
 const EXTENSION_RELEASE_DIST_DIR = "browserExtension/dist";
 const DEFAULT_ARTIFACT_DIR = ".artifacts/extension-release";
 
@@ -728,7 +738,7 @@ export async function publishPreparedExtensionRelease(
     .from(EXTENSION_RELEASE_BUCKET)
     .upload(artifactRelativePath, artifactContent, {
       upsert: true,
-      contentType: "application/zip",
+      contentType: EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
     });
   if (artifactUpload.error) {
     throw new Error(`Failed to upload extension artifact: ${artifactUpload.error.message}`);
@@ -738,7 +748,7 @@ export async function publishPreparedExtensionRelease(
     .from(EXTENSION_RELEASE_BUCKET)
     .upload(EXTENSION_RELEASE_LATEST_PATH, latestMetadataContent, {
       upsert: true,
-      contentType: "application/json; charset=utf-8",
+      contentType: EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
     });
   if (latestUpload.error) {
     throw new Error(`Failed to upload extension release metadata: ${latestUpload.error.message}`);
@@ -911,6 +921,8 @@ if (invokedScript === import.meta.url) {
 
 export {
   DEFAULT_ARTIFACT_DIR,
+  EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+  EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
   EXTENSION_RELEASE_BUCKET,
   EXTENSION_RELEASE_LATEST_PATH,
   ZERO_SHA,

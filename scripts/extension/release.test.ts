@@ -6,6 +6,8 @@ import {
   buildExtensionReleaseMetadata,
   buildSupabaseStoragePublicUrl,
   compareExtensionVersions,
+  EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+  EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
   createZipArchive,
   deriveChromeExtensionIdFromKey,
   detectManifestVersionChange,
@@ -446,5 +448,26 @@ describe("ordering the published release against the manifest", () => {
     // evidence, so neither may decide.
     expect(fallback(undefined)).toEqual([true, false]);
     expect(fallback("garbage")).toEqual([true, false]);
+  });
+});
+
+describe("the content types the publish sends", () => {
+  it("sends no parameters, because the bucket matches the whole header", () => {
+    // storage.buckets.allowed_mime_types for extension-releases is the exact
+    // list ["application/zip", "application/json"], and Storage compares the
+    // header including its parameters. Sending "application/json; charset=utf-8"
+    // was rejected with `mime type ... is not supported`, which published 0.1.3
+    // as a zip with no latest.json pointing at it. The parameter carried
+    // nothing: JSON is UTF-8 by definition.
+    expect(EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE).toBe("application/zip");
+    expect(EXTENSION_RELEASE_METADATA_CONTENT_TYPE).toBe("application/json");
+
+    for (const contentType of [
+      EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+      EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
+    ]) {
+      expect(contentType).not.toContain(";");
+      expect(contentType.trim()).toBe(contentType);
+    }
   });
 });
