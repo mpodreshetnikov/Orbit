@@ -253,6 +253,72 @@ Deno.test("money-fx-sync does not look up a user when the cron token matches", a
   assertEquals(lookups, 0);
 });
 
+/**
+ * A client stub for the default verifier: GoTrue resolves the token, and
+ * `allowed_users` answers according to `allowed`.
+ */
+function createAllowlistClientFn(input: { userId: string; email: string; allowed: boolean }) {
+  return (() => ({
+    auth: {
+      getUser: () =>
+        Promise.resolve({
+          data: { user: { id: input.userId, email: input.email } },
+          error: null,
+        }),
+    },
+    from: (table: string) => {
+      if (table !== "allowed_users") throw new Error(`Unexpected table: ${table}`);
+      return {
+        select: () => ({
+          or: () => ({
+            single: () =>
+              input.allowed
+                ? { data: { id: "allowed-row" }, error: null }
+                : { data: null, error: { message: "No rows found" } },
+          }),
+        }),
+      };
+    },
+  })) as unknown as typeof createClient;
+}
+
+function createAllowlistHandler(allowed: boolean) {
+  return createMoneyFxSyncHandler({
+    supabaseUrl: "http://localhost:54321",
+    supabaseServiceRoleKey: "service-role-key",
+    syncToken: "fx-sync-token",
+    createClientFn: createAllowlistClientFn({
+      userId: "user-1",
+      email: "someone@example.test",
+      allowed,
+    }),
+    fetchFn: () => {
+      throw new Error("fetch must not run for these cases");
+    },
+  });
+}
+
+Deno.test("money-fx-sync accepts a user the app admits", async () => {
+  const response = await createAllowlistHandler(true)(
+    authenticatedRequest("user-access-token", JSON.stringify({ quote_currencies: [] })),
+  );
+
+  assertEquals(response.status, 400);
+  assertEquals(await response.json(), { error: "quote_currencies must not be empty" });
+});
+
+Deno.test("money-fx-sync rejects a signed-in user who is not in allowed_users", async () => {
+  // Sign-ups are open, so a resolvable token is not by itself permission. What
+  // gates the rest of the app is public.allowed_users, enforced through RLS --
+  // which this function, running as the service role, does not go through.
+  const response = await createAllowlistHandler(false)(
+    authenticatedRequest("stranger-access-token", JSON.stringify({ quote_currencies: [] })),
+  );
+
+  assertEquals(response.status, 401);
+  assertEquals(await response.json(), { error: "Unauthorized" });
+});
+
 Deno.test("money-fx-sync refuses to run when no token is configured", async () => {
   const handler = createAuthOnlyHandler(undefined);
   const response = await handler(

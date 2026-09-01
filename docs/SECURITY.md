@@ -23,9 +23,6 @@ Common variables used by this repo:
   - `NEXT_PUBLIC_EXTENSION_ID`
 - Server/API:
   - `SUPABASE_SERVICE_ROLE_KEY`
-  - `MONEY_FX_SYNC_TOKEN` (shared secret the `money-fx-sync` function accepts from the
-    scheduled caller; the same value is stored in Supabase Vault as `money_fx_sync_token`
-    so the `pg_cron` job can present it)
   - `DATABASE_URL` (for remote DB deploy script)
   - `MCP_SERVER_ENABLED` (master switch for the MCP connector; all its routes 404 without it)
   - `SUPABASE_JWT_SECRET` (mints short-lived user JWTs for MCP tool calls)
@@ -38,6 +35,9 @@ Common variables used by this repo:
   - `VAPID_PUBLIC_KEY`
   - `VAPID_PRIVATE_KEY`
   - `SUPABASE_SERVICE_ROLE_KEY`
+  - `MONEY_FX_SYNC_TOKEN` (shared secret the `money-fx-sync` function accepts from the
+    scheduled caller; the same value is stored in Supabase Vault as `money_fx_sync_token`
+    so the `pg_cron` job can present it)
 - GitHub Actions deploy pipeline (`.github/workflows/main.yml`):
   - Secrets: `VERCEL_TOKEN`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASS`
   - Variables: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `SUPABASE_PROJECT_REF`

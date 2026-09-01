@@ -326,13 +326,18 @@ function bearerToken(req: Request): string | null {
 }
 
 /**
- * Whether the bearer belongs to a signed-in user. The web app reaches this
- * function from the browser -- `useMoneyBudgetReport` syncs the report window
- * before reading it -- and a browser cannot hold the cron secret, so rejecting
- * everything but that secret would take the budget report down with it.
+ * Whether the bearer belongs to a signed-in user this app admits. The web app
+ * reaches this function from the browser -- `useMoneyBudgetReport` syncs the
+ * report window before reading it -- and a browser cannot hold the cron secret,
+ * so rejecting everything but that secret would take the budget report down
+ * with it.
  *
- * A signed-in user is not granted anything new here: the window it can ask for
- * writes shared reference rates, which every signed-in user already reads.
+ * Resolving the token is not enough on its own. Sign-ups are open in
+ * `supabase/config.toml`, so any stranger can hold a token GoTrue resolves; what
+ * gates the rest of the app is `public.allowed_users`, enforced through RLS.
+ * This function runs with the service role and so sees none of that, which is
+ * exactly why every other service-role function checks the table by hand. The
+ * same check goes here, in the same shape as `money-import`'s.
  */
 function createDefaultUserVerifier(input: {
   createClientFn: typeof createClient;
@@ -346,7 +351,16 @@ function createDefaultUserVerifier(input: {
         auth: { persistSession: false, autoRefreshToken: false },
       });
       const { data, error } = await client.auth.getUser(accessToken);
-      return !error && Boolean(data?.user);
+      const user = data?.user;
+      if (error || !user) return false;
+
+      const { data: allowedUser, error: allowlistError } = await client
+        .from("allowed_users")
+        .select("id")
+        .or(`auth_user_id.eq.${user.id},email.eq.${user.email}`)
+        .single();
+
+      return !allowlistError && Boolean(allowedUser);
     } catch {
       // A token that GoTrue will not resolve is not a user, and neither is a
       // client that cannot be built. Both are the same answer: no.
