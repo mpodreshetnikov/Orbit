@@ -7,8 +7,8 @@ import {
   buildSupabaseStoragePublicUrl,
   compareExtensionVersions,
   assertReleaseMayBePublished,
-  EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL,
-  EXTENSION_RELEASE_METADATA_CACHE_CONTROL,
+  EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
+  EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
   fetchPublishedExtensionVersionFromStorage,
   mayPublishOverPublished,
   EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
@@ -528,12 +528,14 @@ describe("re-reading production at upload time", () => {
     expect(may({ status: "absent" })).toBe(true);
   });
 
-  it("does not block the upload on an answer it cannot use", () => {
-    // A transient Storage error is not a reason to drop a release: without this
-    // guard the upload would simply have happened.
-    expect(may({ status: "unknown", reason: "network" })).toBe(true);
-    expect(may({ status: "published", version: "not-a-version" })).toBe(true);
-    expect(may(undefined)).toBe(true);
+  it("fails closed on an answer it cannot use", () => {
+    // Deciding whether to overwrite what is already published, there is no second
+    // signal to fall back to. Allowing the write would disable the rollback guard
+    // at exactly the moment it cannot be checked. A refused job can be re-run; an
+    // overwritten release cannot.
+    expect(may({ status: "unknown", reason: "network" })).toBe(false);
+    expect(may({ status: "published", version: "not-a-version" })).toBe(false);
+    expect(may(undefined)).toBe(false);
   });
 });
 
@@ -633,6 +635,20 @@ describe("the publish-time gate", () => {
     ).rejects.toThrow(/already published/);
   });
 
+  it("refuses, and says so, when production cannot be read", async () => {
+    const failing = {
+      storage: {
+        from: () => ({
+          download: () => Promise.resolve({ data: null, error: { status: 503, message: "down" } }),
+        }),
+      },
+    };
+
+    await expect(
+      assertReleaseMayBePublished({ client: failing, releaseVersion: "0.1.3" }),
+    ).rejects.toThrow(/could not be read[\s\S]*Re-run this job/);
+  });
+
   it("allows an older release to be replaced, and a first publish", async () => {
     await expect(
       assertReleaseMayBePublished({ client: clientPublishing("0.1.2"), releaseVersion: "0.1.3" }),
@@ -668,15 +684,26 @@ describe("the publish-time gate", () => {
 });
 
 describe("how long each object may be cached", () => {
-  it("keeps the pointer fresh and the archive immutable", () => {
-    // Supabase defaults an upload to max-age=3600. On latest.json that served an
-    // hour-old pointer to every reader — the extension checking for an update,
-    // and the publish gate checking what is already out.
-    expect(EXTENSION_RELEASE_METADATA_CACHE_CONTROL).toBe("no-cache");
-    expect(EXTENSION_RELEASE_METADATA_CACHE_CONTROL).not.toMatch(/max-age=[1-9]/);
+  it("passes durations, because the upload API builds the header itself", () => {
+    // @supabase/storage-js sets `cache-control: max-age=${cacheControl}`. A full
+    // directive here produces `max-age=no-cache`, which no cache can parse —
+    // worse than the default it was meant to replace. Both values must be bare
+    // second counts.
+    for (const value of [
+      EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
+      EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
+    ]) {
+      expect(value).toMatch(/^\d+$/);
+    }
+  });
 
+  it("keeps the pointer uncached and the archive cached for a year", () => {
+    // Supabase defaults an upload to 3600. On latest.json that served an
+    // hour-old pointer to every reader — the extension checking for an update
+    // among them.
+    expect(EXTENSION_RELEASE_METADATA_CACHE_SECONDS).toBe("0");
     // An archive is content-addressed by the version in its path, so it never
     // changes once written.
-    expect(EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL).toMatch(/immutable/);
+    expect(Number(EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS)).toBeGreaterThan(86400);
   });
 });

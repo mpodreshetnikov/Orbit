@@ -27,17 +27,22 @@ const EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE = "application/zip";
 const EXTENSION_RELEASE_METADATA_CONTENT_TYPE = "application/json";
 
 /**
+ * These are **durations in seconds**, not Cache-Control values. The upload API
+ * builds the header itself as `max-age=${cacheControl}`, so a full directive
+ * here produces `max-age=no-cache` -- a header no cache can parse, which is
+ * worse than the default it was meant to replace.
+ *
  * An archive is content-addressed by the version in its path, so it never
- * changes once written and may be cached for as long as anyone likes.
+ * changes once written and may be cached for a year.
  */
-const EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS = "31536000";
 /**
  * `latest.json` is the opposite: a pointer whose whole purpose is to be current.
  * Supabase defaults an upload to `max-age=3600`, which would have served an
  * hour-old pointer to every reader -- the extension checking for an update, and
  * the publish guard checking what is already out.
  */
-const EXTENSION_RELEASE_METADATA_CACHE_CONTROL = "no-cache";
+const EXTENSION_RELEASE_METADATA_CACHE_SECONDS = "0";
 const EXTENSION_RELEASE_DIST_DIR = "browserExtension/dist";
 const DEFAULT_ARTIFACT_DIR = ".artifacts/extension-release";
 
@@ -401,13 +406,24 @@ export function mayPublishOverPublished(input: {
   published: PublishedExtensionVersion | undefined;
   releaseVersion: string;
 }): boolean {
-  return shouldPublishRelease({
-    publishedVersion: publishedVersionOf(input.published),
-    manifestVersion: input.releaseVersion,
-    // There is no commit range at upload time; the answer is production state
-    // alone, and an unusable answer means "do not block".
-    manifestVersionChanged: true,
-  });
+  // Fails closed, and deliberately not by reusing `shouldPublishRelease`: the two
+  // have opposite policies on an answer they cannot use, and that difference is
+  // the point rather than an inconsistency.
+  //
+  // Deciding whether to publish at all, a failed lookup means "fall back to the
+  // commit range" -- there is another signal. Deciding whether to overwrite what
+  // is already out, there is no other signal, and allowing the write disables the
+  // rollback guard at exactly the moment it cannot be checked. Refusing costs a
+  // job that can be re-run; allowing costs a release that is already published.
+  const published = input.published;
+  if (published === undefined || published.status === "unknown") return false;
+  if (published.status === "absent") return true;
+
+  const order = compareExtensionVersions(published.version, input.releaseVersion);
+  // Metadata that is not a version cannot establish that it is older, so it
+  // cannot license overwriting it either.
+  if (order === null) return false;
+  return order < 0;
 }
 
 /**
@@ -424,10 +440,17 @@ export async function assertReleaseMayBePublished(input: {
   const published = await fetchPublishedExtensionVersionFromStorage(input.client, input.bucketName);
   if (mayPublishOverPublished({ published, releaseVersion: input.releaseVersion })) return;
 
+  if (published.status === "published") {
+    throw new Error(
+      `Refusing to publish ${input.releaseVersion}: ${published.version} is already published. ` +
+        "A newer release must not be overwritten by an older run.",
+    );
+  }
+
   throw new Error(
-    `Refusing to publish ${input.releaseVersion}: ${
-      published.status === "published" ? published.version : "an unknown version"
-    } is already published. A newer release must not be overwritten by an older run.`,
+    `Refusing to publish ${input.releaseVersion}: what is already published could not be read` +
+      `${published.status === "unknown" ? ` (${published.reason})` : ""}. ` +
+      "Re-run this job once Storage answers; publishing blind could overwrite a newer release.",
   );
 }
 
@@ -899,7 +922,7 @@ export async function publishPreparedExtensionRelease(
     .upload(artifactRelativePath, artifactContent, {
       upsert: true,
       contentType: EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
-      cacheControl: EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL,
+      cacheControl: EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
     });
   if (artifactUpload.error) {
     throw new Error(`Failed to upload extension artifact: ${artifactUpload.error.message}`);
@@ -910,7 +933,7 @@ export async function publishPreparedExtensionRelease(
     .upload(EXTENSION_RELEASE_LATEST_PATH, latestMetadataContent, {
       upsert: true,
       contentType: EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
-      cacheControl: EXTENSION_RELEASE_METADATA_CACHE_CONTROL,
+      cacheControl: EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
     });
   if (latestUpload.error) {
     throw new Error(`Failed to upload extension release metadata: ${latestUpload.error.message}`);
@@ -1083,8 +1106,8 @@ if (invokedScript === import.meta.url) {
 
 export {
   DEFAULT_ARTIFACT_DIR,
-  EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL,
-  EXTENSION_RELEASE_METADATA_CACHE_CONTROL,
+  EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
+  EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
   EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
   EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
   EXTENSION_RELEASE_BUCKET,
