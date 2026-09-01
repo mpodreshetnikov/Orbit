@@ -10,6 +10,7 @@ import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } fro
 import { useUIStore } from "@/stores/ui-store";
 import { useMoneyAccounts, useCreateMoneyAccount, useMoneyCardsByAccountIds } from "@/hooks";
 import { getConnectors } from "@/lib/import/connector-types";
+import { MoneyImportGrants } from "@/components/money";
 import {
   isExtensionOutdated,
   normalizeExtensionRelease,
@@ -435,6 +436,17 @@ export default function MoneyImportPage() {
   const selectedConnector = useMemo(
     () => connectors.find((c) => c.sourceId === selectedSourceId),
     [connectors, selectedSourceId],
+  );
+  // Only extension-backed sources can run unattended, so only they are worth granting.
+  const extensionConnectorOptions = useMemo(
+    () =>
+      connectors
+        .filter((connector) => connector.kind !== "file")
+        .map((connector) => ({
+          sourceId: connector.sourceId,
+          label: connector.displayName,
+        })),
+    [connectors],
   );
   const selectedConnectorSourceLabel = useMemo(
     () => resolveConnectorSourceLabel(t, selectedConnector),
@@ -1131,6 +1143,12 @@ export default function MoneyImportPage() {
           <Link href="/money/import/history">{t("money.importViewHistory")}</Link>
         </Button>
       </div>
+
+      <MoneyImportGrants
+        t={t}
+        personId={selectedPersonId}
+        availableSources={extensionConnectorOptions}
+      />
 
       <Card>
         <CardHeader>
