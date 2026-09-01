@@ -36,6 +36,40 @@ function isRetryableUploadError(message: string): boolean {
   return RETRYABLE_UPLOAD_ERROR_RE.test(message.toLowerCase());
 }
 
+/**
+ * Decide what a failed hand-off actually means before writing anything.
+ *
+ * The acceptance call is short, but a lost response is not the same as a lost request: the server
+ * may have claimed the record and started transcribing before the connection dropped. Writing
+ * `ocr_failed` from here on that ambiguity marks a live run as failed, and the user is told the
+ * document failed while it is being read.
+ *
+ * The record itself settles it. A claim means a worker owns the work; a status past OCR means it
+ * already finished. Only a record that nobody owns and that never moved on is this caller's to
+ * fail.
+ */
+export async function reconcileAfterFailedHandoff(
+  supabase: ReturnType<typeof createClient>,
+  recordId: string,
+  errorMessage: string,
+): Promise<"claimed" | "already-finished" | "failed" | "unknown"> {
+  const { data, error } = await supabase
+    .from("medical_records")
+    .select("status, processing_run_id")
+    .eq("id", recordId)
+    .single();
+
+  // The read failed too. Leave the record alone rather than guessing: a stalled record is
+  // recovered by the lease sweep, while a wrong `ocr_failed` over a live run is not recovered
+  // at all.
+  if (error || !data) return "unknown";
+
+  if (data.processing_run_id) return "claimed";
+  if (data.status !== "ocr_processing") return "already-finished";
+
+  return (await updateRecordToOcrFailed(supabase, recordId, errorMessage)) ? "failed" : "unknown";
+}
+
 export async function updateRecordToOcrFailed(
   supabase: ReturnType<typeof createClient>,
   recordId: string,
@@ -286,6 +320,19 @@ export function useBackgroundOCR() {
         // distinguish: nothing here waits on the transcription.
         const errorMessage = error instanceof Error ? error.message : "Processing failed";
 
+        // Ask the record what happened before telling the user anything. A lost response is not
+        // a lost request: the server may have claimed the document and started reading it.
+        const supabaseClient = createClient();
+        const outcome = await reconcileAfterFailedHandoff(supabaseClient, recordId, errorMessage);
+        if (outcome === "claimed" || outcome === "already-finished") {
+          // The connection died, not the run. The record's own status closes this job, exactly
+          // as it does for a response that did arrive.
+          updateJob(jobId, { stage: "processing", progress: 50 });
+          queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+          queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+          return { success: true, accepted: true };
+        }
+
         updateJob(jobId, { stage: "failed", error: errorMessage });
         addNotification({
           jobId,
@@ -295,16 +342,12 @@ export function useBackgroundOCR() {
           type: "error",
           message: errorMessage,
         });
-        toast.error(t("processing.failed"), { description: errorMessage });
-
-        // Persist OCR failure so UI can show error and Retry (retry update on transient network failure)
-        const supabaseClient = createClient();
-        const updated = await updateRecordToOcrFailed(supabaseClient, recordId, errorMessage);
-        if (!updated) {
-          toast.error(t("processing.failed"), {
-            description: "Open the record and use Retry OCR if it still shows processing.",
-          });
-        }
+        toast.error(t("processing.failed"), {
+          description:
+            outcome === "unknown"
+              ? "Open the record and use Retry OCR if it still shows processing."
+              : errorMessage,
+        });
 
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
         queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
@@ -377,11 +420,17 @@ export function useBackgroundOCR() {
         );
       } catch (fetchError) {
         const errorMessage = fetchError instanceof Error ? fetchError.message : "Processing failed";
+        // Same ambiguity as the first attempt: the retry may have been accepted before the
+        // connection dropped, and failing a live run from here would be a lie the user acts on.
+        const outcome = await reconcileAfterFailedHandoff(supabase, recordId, errorMessage);
+        if (outcome === "claimed" || outcome === "already-finished") {
+          updateJob(jobId, { stage: "processing", progress: 50 });
+          queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+          queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+          return { success: true, accepted: true };
+        }
+
         updateJob(jobId, { stage: "failed", error: errorMessage });
-        await supabase
-          .from("medical_records")
-          .update({ status: "ocr_failed", ocr_error: errorMessage })
-          .eq("id", recordId);
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
         queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
         addNotification({
