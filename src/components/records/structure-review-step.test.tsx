@@ -282,7 +282,11 @@ describe("StructureReviewStep", () => {
       ],
     });
     // Most records have nothing to correct; the tests that care set their own.
-    hookMocks.useRecordExtractionIssues.mockReturnValue({ data: [], isLoading: false });
+    hookMocks.useRecordExtractionIssues.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    });
     hookMocks.useRecordFindings.mockReturnValue({
       data: [
         {
@@ -357,6 +361,7 @@ describe("StructureReviewStep", () => {
           id: "issue-1",
           record_id: "record-1",
           entity_kind: "observation",
+          entity_label: "Гемоглобин",
           field: "observation.status",
           received: "borderline",
           resolution: "replaced_with_default",
@@ -365,6 +370,7 @@ describe("StructureReviewStep", () => {
         },
       ],
       isLoading: false,
+      isError: false,
     });
 
     const { StructureReviewStep } = await import("./structure-review-step");
@@ -379,6 +385,22 @@ describe("StructureReviewStep", () => {
     // And a clean extraction must not leave a warning banner sitting there.
     hookMocks.useRecordExtractionIssues.mockReturnValue({ data: [], isLoading: false });
     render(<StructureReviewStep record={createRecord()} onComplete={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.queryByText("records.wizard.extractionIssues")).not.toBeInTheDocument();
+  });
+
+  // A failed read is not the same as a clean extraction: a reviewer must not approve a record
+  // believing nothing was corrected when the warnings simply could not be fetched.
+  it("says so when the corrections could not be read", async () => {
+    hookMocks.useRecordExtractionIssues.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+
+    const { StructureReviewStep } = await import("./structure-review-step");
+    render(<StructureReviewStep record={createRecord()} onComplete={vi.fn()} onBack={vi.fn()} />);
+
+    expect(screen.getByText("records.wizard.extractionIssuesUnavailable")).toBeInTheDocument();
     expect(screen.queryByText("records.wizard.extractionIssues")).not.toBeInTheDocument();
   });
 

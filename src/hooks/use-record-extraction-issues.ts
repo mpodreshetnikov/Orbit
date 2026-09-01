@@ -15,7 +15,9 @@ async function fetchRecordExtractionIssues(recordId: string): Promise<RecordExtr
 
   const { data, error } = await supabase
     .from("record_extraction_issues")
-    .select("id, record_id, entity_kind, field, received, resolution, applied_fallback, detail")
+    .select(
+      "id, record_id, entity_kind, entity_label, field, received, resolution, applied_fallback, detail",
+    )
     .eq("record_id", recordId)
     .order("created_at", { ascending: true });
 

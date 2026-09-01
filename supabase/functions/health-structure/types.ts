@@ -167,6 +167,14 @@ export interface IcdLookupResult {
  */
 export interface ExtractionIssue {
   entityKind: string;
+  /**
+   * Which one: the analyte's name, the finding's label, the condition's name.
+   *
+   * A kind and a field alone do not identify a row. On a panel of forty analytes, two results
+   * with the same rejected status produce two identical warnings and the reviewer cannot tell
+   * which value to correct. Null when the entity was dropped before it had a usable label.
+   */
+  entityLabel: string | null;
   /** The attribute corrected; null when the whole entity was dropped. */
   field: string | null;
   /** What the model wrote, truncated. Document content — it belongs in the record, never a log. */

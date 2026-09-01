@@ -925,6 +925,7 @@ Deno.test(
           issues: [
             {
               entityKind: "observation",
+              entityLabel: "Гемоглобин",
               field: "observation.status",
               received: "borderline",
               resolution: "replaced_with_default" as const,
@@ -944,6 +945,7 @@ Deno.test(
       {
         record_id: "record-1",
         entity_kind: "observation",
+        entity_label: "Гемоглобин",
         field: "observation.status",
         received: "borderline",
         resolution: "replaced_with_default",

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(8);
+SELECT plan(11);
 
 SELECT has_table(
   'public',
@@ -13,6 +13,40 @@ SELECT col_is_null(
   'field',
   'field is null when the whole entity was dropped rather than one value corrected'
 );
+SELECT has_column(
+  'public',
+  'record_extraction_issues',
+  'entity_label',
+  'a correction names the row it was made on, not only its kind'
+);
+
+-- The pipeline writes with the service role, which bypasses RLS. Granting insert or delete to
+-- authenticated clients would let any allowlisted user fabricate or erase the record of what the
+-- extraction corrected, without touching the values those warnings describe.
+SELECT is(
+  (
+    SELECT count(*)::int
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'record_extraction_issues'
+      AND cmd <> 'SELECT'
+  ),
+  0,
+  'the browser cannot write these rows, only read them'
+);
+
+SELECT is(
+  (
+    SELECT count(*)::int
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'record_extraction_issues'
+      AND cmd = 'SELECT'
+  ),
+  1,
+  'and it can read them'
+);
+
 SELECT has_index(
   'public',
   'record_extraction_issues',
@@ -52,11 +86,12 @@ VALUES (
 -- The case the milestone exists for: the model wrote a status outside the vocabulary, the
 -- column's default was used, and the other observations in the document were still saved.
 INSERT INTO public.record_extraction_issues (
-  record_id, entity_kind, field, received, resolution, applied_fallback
+  record_id, entity_kind, entity_label, field, received, resolution, applied_fallback
 )
 VALUES (
   '99999999-5555-0000-0000-000000000000',
   'observation',
+  'Гемоглобин',
   'observation.status',
   'borderline',
   'replaced_with_default',
@@ -65,12 +100,12 @@ VALUES (
 
 SELECT is(
   (
-    SELECT field || ':' || received || '->' || applied_fallback
+    SELECT entity_label || '/' || field || ':' || received || '->' || applied_fallback
     FROM public.record_extraction_issues
     WHERE record_id = '99999999-5555-0000-0000-000000000000'
   ),
-  'observation.status:borderline->unknown',
-  'the correction names the field, what the document said, and what was saved instead'
+  'Гемоглобин/observation.status:borderline->unknown',
+  'the correction names the row, the field, what the document said, and what was saved instead'
 );
 
 -- A dropped entity has no field and no fallback, only a reason.

@@ -780,6 +780,7 @@ CREATE TABLE "public"."record_extraction_issues" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "record_id" "uuid" NOT NULL,
     "entity_kind" "text" NOT NULL,
+    "entity_label" "text",
     "field" "text",
     "received" "text",
     "resolution" "text" NOT NULL,

@@ -620,59 +620,100 @@ export async function runExtractStage(
   const valueIssues: ValueIssue[] = [];
   const groundingHaystack = normalizeForGrounding(ocrText);
 
+  /**
+   * Corrections belong to the entity they were made on, not to the document.
+   *
+   * A shared list cannot tell the two apart: a finding whose severity was coerced and which is
+   * then dropped for an ungrounded anchor would be reported as both "severity saved as unknown"
+   * and "finding not saved", which contradicts itself. So each entity collects its own, and they
+   * are kept only if the entity survives to be written.
+   */
+  const issues: ExtractionIssue[] = [];
+
+  const dropped = (entityKind: string, entityLabel: string | null, reason: string) => {
+    rejected.push({ entityKind, reason });
+    issues.push({
+      entityKind,
+      entityLabel,
+      field: null,
+      received: null,
+      resolution: "dropped",
+      appliedFallback: null,
+      detail: reason,
+    });
+  };
+
+  const kept = (entityKind: string, entityLabel: string | null, entityIssues: ValueIssue[]) => {
+    for (const issue of entityIssues) {
+      valueIssues.push(issue);
+      issues.push({
+        entityKind,
+        // Which row to look at: on a panel of forty analytes, "observation.status" alone does
+        // not tell a reviewer which value to correct.
+        entityLabel,
+        field: issue.field,
+        received: issue.received,
+        resolution: "replaced_with_default",
+        appliedFallback: issue.appliedFallback,
+        detail: null,
+      });
+    }
+  };
+
   const observations: ExtractedObservation[] = [];
   for (const item of asArray(result.parsed.observations)) {
-    const normalized = normalizeObservation(item, valueIssues);
+    const itemIssues: ValueIssue[] = [];
+    const normalized = normalizeObservation(item, itemIssues);
     if (!normalized) {
-      rejected.push({ entityKind: "observation", reason: "missing analyte label" });
+      dropped("observation", null, "missing analyte label");
       continue;
     }
     if (!anchorIsGrounded(normalized.source_anchor, groundingHaystack)) {
-      rejected.push({
-        entityKind: "observation",
-        reason: "source anchor not found in document text",
-      });
+      dropped("observation", normalized.obs_name, "source anchor not found in document text");
       continue;
     }
     observations.push(normalized);
+    kept("observation", normalized.obs_name, itemIssues);
   }
 
   const findings: ExtractedFinding[] = [];
   for (const item of asArray(result.parsed.findings)) {
-    const normalized = normalizeFinding(item, valueIssues);
+    const itemIssues: ValueIssue[] = [];
+    const normalized = normalizeFinding(item, itemIssues);
     if (!normalized) {
-      rejected.push({ entityKind: "finding", reason: "missing finding label or source anchor" });
+      dropped("finding", null, "missing finding label or source anchor");
       continue;
     }
     if (!anchorIsGrounded(normalized.source_anchor, groundingHaystack)) {
-      rejected.push({ entityKind: "finding", reason: "source anchor not found in document text" });
+      dropped("finding", normalized.finding_type_text, "source anchor not found in document text");
       continue;
     }
     if (anchorAssertsAbsence(normalized.source_anchor, normalized.finding_type_text ?? "")) {
-      rejected.push({
-        entityKind: "finding",
-        reason: "source anchor states the finding is absent",
-      });
+      dropped(
+        "finding",
+        normalized.finding_type_text,
+        "source anchor states the finding is absent",
+      );
       continue;
     }
     findings.push(normalized);
+    kept("finding", normalized.finding_type_text, itemIssues);
   }
 
   const conditions: ExtractedCondition[] = [];
   for (const item of asArray(result.parsed.conditions)) {
-    const normalized = normalizeCondition(item, valueIssues);
+    const itemIssues: ValueIssue[] = [];
+    const normalized = normalizeCondition(item, itemIssues);
     if (!normalized) {
-      rejected.push({ entityKind: "condition", reason: "missing condition name" });
+      dropped("condition", null, "missing condition name");
       continue;
     }
     if (!anchorIsGrounded(normalized.source_anchor, groundingHaystack)) {
-      rejected.push({
-        entityKind: "condition",
-        reason: "source anchor not found in document text",
-      });
+      dropped("condition", normalized.name, "source anchor not found in document text");
       continue;
     }
     conditions.push(normalized);
+    kept("condition", normalized.name, itemIssues);
   }
 
   const assertedAbsences: AssertedAbsence[] = [];
@@ -705,40 +746,14 @@ export async function runExtractStage(
     });
   }
 
-  // Everything in `rejected` up to this point is an entity that was dropped outright; the loop
-  // below then appends the value-level corrections to the same list for the telemetry counts.
-  const rejectedEntities = [...rejected];
-
   // Value-level defects do not drop the entity; they replace one attribute with the column's
-  // default and are reported so the review screen can flag them.
+  // default. Appended to `rejected` for the telemetry counts, which are read off it.
   for (const issue of valueIssues) {
     rejected.push({
       entityKind: issue.field,
       reason: `unrecognised value replaced with ${issue.appliedFallback}`,
     });
   }
-
-  // The same corrections, in a shape that survives past the log line: a person reviewing the
-  // record has to be able to see what was substituted while the document is still in front of
-  // them. `rejected` stays as it is, because the telemetry counts are read off it.
-  const issues: ExtractionIssue[] = [
-    ...valueIssues.map((issue) => ({
-      entityKind: issue.field.split(".")[0],
-      field: issue.field,
-      received: issue.received,
-      resolution: "replaced_with_default" as const,
-      appliedFallback: issue.appliedFallback,
-      detail: null,
-    })),
-    ...rejectedEntities.map((rejection) => ({
-      entityKind: rejection.entityKind,
-      field: null,
-      received: null,
-      resolution: "dropped" as const,
-      appliedFallback: null,
-      detail: rejection.reason,
-    })),
-  ];
 
   return {
     value: { observations, findings, conditions, asserted_absences: assertedAbsences },

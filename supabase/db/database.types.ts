@@ -2049,6 +2049,7 @@ export type Database = {
           created_at: string
           detail: string | null
           entity_kind: string
+          entity_label: string | null
           field: string | null
           id: string
           received: string | null
@@ -2060,6 +2061,7 @@ export type Database = {
           created_at?: string
           detail?: string | null
           entity_kind: string
+          entity_label?: string | null
           field?: string | null
           id?: string
           received?: string | null
@@ -2071,6 +2073,7 @@ export type Database = {
           created_at?: string
           detail?: string | null
           entity_kind?: string
+          entity_label?: string | null
           field?: string | null
           id?: string
           received?: string | null

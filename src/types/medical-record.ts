@@ -143,8 +143,10 @@ export interface OcrResult {
 export interface RecordExtractionIssue {
   id: string;
   record_id: string;
-  /** 'observation' | 'finding' | 'condition' */
+  /** 'observation' | 'finding' | 'condition' | 'record' */
   entity_kind: string;
+  /** Which one: the analyte's name, the finding's label. Null when the entity had none. */
+  entity_label: string | null;
   /** The attribute corrected, e.g. 'finding.severity'; null when the entity was dropped. */
   field: string | null;
   /** What the model wrote, truncated. */

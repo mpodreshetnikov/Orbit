@@ -14,8 +14,13 @@
 CREATE TABLE IF NOT EXISTS public.record_extraction_issues (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   record_id uuid NOT NULL REFERENCES public.medical_records(id) ON DELETE CASCADE,
-  -- Which kind of entity the correction applied to: 'observation', 'finding', 'condition'.
+  -- Which kind of entity the correction applied to: 'observation', 'finding', 'condition',
+  -- or 'record' for the document's own fields.
   entity_kind text NOT NULL,
+  -- Which one: the analyte's name, the finding's label. A kind and a field alone do not identify
+  -- a row, and a reviewer cannot correct a value they cannot find. Document content, like
+  -- `received`. Null when the entity was dropped before it had a usable label.
+  entity_label text,
   -- The attribute, as the extraction names it: 'finding.severity', 'observation.status'. Null
   -- when the whole entity was dropped rather than one of its values corrected.
   field text,
@@ -40,6 +45,10 @@ COMMENT ON TABLE public.record_extraction_issues IS
 COMMENT ON COLUMN public.record_extraction_issues.received IS
   'What the model wrote for this field, truncated. Document content: it belongs here, under RLS, and never in a log.';
 
+-- The browser only ever reads these. Writing is the pipeline's business, done with the service
+-- role, which bypasses RLS entirely -- so granting insert or delete to authenticated clients
+-- would buy nothing and let any allowlisted user fabricate or erase the record of what the
+-- extraction corrected, without touching the values those warnings are about.
 DROP POLICY IF EXISTS "record_extraction_issues_select" ON public.record_extraction_issues;
 CREATE POLICY "record_extraction_issues_select" ON public.record_extraction_issues
   FOR SELECT TO authenticated
@@ -51,24 +60,7 @@ CREATE POLICY "record_extraction_issues_select" ON public.record_extraction_issu
     AND (select public.is_allowed_user())
   );
 
+-- Insert and delete are deliberately absent, and dropped here in case an earlier revision of this
+-- migration created them.
 DROP POLICY IF EXISTS "record_extraction_issues_insert" ON public.record_extraction_issues;
-CREATE POLICY "record_extraction_issues_insert" ON public.record_extraction_issues
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.medical_records mr
-      WHERE mr.id = record_id
-    )
-    AND (select public.is_allowed_user())
-  );
-
 DROP POLICY IF EXISTS "record_extraction_issues_delete" ON public.record_extraction_issues;
-CREATE POLICY "record_extraction_issues_delete" ON public.record_extraction_issues
-  FOR DELETE TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.medical_records mr
-      WHERE mr.id = record_id
-    )
-    AND (select public.is_allowed_user())
-  );
