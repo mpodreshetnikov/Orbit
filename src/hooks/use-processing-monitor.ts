@@ -208,10 +208,15 @@ export function useProcessingMonitor(personId: string | null) {
             completedAt: Date.now(),
           });
 
-          // Show notification
-          const notificationMessage = isOcrComplete
-            ? t("processing.ocrComplete")
-            : t("processing.completed");
+          // A transcription that lost a page still reaches review, and the record carries what
+          // it lost. Announcing that as "OCR complete" is the same defect one level up: the
+          // user is told the document was read when part of it was not.
+          const partialOcr = isOcrComplete && Boolean(newRecord.ocr_error);
+          const notificationMessage = partialOcr
+            ? t("processing.ocrPartial")
+            : isOcrComplete
+              ? t("processing.ocrComplete")
+              : t("processing.completed");
 
           addNotification({
             jobId: newRecord.id,
@@ -219,13 +224,16 @@ export function useProcessingMonitor(personId: string | null) {
             title: newRecord.title,
             personName,
             type: "success",
-            message: isOcrComplete
-              ? t("processing.ocrReviewNeeded")
-              : t("processing.reviewStructure"),
+            message: partialOcr
+              ? translateOcrFailure(newRecord.ocr_error, t)
+              : isOcrComplete
+                ? t("processing.ocrReviewNeeded")
+                : t("processing.reviewStructure"),
           });
 
-          toast.success(notificationMessage, {
-            description: newRecord.title,
+          const announce = partialOcr ? toast.warning : toast.success;
+          announce(notificationMessage, {
+            description: partialOcr ? translateOcrFailure(newRecord.ocr_error, t) : newRecord.title,
             action: {
               label: t("processing.viewRecord"),
               onClick: () => {

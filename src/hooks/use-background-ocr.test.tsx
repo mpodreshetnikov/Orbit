@@ -521,12 +521,18 @@ describe("use-background-ocr", () => {
       });
     });
 
-    // Nothing owns the record and it never moved on, so the failure really is this caller's.
+    // Nothing owns the record and it never moved on, so the failure really is this caller's --
+    // classified before it is written, because the browser's own English cannot be translated.
     expect(updateMock).toHaveBeenCalledWith({
       status: "ocr_failed",
-      ocr_error: "Failed to fetch",
+      ocr_error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: Failed to fetch",
     });
-    expect(response).toEqual({ success: false, error: "Failed to fetch" });
+    expect(response).toEqual({
+      success: false,
+      error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: Failed to fetch",
+    });
   });
 
   it("starts OCR for already uploaded attachments when files list is empty", async () => {
@@ -601,7 +607,7 @@ describe("use-background-ocr", () => {
       vi.fn().mockResolvedValue({
         ok: false,
         statusText: "Bad Request",
-        text: async () => JSON.stringify({ error: "ocr crashed" }),
+        text: async () => JSON.stringify({ error: "ocr crashed", persisted: true }),
       }),
     );
 
@@ -623,14 +629,116 @@ describe("use-background-ocr", () => {
       });
     });
 
-    // The service answered, so it has already written the record's own account of the failure.
-    // This used to overwrite it, cause and length cap alike.
+    // The service says it wrote the record's own account of the failure. This used to be
+    // overwritten anyway, cause and length cap alike.
     expect(updateMock).not.toHaveBeenCalledWith(expect.objectContaining({ status: "ocr_failed" }));
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-2",
       expect.objectContaining({ stage: "failed", error: "ocr crashed" }),
     );
     expect(response).toEqual({ success: false, error: "ocr crashed" });
+  });
+
+  it("settles the record itself when the service answered without writing", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client, updateMock } = createSupabaseClientMock({
+      sessionToken: "token-1",
+      recordRow: { status: "ocr_processing", processing_run_id: null },
+    });
+    createClientMock.mockReturnValue(client);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        // An expired token is refused before the service knows which record was meant, so it
+        // answers in JSON and writes nothing. An answer is not proof of a write.
+        text: async () =>
+          JSON.stringify({
+            success: false,
+            error: "ocr_cause:internal the transcription failed for an unexpected reason",
+            persisted: false,
+          }),
+      }),
+    );
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    await act(async () => {
+      await result.current.startBackgroundOCR({
+        recordId: "record-stuck",
+        personId: "person-1",
+        personName: "Alex",
+      });
+    });
+
+    // Otherwise the record sits in ocr_processing with nobody working on it until the
+    // abandonment sweep gets to it.
+    expect(updateMock).toHaveBeenCalledWith({
+      status: "ocr_failed",
+      ocr_error: "ocr_cause:internal the transcription failed for an unexpected reason",
+    });
+  });
+
+  it("leaves a claimed record alone when a gateway loses the response", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client, updateMock } = createSupabaseClientMock({
+      sessionToken: "token-1",
+      // The function received the request and claimed the record; only its answer was lost.
+      recordRow: { status: "ocr_processing", processing_run_id: "run-1" },
+    });
+    createClientMock.mockReturnValue(client);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        statusText: "Bad Gateway",
+        text: async () => "<html>gateway</html>",
+      }),
+    );
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    let response: { success: boolean; accepted?: boolean } | undefined;
+    await act(async () => {
+      response = await result.current.startBackgroundOCR({
+        recordId: "record-live",
+        personId: "person-1",
+        personName: "Alex",
+      });
+    });
+
+    // A 502 is not proof the request never landed, and failing a live run is the lie the user
+    // acts on: they re-photograph a document that is being read as they do it.
+    expect(updateMock).not.toHaveBeenCalledWith(expect.objectContaining({ status: "ocr_failed" }));
+    expect(addNotificationMock).not.toHaveBeenCalled();
+    expect(response).toEqual({ success: true, accepted: true });
   });
 
   it("fails retryOcr when Supabase URL is not configured", async () => {
@@ -760,7 +868,8 @@ describe("use-background-ocr", () => {
   });
 
   // The client no longer aborts the call, so there is no timeout of its own to report -- a
-  // network failure is a network failure, and its message is what the record gets.
+  // network failure is a network failure, and its own words are kept as the detail of a
+  // classified cause rather than written to the column raw.
   it("reports a failed retryOcr fetch with the network error itself", async () => {
     const addJobMock = vi.fn();
     const updateJobMock = vi.fn();
@@ -799,11 +908,16 @@ describe("use-background-ocr", () => {
 
     expect(updateMock).toHaveBeenCalledWith({
       status: "ocr_failed",
-      ocr_error: "Failed to fetch",
+      ocr_error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: Failed to fetch",
     });
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-5",
-      expect.objectContaining({ stage: "failed", error: "Failed to fetch" }),
+      expect.objectContaining({
+        stage: "failed",
+        error:
+          "ocr_cause:service_unreachable the transcription service could not be reached: Failed to fetch",
+      }),
     );
     expect(addNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -811,7 +925,11 @@ describe("use-background-ocr", () => {
         title: "processing.failed",
       }),
     );
-    expect(response).toEqual({ success: false, error: "Failed to fetch" });
+    expect(response).toEqual({
+      success: false,
+      error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: Failed to fetch",
+    });
   });
 
   it("retries updateRecordToOcrFailed and reports exhausted retries", async () => {

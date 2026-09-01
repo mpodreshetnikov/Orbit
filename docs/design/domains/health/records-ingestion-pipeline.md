@@ -43,10 +43,12 @@ Two rules the column depends on:
 
 - The provider's own error body is never quoted into it. That body can echo the request, and for
   OCR the request is the patient's document.
-- Both writers use this format. The edge function writes it, and the browser writes it only for
-  failures the server never saw (an unreachable function, an upload that failed, an expired
-  session); on any failure the service answered, the browser leaves the column alone rather than
-  replacing a named cause with a status line.
+- Both writers use this format. The edge function writes it, and says in its failure payload
+  (`persisted`) whether the record actually carries it — an answer is not proof of a write, since
+  a request refused before the record is known is answered in JSON and written nowhere. The
+  browser leaves the column alone for a persisted failure, and settles the record itself
+  otherwise — but always through `reconcileAfterFailedHandoff`, because a lost response is not a
+  request that never landed and a run holding the claim must not be failed from the browser.
 
 A run that transcribed the document but lost a page writes the same string on the success path,
 so a three-page document that came back with two does not read as a clean success.

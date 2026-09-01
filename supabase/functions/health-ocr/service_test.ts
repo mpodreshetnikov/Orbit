@@ -404,6 +404,45 @@ Deno.test("a document that lost nothing clears the column", async () => {
   assertEquals(state.updatedSuccess[0].ocrError, null);
 });
 
+Deno.test("a failure the record could not be given is reported as not persisted", async () => {
+  // An answer is not proof of a write: the browser reads this to decide whether the record it
+  // moved to ocr_processing is still its to settle.
+  const notAllowed = createRepositoryMock({ userAllowed: false });
+  const openRouter = createOpenRouterMock(async () => ({
+    ocr_text: "unused",
+    suggested_title: "unused",
+    truncated: false,
+    usage: emptyLlmUsage(),
+  }));
+
+  const refused = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    { repository: notAllowed.repository, openRouterClient: openRouter },
+  );
+  assertEquals(refused.payload.persisted, false);
+  assertEquals(notAllowed.state.updatedFailure.length, 0);
+
+  const missingRecord = createRepositoryMock({ recordExists: false });
+  const stamped = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    { repository: missingRecord.repository, openRouterClient: openRouter },
+  );
+  assertEquals(stamped.payload.persisted, true);
+  assertEquals(missingRecord.state.updatedFailure.length, 1);
+
+  // The write itself failed, so the record carries nothing however far the run got.
+  const writeFails = createRepositoryMock({ updateFailureThrows: true, attachments: [] });
+  const unwritten = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository: writeFails.repository,
+      openRouterClient: openRouter,
+      log: { log: () => {}, error: () => {} },
+    },
+  );
+  assertEquals(unwritten.payload.persisted, false);
+});
+
 Deno.test("the persisted failure and the returned one are the same string", async () => {
   const { repository, state } = createRepositoryMock();
   const openRouter = createOpenRouterMock(async () => {

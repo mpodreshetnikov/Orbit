@@ -10,6 +10,7 @@ import { useProcessingQueueStore } from "@/stores/processing-queue-store";
 import {
   formatClientOcrFailure,
   MAX_OCR_ERROR_LENGTH,
+  parseOcrFailureCause,
   translateOcrFailure,
 } from "@/lib/health/ocr-failure";
 import type { HealthOcrResponse } from "@/types";
@@ -104,26 +105,43 @@ export async function updateRecordToOcrFailed(
 /**
  * Read a failed response without inventing a story about it.
  *
- * A JSON body from `health-ocr` is the service's own classified message, and it has already been
- * written to the record — so it is reported as it stands and written nowhere. Anything else (a
- * gateway error, an empty body, a status line) never reached the service, so the browser composes
- * the one cause it can honestly claim: the service could not be reached. The body itself is not
- * quoted; it is not ours, and an HTTP status says as much as a proxy's HTML page does.
+ * A JSON body from `health-ocr` carries the service's own classified message, and `persisted`
+ * says whether the record already holds it. An answer is not proof of a write: a token that
+ * expired between the session read and the call is refused before the service knows which record
+ * the caller meant, so it answers in JSON and writes nothing. Only a persisted failure is one the
+ * browser can leave alone.
+ *
+ * Anything else (a gateway error, an empty body, a status line) never reached the service, so the
+ * browser composes the one cause it can honestly claim. The body itself is not quoted; it is not
+ * ours, and an HTTP status says as much as a proxy's HTML page does.
  */
 async function readFailureMessage(
   response: Response,
-): Promise<{ message: string; fromService: boolean }> {
+): Promise<{ message: string; persisted: boolean }> {
   const errorText = await response.text();
   try {
-    const parsed = JSON.parse(errorText) as { error?: string };
-    if (parsed?.error) return { message: parsed.error, fromService: true };
+    const parsed = JSON.parse(errorText) as { error?: string; persisted?: boolean };
+    if (parsed?.error) return { message: parsed.error, persisted: parsed.persisted === true };
   } catch {
     // Not our payload; fall through.
   }
   return {
     message: formatClientOcrFailure("service_unreachable", `HTTP ${response.status}`),
-    fromService: false,
+    persisted: false,
   };
+}
+
+/**
+ * Make a failure the browser is about to persist translatable.
+ *
+ * A thrown `Failed to fetch` is the browser's own English, and a reader in another language
+ * cannot be shown it. Anything already classified is left exactly as it is — the service's
+ * message must never be re-wrapped.
+ */
+function asDurableClientFailure(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (parseOcrFailureCause(raw)) return raw;
+  return formatClientOcrFailure("service_unreachable", raw || "processing failed");
 }
 
 export function useBackgroundOCR() {
@@ -274,11 +292,18 @@ export function useBackgroundOCR() {
         }
 
         if (!response.ok) {
-          const { message: errorMessage, fromService } = await readFailureMessage(response);
-          // Only when the service never got to write its own: this used to overwrite it every
-          // time, replacing a named cause with a status line and bypassing the length cap.
-          if (!fromService) {
-            await updateRecordToOcrFailed(supabase, recordId, errorMessage);
+          const { message: errorMessage, persisted } = await readFailureMessage(response);
+          if (!persisted) {
+            // Nothing was written, so the record is still this caller's to settle -- but not
+            // unconditionally: a gateway can lose the response of a request the function did
+            // receive, and failing a run that holds the claim is the lie the user acts on.
+            const outcome = await reconcileAfterFailedHandoff(supabase, recordId, errorMessage);
+            if (outcome === "claimed" || outcome === "already-finished") {
+              updateJob(jobId, { stage: "processing", progress: 50 });
+              queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+              queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+              return { success: true, accepted: true };
+            }
           }
           queryClient.invalidateQueries({ queryKey: ["medical-records"] });
           queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
@@ -300,8 +325,18 @@ export function useBackgroundOCR() {
         const data: HealthOcrResponse = await response.json();
 
         if (!data.success) {
-          // The service answered, so it has already written the record's own account of this.
           const errorMessage = data.error || formatClientOcrFailure("service_unreachable");
+          if (data.persisted !== true) {
+            // Answered without writing: the record is still where this caller left it, unless
+            // another run has since taken it.
+            const outcome = await reconcileAfterFailedHandoff(supabase, recordId, errorMessage);
+            if (outcome === "claimed" || outcome === "already-finished") {
+              updateJob(jobId, { stage: "processing", progress: 50 });
+              queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+              queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+              return { success: true, accepted: true };
+            }
+          }
           queryClient.invalidateQueries({ queryKey: ["medical-records"] });
           queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
           updateJob(jobId, { stage: "failed", error: errorMessage });
@@ -358,10 +393,9 @@ export function useBackgroundOCR() {
       } catch (error) {
         // Upload, session or the acceptance call itself. There is no timeout case left to
         // distinguish: nothing here waits on the transcription.
-        const errorMessage =
-          error instanceof Error
-            ? error.message
-            : formatClientOcrFailure("service_unreachable", "processing failed");
+        // Classified before anything is written: `reconcileAfterFailedHandoff` may persist this,
+        // and a raw `Failed to fetch` in the column is a sentence no translation can reach.
+        const errorMessage = asDurableClientFailure(error);
 
         // Ask the record what happened before telling the user anything. A lost response is not
         // a lost request: the server may have claimed the document and started reading it.
@@ -465,10 +499,7 @@ export function useBackgroundOCR() {
           },
         );
       } catch (fetchError) {
-        const errorMessage =
-          fetchError instanceof Error
-            ? fetchError.message
-            : formatClientOcrFailure("service_unreachable", "processing failed");
+        const errorMessage = asDurableClientFailure(fetchError);
         // Same ambiguity as the first attempt: the retry may have been accepted before the
         // connection dropped, and failing a live run from here would be a lie the user acts on.
         const outcome = await reconcileAfterFailedHandoff(supabase, recordId, errorMessage);
@@ -506,9 +537,17 @@ export function useBackgroundOCR() {
       }
 
       if (!response.ok) {
-        const { message: errorMessage, fromService } = await readFailureMessage(response);
-        if (!fromService) {
-          await updateRecordToOcrFailed(supabase, recordId, errorMessage);
+        const { message: errorMessage, persisted } = await readFailureMessage(response);
+        if (!persisted) {
+          // Same ambiguity as the first attempt: a lost response is not a request that never
+          // landed, so the record decides whether this caller may fail it.
+          const outcome = await reconcileAfterFailedHandoff(supabase, recordId, errorMessage);
+          if (outcome === "claimed" || outcome === "already-finished") {
+            updateJob(jobId, { stage: "processing", progress: 50 });
+            queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+            queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+            return { success: true, accepted: true };
+          }
         }
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
         queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
@@ -529,8 +568,16 @@ export function useBackgroundOCR() {
 
       const data: HealthOcrResponse = await response.json();
       if (!data.success) {
-        // Answered, so the record already carries the service's own account of the failure.
         const errorMessage = data.error || formatClientOcrFailure("service_unreachable");
+        if (data.persisted !== true) {
+          const outcome = await reconcileAfterFailedHandoff(supabase, recordId, errorMessage);
+          if (outcome === "claimed" || outcome === "already-finished") {
+            updateJob(jobId, { stage: "processing", progress: 50 });
+            queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+            queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+            return { success: true, accepted: true };
+          }
+        }
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
         queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
         updateJob(jobId, { stage: "failed", error: errorMessage });

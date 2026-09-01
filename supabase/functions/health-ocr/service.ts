@@ -427,7 +427,7 @@ async function transcribeClaimedRecord(
     });
 
     const persistedMessage = errorMessage.slice(0, maxOcrErrorLength);
-    await recordFailure(recordId, persistedMessage, runId, deps);
+    const persisted = await recordFailure(recordId, persistedMessage, runId, deps);
     await serviceSpan?.end({
       status: "error",
       statusMessage: errorMessage,
@@ -438,7 +438,9 @@ async function transcribeClaimedRecord(
       status: 400,
       // What was persisted, not the longer string it was cut from: the client writes this back
       // over the column on failure, so returning the untruncated one bypassed the cap.
-      payload: { success: false, error: persistedMessage },
+      // `persisted` says whether the record actually carries it — an answer is not proof of a
+      // write, and the browser has to know which failures are still its to record.
+      payload: { success: false, error: persistedMessage, persisted },
     };
   }
 }
@@ -447,14 +449,15 @@ async function transcribeClaimedRecord(
  * Leave the record able to say what happened, whatever else went wrong.
  *
  * Best-effort on purpose: a failure to write the failure must not replace the original error,
- * which is the one worth reporting.
+ * which is the one worth reporting. Returns whether the record actually carries it, because the
+ * browser decides from that whether the record still needs anything from it.
  */
 async function recordFailure(
   recordId: string,
   message: string,
   runId: string | null,
   deps: HealthOcrServiceDeps,
-): Promise<void> {
+): Promise<boolean> {
   const log = deps.log ?? console;
   const telemetry = deps.telemetry;
   try {
@@ -463,8 +466,10 @@ async function recordFailure(
       runId: runId ?? undefined,
     });
     await failureSpan?.end({ status: "ok" });
+    return true;
   } catch (updateError) {
     log.error("Failed to update record with ocr_failed:", updateError);
+    return false;
   }
 }
 
@@ -564,16 +569,25 @@ export async function acceptHealthOcrRequest(
       error_message: errorMessage,
     });
 
+    let persisted = false;
     if (recordId && mayRecordFailure) {
       // No claim was taken, so the write is unconditional: nothing else can be working on the
       // record, and the caller has to be able to see why nothing happened.
-      await recordFailure(recordId, errorMessage.slice(0, maxOcrErrorLength), null, deps);
+      persisted = await recordFailure(
+        recordId,
+        errorMessage.slice(0, maxOcrErrorLength),
+        null,
+        deps,
+      );
     }
     await acceptSpan?.end({ status: "error", statusMessage: errorMessage });
 
     return {
       status: 400,
-      payload: { success: false, error: errorMessage.slice(0, maxOcrErrorLength) },
+      // False for everything that failed before the caller was known to own a record — an
+      // expired token, a missing record id — where the record was left exactly as the browser
+      // set it and only the browser can settle it.
+      payload: { success: false, error: errorMessage.slice(0, maxOcrErrorLength), persisted },
     };
   }
 }

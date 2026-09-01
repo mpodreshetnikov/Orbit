@@ -169,6 +169,14 @@ export interface HealthOcrResponse {
   /** Document name suggested by OCR LLM; shown instead of "Processing" */
   suggested_title?: string;
   error?: string;
+  /**
+   * Whether the service wrote `error` to the record itself.
+   *
+   * False for failures decided before the caller was known to own a record — an expired token,
+   * a missing record id, an unconfigured function — where nothing was persisted and the browser
+   * is the only one that can settle the record it moved to `ocr_processing`.
+   */
+  persisted?: boolean;
 }
 
 // Step 2: Structure extraction result (from health-structure)
