@@ -61,7 +61,6 @@ function resolveMaxWorkers(): number | string {
 }
 
 export default defineConfig({
-  // @ts-expect-error - Vite vs Vitest plugin type mismatch (different Vite instances)
   plugins: [react()],
   esbuild: {
     jsxInject: 'import React from "react"',
