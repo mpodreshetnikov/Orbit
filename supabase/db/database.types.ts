@@ -2682,7 +2682,7 @@ export type Database = {
         Returns: Json
       }
       release_abandoned_record_processing: {
-        Args: { p_lease_seconds?: number }
+        Args: { p_lease_seconds?: number; p_structuring_lease_seconds?: number }
         Returns: number
       }
       renew_medical_record_claim: {

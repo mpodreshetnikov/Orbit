@@ -48,6 +48,8 @@ function createSupabaseClientMock(options: {
   uploadErrorSequence?: Array<string | null>;
   insertError?: string | null;
   updateError?: string | null;
+  /** What the record reads as when a lost hand-off is reconciled against it. */
+  recordRow?: { status: string; processing_run_id: string | null } | null;
 }) {
   const updateEqMock = vi.fn().mockResolvedValue({
     error: options.updateError ? { message: options.updateError } : null,
@@ -69,12 +71,27 @@ function createSupabaseClientMock(options: {
   });
   const removeMock = vi.fn().mockResolvedValue({ error: null });
 
+  const selectMock = vi.fn(() => ({
+    eq: vi.fn(() => ({
+      single: vi.fn().mockResolvedValue(
+        options.recordRow === null
+          ? { data: null, error: { message: "not found" } }
+          : {
+              // Unclaimed and still in OCR unless a test says otherwise: the failure really is
+              // this caller's, which is what the older tests were written against.
+              data: options.recordRow ?? { status: "ocr_processing", processing_run_id: null },
+              error: null,
+            },
+      ),
+    })),
+  }));
+
   const fromMock = vi.fn((table: string) => {
     if (table === "record_attachments") {
       return { insert: insertMock };
     }
     if (table === "medical_records") {
-      return { update: updateMock };
+      return { update: updateMock, select: selectMock };
     }
     return {
       insert: insertMock,
@@ -192,7 +209,14 @@ describe("use-background-ocr", () => {
 
     const eqMock = vi.fn().mockResolvedValue({ error: null });
     const updateMock = vi.fn(() => ({ eq: eqMock }));
-    const fromMock = vi.fn(() => ({ update: updateMock }));
+    const selectMock = vi.fn(() => ({
+      eq: vi.fn(() => ({
+        single: vi
+          .fn()
+          .mockResolvedValue({ data: { status: "ocr_processing", processing_run_id: null } }),
+      })),
+    }));
+    const fromMock = vi.fn(() => ({ update: updateMock, select: selectMock }));
 
     createClientMock.mockReturnValue({
       auth: {
@@ -416,6 +440,86 @@ describe("use-background-ocr", () => {
       expect.objectContaining({ stage: "completed" }),
     );
     expect(addNotificationMock).not.toHaveBeenCalled();
+  });
+
+  // A lost response is not a lost request: the server may have claimed the record and started
+  // reading it. Failing it from here marks a live run as failed, and the user is told the
+  // document failed while it is being transcribed.
+  it("does not fail a record another run has claimed when the hand-off response is lost", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client, updateMock } = createSupabaseClientMock({
+      sessionToken: "token-1",
+      recordRow: { status: "ocr_processing", processing_run_id: "run-1" },
+    });
+    createClientMock.mockReturnValue(client);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Failed to fetch")));
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    let response: { success: boolean; accepted?: boolean } | undefined;
+    await act(async () => {
+      response = await result.current.startBackgroundOCR({
+        recordId: "record-1",
+        personId: "person-1",
+        personName: "Alex",
+      });
+    });
+
+    expect(response).toEqual({ success: true, accepted: true });
+    // Only the client's own "ocr_processing" write; nothing marked this record failed.
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).not.toHaveBeenCalledWith(expect.objectContaining({ status: "ocr_failed" }));
+    expect(addNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("fails a record nobody claimed when the hand-off response is lost", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client, updateMock } = createSupabaseClientMock({
+      sessionToken: "token-1",
+      recordRow: { status: "ocr_processing", processing_run_id: null },
+    });
+    createClientMock.mockReturnValue(client);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Failed to fetch")));
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    let response: { success: boolean; error?: string } | undefined;
+    await act(async () => {
+      response = await result.current.startBackgroundOCR({
+        recordId: "record-1",
+        personId: "person-1",
+        personName: "Alex",
+      });
+    });
+
+    // Nothing owns the record and it never moved on, so the failure really is this caller's.
+    expect(updateMock).toHaveBeenCalledWith({
+      status: "ocr_failed",
+      ocr_error: "Failed to fetch",
+    });
+    expect(response).toEqual({ success: false, error: "Failed to fetch" });
   });
 
   it("starts OCR for already uploaded attachments when files list is empty", async () => {
