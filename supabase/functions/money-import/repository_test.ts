@@ -2054,12 +2054,14 @@ Deno.test("postgrestFilterValue quotes values so data cannot be read as filter g
   assertEquals(postgrestFilterValue('a"b\\c'), '"a\\"b\\\\c"');
 });
 
-Deno.test("repository resolves a duplicate by either identity, not just the first", async () => {
+Deno.test("repository refuses a hash-only match when the external id differs", async () => {
   // Every T-Bank row carries both an external_id and a dedupe_hash, and the two unique indexes
-  // are independent: an insert can violate dedupe_hash while its (source, external_id) is new.
-  // Probing only one of them found nothing and reported a duplicate it could not resolve, for a
-  // row whose duplicate was sitting under the other key.
-  const lookup = queryStub({ data: { id: "tx-by-hash" }, error: null });
+  // are independent, so an insert can violate dedupe_hash while its (source, external_id) is
+  // new. Resolving to the hash-matching row and updating it would be wrong, not merely blunt:
+  // the extension folds that hash to 32 bits, so a collision between two different operations
+  // is a matter of scale. The row is refused, and the message says which case it is.
+  const scoped = queryStub({ data: null, error: null });
+  const owner = queryStub({ data: { payer_person_id: "person-1" }, error: null });
   const repository = createRepositoryWithClients({
     adminClient: {
       from: (table: string) => {
@@ -2070,30 +2072,34 @@ Deno.test("repository resolves a duplicate by either identity, not just the firs
               single: async () => ({ data: null, error: { code: "23505", message: "dup" } }),
             }),
           }),
-          select: () => lookup,
+          select: (columns: string) => (columns === "payer_person_id" ? owner : scoped),
           update: () => ({ eq: async () => ({ error: null }) }),
         };
       },
     },
   });
 
-  const resolved = await repository.insertOrResolveTransaction(
-    {
-      posted_at: "2026-01-01T00:00:00.000Z",
-      amount: 10,
-      transaction_type: "expense",
-      source: "tbank",
-      external_id: "ext-new",
-      dedupe_hash: "hash-already-there",
-      account_id: "acc-1",
-    },
-    "person-1",
+  await assertRejectsWith(
+    () =>
+      repository.insertOrResolveTransaction(
+        {
+          posted_at: "2026-01-01T00:00:00.000Z",
+          amount: 10,
+          transaction_type: "expense",
+          source: "tbank",
+          external_id: "ext-new",
+          dedupe_hash: "tbw_deadbeef",
+          account_id: "acc-1",
+        },
+        "person-1",
+      ),
+    "collision between two different operations",
   );
 
-  assertEquals(resolved, { transactionId: "tx-by-hash", inserted: false });
-  const filter = lookup.orFilters[0] ?? "";
-  assertEquals(filter.includes("external_id"), true);
-  assertEquals(filter.includes("dedupe_hash"), true);
+  // Resolution asked about the external id alone; the hash only ever reached the diagnosis.
+  assertEquals(scoped.orFilters.length, 1);
+  assertEquals(scoped.orFilters[0]?.includes("external_id"), true);
+  assertEquals(scoped.orFilters[0]?.includes("dedupe_hash"), false);
 });
 
 Deno.test("exactIgnoringCase tolerates exactly the padding SQL trim removes", () => {

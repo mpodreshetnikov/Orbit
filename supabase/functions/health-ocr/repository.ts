@@ -41,7 +41,12 @@ export interface HealthOcrRepository {
   renewClaim(recordId: string, runId: string): Promise<boolean>;
   updateRecordSuccess(
     recordId: string,
-    payload: { ocrText: string; title: string },
+    /**
+     * `ocrError` is the page a successful run still lost, if any. A document that came back
+     * missing a page is not a clean success, and the combined text is not somewhere anything
+     * reads back — so it is carried on the record, and a run that loses nothing clears it.
+     */
+    payload: { ocrText: string; title: string; ocrError?: string | null },
     options?: { runId?: string },
   ): Promise<void>;
   updateRecordFailure(
@@ -150,7 +155,7 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
           ocr_text: payload.ocrText,
           title: payload.title,
           status: "ocr_review",
-          ocr_error: null,
+          ocr_error: payload.ocrError ?? null,
           processing_run_id: null,
           processing_started_at: null,
         })
@@ -176,7 +181,14 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
         })
         .eq("id", recordId);
       if (options.runId) query = query.eq("processing_run_id", options.runId);
-      const { data } = await query.select("id");
+      const { data, error } = await query.select("id");
+
+      // Checked, not discarded: the caller reports back whether the record carries its failure,
+      // and a refused write that resolved quietly made that report a lie -- the browser then
+      // trusted it and left the record processing with nobody working on it.
+      if (error) {
+        throw new Error(`Failed to update record: ${error.message}`);
+      }
       if (options.runId && (data ?? []).length === 0) throw new ClaimLostError(recordId);
     },
   };

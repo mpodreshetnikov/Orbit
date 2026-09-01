@@ -26,6 +26,51 @@ import type {
 } from "./types.ts";
 
 /**
+ * Quotes a value for a PostgREST filter string, where an unquoted value would let a comma,
+ * parenthesis or dot in the data be read as filter grammar. Backslash escapes itself and the
+ * quote, so it has to be escaped first.
+ */
+export function postgrestFilterValue(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The filter that finds a transaction by one identity.
+ *
+ * The two are not interchangeable and must not be OR-ed. `(source, external_id)` is what the
+ * bank calls the operation; `dedupe_hash` is a fallback for rows that have no external id, and
+ * the extension computes it as FNV-1a folded to 32 bits -- eight hex characters, where a
+ * collision between two genuinely different transactions is a matter of scale rather than of
+ * bad luck. Resolving a row to a transaction whose hash matches while its external id differs
+ * would merge two unrelated operations and overwrite one of them.
+ */
+function transactionIdentityFilter(
+  row: CanonicalTransactionRowInput,
+  identity: "external_id" | "dedupe_hash",
+): string | null {
+  if (identity === "external_id") {
+    const externalId = normalizeText(row.external_id);
+    if (!externalId) return null;
+    const source = postgrestFilterValue(row.source ?? "manual");
+    return `and(source.eq.${source},external_id.eq.${postgrestFilterValue(externalId)})`;
+  }
+  const dedupeHash = normalizeText(row.dedupe_hash);
+  return dedupeHash ? `dedupe_hash.eq.${postgrestFilterValue(dedupeHash)}` : null;
+}
+
+/**
+ * The identity a row is resolved by: what the bank calls it, or the hash when it has no name.
+ * Precedence, not alternatives -- see `transactionIdentityFilter`.
+ */
+function resolvingIdentity(
+  row: CanonicalTransactionRowInput,
+): "external_id" | "dedupe_hash" | null {
+  if (normalizeText(row.external_id)) return "external_id";
+  if (normalizeText(row.dedupe_hash)) return "dedupe_hash";
+  return null;
+}
+
+/**
  * The slice of `money_import_grants` this repository reads and writes. Declared here because the
  * table is absent from the generated `Database` types; see `grantsTable` for why.
  */
@@ -67,37 +112,6 @@ export function exactIgnoringCase(value: string): string {
   // grant against an allowlist row that `is_allowed_user()` itself rejects: wider than the rule
   // it is copying, on the permissive side.
   return `^ *${regexLiteral(value.trim())} *$`;
-}
-
-/**
- * Quotes a value for a PostgREST filter string, where an unquoted value would let a comma,
- * parenthesis or dot in the data be read as filter grammar. Backslash escapes itself and the
- * quote, so it has to be escaped first.
- */
-export function postgrestFilterValue(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
-/**
- * The filter that finds a transaction by whichever of its identities exists.
- *
- * A row can carry both -- every T-Bank row does -- and the two unique indexes are independent,
- * so an insert can violate `dedupe_hash` while its `(source, external_id)` is new. Checking only
- * one of them then finds nothing and reports a duplicate it cannot resolve, for a row whose
- * duplicate is sitting right there under the other key.
- */
-function transactionIdentityFilter(row: CanonicalTransactionRowInput): string | null {
-  const clauses: string[] = [];
-  const externalId = normalizeText(row.external_id);
-  if (externalId) {
-    const source = postgrestFilterValue(row.source ?? "manual");
-    clauses.push(`and(source.eq.${source},external_id.eq.${postgrestFilterValue(externalId)})`);
-  }
-  const dedupeHash = normalizeText(row.dedupe_hash);
-  if (dedupeHash) {
-    clauses.push(`dedupe_hash.eq.${postgrestFilterValue(dedupeHash)}`);
-  }
-  return clauses.length > 0 ? clauses.join(",") : null;
 }
 
 export interface MoneyImportRepository {
@@ -452,91 +466,6 @@ export function createSupabaseMoneyImportRepository(
     return data as Record<string, unknown>;
   }
 
-  /**
-   * `money_import_grants` is not in the generated `Database` types. It is not alone in that --
-   * `money_fx_rates` and the `mcp_oauth_*` tables are missing too, though their migrations are
-   * on main and `db-artifacts-verify` is green -- so this is a standing property of the
-   * generated artifacts rather than something this table did. `money-fx-sync/handler.ts`
-   * already answers it by describing the table it needs where it needs it, and this follows
-   * that: the shape below is what these two queries actually read and write, and it is checked
-   * against the real table by `money_import_grants_rls_test.sql`.
-   */
-  function grantsTable() {
-    return (
-      getAdminClient() as unknown as {
-        from(table: "money_import_grants"): MoneyImportGrantsTableQuery;
-      }
-    ).from("money_import_grants");
-  }
-
-  async function getGrantByToken(token: string): Promise<Record<string, unknown> | null> {
-    const tokenHash = await sha256Hex(token);
-    const { data, error } = await grantsTable().select("*").eq("token_hash", tokenHash).single();
-
-    if (error || !data) return null;
-    return data as Record<string, unknown>;
-  }
-
-  /** Read back the grant a session was minted by, so its revocation reaches that session. */
-  async function getGrantById(grantId: string): Promise<Record<string, unknown> | null> {
-    const { data, error } = await grantsTable().select("*").eq("id", grantId).single();
-
-    if (error || !data) return null;
-    return data as Record<string, unknown>;
-  }
-
-  /**
-   * Whether this auth user may still import. Asked of a grant's issuer on every use, so that
-   * removing someone from `allowed_users` takes their extension's credential with it.
-   *
-   * The allowlist is matched the same two ways everything else matches it -- by `auth_user_id`
-   * or by email. `public.is_allowed_user()` and `authenticateAllowedUser` both accept either,
-   * and a row pre-approved by email keeps a null `auth_user_id` until the signup trigger links
-   * it. Checking only the UUID here would let such a person create a grant through the app and
-   * then get 401 on every use of it.
-   *
-   * Failure answers "no". The alternative -- letting a transport error stand in for permission
-   * -- would turn any outage of this lookup into a grant that authorises itself.
-   */
-  async function isAuthUserAllowed(authUserId: string): Promise<boolean> {
-    if (!authUserId) return false;
-    try {
-      const admin = getAdminClient();
-      const { data: byId, error: byIdError } = await admin
-        .from("allowed_users")
-        .select("id")
-        .eq("auth_user_id", authUserId)
-        .maybeSingle();
-
-      if (byIdError) return false;
-      if (byId) return true;
-
-      const { data: userData, error: userError } = await admin.auth.admin.getUserById(authUserId);
-      const email = normalizeText(userData?.user?.email)?.trim();
-      if (userError || !email) return false;
-
-      // Case-insensitive equality, not a pattern match: `a_b@example.com` matching `axb@...`
-      // would wave a removed issuer through on somebody else's allowlist row. Escaping LIKE
-      // metacharacters was the first attempt and is not enough -- see `regexLiteral`.
-      const { data: byEmail, error: byEmailError } = await admin
-        .from("allowed_users")
-        .select("id")
-        .regexIMatch("email", exactIgnoringCase(email))
-        .maybeSingle();
-
-      if (byEmailError || !byEmail) return false;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function markGrantUsed(grantId: string, usedAtIso: string): Promise<void> {
-    // Best effort: knowing when a grant was last used is worth having, but failing to
-    // record it must not cost the import that is starting.
-    await grantsTable().update({ last_used_at: usedAtIso }).eq("id", grantId);
-  }
-
   async function findLastImportedAt(source: string, payerPersonId: string): Promise<string | null> {
     const { data, error } = await getAdminClient()
       .from("money_transactions")
@@ -631,6 +560,91 @@ export function createSupabaseMoneyImportRepository(
       .eq("id", batchId);
 
     if (error) throw new Error(error.message);
+  }
+
+  /**
+   * `money_import_grants` is not in the generated `Database` types. It is not alone in that --
+   * `money_fx_rates` and the `mcp_oauth_*` tables are missing too, though their migrations are
+   * on main and `db-artifacts-verify` is green -- so this is a standing property of the
+   * generated artifacts rather than something this table did. `money-fx-sync/handler.ts`
+   * already answers it by describing the table it needs where it needs it, and this follows
+   * that: the shape below is what these two queries actually read and write, and it is checked
+   * against the real table by `money_import_grants_rls_test.sql`.
+   */
+  function grantsTable() {
+    return (
+      getAdminClient() as unknown as {
+        from(table: "money_import_grants"): MoneyImportGrantsTableQuery;
+      }
+    ).from("money_import_grants");
+  }
+
+  async function getGrantByToken(token: string): Promise<Record<string, unknown> | null> {
+    const tokenHash = await sha256Hex(token);
+    const { data, error } = await grantsTable().select("*").eq("token_hash", tokenHash).single();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  }
+
+  /** Read back the grant a session was minted by, so its revocation reaches that session. */
+  async function getGrantById(grantId: string): Promise<Record<string, unknown> | null> {
+    const { data, error } = await grantsTable().select("*").eq("id", grantId).single();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  }
+
+  /**
+   * Whether this auth user may still import. Asked of a grant's issuer on every use, so that
+   * removing someone from `allowed_users` takes their extension's credential with it.
+   *
+   * The allowlist is matched the same two ways everything else matches it -- by `auth_user_id`
+   * or by email. `public.is_allowed_user()` and `authenticateAllowedUser` both accept either,
+   * and a row pre-approved by email keeps a null `auth_user_id` until the signup trigger links
+   * it. Checking only the UUID here would let such a person create a grant through the app and
+   * then get 401 on every use of it.
+   *
+   * Failure answers "no". The alternative -- letting a transport error stand in for permission
+   * -- would turn any outage of this lookup into a grant that authorises itself.
+   */
+  async function isAuthUserAllowed(authUserId: string): Promise<boolean> {
+    if (!authUserId) return false;
+    try {
+      const admin = getAdminClient();
+      const { data: byId, error: byIdError } = await admin
+        .from("allowed_users")
+        .select("id")
+        .eq("auth_user_id", authUserId)
+        .maybeSingle();
+
+      if (byIdError) return false;
+      if (byId) return true;
+
+      const { data: userData, error: userError } = await admin.auth.admin.getUserById(authUserId);
+      const email = normalizeText(userData?.user?.email)?.trim();
+      if (userError || !email) return false;
+
+      // Case-insensitive equality, not a pattern match: `a_b@example.com` matching `axb@...`
+      // would wave a removed issuer through on somebody else's allowlist row. Escaping LIKE
+      // metacharacters was the first attempt and is not enough -- see `regexLiteral`.
+      const { data: byEmail, error: byEmailError } = await admin
+        .from("allowed_users")
+        .select("id")
+        .regexIMatch("email", exactIgnoringCase(email))
+        .maybeSingle();
+
+      if (byEmailError || !byEmail) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function markGrantUsed(grantId: string, usedAtIso: string): Promise<void> {
+    // Best effort: knowing when a grant was last used is worth having, but failing to
+    // record it must not cost the import that is starting.
+    await grantsTable().update({ last_used_at: usedAtIso }).eq("id", grantId);
   }
 
   async function assertAccountBelongsToPayer(
@@ -749,8 +763,9 @@ export function createSupabaseMoneyImportRepository(
    */
   async function findTransactionOwnerIgnoringPayer(
     row: CanonicalTransactionRowInput,
+    identity: "external_id" | "dedupe_hash",
   ): Promise<string | null> {
-    const identityFilter = transactionIdentityFilter(row);
+    const identityFilter = transactionIdentityFilter(row, identity);
     if (!identityFilter) return null;
 
     const { data, error } = await getAdminClient()
@@ -771,7 +786,8 @@ export function createSupabaseMoneyImportRepository(
     // service-role client. `(source, external_id)` and `dedupe_hash` are unique across the whole
     // table, not per person, so without this predicate a caller could reuse another payer's
     // external id, let the insert conflict, and have their row resolved and overwritten here.
-    const identityFilter = transactionIdentityFilter(row);
+    const identity = resolvingIdentity(row);
+    const identityFilter = identity ? transactionIdentityFilter(row, identity) : null;
     if (!identityFilter) return null;
 
     const { data, error } = await getAdminClient()
@@ -1713,14 +1729,30 @@ export function createSupabaseMoneyImportRepository(
       // "could not be resolved" alone reads like a bug in the importer rather than the real
       // condition, and the real condition is fixable: scoping those indexes by payer is what
       // `scope_money_transaction_identity` does in the money-identity work.
-      const conflictingOwner = await findTransactionOwnerIgnoringPayer(row);
-      if (conflictingOwner && conflictingOwner !== payerPersonId) {
-        throw new Error(
-          "Duplicate transaction belongs to another payer; the money_transactions uniqueness " +
-            "indexes are not scoped by payer, so this row cannot be imported without " +
-            "overwriting theirs",
-        );
+      // Diagnosis only, and it probes both identities because either index can be the one that
+      // was violated. Nothing here feeds resolution: a row found under an identity this row is
+      // not resolved by is, by definition, a different transaction.
+      for (const identity of ["external_id", "dedupe_hash"] as const) {
+        const owner = await findTransactionOwnerIgnoringPayer(row, identity);
+        if (!owner) continue;
+
+        if (owner !== payerPersonId) {
+          throw new Error(
+            `Duplicate transaction belongs to another payer (matched on ${identity}); the ` +
+              "money_transactions uniqueness indexes are not scoped by payer, so this row " +
+              "cannot be imported without overwriting theirs",
+          );
+        }
+
+        if (identity === "dedupe_hash" && normalizeText(row.external_id)) {
+          throw new Error(
+            "Duplicate transaction matched only on dedupe_hash while carrying a different " +
+              "external_id; the extension folds that hash to 32 bits, so this is a collision " +
+              "between two different operations rather than the same one twice",
+          );
+        }
       }
+
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 
