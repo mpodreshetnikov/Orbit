@@ -320,6 +320,10 @@ export function publishedVersionOf(
 export interface ExtensionReleaseDownloader {
   storage: {
     from(bucket: string): {
+      list(
+        path: string,
+        options?: { search?: string; limit?: number },
+      ): Promise<{ data: { name: string }[] | null; error: unknown }>;
       download(path: string): Promise<{ data: Blob | null; error: unknown }>;
     };
   };
@@ -340,30 +344,51 @@ export async function fetchPublishedExtensionVersionFromStorage(
   client: ExtensionReleaseDownloader,
   bucketName: string = EXTENSION_RELEASE_BUCKET,
 ): Promise<PublishedExtensionVersion> {
+  // Absence is established by listing, not by classifying a download error.
+  // Storage reports "not there" differently on every route -- HTTP 400 with the
+  // status in the body on the public URL, and something the client wraps on the
+  // authenticated one -- and guessing at those shapes has now been wrong twice.
+  // A listing answers with an empty array, which is not an error at all, so
+  // there is nothing to classify.
+  let listing: { data: { name: string }[] | null; error: unknown };
+  try {
+    listing = await client.storage
+      .from(bucketName)
+      .list("", { search: EXTENSION_RELEASE_LATEST_PATH, limit: 100 });
+  } catch (error) {
+    return { status: "unknown", reason: `listing the bucket failed: ${errorText(error)}` };
+  }
+
+  if (listing.error) {
+    return { status: "unknown", reason: `listing the bucket: ${errorText(listing.error)}` };
+  }
+
+  if (!(listing.data ?? []).some((entry) => entry.name === EXTENSION_RELEASE_LATEST_PATH)) {
+    return { status: "absent" };
+  }
+
   let result: { data: Blob | null; error: unknown };
   try {
     result = await client.storage.from(bucketName).download(EXTENSION_RELEASE_LATEST_PATH);
   } catch (error) {
     return {
       status: "unknown",
-      reason: `reading ${EXTENSION_RELEASE_LATEST_PATH} failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      reason: `reading ${EXTENSION_RELEASE_LATEST_PATH} failed: ${errorText(error)}`,
     };
   }
 
+  // The listing said it is there, so a failure to read it now is a failure, not
+  // an absence. Fail closed rather than guess.
   if (result.error) {
-    // Storage reports a missing object in the error body rather than by status,
-    // the same shape the public route uses.
-    if (isStorageObjectMissing(result.error)) return { status: "absent" };
-    const message =
-      typeof (result.error as { message?: unknown }).message === "string"
-        ? (result.error as { message: string }).message
-        : JSON.stringify(result.error);
-    return { status: "unknown", reason: `reading ${EXTENSION_RELEASE_LATEST_PATH}: ${message}` };
+    return {
+      status: "unknown",
+      reason: `reading ${EXTENSION_RELEASE_LATEST_PATH}: ${errorText(result.error)}`,
+    };
   }
 
-  if (!result.data) return { status: "absent" };
+  if (!result.data) {
+    return { status: "unknown", reason: `${EXTENSION_RELEASE_LATEST_PATH} came back empty` };
+  }
 
   let payload: unknown;
   try {
@@ -510,6 +535,25 @@ export function evaluateExtensionVersionPolicy(input: {
       versionChanged: versionDelta.changed,
     }),
   };
+}
+
+/**
+ * A description of a thrown or returned error that survives shapes JSON cannot
+ * see. `JSON.stringify` on an Error gives `{}` -- which is exactly what the
+ * first version of this guard printed, telling nobody anything.
+ */
+function errorText(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (error && typeof error === "object") {
+    const body = error as { name?: unknown; message?: unknown; status?: unknown };
+    const parts = [body.name, body.message, body.status].filter(
+      (part) => part !== undefined && part !== null && part !== "",
+    );
+    if (parts.length > 0) return parts.map(String).join(" ");
+    const keys = Object.keys(body);
+    return keys.length > 0 ? JSON.stringify(body) : `an error with no readable fields`;
+  }
+  return String(error);
 }
 
 const STORAGE_MISSING_CODES = new Set(["NoSuchKey", "NoSuchBucket"]);
