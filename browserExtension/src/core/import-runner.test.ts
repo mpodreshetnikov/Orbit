@@ -117,6 +117,9 @@ describe("import-runner", () => {
       inserted: 1,
       skipped: 0,
       error_count: 0,
+      // Carried back for a scheduled run, which must not walk its backfill cursor past a
+      // window it only saw part of. Nothing extra is sent to the server.
+      import_completeness: { skipped_after_budget_count: 0, partial: false },
     });
   });
 
@@ -223,6 +226,7 @@ describe("import-runner", () => {
       inserted: 9,
       skipped: 3,
       error_count: 3,
+      import_completeness: { skipped_after_budget_count: 0, partial: false },
     });
   });
 
