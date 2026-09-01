@@ -23,6 +23,9 @@ Common variables used by this repo:
   - `NEXT_PUBLIC_EXTENSION_ID`
 - Server/API:
   - `SUPABASE_SERVICE_ROLE_KEY`
+  - `MONEY_FX_SYNC_TOKEN` (shared secret the `money-fx-sync` function accepts from the
+    scheduled caller; the same value is stored in Supabase Vault as `money_fx_sync_token`
+    so the `pg_cron` job can present it)
   - `DATABASE_URL` (for remote DB deploy script)
   - `MCP_SERVER_ENABLED` (master switch for the MCP connector; all its routes 404 without it)
   - `SUPABASE_JWT_SECRET` (mints short-lived user JWTs for MCP tool calls)
@@ -43,7 +46,8 @@ Common variables used by this repo:
 
 - Service-role credentials are allowed only in server contexts (Next API routes, Edge Functions, deploy scripts).
 - Never expose service-role keys to client bundles.
-- Functions with `verify_jwt = false` must validate bearer tokens manually unless they are strictly internal cron-style endpoints.
+- Functions with `verify_jwt = false` must validate bearer tokens manually unless they are strictly internal cron-style endpoints. "Internal" means unreachable from the internet — a cron-triggered function on a public URL still needs a manual check, because the schedule does not restrict who else can call it.
+- A function that both a schedule and the browser call accepts two credentials, never one: the schedule carries a shared secret, and the browser carries the signed-in user's access token, because a browser must never hold the secret. `money-fx-sync` is the worked example. Accepting only the secret does not harden such a function — it takes the user-facing path down, which is a defect, not a boundary.
 
 ## MCP Connector
 

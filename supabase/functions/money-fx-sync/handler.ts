@@ -3,6 +3,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const MONEY_FX_SYNC_TOKEN = Deno.env.get("MONEY_FX_SYNC_TOKEN");
 const CBR_DAILY_URL = Deno.env.get("CBR_DAILY_URL") ?? "https://www.cbr.ru/scripts/XML_daily.asp";
 const CBR_DYNAMIC_URL =
   Deno.env.get("CBR_DYNAMIC_URL") ?? "https://www.cbr.ru/scripts/XML_dynamic.asp";
@@ -22,6 +23,8 @@ interface SyncWindowInput {
 interface MoneyFxSyncDeps {
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
+  syncToken?: string;
+  verifyUserFn?: (accessToken: string) => Promise<boolean>;
   cbrDailyUrl?: string;
   cbrDynamicUrl?: string;
   createClientFn?: typeof createClient;
@@ -289,6 +292,69 @@ async function loadSyncBounds(
   };
 }
 
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Comparing the SHA-256 of both strings makes the comparison independent of the
+ * secret's length and content, so a caller cannot learn the token byte by byte from
+ * how long the rejection took.
+ */
+async function tokensMatch(presented: string, expected: string): Promise<boolean> {
+  const [presentedHash, expectedHash] = await Promise.all([
+    sha256Hex(presented),
+    sha256Hex(expected),
+  ]);
+  if (presentedHash.length !== expectedHash.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < presentedHash.length; index++) {
+    mismatch |= presentedHash.charCodeAt(index) ^ expectedHash.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+function bearerToken(req: Request): string | null {
+  const header = req.headers.get("Authorization") ?? req.headers.get("authorization");
+  if (!header) return null;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  const token = (match ? match[1] : header).trim();
+  return token.length > 0 ? token : null;
+}
+
+/**
+ * Whether the bearer belongs to a signed-in user. The web app reaches this
+ * function from the browser -- `useMoneyBudgetReport` syncs the report window
+ * before reading it -- and a browser cannot hold the cron secret, so rejecting
+ * everything but that secret would take the budget report down with it.
+ *
+ * A signed-in user is not granted anything new here: the window it can ask for
+ * writes shared reference rates, which every signed-in user already reads.
+ */
+function createDefaultUserVerifier(input: {
+  createClientFn: typeof createClient;
+  supabaseUrl?: string;
+  serviceRoleKey?: string;
+}): (accessToken: string) => Promise<boolean> {
+  return async (accessToken: string) => {
+    if (!input.supabaseUrl || !input.serviceRoleKey) return false;
+    try {
+      const client = input.createClientFn(input.supabaseUrl, input.serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data, error } = await client.auth.getUser(accessToken);
+      return !error && Boolean(data?.user);
+    } catch {
+      // A token that GoTrue will not resolve is not a user, and neither is a
+      // client that cannot be built. Both are the same answer: no.
+      return false;
+    }
+  };
+}
+
 export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
   const createClientFn = deps.createClientFn ?? createClient;
   const fetchFn = deps.fetchFn ?? fetch;
@@ -296,6 +362,14 @@ export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
   const resolvedServiceRoleKey = deps.supabaseServiceRoleKey ?? SUPABASE_SERVICE_ROLE_KEY;
   const resolvedCbrDailyUrl = deps.cbrDailyUrl ?? CBR_DAILY_URL;
   const resolvedCbrDynamicUrl = deps.cbrDynamicUrl ?? CBR_DYNAMIC_URL;
+  const resolvedSyncToken = deps.syncToken ?? MONEY_FX_SYNC_TOKEN;
+  const verifyUser =
+    deps.verifyUserFn ??
+    createDefaultUserVerifier({
+      createClientFn,
+      supabaseUrl: resolvedSupabaseUrl,
+      serviceRoleKey: resolvedServiceRoleKey,
+    });
 
   return async function handleMoneyFxSyncRequest(req: Request): Promise<Response> {
     if (req.method === "OPTIONS") {
@@ -304,6 +378,33 @@ export function createMoneyFxSyncHandler(deps: MoneyFxSyncDeps = {}) {
 
     if (req.method !== "POST") {
       return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    // The function runs with the service role key and takes an arbitrary date window
+    // from the request body, so it cannot stay reachable by anyone who knows the project
+    // address. `verify_jwt` is off, which is exactly the case docs/SECURITY.md requires to
+    // validate the bearer by hand.
+    //
+    // Two callers are legitimate and they cannot present the same credential. The pg_cron
+    // job is nobody's session, so it carries the shared secret from Vault. The web app is
+    // a browser, which must never hold that secret, so it carries the signed-in user's
+    // access token. Accepting only the first would 401 the budget report on every load.
+    const presentedToken = bearerToken(req);
+    if (!presentedToken) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
+    }
+
+    const isCronCaller = resolvedSyncToken
+      ? await tokensMatch(presentedToken, resolvedSyncToken)
+      : false;
+
+    if (!isCronCaller && !(await verifyUser(presentedToken))) {
+      // An unset secret is reported rather than silently narrowing this to users
+      // only: it means the scheduled sync cannot authenticate and has stopped.
+      if (!resolvedSyncToken) {
+        return jsonResponse({ error: "Missing MONEY_FX_SYNC_TOKEN" }, 500);
+      }
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     if (!resolvedSupabaseUrl || !resolvedServiceRoleKey) {
