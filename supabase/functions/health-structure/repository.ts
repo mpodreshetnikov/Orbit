@@ -16,9 +16,15 @@ interface AuthenticatedUser {
   email: string | null;
 }
 
+/** The storage bucket a record's own pages live in. */
+const ATTACHMENT_BUCKET = "medical-attachments";
+
 export interface HealthStructureRepository extends ResolutionRepository {
   authenticateAllowedUser(token: string): Promise<AuthenticatedUser | null>;
   getRecord(recordId: string): Promise<Record<string, unknown> | null>;
+  /** The record's attachments in document order, for the pages the extraction stage reads. */
+  getAttachments(recordId: string): Promise<Array<{ storage_path: string; mime_type: string }>>;
+  downloadAttachment(storagePath: string): Promise<Blob | null>;
   fetchObservationCatalog(): Promise<ObservationCatalogItem[]>;
   fetchFindingTypeCatalog(): Promise<FindingTypeCatalogItem[]>;
   fetchBodySiteCatalog(): Promise<BodySiteCatalogItem[]>;
@@ -116,6 +122,27 @@ export function createSupabaseHealthStructureRepository(
     } catch {
       return null;
     }
+  }
+
+  async function getAttachments(
+    recordId: string,
+  ): Promise<Array<{ storage_path: string; mime_type: string }>> {
+    const { data, error } = await admin
+      .from("record_attachments")
+      .select("storage_path, mime_type")
+      .eq("record_id", recordId)
+      // The same tiebreak health-ocr applies: the page markers in the transcription and the
+      // images sent with it have to describe the same order.
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true });
+    if (error) throw new Error(`Failed to fetch attachments: ${error.message}`);
+    return (data ?? []) as Array<{ storage_path: string; mime_type: string }>;
+  }
+
+  async function downloadAttachment(storagePath: string): Promise<Blob | null> {
+    const { data, error } = await admin.storage.from(ATTACHMENT_BUCKET).download(storagePath);
+    if (error || !data) return null;
+    return data;
   }
 
   async function getRecord(recordId: string): Promise<Record<string, unknown> | null> {
@@ -374,6 +401,8 @@ export function createSupabaseHealthStructureRepository(
   return {
     authenticateAllowedUser,
     getRecord,
+    getAttachments,
+    downloadAttachment,
     fetchObservationCatalog,
     fetchFindingTypeCatalog,
     fetchBodySiteCatalog,

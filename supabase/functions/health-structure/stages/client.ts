@@ -70,6 +70,7 @@ export async function callStageJson(
   schema: Record<string, unknown>,
   schemaName: string,
   ctx: StageContext,
+  images: string[] = [],
 ): Promise<StageCallResult> {
   const timeoutMs = ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -104,7 +105,19 @@ export async function callStageJson(
           },
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
+            {
+              role: "user",
+              // A plain string when there is nothing but text, so a stage that sends no images
+              // produces exactly the request body it always did -- and the long stable prefix
+              // stays byte-identical for provider-side prompt caching.
+              content:
+                images.length > 0
+                  ? [
+                      { type: "text", text: userPrompt },
+                      ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+                    ]
+                  : userPrompt,
+            },
           ],
         };
         if (ctx.effort) body.reasoning = { effort: ctx.effort };

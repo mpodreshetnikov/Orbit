@@ -75,8 +75,10 @@ export async function runStagedParse(
         findingTypeCatalog: context.findingTypeCatalog,
         bodySiteCatalog: context.bodySiteCatalog,
       },
-      // Extraction is the accuracy-critical stage; it gets the higher reasoning budget.
+      // Extraction is the accuracy-critical stage; it gets the higher reasoning budget, and the
+      // pages themselves where the transcription of a table is ambiguous.
       stageContext(deps, deps.models?.extract ?? deps.defaultModel, "high"),
+      context.pageImages ?? [],
     ),
   ]);
   stagesRun.push("classify", "extract");

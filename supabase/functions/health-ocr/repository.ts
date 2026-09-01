@@ -116,7 +116,12 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
         .from("record_attachments")
         .select("id, storage_path, mime_type, original_filename")
         .eq("record_id", recordId)
-        .order("sort_order", { ascending: true });
+        // `id` breaks the tie, because `sort_order` is not unique -- the single-upload path
+        // leaves it at zero -- and health-structure orders the same attachments for the page
+        // images it sends alongside this text. Two arbitrary orders would let extraction read a
+        // table against the wrong page.
+        .order("sort_order", { ascending: true })
+        .order("id", { ascending: true });
 
       if (error) {
         throw new Error(`Failed to fetch attachments: ${error.message}`);

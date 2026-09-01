@@ -15,7 +15,7 @@
  * because a slightly worse transcription beats no transcription.
  */
 
-import { ORIENTATION_NORMAL, readJpegOrientation } from "../_shared/exif-orientation.ts";
+import { ORIENTATION_NORMAL, readJpegOrientation } from "./exif-orientation.ts";
 
 /**
  * The longest edge a page is reduced to.
