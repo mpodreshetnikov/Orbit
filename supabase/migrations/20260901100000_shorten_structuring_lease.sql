@@ -1,15 +1,11 @@
--- Function: release_abandoned_record_processing()
--- Give back the records whose worker never came back.
+-- Structuring renews its claim, so it no longer needs an hour of grace.
 --
--- The browser used to be the timeout: it aborted the OCR call after two minutes and wrote
--- `ocr_failed` itself. That was wrong about live runs -- a five-page document is not a failure --
--- and it is gone now that the pipelines run past the request. But something still has to answer
--- for a worker that dies mid-document, or the record sits in `ocr_processing` forever with
--- nobody working on it and no way for the user to retry.
---
--- The claim's lease already says what "abandoned" means, so this reuses it rather than inventing
--- a second timeout. A run that is alive renews; one that stopped goes quiet and its record comes
--- back to the user with an error it can act on.
+-- The longer lease existed for one reason: the whole structuring run was a single claim, and
+-- three staged model calls with retries and provider backoff can outrun any lease short enough
+-- to be useful. Reaped on the OCR lease, a worker still reading the document would have lost the
+-- record and thrown away everything it had done. Now the parse says it is still alive between
+-- stages, which is what a lease is for -- and a dead structuring worker stops holding its record
+-- for an hour.
 
 CREATE OR REPLACE FUNCTION public.release_abandoned_record_processing(
   p_lease_seconds integer DEFAULT 900,

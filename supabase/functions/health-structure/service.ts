@@ -32,6 +32,11 @@ export interface HealthStructureParseContext {
    * the transcription alone, as it always did.
    */
   pageImages?: string[];
+  /**
+   * Say the run is still working, between stages. Absent for callers with no claim to keep --
+   * the E2E stub and the unit tests.
+   */
+  renewClaim?: () => Promise<boolean>;
 }
 
 export interface HealthStructureServiceDeps {
@@ -310,7 +315,11 @@ export async function runHealthStructureService(
     // Loaded after the claim and never allowed to fail the record: this is context, not content.
     const pageImages = (await deps.loadPageImages?.(input.recordId)) ?? [];
 
+    const claimedRunId = runId;
     const context: HealthStructureParseContext = {
+      // The parse is long enough to outlive a lease short enough to be useful, so it says so
+      // between stages rather than being given an hour up front.
+      renewClaim: () => deps.repository.renewClaim(input.recordId!, claimedRunId),
       observationCatalog,
       findingTypeCatalog,
       bodySiteCatalog,

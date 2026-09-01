@@ -1147,3 +1147,79 @@ Deno.test("with no pages, the request body is exactly what it always was", async
     assertEquals(promptOf(body).includes("The images accompanying this prompt"), false);
   }
 });
+
+// The whole parse is one claim, and three staged calls with retries can run for many minutes. A
+// lease long enough to cover that is a lease that leaves a dead worker holding its record for an
+// hour, so the run says it is still alive instead.
+Deno.test("the run renews its claim between stages", async () => {
+  const renewals: number[] = [];
+  const { bodies, fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    if (prompt.includes("Extract clinical entities")) {
+      return jsonResponse({ observations: [], findings: [], conditions: [] });
+    }
+    return jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    });
+  });
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  await runStagedParse("Гемоглобин 97 г/л", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "m",
+    renewClaim: () => {
+      renewals.push(bodies.length);
+      return Promise.resolve(true);
+    },
+  });
+
+  // Once after classify and extract, once after reconcile -- between stages, never inside one,
+  // since a stage is a single call whose length the provider decides.
+  assertEquals(renewals, [2, 3]);
+});
+
+Deno.test("a run that lost its record stops rather than finishing the parse", async () => {
+  const { bodies, fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    return jsonResponse({ observations: [], findings: [], conditions: [] });
+  });
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  let caught: unknown = null;
+  try {
+    await runStagedParse("Гемоглобин 97 г/л", context, {
+      fetchFn,
+      apiKey: "k",
+      defaultModel: "m",
+      renewClaim: () => Promise.resolve(false),
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assertEquals((caught as Error)?.name, "StagedParseClaimLostError");
+  // Classify and extract were paid for; reconcile was not, because by then the result had
+  // nowhere to be written.
+  assertEquals(bodies.length, 2);
+});

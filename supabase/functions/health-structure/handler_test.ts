@@ -19,6 +19,7 @@ function parsed(
 function createRepositoryMock(): HealthStructureRepository {
   return {
     authenticateAllowedUser: async () => ({ id: "user-1", email: "user@example.com" }),
+    renewClaim: async () => true,
     getAttachments: async () => [],
     downloadAttachment: async () => null,
     getRecord: async () => ({
