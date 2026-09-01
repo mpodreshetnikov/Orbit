@@ -5,6 +5,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildExtensionReleaseMetadata,
   buildSupabaseStoragePublicUrl,
+  compareExtensionVersions,
+  assertReleaseMayBePublished,
+  EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
+  EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
+  fetchPublishedExtensionVersionFromStorage,
+  mayPublishOverPublished,
+  EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+  EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
   createZipArchive,
   deriveChromeExtensionIdFromKey,
   detectManifestVersionChange,
@@ -12,6 +20,7 @@ import {
   fetchPublishedExtensionVersion,
   getExtensionReleaseArtifactName,
   readExtensionManifestVersion,
+  shouldPublishRelease,
   shouldRequireExtensionVersionBump,
 } from "./release";
 
@@ -103,6 +112,22 @@ describe("extension release", () => {
       expect(result.versionChanged).toBe(true);
       expect(result.manifestVersionChanged).toBe(false);
       expect(result.publishedVersion).toBeNull();
+    });
+
+    it("does NOT publish when the published release is newer than this manifest", () => {
+      // Runs for consecutive pushes to main are not serialised, so a docs-only
+      // run carrying 0.1.3 can reach this check after a newer run published
+      // 0.1.4. "Differs from what is published" is true there, and acting on it
+      // would rebuild 0.1.3 and overwrite latest.json through the publish
+      // step's upsert -- rolling production back.
+      const result = evaluateExtensionVersionPolicy({
+        changedFiles: ["docs/QUALITY.md"],
+        ...unchangedManifests,
+        published: { status: "published", version: "0.1.4" },
+      });
+
+      expect(result.versionChanged).toBe(false);
+      expect(result.publishedVersion).toBe("0.1.4");
     });
 
     it("publishes when the published release is behind the manifest", () => {
@@ -371,4 +396,314 @@ describe("extension release", () => {
       "https://project.supabase.co/storage/v1/object/public/extension-releases/releases/1.2.3/orbit%20extension.zip",
     );
   }, 15_000);
+});
+
+describe("ordering the published release against the manifest", () => {
+  it("compares versions numerically, component by component", () => {
+    expect(compareExtensionVersions("0.1.3", "0.1.4")).toBe(-1);
+    expect(compareExtensionVersions("0.1.4", "0.1.3")).toBe(1);
+    expect(compareExtensionVersions("0.1.3", "0.1.3")).toBe(0);
+    // Not lexicographic: "0.1.10" is after "0.1.9", though it sorts before it
+    // as a string.
+    expect(compareExtensionVersions("0.1.9", "0.1.10")).toBe(-1);
+    // A missing component reads as zero, the way Chrome orders them.
+    expect(compareExtensionVersions("1", "1.0.0")).toBe(0);
+    expect(compareExtensionVersions("1.2", "1.2.1")).toBe(-1);
+  });
+
+  it("reports null for anything that is not a version", () => {
+    for (const [left, right] of [
+      ["1.0.0", "not-a-version"],
+      ["", "1.0.0"],
+      ["1.0.0-beta", "1.0.0"],
+      ["1.2.3.4.5", "1.0.0"],
+    ]) {
+      expect(compareExtensionVersions(left, right)).toBeNull();
+    }
+  });
+
+  it("rejects a published version that is padded rather than tidying it up", () => {
+    // The published value is the untrusted side. Trimming it before validating
+    // would accept " 65535 " as a version Chrome rejects, and order metadata
+    // that should have taken the malformed fallback.
+    expect(compareExtensionVersions(" 1.0.0 ", "1.0.0")).toBeNull();
+    expect(compareExtensionVersions("1.0.0", "1.0 ")).toBeNull();
+    expect(compareExtensionVersions(" 65535 ", "2.0.0")).toBeNull();
+  });
+
+  it("rejects all-numeric strings Chrome's grammar does not accept", () => {
+    // A component above 65535, or one written with leading zeros, is not a
+    // version Chrome would take. Ordering it anyway is worse than refusing:
+    // published "65536" would read as newer than a 2.0.0 manifest and suppress
+    // the publish, leaving the release stuck rather than falling back.
+    expect(compareExtensionVersions("65536", "2.0.0")).toBeNull();
+    expect(compareExtensionVersions("1.65536", "1.0")).toBeNull();
+    expect(compareExtensionVersions("01.0", "1.0")).toBeNull();
+    expect(compareExtensionVersions("1.00", "1.0")).toBeNull();
+    // The boundary itself is legal.
+    expect(compareExtensionVersions("65535", "65535")).toBe(0);
+    expect(compareExtensionVersions("0.0.0.0", "0")).toBe(0);
+  });
+
+  it("falls back rather than suppressing the publish on metadata Chrome would reject", () => {
+    expect(
+      shouldPublishRelease({
+        publishedVersion: "65536",
+        manifestVersion: "2.0.0",
+        manifestVersionChanged: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("publishes only for an absent or older release", () => {
+    const manifestVersion = "0.1.3";
+    const publish = (publishedVersion: string | null | undefined, changed = false) =>
+      shouldPublishRelease({ publishedVersion, manifestVersion, manifestVersionChanged: changed });
+
+    expect(publish(null)).toBe(true);
+    expect(publish("0.1.2")).toBe(true);
+    expect(publish("0.1.3")).toBe(false);
+    expect(publish("0.1.4")).toBe(false);
+    expect(publish("0.2.0")).toBe(false);
+    expect(publish("1.0.0")).toBe(false);
+  });
+
+  it("falls back to the commit range when there is no usable answer", () => {
+    const fallback = (publishedVersion: string | null | undefined) => [
+      shouldPublishRelease({
+        publishedVersion,
+        manifestVersion: "0.1.3",
+        manifestVersionChanged: true,
+      }),
+      shouldPublishRelease({
+        publishedVersion,
+        manifestVersion: "0.1.3",
+        manifestVersionChanged: false,
+      }),
+    ];
+
+    // A failed lookup, and published metadata that is not a version: neither is
+    // evidence, so neither may decide.
+    expect(fallback(undefined)).toEqual([true, false]);
+    expect(fallback("garbage")).toEqual([true, false]);
+  });
+});
+
+describe("the content types the publish sends", () => {
+  it("sends no parameters, because the bucket matches the whole header", () => {
+    // storage.buckets.allowed_mime_types for extension-releases is the exact
+    // list ["application/zip", "application/json"], and Storage compares the
+    // header including its parameters. Sending "application/json; charset=utf-8"
+    // was rejected with `mime type ... is not supported`, which published 0.1.3
+    // as a zip with no latest.json pointing at it. The parameter carried
+    // nothing: JSON is UTF-8 by definition.
+    expect(EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE).toBe("application/zip");
+    expect(EXTENSION_RELEASE_METADATA_CONTENT_TYPE).toBe("application/json");
+
+    for (const contentType of [
+      EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+      EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
+    ]) {
+      expect(contentType).not.toContain(";");
+      expect(contentType.trim()).toBe(contentType);
+    }
+  });
+});
+
+describe("re-reading production at upload time", () => {
+  const releaseVersion = "0.1.3";
+  const may = (published: Parameters<typeof mayPublishOverPublished>[0]["published"]) =>
+    mayPublishOverPublished({ published, releaseVersion });
+
+  it("stands down when a newer release is already published", () => {
+    // The decision taken in quality-gates is a sample minutes old. If a 0.1.3 run
+    // and a 0.1.4 run both read "published 0.1.2" before either uploaded, both
+    // were told to go — so the older one has to be stopped here, at the upload.
+    expect(may({ status: "published", version: "0.1.4" })).toBe(false);
+    expect(may({ status: "published", version: "0.1.3" })).toBe(false);
+  });
+
+  it("proceeds when production is behind, or has nothing", () => {
+    expect(may({ status: "published", version: "0.1.2" })).toBe(true);
+    expect(may({ status: "absent" })).toBe(true);
+  });
+
+  it("fails closed on an answer it cannot use", () => {
+    // Deciding whether to overwrite what is already published, there is no second
+    // signal to fall back to. Allowing the write would disable the rollback guard
+    // at exactly the moment it cannot be checked. A refused job can be re-run; an
+    // overwritten release cannot.
+    expect(may({ status: "unknown", reason: "network" })).toBe(false);
+    expect(may({ status: "published", version: "not-a-version" })).toBe(false);
+    expect(may(undefined)).toBe(false);
+  });
+});
+
+describe("reading the published version authoritatively", () => {
+  const clientReturning = (result: { data: Blob | null; error: unknown }) => ({
+    storage: {
+      from: (bucket: string) => {
+        if (bucket !== "extension-releases") throw new Error(`Unexpected bucket: ${bucket}`);
+        return { download: () => Promise.resolve(result) };
+      },
+    },
+  });
+
+  it("reads latest.json through the client rather than the public URL", async () => {
+    // The public route is a CDN. A guard deciding whether to overwrite
+    // production cannot read production through a cache.
+    const asked: string[] = [];
+    const client = {
+      storage: {
+        from: () => ({
+          download: (path: string) => {
+            asked.push(path);
+            return Promise.resolve({
+              data: new Blob([JSON.stringify({ version: "0.1.4" })]),
+              error: null,
+            });
+          },
+        }),
+      },
+    };
+
+    await expect(fetchPublishedExtensionVersionFromStorage(client)).resolves.toEqual({
+      status: "published",
+      version: "0.1.4",
+    });
+    expect(asked).toEqual(["latest.json"]);
+  });
+
+  it("reports absent when the object is not there", async () => {
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: null, error: { statusCode: "404", code: "NoSuchKey" } }),
+      ),
+    ).resolves.toEqual({ status: "absent" });
+
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: null, error: { status: 404, message: "Object not found" } }),
+      ),
+    ).resolves.toEqual({ status: "absent" });
+  });
+
+  it("reports unknown for an error that is not a missing object", async () => {
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: null, error: { status: 403, message: "Unauthorized" } }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+  });
+
+  it("reports unknown for a body that is not usable metadata", async () => {
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: new Blob(["<html>proxy</html>"]), error: null }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: new Blob([JSON.stringify({ published_at: "now" })]), error: null }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+  });
+});
+
+describe("the publish-time gate", () => {
+  const clientPublishing = (version: string | null) => ({
+    storage: {
+      from: () => ({
+        download: () =>
+          Promise.resolve(
+            version === null
+              ? { data: null, error: { status: 404, message: "Object not found" } }
+              : { data: new Blob([JSON.stringify({ version })]), error: null },
+          ),
+      }),
+    },
+  });
+
+  it("refuses to overwrite a release that is not older", async () => {
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing("0.1.4"), releaseVersion: "0.1.3" }),
+    ).rejects.toThrow(/Refusing to publish 0\.1\.3: 0\.1\.4 is already published/);
+
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing("0.1.3"), releaseVersion: "0.1.3" }),
+    ).rejects.toThrow(/already published/);
+  });
+
+  it("refuses, and says so, when production cannot be read", async () => {
+    const failing = {
+      storage: {
+        from: () => ({
+          download: () => Promise.resolve({ data: null, error: { status: 503, message: "down" } }),
+        }),
+      },
+    };
+
+    await expect(
+      assertReleaseMayBePublished({ client: failing, releaseVersion: "0.1.3" }),
+    ).rejects.toThrow(/could not be read[\s\S]*Re-run this job/);
+  });
+
+  it("allows an older release to be replaced, and a first publish", async () => {
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing("0.1.2"), releaseVersion: "0.1.3" }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing(null), releaseVersion: "0.1.3" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("reads through the client it is given, never a URL", async () => {
+    // This is the point of the gate rather than an implementation detail: the
+    // public route is a CDN, and a check that decides whether to overwrite
+    // production must not read production through a cache.
+    let downloads = 0;
+    const client = {
+      storage: {
+        from: () => ({
+          download: () => {
+            downloads += 1;
+            return Promise.resolve({
+              data: new Blob([JSON.stringify({ version: "0.1.2" })]),
+              error: null,
+            });
+          },
+        }),
+      },
+    };
+
+    await assertReleaseMayBePublished({ client, releaseVersion: "0.1.3" });
+    expect(downloads).toBe(1);
+  });
+});
+
+describe("how long each object may be cached", () => {
+  it("passes durations, because the upload API builds the header itself", () => {
+    // @supabase/storage-js sets `cache-control: max-age=${cacheControl}`. A full
+    // directive here produces `max-age=no-cache`, which no cache can parse —
+    // worse than the default it was meant to replace. Both values must be bare
+    // second counts.
+    for (const value of [
+      EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
+      EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
+    ]) {
+      expect(value).toMatch(/^\d+$/);
+    }
+  });
+
+  it("keeps the pointer uncached and the archive cached for a year", () => {
+    // Supabase defaults an upload to 3600. On latest.json that served an
+    // hour-old pointer to every reader — the extension checking for an update
+    // among them.
+    expect(EXTENSION_RELEASE_METADATA_CACHE_SECONDS).toBe("0");
+    // An archive is content-addressed by the version in its path, so it never
+    // changes once written.
+    expect(Number(EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS)).toBeGreaterThan(86400);
+  });
 });

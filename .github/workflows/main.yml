@@ -304,6 +304,21 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Extension Release
     environment: production
+    # Serialised per release version, not globally. Two runs uploading the same
+    # version are the double-write worth preventing, and they queue here; two
+    # runs uploading different versions are kept apart by the guard in
+    # `publishPreparedExtensionRelease`, which re-reads the published version
+    # through the authenticated Storage API immediately before writing.
+    #
+    # A single global group would have been worse than none: GitHub keeps at most
+    # one running and one pending job per group, and a new entrant replaces the
+    # pending one even with `cancel-in-progress: false`. Re-running an old 0.1.2
+    # workflow would then displace a pending 0.1.4, which would refuse its own
+    # upload and leave 0.1.4 unpublished until someone pushed again. Keying the
+    # group by version means an older run can only ever displace itself.
+    concurrency:
+      group: publish-extension-release-${{ needs.quality-gates.outputs.extension_next_version }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_APP_ORIGIN: ${{ vars.NEXT_PUBLIC_APP_ORIGIN }}

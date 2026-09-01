@@ -15,6 +15,34 @@ const CHROME_EXTENSION_ID_ALPHABET = "abcdefghijklmnop";
 const EXTENSION_RELEASE_BUCKET = "extension-releases";
 const EXTENSION_RELEASE_LATEST_PATH = "latest.json";
 const EXTENSION_RELEASE_MANIFEST_PATH = "browserExtension/manifest.json";
+/**
+ * The bucket's `allowed_mime_types` is an exact-match list of
+ * `["application/zip", "application/json"]`, and Storage compares the whole
+ * header including its parameters. Sending `application/json; charset=utf-8`
+ * is therefore rejected -- which is what left 0.1.3 published as a zip with no
+ * latest.json pointing at it. The parameter carried nothing anyway: JSON is
+ * UTF-8 by definition (RFC 8259 section 8.1).
+ */
+const EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE = "application/zip";
+const EXTENSION_RELEASE_METADATA_CONTENT_TYPE = "application/json";
+
+/**
+ * These are **durations in seconds**, not Cache-Control values. The upload API
+ * builds the header itself as `max-age=${cacheControl}`, so a full directive
+ * here produces `max-age=no-cache` -- a header no cache can parse, which is
+ * worse than the default it was meant to replace.
+ *
+ * An archive is content-addressed by the version in its path, so it never
+ * changes once written and may be cached for a year.
+ */
+const EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS = "31536000";
+/**
+ * `latest.json` is the opposite: a pointer whose whole purpose is to be current.
+ * Supabase defaults an upload to `max-age=3600`, which would have served an
+ * hour-old pointer to every reader -- the extension checking for an update, and
+ * the publish guard checking what is already out.
+ */
+const EXTENSION_RELEASE_METADATA_CACHE_SECONDS = "0";
 const EXTENSION_RELEASE_DIST_DIR = "browserExtension/dist";
 const DEFAULT_ARTIFACT_DIR = ".artifacts/extension-release";
 
@@ -221,6 +249,233 @@ export function shouldRequireExtensionVersionBump(input: {
   return input.changedFiles.some((filePath) => isExtensionVersionedSurface(filePath));
 }
 
+/** Chrome rejects a version component above this. */
+const MAX_EXTENSION_VERSION_COMPONENT = 65535;
+
+/**
+ * Compares two extension versions the way Chrome orders them: one to four
+ * dot-separated integers, compared numerically component by component, a
+ * missing component reading as zero. Returns null when either side is not a
+ * version at all, so a caller can tell "older" from "cannot tell".
+ */
+export function compareExtensionVersions(left: string, right: string): number | null {
+  const parse = (value: string): number[] | null => {
+    // Deliberately not trimmed. The published value is the untrusted side here,
+    // and normalising it before validating would accept `" 65535 "` as a version
+    // Chrome would reject -- ordering metadata that should have taken the
+    // malformed fallback instead.
+    const parts = value.split(".");
+    if (parts.length === 0 || parts.length > 4) return null;
+    const numbers: number[] = [];
+    for (const part of parts) {
+      // Chrome's grammar, not "digits": one to four integers between 0 and
+      // 65535, written without leading zeros. Accepting a number outside that
+      // range would order metadata Chrome itself would reject -- 65536 would
+      // read as newer than the manifest and suppress the publish, leaving the
+      // release stuck instead of taking the malformed-metadata fallback.
+      if (!/^(0|[1-9]\d*)$/.test(part)) return null;
+      const parsed = Number(part);
+      if (parsed > MAX_EXTENSION_VERSION_COMPONENT) return null;
+      numbers.push(parsed);
+    }
+    return numbers;
+  };
+
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return null;
+
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Whether this run should publish a release.
+ *
+ * The comparison is deliberately ordered, not an inequality. Workflow runs for
+ * consecutive pushes to main are not serialised, so a docs-only run carrying an
+ * older manifest can reach this check after a newer run has already published.
+ * "Differs from what is published" is true there too, and acting on it would
+ * rebuild the older bundle and overwrite `latest.json` through the publish
+ * step's `upsert: true` -- rolling production back to a release it had already
+ * moved past. Only an absent release, or one genuinely older than this
+ * manifest, is a reason to publish. T-260901-0dr.
+ */
+/**
+ * Flattens a lookup into the shape the publish decision takes: a version, `null`
+ * for nothing published, `undefined` for an answer that is not evidence.
+ */
+export function publishedVersionOf(
+  published: PublishedExtensionVersion | undefined,
+): string | null | undefined {
+  if (published === undefined || published.status === "unknown") return undefined;
+  if (published.status === "absent") return null;
+  return published.version;
+}
+
+/** The slice of a Supabase client this module needs to read an object back. */
+export interface ExtensionReleaseDownloader {
+  storage: {
+    from(bucket: string): {
+      download(path: string): Promise<{ data: Blob | null; error: unknown }>;
+    };
+  };
+}
+
+/**
+ * Reads the published version through the authenticated Storage API rather than
+ * the public URL.
+ *
+ * The public route is served from a CDN, so it answers with whatever it last
+ * cached -- and a guard that decides whether to overwrite production cannot read
+ * production through a cache. Even with `no-cache` now set on the object, an
+ * edge that has not yet seen the newest write would let the very rollback this
+ * guard exists to stop through. The authenticated route is the object store
+ * itself, which is the only answer worth deciding on.
+ */
+export async function fetchPublishedExtensionVersionFromStorage(
+  client: ExtensionReleaseDownloader,
+  bucketName: string = EXTENSION_RELEASE_BUCKET,
+): Promise<PublishedExtensionVersion> {
+  let result: { data: Blob | null; error: unknown };
+  try {
+    result = await client.storage.from(bucketName).download(EXTENSION_RELEASE_LATEST_PATH);
+  } catch (error) {
+    return {
+      status: "unknown",
+      reason: `reading ${EXTENSION_RELEASE_LATEST_PATH} failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  if (result.error) {
+    // Storage reports a missing object in the error body rather than by status,
+    // the same shape the public route uses.
+    if (isStorageObjectMissing(result.error)) return { status: "absent" };
+    const message =
+      typeof (result.error as { message?: unknown }).message === "string"
+        ? (result.error as { message: string }).message
+        : JSON.stringify(result.error);
+    return { status: "unknown", reason: `reading ${EXTENSION_RELEASE_LATEST_PATH}: ${message}` };
+  }
+
+  if (!result.data) return { status: "absent" };
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(await result.data.text());
+  } catch (error) {
+    return {
+      status: "unknown",
+      reason: `${EXTENSION_RELEASE_LATEST_PATH} is not JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  const version = (payload as { version?: unknown } | null)?.version;
+  if (typeof version !== "string" || !version.trim()) {
+    return { status: "unknown", reason: `${EXTENSION_RELEASE_LATEST_PATH} carries no version` };
+  }
+
+  // As written, not trimmed: whether it is a version is the comparison's call.
+  return { status: "published", version };
+}
+
+/**
+ * Whether the release may still be uploaded, re-asked at the moment of upload.
+ *
+ * The publish decision taken in `quality-gates` is a sample of production taken
+ * minutes earlier, and ordering a stale sample does not prevent the rollback it
+ * was meant to prevent: if a 0.1.3 run and a 0.1.4 run both read "published
+ * 0.1.2" before either uploads, both are told to go, and whichever finishes
+ * second wins regardless of age. So the state is read again here, where the
+ * upload actually happens, and the older run stands down. The workflow
+ * serialises the publish job as well -- neither is sufficient alone, because a
+ * guard on a stale read still races and serialisation without a re-read still
+ * lets the second run overwrite with the older bundle.
+ *
+ * A lookup that fails does not block the upload: that is the behaviour without
+ * this guard, and a transient Storage error is not a reason to drop a release.
+ */
+export function mayPublishOverPublished(input: {
+  published: PublishedExtensionVersion | undefined;
+  releaseVersion: string;
+}): boolean {
+  // Fails closed, and deliberately not by reusing `shouldPublishRelease`: the two
+  // have opposite policies on an answer they cannot use, and that difference is
+  // the point rather than an inconsistency.
+  //
+  // Deciding whether to publish at all, a failed lookup means "fall back to the
+  // commit range" -- there is another signal. Deciding whether to overwrite what
+  // is already out, there is no other signal, and allowing the write disables the
+  // rollback guard at exactly the moment it cannot be checked. Refusing costs a
+  // job that can be re-run; allowing costs a release that is already published.
+  const published = input.published;
+  if (published === undefined || published.status === "unknown") return false;
+  if (published.status === "absent") return true;
+
+  const order = compareExtensionVersions(published.version, input.releaseVersion);
+  // Metadata that is not a version cannot establish that it is older, so it
+  // cannot license overwriting it either.
+  if (order === null) return false;
+  return order < 0;
+}
+
+/**
+ * The publish-time gate, as one callable thing so it can be exercised without
+ * a prepared artifact on disk. It reads production through the client it is
+ * given -- never the public URL -- and refuses when what is already out is not
+ * older than what this run is about to write.
+ */
+export async function assertReleaseMayBePublished(input: {
+  client: ExtensionReleaseDownloader;
+  releaseVersion: string;
+  bucketName?: string;
+}): Promise<void> {
+  const published = await fetchPublishedExtensionVersionFromStorage(input.client, input.bucketName);
+  if (mayPublishOverPublished({ published, releaseVersion: input.releaseVersion })) return;
+
+  if (published.status === "published") {
+    throw new Error(
+      `Refusing to publish ${input.releaseVersion}: ${published.version} is already published. ` +
+        "A newer release must not be overwritten by an older run.",
+    );
+  }
+
+  throw new Error(
+    `Refusing to publish ${input.releaseVersion}: what is already published could not be read` +
+      `${published.status === "unknown" ? ` (${published.reason})` : ""}. ` +
+      "Re-run this job once Storage answers; publishing blind could overwrite a newer release.",
+  );
+}
+
+export function shouldPublishRelease(input: {
+  /** `null` when nothing is published, `undefined` when the lookup failed. */
+  publishedVersion: string | null | undefined;
+  manifestVersion: string;
+  manifestVersionChanged: boolean;
+}): boolean {
+  // The lookup produced no answer, so the commit range is all there is to go on
+  // -- the behaviour this had before the published comparison existed.
+  if (input.publishedVersion === undefined) return input.manifestVersionChanged;
+
+  // Nothing published yet: the first release is always worth making.
+  if (input.publishedVersion === null) return true;
+
+  const order = compareExtensionVersions(input.publishedVersion, input.manifestVersion);
+
+  // Published metadata that is not a version is not evidence of anything. Fall
+  // back rather than guess, for the same reason a failed lookup does.
+  if (order === null) return input.manifestVersionChanged;
+
+  return order < 0;
+}
+
 export function evaluateExtensionVersionPolicy(input: {
   changedFiles: string[];
   previousManifestContent: string;
@@ -233,22 +488,15 @@ export function evaluateExtensionVersionPolicy(input: {
     input.nextManifestContent,
   );
 
-  const published = input.published;
-  const publishedVersion =
-    published === undefined || published.status === "unknown"
-      ? undefined
-      : published.status === "absent"
-        ? null
-        : published.version;
+  const publishedVersion = publishedVersionOf(input.published);
 
   return {
     changedFiles: normalizedChangedFiles,
-    // Undefined means the lookup did not produce an answer, so the commit range
-    // is all there is to go on -- the behaviour this had before.
-    versionChanged:
-      publishedVersion === undefined
-        ? versionDelta.changed
-        : publishedVersion !== versionDelta.nextVersion,
+    versionChanged: shouldPublishRelease({
+      publishedVersion,
+      manifestVersion: versionDelta.nextVersion,
+      manifestVersionChanged: versionDelta.changed,
+    }),
     manifestVersionChanged: versionDelta.changed,
     previousVersion: versionDelta.previousVersion,
     nextVersion: versionDelta.nextVersion,
@@ -273,9 +521,11 @@ const STORAGE_MISSING_CODES = new Set(["NoSuchKey", "NoSuchBucket"]);
  */
 function isStorageObjectMissing(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
-  const body = payload as { statusCode?: unknown; code?: unknown };
+  const body = payload as { statusCode?: unknown; status?: unknown; code?: unknown };
   if (typeof body.code === "string" && STORAGE_MISSING_CODES.has(body.code)) return true;
-  return String(body.statusCode ?? "") === "404";
+  // The public route puts the real status in `statusCode`; the client's own
+  // error object carries `status`. Both mean the same thing here.
+  return String(body.statusCode ?? "") === "404" || String(body.status ?? "") === "404";
 }
 
 /**
@@ -351,7 +601,10 @@ export async function fetchPublishedExtensionVersion(input: {
     return { status: "unknown", reason: `${url} carries no version string` };
   }
 
-  return { status: "published", version: version.trim() };
+  // Returned as written, not trimmed: whether it is a version at all is the
+  // comparison's judgement to make, and it cannot make it on a value this
+  // function has already tidied up.
+  return { status: "published", version };
 }
 
 export function buildSupabaseStoragePublicUrl(input: {
@@ -659,6 +912,8 @@ export async function publishPreparedExtensionRelease(
     serviceRoleKey,
   });
 
+  await assertReleaseMayBePublished({ client: supabase, releaseVersion: metadata.version });
+
   const artifactContent = await fs.readFile(artifactPath);
   const latestMetadataContent = await fs.readFile(metadataPath);
 
@@ -666,7 +921,8 @@ export async function publishPreparedExtensionRelease(
     .from(EXTENSION_RELEASE_BUCKET)
     .upload(artifactRelativePath, artifactContent, {
       upsert: true,
-      contentType: "application/zip",
+      contentType: EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+      cacheControl: EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
     });
   if (artifactUpload.error) {
     throw new Error(`Failed to upload extension artifact: ${artifactUpload.error.message}`);
@@ -676,7 +932,8 @@ export async function publishPreparedExtensionRelease(
     .from(EXTENSION_RELEASE_BUCKET)
     .upload(EXTENSION_RELEASE_LATEST_PATH, latestMetadataContent, {
       upsert: true,
-      contentType: "application/json; charset=utf-8",
+      contentType: EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
+      cacheControl: EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
     });
   if (latestUpload.error) {
     throw new Error(`Failed to upload extension release metadata: ${latestUpload.error.message}`);
@@ -849,6 +1106,10 @@ if (invokedScript === import.meta.url) {
 
 export {
   DEFAULT_ARTIFACT_DIR,
+  EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
+  EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
+  EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+  EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
   EXTENSION_RELEASE_BUCKET,
   EXTENSION_RELEASE_LATEST_PATH,
   ZERO_SHA,
