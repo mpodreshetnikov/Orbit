@@ -364,14 +364,21 @@ export function createSupabaseHealthStructureRepository(
   async function recomputeConditionCurrentStatus(conditionId: string): Promise<void> {
     // A closure written by the model and confirmed by nobody must not end an entry in someone's
     // medical record, so it is excluded here rather than filtered downstream: the exclusion runs
-    // before the limit, or a suppressed resolution would merely hide the row beneath it and leave
-    // the status stale in a different way. Only resolutions are excluded -- a machine-authored
-    // `active` or `suspected` row is how conditions reach the chart at all.
+    // before the limit, or a suppressed closure would merely hide the row beneath it and leave the
+    // status stale in a different way. Both closing statuses count -- `resolved` says the
+    // condition ended, `history` says it no longer bears on today, and either takes it off the
+    // active chart. `active` and `suspected` are how conditions reach the chart at all, so they
+    // still apply unreviewed.
+    //
+    // The web app carries the same rule in `src/lib/conditions/unverified-closure.ts`; this tree
+    // imports nothing from that one, so it is written twice on purpose. Change one, change both.
     const { data } = await admin
       .from("condition_records")
       .select("status_in_record, medical_records!inner(record_date)")
       .eq("condition_id", conditionId)
-      .or("status_in_record.neq.resolved,is_llm_extracted.is.false,is_user_verified.is.true")
+      .or(
+        "status_in_record.not.in.(resolved,history),is_llm_extracted.is.false,is_user_verified.is.true",
+      )
       .order("medical_records(record_date)", { ascending: false })
       .limit(1)
       .maybeSingle();

@@ -726,12 +726,20 @@ interface ConditionRecordRow {
  * repository asked for, including asking for nothing.
  */
 function matchesOrFilter(row: ConditionRecordRow, filter: string): boolean {
-  return filter.split(",").some((term) => {
+  // `not.in.(a,b)` carries commas inside its parentheses, so terms cannot be split on commas
+  // alone without tearing that list in half.
+  const terms = filter.match(/[^,(]+(?:\([^)]*\))?/g) ?? [];
+  return terms.some((term) => {
+    const notIn = term.match(/^([a-z_]+)\.not\.in\.\(([^)]*)\)$/);
+    if (notIn) {
+      const [, column, list] = notIn;
+      return !list.split(",").includes(String((row as unknown as Record<string, unknown>)[column]));
+    }
     const [column, operator, value] = term.split(".");
     const actual = (row as unknown as Record<string, unknown>)[column];
     if (operator === "is") return actual === (value === "true");
     if (operator === "neq") return actual !== value;
-    throw new Error(`Unsupported operator ${operator}`);
+    throw new Error(`Unsupported term ${term}`);
   });
 }
 
@@ -848,3 +856,28 @@ Deno.test(
     assertEquals(updates, [{ current_status: "resolved" }]);
   },
 );
+
+Deno.test(
+  "an unverified machine history record cannot take a condition off the active chart",
+  async () => {
+    const { adminClient, updates } = createRecomputeClients([
+      conditionRecord({ status_in_record: "history", record_date: "2026-03-01" }),
+    ]);
+    const repository = createRepositoryWithClients({ adminClient });
+
+    await repository.recomputeConditionCurrentStatus("cond-1");
+
+    assertEquals(updates, []);
+  },
+);
+
+Deno.test("a machine-authored suspected record still applies", async () => {
+  const { adminClient, updates } = createRecomputeClients([
+    conditionRecord({ status_in_record: "suspected", record_date: "2026-03-01" }),
+  ]);
+  const repository = createRepositoryWithClients({ adminClient });
+
+  await repository.recomputeConditionCurrentStatus("cond-1");
+
+  assertEquals(updates, [{ current_status: "suspected" }]);
+});

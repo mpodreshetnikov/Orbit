@@ -8,6 +8,7 @@ import type {
 } from "@/types";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 import { createQueryBuilder } from "../../test/utils/web/supabase-query";
+import { AUTHORITATIVE_STATUS_FILTER } from "@/lib/conditions/unverified-closure";
 
 const { createClientMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
@@ -229,6 +230,79 @@ describe("use-conditions", () => {
       code: "J45",
       icd_name_en: "Asthma",
     });
+  });
+
+  it("recomputes on verification alone, so an approved closure reaches the condition", async () => {
+    // Activating a record verifies every mention and passes nothing else -- no status, no
+    // condition id. The closure is suppressed until exactly this moment, so if verification did
+    // not trigger the recompute the confirmed resolution would never reach the chart.
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: {
+        id: "cr-1",
+        record_id: "record-1",
+        condition_id: "cond-1",
+      },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: { status_in_record: "resolved" },
+      error: null,
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "condition_records" ? conditionRecordsBuilder : conditionsBuilder,
+      ),
+    });
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { is_user_verified: true },
+      });
+    });
+
+    expect(conditionsBuilder.update).toHaveBeenCalledWith({ current_status: "resolved" });
+  });
+
+  it("excludes unconfirmed machine closures from the recompute", async () => {
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: { status_in_record: "active" },
+      error: null,
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "condition_records" ? conditionRecordsBuilder : conditionsBuilder,
+      ),
+    });
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { status_in_record: "active" },
+        conditionId: "cond-1",
+      });
+    });
+
+    // The filter has to reach the query, and it has to reach it before the limit -- a recompute
+    // that filtered afterwards would let a suppressed closure shadow the row beneath it.
+    expect(conditionRecordsBuilder.or).toHaveBeenCalledWith(AUTHORITATIVE_STATUS_FILTER);
+    expect(conditionRecordsBuilder.or.mock.invocationCallOrder[0]).toBeLessThan(
+      conditionRecordsBuilder.limit.mock.invocationCallOrder[0],
+    );
   });
 
   it("deletes condition record and recomputes status", async () => {
