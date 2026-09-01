@@ -1,7 +1,11 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
 import { createClient } from "@supabase/supabase-js";
-import { createSupabaseMoneyImportRepository, type MoneyImportRepository } from "./repository.ts";
+import {
+  createSupabaseMoneyImportRepository,
+  postgrestFilterValue,
+  type MoneyImportRepository,
+} from "./repository.ts";
 import type { CanonicalTransactionRowInput } from "./types.ts";
 
 /**
@@ -35,10 +39,16 @@ async function assertRejectsWith(run: () => Promise<unknown>, expectedFragment: 
  */
 function queryStub(result: { data: unknown; error: unknown }) {
   const filters: Array<{ column: string; value: unknown }> = [];
+  const orFilters: string[] = [];
   const chain: Record<string, unknown> = {
     filters,
+    orFilters,
     eq(column: string, value: unknown) {
       filters.push({ column, value });
+      return chain;
+    },
+    or(filter: string) {
+      orFilters.push(filter);
       return chain;
     },
     limit() {
@@ -52,6 +62,7 @@ function queryStub(result: { data: unknown; error: unknown }) {
   };
   return chain as typeof chain & {
     filters: Array<{ column: string; value: unknown }>;
+    orFilters: string[];
   };
 }
 
@@ -1161,7 +1172,7 @@ Deno.test(
       "person-1",
     );
     assertEquals(dedupeResolved, { transactionId: "tx-dedupe", inserted: false });
-    dedupeQueryUsed = dedupeLookup.filters.some((filter) => filter.column === "dedupe_hash");
+    dedupeQueryUsed = dedupeLookup.orFilters.some((filter) => filter.includes("dedupe_hash"));
     // Resolution by dedupe hash is scoped to the payer for the same reason resolution by
     // external id is: the hash is unique across the table, not per person.
     assertEquals(
@@ -2033,3 +2044,53 @@ Deno.test(
     );
   },
 );
+
+Deno.test("postgrestFilterValue quotes values so data cannot be read as filter grammar", () => {
+  assertEquals(postgrestFilterValue("plain"), '"plain"');
+  // A comma or a parenthesis in an external id would otherwise end the clause.
+  assertEquals(postgrestFilterValue("a,b(c)"), '"a,b(c)"');
+  // The backslash has to be escaped before the quote, or the escape escapes itself away.
+  assertEquals(postgrestFilterValue('a"b\\c'), '"a\\"b\\\\c"');
+});
+
+Deno.test("repository resolves a duplicate by either identity, not just the first", async () => {
+  // Every T-Bank row carries both an external_id and a dedupe_hash, and the two unique indexes
+  // are independent: an insert can violate dedupe_hash while its (source, external_id) is new.
+  // Probing only one of them found nothing and reported a duplicate it could not resolve, for a
+  // row whose duplicate was sitting under the other key.
+  const lookup = queryStub({ data: { id: "tx-by-hash" }, error: null });
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) => {
+        if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+        return {
+          insert: () => ({
+            select: () => ({
+              single: async () => ({ data: null, error: { code: "23505", message: "dup" } }),
+            }),
+          }),
+          select: () => lookup,
+          update: () => ({ eq: async () => ({ error: null }) }),
+        };
+      },
+    },
+  });
+
+  const resolved = await repository.insertOrResolveTransaction(
+    {
+      posted_at: "2026-01-01T00:00:00.000Z",
+      amount: 10,
+      transaction_type: "expense",
+      source: "tbank",
+      external_id: "ext-new",
+      dedupe_hash: "hash-already-there",
+      account_id: "acc-1",
+    },
+    "person-1",
+  );
+
+  assertEquals(resolved, { transactionId: "tx-by-hash", inserted: false });
+  const filter = lookup.orFilters[0] ?? "";
+  assertEquals(filter.includes("external_id"), true);
+  assertEquals(filter.includes("dedupe_hash"), true);
+});
