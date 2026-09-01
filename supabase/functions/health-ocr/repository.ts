@@ -181,7 +181,14 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
         })
         .eq("id", recordId);
       if (options.runId) query = query.eq("processing_run_id", options.runId);
-      const { data } = await query.select("id");
+      const { data, error } = await query.select("id");
+
+      // Checked, not discarded: the caller reports back whether the record carries its failure,
+      // and a refused write that resolved quietly made that report a lie -- the browser then
+      // trusted it and left the record processing with nobody working on it.
+      if (error) {
+        throw new Error(`Failed to update record: ${error.message}`);
+      }
       if (options.runId && (data ?? []).length === 0) throw new ClaimLostError(recordId);
     },
   };

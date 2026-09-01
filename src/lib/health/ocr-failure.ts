@@ -19,6 +19,7 @@ export const SERVER_OCR_CAUSES = [
   "unsupported_media",
   "attachment_unavailable",
   "unreadable_document",
+  "truncated_page",
   "no_attachments",
   "internal",
 ] as const;

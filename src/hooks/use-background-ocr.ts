@@ -103,6 +103,19 @@ export async function updateRecordToOcrFailed(
 }
 
 /**
+ * Make a failure the browser is about to persist translatable.
+ *
+ * A thrown `Failed to fetch` is the browser's own English, and a reader in another language
+ * cannot be shown it. Anything already classified is left exactly as it is — the service's
+ * message must never be re-wrapped.
+ */
+function asDurableClientFailure(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (parseOcrFailureCause(raw)) return raw;
+  return formatClientOcrFailure("service_unreachable", raw || "processing failed");
+}
+
+/**
  * Read a failed response without inventing a story about it.
  *
  * A JSON body from `health-ocr` carries the service's own classified message, and `persisted`
@@ -121,7 +134,18 @@ async function readFailureMessage(
   const errorText = await response.text();
   try {
     const parsed = JSON.parse(errorText) as { error?: string; persisted?: boolean };
-    if (parsed?.error) return { message: parsed.error, persisted: parsed.persisted === true };
+    if (parsed?.error) {
+      const persisted = parsed.persisted === true;
+      return {
+        // A persisted message is the column's own text and is passed through untouched. An
+        // unpersisted one may be written from here -- and not every JSON error is classified:
+        // the edge handler's own catch answers before the service runs at all, in plain English
+        // (a missing provider key, an unconfigured Supabase). Classifying it here is what keeps
+        // that sentence from reaching a column no translation can read.
+        message: persisted ? parsed.error : asDurableClientFailure(new Error(parsed.error)),
+        persisted,
+      };
+    }
   } catch {
     // Not our payload; fall through.
   }
@@ -129,19 +153,6 @@ async function readFailureMessage(
     message: formatClientOcrFailure("service_unreachable", `HTTP ${response.status}`),
     persisted: false,
   };
-}
-
-/**
- * Make a failure the browser is about to persist translatable.
- *
- * A thrown `Failed to fetch` is the browser's own English, and a reader in another language
- * cannot be shown it. Anything already classified is left exactly as it is — the service's
- * message must never be re-wrapped.
- */
-function asDurableClientFailure(error: unknown): string {
-  const raw = error instanceof Error ? error.message : "";
-  if (parseOcrFailureCause(raw)) return raw;
-  return formatClientOcrFailure("service_unreachable", raw || "processing failed");
 }
 
 export function useBackgroundOCR() {

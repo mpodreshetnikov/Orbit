@@ -383,9 +383,38 @@ Deno.test("a document that lost one page does not read as a clean success", asyn
   // Durable, on the record itself -- not only in a line of the combined text nothing reads back.
   assertEquals(
     state.updatedSuccess[0].ocrError,
-    "ocr_cause:provider_unavailable the transcription service was unavailable: 1 of 2 pages failed",
+    "ocr_cause:provider_unavailable the transcription service was unavailable: " +
+      "1 of 2 pages did not come back complete",
   );
 });
+
+Deno.test(
+  "a page cut short by the completion budget is a partial loss, not a clean page",
+  async () => {
+    const { repository, state } = createRepositoryMock();
+    const openRouter = createOpenRouterMock(async () => ({
+      // Every retry for a larger budget is spent and the answer is still a prefix.
+      ocr_text: "The beginning of a long report",
+      suggested_title: "t",
+      truncated: true,
+      usage: emptyLlmUsage(),
+    }));
+
+    const result = await runHealthOcrService(
+      { authToken: "token", recordId: "record-1" },
+      { repository, openRouterClient: openRouter, log: { log: () => {}, error: () => {} } },
+    );
+
+    // The page has text, so the run succeeds -- but everything downstream reads that prefix as the
+    // whole page, and the record has to say so.
+    assertEquals(result.status, 200);
+    assertEquals(
+      state.updatedSuccess[0].ocrError,
+      "ocr_cause:truncated_page the document was longer than one transcription pass could hold: " +
+        "1 of 1 page did not come back complete",
+    );
+  },
+);
 
 Deno.test("a document that lost nothing clears the column", async () => {
   const { repository, state } = createRepositoryMock();

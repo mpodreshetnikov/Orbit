@@ -854,6 +854,7 @@
       "unsupported_media": "This file type cannot be recognised. Upload the document as a photo, an image or a PDF.",
       "attachment_unavailable": "The uploaded file could not be read. Upload it again.",
       "unreadable_document": "No text could be read from the document. Re-photograph it in better light, in focus and with the whole page in frame.",
+      "truncated_page": "Part of the document was longer than one transcription pass could hold, so only its beginning was read. Retry, and split the document into smaller uploads if it happens again.",
       "no_attachments": "This record has no attached files to recognise.",
       "internal": "Text recognition failed for an unexpected reason. Try again, and tell an administrator if it keeps happening.",
       "service_unreachable": "The text recognition service could not be reached. Check your connection and try again.",

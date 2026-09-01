@@ -51,7 +51,9 @@ Two rules the column depends on:
   request that never landed and a run holding the claim must not be failed from the browser.
 
 A run that transcribed the document but lost a page writes the same string on the success path,
-so a three-page document that came back with two does not read as a clean success.
+so a three-page document that came back with two does not read as a clean success. A page the
+model cut short at its completion budget counts as such a loss too (`truncated_page`): it has
+text, but everything downstream reads that prefix as the whole page.
 
 ### Health-specific edge cases and failure recovery patterns
 

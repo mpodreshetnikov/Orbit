@@ -37,6 +37,8 @@ export type OcrFailureCause =
   | "attachment_unavailable"
   /** The service read the page and found no text in it. This is the one a better photo fixes. */
   | "unreadable_document"
+  /** The page was longer than the completion budget, so only its beginning was transcribed. */
+  | "truncated_page"
   /** The record has no attachments to transcribe. */
   | "no_attachments"
   /** Anything the classification above does not recognise. */
@@ -55,6 +57,7 @@ const CAUSE_PRECEDENCE: OcrFailureCause[] = [
   "unsupported_media",
   "attachment_unavailable",
   "provider_unavailable",
+  "truncated_page",
   "unreadable_document",
   "no_attachments",
   "internal",
@@ -141,6 +144,7 @@ const CAUSE_SUMMARIES: Record<OcrFailureCause, string> = {
   unsupported_media: "the file type cannot be transcribed",
   attachment_unavailable: "the stored file could not be read",
   unreadable_document: "no text could be read from the document",
+  truncated_page: "the document was longer than one transcription pass could hold",
   no_attachments: "the record has no attachments",
   internal: "the transcription failed for an unexpected reason",
 };
@@ -154,6 +158,16 @@ const CAUSE_SUMMARIES: Record<OcrFailureCause, string> = {
 export function formatOcrFailure(cause: OcrFailureCause, detail?: string): string {
   const summary = CAUSE_SUMMARIES[cause];
   return `${OCR_CAUSE_PREFIX}${cause} ${detail ? `${summary}: ${detail}` : summary}`;
+}
+
+/**
+ * What a run that still succeeded did not bring back.
+ *
+ * Its own wording, because "failed" is wrong for a document the user can read: these pages are
+ * missing or cut short inside a transcription that otherwise worked.
+ */
+export function partialPageDetail(incomplete: number, total: number): string {
+  return `${incomplete} of ${total} page${total === 1 ? "" : "s"} did not come back complete`;
 }
 
 /** How many of how many pages failed, in a form that has no document text in it. */

@@ -10,6 +10,7 @@ import {
   type OcrFailureCause,
   OcrFailureError,
   pageCountDetail,
+  partialPageDetail,
 } from "./failure.ts";
 import { selectSuggestedTitle } from "./title.ts";
 import type { OpenRouterOcrClient, OcrAttachmentPayload } from "./openrouter-client.ts";
@@ -283,7 +284,14 @@ async function transcribeClaimedRecord(
           pageTexts[index] = result.ocr_text;
           // The call succeeded and the page still has nothing on it, which is the one cause a
           // better photograph actually fixes -- and the only one that used to be reported.
-          if (!result.ocr_text.trim()) pageCauses[index] = "unreadable_document";
+          if (!result.ocr_text.trim()) {
+            pageCauses[index] = "unreadable_document";
+          } else if (result.truncated) {
+            // The retries for a larger budget are spent and the answer is still a prefix. The
+            // page has text, so the run succeeds -- but everything downstream reads that prefix
+            // as the whole page, which is exactly the silent loss this task exists to end.
+            pageCauses[index] = "truncated_page";
+          }
           if (index === 0) {
             suggestedTitle = selectSuggestedTitle(result.suggested_title, suggestedTitle);
           }
@@ -360,7 +368,7 @@ async function transcribeClaimedRecord(
       failedPages.length > 0
         ? formatOcrFailure(
             dominantCause(failedPages),
-            pageCountDetail(failedPages.length, attachments.length),
+            partialPageDetail(failedPages.length, attachments.length),
           ).slice(0, maxOcrErrorLength)
         : null;
     const persistSpan = telemetry?.startSpan("edge.health_ocr.persist_record");

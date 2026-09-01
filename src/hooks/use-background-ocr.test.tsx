@@ -639,6 +639,57 @@ describe("use-background-ocr", () => {
     expect(response).toEqual({ success: false, error: "ocr crashed" });
   });
 
+  it("classifies a plain-English JSON error before it can be persisted", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client, updateMock } = createSupabaseClientMock({
+      sessionToken: "token-1",
+      recordRow: { status: "ocr_processing", processing_run_id: null },
+    });
+    createClientMock.mockReturnValue(client);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        // The edge handler's own catch answers before the service runs at all, in plain English.
+        text: async () =>
+          JSON.stringify({ success: false, error: "Supabase environment not configured" }),
+      }),
+    );
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    await act(async () => {
+      await result.current.startBackgroundOCR({
+        recordId: "record-unclassified",
+        personId: "person-1",
+        personName: "Alex",
+      });
+    });
+
+    // Reconciliation persists this, so it has to be a cause a reader's own language has a
+    // sentence for -- not the server's English.
+    expect(updateMock).toHaveBeenCalledWith({
+      status: "ocr_failed",
+      ocr_error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: " +
+        "Supabase environment not configured",
+    });
+  });
+
   it("settles the record itself when the service answered without writing", async () => {
     const addJobMock = vi.fn();
     const updateJobMock = vi.fn();
