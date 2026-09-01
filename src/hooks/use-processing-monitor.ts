@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase";
+import { translateOcrFailure } from "@/lib/health/ocr-failure";
 import { useProcessingQueueStore } from "@/stores/processing-queue-store";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -119,7 +120,7 @@ export function useProcessingMonitor(personId: string | null) {
         if (record.status === "ocr_failed") {
           store.updateJob(job.id, {
             stage: "failed",
-            error: record.ocr_error || t("processing.failed"),
+            error: translateOcrFailure(record.ocr_error, t),
           });
           continue;
         }
@@ -168,7 +169,9 @@ export function useProcessingMonitor(personId: string | null) {
 
         const failure = readFailure(oldStatus, newRecord);
         if (failure && processingRecordsRef.current.has(newRecord.id)) {
-          const message = failure.message || t("processing.failed");
+          // OCR failures carry a cause code the user's language has a sentence for; a
+          // structuring failure still carries the server's own English, so it falls through.
+          const message = translateOcrFailure(failure.message, t);
           console.log("[Realtime] Record failed processing:", newRecord.id, newStatus);
           processingRecordsRef.current.delete(newRecord.id);
           updateJob(newRecord.id, { stage: "failed", error: message });
@@ -205,10 +208,15 @@ export function useProcessingMonitor(personId: string | null) {
             completedAt: Date.now(),
           });
 
-          // Show notification
-          const notificationMessage = isOcrComplete
-            ? t("processing.ocrComplete")
-            : t("processing.completed");
+          // A transcription that lost a page still reaches review, and the record carries what
+          // it lost. Announcing that as "OCR complete" is the same defect one level up: the
+          // user is told the document was read when part of it was not.
+          const partialOcr = isOcrComplete && Boolean(newRecord.ocr_error);
+          const notificationMessage = partialOcr
+            ? t("processing.ocrPartial")
+            : isOcrComplete
+              ? t("processing.ocrComplete")
+              : t("processing.completed");
 
           addNotification({
             jobId: newRecord.id,
@@ -216,13 +224,16 @@ export function useProcessingMonitor(personId: string | null) {
             title: newRecord.title,
             personName,
             type: "success",
-            message: isOcrComplete
-              ? t("processing.ocrReviewNeeded")
-              : t("processing.reviewStructure"),
+            message: partialOcr
+              ? translateOcrFailure(newRecord.ocr_error, t)
+              : isOcrComplete
+                ? t("processing.ocrReviewNeeded")
+                : t("processing.reviewStructure"),
           });
 
-          toast.success(notificationMessage, {
-            description: newRecord.title,
+          const announce = partialOcr ? toast.warning : toast.success;
+          announce(notificationMessage, {
+            description: partialOcr ? translateOcrFailure(newRecord.ocr_error, t) : newRecord.title,
             action: {
               label: t("processing.viewRecord"),
               onClick: () => {

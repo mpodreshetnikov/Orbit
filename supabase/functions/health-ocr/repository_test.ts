@@ -307,6 +307,13 @@ Deno.test("health-ocr repository throws when updateRecordSuccess fails", async (
     () => repository.updateRecordSuccess("record-1", { ocrText: "text", title: "Title" }),
     "Failed to update record: write failed",
   );
+
+  // The failure write reports the same way. Resolving quietly on a refused update made the
+  // service tell the browser the record carried its failure when it carried nothing.
+  await assertThrowsWithMessage(
+    () => repository.updateRecordFailure("record-1", "broken"),
+    "Failed to update record: write failed",
+  );
 });
 
 Deno.test(
