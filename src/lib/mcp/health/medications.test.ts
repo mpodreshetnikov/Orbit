@@ -854,6 +854,33 @@ describe("logDose", () => {
       expect(logged.corrected).toBe(false);
     });
 
+    it("resolves the dose that was due when the intake came later", async () => {
+      // The 08:00 dose swallowed at 08:15. One field did both jobs, so the
+      // lookup went to 08:15, found nothing, inserted a second event and
+      // decremented stock for it -- while the 08:00 dose stayed owed and its
+      // reminder stayed armed.
+      const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        takenAt: "2026-06-15T08:15:00.000Z",
+        status: "taken",
+      });
+
+      expect(result.planned).toBe(true);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+      // And the moment the person reported is what the record carries, rather
+      // than the slot the dose sat on.
+      expect(fake.events[0].taken_at).toBe("2026-06-15T08:15:00.000Z");
+      expect(fake.rpc).toHaveBeenCalledWith("mark_dose_taken", {
+        p_dose_event_id: "d-1",
+        p_taken_at: "2026-06-15T08:15:00.000Z",
+      });
+    });
+
     it("still says nothing was written when the amount is the one on record", async () => {
       const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
 

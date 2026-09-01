@@ -393,7 +393,24 @@ export async function findRegimensByName(
 
 export interface LogDoseParams {
   regimenId: string;
+  /**
+   * The minute the dose belongs to -- the slot a planned event sits on, and
+   * where an unplanned intake is filed.
+   *
+   * Deliberately not the same field as `takenAt`. One value did both jobs
+   * once, so an 08:00 dose taken at 08:15 looked for a plan at 08:15, found
+   * none, and inserted a second event beside the 08:00 one it left unresolved
+   * -- two intakes on the record and stock down twice for one pill.
+   */
   at: string;
+  /**
+   * When the person says they took it, when that is not simply `at`.
+   *
+   * Passed through to the resolution RPC. Left off, the RPC keeps its own
+   * behaviour of stamping the event's `actual_at`, which is the time a snooze
+   * moved the dose to and the time the read tools print.
+   */
+  takenAt?: string | null;
   amount?: number | null;
   status: "taken" | "skipped";
   note?: string | null;
@@ -656,6 +673,7 @@ export async function logDose(
         p_dose_event_id: doseEventId,
         p_amount_taken: amount,
         ...(note ? { p_note: note } : {}),
+        ...(params.takenAt ? { p_taken_at: params.takenAt } : {}),
       } as never);
 
       // Safe to repeat, unlike the resolution path: the RPC compares the amount
@@ -763,7 +781,15 @@ export async function logDose(
 
   const { error: resolveError } = await supabase.rpc(
     params.status === "skipped" ? "mark_dose_skipped" : "mark_dose_taken",
-    { p_dose_event_id: doseEventId, ...(note ? { p_note: note } : {}) } as never,
+    {
+      p_dose_event_id: doseEventId,
+      ...(note ? { p_note: note } : {}),
+      // Only when the caller named one. `mark_dose_taken` otherwise stamps the
+      // event's own `actual_at`, which is where a snooze moved the dose to --
+      // the right answer when nobody has said otherwise, and the wrong one to
+      // overwrite with a slot time nobody reported.
+      ...(params.status === "taken" && params.takenAt ? { p_taken_at: params.takenAt } : {}),
+    } as never,
   );
 
   if (resolveError) {

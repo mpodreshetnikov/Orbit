@@ -267,7 +267,12 @@ export function createDoseEventsFake(params: {
   const rpc = vi.fn(
     async (
       name: string,
-      args: { p_dose_event_id: string; p_note?: string; p_amount_taken?: number },
+      args: {
+        p_dose_event_id: string;
+        p_note?: string;
+        p_amount_taken?: number;
+        p_taken_at?: string;
+      },
     ) => {
       const failure = takeFailure("rpc");
       if (failure) {
@@ -305,6 +310,9 @@ export function createDoseEventsFake(params: {
               ...((target.planned_intake as Record<string, unknown> | null) ?? {}),
               intake: { amount: after, unit },
             };
+          }
+          if (args.p_taken_at) {
+            target.taken_at = args.p_taken_at;
           }
           if (args.p_note !== undefined) {
             target.note = args.p_note?.trim() || null;
@@ -349,7 +357,11 @@ export function createDoseEventsFake(params: {
           }
           row.status = "skipped";
         }
-        row.taken_at = row.actual_at;
+        // `COALESCE(p_taken_at, actual_at, now())`, as `mark_dose_taken.sql`
+        // has it. `mark_dose_skipped` takes no such argument and keeps
+        // stamping `actual_at`.
+        row.taken_at =
+          name === "mark_dose_taken" ? (args.p_taken_at ?? row.actual_at) : row.actual_at;
         row.note = args.p_note?.trim() || null;
       }
 
