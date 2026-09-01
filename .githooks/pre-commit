@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -eu
+
+# Advisory only: it never blocks a commit. The limit is enforced on pre-push and in CI; what this
+# adds is meeting it while the cut can still be changed. A branch that first hears about the limit
+# when CI fails is a finished branch, and the cheapest-looking answer then is to slice it into
+# pieces that do not stand on their own -- which is the one answer docs/QUALITY.md rules out.
+
+if ! command -v node >/dev/null 2>&1; then
+  exit 0
+fi
+
+node scripts/just/check-pr-size.cjs --advisory || true

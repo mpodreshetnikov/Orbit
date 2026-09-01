@@ -9,3 +9,28 @@ if ! command -v just >/dev/null 2>&1; then
 fi
 
 just secrets-preflight
+
+# The same gate CI runs, one step earlier: a branch pushed over the limit has already been opened as
+# a pull request by the time CI says so, and re-cutting it then costs the opening review too.
+#
+# Git names each pushed ref on stdin as "<local ref> <local sha> <remote ref> <remote sha>". Measure
+# those rather than the checkout: `git push origin some-other-branch` pushes a ref that is not HEAD,
+# and measuring the working tree would report success on it. A deletion (the zero sha) has nothing to
+# measure. With no refs on stdin -- the hook run by hand -- fall back to the working tree.
+echo "[pre-push] Checking reviewable change size..."
+
+pushed_any=0
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  [ -n "${local_sha:-}" ] || continue
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+  pushed_any=1
+  branch=${local_ref#refs/heads/}
+  node scripts/just/check-pr-size.cjs --head "$local_sha" --branch "$branch"
+done
+
+if [ "$pushed_any" -eq 0 ]; then
+  node scripts/just/check-pr-size.cjs
+fi
