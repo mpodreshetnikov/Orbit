@@ -3,6 +3,7 @@ import { assertEquals } from "std/assert/assert-equals";
 import { createClient } from "@supabase/supabase-js";
 import {
   createSupabaseMoneyImportRepository,
+  exactIgnoringCase,
   postgrestFilterValue,
   type MoneyImportRepository,
 } from "./repository.ts";
@@ -2099,4 +2100,18 @@ Deno.test("repository refuses a hash-only match when the external id differs", a
   assertEquals(scoped.orFilters.length, 1);
   assertEquals(scoped.orFilters[0]?.includes("external_id"), true);
   assertEquals(scoped.orFilters[0]?.includes("dedupe_hash"), false);
+});
+
+Deno.test("exactIgnoringCase tolerates exactly the padding SQL trim removes", () => {
+  const pattern = exactIgnoringCase("user@example.com");
+  assertEquals(new RegExp(pattern, "i").test("  User@Example.com  "), true);
+  // PostgreSQL's one-argument trim is btrim(x, ' '), so a tab-padded allowlist row is NOT
+  // trimmed to this address and is_allowed_user() would not match it. Matching it here would be
+  // wider than the rule this copies, on the permissive side.
+  assertEquals(new RegExp(pattern, "i").test("\tuser@example.com\t"), false);
+  // And the metacharacters stay literal.
+  assertEquals(
+    new RegExp(exactIgnoringCase("a*b@example.com"), "i").test("axb@example.com"),
+    false,
+  );
 });

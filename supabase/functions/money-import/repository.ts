@@ -70,9 +70,57 @@ function resolvingIdentity(
   return null;
 }
 
+/**
+ * The slice of `money_import_grants` this repository reads and writes. Declared here because the
+ * table is absent from the generated `Database` types; see `grantsTable` for why.
+ */
+interface MoneyImportGrantsTableQuery {
+  select(columns: string): {
+    eq(
+      column: string,
+      value: string,
+    ): {
+      single(): Promise<{
+        data: Record<string, unknown> | null;
+        error: { message?: string } | null;
+      }>;
+    };
+  };
+  update(values: { last_used_at: string }): {
+    eq(column: string, value: string): Promise<{ error: { message?: string } | null }>;
+  };
+}
+
+/**
+ * Escapes every regex metacharacter so a value matches only itself.
+ *
+ * `ilike` cannot be made safe here: PostgREST rewrites `*` in a `like`/`ilike` value to `%`
+ * unconditionally, with no escape that survives the substitution, so `a*b@example.com` widens
+ * into a wildcard and can match somebody else's allowlist row. `src/lib/mcp/health/medications.ts`
+ * hit the same wall and answered it the same way -- an anchored case-insensitive regex, which is
+ * equality that ignores case rather than a pattern.
+ */
+export function regexLiteral(value: string): string {
+  return value.replace(/[.^$*+?()[\]{}|\\]/g, (match) => `\\${match}`);
+}
+
+/** An anchored pattern that matches exactly this value, ignoring case and surrounding spaces. */
+export function exactIgnoringCase(value: string): string {
+  // `public.is_allowed_user()` compares `lower(trim(email))`, so the padding this tolerates has
+  // to be exactly the padding that trim removes -- and PostgreSQL's one-argument trim is
+  // `btrim(x, ' ')`, spaces only. `\s` would also eat tabs and newlines, which would authorise a
+  // grant against an allowlist row that `is_allowed_user()` itself rejects: wider than the rule
+  // it is copying, on the permissive side.
+  return `^ *${regexLiteral(value.trim())} *$`;
+}
+
 export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
+  getGrantByToken(token: string): Promise<Record<string, unknown> | null>;
+  getGrantById(grantId: string): Promise<Record<string, unknown> | null>;
+  isAuthUserAllowed(authUserId: string): Promise<boolean>;
+  markGrantUsed(grantId: string, usedAtIso: string): Promise<void>;
   findLastImportedAt(source: string, payerPersonId: string): Promise<string | null>;
   createImportSession(payload: Record<string, unknown>): Promise<{ id: string }>;
   getImportSessionForUser(
@@ -512,6 +560,91 @@ export function createSupabaseMoneyImportRepository(
       .eq("id", batchId);
 
     if (error) throw new Error(error.message);
+  }
+
+  /**
+   * `money_import_grants` is not in the generated `Database` types. It is not alone in that --
+   * `money_fx_rates` and the `mcp_oauth_*` tables are missing too, though their migrations are
+   * on main and `db-artifacts-verify` is green -- so this is a standing property of the
+   * generated artifacts rather than something this table did. `money-fx-sync/handler.ts`
+   * already answers it by describing the table it needs where it needs it, and this follows
+   * that: the shape below is what these two queries actually read and write, and it is checked
+   * against the real table by `money_import_grants_rls_test.sql`.
+   */
+  function grantsTable() {
+    return (
+      getAdminClient() as unknown as {
+        from(table: "money_import_grants"): MoneyImportGrantsTableQuery;
+      }
+    ).from("money_import_grants");
+  }
+
+  async function getGrantByToken(token: string): Promise<Record<string, unknown> | null> {
+    const tokenHash = await sha256Hex(token);
+    const { data, error } = await grantsTable().select("*").eq("token_hash", tokenHash).single();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  }
+
+  /** Read back the grant a session was minted by, so its revocation reaches that session. */
+  async function getGrantById(grantId: string): Promise<Record<string, unknown> | null> {
+    const { data, error } = await grantsTable().select("*").eq("id", grantId).single();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  }
+
+  /**
+   * Whether this auth user may still import. Asked of a grant's issuer on every use, so that
+   * removing someone from `allowed_users` takes their extension's credential with it.
+   *
+   * The allowlist is matched the same two ways everything else matches it -- by `auth_user_id`
+   * or by email. `public.is_allowed_user()` and `authenticateAllowedUser` both accept either,
+   * and a row pre-approved by email keeps a null `auth_user_id` until the signup trigger links
+   * it. Checking only the UUID here would let such a person create a grant through the app and
+   * then get 401 on every use of it.
+   *
+   * Failure answers "no". The alternative -- letting a transport error stand in for permission
+   * -- would turn any outage of this lookup into a grant that authorises itself.
+   */
+  async function isAuthUserAllowed(authUserId: string): Promise<boolean> {
+    if (!authUserId) return false;
+    try {
+      const admin = getAdminClient();
+      const { data: byId, error: byIdError } = await admin
+        .from("allowed_users")
+        .select("id")
+        .eq("auth_user_id", authUserId)
+        .maybeSingle();
+
+      if (byIdError) return false;
+      if (byId) return true;
+
+      const { data: userData, error: userError } = await admin.auth.admin.getUserById(authUserId);
+      const email = normalizeText(userData?.user?.email)?.trim();
+      if (userError || !email) return false;
+
+      // Case-insensitive equality, not a pattern match: `a_b@example.com` matching `axb@...`
+      // would wave a removed issuer through on somebody else's allowlist row. Escaping LIKE
+      // metacharacters was the first attempt and is not enough -- see `regexLiteral`.
+      const { data: byEmail, error: byEmailError } = await admin
+        .from("allowed_users")
+        .select("id")
+        .regexIMatch("email", exactIgnoringCase(email))
+        .maybeSingle();
+
+      if (byEmailError || !byEmail) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function markGrantUsed(grantId: string, usedAtIso: string): Promise<void> {
+    // Best effort: knowing when a grant was last used is worth having, but failing to
+    // record it must not cost the import that is starting.
+    await grantsTable().update({ last_used_at: usedAtIso }).eq("id", grantId);
   }
 
   async function assertAccountBelongsToPayer(
@@ -1758,6 +1891,10 @@ export function createSupabaseMoneyImportRepository(
   return {
     authenticateAllowedUser,
     getSessionByToken,
+    getGrantByToken,
+    getGrantById,
+    isAuthUserAllowed,
+    markGrantUsed,
     findLastImportedAt,
     createImportSession,
     getImportSessionForUser,
