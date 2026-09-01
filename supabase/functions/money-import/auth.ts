@@ -15,23 +15,43 @@ export interface MoneyImportAuthDeps {
 }
 
 /**
+ * Whether a `revoked_at` column says the credential is revoked.
+ *
+ * Presence, not parseability. `timestamptz` accepts `infinity` and `-infinity`, which are
+ * perfectly valid values that `new Date()` cannot read -- so asking `toIsoOrNull` whether this
+ * is a date answered "no" and the credential counted as live. The authority trigger forbids
+ * clearing a revocation to NULL, so writing one of those in its place was the way around it: the
+ * row reads as revoked everywhere a person looks, and authenticates anyway.
+ */
+export function isRevoked(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
+}
+
+/**
  * Whether the grant row itself is still live. This answers only "was it revoked or has it
  * expired" -- whether the person who issued it may still import is a separate question, asked
  * of `allowed_users` at every use. See `resolveAuth`.
  */
 export function isGrantUsable(grant: Record<string, unknown>, nowMs = Date.now()): boolean {
-  if (toIsoOrNull(grant.revoked_at)) return false;
+  if (isRevoked(grant.revoked_at)) return false;
 
-  // No expiry means the grant lives until it is revoked; that is the point of it.
-  const expiresAt = toIsoOrNull(grant.expires_at);
-  if (expiresAt && new Date(expiresAt).getTime() <= nowMs) return false;
+  // No expiry means the grant lives until it is revoked; that is the point of it. But a value
+  // that is present and unreadable is not "no expiry" -- `infinity` reaches toIsoOrNull as null
+  // the same way it does above, and reading that as "lives forever" is the generous answer where
+  // the safe one costs nothing.
+  if (grant.expires_at !== null && grant.expires_at !== undefined) {
+    const expiresAt = toIsoOrNull(grant.expires_at);
+    if (!expiresAt) return false;
+    if (new Date(expiresAt).getTime() <= nowMs) return false;
+  }
 
   return true;
 }
 
 export function isSessionUsable(session: Record<string, unknown>, nowMs = Date.now()): boolean {
-  const revokedAt = toIsoOrNull(session.revoked_at);
-  if (revokedAt) return false;
+  if (isRevoked(session.revoked_at)) return false;
 
   const expiresAt = toIsoOrNull(session.expires_at);
   if (!expiresAt) return false;

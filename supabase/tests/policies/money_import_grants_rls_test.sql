@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(20);
+SELECT plan(22);
 
 SELECT has_table('public', 'money_import_grants', 'money_import_grants table exists');
 
@@ -209,6 +209,17 @@ SELECT throws_ok(
   'the sources of an existing grant cannot be widened'
 );
 
+SELECT throws_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET expires_at = now() + interval '10 years'
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  NULL,
+  'expires_at is fixed at issue time; issue a new grant instead',
+  'the expiry of an existing grant cannot be extended'
+);
+
 SELECT lives_ok(
   $$
     UPDATE public.money_import_grants
@@ -218,6 +229,20 @@ SELECT lives_ok(
   'revoking is still open to the household, which is the point of the update policy'
 );
 
+-- `timestamptz` accepts `infinity`, which is not NULL and so passes the one-way check below,
+-- while every reader that parses it as a date sees no revocation at all. Overwriting a real
+-- revocation with it was the way round the trigger.
+SELECT throws_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET revoked_at = 'infinity'
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  NULL,
+  'a revoked grant cannot have its revocation rewritten; issue a new grant instead',
+  'a recorded revocation cannot be replaced with another value'
+);
+
 SELECT throws_ok(
   $$
     UPDATE public.money_import_grants
@@ -225,7 +250,7 @@ SELECT throws_ok(
     WHERE id = '7d000000-0000-0000-0000-000000000102'
   $$,
   NULL,
-  'a revoked grant cannot be un-revoked; issue a new grant instead',
+  'a revoked grant cannot have its revocation rewritten; issue a new grant instead',
   'revocation is one-way'
 );
 

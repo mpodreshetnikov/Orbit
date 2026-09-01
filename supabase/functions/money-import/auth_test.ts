@@ -1,6 +1,6 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
-import { isGrantUsable, isSessionUsable, resolveAuth } from "./auth.ts";
+import { isGrantUsable, isRevoked, isSessionUsable, resolveAuth } from "./auth.ts";
 import type { MoneyImportAuthDeps } from "./auth.ts";
 import type { UserAuthContext } from "./types.ts";
 
@@ -285,5 +285,47 @@ Deno.test("resolveAuth refuses a grant when the allowlist check is not wired", a
         allowGrant: true,
       }),
     "Unauthorized",
+  );
+});
+
+Deno.test("isRevoked answers on presence, not on whether the value parses as a date", () => {
+  assertEquals(isRevoked(null), false);
+  assertEquals(isRevoked(undefined), false);
+  assertEquals(isRevoked(""), false);
+  assertEquals(isRevoked("   "), false);
+  assertEquals(isRevoked("2026-08-01T00:00:00.000Z"), true);
+  // timestamptz accepts these, and new Date() cannot read them. Asking whether a revocation is
+  // a date answered "no" and the credential counted as live.
+  assertEquals(isRevoked("infinity"), true);
+  assertEquals(isRevoked("-infinity"), true);
+});
+
+Deno.test("resolveAuth rejects a grant revoked to a value that is not a date", async () => {
+  await assertThrowsWithMessage(
+    () =>
+      resolveAuth(grantRequest(), grantDeps({ ...LIVE_GRANT, revoked_at: "infinity" }), {
+        allowUser: false,
+        allowSession: false,
+        allowGrant: true,
+      }),
+    "Unauthorized",
+  );
+});
+
+Deno.test("isGrantUsable refuses an expiry it cannot read rather than reading it as none", () => {
+  // A present-but-unparseable expiry is not "lives until revoked"; that is the generous answer
+  // where the safe one costs nothing.
+  assertEquals(isGrantUsable({ revoked_at: null, expires_at: "infinity" }), false);
+  assertEquals(isGrantUsable({ revoked_at: null, expires_at: null }), true);
+});
+
+Deno.test("isSessionUsable treats any recorded revocation as final", () => {
+  assertEquals(
+    isSessionUsable({
+      revoked_at: "infinity",
+      expires_at: "2999-01-01T00:00:00.000Z",
+      status: "running",
+    }),
+    false,
   );
 });

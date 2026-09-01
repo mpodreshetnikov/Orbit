@@ -47,11 +47,23 @@ interface MoneyImportGrantsTableQuery {
 }
 
 /**
- * Escapes the SQL LIKE metacharacters so a value is matched literally. ILIKE's default escape
- * character is a backslash, which therefore has to be escaped first.
+ * Escapes every regex metacharacter so a value matches only itself.
+ *
+ * `ilike` cannot be made safe here: PostgREST rewrites `*` in a `like`/`ilike` value to `%`
+ * unconditionally, with no escape that survives the substitution, so `a*b@example.com` widens
+ * into a wildcard and can match somebody else's allowlist row. `src/lib/mcp/health/medications.ts`
+ * hit the same wall and answered it the same way -- an anchored case-insensitive regex, which is
+ * equality that ignores case rather than a pattern.
  */
-export function escapeLikePattern(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+export function regexLiteral(value: string): string {
+  return value.replace(/[.^$*+?()[\]{}|\\]/g, (match) => `\\${match}`);
+}
+
+/** An anchored pattern that matches exactly this value, ignoring case and surrounding spaces. */
+export function exactIgnoringCase(value: string): string {
+  // `public.is_allowed_user()` compares `lower(trim(email))`, so the trim is part of the rule
+  // rather than a courtesy.
+  return `^\\s*${regexLiteral(value.trim())}\\s*$`;
 }
 
 /**
@@ -491,14 +503,13 @@ export function createSupabaseMoneyImportRepository(
       const email = normalizeText(userData?.user?.email)?.trim();
       if (userError || !email) return false;
 
-      // Case-insensitive equality, not a pattern match. `ilike` reads `_` and `%` as wildcards
-      // and `_` is ordinary in an address, so `a_b@example.com` would have matched `axb@...`:
-      // a removed issuer waved through by somebody else's allowlist row. Escaping the
-      // metacharacters keeps the case-insensitivity and drops the pattern.
+      // Case-insensitive equality, not a pattern match: `a_b@example.com` matching `axb@...`
+      // would wave a removed issuer through on somebody else's allowlist row. Escaping LIKE
+      // metacharacters was the first attempt and is not enough -- see `regexLiteral`.
       const { data: byEmail, error: byEmailError } = await admin
         .from("allowed_users")
         .select("id")
-        .ilike("email", escapeLikePattern(email))
+        .regexIMatch("email", exactIgnoringCase(email))
         .maybeSingle();
 
       if (byEmailError || !byEmail) return false;

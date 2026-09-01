@@ -39,10 +39,12 @@ BEGIN
     RAISE EXCEPTION 'expires_at is fixed at issue time; issue a new grant instead';
   END IF;
 
-  -- Revocation is one-way. Un-revoking would resurrect a credential that has been treated as
-  -- dead, possibly for a long time.
-  IF OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NULL THEN
-    RAISE EXCEPTION 'a revoked grant cannot be un-revoked; issue a new grant instead';
+  -- Revocation is one-way, and final in its exact value. Clearing it to NULL would resurrect a
+  -- credential treated as dead; rewriting it to another timestamp is the same act wearing a
+  -- disguise, because `timestamptz` accepts `infinity`, which is not NULL and which every reader
+  -- that parses it as a date sees as no revocation at all.
+  IF OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
+    RAISE EXCEPTION 'a revoked grant cannot have its revocation rewritten; issue a new grant instead';
   END IF;
 
   RETURN NEW;
