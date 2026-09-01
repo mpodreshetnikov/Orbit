@@ -576,6 +576,30 @@ export function createSupabaseMoneyImportRepository(
     throw new Error("account_id is required and could not be resolved");
   }
 
+  /**
+   * Who owns the row a duplicate collided with, ignoring the payer.
+   *
+   * Only ever used to explain a failure. It deliberately does not feed resolution: returning
+   * this id to the caller is exactly the cross-payer write that `findExistingTransactionId`
+   * refuses.
+   */
+  async function findTransactionOwnerIgnoringPayer(
+    row: CanonicalTransactionRowInput,
+  ): Promise<string | null> {
+    let query = getAdminClient().from("money_transactions").select("payer_person_id").limit(1);
+    if (row.external_id) {
+      query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
+    } else if (row.dedupe_hash) {
+      query = query.eq("dedupe_hash", row.dedupe_hash);
+    } else {
+      return null;
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) return null;
+    return normalizeText((data as Record<string, unknown>).payer_person_id);
+  }
+
   async function findExistingTransactionId(
     row: CanonicalTransactionRowInput,
     payerPersonId: string,
@@ -1524,6 +1548,20 @@ export function createSupabaseMoneyImportRepository(
 
     const existingId = await findExistingTransactionId(row, payerPersonId);
     if (!existingId) {
+      // The unique indexes on `(source, external_id)` and `dedupe_hash` are global, not per
+      // payer, so a conflict can be with a row belonging to somebody else. Resolving it would
+      // mean updating their transaction, which is the hole this payer predicate closes -- but
+      // "could not be resolved" alone reads like a bug in the importer rather than the real
+      // condition, and the real condition is fixable: scoping those indexes by payer is what
+      // `scope_money_transaction_identity` does in the money-identity work.
+      const conflictingOwner = await findTransactionOwnerIgnoringPayer(row);
+      if (conflictingOwner && conflictingOwner !== payerPersonId) {
+        throw new Error(
+          "Duplicate transaction belongs to another payer; the money_transactions uniqueness " +
+            "indexes are not scoped by payer, so this row cannot be imported without " +
+            "overwriting theirs",
+        );
+      }
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 

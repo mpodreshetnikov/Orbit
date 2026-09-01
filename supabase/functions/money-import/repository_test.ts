@@ -1988,3 +1988,48 @@ Deno.test(
     assertEquals(resolution, null);
   },
 );
+
+Deno.test(
+  "repository names a cross-payer duplicate instead of reporting it unresolvable",
+  async () => {
+    // The uniqueness indexes are global, so an insert can collide with a row belonging to
+    // somebody else. Resolving that row is the cross-payer write the payer predicate refuses --
+    // but the failure has to say so, or it reads as a bug in the importer rather than as the
+    // real and fixable condition it is.
+    const scopedLookup = queryStub({ data: null, error: null });
+    const ownerLookup = queryStub({ data: { payer_person_id: "person-2" }, error: null });
+
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          if (table !== "money_transactions") throw new Error(`Unexpected table ${table}`);
+          return {
+            insert: () => ({
+              select: () => ({
+                single: async () => ({ data: null, error: { code: "23505", message: "dup" } }),
+              }),
+            }),
+            select: (columns: string) =>
+              columns === "payer_person_id" ? ownerLookup : scopedLookup,
+          };
+        },
+      },
+    });
+
+    await assertRejectsWith(
+      () =>
+        repository.insertOrResolveTransaction(
+          {
+            posted_at: "2026-01-01T00:00:00.000Z",
+            amount: 10,
+            transaction_type: "expense",
+            source: "tbank",
+            external_id: "ext-shared",
+            account_id: "acc-1",
+          },
+          "person-1",
+        ),
+      "belongs to another payer",
+    );
+  },
+);
