@@ -27,6 +27,17 @@ type ServiceResult = {
   payload: Record<string, unknown>;
 };
 
+export interface HealthOcrAcceptance {
+  status: number;
+  payload: Record<string, unknown>;
+  /**
+   * The work the accepted request stands for, present only when this run holds the claim.
+   * The caller runs it after the response has gone out; its result is what the record's status
+   * will say, not what any caller is still waiting for.
+   */
+  work?: () => Promise<ServiceResult>;
+}
+
 const DEFAULT_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_OCR_ERROR_LENGTH = 500;
 const DEFAULT_TITLE = "Медицинский документ";
@@ -71,82 +82,31 @@ function buildCombinedPageText(pageTexts: string[]): string {
     .join("\n\n");
 }
 
-export async function runHealthOcrService(
-  input: HealthOcrServiceInput,
+/**
+ * Everything after the claim: download each attachment, transcribe it, persist the result.
+ *
+ * This half no longer runs inside the request. The browser used to hold the connection open for
+ * the whole document and give up at two minutes, so a five-page upload ended with the client
+ * writing `ocr_failed` over a run that was still working. What a caller needs synchronously is
+ * only whether the work was accepted; the work itself reports through the record's own status,
+ * which the client already watches over realtime.
+ */
+async function transcribeClaimedRecord(
+  recordId: string,
+  runId: string,
   deps: HealthOcrServiceDeps,
 ): Promise<ServiceResult> {
   const log = deps.log ?? console;
   const telemetry = deps.telemetry;
-  const startMs = (deps.now ?? (() => Date.now()))();
+  const now = deps.now ?? (() => Date.now());
+  const startMs = now();
   const maxOcrErrorLength = deps.maxOcrErrorLength ?? DEFAULT_MAX_OCR_ERROR_LENGTH;
   const defaultTitle = deps.defaultTitle ?? DEFAULT_TITLE;
-  const recordId = input.recordId;
-  let shouldMarkFailure = false;
-  let runId: string | null = null;
   const serviceSpan = telemetry?.startSpan("edge.health_ocr.service", {
-    attrs: {
-      has_record_id: Boolean(recordId),
-    },
-  });
-  telemetry?.info("health_ocr_service_started", {
-    has_record_id: Boolean(recordId),
+    attrs: { has_record_id: true },
   });
 
   try {
-    const authSpan = telemetry?.startSpan("edge.health_ocr.auth");
-    const user = await deps.repository.authenticateUser(input.authToken);
-    if (!user) {
-      await authSpan?.end({
-        status: "error",
-        statusMessage: "Unauthorized - invalid token",
-      });
-      throw new Error("Unauthorized - invalid token");
-    }
-
-    const allowed = await deps.repository.isAllowedUser(user);
-    if (!allowed) {
-      await authSpan?.end({
-        status: "error",
-        statusMessage: "User not in allowlist",
-      });
-      throw new Error("User not in allowlist");
-    }
-    await authSpan?.end({ status: "ok" });
-
-    if (!recordId) {
-      throw new Error("Missing required field: record_id");
-    }
-    shouldMarkFailure = true;
-
-    const recordSpan = telemetry?.startSpan("edge.health_ocr.get_record");
-    const record = await deps.repository.getRecord(recordId);
-    if (!record) {
-      await recordSpan?.end({
-        status: "error",
-        statusMessage: "Record not found or access denied",
-      });
-      throw new Error("Record not found or access denied");
-    }
-    await recordSpan?.end({ status: "ok" });
-
-    // Ownership, server-side, before any work: two invocations for the same record used to run
-    // side by side, and the record's state was decided by whichever finished last.
-    const claimSpan = telemetry?.startSpan("edge.health_ocr.claim");
-    runId = await deps.repository.claimRecord(recordId);
-    if (!runId) {
-      await claimSpan?.end({ status: "ok", attrs: { claimed: false } });
-      telemetry?.info("health_ocr_already_running", { record_id: recordId });
-      // Another run owns the record; marking it failed here would report that run's progress
-      // as this caller's failure.
-      shouldMarkFailure = false;
-      await serviceSpan?.end({ status: "ok", attrs: { claimed: false } });
-      return {
-        status: 409,
-        payload: { success: false, error: "OCR is already running for this record" },
-      };
-    }
-    await claimSpan?.end({ status: "ok", attrs: { claimed: true } });
-
     const attachmentsSpan = telemetry?.startSpan("edge.health_ocr.get_attachments");
     const attachments = await deps.repository.getAttachments(recordId);
     if (attachments.length === 0) {
@@ -265,21 +225,16 @@ export async function runHealthOcrService(
       },
     });
 
-    log.log(
-      "[health-ocr] success record_id:",
-      recordId,
-      "duration_ms:",
-      (deps.now ?? (() => Date.now()))() - startMs,
-    );
+    log.log("[health-ocr] success record_id:", recordId, "duration_ms:", now() - startMs);
     telemetry?.info("health_ocr_service_completed", {
       record_id: recordId,
-      duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+      duration_ms: now() - startMs,
       char_count: fullOcrText.length,
     });
     await serviceSpan?.end({
       status: "ok",
       attrs: {
-        duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+        duration_ms: now() - startMs,
         // The record's whole OCR cost, so a multi-page document does not have to be summed
         // page span by page span.
         ...usageAttrs(sumLlmUsage(pageUsage)),
@@ -297,46 +252,177 @@ export async function runHealthOcrService(
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    const truncatedMessage = errorMessage.slice(0, maxOcrErrorLength);
     log.error(
       "[health-ocr] error record_id:",
       recordId,
       "duration_ms:",
-      (deps.now ?? (() => Date.now()))() - startMs,
+      now() - startMs,
       "error:",
       error,
     );
     telemetry?.error("health_ocr_service_failed", {
-      record_id: recordId ?? "missing",
-      duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
+      record_id: recordId,
+      duration_ms: now() - startMs,
       error_message: errorMessage,
     });
 
-    if (recordId && shouldMarkFailure) {
-      try {
-        const failureSpan = telemetry?.startSpan("edge.health_ocr.persist_failure");
-        await deps.repository.updateRecordFailure(recordId, truncatedMessage, {
-          runId: runId ?? undefined,
-        });
-        await failureSpan?.end({ status: "ok" });
-      } catch (updateError) {
-        log.error("Failed to update record with ocr_failed:", updateError);
-      }
-    }
+    await recordFailure(recordId, errorMessage.slice(0, maxOcrErrorLength), runId, deps);
     await serviceSpan?.end({
       status: "error",
       statusMessage: errorMessage,
-      attrs: {
-        duration_ms: (deps.now ?? (() => Date.now()))() - startMs,
-      },
+      attrs: { duration_ms: now() - startMs },
     });
 
     return {
       status: 400,
-      payload: {
-        success: false,
-        error: errorMessage,
-      },
+      payload: { success: false, error: errorMessage },
     };
   }
+}
+
+/**
+ * Leave the record able to say what happened, whatever else went wrong.
+ *
+ * Best-effort on purpose: a failure to write the failure must not replace the original error,
+ * which is the one worth reporting.
+ */
+async function recordFailure(
+  recordId: string,
+  message: string,
+  runId: string | null,
+  deps: HealthOcrServiceDeps,
+): Promise<void> {
+  const log = deps.log ?? console;
+  const telemetry = deps.telemetry;
+  try {
+    const failureSpan = telemetry?.startSpan("edge.health_ocr.persist_failure");
+    await deps.repository.updateRecordFailure(recordId, message, {
+      runId: runId ?? undefined,
+    });
+    await failureSpan?.end({ status: "ok" });
+  } catch (updateError) {
+    log.error("Failed to update record with ocr_failed:", updateError);
+  }
+}
+
+/**
+ * Decide, synchronously, whether this request gets to transcribe the record.
+ *
+ * Everything a caller can act on happens here — authentication, the record, and the claim that
+ * says no second run is already working. The transcription itself is handed back as `work` for
+ * the caller to run after the response has been sent.
+ */
+export async function acceptHealthOcrRequest(
+  input: HealthOcrServiceInput,
+  deps: HealthOcrServiceDeps,
+): Promise<HealthOcrAcceptance> {
+  const telemetry = deps.telemetry;
+  const maxOcrErrorLength = deps.maxOcrErrorLength ?? DEFAULT_MAX_OCR_ERROR_LENGTH;
+  const recordId = input.recordId;
+  let mayRecordFailure = false;
+  const acceptSpan = telemetry?.startSpan("edge.health_ocr.accept", {
+    attrs: { has_record_id: Boolean(recordId) },
+  });
+  telemetry?.info("health_ocr_service_started", {
+    has_record_id: Boolean(recordId),
+  });
+
+  try {
+    const authSpan = telemetry?.startSpan("edge.health_ocr.auth");
+    const user = await deps.repository.authenticateUser(input.authToken);
+    if (!user) {
+      await authSpan?.end({
+        status: "error",
+        statusMessage: "Unauthorized - invalid token",
+      });
+      throw new Error("Unauthorized - invalid token");
+    }
+
+    const allowed = await deps.repository.isAllowedUser(user);
+    if (!allowed) {
+      await authSpan?.end({
+        status: "error",
+        statusMessage: "User not in allowlist",
+      });
+      throw new Error("User not in allowlist");
+    }
+    await authSpan?.end({ status: "ok" });
+
+    if (!recordId) {
+      throw new Error("Missing required field: record_id");
+    }
+    // Only now: an unauthenticated caller carrying a known record id must not be able to stamp
+    // that record as failed.
+    mayRecordFailure = true;
+
+    const recordSpan = telemetry?.startSpan("edge.health_ocr.get_record");
+    const record = await deps.repository.getRecord(recordId);
+    if (!record) {
+      await recordSpan?.end({
+        status: "error",
+        statusMessage: "Record not found or access denied",
+      });
+      throw new Error("Record not found or access denied");
+    }
+    await recordSpan?.end({ status: "ok" });
+
+    // Ownership, server-side, before any work: two invocations for the same record used to run
+    // side by side, and the record's state was decided by whichever finished last.
+    const claimSpan = telemetry?.startSpan("edge.health_ocr.claim");
+    const runId = await deps.repository.claimRecord(recordId);
+    if (!runId) {
+      await claimSpan?.end({ status: "ok", attrs: { claimed: false } });
+      telemetry?.info("health_ocr_already_running", { record_id: recordId });
+      await acceptSpan?.end({ status: "ok", attrs: { claimed: false } });
+      return {
+        status: 409,
+        // Another run owns the record; marking it failed here would report that run's progress
+        // as this caller's failure.
+        payload: { success: false, error: "OCR is already running for this record" },
+      };
+    }
+    await claimSpan?.end({ status: "ok", attrs: { claimed: true } });
+    await acceptSpan?.end({ status: "ok", attrs: { claimed: true } });
+
+    return {
+      status: 202,
+      payload: { success: true, accepted: true, record_id: recordId },
+      work: () => transcribeClaimedRecord(recordId, runId, deps),
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    telemetry?.error("health_ocr_service_failed", {
+      record_id: recordId ?? "missing",
+      error_message: errorMessage,
+    });
+
+    if (recordId && mayRecordFailure) {
+      // No claim was taken, so the write is unconditional: nothing else can be working on the
+      // record, and the caller has to be able to see why nothing happened.
+      await recordFailure(recordId, errorMessage.slice(0, maxOcrErrorLength), null, deps);
+    }
+    await acceptSpan?.end({ status: "error", statusMessage: errorMessage });
+
+    return {
+      status: 400,
+      payload: { success: false, error: errorMessage },
+    };
+  }
+}
+
+/**
+ * Accept and transcribe in one call, reporting the transcription's own result.
+ *
+ * The inline shape: used by tests and by any caller that wants the text back rather than a
+ * record to watch.
+ */
+export async function runHealthOcrService(
+  input: HealthOcrServiceInput,
+  deps: HealthOcrServiceDeps,
+): Promise<ServiceResult> {
+  const acceptance = await acceptHealthOcrRequest(input, deps);
+  if (!acceptance.work) {
+    return { status: acceptance.status, payload: acceptance.payload };
+  }
+  return await acceptance.work();
 }

@@ -22,7 +22,6 @@ interface RetryOCRInput {
   personName: string;
 }
 
-const OCR_FETCH_TIMEOUT_MS = 120_000; // 120s so client does not wait indefinitely
 const OCR_FAILED_UPDATE_RETRIES = 3;
 const OCR_FAILED_UPDATE_DELAY_MS = 1500;
 const OCR_UPLOAD_RETRIES = 3;
@@ -162,34 +161,30 @@ export function useBackgroundOCR() {
           throw new Error("Supabase URL not configured");
         }
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), OCR_FETCH_TIMEOUT_MS);
-        let response: Response;
-        try {
-          response = await fetchEdgeFunctionWithTelemetry(
-            `${supabaseUrl}/functions/v1/health-ocr`,
-            {
-              method: "POST",
-              signal: controller.signal,
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({ record_id: recordId }),
+        // No timeout: the call now returns as soon as the record is claimed, and the
+        // transcription that follows is reported by the record's status. The 120-second abort
+        // this replaces was how a five-page document ended up marked failed while the server
+        // was still transcribing it.
+        const response = await fetchEdgeFunctionWithTelemetry(
+          `${supabaseUrl}/functions/v1/health-ocr`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
             },
-            {
-              component: "use-background-ocr",
-              operation: "health-ocr",
-              attrs: {
-                has_record_id: Boolean(recordId),
-              },
+            body: JSON.stringify({ record_id: recordId }),
+          },
+          {
+            component: "use-background-ocr",
+            operation: "health-ocr",
+            attrs: {
+              has_record_id: Boolean(recordId),
             },
-          );
-        } finally {
-          clearTimeout(timeoutId);
-        }
+          },
+        );
 
-        updateJob(jobId, { progress: 80 });
+        updateJob(jobId, { progress: 50 });
 
         if (response.status === 409) {
           // Another run owns this record and is still working on it. Marking it failed here
@@ -250,6 +245,14 @@ export function useBackgroundOCR() {
           return { success: false, error: errorMessage };
         }
 
+        if (data.accepted) {
+          // The work was taken, not finished. useProcessingMonitor closes the job out when the
+          // record reaches ocr_review, or fails it when the record reaches ocr_failed.
+          queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+          queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+          return { success: true, accepted: true };
+        }
+
         // Mark job as completed; use LLM-suggested record name when available
         const displayTitle = data.suggested_title?.trim() || t("processing.ocrComplete");
         updateJob(jobId, {
@@ -279,36 +282,20 @@ export function useBackgroundOCR() {
 
         return { success: true, ocr_text: data.ocr_text };
       } catch (error) {
-        const errorMessage =
-          (error as Error)?.name === "AbortError"
-            ? t("processing.timeout")
-            : error instanceof Error
-              ? error.message
-              : "Processing failed";
+        // Upload, session or the acceptance call itself. There is no timeout case left to
+        // distinguish: nothing here waits on the transcription.
+        const errorMessage = error instanceof Error ? error.message : "Processing failed";
 
         updateJob(jobId, { stage: "failed", error: errorMessage });
         addNotification({
           jobId,
           recordId,
-          title:
-            (error as Error)?.name === "AbortError"
-              ? t("processing.timeout")
-              : t("processing.failed"),
+          title: t("processing.failed"),
           personName,
           type: "error",
           message: errorMessage,
         });
-        toast.error(
-          (error as Error)?.name === "AbortError"
-            ? t("processing.timeout")
-            : t("processing.failed"),
-          {
-            description:
-              (error as Error)?.name === "AbortError"
-                ? t("processing.timeoutDescription")
-                : errorMessage,
-          },
-        );
+        toast.error(t("processing.failed"), { description: errorMessage });
 
         // Persist OCR failure so UI can show error and Retry (retry update on transient network failure)
         const supabaseClient = createClient();
@@ -368,15 +355,12 @@ export function useBackgroundOCR() {
         return { success: false, error: err };
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), OCR_FETCH_TIMEOUT_MS);
       let response: Response;
       try {
         response = await fetchEdgeFunctionWithTelemetry(
           `${supabaseUrl}/functions/v1/health-ocr`,
           {
             method: "POST",
-            signal: controller.signal,
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${session.access_token}`,
@@ -392,13 +376,7 @@ export function useBackgroundOCR() {
           },
         );
       } catch (fetchError) {
-        clearTimeout(timeoutId);
-        const errorMessage =
-          (fetchError as Error)?.name === "AbortError"
-            ? t("processing.timeout")
-            : fetchError instanceof Error
-              ? fetchError.message
-              : "Processing failed";
+        const errorMessage = fetchError instanceof Error ? fetchError.message : "Processing failed";
         updateJob(jobId, { stage: "failed", error: errorMessage });
         await supabase
           .from("medical_records")
@@ -409,30 +387,16 @@ export function useBackgroundOCR() {
         addNotification({
           jobId,
           recordId,
-          title:
-            (fetchError as Error)?.name === "AbortError"
-              ? t("processing.timeout")
-              : t("processing.failed"),
+          title: t("processing.failed"),
           personName,
           type: "error",
           message: errorMessage,
         });
-        toast.error(
-          (fetchError as Error)?.name === "AbortError"
-            ? t("processing.timeout")
-            : t("processing.failed"),
-          {
-            description:
-              (fetchError as Error)?.name === "AbortError"
-                ? t("processing.timeoutDescription")
-                : errorMessage,
-          },
-        );
+        toast.error(t("processing.failed"), { description: errorMessage });
         return { success: false, error: errorMessage };
       }
-      clearTimeout(timeoutId);
 
-      updateJob(jobId, { progress: 80 });
+      updateJob(jobId, { progress: 50 });
 
       if (response.status === 409) {
         // The record already has an owner; the run that holds it decides its status.
@@ -489,6 +453,13 @@ export function useBackgroundOCR() {
         });
         toast.error(t("processing.failed"), { description: errorMessage });
         return { success: false, error: errorMessage };
+      }
+
+      if (data.accepted) {
+        // Claimed and running; the record's status is what finishes this job.
+        queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+        queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
+        return { success: true, accepted: true };
       }
 
       const displayTitle = data.suggested_title?.trim() || t("processing.ocrComplete");

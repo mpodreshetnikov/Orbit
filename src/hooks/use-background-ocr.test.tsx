@@ -327,6 +327,97 @@ describe("use-background-ocr", () => {
     expect(response).toEqual({ success: true, ocr_text: "OCR body" });
   });
 
+  // What the function actually answers now: the record is claimed, the transcription is running.
+  // The job has to stay open -- useProcessingMonitor closes it when the record moves.
+  it("leaves the job running when OCR is accepted rather than finished", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client } = createSupabaseClientMock({ sessionToken: "token-1" });
+    createClientMock.mockReturnValue(client);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 202,
+        json: async () => ({ success: true, accepted: true, record_id: "record-1" }),
+      }),
+    );
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    let response: { success: boolean; accepted?: boolean } | undefined;
+    await act(async () => {
+      response = await result.current.startBackgroundOCR({
+        recordId: "record-1",
+        personId: "person-1",
+        personName: "Alex",
+      });
+    });
+
+    expect(response).toEqual({ success: true, accepted: true });
+    expect(updateJobMock).not.toHaveBeenCalledWith(
+      "record-1",
+      expect.objectContaining({ stage: "completed" }),
+    );
+    // No "text extracted" notification either: nothing has been extracted yet.
+    expect(addNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves the job running when a retry is accepted", async () => {
+    const addJobMock = vi.fn();
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        addJob: addJobMock,
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+      }),
+    );
+
+    const { client } = createSupabaseClientMock({ sessionToken: "token-1" });
+    createClientMock.mockReturnValue(client);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 202,
+        json: async () => ({ success: true, accepted: true, record_id: "record-5" }),
+      }),
+    );
+
+    const { useBackgroundOCR } = await import("./use-background-ocr");
+    const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
+
+    let response: { success: boolean; accepted?: boolean } | undefined;
+    await act(async () => {
+      response = await result.current.retryOcr({
+        recordId: "record-5",
+        personId: "person-1",
+        personName: "Alex",
+      });
+    });
+
+    expect(response).toEqual({ success: true, accepted: true });
+    expect(updateJobMock).not.toHaveBeenCalledWith(
+      "record-5",
+      expect.objectContaining({ stage: "completed" }),
+    );
+    expect(addNotificationMock).not.toHaveBeenCalled();
+  });
+
   it("starts OCR for already uploaded attachments when files list is empty", async () => {
     const addJobMock = vi.fn();
     const updateJobMock = vi.fn();
@@ -556,7 +647,9 @@ describe("use-background-ocr", () => {
     expect(response).toEqual({ success: true, ocr_text: "fresh ocr" });
   });
 
-  it("handles retryOcr timeout errors from fetch abort", async () => {
+  // The client no longer aborts the call, so there is no timeout of its own to report -- a
+  // network failure is a network failure, and its message is what the record gets.
+  it("reports a failed retryOcr fetch with the network error itself", async () => {
     const addJobMock = vi.fn();
     const updateJobMock = vi.fn();
     const addNotificationMock = vi.fn();
@@ -573,14 +666,7 @@ describe("use-background-ocr", () => {
     });
     createClientMock.mockReturnValue(client);
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockRejectedValue(
-        Object.assign(new Error("Aborted"), {
-          name: "AbortError",
-        }),
-      ),
-    );
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Failed to fetch")));
 
     const { useBackgroundOCR } = await import("./use-background-ocr");
     const { result } = renderHookWithQueryClient(() => useBackgroundOCR());
@@ -601,23 +687,19 @@ describe("use-background-ocr", () => {
 
     expect(updateMock).toHaveBeenCalledWith({
       status: "ocr_failed",
-      ocr_error: "processing.timeout",
+      ocr_error: "Failed to fetch",
     });
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-5",
-      expect.objectContaining({ stage: "failed", error: "processing.timeout" }),
+      expect.objectContaining({ stage: "failed", error: "Failed to fetch" }),
     );
     expect(addNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "error",
-        title: "processing.timeout",
+        title: "processing.failed",
       }),
     );
-    expect(toastErrorMock).toHaveBeenCalledWith(
-      "processing.timeout",
-      expect.objectContaining({ description: "processing.timeoutDescription" }),
-    );
-    expect(response).toEqual({ success: false, error: "processing.timeout" });
+    expect(response).toEqual({ success: false, error: "Failed to fetch" });
   });
 
   it("retries updateRecordToOcrFailed and reports exhausted retries", async () => {

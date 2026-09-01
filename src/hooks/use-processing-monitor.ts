@@ -13,6 +13,29 @@ interface MedicalRecordPayload {
   title: string;
   status: string;
   person_id: string;
+  ocr_error: string | null;
+  structure_error: string | null;
+}
+
+/**
+ * A record that stopped moving, and why.
+ *
+ * The client no longer waits on the pipeline's HTTP call, so this is the only place a failure
+ * can reach the user: nothing is holding a response that could report it. `ocr_failed` is the
+ * OCR pipeline's terminal failure; a structuring failure returns the record to `ocr_review`,
+ * which is why the previous status has to be read to tell it from a normal completion.
+ */
+function readFailure(
+  oldStatus: string | undefined,
+  newRecord: MedicalRecordPayload,
+): { message: string | null } | null {
+  if (newRecord.status === "ocr_failed") {
+    return { message: newRecord.ocr_error };
+  }
+  if (oldStatus === "structuring" && newRecord.status === "ocr_review") {
+    return { message: newRecord.structure_error };
+  }
+  return null;
 }
 
 /**
@@ -26,6 +49,7 @@ export function useProcessingMonitor(personId: string | null) {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const updateJob = useProcessingQueueStore((state) => state.updateJob);
+  const addNotification = useProcessingQueueStore((state) => state.addNotification);
   const processingRecordsRef = useRef<Set<string>>(new Set());
   const isInitializedRef = useRef(false);
 
@@ -70,12 +94,35 @@ export function useProcessingMonitor(personId: string | null) {
       if (eventType === "UPDATE" && newRecord && oldRecord) {
         const oldStatus = oldRecord.status;
         const newStatus = newRecord.status;
+        // The queue entry is where the person's name lives; a notification without it reads as
+        // belonging to nobody on a family account.
+        const personName =
+          useProcessingQueueStore.getState().getJobByRecordId(newRecord.id)?.personName ?? "";
 
         // Check if a record completed a processing stage
         // OCR processing: ocr_processing -> ocr_review
         // Structure processing: structuring -> structure_review
         const isOcrComplete = oldStatus === "ocr_processing" && newStatus === "ocr_review";
         const isStructureComplete = oldStatus === "structuring" && newStatus === "structure_review";
+
+        const failure = readFailure(oldStatus, newRecord);
+        if (failure && processingRecordsRef.current.has(newRecord.id)) {
+          const message = failure.message || t("processing.failed");
+          console.log("[Realtime] Record failed processing:", newRecord.id, newStatus);
+          processingRecordsRef.current.delete(newRecord.id);
+          updateJob(newRecord.id, { stage: "failed", error: message });
+          addNotification({
+            jobId: newRecord.id,
+            recordId: newRecord.id,
+            title: t("processing.failed"),
+            personName,
+            type: "error",
+            message,
+          });
+          toast.error(t("processing.failed"), { description: message });
+          queryClient.invalidateQueries({ queryKey: ["medical-records"] });
+          queryClient.invalidateQueries({ queryKey: ["medical-record", newRecord.id] });
+        }
 
         if (isOcrComplete || isStructureComplete) {
           console.log(
@@ -101,6 +148,17 @@ export function useProcessingMonitor(personId: string | null) {
           const notificationMessage = isOcrComplete
             ? t("processing.ocrComplete")
             : t("processing.completed");
+
+          addNotification({
+            jobId: newRecord.id,
+            recordId: newRecord.id,
+            title: newRecord.title,
+            personName,
+            type: "success",
+            message: isOcrComplete
+              ? t("processing.ocrReviewNeeded")
+              : t("processing.reviewStructure"),
+          });
 
           toast.success(notificationMessage, {
             description: newRecord.title,
@@ -199,5 +257,5 @@ export function useProcessingMonitor(personId: string | null) {
       isInitializedRef.current = false;
       processingRecordsRef.current.clear();
     };
-  }, [personId, queryClient, t, updateJob]);
+  }, [personId, queryClient, t, updateJob, addNotification]);
 }
