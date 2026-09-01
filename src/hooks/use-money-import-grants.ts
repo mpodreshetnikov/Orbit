@@ -44,8 +44,15 @@ interface MoneyImportGrantsTable {
       column: string,
       options: { ascending: boolean },
     ): Promise<{ data: MoneyImportGrant[] | null; error: GrantRowError | null }>;
+    eq(
+      column: string,
+      value: string,
+    ): {
+      maybeSingle(): Promise<{ data: MoneyImportGrant | null; error: GrantRowError | null }>;
+    };
   };
   insert(values: {
+    id: string;
     person_id: string;
     created_by_auth_user_id: string;
     label: string;
@@ -117,8 +124,14 @@ export function useCreateMoneyImportGrant() {
       // The token exists in this function and in the reply to the caller, nowhere else:
       // only its hash is stored, so a lost token is reissued rather than recovered.
       const token = generateGrantToken();
+      // The id is chosen here rather than by the database, so that a lost response can be told
+      // apart from a failed insert. Without it, a disconnect after the row commits leaves an
+      // active grant whose only plaintext key was shown zero times and cannot be recovered --
+      // the one failure this screen must not have, since the key exists nowhere else.
+      const id = crypto.randomUUID();
       const { data, error } = await grantsTable(supabase)
         .insert({
+          id,
           person_id: input.personId,
           created_by_auth_user_id: user.id,
           label: input.label.trim(),
@@ -129,9 +142,17 @@ export function useCreateMoneyImportGrant() {
         .select(GRANT_COLUMNS)
         .single();
 
-      if (error) throw new Error(error.message);
-      if (!data) throw new Error("The grant was created but not returned");
-      return { grant: data, token };
+      if (data) return { grant: data, token };
+
+      // Ask whether it landed anyway. The token is still in hand, so if the row is there this
+      // is a delivery failure rather than an issuance failure, and the caller can be given both.
+      const { data: reconciled } = await grantsTable(supabase)
+        .select(GRANT_COLUMNS)
+        .eq("id", id)
+        .maybeSingle();
+      if (reconciled) return { grant: reconciled, token };
+
+      throw new Error(error?.message ?? "The grant was created but not returned");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: GRANTS_QUERY_KEY });

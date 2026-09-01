@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,8 +28,14 @@ function describeGrantState(
   nowMs: number,
 ): { label: string; tone: "active" | "inactive" } {
   if (grant.revoked_at) return { label: t("money.importGrantRevoked"), tone: "inactive" };
-  if (grant.expires_at && new Date(grant.expires_at).getTime() <= nowMs) {
-    return { label: t("money.importGrantExpired"), tone: "inactive" };
+  if (grant.expires_at) {
+    // A present expiry that cannot be read is not "no expiry". `timestamptz` accepts `infinity`,
+    // which parses to NaN here, and the Edge Function's isGrantUsable already refuses such a
+    // grant — so reading it as Active would make the screen disagree with authentication.
+    const expiresAtMs = new Date(grant.expires_at).getTime();
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
+      return { label: t("money.importGrantExpired"), tone: "inactive" };
+    }
   }
   return { label: t("money.importGrantActive"), tone: "active" };
 }
@@ -40,7 +46,7 @@ function describeGrantState(
  * losing it is issuing another one.
  */
 export function MoneyImportGrants({ t, personId, availableSources }: MoneyImportGrantsProps) {
-  const { data: grants, isLoading } = useMoneyImportGrants();
+  const { data: grants, isLoading, isError, refetch } = useMoneyImportGrants();
   const createGrant = useCreateMoneyImportGrant();
   const revokeGrant = useRevokeMoneyImportGrant();
 
@@ -55,6 +61,11 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
   // against the wrong payer.
   useEffect(() => {
     setIssuedToken(null);
+  }, [personId]);
+  // Read by an in-flight issuance, which cannot see the state it was started with.
+  const personIdRef = useRef(personId);
+  useEffect(() => {
+    personIdRef.current = personId;
   }, [personId]);
 
   // Frozen at first render this reported an expired grant as Active for as long as the page
@@ -90,11 +101,20 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
     }
 
     try {
+      const issuedForPersonId = personId;
       const created = await createGrant.mutateAsync({
-        personId,
+        personId: issuedForPersonId,
         label,
         allowedSources: selectedSources,
       });
+      // The mutation captured the person it was submitted for. If the selection moved on while
+      // it was in flight, showing the key now would put one person's credential in another
+      // person's panel -- the effect above already cleared it once for exactly that reason.
+      if (personIdRef.current !== issuedForPersonId) {
+        toast.success(t("money.importGrantCreatedForOtherPerson"));
+        setLabel("");
+        return;
+      }
       setIssuedToken(created.token);
       setLabel("");
       toast.success(t("money.importGrantCreated"));
@@ -116,6 +136,14 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
   };
 
   const handleRevoke = async (grantId: string) => {
+    // The database makes this one-way -- the authority trigger refuses to clear or rewrite
+    // revoked_at -- so the only recovery from a stray click is issuing and distributing a new
+    // key. Naming the grant in the prompt is the point: it is what tells you it is the wrong one.
+    const grant = visibleGrants.find((candidate) => candidate.id === grantId);
+    if (!globalThis.confirm(t("money.importGrantRevokeConfirm", { label: grant?.label ?? "" }))) {
+      return;
+    }
+
     try {
       await revokeGrant.mutateAsync(grantId);
       toast.success(t("money.importGrantRevoked"));
@@ -190,7 +218,18 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
 
         {isLoading && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
 
-        {!isLoading && visibleGrants.length === 0 && (
+        {!isLoading && isError && (
+          // "No grants yet" on a failed read would hide live credentials and their revoke
+          // buttons on the only screen that has them, and would look exactly like having none.
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+            <p className="text-sm">{t("money.importGrantsLoadFailed")}</p>
+            <Button type="button" size="sm" variant="outline" onClick={() => void refetch()}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        )}
+
+        {!isLoading && !isError && visibleGrants.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("money.importGrantsEmpty")}</p>
         )}
 

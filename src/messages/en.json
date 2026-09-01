@@ -597,7 +597,10 @@
     "importGrantsTitle": "Automatic import",
     "importGrantCopy": "Copy key",
     "importGrantCopied": "Key copied.",
-    "importGrantCopyFailed": "Could not copy the key. Select it and copy manually."
+    "importGrantCopyFailed": "Could not copy the key. Select it and copy manually.",
+    "importGrantCreatedForOtherPerson": "The grant was issued for the person selected when you started, so the key is not shown here. Issue another one for this person.",
+    "importGrantsLoadFailed": "Could not load the grants. Any that exist are still active and cannot be revoked from here until this loads.",
+    "importGrantRevokeConfirm": "Revoke the grant “{label}”? This cannot be undone — the extension using it will stop importing, and restoring access means issuing a new key."
   },
   "records": {
     "title": "Medical Records",
