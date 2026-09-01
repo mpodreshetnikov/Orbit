@@ -1,10 +1,10 @@
 BEGIN;
-SELECT plan(7);
+SELECT plan(9);
 
 SELECT has_function(
   'public',
   'release_abandoned_record_processing',
-  ARRAY['integer'],
+  ARRAY['integer', 'integer'],
   'the reaper that replaced the browser timeout exists'
 );
 
@@ -40,13 +40,23 @@ VALUES
     'lab', '2026-02-01'::date, 'Dead OCR run', 'ocr_processing',
     'aaaaaaaa-4444-0000-0000-000000000000', now() - interval '2 hours'
   ),
-  -- A dead structuring worker: the same, one stage later.
+  -- A dead structuring worker: the same, one stage later, and past its own longer lease.
   (
     '99999999-4444-0000-0000-000000000002',
     '88888888-4444-0000-0000-000000000000',
     '77777777-4444-0000-0000-000000000000',
     'lab', '2026-02-01'::date, 'Dead structuring run', 'structuring',
-    'bbbbbbbb-4444-0000-0000-000000000000', now() - interval '2 hours'
+    'bbbbbbbb-4444-0000-0000-000000000000', now() - interval '3 hours'
+  ),
+  -- A structuring run twenty minutes in. It never renews its claim -- the whole run is one --
+  -- and three staged model calls with retries can legitimately take this long, so releasing it
+  -- would take the document away from a worker still reading it.
+  (
+    '99999999-4444-0000-0000-000000000005',
+    '88888888-4444-0000-0000-000000000000',
+    '77777777-4444-0000-0000-000000000000',
+    'lab', '2026-02-01'::date, 'Slow but live structuring run', 'structuring',
+    'dddddddd-4444-0000-0000-000000000000', now() - interval '20 minutes'
   ),
   -- A live run that renewed a moment ago. Releasing this one would take a document away from
   -- the worker transcribing it, which is the failure mode this whole milestone removes.
@@ -73,9 +83,19 @@ VALUES (
 );
 
 SELECT is(
-  public.release_abandoned_record_processing(900),
+  public.release_abandoned_record_processing(900, 3600),
   3,
-  'the three abandoned records are released and the live one is not'
+  'the three abandoned records are released and the live ones are not'
+);
+
+SELECT is(
+  (
+    SELECT status::text || ':' || processing_run_id::text
+    FROM public.medical_records
+    WHERE id = '99999999-4444-0000-0000-000000000005'
+  ),
+  'structuring:dddddddd-4444-0000-0000-000000000000',
+  'a structuring run past the OCR lease but inside its own keeps the record'
 );
 
 SELECT is(
@@ -119,9 +139,17 @@ SELECT is(
 );
 
 SELECT is(
-  public.release_abandoned_record_processing(900),
+  public.release_abandoned_record_processing(900, 3600),
   0,
   'a second sweep finds nothing left to release'
+);
+
+-- And the longer lease is a lease, not an exemption: a structuring run that really has stopped
+-- is still freed once it passes it.
+SELECT is(
+  public.release_abandoned_record_processing(900, 600),
+  1,
+  'a structuring run past its own lease is released too'
 );
 
 SELECT * FROM finish();

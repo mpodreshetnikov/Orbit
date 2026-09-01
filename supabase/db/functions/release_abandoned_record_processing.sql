@@ -12,7 +12,8 @@
 -- back to the user with an error it can act on.
 
 CREATE OR REPLACE FUNCTION public.release_abandoned_record_processing(
-  p_lease_seconds integer DEFAULT 900
+  p_lease_seconds integer DEFAULT 900,
+  p_structuring_lease_seconds integer DEFAULT 3600
 )
 RETURNS integer
 LANGUAGE plpgsql
@@ -37,11 +38,18 @@ BEGIN
       structure_error = CASE WHEN status = 'structuring' THEN v_message ELSE structure_error END,
       processing_run_id = NULL,
       processing_started_at = NULL
-    WHERE status IN ('ocr_processing', 'structuring')
-      -- A record can sit in a processing status without a claim: the client moves it there
-      -- before the function is reached, and the request may never arrive. `updated_at` is the
-      -- only clock those rows have.
-      AND COALESCE(processing_started_at, updated_at) < now() - make_interval(secs => p_lease_seconds)
+    WHERE (
+        -- OCR renews its claim after every page, so a claim that has gone quiet for a lease is
+        -- a worker that stopped.
+        (status = 'ocr_processing'
+          AND COALESCE(processing_started_at, updated_at) < now() - make_interval(secs => p_lease_seconds))
+        -- Structuring does not renew: its whole run is one claim, and three staged model calls
+        -- with retries and provider backoff can legitimately outlive the OCR lease. Reaping it
+        -- on that lease would take a document away from a worker still reading it and throw the
+        -- completed work away, so it gets its own, longer one.
+        OR (status = 'structuring'
+          AND COALESCE(processing_started_at, updated_at) < now() - make_interval(secs => p_structuring_lease_seconds))
+      )
     RETURNING 1
   )
   SELECT count(*)::integer INTO v_released FROM released;
@@ -50,8 +58,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.release_abandoned_record_processing(integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.release_abandoned_record_processing(integer) TO service_role;
+REVOKE ALL ON FUNCTION public.release_abandoned_record_processing(integer, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.release_abandoned_record_processing(integer, integer) TO service_role;
 
-COMMENT ON FUNCTION public.release_abandoned_record_processing(integer) IS
-  'Returns records whose processing claim outlived its lease to a state the user can retry from, and reports how many were released.';
+COMMENT ON FUNCTION public.release_abandoned_record_processing(integer, integer) IS
+  'Returns records whose processing claim outlived its lease to a state the user can retry from, and reports how many were released. Structuring carries a longer lease because it does not renew its claim.';

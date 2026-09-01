@@ -45,6 +45,9 @@ function readFailure(
  *
  * Should be mounted at the AppShell level to stay active across all health pages.
  */
+/** How often jobs outside the subscribed person's channel are checked against the database. */
+const ORPHANED_JOB_RECONCILE_MS = 30_000;
+
 export function useProcessingMonitor(personId: string | null) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -81,6 +84,59 @@ export function useProcessingMonitor(personId: string | null) {
       }
     };
 
+    /**
+     * Close out jobs the realtime channel cannot see.
+     *
+     * The subscription is filtered to the selected person, so switching family members leaves a
+     * job running with nothing watching for its completion -- and re-selecting the person does
+     * not help, because initialisation only looks at records that are *still* processing. The
+     * record has already moved by then.
+     *
+     * So the queue's own active jobs are reconciled against the database, whoever they belong
+     * to. A read of the store costs nothing when there is nothing outstanding, which is the
+     * usual case.
+     */
+    const reconcileActiveJobs = async () => {
+      const store = useProcessingQueueStore.getState();
+      const orphaned = store
+        .getActiveJobs()
+        .filter((job) => job.stage === "processing" && job.personId !== personId);
+      if (orphaned.length === 0) return;
+
+      const { data, error } = await supabase
+        .from("medical_records")
+        .select("id, title, status, ocr_error, structure_error")
+        .in(
+          "id",
+          orphaned.map((job) => job.recordId),
+        );
+      if (error || !data) return;
+
+      for (const record of data) {
+        const job = orphaned.find((candidate) => candidate.recordId === record.id);
+        if (!job) continue;
+
+        if (record.status === "ocr_failed") {
+          store.updateJob(job.id, {
+            stage: "failed",
+            error: record.ocr_error || t("processing.failed"),
+          });
+          continue;
+        }
+        // Past OCR: the transcription finished while nothing was listening. There is no toast
+        // for it -- the moment to announce it has passed -- but the queue must stop claiming
+        // the document is still being read.
+        if (record.status !== "ocr_processing" && record.status !== "structuring") {
+          store.updateJob(job.id, {
+            stage: "completed",
+            progress: 100,
+            title: record.title,
+            completedAt: Date.now(),
+          });
+        }
+      }
+    };
+
     // Handle realtime updates
     const handleRecordChange = (payload: RealtimePostgresChangesPayload<MedicalRecordPayload>) => {
       const { eventType, new: newRecord, old: oldRecord } = payload;
@@ -102,7 +158,12 @@ export function useProcessingMonitor(personId: string | null) {
         // Check if a record completed a processing stage
         // OCR processing: ocr_processing -> ocr_review
         // Structure processing: structuring -> structure_review
-        const isOcrComplete = oldStatus === "ocr_processing" && newStatus === "ocr_review";
+        // `ocr_failed` is included because a record can be marked failed by a client whose
+        // connection dropped and then be finished by the run that actually owned it. Recovery is
+        // a completion, and the job has to be told.
+        const isOcrComplete =
+          (oldStatus === "ocr_processing" || oldStatus === "ocr_failed") &&
+          newStatus === "ocr_review";
         const isStructureComplete = oldStatus === "structuring" && newStatus === "structure_review";
 
         const failure = readFailure(oldStatus, newRecord);
@@ -228,6 +289,10 @@ export function useProcessingMonitor(personId: string | null) {
 
     // Initialize tracking
     initializeProcessingRecords();
+    reconcileActiveJobs();
+    // A job for another person is invisible to this channel for as long as that person stays
+    // selected, so it is reconciled on a slow tick rather than left until the next navigation.
+    const reconcileTimer = setInterval(reconcileActiveJobs, ORPHANED_JOB_RECONCILE_MS);
 
     // Subscribe to realtime changes for this person's medical records
     console.log("[Realtime] Subscribing to medical_records for person:", personId);
@@ -252,6 +317,7 @@ export function useProcessingMonitor(personId: string | null) {
 
     return () => {
       // Clean up subscription on unmount
+      clearInterval(reconcileTimer);
       console.log("[Realtime] Unsubscribing from medical_records for person:", personId);
       supabase.removeChannel(channel);
       isInitializedRef.current = false;
