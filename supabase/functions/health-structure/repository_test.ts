@@ -474,11 +474,13 @@ Deno.test("health-structure repository condition/finding helpers work", async ()
             insert: async () => ({ error: null }),
             select: () => ({
               eq: () => ({
-                order: () => ({
-                  limit: () => ({
-                    maybeSingle: async () => ({
-                      data: { status_in_record: "resolved" },
-                      error: null,
+                or: () => ({
+                  order: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({
+                        data: { status_in_record: "resolved" },
+                        error: null,
+                      }),
                     }),
                   }),
                 }),
@@ -543,9 +545,11 @@ Deno.test("health-structure repository condition helpers handle null paths", asy
           return {
             select: () => ({
               eq: () => ({
-                order: () => ({
-                  limit: () => ({
-                    maybeSingle: async () => ({ data: { status_in_record: null }, error: null }),
+                or: () => ({
+                  order: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({ data: { status_in_record: null }, error: null }),
+                    }),
                   }),
                 }),
               }),
@@ -705,3 +709,142 @@ Deno.test("replaceRecordExtractionIssues refuses to proceed when the clear faile
   }
   assertEquals((caught as Error)?.message, "Failed to clear extraction issues: permission denied");
 });
+
+/** One `condition_records` row as the recompute query sees it, newest `record_date` winning. */
+interface ConditionRecordRow {
+  status_in_record: string;
+  is_llm_extracted: boolean;
+  is_user_verified: boolean;
+  record_date: string;
+}
+
+/**
+ * Evaluate one PostgREST `or=` argument -- `col.neq.value,col.is.false` -- against a row.
+ *
+ * The fake parses the filter rather than hard-coding its effect on purpose: the milestone is the
+ * filter, so a stub that ignored the string and returned canned rows would pass whatever the
+ * repository asked for, including asking for nothing.
+ */
+function matchesOrFilter(row: ConditionRecordRow, filter: string): boolean {
+  return filter.split(",").some((term) => {
+    const [column, operator, value] = term.split(".");
+    const actual = (row as unknown as Record<string, unknown>)[column];
+    if (operator === "is") return actual === (value === "true");
+    if (operator === "neq") return actual !== value;
+    throw new Error(`Unsupported operator ${operator}`);
+  });
+}
+
+/**
+ * An admin client over a fixed set of condition records, applying the filter, the ordering and
+ * the limit in the order PostgREST would, so that a filter applied after the limit fails here.
+ */
+function createRecomputeClients(rows: ConditionRecordRow[]) {
+  const updates: Record<string, unknown>[] = [];
+  const adminClient = {
+    from: (table: string) => {
+      if (table === "condition_records") {
+        return {
+          select: () => ({
+            eq: () => ({
+              or: (filter: string) => ({
+                order: () => ({
+                  limit: (count: number) => ({
+                    maybeSingle: async () => {
+                      const matching = rows
+                        .filter((row) => matchesOrFilter(row, filter))
+                        .sort((a, b) => b.record_date.localeCompare(a.record_date))
+                        .slice(0, count);
+                      return { data: matching[0] ?? null, error: null };
+                    },
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === "conditions") {
+        return {
+          update: (patch: Record<string, unknown>) => ({
+            eq: async () => {
+              updates.push(patch);
+              return { error: null };
+            },
+          }),
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    },
+  };
+  return { adminClient, updates };
+}
+
+function conditionRecord(overrides: Partial<ConditionRecordRow>): ConditionRecordRow {
+  return {
+    status_in_record: "active",
+    is_llm_extracted: true,
+    is_user_verified: false,
+    record_date: "2026-01-01",
+    ...overrides,
+  };
+}
+
+Deno.test(
+  "an unverified machine resolution leaves the condition's current status alone",
+  async () => {
+    const { adminClient, updates } = createRecomputeClients([
+      conditionRecord({ status_in_record: "resolved", record_date: "2026-03-01" }),
+    ]);
+    const repository = createRepositoryWithClients({ adminClient });
+
+    await repository.recomputeConditionCurrentStatus("cond-1");
+
+    assertEquals(updates, []);
+  },
+);
+
+Deno.test("the same resolution applies once a person has verified it", async () => {
+  const { adminClient, updates } = createRecomputeClients([
+    conditionRecord({
+      status_in_record: "resolved",
+      is_user_verified: true,
+      record_date: "2026-03-01",
+    }),
+  ]);
+  const repository = createRepositoryWithClients({ adminClient });
+
+  await repository.recomputeConditionCurrentStatus("cond-1");
+
+  assertEquals(updates, [{ current_status: "resolved" }]);
+});
+
+Deno.test("a machine-authored active record still applies", async () => {
+  const { adminClient, updates } = createRecomputeClients([
+    conditionRecord({ status_in_record: "active", record_date: "2026-03-01" }),
+  ]);
+  const repository = createRepositoryWithClients({ adminClient });
+
+  await repository.recomputeConditionCurrentStatus("cond-1");
+
+  assertEquals(updates, [{ current_status: "active" }]);
+});
+
+Deno.test(
+  "a verified resolution wins rather than being shadowed by an unverified one",
+  async () => {
+    const { adminClient, updates } = createRecomputeClients([
+      conditionRecord({ status_in_record: "resolved", record_date: "2026-04-01" }),
+      conditionRecord({
+        status_in_record: "resolved",
+        is_user_verified: true,
+        record_date: "2026-03-01",
+      }),
+    ]);
+    const repository = createRepositoryWithClients({ adminClient });
+
+    await repository.recomputeConditionCurrentStatus("cond-1");
+
+    assertEquals(updates, [{ current_status: "resolved" }]);
+  },
+);
