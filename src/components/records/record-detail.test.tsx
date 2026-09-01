@@ -546,6 +546,70 @@ describe("RecordDetail", () => {
     expect(refetch).not.toHaveBeenCalled();
   });
 
+  it("names the cause of a failed OCR in the reader's language", async () => {
+    const { RecordDetail } = await import("./record-detail");
+
+    hookMocks.useBackgroundOCR.mockReturnValue({ retryOcr: vi.fn() });
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({
+        status: "ocr_failed",
+        ocr_error:
+          "ocr_cause:provider_auth the transcription service rejected this deployment's credentials",
+      }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const view = render(<RecordDetail recordId="record-1" />);
+    // Not the server's English sentence: a rejected key is not a photograph to retake, and the
+    // reader has to be told which of the two this was.
+    expect(screen.getByText("processing.ocrCause.provider_auth")).toBeInTheDocument();
+    view.unmount();
+
+    // A row written before the causes existed still says what little it knows.
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({
+        status: "ocr_failed",
+        ocr_error: "Failed to extract text from any attachment",
+      }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<RecordDetail recordId="record-1" />);
+    expect(screen.getByText("Failed to extract text from any attachment")).toBeInTheDocument();
+  });
+
+  it("says on the review screen that a page of the document was lost", async () => {
+    const { RecordDetail } = await import("./record-detail");
+
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({
+        status: "ocr_review",
+        ocr_error:
+          "ocr_cause:provider_unavailable the transcription service was unavailable: " +
+          "1 of 3 pages failed",
+      }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const view = render(<RecordDetail recordId="record-1" />);
+    // A three-page document that came back with two pages is not a clean success.
+    expect(screen.getByText("processing.ocrPartial")).toBeInTheDocument();
+    expect(screen.getByText("processing.ocrCause.provider_unavailable")).toBeInTheDocument();
+    view.unmount();
+
+    hookMocks.useMedicalRecord.mockReturnValue({
+      data: baseRecord({ status: "ocr_review" }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<RecordDetail recordId="record-1" />);
+    expect(screen.queryByText("processing.ocrPartial")).not.toBeInTheDocument();
+  });
+
   it("renders ocr and structure review branches", async () => {
     const { RecordDetail } = await import("./record-detail");
 

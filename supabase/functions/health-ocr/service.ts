@@ -3,6 +3,14 @@ import type { EdgeTelemetry } from "../_shared/observability.ts";
 import { type LlmUsage, sumLlmUsage, usageAttrs } from "../_shared/llm-usage.ts";
 import { ClaimLostError } from "../_shared/processing-claim.ts";
 import type { PreprocessedImage } from "../_shared/image-preprocess.ts";
+import {
+  classifyOcrError,
+  dominantCause,
+  formatOcrFailure,
+  type OcrFailureCause,
+  OcrFailureError,
+  pageCountDetail,
+} from "./failure.ts";
 import { selectSuggestedTitle } from "./title.ts";
 import type { OpenRouterOcrClient, OcrAttachmentPayload } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
@@ -90,6 +98,12 @@ function createSerialQueue(): <T>(work: () => Promise<T>) => Promise<T> {
   };
 }
 
+/**
+ * Prepare one page, or say why it cannot be prepared.
+ *
+ * A missing blob and an oversized one are both `attachment_unavailable`: from the reader's side
+ * they are the same thing — the file this record is made of never reached the transcription.
+ */
 async function prepareOnePage(
   deps: HealthOcrServiceDeps,
   attachment: OcrAttachment,
@@ -207,7 +221,7 @@ async function transcribeClaimedRecord(
         status: "error",
         statusMessage: "No attachments found for this record",
       });
-      throw new Error("No attachments found for this record");
+      throw new OcrFailureError("no_attachments", formatOcrFailure("no_attachments"));
     }
     await attachmentsSpan?.end({
       status: "ok",
@@ -220,6 +234,10 @@ async function transcribeClaimedRecord(
 
     // Indexed, not appended: pages finish out of order now, and their order is the document's.
     const pageTexts: string[] = new Array(attachments.length).fill("");
+    // Why each page has no text, where it has none. The per-page catch used to log the provider's
+    // answer and push an empty string, which made an auth failure, a spent retry and a page the
+    // model could not read the same event by the time anything durable was written.
+    const pageCauses: Array<OcrFailureCause | null> = new Array(attachments.length).fill(null);
     const pageUsage: LlmUsage[] = [];
     let suggestedTitle = defaultTitle;
 
@@ -238,6 +256,7 @@ async function transcribeClaimedRecord(
         });
         const page = await prepareOnePage(deps, attachment, decodeSerially);
         if (!page) {
+          pageCauses[index] = "attachment_unavailable";
           await pageSpan?.end({
             status: "error",
             statusMessage: "Attachment download failed",
@@ -262,6 +281,9 @@ async function transcribeClaimedRecord(
             requestTitle: index === 0,
           });
           pageTexts[index] = result.ocr_text;
+          // The call succeeded and the page still has nothing on it, which is the one cause a
+          // better photograph actually fixes -- and the only one that used to be reported.
+          if (!result.ocr_text.trim()) pageCauses[index] = "unreadable_document";
           if (index === 0) {
             suggestedTitle = selectSuggestedTitle(result.suggested_title, suggestedTitle);
           }
@@ -291,6 +313,7 @@ async function transcribeClaimedRecord(
             },
           });
         } catch (error) {
+          pageCauses[index] = classifyOcrError(error);
           log.error(`OCR failed for ${attachment.storage_path}:`, {
             mime_type: attachment.mime_type,
             ocr_input_type: ocrInputType,
@@ -302,6 +325,7 @@ async function transcribeClaimedRecord(
             attrs: {
               attachment_mime_type: attachment.mime_type,
               ocr_input_type: ocrInputType,
+              ocr_failure_cause: pageCauses[index] ?? "internal",
               ...sizeAttrs,
             },
           });
@@ -317,21 +341,39 @@ async function transcribeClaimedRecord(
       },
     );
 
+    const failedPages = pageCauses.filter((cause): cause is OcrFailureCause => cause !== null);
     if (pageTexts.every((text) => !text.trim())) {
-      throw new Error("Failed to extract text from any attachment");
+      // Named, not merely reported: the record now says whether to re-photograph the document,
+      // retry later, or fix a configuration problem, without anyone opening the function logs.
+      const cause = dominantCause(failedPages);
+      throw new OcrFailureError(
+        cause,
+        formatOcrFailure(cause, pageCountDetail(failedPages.length, attachments.length)),
+      );
     }
 
     const fullOcrText = buildCombinedPageText(pageTexts);
+    // A document that lost a page is not a clean success. The combined text says so in a line
+    // nothing reads back, so the loss is written to the record's own column too, where the
+    // review screen shows it and the next run clears it.
+    const partialFailure =
+      failedPages.length > 0
+        ? formatOcrFailure(
+            dominantCause(failedPages),
+            pageCountDetail(failedPages.length, attachments.length),
+          ).slice(0, maxOcrErrorLength)
+        : null;
     const persistSpan = telemetry?.startSpan("edge.health_ocr.persist_record");
     await deps.repository.updateRecordSuccess(
       recordId,
-      { ocrText: fullOcrText, title: suggestedTitle },
+      { ocrText: fullOcrText, title: suggestedTitle, ocrError: partialFailure },
       { runId },
     );
     await persistSpan?.end({
       status: "ok",
       attrs: {
         full_text_chars: fullOcrText.length,
+        failed_pages: failedPages.length,
       },
     });
 
@@ -361,7 +403,15 @@ async function transcribeClaimedRecord(
       },
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    // Every failure below the claim is classified, the ones that never reached a page included:
+    // whatever the record ends up carrying, it carries a cause the browser can translate.
+    const errorMessage =
+      error instanceof OcrFailureError
+        ? error.message
+        : formatOcrFailure(
+            classifyOcrError(error),
+            error instanceof Error ? error.message : undefined,
+          );
     log.error(
       "[health-ocr] error record_id:",
       recordId,
@@ -376,7 +426,8 @@ async function transcribeClaimedRecord(
       error_message: errorMessage,
     });
 
-    await recordFailure(recordId, errorMessage.slice(0, maxOcrErrorLength), runId, deps);
+    const persistedMessage = errorMessage.slice(0, maxOcrErrorLength);
+    await recordFailure(recordId, persistedMessage, runId, deps);
     await serviceSpan?.end({
       status: "error",
       statusMessage: errorMessage,
@@ -385,7 +436,9 @@ async function transcribeClaimedRecord(
 
     return {
       status: 400,
-      payload: { success: false, error: errorMessage },
+      // What was persisted, not the longer string it was cut from: the client writes this back
+      // over the column on failure, so returning the untruncated one bypassed the cap.
+      payload: { success: false, error: persistedMessage },
     };
   }
 }
@@ -500,7 +553,12 @@ export async function acceptHealthOcrRequest(
       work: () => transcribeClaimedRecord(recordId, runId, deps),
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    // Classified like every other durable failure, so the column never holds a bare English
+    // sentence the browser has to render as it stands.
+    const errorMessage = formatOcrFailure(
+      classifyOcrError(error),
+      error instanceof Error ? error.message : undefined,
+    );
     telemetry?.error("health_ocr_service_failed", {
       record_id: recordId ?? "missing",
       error_message: errorMessage,
@@ -515,7 +573,7 @@ export async function acceptHealthOcrRequest(
 
     return {
       status: 400,
-      payload: { success: false, error: errorMessage },
+      payload: { success: false, error: errorMessage.slice(0, maxOcrErrorLength) },
     };
   }
 }

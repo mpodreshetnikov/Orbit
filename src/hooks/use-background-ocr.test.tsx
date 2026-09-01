@@ -184,14 +184,18 @@ describe("use-background-ocr", () => {
       "record-1",
       expect.objectContaining({
         stage: "failed",
-        error: "Not authenticated",
+        error: "ocr_cause:not_authenticated the session is not signed in",
       }),
     );
+    // The user reads a translated sentence; the column keeps the classified string.
     expect(toastErrorMock).toHaveBeenCalledWith(
       "processing.failed",
-      expect.objectContaining({ description: "Not authenticated" }),
+      expect.objectContaining({ description: "processing.ocrCause.not_authenticated" }),
     );
-    expect(response).toEqual({ success: false, error: "Not authenticated" });
+    expect(response).toEqual({
+      success: false,
+      error: "ocr_cause:not_authenticated the session is not signed in",
+    });
   });
 
   it("fails startBackgroundOCR when session is missing and persists ocr_failed status", async () => {
@@ -260,7 +264,7 @@ describe("use-background-ocr", () => {
       "record-1",
       expect.objectContaining({
         stage: "failed",
-        error: "Not authenticated",
+        error: "ocr_cause:not_authenticated the session is not signed in",
       }),
     );
     expect(addNotificationMock).toHaveBeenCalledWith(
@@ -272,12 +276,15 @@ describe("use-background-ocr", () => {
     expect(fromMock).toHaveBeenCalledWith("medical_records");
     expect(updateMock).toHaveBeenCalledWith({
       status: "ocr_failed",
-      ocr_error: "Not authenticated",
+      ocr_error: "ocr_cause:not_authenticated the session is not signed in",
     });
     expect(eqMock).toHaveBeenCalledWith("id", "record-1");
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-records"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-record", "record-1"] });
-    expect(response).toEqual({ success: false, error: "Not authenticated" });
+    expect(response).toEqual({
+      success: false,
+      error: "ocr_cause:not_authenticated the session is not signed in",
+    });
   });
 
   it("completes startBackgroundOCR successfully and publishes completion notification", async () => {
@@ -616,20 +623,12 @@ describe("use-background-ocr", () => {
       });
     });
 
-    expect(updateMock).toHaveBeenCalledWith({
-      status: "ocr_failed",
-      ocr_error: "ocr crashed",
-    });
+    // The service answered, so it has already written the record's own account of the failure.
+    // This used to overwrite it, cause and length cap alike.
+    expect(updateMock).not.toHaveBeenCalledWith(expect.objectContaining({ status: "ocr_failed" }));
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-2",
       expect.objectContaining({ stage: "failed", error: "ocr crashed" }),
-    );
-    expect(addNotificationMock).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "error", message: "ocr crashed" }),
-    );
-    expect(toastErrorMock).toHaveBeenCalledWith(
-      "processing.failed",
-      expect.objectContaining({ description: "ocr crashed" }),
     );
     expect(response).toEqual({ success: false, error: "ocr crashed" });
   });
@@ -673,15 +672,24 @@ describe("use-background-ocr", () => {
 
     expect(updateMock).toHaveBeenCalledWith({
       status: "ocr_failed",
-      ocr_error: "Supabase URL not configured",
+      ocr_error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: no service URL configured",
     });
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-3",
-      expect.objectContaining({ stage: "failed", error: "Supabase URL not configured" }),
+      expect.objectContaining({
+        stage: "failed",
+        error:
+          "ocr_cause:service_unreachable the transcription service could not be reached: no service URL configured",
+      }),
     );
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-records"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["medical-record", "record-3"] });
-    expect(response).toEqual({ success: false, error: "Supabase URL not configured" });
+    expect(response).toEqual({
+      success: false,
+      error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: no service URL configured",
+    });
   });
 
   it("completes retryOcr and falls back to translated title", async () => {
@@ -893,20 +901,30 @@ describe("use-background-ocr", () => {
       files: [new File(["a"], "scan.pdf", { type: "application/pdf" })],
     });
 
-    expect(uploadResult).toEqual({ success: false, error: "Upload failed: upload failed" });
+    expect(uploadResult).toEqual({
+      success: false,
+      error: "ocr_cause:upload_failed the document could not be uploaded: upload failed",
+    });
     expect(insertResult).toEqual({
       success: false,
-      error: "Failed to create attachment: insert failed",
+      error:
+        "ocr_cause:upload_failed the document could not be uploaded: " +
+        "failed to create attachment: insert failed",
     });
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-upload",
-      expect.objectContaining({ stage: "failed", error: "Upload failed: upload failed" }),
+      expect.objectContaining({
+        stage: "failed",
+        error: "ocr_cause:upload_failed the document could not be uploaded: upload failed",
+      }),
     );
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-insert",
       expect.objectContaining({
         stage: "failed",
-        error: "Failed to create attachment: insert failed",
+        error:
+          "ocr_cause:upload_failed the document could not be uploaded: " +
+          "failed to create attachment: insert failed",
       }),
     );
   });
@@ -979,7 +997,8 @@ describe("use-background-ocr", () => {
       })
       .mockResolvedValueOnce({
         ok: false,
-        statusText: "Bad Request",
+        status: 502,
+        statusText: "Bad Gateway",
         text: async () => "plain failure",
       });
     vi.stubGlobal("fetch", fetchMock);
@@ -1001,15 +1020,31 @@ describe("use-background-ocr", () => {
       files: [new File(["a"], "scan.pdf", { type: "application/pdf" })],
     });
 
-    expect(failedJsonResult).toEqual({ success: false, error: "OCR processing failed" });
-    expect(plainTextResult).toEqual({ success: false, error: "plain failure" });
+    expect(failedJsonResult).toEqual({
+      success: false,
+      error: "ocr_cause:service_unreachable the transcription service could not be reached",
+    });
+    // Never reached the service, and its body is not ours to quote: the status is the whole of
+    // what the browser can honestly say happened.
+    expect(plainTextResult).toEqual({
+      success: false,
+      error:
+        "ocr_cause:service_unreachable the transcription service could not be reached: HTTP 502",
+    });
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-json-fail",
-      expect.objectContaining({ stage: "failed", error: "OCR processing failed" }),
+      expect.objectContaining({
+        stage: "failed",
+        error: "ocr_cause:service_unreachable the transcription service could not be reached",
+      }),
     );
     expect(updateJobMock).toHaveBeenCalledWith(
       "record-plain-fail",
-      expect.objectContaining({ stage: "failed", error: "plain failure" }),
+      expect.objectContaining({
+        stage: "failed",
+        error:
+          "ocr_cause:service_unreachable the transcription service could not be reached: HTTP 502",
+      }),
     );
   });
 });

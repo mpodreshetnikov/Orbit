@@ -7,6 +7,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import { fetchEdgeFunctionWithTelemetry } from "@/lib/observability/edge-function-fetch";
 import { useProcessingQueueStore } from "@/stores/processing-queue-store";
+import {
+  formatClientOcrFailure,
+  MAX_OCR_ERROR_LENGTH,
+  translateOcrFailure,
+} from "@/lib/health/ocr-failure";
 import type { HealthOcrResponse } from "@/types";
 
 interface BackgroundOCRInput {
@@ -70,15 +75,23 @@ export async function reconcileAfterFailedHandoff(
   return (await updateRecordToOcrFailed(supabase, recordId, errorMessage)) ? "failed" : "unknown";
 }
 
+/**
+ * Write a failure this side is the only witness to.
+ *
+ * Only for failures the server never saw: whatever `health-ocr` persisted is more careful than
+ * anything composable here, and this used to overwrite it on every failure path — cause and
+ * length cap alike.
+ */
 export async function updateRecordToOcrFailed(
   supabase: ReturnType<typeof createClient>,
   recordId: string,
   errorMessage: string,
 ): Promise<boolean> {
+  const durableMessage = errorMessage.slice(0, MAX_OCR_ERROR_LENGTH);
   for (let attempt = 0; attempt < OCR_FAILED_UPDATE_RETRIES; attempt++) {
     const { error } = await supabase
       .from("medical_records")
-      .update({ status: "ocr_failed", ocr_error: errorMessage })
+      .update({ status: "ocr_failed", ocr_error: durableMessage })
       .eq("id", recordId);
     if (!error) return true;
     if (attempt < OCR_FAILED_UPDATE_RETRIES - 1) {
@@ -86,6 +99,31 @@ export async function updateRecordToOcrFailed(
     }
   }
   return false;
+}
+
+/**
+ * Read a failed response without inventing a story about it.
+ *
+ * A JSON body from `health-ocr` is the service's own classified message, and it has already been
+ * written to the record — so it is reported as it stands and written nowhere. Anything else (a
+ * gateway error, an empty body, a status line) never reached the service, so the browser composes
+ * the one cause it can honestly claim: the service could not be reached. The body itself is not
+ * quoted; it is not ours, and an HTTP status says as much as a proxy's HTML page does.
+ */
+async function readFailureMessage(
+  response: Response,
+): Promise<{ message: string; fromService: boolean }> {
+  const errorText = await response.text();
+  try {
+    const parsed = JSON.parse(errorText) as { error?: string };
+    if (parsed?.error) return { message: parsed.error, fromService: true };
+  } catch {
+    // Not our payload; fall through.
+  }
+  return {
+    message: formatClientOcrFailure("service_unreachable", `HTTP ${response.status}`),
+    fromService: false,
+  };
 }
 
 export function useBackgroundOCR() {
@@ -119,7 +157,7 @@ export function useBackgroundOCR() {
         } = await supabase.auth.getSession();
 
         if (!session) {
-          throw new Error("Not authenticated");
+          throw new Error(formatClientOcrFailure("not_authenticated"));
         }
 
         if (hasFilesToUpload) {
@@ -157,7 +195,7 @@ export function useBackgroundOCR() {
             }
 
             if (uploadErrorMessage) {
-              throw new Error(`Upload failed: ${uploadErrorMessage}`);
+              throw new Error(formatClientOcrFailure("upload_failed", uploadErrorMessage));
             }
 
             // Create attachment record
@@ -172,7 +210,12 @@ export function useBackgroundOCR() {
 
             if (attachError) {
               await supabase.storage.from("medical-attachments").remove([storagePath]);
-              throw new Error(`Failed to create attachment: ${attachError.message}`);
+              throw new Error(
+                formatClientOcrFailure(
+                  "upload_failed",
+                  `failed to create attachment: ${attachError.message}`,
+                ),
+              );
             }
 
             const progress = 10 + Math.round(((index + 1) / files.length) * 20);
@@ -192,7 +235,9 @@ export function useBackgroundOCR() {
         // Call health-ocr edge function with timeout
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
         if (!supabaseUrl) {
-          throw new Error("Supabase URL not configured");
+          throw new Error(
+            formatClientOcrFailure("service_unreachable", "no service URL configured"),
+          );
         }
 
         // No timeout: the call now returns as soon as the record is claimed, and the
@@ -229,18 +274,12 @@ export function useBackgroundOCR() {
         }
 
         if (!response.ok) {
-          const errorText = await response.text();
-          let errorMessage = response.statusText;
-          try {
-            const parsed = JSON.parse(errorText) as { error?: string };
-            if (parsed?.error) errorMessage = parsed.error;
-          } catch {
-            if (errorText) errorMessage = errorText;
+          const { message: errorMessage, fromService } = await readFailureMessage(response);
+          // Only when the service never got to write its own: this used to overwrite it every
+          // time, replacing a named cause with a status line and bypassing the length cap.
+          if (!fromService) {
+            await updateRecordToOcrFailed(supabase, recordId, errorMessage);
           }
-          await supabase
-            .from("medical_records")
-            .update({ status: "ocr_failed", ocr_error: errorMessage })
-            .eq("id", recordId);
           queryClient.invalidateQueries({ queryKey: ["medical-records"] });
           queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
           updateJob(jobId, { stage: "failed", error: errorMessage });
@@ -250,20 +289,19 @@ export function useBackgroundOCR() {
             title: t("processing.failed"),
             personName,
             type: "error",
-            message: errorMessage,
+            message: translateOcrFailure(errorMessage, t),
           });
-          toast.error(t("processing.failed"), { description: errorMessage });
+          toast.error(t("processing.failed"), {
+            description: translateOcrFailure(errorMessage, t),
+          });
           return { success: false, error: errorMessage };
         }
 
         const data: HealthOcrResponse = await response.json();
 
         if (!data.success) {
-          const errorMessage = data.error || "OCR processing failed";
-          await supabase
-            .from("medical_records")
-            .update({ status: "ocr_failed", ocr_error: errorMessage })
-            .eq("id", recordId);
+          // The service answered, so it has already written the record's own account of this.
+          const errorMessage = data.error || formatClientOcrFailure("service_unreachable");
           queryClient.invalidateQueries({ queryKey: ["medical-records"] });
           queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
           updateJob(jobId, { stage: "failed", error: errorMessage });
@@ -273,9 +311,11 @@ export function useBackgroundOCR() {
             title: t("processing.failed"),
             personName,
             type: "error",
-            message: errorMessage,
+            message: translateOcrFailure(errorMessage, t),
           });
-          toast.error(t("processing.failed"), { description: errorMessage });
+          toast.error(t("processing.failed"), {
+            description: translateOcrFailure(errorMessage, t),
+          });
           return { success: false, error: errorMessage };
         }
 
@@ -318,7 +358,10 @@ export function useBackgroundOCR() {
       } catch (error) {
         // Upload, session or the acceptance call itself. There is no timeout case left to
         // distinguish: nothing here waits on the transcription.
-        const errorMessage = error instanceof Error ? error.message : "Processing failed";
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : formatClientOcrFailure("service_unreachable", "processing failed");
 
         // Ask the record what happened before telling the user anything. A lost response is not
         // a lost request: the server may have claimed the document and started reading it.
@@ -340,13 +383,13 @@ export function useBackgroundOCR() {
           title: t("processing.failed"),
           personName,
           type: "error",
-          message: errorMessage,
+          message: translateOcrFailure(errorMessage, t),
         });
         toast.error(t("processing.failed"), {
           description:
             outcome === "unknown"
-              ? "Open the record and use Retry OCR if it still shows processing."
-              : errorMessage,
+              ? t("processing.retryIfStillProcessing")
+              : translateOcrFailure(errorMessage, t),
         });
 
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
@@ -375,9 +418,12 @@ export function useBackgroundOCR() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        updateJob(jobId, { stage: "failed", error: "Not authenticated" });
-        toast.error(t("processing.failed"), { description: "Not authenticated" });
-        return { success: false, error: "Not authenticated" };
+        const notSignedIn = formatClientOcrFailure("not_authenticated");
+        updateJob(jobId, { stage: "failed", error: notSignedIn });
+        toast.error(t("processing.failed"), {
+          description: translateOcrFailure(notSignedIn, t),
+        });
+        return { success: false, error: notSignedIn };
       }
 
       await supabase
@@ -387,7 +433,7 @@ export function useBackgroundOCR() {
 
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       if (!supabaseUrl) {
-        const err = "Supabase URL not configured";
+        const err = formatClientOcrFailure("service_unreachable", "no service URL configured");
         updateJob(jobId, { stage: "failed", error: err });
         await supabase
           .from("medical_records")
@@ -419,7 +465,10 @@ export function useBackgroundOCR() {
           },
         );
       } catch (fetchError) {
-        const errorMessage = fetchError instanceof Error ? fetchError.message : "Processing failed";
+        const errorMessage =
+          fetchError instanceof Error
+            ? fetchError.message
+            : formatClientOcrFailure("service_unreachable", "processing failed");
         // Same ambiguity as the first attempt: the retry may have been accepted before the
         // connection dropped, and failing a live run from here would be a lie the user acts on.
         const outcome = await reconcileAfterFailedHandoff(supabase, recordId, errorMessage);
@@ -439,9 +488,11 @@ export function useBackgroundOCR() {
           title: t("processing.failed"),
           personName,
           type: "error",
-          message: errorMessage,
+          message: translateOcrFailure(errorMessage, t),
         });
-        toast.error(t("processing.failed"), { description: errorMessage });
+        toast.error(t("processing.failed"), {
+          description: translateOcrFailure(errorMessage, t),
+        });
         return { success: false, error: errorMessage };
       }
 
@@ -455,18 +506,10 @@ export function useBackgroundOCR() {
       }
 
       if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = response.statusText;
-        try {
-          const parsed = JSON.parse(errorText) as { error?: string };
-          if (parsed?.error) errorMessage = parsed.error;
-        } catch {
-          if (errorText) errorMessage = errorText;
+        const { message: errorMessage, fromService } = await readFailureMessage(response);
+        if (!fromService) {
+          await updateRecordToOcrFailed(supabase, recordId, errorMessage);
         }
-        await supabase
-          .from("medical_records")
-          .update({ status: "ocr_failed", ocr_error: errorMessage })
-          .eq("id", recordId);
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
         queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
         updateJob(jobId, { stage: "failed", error: errorMessage });
@@ -476,19 +519,18 @@ export function useBackgroundOCR() {
           title: t("processing.failed"),
           personName,
           type: "error",
-          message: errorMessage,
+          message: translateOcrFailure(errorMessage, t),
         });
-        toast.error(t("processing.failed"), { description: errorMessage });
+        toast.error(t("processing.failed"), {
+          description: translateOcrFailure(errorMessage, t),
+        });
         return { success: false, error: errorMessage };
       }
 
       const data: HealthOcrResponse = await response.json();
       if (!data.success) {
-        const errorMessage = data.error || "OCR processing failed";
-        await supabase
-          .from("medical_records")
-          .update({ status: "ocr_failed", ocr_error: errorMessage })
-          .eq("id", recordId);
+        // Answered, so the record already carries the service's own account of the failure.
+        const errorMessage = data.error || formatClientOcrFailure("service_unreachable");
         queryClient.invalidateQueries({ queryKey: ["medical-records"] });
         queryClient.invalidateQueries({ queryKey: ["medical-record", recordId] });
         updateJob(jobId, { stage: "failed", error: errorMessage });
@@ -498,9 +540,11 @@ export function useBackgroundOCR() {
           title: t("processing.failed"),
           personName,
           type: "error",
-          message: errorMessage,
+          message: translateOcrFailure(errorMessage, t),
         });
-        toast.error(t("processing.failed"), { description: errorMessage });
+        toast.error(t("processing.failed"), {
+          description: translateOcrFailure(errorMessage, t),
+        });
         return { success: false, error: errorMessage };
       }
 

@@ -844,7 +844,22 @@
     "structureFailed": "Structure Extraction Failed",
     "ocrFailed": "OCR failed",
     "retryOcr": "Retry OCR",
-    "failedTapToRetry": "Failed – tap to retry"
+    "failedTapToRetry": "Failed – tap to retry",
+    "ocrPartial": "Part of the document was not read",
+    "retryIfStillProcessing": "Open the record and use Retry OCR if it still shows processing.",
+    "ocrCause": {
+      "provider_auth": "The text recognition service rejected this app's credentials. The document is fine — an administrator needs to fix the API key.",
+      "provider_rejected": "The text recognition service refused the request. This is a configuration problem, not a problem with the document.",
+      "provider_unavailable": "The text recognition service was unavailable. Try again in a few minutes.",
+      "unsupported_media": "This file type cannot be recognised. Upload the document as a photo, an image or a PDF.",
+      "attachment_unavailable": "The uploaded file could not be read. Upload it again.",
+      "unreadable_document": "No text could be read from the document. Re-photograph it in better light, in focus and with the whole page in frame.",
+      "no_attachments": "This record has no attached files to recognise.",
+      "internal": "Text recognition failed for an unexpected reason. Try again, and tell an administrator if it keeps happening.",
+      "service_unreachable": "The text recognition service could not be reached. Check your connection and try again.",
+      "not_authenticated": "Your session has expired. Sign in again and retry.",
+      "upload_failed": "The document could not be uploaded. Check your connection and try again."
+    }
   },
   "catalogs": {
     "title": "Catalogs",

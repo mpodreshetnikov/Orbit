@@ -31,6 +31,26 @@ Failure branch:
 
 Legacy compatibility status (`processing`) still appears in monitor logic and should be phased out in future cleanup.
 
+### What `ocr_error` carries
+
+`ocr_error` holds a classified cause, not a sentence: `ocr_cause:<code> <English summary>`, capped
+at 500 characters with the code first so truncation can only cost the summary. The vocabulary is
+declared in `supabase/functions/health-ocr/failure.ts` and mirrored for the browser in
+`src/lib/health/ocr-failure.ts`, which also translates it — the server composes in English and does
+not know the reader's language.
+
+Two rules the column depends on:
+
+- The provider's own error body is never quoted into it. That body can echo the request, and for
+  OCR the request is the patient's document.
+- Both writers use this format. The edge function writes it, and the browser writes it only for
+  failures the server never saw (an unreachable function, an upload that failed, an expired
+  session); on any failure the service answered, the browser leaves the column alone rather than
+  replacing a named cause with a status line.
+
+A run that transcribed the document but lost a page writes the same string on the success path,
+so a three-page document that came back with two does not read as a clean success.
+
 ### Health-specific edge cases and failure recovery patterns
 
 - OCR returns empty/low-quality text:

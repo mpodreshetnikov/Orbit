@@ -41,7 +41,12 @@ export interface HealthOcrRepository {
   renewClaim(recordId: string, runId: string): Promise<boolean>;
   updateRecordSuccess(
     recordId: string,
-    payload: { ocrText: string; title: string },
+    /**
+     * `ocrError` is the page a successful run still lost, if any. A document that came back
+     * missing a page is not a clean success, and the combined text is not somewhere anything
+     * reads back — so it is carried on the record, and a run that loses nothing clears it.
+     */
+    payload: { ocrText: string; title: string; ocrError?: string | null },
     options?: { runId?: string },
   ): Promise<void>;
   updateRecordFailure(
@@ -150,7 +155,7 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
           ocr_text: payload.ocrText,
           title: payload.title,
           status: "ocr_review",
-          ocr_error: null,
+          ocr_error: payload.ocrError ?? null,
           processing_run_id: null,
           processing_started_at: null,
         })

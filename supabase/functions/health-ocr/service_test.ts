@@ -3,12 +3,19 @@ import { assertEquals } from "std/assert/assert-equals";
 import { emptyLlmUsage } from "../_shared/llm-usage.ts";
 import { ClaimLostError } from "../_shared/processing-claim.ts";
 import { runHealthOcrService } from "./service.ts";
+import { OcrProviderError, UnsupportedOcrMediaError } from "./failure.ts";
+import { RetryableLlmError } from "../_shared/llm-retry.ts";
 import type { OpenRouterOcrClient } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";
 import type { EdgeAttrs, EdgeSpanHandle, EdgeTelemetry } from "../_shared/observability.ts";
 
 interface RepositoryState {
-  updatedSuccess: Array<{ recordId: string; ocrText: string; title: string }>;
+  updatedSuccess: Array<{
+    recordId: string;
+    ocrText: string;
+    title: string;
+    ocrError: string | null;
+  }>;
   updatedFailure: Array<{ recordId: string; errorMessage: string }>;
 }
 
@@ -66,6 +73,7 @@ function createRepositoryMock(
           recordId,
           ocrText: payload.ocrText,
           title: payload.title,
+          ocrError: payload.ocrError ?? null,
         });
       },
       updateRecordFailure: async (recordId, errorMessage) => {
@@ -220,7 +228,7 @@ Deno.test("runHealthOcrService returns error when no attachments exist", async (
 
   assertEquals(result.status, 400);
   assertEquals(result.payload.success, false);
-  assertEquals(result.payload.error, "No attachments found for this record");
+  assertEquals(result.payload.error, "ocr_cause:no_attachments the record has no attachments");
   assertEquals(state.updatedFailure.length, 1);
 });
 
@@ -235,15 +243,188 @@ Deno.test("runHealthOcrService marks failed when OCR extraction fails for every 
     {
       repository,
       openRouterClient: openRouter,
-      maxOcrErrorLength: 50,
     },
   );
 
   assertEquals(result.status, 400);
   assertEquals(result.payload.success, false);
-  assertEquals(result.payload.error, "Failed to extract text from any attachment");
   assertEquals(state.updatedSuccess.length, 0);
   assertEquals(state.updatedFailure.length, 1);
+  assertEquals(state.updatedFailure[0].errorMessage, result.payload.error);
+});
+
+/**
+ * The three failures the record used to describe identically.
+ *
+ * Each names a different next move -- fix the key, wait, re-photograph the page -- so a record
+ * that cannot tell them apart sends the user to the wrong one.
+ */
+Deno.test("runHealthOcrService distinguishes the cause of a failed transcription", async () => {
+  const cases: Array<{ error: unknown; cause: string }> = [
+    { error: new OcrProviderError("OpenRouter API error: 401", 401), cause: "provider_auth" },
+    { error: new OcrProviderError("OpenRouter API error: 400", 400), cause: "provider_rejected" },
+    { error: new RetryableLlmError("OpenRouter API error: 429"), cause: "provider_unavailable" },
+    { error: new UnsupportedOcrMediaError("image/heic"), cause: "unsupported_media" },
+  ];
+
+  for (const testCase of cases) {
+    const { repository, state } = createRepositoryMock();
+    const result = await runHealthOcrService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository,
+        openRouterClient: createOpenRouterMock(async () => {
+          throw testCase.error;
+        }),
+        log: { log: () => {}, error: () => {} },
+      },
+    );
+
+    assertEquals(result.status, 400);
+    assertEquals(state.updatedFailure.length, 1);
+    assertEquals(
+      state.updatedFailure[0].errorMessage.startsWith(`ocr_cause:${testCase.cause} `),
+      true,
+      `expected ${testCase.cause}, got ${state.updatedFailure[0].errorMessage}`,
+    );
+    // The provider's own words never reach the column: its body can quote the request, and for
+    // OCR the request is the patient's document.
+    assertEquals(state.updatedFailure[0].errorMessage.includes("OpenRouter"), false);
+  }
+});
+
+Deno.test("runHealthOcrService reports a page the model could not read as such", async () => {
+  const { repository, state } = createRepositoryMock();
+  const openRouter = createOpenRouterMock(async () => ({
+    ocr_text: "   ",
+    suggested_title: "",
+    truncated: false,
+    usage: emptyLlmUsage(),
+  }));
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    { repository, openRouterClient: openRouter, log: { log: () => {}, error: () => {} } },
+  );
+
+  assertEquals(result.status, 400);
+  assertEquals(
+    state.updatedFailure[0].errorMessage,
+    "ocr_cause:unreadable_document no text could be read from the document: all 1 page failed",
+  );
+});
+
+Deno.test("runHealthOcrService names the cause worth acting on when pages differ", async () => {
+  const { repository, state } = createRepositoryMock({
+    attachments: [
+      { id: "a1", storage_path: "a.png", mime_type: "image/png", original_filename: "a.png" },
+      { id: "a2", storage_path: "b.png", mime_type: "image/png", original_filename: "b.png" },
+    ],
+  });
+  let page = 0;
+  const openRouter = createOpenRouterMock(async () => {
+    page += 1;
+    if (page === 1)
+      return { ocr_text: "", suggested_title: "", truncated: false, usage: emptyLlmUsage() };
+    throw new OcrProviderError("OpenRouter API error: 401", 401);
+  });
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      openRouterClient: openRouter,
+      pageConcurrency: 1,
+      log: { log: () => {}, error: () => {} },
+    },
+  );
+
+  assertEquals(result.status, 400);
+  // A rejected key is what makes the next run different; an unreadable page beside it does not.
+  assertEquals(
+    state.updatedFailure[0].errorMessage,
+    "ocr_cause:provider_auth the transcription service rejected this deployment's credentials: " +
+      "all 2 pages failed",
+  );
+});
+
+Deno.test("a document that lost one page does not read as a clean success", async () => {
+  const { repository, state } = createRepositoryMock({
+    attachments: [
+      { id: "a1", storage_path: "a.png", mime_type: "image/png", original_filename: "a.png" },
+      { id: "a2", storage_path: "b.png", mime_type: "image/png", original_filename: "b.png" },
+    ],
+  });
+  let page = 0;
+  const openRouter = createOpenRouterMock(async () => {
+    page += 1;
+    if (page === 1)
+      return {
+        ocr_text: "First page",
+        suggested_title: "t",
+        truncated: false,
+        usage: emptyLlmUsage(),
+      };
+    throw new RetryableLlmError("OpenRouter API error: 503");
+  });
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      openRouterClient: openRouter,
+      pageConcurrency: 1,
+      log: { log: () => {}, error: () => {} },
+    },
+  );
+
+  assertEquals(result.status, 200);
+  assertEquals(state.updatedSuccess.length, 1);
+  // Durable, on the record itself -- not only in a line of the combined text nothing reads back.
+  assertEquals(
+    state.updatedSuccess[0].ocrError,
+    "ocr_cause:provider_unavailable the transcription service was unavailable: 1 of 2 pages failed",
+  );
+});
+
+Deno.test("a document that lost nothing clears the column", async () => {
+  const { repository, state } = createRepositoryMock();
+  const openRouter = createOpenRouterMock(async () => ({
+    ocr_text: "All of it",
+    suggested_title: "t",
+    truncated: false,
+    usage: emptyLlmUsage(),
+  }));
+
+  await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    { repository, openRouterClient: openRouter },
+  );
+
+  assertEquals(state.updatedSuccess[0].ocrError, null);
+});
+
+Deno.test("the persisted failure and the returned one are the same string", async () => {
+  const { repository, state } = createRepositoryMock();
+  const openRouter = createOpenRouterMock(async () => {
+    throw new OcrProviderError("OpenRouter API error: 401", 401);
+  });
+
+  const result = await runHealthOcrService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      openRouterClient: openRouter,
+      // Shorter than the message, so a payload carrying the untruncated one would show.
+      maxOcrErrorLength: 30,
+      log: { log: () => {}, error: () => {} },
+    },
+  );
+
+  // The client writes the payload back over the column on failure, so a longer payload was a
+  // 500-character cap that did not hold.
+  assertEquals((result.payload.error as string).length, 30);
+  assertEquals(state.updatedFailure[0].errorMessage, result.payload.error);
 });
 
 Deno.test(
@@ -349,7 +530,11 @@ Deno.test("runHealthOcrService returns auth and guard errors before marking fail
     },
   );
   assertEquals(unauthorizedResult.status, 400);
-  assertEquals(unauthorizedResult.payload.error, "Unauthorized - invalid token");
+  assertEquals(
+    unauthorizedResult.payload.error,
+    "ocr_cause:internal the transcription failed for an unexpected reason: " +
+      "Unauthorized - invalid token",
+  );
   assertEquals(unauthorized.state.updatedFailure.length, 0);
 
   const disallowed = createRepositoryMock({ userAllowed: false });
@@ -360,7 +545,7 @@ Deno.test("runHealthOcrService returns auth and guard errors before marking fail
       openRouterClient: openRouter,
     },
   );
-  assertEquals(disallowedResult.payload.error, "User not in allowlist");
+  assertEquals((disallowedResult.payload.error as string).includes("User not in allowlist"), true);
   assertEquals(disallowed.state.updatedFailure.length, 0);
 
   const missingRecordId = createRepositoryMock();
@@ -371,7 +556,10 @@ Deno.test("runHealthOcrService returns auth and guard errors before marking fail
       openRouterClient: openRouter,
     },
   );
-  assertEquals(missingRecordIdResult.payload.error, "Missing required field: record_id");
+  assertEquals(
+    (missingRecordIdResult.payload.error as string).includes("Missing required field: record_id"),
+    true,
+  );
   assertEquals(missingRecordId.state.updatedFailure.length, 0);
 });
 
@@ -391,7 +579,10 @@ Deno.test("runHealthOcrService handles missing record and updateRecordFailure er
       openRouterClient: openRouter,
     },
   );
-  assertEquals(missingRecordResult.payload.error, "Record not found or access denied");
+  assertEquals(
+    (missingRecordResult.payload.error as string).includes("Record not found or access denied"),
+    true,
+  );
   assertEquals(missingRecord.state.updatedFailure.length, 1);
 
   const failedMarking = createRepositoryMock({
@@ -416,7 +607,11 @@ Deno.test("runHealthOcrService handles missing record and updateRecordFailure er
     },
   );
   assertEquals(result.status, 400);
-  assertEquals(result.payload.error, "Failed to extract text from any attachment");
+  // The stored file never arrived, which is not the same as a page nobody could read.
+  assertEquals(
+    result.payload.error,
+    "ocr_cause:attachment_unavailable the stored file could not be read: all 1 page failed",
+  );
 });
 
 Deno.test(

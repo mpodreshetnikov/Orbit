@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase";
+import { translateOcrFailure } from "@/lib/health/ocr-failure";
 import { useProcessingQueueStore } from "@/stores/processing-queue-store";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -119,7 +120,7 @@ export function useProcessingMonitor(personId: string | null) {
         if (record.status === "ocr_failed") {
           store.updateJob(job.id, {
             stage: "failed",
-            error: record.ocr_error || t("processing.failed"),
+            error: translateOcrFailure(record.ocr_error, t),
           });
           continue;
         }
@@ -168,7 +169,9 @@ export function useProcessingMonitor(personId: string | null) {
 
         const failure = readFailure(oldStatus, newRecord);
         if (failure && processingRecordsRef.current.has(newRecord.id)) {
-          const message = failure.message || t("processing.failed");
+          // OCR failures carry a cause code the user's language has a sentence for; a
+          // structuring failure still carries the server's own English, so it falls through.
+          const message = translateOcrFailure(failure.message, t);
           console.log("[Realtime] Record failed processing:", newRecord.id, newStatus);
           processingRecordsRef.current.delete(newRecord.id);
           updateJob(newRecord.id, { stage: "failed", error: message });

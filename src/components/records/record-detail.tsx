@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { format } from "date-fns";
 import { useDateFnsLocale } from "@/lib/date-locale";
+import { translateOcrFailure } from "@/lib/health/ocr-failure";
 import {
   ArrowLeft,
   Calendar,
@@ -742,7 +743,9 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
         </div>
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 space-y-4">
           <p className="text-sm text-muted-foreground">
-            {record.ocr_error || t("processing.failed")}
+            {/* The column holds a cause code, not a sentence: the server composes in English and
+                does not know the reader's language. */}
+            {translateOcrFailure(record.ocr_error, t)}
           </p>
           {!hasAttachments ? (
             <p className="text-sm text-muted-foreground">{t("records.detail.noAttachments")}</p>
@@ -795,6 +798,16 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
           </Button>
           <h1 className="text-2xl font-bold tracking-tight">{t("records.ocr.pageTitle")}</h1>
         </div>
+        {record.ocr_error ? (
+          // The transcription succeeded without a page of the document. Nothing else says so --
+          // the combined text notes it in a line nobody reads back -- and the next run clears it.
+          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4">
+            <p className="text-sm font-medium">{t("processing.ocrPartial")}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {translateOcrFailure(record.ocr_error, t)}
+            </p>
+          </div>
+        ) : null}
         {record.structure_error ? (
           // The last structuring attempt failed. The toast that announced it is long gone, so the
           // reason is shown here until a run succeeds and clears it.
