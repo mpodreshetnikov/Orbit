@@ -133,6 +133,28 @@ export interface OcrResult {
   ocr_text: string;
 }
 
+/**
+ * A value the extraction corrected in order to save the rest of the document.
+ *
+ * The entity was still written — an out-of-vocabulary severity became the column's default, an
+ * unparseable date became null — unless `resolution` says it was dropped. Surfaced on the review
+ * screen because that is the last moment a person can put the real value back.
+ */
+export interface RecordExtractionIssue {
+  id: string;
+  record_id: string;
+  /** 'observation' | 'finding' | 'condition' */
+  entity_kind: string;
+  /** The attribute corrected, e.g. 'finding.severity'; null when the entity was dropped. */
+  field: string | null;
+  /** What the model wrote, truncated. */
+  received: string | null;
+  resolution: "replaced_with_default" | "dropped";
+  applied_fallback: string | null;
+  /** Why it was dropped, in the extraction's own words. */
+  detail: string | null;
+}
+
 export interface HealthOcrResponse {
   success: boolean;
   /**

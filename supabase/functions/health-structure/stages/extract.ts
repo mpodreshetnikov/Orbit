@@ -17,7 +17,12 @@ import type {
   StageRejection,
   StageResult,
 } from "./types.ts";
-import type { ExtractedCondition, ExtractedFinding, ExtractedObservation } from "../types.ts";
+import type {
+  ExtractedCondition,
+  ExtractedFinding,
+  ExtractedObservation,
+  ExtractionIssue,
+} from "../types.ts";
 import {
   CONDITION_STATUSES,
   coerceConfidence,
@@ -700,6 +705,10 @@ export async function runExtractStage(
     });
   }
 
+  // Everything in `rejected` up to this point is an entity that was dropped outright; the loop
+  // below then appends the value-level corrections to the same list for the telemetry counts.
+  const rejectedEntities = [...rejected];
+
   // Value-level defects do not drop the entity; they replace one attribute with the column's
   // default and are reported so the review screen can flag them.
   for (const issue of valueIssues) {
@@ -709,10 +718,33 @@ export async function runExtractStage(
     });
   }
 
+  // The same corrections, in a shape that survives past the log line: a person reviewing the
+  // record has to be able to see what was substituted while the document is still in front of
+  // them. `rejected` stays as it is, because the telemetry counts are read off it.
+  const issues: ExtractionIssue[] = [
+    ...valueIssues.map((issue) => ({
+      entityKind: issue.field.split(".")[0],
+      field: issue.field,
+      received: issue.received,
+      resolution: "replaced_with_default" as const,
+      appliedFallback: issue.appliedFallback,
+      detail: null,
+    })),
+    ...rejectedEntities.map((rejection) => ({
+      entityKind: rejection.entityKind,
+      field: null,
+      received: null,
+      resolution: "dropped" as const,
+      appliedFallback: null,
+      detail: rejection.reason,
+    })),
+  ];
+
   return {
     value: { observations, findings, conditions, asserted_absences: assertedAbsences },
     usage: result.usage,
     finishReason: result.finishReason,
     rejected,
+    issues,
   };
 }

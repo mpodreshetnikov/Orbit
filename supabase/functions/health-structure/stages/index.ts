@@ -3,7 +3,7 @@ import { runExtractStage } from "./extract.ts";
 import { hasNothingToReconcile, runReconcileStage } from "./reconcile.ts";
 import { sumUsage, type StageContext, type StageRejection, type StageUsage } from "./types.ts";
 import type { HealthStructureParseContext } from "../service.ts";
-import type { StructuredDataWithEntities } from "../types.ts";
+import type { ExtractionIssue, StructuredDataWithEntities } from "../types.ts";
 
 export interface StagedParseDeps {
   fetchFn: typeof fetch;
@@ -44,6 +44,8 @@ export interface StagedParseOutcome {
   usage: StageUsage;
   rejected: StageRejection[];
   stagesRun: string[];
+  /** Value-level corrections, for the record rather than for a log line. */
+  issues: ExtractionIssue[];
 }
 
 function stageContext(deps: StagedParseDeps, model: string, effort?: StageContext["effort"]) {
@@ -141,5 +143,6 @@ export async function runStagedParse(
     ),
     rejected: [...classify.rejected, ...extract.rejected, ...reconcile.rejected],
     stagesRun,
+    issues: [...(classify.issues ?? []), ...(extract.issues ?? []), ...(reconcile.issues ?? [])],
   };
 }

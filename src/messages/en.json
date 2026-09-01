@@ -681,6 +681,9 @@
       "activateMessage": "This will move the record from drafts to your active records list."
     },
     "wizard": {
+      "extractionIssues": "{count, plural, one {# value needs attention} other {# values need attention}}",
+      "extractionIssueReplaced": "{field}: the document said “{received}”, saved as “{fallback}”",
+      "extractionIssueDropped": "{entity}: not saved ({detail})",
       "step1": "Step 1 of 3",
       "step2": "Step 2 of 3",
       "step3": "Step 3 of 3",

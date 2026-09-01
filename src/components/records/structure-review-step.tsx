@@ -81,6 +81,7 @@ import {
   usePersonConditionRecordHistory,
   usePersonObservationHistory,
   useCompleteCheckupItem,
+  useRecordExtractionIssues,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
 import {
@@ -812,6 +813,10 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const [showOcrText, setShowOcrText] = useState(false);
 
   // Observations
+  // What the extraction had to correct to keep the rest of the document. Read here because the
+  // review screen is the last moment a person can put the real value back.
+  const { data: extractionIssues } = useRecordExtractionIssues(record.id);
+
   const { data: observations, isLoading: observationsLoading } = useRecordObservations(record.id);
   const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(
     null,
@@ -1461,6 +1466,34 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                   {record.ocr_text}
                 </pre>
               )}
+            </div>
+          )}
+
+          {/* What the extraction could not take at face value */}
+          {extractionIssues && extractionIssues.length > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                <span>
+                  {t("records.wizard.extractionIssues", { count: extractionIssues.length })}
+                </span>
+              </div>
+              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                {extractionIssues.map((issue) => (
+                  <li key={issue.id}>
+                    {issue.resolution === "dropped"
+                      ? t("records.wizard.extractionIssueDropped", {
+                          entity: issue.entity_kind,
+                          detail: issue.detail ?? "",
+                        })
+                      : t("records.wizard.extractionIssueReplaced", {
+                          field: issue.field ?? issue.entity_kind,
+                          received: issue.received ?? "",
+                          fallback: issue.applied_fallback ?? "",
+                        })}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

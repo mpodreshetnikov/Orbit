@@ -681,6 +681,9 @@
       "activateMessage": "Запись будет перемещена из черновиков в список активных записей."
     },
     "wizard": {
+      "extractionIssues": "{count, plural, one {# значение требует внимания} few {# значения требуют внимания} many {# значений требуют внимания} other {# значений требуют внимания}}",
+      "extractionIssueReplaced": "{field}: в документе «{received}», сохранено как «{fallback}»",
+      "extractionIssueDropped": "{entity}: не сохранено ({detail})",
       "step1": "Шаг 1 из 3",
       "step2": "Шаг 2 из 3",
       "step3": "Шаг 3 из 3",

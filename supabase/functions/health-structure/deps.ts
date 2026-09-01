@@ -158,6 +158,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
           structured: outcome.structured,
           usage: outcome.usage,
           stagesRun: outcome.stagesRun,
+          issues: outcome.issues,
         };
       }
       const structured = await callOpenRouterParse(ocrText, context, {

@@ -45,6 +45,7 @@ function createRepositoryMock(
     authenticateAllowedUser: async () =>
       options.user !== undefined ? options.user : { id: "user-1", email: "user@example.com" },
     renewClaim: async () => true,
+    replaceRecordExtractionIssues: async () => {},
     getAttachments: async () => [],
     downloadAttachment: async () => null,
     getRecord: async () =>
@@ -901,3 +902,80 @@ Deno.test("runHealthStructureService renews under the claim it took", async () =
   assertEquals(result.status, 200);
   assertEquals(renewals, [{ recordId: "record-1", runId: "run-1" }]);
 });
+
+// The corrections are the record's data, not telemetry: they have to survive the request that
+// made them, and a re-run must not stack yesterday's on top of today's.
+Deno.test(
+  "runHealthStructureService writes the extraction's corrections to the record",
+  async () => {
+    const { repository } = createRepositoryMock();
+    const written: Array<{ recordId: string; rows: Record<string, unknown>[] }> = [];
+
+    const result = await runHealthStructureService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository: {
+          ...repository,
+          replaceRecordExtractionIssues: async (recordId, rows) => {
+            written.push({ recordId, rows });
+          },
+        },
+        parseStructuredData: async () => ({
+          ...parsed(structuredData),
+          issues: [
+            {
+              entityKind: "observation",
+              field: "observation.status",
+              received: "borderline",
+              resolution: "replaced_with_default" as const,
+              appliedFallback: "unknown",
+              detail: null,
+            },
+          ],
+        }),
+        lookupIcdCode: async () => null,
+      },
+    );
+
+    assertEquals(result.status, 200);
+    assertEquals(written.length, 1);
+    assertEquals(written[0].recordId, "record-1");
+    assertEquals(written[0].rows, [
+      {
+        record_id: "record-1",
+        entity_kind: "observation",
+        field: "observation.status",
+        received: "borderline",
+        resolution: "replaced_with_default",
+        applied_fallback: "unknown",
+        detail: null,
+      },
+    ]);
+  },
+);
+
+Deno.test(
+  "a parse with nothing to correct still clears the record's previous corrections",
+  async () => {
+    const { repository } = createRepositoryMock();
+    const written: Array<Record<string, unknown>[]> = [];
+
+    await runHealthStructureService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository: {
+          ...repository,
+          replaceRecordExtractionIssues: async (_recordId, rows) => {
+            written.push(rows);
+          },
+        },
+        parseStructuredData: async () => parsed(structuredData),
+        lookupIcdCode: async () => null,
+      },
+    );
+
+    // Called with nothing rather than not called: a retry that succeeds cleanly must leave no
+    // warning behind from the run before it.
+    assertEquals(written, [[]]);
+  },
+);

@@ -2043,6 +2043,50 @@ export type Database = {
           },
         ]
       }
+      record_extraction_issues: {
+        Row: {
+          applied_fallback: string | null
+          created_at: string
+          detail: string | null
+          entity_kind: string
+          field: string | null
+          id: string
+          received: string | null
+          record_id: string
+          resolution: string
+        }
+        Insert: {
+          applied_fallback?: string | null
+          created_at?: string
+          detail?: string | null
+          entity_kind: string
+          field?: string | null
+          id?: string
+          received?: string | null
+          record_id: string
+          resolution: string
+        }
+        Update: {
+          applied_fallback?: string | null
+          created_at?: string
+          detail?: string | null
+          entity_kind?: string
+          field?: string | null
+          id?: string
+          received?: string | null
+          record_id?: string
+          resolution?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "record_extraction_issues_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "medical_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       record_findings: {
         Row: {
           body_site_id: string | null

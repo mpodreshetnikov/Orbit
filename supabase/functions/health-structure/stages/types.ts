@@ -7,6 +7,7 @@ import type {
   ExtractedCondition,
   ExtractedFinding,
   ExtractedObservation,
+  ExtractionIssue,
   FindingTypeCatalogItem,
   ObservationCatalogItem,
   StructuredData,
@@ -50,6 +51,8 @@ export interface StageResult<T> {
   usage: StageUsage;
   finishReason: string | null;
   rejected: StageRejection[];
+  /** Value-level corrections, in a shape that reaches the record rather than only a log line. */
+  issues?: ExtractionIssue[];
 }
 
 /**

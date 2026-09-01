@@ -1223,3 +1223,65 @@ Deno.test("a run that lost its record stops rather than finishing the parse", as
   // nowhere to be written.
   assertEquals(bodies.length, 2);
 });
+
+// The defect this replaced: an out-of-vocabulary enum used to reject the whole insert. Now it
+// falls back and the correction is recorded, so the review screen can say what was substituted.
+Deno.test(
+  "a corrected value is reported as an issue, and the entity is still extracted",
+  async () => {
+    const { fetchFn } = recordingFetch((body) => {
+      const prompt = promptOf(body);
+      if (prompt.includes("describe it as a whole")) {
+        return jsonResponse({
+          record_type: "lab",
+          title: "CBC",
+          record_date: "2026-01-05",
+          summary: "s",
+          keywords: [],
+        });
+      }
+      if (prompt.includes("Extract clinical entities")) {
+        return jsonResponse({
+          observations: [
+            {
+              obs_name_text: "Гемоглобин",
+              value: "97",
+              status: "borderline",
+              source_anchor: "Гемоглобин 97 г/л",
+              confidence: 0.9,
+            },
+            // No analyte label at all: this one cannot be saved, only reported.
+            { value: "5", source_anchor: "Гемоглобин 97 г/л", confidence: 0.9 },
+          ],
+          findings: [],
+          conditions: [],
+        });
+      }
+      return jsonResponse({
+        findings_to_resolve: [],
+        conditions_to_resolve: [],
+        checkups_to_complete: [],
+      });
+    });
+
+    const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+    const outcome = await runStagedParse("Гемоглобин 97 г/л", context, {
+      fetchFn,
+      apiKey: "k",
+      defaultModel: "m",
+    });
+
+    // The good observation survived the bad status, which is the whole point.
+    assertEquals(outcome.structured.observations.length, 1);
+
+    const replaced = outcome.issues.find((issue) => issue.resolution === "replaced_with_default");
+    assertEquals(replaced?.entityKind, "observation");
+    assertEquals(replaced?.field, "observation.status");
+    assertEquals(replaced?.received, "borderline");
+
+    const dropped = outcome.issues.find((issue) => issue.resolution === "dropped");
+    assertEquals(dropped?.entityKind, "observation");
+    assertEquals(dropped?.field, null);
+    assertEquals(typeof dropped?.detail, "string");
+  },
+);
