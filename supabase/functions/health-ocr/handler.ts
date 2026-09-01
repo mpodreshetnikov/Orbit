@@ -5,7 +5,7 @@ import {
   createEdgeTelemetry,
 } from "../_shared/observability.ts";
 import { createDefaultHealthOcrDeps, type HealthOcrDeps } from "./deps.ts";
-import { runHealthOcrService } from "./service.ts";
+import { acceptHealthOcrRequest } from "./service.ts";
 import type { HealthOcrRepository } from "./repository.ts";
 
 export interface HealthOcrHandlerDeps {
@@ -17,6 +17,31 @@ export interface HealthOcrHandlerDeps {
   openRouterClient: HealthOcrDeps["openRouterClient"];
   log?: Pick<Console, "log" | "error">;
   now?: () => number;
+  /**
+   * Keep the transcription alive after the response is sent. The platform's own
+   * `EdgeRuntime.waitUntil` is what stops the worker being torn down with the request; tests
+   * substitute something they can await.
+   */
+  runInBackground?: (work: Promise<unknown>) => void;
+}
+
+interface EdgeRuntimeWithWaitUntil {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+/**
+ * Hand the work to the runtime and stop watching it.
+ *
+ * A rejection here is not a response anyone is waiting for -- the service has already written the
+ * failure to the record -- but an unhandled rejection would take the worker down with it, so it
+ * is caught and logged.
+ */
+function dispatchInBackground(work: Promise<unknown>, log: Pick<Console, "log" | "error">): void {
+  const settled = work.catch((error) => {
+    log.error("[health-ocr] background work failed:", error);
+  });
+  const runtime = (globalThis as { EdgeRuntime?: EdgeRuntimeWithWaitUntil }).EdgeRuntime;
+  runtime?.waitUntil?.(settled);
 }
 
 function getBearerToken(req: Request): string | null {
@@ -29,6 +54,7 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
   return async function handleHealthOcrRequest(req: Request): Promise<Response> {
     const context = createEdgeRequestContext(req, "health-ocr");
     const telemetry = createEdgeTelemetry(context);
+    const log = deps.log ?? console;
     const requestSpan = telemetry.startSpan("edge.health_ocr.request", {
       kind: "server",
       attrs: {
@@ -68,7 +94,7 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
       const recordId = typeof body.record_id === "string" ? body.record_id : null;
       const repository = deps.createRepository(token);
 
-      const result = await runHealthOcrService(
+      const acceptance = await acceptHealthOcrRequest(
         {
           authToken: token,
           recordId,
@@ -85,25 +111,35 @@ export function createHealthOcrHandler(deps: HealthOcrHandlerDeps) {
         },
       );
 
+      if (acceptance.work) {
+        // The response goes out now; the document is transcribed after it. Nothing downstream
+        // reads this request's body for the result -- the record's status carries it.
+        const runInBackground =
+          deps.runInBackground ?? ((work: Promise<unknown>) => dispatchInBackground(work, log));
+        runInBackground(acceptance.work());
+      }
+
       telemetry.info("health_ocr_invocation_completed", {
-        status_code: result.status,
+        status_code: acceptance.status,
         has_record_id: recordId !== null,
+        accepted: Boolean(acceptance.work),
       });
       await requestSpan.end({
-        status: result.status >= 400 ? "error" : "ok",
+        status: acceptance.status >= 400 ? "error" : "ok",
         attrs: {
-          status_code: result.status,
+          status_code: acceptance.status,
           has_record_id: recordId !== null,
+          accepted: Boolean(acceptance.work),
         },
       });
 
-      return new Response(JSON.stringify(result.payload), {
+      return new Response(JSON.stringify(acceptance.payload), {
         headers: {
           ...corsHeaders,
           "Content-Type": "application/json",
           ...buildEdgePropagationHeaders(context, requestSpan.spanId),
         },
-        status: result.status,
+        status: acceptance.status,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
