@@ -706,6 +706,9 @@ describe("tbank-web connector", () => {
       sessionId: null,
       sourceId: "tbank_web",
       windowFromIso: "2026-02-01T00:00:00.000Z",
+      // Null on this call: a catch-up window is bounded by now, and only a history slice sends
+      // an end of its own.
+      windowToIso: null,
     });
     expect(result.parsedTransactionsCount).toBe(1);
     expect(result.rows).toHaveLength(1);

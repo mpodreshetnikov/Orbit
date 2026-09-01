@@ -609,7 +609,12 @@ function summarizeExtractionDiagnostics(
 const connector: Connector = {
   sourceId: "tbank_web",
   displayName: "T-Bank Web",
-  async parse({ windowFrom, session, debug }: ConnectorParseInput): Promise<ConnectorParseOutput> {
+  async parse({
+    windowFrom,
+    windowTo,
+    session,
+    debug,
+  }: ConnectorParseInput): Promise<ConnectorParseOutput> {
     const emitProgress = async (
       phase: string,
       progressPercent: number,
@@ -627,6 +632,12 @@ const connector: Connector = {
     const parseStrategy = resolveParseStrategy(session);
     const normalizedWindowFrom =
       toIsoString(windowFrom) || toIsoString(session?.last_imported_at) || fallbackWindowFromIso;
+    // A backfill slice is bounded at both ends, and until this was threaded through only its
+    // start was honoured: a slice planned as one month read from its start through to today.
+    // Each run then did more work than the last and re-imported everything newer, which is also
+    // how the receipt budget got exhausted on every deep slice -- and an exhausted budget holds
+    // the cursor, so the walk stalled while the runs grew.
+    const normalizedWindowTo = toIsoString(windowTo);
 
     const activeTab =
       typeof debug?.tab_id === "number"
@@ -651,6 +662,7 @@ const connector: Connector = {
     const extraction = await extractOperationsWithRetry(
       readyTab.id,
       normalizedWindowFrom,
+      normalizedWindowTo,
       typeof session?.session_id === "string" ? session.session_id : null,
       typeof session?.source === "string" ? session.source : "tbank_web",
       typeof session?.payer_person_id === "string" ? session.payer_person_id : null,
@@ -851,6 +863,7 @@ async function prepareOperationsTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.T
 async function extractOperationsWithRetry(
   tabId: number,
   windowFromIso: string,
+  windowToIso: string | null,
   sessionId: string | null,
   sourceId: string | null,
   payerPersonId: string | null,
@@ -873,7 +886,7 @@ async function extractOperationsWithRetry(
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         func: extractOperationsInPage,
-        args: [{ windowFromIso, sessionId, sourceId, payerPersonId, parseStrategy }],
+        args: [{ windowFromIso, windowToIso, sessionId, sourceId, payerPersonId, parseStrategy }],
       });
       const extraction = injected?.[0]?.result as PageExtraction | undefined;
       if (extraction) {
@@ -930,6 +943,7 @@ function findLatestResourceUrlByPath(
 
 function extractOperationsInPage(input: {
   windowFromIso?: string;
+  windowToIso?: string | null;
   sessionId?: string | null;
   sourceId?: string | null;
   payerPersonId?: string | null;
@@ -1207,11 +1221,15 @@ function extractOperationsInPage(input: {
 
   async function run(args: {
     windowFromIso?: string;
+    windowToIso?: string | null;
     sessionId?: string | null;
   }): Promise<PageExtraction> {
     const startedAtMs = Date.now();
     const pageDayMs = 24 * 60 * 60 * 1000;
     const windowFromMs = toMs(args.windowFromIso) ?? Date.now() - 30 * pageDayMs;
+    // Absent means "up to now", which is what a catch-up window wants. A history slice sends
+    // its own end, and without honouring it the slice is not a slice at all.
+    const windowToMs = toMs(args.windowToIso) ?? Date.now();
     const debugMeta = {
       discovered_endpoints: {
         operations_api: null as string | null,
@@ -1313,7 +1331,7 @@ function extractOperationsInPage(input: {
       const sessionId = discoverSessionId(operationsApiUrl) || discoverSessionIdFromResources();
       const trancheBaseParams = parseTrancheBaseParams(trancheOffersApiUrl);
 
-      const ranges = buildRanges(windowFromMs, Date.now());
+      const ranges = buildRanges(windowFromMs, windowToMs);
       debugMeta.range_request_count = ranges.length;
       debugMeta.effective_chunk_span_days =
         ranges.length > 0
@@ -1361,7 +1379,7 @@ function extractOperationsInPage(input: {
 
           const operationMs = extractTimeMs(operation);
           if (operationMs === null) continue;
-          if (operationMs < windowFromMs) {
+          if (operationMs < windowFromMs || operationMs > windowToMs) {
             debugMeta.out_of_range_skip_count += 1;
             debugMeta.preflight_enrichment_skip_count += 1;
             continue;
@@ -1572,7 +1590,7 @@ function extractOperationsInPage(input: {
       debugMeta.stage_timings_ms.api = Date.now() - apiStartedMs;
       reportProgress("parse_using_dom_fallback", 46);
       const domStartedMs = Date.now();
-      const rows = parseDomFallbackRows(windowFromMs);
+      const rows = parseDomFallbackRows(windowFromMs, windowToMs);
       debugMeta.dom_row_count = rows.length;
       reportProgress("parse_dom_rows_ready", 54, rows.length);
       debugMeta.stage_timings_ms.dom = Date.now() - domStartedMs;
@@ -2198,7 +2216,7 @@ function extractOperationsInPage(input: {
     return result;
   }
 
-  function parseDomFallbackRows(windowFromMs: number): JsonMap[] {
+  function parseDomFallbackRows(windowFromMs: number, windowToMs: number): JsonMap[] {
     const rows: JsonMap[] = [];
     const operationNodes = Array.from(
       document.querySelectorAll('[data-qa-type="atom-operations-feed-operation-root"]'),
@@ -2218,7 +2236,7 @@ function extractOperationsInPage(input: {
       const timeValue = readNodeTimeMs(node);
 
       if (!title || amount === null) continue;
-      if (timeValue < windowFromMs) continue;
+      if (timeValue < windowFromMs || timeValue > windowToMs) continue;
 
       const postedAt = new Date(timeValue).toISOString();
       rows.push({

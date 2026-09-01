@@ -394,6 +394,7 @@ export async function runImportSession(
       type: "MONEY_IMPORT_DONE",
       batch_id: (applyResult as { batch_id?: string }).batch_id ?? session.batch_id,
       debug_run_id: debug?.debugRunId ?? null,
+      unattended: session.unattended === true,
     }),
   );
 
@@ -406,8 +407,8 @@ export async function runImportSession(
 }
 
 export interface RunCompleteness {
-  /** Receipts this run left unread because it ran out of budget. */
-  skipped_after_budget_count: number;
+  /** Receipts this run left unread, for any reason: budget, rate limit, or outright failure. */
+  unread_receipt_count: number;
   /** True when the connector could not prove it read the whole window. */
   partial: boolean;
 }
@@ -422,11 +423,22 @@ export interface RunCompleteness {
  * `shouldAdvanceBackfillCursor`, so nothing here changes when they arrive.
  */
 function readRunCompleteness(debug: ConnectorParseDebugSummary | undefined): RunCompleteness {
-  const skipped = debug?.receipt_enrichment?.skipped_after_budget_count;
+  const receipts = debug?.receipt_enrichment;
+  const count = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+  // Every way a receipt can go unread counts, not the budget alone. A slice whose last receipt
+  // was rate-limited reports `skipped_after_budget_count: 0` -- there were no later requests to
+  // increment it -- and reading that as "complete" advances the cursor past rows that never got
+  // their detail, on a walk that passes each slice once.
+  const unreadReceiptCount =
+    count(receipts?.skipped_after_budget_count) +
+    count(receipts?.rate_limited_count) +
+    count(receipts?.failed_count);
+
   return {
-    skipped_after_budget_count:
-      typeof skipped === "number" && Number.isFinite(skipped) ? skipped : 0,
-    partial: Boolean(debug?.blocked_reason),
+    unread_receipt_count: unreadReceiptCount,
+    partial: Boolean(debug?.blocked_reason) || receipts?.stopped_after_budget === true,
   };
 }
 
@@ -460,22 +472,52 @@ export interface ScheduledImportRunResult {
   result: Record<string, unknown>;
 }
 
+export interface ScheduledImportOutcome {
+  incremental: ScheduledImportRunResult | null;
+  backfill: ScheduledImportRunResult | null;
+  /** Set when the history slice failed. The catch-up window's own result still stands. */
+  backfillError?: { window: BackfillSlice; message: string };
+}
+
 function readCompletenessFromResult(result: Record<string, unknown>): {
-  skippedAfterBudgetCount: number;
+  unreadReceiptCount: number;
   partial: boolean;
 } {
   const value = result.import_completeness;
   if (!value || typeof value !== "object") {
     // A result without the summary is a result that cannot vouch for its window. Reading that
     // silence as "complete" is what would quietly skip a slice, so it counts as partial.
-    return { skippedAfterBudgetCount: 0, partial: true };
+    return { unreadReceiptCount: 0, partial: true };
   }
   const record = value as Record<string, unknown>;
-  const skipped = record.skipped_after_budget_count;
+  const unread = record.unread_receipt_count;
   return {
-    skippedAfterBudgetCount: typeof skipped === "number" && Number.isFinite(skipped) ? skipped : 0,
+    unreadReceiptCount: typeof unread === "number" && Number.isFinite(unread) ? unread : 0,
     partial: record.partial === true,
   };
+}
+
+/**
+ * Takes the session field for this run, or refuses when someone else already holds it.
+ *
+ * There is no atomic test-and-set over extension storage, and none is needed here: the service
+ * worker is single-threaded and this read and write are separated by no other await, so nothing
+ * of ours can interleave. What it guards is the app having stored a session while the sweep was
+ * busy with an earlier window -- the check at the start of a sweep is a snapshot, and the second
+ * window happens long after it.
+ */
+async function claimSessionField(
+  sessionStore: SessionStore,
+  session: Record<string, unknown>,
+): Promise<boolean> {
+  const current = await sessionStore.getSession();
+  if (current) {
+    const currentId = typeof current.session_id === "string" ? current.session_id : null;
+    const ownId = typeof session.session_id === "string" ? session.session_id : null;
+    if (!currentId || !ownId || currentId !== ownId) return false;
+  }
+  await sessionStore.setSession(session);
+  return true;
 }
 
 /**
@@ -511,10 +553,7 @@ export async function runScheduledImport(
   input: ScheduledImportInput,
   deps: ImportRunnerDeps & { backfillStore: BackfillStore; sessionStore: SessionStore },
   debug?: ImportRunnerDebugConfig,
-): Promise<{
-  incremental: ScheduledImportRunResult | null;
-  backfill: ScheduledImportRunResult | null;
-}> {
+): Promise<ScheduledImportOutcome> {
   const token = input.credentials.grantToken ?? input.credentials.userAccessToken ?? "";
   if (!token) throw new Error("No credentials available for a scheduled import");
 
@@ -539,8 +578,25 @@ export async function runScheduledImport(
       default_account_id: input.defaultAccountId ?? null,
       app_origin: input.appOrigin ?? null,
       show_source_page_widget: input.showSourcePageWidget ?? false,
+      // Stated from the plan rather than taken from the server's echo. The connector reads its
+      // upper bound from here, and a slice that silently loses its end is a slice that reads
+      // through to today -- the difference between a bounded walk and one that grows every run.
+      window_from: window.windowFromIso,
+      window_to: window.windowToIso,
+      // The app navigates to the report on MONEY_IMPORT_DONE. That is right for a run someone
+      // started and wrong for one they did not: it would take a person off whatever they were
+      // doing -- including a manual import in progress -- and onto a report for a run they never
+      // asked for. The flag rides on the session so every message the run broadcasts carries it.
+      unattended: true,
     };
-    await deps.sessionStore.setSession(session);
+    // Checked immediately before the write, not once at the start of the sweep: the app can
+    // store a session at any moment, and overwriting one costs the person their import. The
+    // window's own session is completed as failed rather than left running.
+    const claimed = await claimSessionField(deps.sessionStore, session);
+    if (!claimed) {
+      await tryCompleteSessionAsFailed(session, deps.callEdge);
+      throw new Error("A session started by the person is in progress");
+    }
 
     try {
       const result = await runImportSession(session, window.windowFromIso, deps, windowDebug);
@@ -556,14 +612,22 @@ export async function runScheduledImport(
     }
   };
 
-  const incremental = await runWindow(planIncrementalWindow(input.nowMs));
+  const scope = { sourceId: input.sourceId, payerPersonId: input.payerPersonId };
+  const state = await deps.backfillStore.getState(scope);
 
-  const state = await deps.backfillStore.getState(input.sourceId);
+  const incremental = await runWindow(planIncrementalWindow(state, input.nowMs));
+  // Recorded only once the window has actually landed, so a failed run leaves the next one
+  // reaching just as far back rather than skipping what it never read.
+  await deps.backfillStore.setState(scope, { ...state, lastIncrementalToMs: input.nowMs });
   const planned = planBackfillSlice(state, input.nowMs);
   if (!planned) {
     // The walk has reached its horizon; from here only the catch-up window matters.
     if (state.completedAtMs === null) {
-      await deps.backfillStore.setState(input.sourceId, { ...state, completedAtMs: input.nowMs });
+      await deps.backfillStore.setState(scope, {
+        ...state,
+        lastIncrementalToMs: input.nowMs,
+        completedAtMs: input.nowMs,
+      });
     }
     return { incremental, backfill: null };
   }
@@ -571,14 +635,26 @@ export async function runScheduledImport(
   let backfill: ScheduledImportRunResult;
   try {
     backfill = await runWindow(planned.slice);
-  } catch {
+  } catch (error) {
     // A failed history slice must not cost the catch-up window that already succeeded, and must
-    // not move the cursor: the same slice is simply taken again next time.
-    return { incremental, backfill: null };
+    // not move the cursor: the same slice is simply taken again next time. It is reported rather
+    // than swallowed -- a bare null made a failing slice indistinguishable from a finished walk,
+    // so a connector that had stopped working could retry for weeks with nothing to say so.
+    return {
+      incremental,
+      backfill: null,
+      backfillError: {
+        window: planned.slice,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
   }
 
   if (shouldAdvanceBackfillCursor({ ok: true, ...readCompletenessFromResult(backfill.result) })) {
-    await deps.backfillStore.setState(input.sourceId, planned.nextState);
+    await deps.backfillStore.setState(scope, {
+      ...planned.nextState,
+      lastIncrementalToMs: input.nowMs,
+    });
   }
 
   return { incremental, backfill };
