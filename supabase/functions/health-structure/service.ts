@@ -26,6 +26,12 @@ export interface HealthStructureParseContext {
   existingConditions: Awaited<ReturnType<HealthStructureRepository["fetchPersonConditions"]>>;
   existingFindings: Awaited<ReturnType<HealthStructureRepository["fetchPersonActiveFindings"]>>;
   checkupItems: Awaited<ReturnType<HealthStructureRepository["fetchUpcomingOverdueCheckupItems"]>>;
+  /**
+   * The record's own pages, as data URLs, for the stage that has to read a table. Empty when the
+   * record has no raster attachments or they could not be loaded -- structuring then works from
+   * the transcription alone, as it always did.
+   */
+  pageImages?: string[];
 }
 
 export interface HealthStructureServiceDeps {
@@ -35,6 +41,11 @@ export interface HealthStructureServiceDeps {
     context: HealthStructureParseContext,
   ) => Promise<StructuredParseOutcome>;
   lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
+  /**
+   * Load the record's pages for the extraction stage. Absent, structuring sees only the text --
+   * which is what it saw before, and what the E2E stub and the unit tests want.
+   */
+  loadPageImages?: (recordId: string) => Promise<string[]>;
   log?: Pick<Console, "log" | "warn" | "error">;
   telemetry?: EdgeTelemetry;
 }
@@ -295,6 +306,10 @@ export async function runHealthStructureService(
       },
     });
 
+    // The pages themselves, so extraction can settle what the transcription left ambiguous.
+    // Loaded after the claim and never allowed to fail the record: this is context, not content.
+    const pageImages = (await deps.loadPageImages?.(input.recordId)) ?? [];
+
     const context: HealthStructureParseContext = {
       observationCatalog,
       findingTypeCatalog,
@@ -302,6 +317,7 @@ export async function runHealthStructureService(
       existingConditions,
       existingFindings,
       checkupItems,
+      pageImages,
     };
 
     const parseSpan = telemetry?.startSpan("edge.health_structure.parse_llm");
@@ -310,6 +326,7 @@ export async function runHealthStructureService(
     await parseSpan?.end({
       status: "ok",
       attrs: {
+        page_image_count: pageImages.length,
         observation_count: structuredData.observations.length,
         finding_count: structuredData.findings.length,
         condition_count: structuredData.conditions.length,

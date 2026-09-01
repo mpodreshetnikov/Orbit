@@ -566,6 +566,7 @@ export async function runExtractStage(
   ocrText: string,
   catalogs: CatalogContext,
   ctx: StageContext,
+  pageImages: string[] = [],
 ): Promise<StageResult<ExtractResult>> {
   const userPrompt = buildStagePrompt({
     instructions: [
@@ -584,6 +585,16 @@ export async function runExtractStage(
       "Put those denials in asserted_absences instead, when the document names a specific finding as absent: 'Конкременты: нет', 'дополнительных образований не выявлено', 'без признаков дисплазии'. Give the finding and the site as you would for a finding, and anchor it on the denying sentence. A general statement that an organ looks normal is not an asserted absence — it must name the thing that is missing.",
       "asserted_absences never becomes part of the patient's record. It is read only to check whether something already on the record has since resolved.",
       "If a label is illegible or ambiguous, omit that entity entirely rather than guessing.",
+      ...(pageImages.length > 0
+        ? [
+            // Whatever the transcription failed to express about a table -- which column a number
+            // sat under, whether a range belongs to the row above or below -- is unrecoverable
+            // from the text alone. The pages settle it.
+            "The images accompanying this prompt are the document's own pages, in order.",
+            "Read them when the text below is ambiguous about layout: which column a value belongs to, which reference range goes with which analyte, where one table ends and the next begins.",
+            "The text remains the record. Copy source_anchor from the text, never from the image, and do not report an entity that appears in neither.",
+          ]
+        : []),
     ],
     schema: EXTRACT_SCHEMA,
     examples: EXAMPLES,
@@ -597,6 +608,7 @@ export async function runExtractStage(
     EXTRACT_SCHEMA,
     "health_clinical_extraction",
     ctx,
+    pageImages,
   );
 
   const rejected: StageRejection[] = [];

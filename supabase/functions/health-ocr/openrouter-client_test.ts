@@ -324,6 +324,11 @@ Deno.test("OCR prompt forbids the rewriting that would corrupt lab values", asyn
   assertEquals(prompt.includes("exactly as printed"), true);
   // Guessing at illegible text is the failure mode that puts invented numbers into the chart.
   assertEquals(prompt.includes("[нрзб]"), true);
+
+  // A lab report is a table, and flattening one to prose is where a value ends up beside the
+  // wrong analyte's unit or reference range.
+  assertEquals(prompt.includes("markdown table"), true);
+  assertEquals(prompt.includes("never move a value into a neighbouring column"), true);
 });
 
 Deno.test("a transient 429 does not cost the page", async () => {

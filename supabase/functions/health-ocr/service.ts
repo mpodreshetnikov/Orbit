@@ -2,7 +2,7 @@ import { encodeBase64 } from "std/encoding/base64";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import { type LlmUsage, sumLlmUsage, usageAttrs } from "../_shared/llm-usage.ts";
 import { ClaimLostError } from "../_shared/processing-claim.ts";
-import type { PreprocessedImage } from "./image-preprocess.ts";
+import type { PreprocessedImage } from "../_shared/image-preprocess.ts";
 import { selectSuggestedTitle } from "./title.ts";
 import type { OpenRouterOcrClient, OcrAttachmentPayload } from "./openrouter-client.ts";
 import type { HealthOcrRepository, OcrAttachment } from "./repository.ts";

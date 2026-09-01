@@ -44,6 +44,8 @@ function createRepositoryMock(
   const repository: HealthStructureRepository = {
     authenticateAllowedUser: async () =>
       options.user !== undefined ? options.user : { id: "user-1", email: "user@example.com" },
+    getAttachments: async () => [],
+    downloadAttachment: async () => null,
     getRecord: async () =>
       options.record !== undefined
         ? options.record
@@ -823,3 +825,49 @@ Deno.test("runHealthStructureService hands a failed record back to review", asyn
   assertEquals(patch.structure_error, "OpenRouter timeout");
   assertEquals(patch.processing_run_id, null);
 });
+
+// The pages are context: a record whose attachments cannot be read still structures from its
+// text, exactly as it did before they were sent at all.
+Deno.test("runHealthStructureService hands the record's pages to the parser", async () => {
+  const { repository } = createRepositoryMock();
+  let seenPages: string[] | undefined;
+
+  const result = await runHealthStructureService(
+    { authToken: "token", recordId: "record-1" },
+    {
+      repository,
+      loadPageImages: async () => ["data:image/jpeg;base64,AAAA"],
+      parseStructuredData: async (_ocrText, context) => {
+        seenPages = context.pageImages;
+        return parsed(structuredData);
+      },
+      lookupIcdCode: async () => null,
+    },
+  );
+
+  assertEquals(result.status, 200);
+  assertEquals(seenPages, ["data:image/jpeg;base64,AAAA"]);
+});
+
+Deno.test(
+  "runHealthStructureService structures from text alone when there are no pages",
+  async () => {
+    const { repository } = createRepositoryMock();
+    let seenPages: string[] | undefined;
+
+    const result = await runHealthStructureService(
+      { authToken: "token", recordId: "record-1" },
+      {
+        repository,
+        parseStructuredData: async (_ocrText, context) => {
+          seenPages = context.pageImages;
+          return parsed(structuredData);
+        },
+        lookupIcdCode: async () => null,
+      },
+    );
+
+    assertEquals(result.status, 200);
+    assertEquals(seenPages, []);
+  },
+);

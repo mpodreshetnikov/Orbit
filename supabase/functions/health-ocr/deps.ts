@@ -1,4 +1,4 @@
-import { preprocessOcrImage } from "./image-preprocess.ts";
+import { preprocessOcrImage } from "../_shared/image-preprocess.ts";
 import { createOpenRouterOcrClient } from "./openrouter-client.ts";
 import { createSupabaseHealthOcrRepository } from "./repository.ts";
 
