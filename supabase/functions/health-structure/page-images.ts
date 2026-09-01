@@ -80,8 +80,17 @@ export async function loadRecordPageImages(
       if (!blob) continue;
 
       const sourceBytes = new Uint8Array(await blob.arrayBuffer());
-      const normalised =
-        (await deps.preprocessImage?.(sourceBytes, attachment.mime_type, { log })) ?? null;
+      const normalised = deps.preprocessImage
+        ? await deps.preprocessImage(sourceBytes, attachment.mime_type, { log })
+        : null;
+      // A page that would not decode is dropped rather than forwarded as it was stored. OCR can
+      // send a corrupt image and lose only that page, because it calls once per attachment;
+      // extraction sends every page in one request, so a provider rejecting one image would take
+      // the whole record's structuring with it -- and the text alone would have worked.
+      if (deps.preprocessImage && !normalised) {
+        log.error(`[health-structure] page ${attachment.storage_path} would not decode; omitted`);
+        continue;
+      }
       const bytes = normalised?.bytes ?? sourceBytes;
       const mimeType = normalised?.mimeType ?? attachment.mime_type;
 

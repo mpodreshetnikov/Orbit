@@ -168,10 +168,12 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
       // fallback pipeline, so its cost stays unknown rather than being reported as zero.
       return { structured, usage: emptyLlmUsage(), stagesRun: [] };
     },
-    // The E2E stub structures from a marker in the text and never calls a model, so loading
-    // pages for it would be storage traffic with nothing to read it.
+    // Only the staged pipeline reads them. The E2E stub structures from a marker in the text and
+    // never calls a model, and the monolithic fallback is text-only -- downloading and decoding
+    // four attachments for either would be latency and memory spent on nothing, and the
+    // monolithic path is the rollout escape hatch, where that matters most.
     loadPageImages:
-      parseMode === "e2e_stub" || !hasSupabaseEnv
+      parseMode === "e2e_stub" || pipelineMode !== "staged" || !hasSupabaseEnv
         ? undefined
         : (recordId: string) =>
             loadRecordPageImages(recordId, {

@@ -131,7 +131,10 @@ export function createSupabaseHealthStructureRepository(
       .from("record_attachments")
       .select("storage_path, mime_type")
       .eq("record_id", recordId)
-      .order("sort_order", { ascending: true });
+      // The same tiebreak health-ocr applies: the page markers in the transcription and the
+      // images sent with it have to describe the same order.
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true });
     if (error) throw new Error(`Failed to fetch attachments: ${error.message}`);
     return (data ?? []) as Array<{ storage_path: string; mime_type: string }>;
   }

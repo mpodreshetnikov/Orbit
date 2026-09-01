@@ -34,6 +34,17 @@ function createRepositoryWithClients(clients: {
   });
 }
 
+/**
+ * `order()` is chained twice now -- `sort_order` then `id`, because the first is not unique and
+ * health-structure has to see the same page order. A mock that returns a bare promise breaks on
+ * the second call, so this is awaitable and chainable at once.
+ */
+function orderable<T>(result: T) {
+  const chain = Promise.resolve(result) as Promise<T> & { order: () => typeof chain };
+  chain.order = () => chain;
+  return chain;
+}
+
 Deno.test("health-ocr repository authenticates user and checks allowlist", async () => {
   const repository = createRepositoryWithClients({
     anonClient: {
@@ -124,17 +135,18 @@ Deno.test("health-ocr repository loads record and attachments", async () => {
           return {
             select: () => ({
               eq: () => ({
-                order: async () => ({
-                  data: [
-                    {
-                      id: "att-1",
-                      storage_path: "a.png",
-                      mime_type: "image/png",
-                      original_filename: "a.png",
-                    },
-                  ],
-                  error: null,
-                }),
+                order: () =>
+                  orderable({
+                    data: [
+                      {
+                        id: "att-1",
+                        storage_path: "a.png",
+                        mime_type: "image/png",
+                        original_filename: "a.png",
+                      },
+                    ],
+                    error: null,
+                  }),
               }),
             }),
           };
@@ -177,7 +189,7 @@ Deno.test("health-ocr repository handles missing record and attachment query err
           return {
             select: () => ({
               eq: () => ({
-                order: async () => ({ data: null, error: { message: "broken" } }),
+                order: () => orderable({ data: null, error: { message: "broken" } }),
               }),
             }),
           };
@@ -316,7 +328,7 @@ Deno.test(
                 return {
                   select: () => ({
                     eq: () => ({
-                      order: async () => ({ data: null, error: null }),
+                      order: () => orderable({ data: null, error: null }),
                     }),
                   }),
                 };

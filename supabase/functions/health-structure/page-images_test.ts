@@ -93,3 +93,41 @@ Deno.test("an unreadable attachment list leaves structuring to work from the tex
   assertEquals(images, []);
   assertEquals(errors.length, 1);
 });
+
+// OCR calls once per attachment, so a corrupt page costs only that page. Extraction sends every
+// page in one request: a provider rejecting one image would take the whole record's structuring
+// with it, when the transcription alone would have worked.
+Deno.test("a page that will not decode is omitted rather than sent as it was stored", async () => {
+  const errors: unknown[] = [];
+  const images = await loadRecordPageImages("record-1", {
+    getAttachments: () => Promise.resolve([attachment("bad.png"), attachment("good.png")]),
+    downloadAttachment: () => Promise.resolve(new Blob([new TextEncoder().encode("raw")])),
+    preprocessImage: (_bytes, _mimeType) => Promise.resolve(_bytes && false ? null : null),
+    log: { log: () => {}, warn: () => {}, error: (...args: unknown[]) => errors.push(args) },
+  });
+
+  assertEquals(images, []);
+  assertEquals(errors.length, 2);
+});
+
+Deno.test("only the pages that would not decode are dropped", async () => {
+  const images = await loadRecordPageImages("record-1", {
+    getAttachments: () => Promise.resolve([attachment("bad.png"), attachment("good.png")]),
+    downloadAttachment: (path) =>
+      Promise.resolve(new Blob([new TextEncoder().encode(path === "bad.png" ? "junk" : "raw")])),
+    preprocessImage: (bytes) =>
+      Promise.resolve(
+        new TextDecoder().decode(bytes) === "junk"
+          ? null
+          : {
+              bytes: new TextEncoder().encode("small"),
+              mimeType: "image/jpeg",
+              width: 10,
+              height: 10,
+            },
+      ),
+    log: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  assertEquals(images, [`data:image/jpeg;base64,${btoa("small")}`]);
+});
