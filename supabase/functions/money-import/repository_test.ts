@@ -25,6 +25,36 @@ async function assertRejectsWith(run: () => Promise<unknown>, expectedFragment: 
   }
 }
 
+/**
+ * A PostgREST-shaped query stub whose filters chain in any order.
+ *
+ * The hand-nested `select().limit().eq().eq()` shapes these tests used had the real builder's
+ * call order baked in, so adding one filter to a query broke tests that were not about it --
+ * and, worse, made the shape of the stub the thing under test. This records the filters instead,
+ * so a test can assert the ones it cares about.
+ */
+function queryStub(result: { data: unknown; error: unknown }) {
+  const filters: Array<{ column: string; value: unknown }> = [];
+  const chain: Record<string, unknown> = {
+    filters,
+    eq(column: string, value: unknown) {
+      filters.push({ column, value });
+      return chain;
+    },
+    limit() {
+      return chain;
+    },
+    order() {
+      return chain;
+    },
+    maybeSingle: async () => result,
+    single: async () => result,
+  };
+  return chain as typeof chain & {
+    filters: Array<{ column: string; value: unknown }>;
+  };
+}
+
 function createRepositoryWithClients(clients: {
   anonClient?: Record<string, unknown>;
   adminClient?: Record<string, unknown>;
@@ -521,6 +551,7 @@ Deno.test(
   "repository insertOrResolveTransaction handles inserted and duplicate-update paths",
   async () => {
     let insertCalls = 0;
+    const duplicateLookup = queryStub({ data: { id: "tx-existing" }, error: null });
     const updatedTransactions: Array<{ id: string; payload: Record<string, unknown> }> = [];
     const repository = createRepositoryWithClients({
       adminClient: {
@@ -538,15 +569,7 @@ Deno.test(
                   },
                 }),
               }),
-              select: () => ({
-                limit: () => ({
-                  eq: () => ({
-                    eq: () => ({
-                      maybeSingle: async () => ({ data: { id: "tx-existing" }, error: null }),
-                    }),
-                  }),
-                }),
-              }),
+              select: () => duplicateLookup,
               update: (payload: Record<string, unknown>) => ({
                 eq: (column: string, value: string) => {
                   assertEquals(column, "id");
@@ -578,6 +601,14 @@ Deno.test(
     assertEquals(updatedTransactions.length, 1);
     assertEquals(updatedTransactions[0]?.id, "tx-existing");
     assertEquals(updatedTransactions[0]?.payload.external_id, "ext-1");
+    // The row that gets overwritten has to be the payer's own. Without this predicate a caller
+    // could reuse another payer's external id and have their transaction resolved here.
+    assertEquals(
+      duplicateLookup.filters.some(
+        (filter) => filter.column === "payer_person_id" && filter.value === "person-1",
+      ),
+      true,
+    );
   },
 );
 
@@ -1092,6 +1123,7 @@ Deno.test(
   "repository duplicate transaction handling covers dedupe and unresolved duplicate branches",
   async () => {
     let insertCall = 0;
+    const dedupeLookup = queryStub({ data: { id: "tx-dedupe" }, error: null });
     let dedupeQueryUsed = false;
 
     const repository = createRepositoryWithClients({
@@ -1112,19 +1144,7 @@ Deno.test(
             update: () => ({
               eq: async () => ({ error: null }),
             }),
-            select: () => ({
-              limit: () => ({
-                eq: (column: string) => {
-                  if (column === "dedupe_hash") dedupeQueryUsed = true;
-                  return {
-                    eq: () => ({
-                      maybeSingle: async () => ({ data: { id: "tx-dedupe" }, error: null }),
-                    }),
-                    maybeSingle: async () => ({ data: { id: "tx-dedupe" }, error: null }),
-                  };
-                },
-              }),
-            }),
+            select: () => dedupeLookup,
           };
         },
       },
@@ -1141,6 +1161,15 @@ Deno.test(
       "person-1",
     );
     assertEquals(dedupeResolved, { transactionId: "tx-dedupe", inserted: false });
+    dedupeQueryUsed = dedupeLookup.filters.some((filter) => filter.column === "dedupe_hash");
+    // Resolution by dedupe hash is scoped to the payer for the same reason resolution by
+    // external id is: the hash is unique across the table, not per person.
+    assertEquals(
+      dedupeLookup.filters.some(
+        (filter) => filter.column === "payer_person_id" && filter.value === "person-1",
+      ),
+      true,
+    );
     assertEquals(dedupeQueryUsed, true);
 
     await assertThrowsWithMessage(

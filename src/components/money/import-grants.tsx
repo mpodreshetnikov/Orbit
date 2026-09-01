@@ -49,6 +49,13 @@ export function MoneyImportGrants({ t, personId, availableSources }: MoneyImport
     availableSources.map((source) => source.sourceId),
   );
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  // The token authorises imports for the person it was issued for. Leaving it on screen after
+  // the page's selected person changes would present it in the new person's context -- the list
+  // and the form beneath it have already switched -- which is how a credential ends up saved
+  // against the wrong payer.
+  useEffect(() => {
+    setIssuedToken(null);
+  }, [personId]);
 
   // Frozen at first render this reported an expired grant as Active for as long as the page
   // stayed open, while the backend had already begun refusing it. A minute is finer than any

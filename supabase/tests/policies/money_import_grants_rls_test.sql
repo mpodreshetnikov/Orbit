@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(15);
+SELECT plan(20);
 
 SELECT has_table('public', 'money_import_grants', 'money_import_grants table exists');
 
@@ -170,6 +170,63 @@ SELECT throws_ok(
   NULL,
   'created_by_auth_user_id is fixed at issue time and cannot be changed',
   'the issuer of an existing grant cannot be changed'
+);
+
+-- Freezing the issuer alone is not enough. With the rest of the row writable, an allowlisted
+-- user could take a still-allowed colleague's grant and swap in the hash of a token they hold:
+-- the issuer is unchanged and still allowed, so the recheck passes and the hijacked token
+-- outlives the attacker's own removal.
+SELECT throws_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET token_hash = 'hash-of-a-token-the-caller-holds'
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  NULL,
+  'token_hash is fixed at issue time; issue a new grant instead',
+  'the secret of an existing grant cannot be swapped'
+);
+
+SELECT throws_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET person_id = '7d000000-0000-0000-0000-0000000000ee'
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  NULL,
+  'person_id is fixed at issue time; issue a new grant instead',
+  'a grant cannot be repointed at another person'
+);
+
+SELECT throws_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET allowed_sources = ARRAY['alfa_web']
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  NULL,
+  'allowed_sources is fixed at issue time; issue a new grant instead',
+  'the sources of an existing grant cannot be widened'
+);
+
+SELECT lives_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET revoked_at = now()
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  'revoking is still open to the household, which is the point of the update policy'
+);
+
+SELECT throws_ok(
+  $$
+    UPDATE public.money_import_grants
+    SET revoked_at = NULL
+    WHERE id = '7d000000-0000-0000-0000-000000000102'
+  $$,
+  NULL,
+  'a revoked grant cannot be un-revoked; issue a new grant instead',
+  'revocation is one-way'
 );
 
 SET LOCAL ROLE anon;

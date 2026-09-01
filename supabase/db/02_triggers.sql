@@ -36,7 +36,7 @@ BEGIN;
 \i triggers/update_money_transaction_brand_aliases_updated_at.sql
 \i triggers/update_money_import_batch_brand_resolutions_updated_at.sql
 \i triggers/update_money_import_grants_updated_at.sql
-\i triggers/enforce_money_import_grant_issuer.sql
+\i triggers/enforce_money_import_grant_authority.sql
 \i triggers/update_money_transactions_updated_at.sql
 \i triggers/update_money_line_items_updated_at.sql
 \i triggers/update_money_budget_targets_updated_at.sql

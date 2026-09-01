@@ -46,6 +46,14 @@ interface MoneyImportGrantsTableQuery {
   };
 }
 
+/**
+ * Escapes the SQL LIKE metacharacters so a value is matched literally. ILIKE's default escape
+ * character is a backslash, which therefore has to be escaped first.
+ */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
@@ -101,7 +109,10 @@ export interface MoneyImportRepository {
     payerPersonId: string,
     candidates: ExistingTransactionStateCandidate[],
   ): Promise<ExistingTransactionStateResult[]>;
-  findExistingTransactionId(row: CanonicalTransactionRowInput): Promise<string | null>;
+  findExistingTransactionId(
+    row: CanonicalTransactionRowInput,
+    payerPersonId: string,
+  ): Promise<string | null>;
   findExistingLineItemId(transactionId: string, importHash: string): Promise<string | null>;
   repairExistingTransactionDetails(
     transactionId: string,
@@ -449,10 +460,14 @@ export function createSupabaseMoneyImportRepository(
       const email = normalizeText(userData?.user?.email)?.trim();
       if (userError || !email) return false;
 
+      // Case-insensitive equality, not a pattern match. `ilike` reads `_` and `%` as wildcards
+      // and `_` is ordinary in an address, so `a_b@example.com` would have matched `axb@...`:
+      // a removed issuer waved through by somebody else's allowlist row. Escaping the
+      // metacharacters keeps the case-insensitivity and drops the pattern.
       const { data: byEmail, error: byEmailError } = await admin
         .from("allowed_users")
         .select("id")
-        .ilike("email", email)
+        .ilike("email", escapeLikePattern(email))
         .maybeSingle();
 
       if (byEmailError || !byEmail) return false;
@@ -608,10 +623,9 @@ export function createSupabaseMoneyImportRepository(
     const explicitAccountId = normalizeText(row.account_id);
     if (explicitAccountId) {
       // An id supplied in the row is a claim, not a fact. Everything below is already scoped to
-      // the payer, and this branch used to skip that scoping entirely -- so a caller holding any
+      // the payer, and this branch skipped that scoping entirely -- so a caller holding any
       // session could write against another household member's account by naming its uuid, and
-      // the service-role client would persist it. A grant makes that reachable with nobody
-      // present, which is the whole reason its person is fixed by the credential.
+      // the service-role client would persist it.
       await assertAccountBelongsToPayer(explicitAccountId, payerPersonId);
       return explicitAccountId;
     }
@@ -674,8 +688,17 @@ export function createSupabaseMoneyImportRepository(
 
   async function findExistingTransactionId(
     row: CanonicalTransactionRowInput,
+    payerPersonId: string,
   ): Promise<string | null> {
-    let query = getAdminClient().from("money_transactions").select("id").limit(1);
+    // Scoped to the payer, because the row this returns is then updated through the
+    // service-role client. `(source, external_id)` and `dedupe_hash` are unique across the whole
+    // table, not per person, so without this predicate a caller could reuse another payer's
+    // external id, let the insert conflict, and have their row resolved and overwritten here.
+    let query = getAdminClient()
+      .from("money_transactions")
+      .select("id")
+      .eq("payer_person_id", payerPersonId)
+      .limit(1);
     if (row.external_id) {
       query = query.eq("source", row.source ?? "manual").eq("external_id", row.external_id);
     } else if (row.dedupe_hash) {
@@ -1609,7 +1632,7 @@ export function createSupabaseMoneyImportRepository(
       throw new Error((error as { message?: string })?.message || "Failed to insert transaction");
     }
 
-    const existingId = await findExistingTransactionId(row);
+    const existingId = await findExistingTransactionId(row, payerPersonId);
     if (!existingId) {
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
