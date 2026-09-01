@@ -61,9 +61,12 @@ export function regexLiteral(value: string): string {
 
 /** An anchored pattern that matches exactly this value, ignoring case and surrounding spaces. */
 export function exactIgnoringCase(value: string): string {
-  // `public.is_allowed_user()` compares `lower(trim(email))`, so the trim is part of the rule
-  // rather than a courtesy.
-  return `^\\s*${regexLiteral(value.trim())}\\s*$`;
+  // `public.is_allowed_user()` compares `lower(trim(email))`, so the padding this tolerates has
+  // to be exactly the padding that trim removes -- and PostgreSQL's one-argument trim is
+  // `btrim(x, ' ')`, spaces only. `\s` would also eat tabs and newlines, which would authorise a
+  // grant against an allowlist row that `is_allowed_user()` itself rejects: wider than the rule
+  // it is copying, on the permissive side.
+  return `^ *${regexLiteral(value.trim())} *$`;
 }
 
 /**
@@ -101,6 +104,7 @@ export interface MoneyImportRepository {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
   getGrantByToken(token: string): Promise<Record<string, unknown> | null>;
+  getGrantById(grantId: string): Promise<Record<string, unknown> | null>;
   isAuthUserAllowed(authUserId: string): Promise<boolean>;
   markGrantUsed(grantId: string, usedAtIso: string): Promise<void>;
   findLastImportedAt(source: string, payerPersonId: string): Promise<string | null>;
@@ -468,6 +472,14 @@ export function createSupabaseMoneyImportRepository(
   async function getGrantByToken(token: string): Promise<Record<string, unknown> | null> {
     const tokenHash = await sha256Hex(token);
     const { data, error } = await grantsTable().select("*").eq("token_hash", tokenHash).single();
+
+    if (error || !data) return null;
+    return data as Record<string, unknown>;
+  }
+
+  /** Read back the grant a session was minted by, so its revocation reaches that session. */
+  async function getGrantById(grantId: string): Promise<Record<string, unknown> | null> {
+    const { data, error } = await grantsTable().select("*").eq("id", grantId).single();
 
     if (error || !data) return null;
     return data as Record<string, unknown>;
@@ -1848,6 +1860,7 @@ export function createSupabaseMoneyImportRepository(
     authenticateAllowedUser,
     getSessionByToken,
     getGrantByToken,
+    getGrantById,
     isAuthUserAllowed,
     markGrantUsed,
     findLastImportedAt,

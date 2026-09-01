@@ -23,6 +23,7 @@ function createRepositoryMock(batch: Record<string, unknown> | null): {
       authenticateAllowedUser: async () => null,
       getSessionByToken: async () => null,
       getGrantByToken: async () => null,
+      getGrantById: async () => null,
       isAuthUserAllowed: async () => false,
       markGrantUsed: async () => {},
       findLastImportedAt: async () => null,

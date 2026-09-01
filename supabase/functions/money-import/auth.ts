@@ -10,6 +10,7 @@ export interface MoneyImportAuthDeps {
   authenticateAllowedUser(token: string): Promise<UserAuthContext | null>;
   getSessionByToken(token: string): Promise<Record<string, unknown> | null>;
   getGrantByToken?(token: string): Promise<Record<string, unknown> | null>;
+  getGrantById?(grantId: string): Promise<Record<string, unknown> | null>;
   isAuthUserAllowed?(authUserId: string): Promise<boolean>;
   now?: () => number;
 }
@@ -77,6 +78,29 @@ function asGrantAuthContext(token: string, grant: Record<string, unknown>): Gran
   };
 }
 
+/**
+ * Whether the grant a session was minted by is still good for it: still there, not revoked, not
+ * expired, and its issuer still allowed.
+ *
+ * Fails closed on a missing dependency, for the same reason `resolveAuth` refuses a grant when
+ * the allowlist check is not wired -- a caller who adds the column and forgets the re-check would
+ * otherwise restore the gap in silence.
+ */
+async function isMintingGrantStillUsable(
+  grantId: string,
+  deps: MoneyImportAuthDeps,
+): Promise<boolean> {
+  if (!deps.getGrantById || !deps.isAuthUserAllowed) return false;
+
+  const grant = await deps.getGrantById(grantId);
+  if (!grant) return false;
+  if (!isGrantUsable(grant, (deps.now ?? (() => Date.now()))())) return false;
+
+  const issuer = normalizeText(grant.created_by_auth_user_id);
+  if (!issuer) return false;
+  return await deps.isAuthUserAllowed(issuer);
+}
+
 export async function resolveAuth(
   req: Request,
   deps: MoneyImportAuthDeps,
@@ -93,6 +117,15 @@ export async function resolveAuth(
   if (options.allowSession) {
     const session = await deps.getSessionByToken(token);
     if (session && isSessionUsable(session, (deps.now ?? (() => Date.now()))())) {
+      // A session minted by a grant is only as live as that grant. Without this, revoking a
+      // grant left the sessions it had already opened importing for the rest of their TTL --
+      // bounded, but "revoked" that keeps working for fifteen minutes is not what the word
+      // means. A session a person opened has no grant_id and takes none of this.
+      const grantId = normalizeText(session.grant_id);
+      if (grantId) {
+        const usable = await isMintingGrantStillUsable(grantId, deps);
+        if (!usable) throw new Error("Unauthorized");
+      }
       return asSessionAuthContext(token, session);
     }
   }

@@ -329,3 +329,112 @@ Deno.test("isSessionUsable treats any recorded revocation as final", () => {
     false,
   );
 });
+
+function sessionFromGrantDeps(overrides: {
+  grant?: Record<string, unknown> | null;
+  issuerAllowed?: boolean;
+  omitGrantLookup?: boolean;
+}) {
+  const deps: MoneyImportAuthDeps = {
+    authenticateAllowedUser: async () => null,
+    getSessionByToken: async () => ({
+      id: "session-1",
+      grant_id: "grant-1",
+      status: "running",
+      revoked_at: null,
+      expires_at: "2999-01-01T00:00:00.000Z",
+    }),
+    now: () => new Date("2026-08-23T00:00:00.000Z").getTime(),
+    isAuthUserAllowed: async () => overrides.issuerAllowed ?? true,
+  };
+  if (!overrides.omitGrantLookup) {
+    deps.getGrantById = async () => (overrides.grant === undefined ? LIVE_GRANT : overrides.grant);
+  }
+  return deps;
+}
+
+function sessionRequest(): Request {
+  return new Request("http://localhost", {
+    headers: { Authorization: "Bearer session-token" },
+  });
+}
+
+Deno.test("resolveAuth accepts a grant-minted session while its grant is live", async () => {
+  const auth = await resolveAuth(sessionRequest(), sessionFromGrantDeps({}), {
+    allowUser: false,
+    allowSession: true,
+  });
+  assertEquals(auth.mode, "session");
+});
+
+Deno.test("resolveAuth refuses a grant-minted session once its grant is revoked", async () => {
+  // The session itself is untouched -- not revoked, not expired, status running. Before the
+  // session recorded which grant minted it, revoking that grant left this session importing for
+  // the rest of its TTL, because nothing on the session pointed back at the credential.
+  await assertThrowsWithMessage(
+    () =>
+      resolveAuth(
+        sessionRequest(),
+        sessionFromGrantDeps({ grant: { ...LIVE_GRANT, revoked_at: "2026-08-01T00:00:00.000Z" } }),
+        { allowUser: false, allowSession: true },
+      ),
+    "Unauthorized",
+  );
+});
+
+Deno.test("resolveAuth refuses a grant-minted session once its issuer loses access", async () => {
+  await assertThrowsWithMessage(
+    () =>
+      resolveAuth(sessionRequest(), sessionFromGrantDeps({ issuerAllowed: false }), {
+        allowUser: false,
+        allowSession: true,
+      }),
+    "Unauthorized",
+  );
+});
+
+Deno.test("resolveAuth refuses a grant-minted session whose grant is gone", async () => {
+  await assertThrowsWithMessage(
+    () =>
+      resolveAuth(sessionRequest(), sessionFromGrantDeps({ grant: null }), {
+        allowUser: false,
+        allowSession: true,
+      }),
+    "Unauthorized",
+  );
+});
+
+Deno.test(
+  "resolveAuth refuses a grant-minted session when the grant lookup is not wired",
+  async () => {
+    // Fail closed on a missing dependency, as the grant path does: a caller who adds the column
+    // and forgets the re-check would otherwise restore the gap in silence.
+    await assertThrowsWithMessage(
+      () =>
+        resolveAuth(sessionRequest(), sessionFromGrantDeps({ omitGrantLookup: true }), {
+          allowUser: false,
+          allowSession: true,
+        }),
+      "Unauthorized",
+    );
+  },
+);
+
+Deno.test("resolveAuth leaves a session a person opened alone", async () => {
+  // No grant_id, so none of the above applies and no grant lookup is attempted.
+  const auth = await resolveAuth(
+    sessionRequest(),
+    {
+      authenticateAllowedUser: async () => null,
+      getSessionByToken: async () => ({
+        id: "session-2",
+        status: "running",
+        revoked_at: null,
+        expires_at: "2999-01-01T00:00:00.000Z",
+      }),
+      now: () => new Date("2026-08-23T00:00:00.000Z").getTime(),
+    },
+    { allowUser: false, allowSession: true },
+  );
+  assertEquals(auth.mode, "session");
+});

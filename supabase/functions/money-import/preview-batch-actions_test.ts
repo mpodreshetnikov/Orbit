@@ -46,6 +46,7 @@ function createRepositoryMock(
     authenticateAllowedUser: async () => null,
     getSessionByToken: async () => null,
     getGrantByToken: async () => null,
+    getGrantById: async () => null,
     isAuthUserAllowed: async () => false,
     markGrantUsed: async () => {},
     findLastImportedAt: async () => null,

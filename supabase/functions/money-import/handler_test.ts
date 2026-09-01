@@ -45,6 +45,7 @@ function createRepositoryMock(
       if (token !== "grant-token") return null;
       return options.grantByToken ?? null;
     },
+    getGrantById: async () => options.grantByToken ?? null,
     isAuthUserAllowed: async () => options.issuerIsAllowed ?? true,
     markGrantUsed: async () => {},
     getImportSessionForUser: async () => options.sessionForUser ?? null,
