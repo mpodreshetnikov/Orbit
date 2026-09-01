@@ -681,6 +681,31 @@
       "activateMessage": "This will move the record from drafts to your active records list."
     },
     "wizard": {
+      "extractionIssues": "{count, plural, one {# value needs attention} other {# values need attention}}",
+      "extractionIssuesUnavailable": "Could not check what the extraction had to correct",
+      "extractionIssueReplaced": "{entity} — {field}: the document said “{received}”, saved as “{fallback}”",
+      "extractionIssueDropped": "{entity}: not saved ({detail})",
+      "extractionEntity": {
+        "observation": "Analyte",
+        "finding": "Finding",
+        "condition": "Diagnosis",
+        "record": "Document"
+      },
+      "extractionField": {
+        "observation.status": "status",
+        "finding.severity": "severity",
+        "finding.laterality": "side",
+        "finding.finding_date": "date",
+        "condition.status": "status",
+        "record.record_date": "document date"
+      },
+      "extractionDetail": {
+        "missing_analyte_label": "the analyte had no name",
+        "missing_finding_label_or_source_anchor": "the finding had no name or no quote from the document",
+        "missing_condition_name": "the diagnosis had no name",
+        "source_anchor_not_found_in_document_text": "its quote is not in the document",
+        "source_anchor_states_the_finding_is_absent": "the document says it is absent"
+      },
       "step1": "Step 1 of 3",
       "step2": "Step 2 of 3",
       "step3": "Step 3 of 3",
@@ -819,8 +844,6 @@
     "structureFailed": "Structure Extraction Failed",
     "ocrFailed": "OCR failed",
     "retryOcr": "Retry OCR",
-    "timeout": "Processing timed out",
-    "timeoutDescription": "Check your connection and use Retry OCR from the record.",
     "failedTapToRetry": "Failed – tap to retry"
   },
   "catalogs": {

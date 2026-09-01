@@ -681,6 +681,31 @@
       "activateMessage": "Запись будет перемещена из черновиков в список активных записей."
     },
     "wizard": {
+      "extractionIssues": "{count, plural, one {# значение требует внимания} few {# значения требуют внимания} many {# значений требуют внимания} other {# значений требуют внимания}}",
+      "extractionIssuesUnavailable": "Не удалось проверить, что пришлось исправить при распознавании",
+      "extractionIssueReplaced": "{entity} — {field}: в документе «{received}», сохранено как «{fallback}»",
+      "extractionIssueDropped": "{entity}: не сохранено ({detail})",
+      "extractionEntity": {
+        "observation": "Показатель",
+        "finding": "Находка",
+        "condition": "Диагноз",
+        "record": "Документ"
+      },
+      "extractionField": {
+        "observation.status": "статус",
+        "finding.severity": "степень",
+        "finding.laterality": "сторона",
+        "finding.finding_date": "дата",
+        "condition.status": "статус",
+        "record.record_date": "дата документа"
+      },
+      "extractionDetail": {
+        "missing_analyte_label": "у показателя нет названия",
+        "missing_finding_label_or_source_anchor": "у находки нет названия или цитаты из документа",
+        "missing_condition_name": "у диагноза нет названия",
+        "source_anchor_not_found_in_document_text": "её цитаты нет в документе",
+        "source_anchor_states_the_finding_is_absent": "документ утверждает, что её нет"
+      },
       "step1": "Шаг 1 из 3",
       "step2": "Шаг 2 из 3",
       "step3": "Шаг 3 из 3",
@@ -819,8 +844,6 @@
     "structureFailed": "Ошибка извлечения данных",
     "ocrFailed": "Ошибка распознавания текста",
     "retryOcr": "Повторить распознавание",
-    "timeout": "Превышено время ожидания",
-    "timeoutDescription": "Проверьте соединение и нажмите «Повторить распознавание» в записи.",
     "failedTapToRetry": "Ошибка – нажмите, чтобы повторить"
   },
   "catalogs": {

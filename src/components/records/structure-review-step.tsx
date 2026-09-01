@@ -85,6 +85,7 @@ import {
   usePersonConditionRecordHistory,
   usePersonObservationHistory,
   useCompleteCheckupItem,
+  useRecordExtractionIssues,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
 import {
@@ -802,6 +803,41 @@ export function EditObservationDialog({
   );
 }
 
+type Translate = ReturnType<typeof useTranslations>;
+
+/**
+ * Turn the extraction's own identifiers into something a reader recognises.
+ *
+ * `observation.status` and `missing analyte label` are how the pipeline names things to itself.
+ * Rendering them into a Russian sentence leaves the warning half-translated and points at an
+ * implementation detail instead of at the value the reader has to fix. Unknown keys fall back to
+ * the raw token, so a field added later degrades to something readable rather than to nothing.
+ */
+function describeIssueField(field: string | null, t: Translate): string {
+  if (!field) return "";
+  const key = `records.wizard.extractionField.${field}`;
+  const translated = t(key);
+  return translated === key ? field : translated;
+}
+
+function describeIssueDetail(detail: string | null, t: Translate): string {
+  if (!detail) return "";
+  const key = `records.wizard.extractionDetail.${detail.replace(/\s+/g, "_")}`;
+  const translated = t(key);
+  return translated === key ? detail : translated;
+}
+
+/** The row the correction was made on, named the way the document names it where possible. */
+function describeIssueEntity(
+  issue: { entity_kind: string; entity_label: string | null },
+  t: Translate,
+): string {
+  const kindKey = `records.wizard.extractionEntity.${issue.entity_kind}`;
+  const kind = t(kindKey);
+  const kindLabel = kind === kindKey ? issue.entity_kind : kind;
+  return issue.entity_label ? `${kindLabel} “${issue.entity_label}”` : kindLabel;
+}
+
 export function StructureReviewStep({ record, onComplete, onBack }: StructureReviewStepProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -820,6 +856,12 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const [isSaving, setIsSaving] = useState(false);
 
   // Observations
+  // What the extraction had to correct to keep the rest of the document. Read here because the
+  // review screen is the last moment a person can put the real value back.
+  const { data: extractionIssues, isError: extractionIssuesFailed } = useRecordExtractionIssues(
+    record.id,
+  );
+
   const { data: observations, isLoading: observationsLoading } = useRecordObservations(record.id);
   const [editingObservation, setEditingObservation] = useState<RecordObservationWithCatalog | null>(
     null,
@@ -1542,6 +1584,45 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                   {record.ocr_text}
                 </pre>
               )}
+            </div>
+          )}
+
+          {/* What the extraction could not take at face value */}
+          {extractionIssuesFailed && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                {/* Not the same as "nothing was corrected": a reviewer must not approve a record
+                    believing it is clean when the warnings simply could not be read. */}
+                <span>{t("records.wizard.extractionIssuesUnavailable")}</span>
+              </div>
+            </div>
+          )}
+          {extractionIssues && extractionIssues.length > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                <span>
+                  {t("records.wizard.extractionIssues", { count: extractionIssues.length })}
+                </span>
+              </div>
+              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                {extractionIssues.map((issue) => (
+                  <li key={issue.id}>
+                    {issue.resolution === "dropped"
+                      ? t("records.wizard.extractionIssueDropped", {
+                          entity: describeIssueEntity(issue, t),
+                          detail: describeIssueDetail(issue.detail, t),
+                        })
+                      : t("records.wizard.extractionIssueReplaced", {
+                          entity: describeIssueEntity(issue, t),
+                          field: describeIssueField(issue.field, t),
+                          received: issue.received ?? "",
+                          fallback: issue.applied_fallback ?? "",
+                        })}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

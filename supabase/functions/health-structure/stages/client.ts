@@ -9,7 +9,8 @@ import {
   RetryableLlmError,
   withLlmRetry,
 } from "../../_shared/llm-retry.ts";
-import type { StageContext, StageUsage } from "./types.ts";
+import { parseLlmUsage } from "../../_shared/llm-usage.ts";
+import { StagedParseClaimLostError, type StageContext, type StageUsage } from "./types.ts";
 
 /**
  * 60s was marginal for a real document: the three-specimen histology case in the eval corpus
@@ -56,10 +57,6 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function asNumberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 /**
  * Issue one stage request and return its parsed JSON object.
  *
@@ -73,6 +70,7 @@ export async function callStageJson(
   schema: Record<string, unknown>,
   schemaName: string,
   ctx: StageContext,
+  images: string[] = [],
 ): Promise<StageCallResult> {
   const timeoutMs = ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -107,7 +105,19 @@ export async function callStageJson(
           },
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
+            {
+              role: "user",
+              // A plain string when there is nothing but text, so a stage that sends no images
+              // produces exactly the request body it always did -- and the long stable prefix
+              // stays byte-identical for provider-side prompt caching.
+              content:
+                images.length > 0
+                  ? [
+                      { type: "text", text: userPrompt },
+                      ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+                    ]
+                  : userPrompt,
+            },
           ],
         };
         if (ctx.effort) body.reasoning = { effort: ctx.effort };
@@ -146,17 +156,12 @@ export async function callStageJson(
         }
 
         const contentText = extractContentText(asObject(firstChoice.message));
-        const usageRaw = asObject(payload.usage);
 
         return {
           parsed: parseJsonObject(contentText),
-          usage: {
-            promptTokens: asNumberOrNull(usageRaw.prompt_tokens),
-            completionTokens: asNumberOrNull(usageRaw.completion_tokens),
-            // Null on a replayed cassette recorded before usage accounting was requested, and null
-            // on any provider that does not price the call. Null means "unknown", never "free".
-            costUsd: asNumberOrNull(usageRaw.cost),
-          },
+          // Null on a replayed cassette recorded before usage accounting was requested, and null
+          // on any provider that does not price the call. Null means "unknown", never "free".
+          usage: parseLlmUsage(payload),
           finishReason,
         };
       } catch (error) {
@@ -177,6 +182,11 @@ export async function callStageJson(
       sleepFn: ctx.sleepFn,
       jitterFn: ctx.jitterFn,
       log: ctx.log,
+      // A stage that is retrying is a run that is alive but silent, and silence is what the
+      // lease reads as death. Renew in the gap rather than only between stages.
+      onBeforeRetry: async () => {
+        if (ctx.renewClaim && !(await ctx.renewClaim())) throw new StagedParseClaimLostError();
+      },
     },
   );
 

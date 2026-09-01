@@ -105,7 +105,7 @@ Deno.test(
           const { createDefaultHealthStructureDeps } = await importDepsModule("present");
           const deps = createDefaultHealthStructureDeps();
 
-          const structured = await deps.parseStructuredData("ocr", {
+          const outcome = await deps.parseStructuredData("ocr", {
             observationCatalog: [],
             findingTypeCatalog: [],
             bodySiteCatalog: [],
@@ -113,7 +113,9 @@ Deno.test(
             existingFindings: [],
             checkupItems: [],
           });
-          assertEquals(structured.title, "Doc");
+          assertEquals(outcome.structured.title, "Doc");
+          // One call, not two: the function no longer looks codes up, because it no longer
+          // creates conditions.
           assertEquals(fetchCalls >= 1, true);
         } finally {
           globalThis.fetch = originalFetch;
@@ -148,7 +150,7 @@ Deno.test(
           assertEquals(deps.config.openRouterApiKey, undefined);
           assertEquals(deps.config.parseMode, "e2e_stub");
 
-          const structured = await deps.parseStructuredData("Hemoglobin 142 g/L", {
+          const outcome = await deps.parseStructuredData("Hemoglobin 142 g/L", {
             observationCatalog: [],
             findingTypeCatalog: [],
             bodySiteCatalog: [],
@@ -156,7 +158,9 @@ Deno.test(
             existingFindings: [],
             checkupItems: [],
           });
-          assertEquals(structured.title, "Hemoglobin 142 g/L");
+          assertEquals(outcome.structured.title, "Hemoglobin 142 g/L");
+          // The stub makes no provider call, so its cost is unknown rather than zero.
+          assertEquals(outcome.usage.promptTokens, null);
           assertEquals(fetchCalls, 0);
 
           let parseError: unknown = null;
@@ -262,3 +266,34 @@ Deno.test(
     );
   },
 );
+
+// Only the staged pipeline reads the pages. Wiring the loader for the other modes would download
+// and decode four attachments before a call that ignores them -- and the monolithic path is the
+// rollout escape hatch, where that latency is least welcome.
+Deno.test("page images are loaded only for the staged pipeline", async () => {
+  await withEnv(
+    {
+      OPENROUTER_API_KEY: "key",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+      HEALTH_STRUCTURE_PIPELINE_MODE: "staged",
+    },
+    async () => {
+      const { createDefaultHealthStructureDeps } = await importDepsModule("staged-pages");
+      assertEquals(typeof createDefaultHealthStructureDeps().loadPageImages, "function");
+    },
+  );
+
+  await withEnv(
+    {
+      OPENROUTER_API_KEY: "key",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+      HEALTH_STRUCTURE_PIPELINE_MODE: "monolithic",
+    },
+    async () => {
+      const { createDefaultHealthStructureDeps } = await importDepsModule("monolithic-pages");
+      assertEquals(createDefaultHealthStructureDeps().loadPageImages, undefined);
+    },
+  );
+});

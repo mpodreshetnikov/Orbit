@@ -296,7 +296,10 @@ CREATE TABLE "public"."medical_records" (
     "llm_keywords" "text"[],
     "search_vector" "tsvector" GENERATED ALWAYS AS ((("setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("title", ''::"text")), 'A'::"char") || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("notes", ''::"text")), 'B'::"char")) || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("ocr_text", ''::"text")), 'C'::"char"))) STORED,
     "ocr_error" "text",
-    "llm_suggested_checkup_completions" "jsonb"
+    "llm_suggested_checkup_completions" "jsonb",
+    "structure_error" "text",
+    "processing_run_id" "uuid",
+    "processing_started_at" timestamp with time zone
 );
 
 ALTER TABLE ONLY "public"."medical_records" REPLICA IDENTITY FULL;
@@ -775,6 +778,25 @@ CREATE TABLE "public"."record_attachments" (
 
 
 --
+-- Name: record_extraction_issues; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."record_extraction_issues" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "record_id" "uuid" NOT NULL,
+    "entity_kind" "text" NOT NULL,
+    "entity_label" "text",
+    "field" "text",
+    "received" "text",
+    "resolution" "text" NOT NULL,
+    "applied_fallback" "text",
+    "detail" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_extraction_issues_resolution_check" CHECK (("resolution" = ANY (ARRAY['replaced_with_default'::"text", 'dropped'::"text"])))
+);
+
+
+--
 -- Name: record_findings; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -802,7 +824,9 @@ CREATE TABLE "public"."record_findings" (
     "confidence" numeric,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "resolution_status" "text" DEFAULT 'observed'::"text" NOT NULL,
     CONSTRAINT "record_findings_laterality_check" CHECK (("laterality" = ANY (ARRAY['left'::"text", 'right'::"text", 'bilateral'::"text", 'none'::"text"]))),
+    CONSTRAINT "record_findings_resolution_status_check" CHECK (("resolution_status" = ANY (ARRAY['observed'::"text", 'resolved'::"text"]))),
     CONSTRAINT "record_findings_severity_check" CHECK (("severity" = ANY (ARRAY['mild'::"text", 'moderate'::"text", 'severe'::"text", 'unknown'::"text"])))
 );
 
@@ -1291,6 +1315,14 @@ ALTER TABLE ONLY "public"."record_attachments"
 
 
 --
+-- Name: record_extraction_issues record_extraction_issues_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."record_extraction_issues"
+    ADD CONSTRAINT "record_extraction_issues_pkey" PRIMARY KEY ("id");
+
+
+--
 -- Name: record_findings record_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1641,6 +1673,13 @@ CREATE INDEX "idx_medical_records_created_by" ON "public"."medical_records" USIN
 --
 
 CREATE INDEX "idx_medical_records_person_id" ON "public"."medical_records" USING "btree" ("person_id");
+
+
+--
+-- Name: idx_medical_records_processing_run_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_medical_records_processing_run_id" ON "public"."medical_records" USING "btree" ("processing_run_id") WHERE ("processing_run_id" IS NOT NULL);
 
 
 --
@@ -2099,6 +2138,13 @@ CREATE INDEX "idx_record_attachments_sort_order" ON "public"."record_attachments
 
 
 --
+-- Name: idx_record_extraction_issues_record; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_record_extraction_issues_record" ON "public"."record_extraction_issues" USING "btree" ("record_id");
+
+
+--
 -- Name: idx_record_findings_body_site_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2138,6 +2184,13 @@ CREATE INDEX "idx_record_findings_person_id" ON "public"."record_findings" USING
 --
 
 CREATE INDEX "idx_record_findings_record_id" ON "public"."record_findings" USING "btree" ("record_id");
+
+
+--
+-- Name: idx_record_findings_resolution_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_record_findings_resolution_status" ON "public"."record_findings" USING "btree" ("resolution_status");
 
 
 --
@@ -2808,6 +2861,14 @@ ALTER TABLE ONLY "public"."push_subscriptions"
 
 ALTER TABLE ONLY "public"."record_attachments"
     ADD CONSTRAINT "record_attachments_record_id_fkey" FOREIGN KEY ("record_id") REFERENCES "public"."medical_records"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: record_extraction_issues record_extraction_issues_record_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."record_extraction_issues"
+    ADD CONSTRAINT "record_extraction_issues_record_id_fkey" FOREIGN KEY ("record_id") REFERENCES "public"."medical_records"("id") ON DELETE CASCADE;
 
 
 --

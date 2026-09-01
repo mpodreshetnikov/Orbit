@@ -1,6 +1,14 @@
+import extensionManifest from "../../browserExtension/manifest.json";
+
 export interface ChromeRuntimeMock {
   sendMessage: (...args: unknown[]) => void;
   getURL: (path: string) => string;
+  /**
+   * The background reads its own version from here rather than importing `manifest.json`, so
+   * the mock has to offer it — see `resolveExtensionVersion` in `background-router.ts` for why
+   * that import had to go.
+   */
+  getManifest: () => { version: string };
   reload: () => void;
   onMessage: {
     addListener: (...args: unknown[]) => void;
@@ -32,6 +40,7 @@ export function createChromeMock(): ChromeMock {
     runtime: {
       sendMessage: () => {},
       getURL: (path: string) => `chrome-extension://unit-test/${path}`,
+      getManifest: () => ({ version: extensionManifest.version }),
       reload: () => {},
       onMessage: {
         addListener: () => {},

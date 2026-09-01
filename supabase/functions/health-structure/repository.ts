@@ -8,6 +8,11 @@ import type {
   FindingTypeCatalogItem,
   ObservationCatalogItem,
 } from "./types.ts";
+import {
+  ClaimLostError,
+  claimRecordViaRpc,
+  renewClaimViaRpc,
+} from "../_shared/processing-claim.ts";
 import type { ResolutionRepository } from "./resolution.ts";
 
 interface AuthenticatedUser {
@@ -15,18 +20,38 @@ interface AuthenticatedUser {
   email: string | null;
 }
 
+/** The storage bucket a record's own pages live in. */
+const ATTACHMENT_BUCKET = "medical-attachments";
+
 export interface HealthStructureRepository extends ResolutionRepository {
   authenticateAllowedUser(token: string): Promise<AuthenticatedUser | null>;
   getRecord(recordId: string): Promise<Record<string, unknown> | null>;
+  /** The record's attachments in document order, for the pages the extraction stage reads. */
+  getAttachments(recordId: string): Promise<Array<{ storage_path: string; mime_type: string }>>;
+  downloadAttachment(storagePath: string): Promise<Blob | null>;
   fetchObservationCatalog(): Promise<ObservationCatalogItem[]>;
   fetchFindingTypeCatalog(): Promise<FindingTypeCatalogItem[]>;
   fetchBodySiteCatalog(): Promise<BodySiteCatalogItem[]>;
   fetchPersonConditions(personId: string): Promise<ExistingCondition[]>;
   fetchPersonActiveFindings(personId: string): Promise<ExistingFinding[]>;
   fetchUpcomingOverdueCheckupItems(personId: string): Promise<CheckupItemForContext[]>;
-  updateMedicalRecord(recordId: string, patch: Record<string, unknown>): Promise<void>;
+  /**
+   * Take ownership of the record for this run, or report that someone else has it.
+   * Returns the run id on success and null when the record is already claimed.
+   */
+  claimRecord(recordId: string): Promise<string | null>;
+  /** Extend this run's lease while it is still working; false once the claim has been taken. */
+  renewClaim(recordId: string, runId: string): Promise<boolean>;
+  /** Terminal write, applied only while this run still owns the record. */
+  updateMedicalRecord(
+    recordId: string,
+    patch: Record<string, unknown>,
+    options?: { runId?: string },
+  ): Promise<void>;
   replaceRecordObservations(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   replaceRecordFindings(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
+  /** Replace the record's extraction issues, so a re-run does not stack yesterday's. */
+  replaceRecordExtractionIssues(recordId: string, rows: Record<string, unknown>[]): Promise<void>;
   clearConditionRecords(recordId: string): Promise<void>;
 }
 
@@ -107,6 +132,27 @@ export function createSupabaseHealthStructureRepository(
     }
   }
 
+  async function getAttachments(
+    recordId: string,
+  ): Promise<Array<{ storage_path: string; mime_type: string }>> {
+    const { data, error } = await admin
+      .from("record_attachments")
+      .select("storage_path, mime_type")
+      .eq("record_id", recordId)
+      // The same tiebreak health-ocr applies: the page markers in the transcription and the
+      // images sent with it have to describe the same order.
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true });
+    if (error) throw new Error(`Failed to fetch attachments: ${error.message}`);
+    return (data ?? []) as Array<{ storage_path: string; mime_type: string }>;
+  }
+
+  async function downloadAttachment(storagePath: string): Promise<Blob | null> {
+    const { data, error } = await admin.storage.from(ATTACHMENT_BUCKET).download(storagePath);
+    if (error || !data) return null;
+    return data;
+  }
+
   async function getRecord(recordId: string): Promise<Record<string, unknown> | null> {
     const { data, error } = await admin
       .from("medical_records")
@@ -176,7 +222,7 @@ export function createSupabaseHealthStructureRepository(
     const { data, error } = await admin
       .from("record_findings")
       .select(
-        "finding_code,finding_type_text,site_code,body_site_text,finding_type_id,body_site_id,size_mm,count,medical_records!inner(person_id,status)",
+        "finding_code,finding_type_text,site_code,body_site_text,finding_type_id,body_site_id,resolution_status,medical_records!inner(person_id,status)",
       )
       .eq("medical_records.person_id", personId)
       .eq("medical_records.status", "active")
@@ -192,9 +238,8 @@ export function createSupabaseHealthStructureRepository(
 
     for (const raw of data as unknown[]) {
       const row = raw as Record<string, unknown>;
-      const sizeMm = typeof row.size_mm === "number" ? row.size_mm : null;
-      const count = typeof row.count === "number" ? row.count : null;
-      if (sizeMm === 0 || count === 0) continue;
+      // A resolution row closes the finding it names; it is not itself an active finding.
+      if (row.resolution_status === "resolved") continue;
 
       const findingCode = normalizeText(row.finding_code);
       const findingTypeText = normalizeText(row.finding_type_text) ?? "Unknown finding";
@@ -236,16 +281,29 @@ export function createSupabaseHealthStructureRepository(
     return (data ?? []) as CheckupItemForContext[];
   }
 
+  async function claimRecord(recordId: string): Promise<string | null> {
+    return await claimRecordViaRpc(admin, recordId, "structuring");
+  }
+
+  async function renewClaim(recordId: string, runId: string): Promise<boolean> {
+    return await renewClaimViaRpc(admin, recordId, runId);
+  }
+
   async function updateMedicalRecord(
     recordId: string,
     patch: Record<string, unknown>,
+    options: { runId?: string } = {},
   ): Promise<void> {
-    const { error } = await admin
+    let query = admin
       .from("medical_records")
       .update(patch as Database["public"]["Tables"]["medical_records"]["Update"])
       .eq("id", recordId);
+    // A worker that has lost its claim must not resurrect its result over whatever replaced it.
+    if (options.runId) query = query.eq("processing_run_id", options.runId);
+    const { data, error } = await query.select("id");
 
     if (error) throw new Error(`Failed to update record: ${error.message}`);
+    if (options.runId && (data ?? []).length === 0) throw new ClaimLostError(recordId);
   }
 
   async function replaceRecordObservations(
@@ -270,6 +328,27 @@ export function createSupabaseHealthStructureRepository(
       .from("record_findings")
       .insert(rows as Database["public"]["Tables"]["record_findings"]["Insert"][]);
     if (error) throw new Error(`Failed to insert findings: ${error.message}`);
+  }
+
+  async function replaceRecordExtractionIssues(
+    recordId: string,
+    rows: Record<string, unknown>[],
+  ): Promise<void> {
+    // Checked, unlike a fire-and-forget delete: a delete that failed turns "replace" into
+    // "append" for a run with corrections, and into "keep the old warnings" for a clean one --
+    // and the clean case is the one that would silently report a problem that no longer exists.
+    const { error: deleteError } = await admin
+      .from("record_extraction_issues")
+      .delete()
+      .eq("record_id", recordId);
+    if (deleteError) {
+      throw new Error(`Failed to clear extraction issues: ${deleteError.message}`);
+    }
+    if (rows.length === 0) return;
+    const { error } = await admin
+      .from("record_extraction_issues")
+      .insert(rows as Database["public"]["Tables"]["record_extraction_issues"]["Insert"][]);
+    if (error) throw new Error(`Failed to insert extraction issues: ${error.message}`);
   }
 
   async function clearConditionRecords(recordId: string): Promise<void> {
@@ -306,15 +385,20 @@ export function createSupabaseHealthStructureRepository(
   return {
     authenticateAllowedUser,
     getRecord,
+    getAttachments,
+    downloadAttachment,
     fetchObservationCatalog,
     fetchFindingTypeCatalog,
     fetchBodySiteCatalog,
     fetchPersonConditions,
     fetchPersonActiveFindings,
     fetchUpcomingOverdueCheckupItems,
+    claimRecord,
+    renewClaim,
     updateMedicalRecord,
     replaceRecordObservations,
     replaceRecordFindings,
+    replaceRecordExtractionIssues,
     clearConditionRecords,
     insertConditionRecord,
     recomputeConditionCurrentStatus,

@@ -324,6 +324,11 @@ Deno.test("OCR prompt forbids the rewriting that would corrupt lab values", asyn
   assertEquals(prompt.includes("exactly as printed"), true);
   // Guessing at illegible text is the failure mode that puts invented numbers into the chart.
   assertEquals(prompt.includes("[нрзб]"), true);
+
+  // A lab report is a table, and flattening one to prose is where a value ends up beside the
+  // wrong analyte's unit or reference range.
+  assertEquals(prompt.includes("markdown table"), true);
+  assertEquals(prompt.includes("never move a value into a neighbouring column"), true);
 });
 
 Deno.test("a transient 429 does not cost the page", async () => {
@@ -505,4 +510,90 @@ Deno.test("content delivered as typed parts is not read as an empty page", async
     { requestTitle: true },
   );
   assertEquals(result.ocr_text, "parts");
+});
+
+Deno.test("createOpenRouterOcrClient reports what the transcription cost", async () => {
+  const client = createOpenRouterOcrClient({
+    fetchFn: async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { content: JSON.stringify({ ocr_text: "hello", suggested_title: "t" }) },
+            },
+          ],
+          usage: { prompt_tokens: 2100, completion_tokens: 640, cost: 0.011 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    apiKey: "key",
+    referer: "https://example.com",
+  });
+
+  const result = await client.callVisionOcrSingle(
+    { url: "data:image/png;base64,AAA", mimeType: "image/png" },
+    { requestTitle: true },
+  );
+
+  assertEquals(result.usage.promptTokens, 2100);
+  assertEquals(result.usage.completionTokens, 640);
+  assertEquals(result.usage.costUsd, 0.011);
+});
+
+Deno.test("createOpenRouterOcrClient reports unknown cost as null, not zero", async () => {
+  const client = createOpenRouterOcrClient({
+    fetchFn: async () => okResponse({ ocr_text: "hello", suggested_title: "t" }),
+    apiKey: "key",
+    referer: "https://example.com",
+  });
+
+  const result = await client.callVisionOcrSingle(
+    { url: "data:image/png;base64,AAA", mimeType: "image/png" },
+    { requestTitle: false },
+  );
+
+  assertEquals(result.usage.promptTokens, null);
+  assertEquals(result.usage.costUsd, null);
+});
+
+Deno.test("createOpenRouterOcrClient counts the truncated attempt it paid for", async () => {
+  let call = 0;
+  const client = createOpenRouterOcrClient({
+    fetchFn: async () => {
+      call += 1;
+      const truncated = call === 1;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: truncated ? "length" : "stop",
+              message: {
+                content: JSON.stringify({
+                  ocr_text: truncated ? "half a page" : "the whole page",
+                  suggested_title: "t",
+                }),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 1000, completion_tokens: 500, cost: 0.01 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    },
+    apiKey: "key",
+    referer: "https://example.com",
+    ...NO_WAIT,
+  });
+
+  const result = await client.callVisionOcrSingle(
+    { url: "data:image/png;base64,AAA", mimeType: "image/png" },
+    { requestTitle: false },
+  );
+
+  assertEquals(result.ocr_text, "the whole page");
+  // Both attempts reached the model, so both were billed.
+  assertEquals(result.usage.promptTokens, 2000);
+  assertEquals(result.usage.completionTokens, 1000);
+  assertEquals(result.usage.costUsd, 0.02);
 });

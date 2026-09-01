@@ -100,5 +100,16 @@ export async function runClassifyStage(
       entityKind: issue.field,
       reason: `unrecognised value replaced with ${issue.appliedFallback}`,
     })),
+    // A discarded document date is exactly the correction a reviewer needs to see: it decides
+    // where the record sits in the patient's timeline, and nothing else in the record says so.
+    issues: issues.map((issue) => ({
+      entityKind: "record",
+      entityLabel: null,
+      field: issue.field,
+      received: issue.received,
+      resolution: "replaced_with_default" as const,
+      appliedFallback: issue.appliedFallback,
+      detail: null,
+    })),
   };
 }

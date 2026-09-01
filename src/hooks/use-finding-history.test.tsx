@@ -158,8 +158,9 @@ describe("use-finding-history", () => {
 
     expect(builder.insert).toHaveBeenCalledWith(
       expect.objectContaining({
-        size_mm: 0,
-        count: 0,
+        size_mm: null,
+        count: null,
+        resolution_status: "resolved",
       }),
     );
     expect(invalidateSpy).toHaveBeenCalledWith({

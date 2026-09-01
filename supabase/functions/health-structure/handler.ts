@@ -88,6 +88,7 @@ export function createHealthStructureHandler(deps: HealthStructureHandlerDeps) {
         {
           repository: deps.repository,
           parseStructuredData: deps.parseStructuredData,
+          loadPageImages: deps.loadPageImages,
           log: deps.log,
           telemetry,
         },

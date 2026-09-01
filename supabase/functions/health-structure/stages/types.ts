@@ -1,3 +1,4 @@
+import { emptyLlmUsage, type LlmUsage, sumLlmUsage } from "../../_shared/llm-usage.ts";
 import type {
   BodySiteCatalogItem,
   CheckupItemForContext,
@@ -6,6 +7,7 @@ import type {
   ExtractedCondition,
   ExtractedFinding,
   ExtractedObservation,
+  ExtractionIssue,
   FindingTypeCatalogItem,
   ObservationCatalogItem,
   StructuredData,
@@ -34,18 +36,30 @@ export interface StageContext {
   /** Injected in tests so retries do not actually wait. */
   sleepFn?: (ms: number) => Promise<void>;
   jitterFn?: () => number;
+  /**
+   * Say the run is still working, while this stage waits.
+   *
+   * Renewing only between stages is not enough: one stage can be three attempts and their
+   * backoff, so the gap between renewals could outrun the lease and the reaper would release a
+   * live run. This is called during that waiting, and a false answer stops the stage.
+   */
+  renewClaim?: () => Promise<boolean>;
 }
 
-export interface StageUsage {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  /** What the router charged for this call, in USD. Null when unknown -- never assume zero. */
-  costUsd: number | null;
-}
+/** One shape for what a model call cost, shared with the other edge functions. */
+export type StageUsage = LlmUsage;
 
 export interface StageRejection {
   entityKind: string;
   reason: string;
+}
+
+/** Thrown when a renewal reports the record now belongs to another run. */
+export class StagedParseClaimLostError extends Error {
+  constructor() {
+    super("Another run owns this record");
+    this.name = "StagedParseClaimLostError";
+  }
 }
 
 export interface StageResult<T> {
@@ -53,6 +67,8 @@ export interface StageResult<T> {
   usage: StageUsage;
   finishReason: string | null;
   rejected: StageRejection[];
+  /** Value-level corrections, in a shape that reaches the record rather than only a log line. */
+  issues?: ExtractionIssue[];
 }
 
 /**
@@ -114,17 +130,9 @@ export const EMPTY_RECONCILE: ReconcileResult = {
 };
 
 export function emptyUsage(): StageUsage {
-  return { promptTokens: null, completionTokens: null, costUsd: null };
+  return emptyLlmUsage();
 }
 
 export function sumUsage(parts: StageUsage[]): StageUsage {
-  let prompt: number | null = null;
-  let completion: number | null = null;
-  let cost: number | null = null;
-  for (const part of parts) {
-    if (part.promptTokens !== null) prompt = (prompt ?? 0) + part.promptTokens;
-    if (part.completionTokens !== null) completion = (completion ?? 0) + part.completionTokens;
-    if (part.costUsd !== null) cost = (cost ?? 0) + part.costUsd;
-  }
-  return { promptTokens: prompt, completionTokens: completion, costUsd: cost };
+  return sumLlmUsage(parts);
 }

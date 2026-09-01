@@ -8,6 +8,7 @@ export * from "./use-structure-extraction";
 export * from "./use-processing-monitor";
 export * from "./use-observation-catalog";
 export * from "./use-record-observations";
+export * from "./use-record-extraction-issues";
 export * from "./use-observation-history";
 export * from "./use-hidden-measurements";
 export * from "./use-measurement-catalog";

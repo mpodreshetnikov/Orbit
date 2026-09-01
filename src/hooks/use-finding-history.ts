@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import type {
+  FindingResolutionStatus,
   FindingSummary,
   FindingHistoryPoint,
   FindingSeverity,
@@ -10,9 +11,10 @@ import type {
   CreateRecordFindingInput,
 } from "@/types";
 
-// Helper to determine if a finding is resolved (size=0 or count=0)
-function isResolved(size: number | null, count: number | null): boolean {
-  return size === 0 || count === 0;
+// A finding is resolved when a later row says so. It used to be inferred from `size_mm = 0` or
+// `count = 0`, which hid any finding whose real measurement happened to be zero.
+function isResolved(point: { resolution_status: FindingResolutionStatus }): boolean {
+  return point.resolution_status === "resolved";
 }
 
 // ============================================================================
@@ -30,6 +32,7 @@ interface RawFindingRow {
   body_site_text: string | null;
   size_mm: number | null;
   count: number | null;
+  resolution_status: FindingResolutionStatus;
   severity: string;
   laterality: string;
   morphology: string | null;
@@ -73,6 +76,7 @@ async function fetchPersonFindingHistory(
       body_site_text,
       size_mm,
       count,
+      resolution_status,
       severity,
       laterality,
       morphology,
@@ -130,6 +134,7 @@ async function fetchPersonFindingHistory(
       record_date: r.medical_records.record_date,
       size_mm: r.size_mm,
       count: r.count,
+      resolution_status: r.resolution_status,
       severity: r.severity as FindingSeverity,
       laterality: r.laterality as FindingLaterality,
       morphology: r.morphology,
@@ -185,7 +190,7 @@ async function fetchPersonFindingHistory(
       latest_severity: latest.severity,
       latest_laterality: latest.laterality,
       latest_date: latest.record_date,
-      is_resolved: isResolved(latest.size_mm, latest.count),
+      is_resolved: isResolved(latest),
       occurrence_count: history.length,
       history,
     };
@@ -262,6 +267,7 @@ async function fetchSingleFindingHistory(
       body_site_text,
       size_mm,
       count,
+      resolution_status,
       severity,
       laterality,
       morphology,
@@ -312,6 +318,7 @@ async function fetchSingleFindingHistory(
       record_date: row.medical_records.record_date,
       size_mm: row.size_mm,
       count: row.count,
+      resolution_status: row.resolution_status,
       severity: row.severity as FindingSeverity,
       laterality: row.laterality as FindingLaterality,
       morphology: row.morphology,
@@ -356,7 +363,7 @@ async function fetchSingleFindingHistory(
     latest_severity: latestHistory.severity,
     latest_laterality: latestHistory.laterality,
     latest_date: latestHistory.record_date,
-    is_resolved: isResolved(latestHistory.size_mm, latestHistory.count),
+    is_resolved: isResolved(latestHistory),
     occurrence_count: data.length,
     history,
   };
@@ -376,7 +383,7 @@ export function useSingleFindingHistory(
 
 // ============================================================================
 // MARK FINDING AS RESOLVED
-// Creates a new entry with size=0, count=0 to indicate the finding is gone
+// Creates a new entry marked resolution_status='resolved' to indicate the finding is gone
 // ============================================================================
 
 export interface MarkResolvedInput {
@@ -397,8 +404,9 @@ async function markFindingResolved(input: MarkResolvedInput): Promise<void> {
     body_site_id: input.finding.body_site_id,
     site_code: input.finding.site_code,
     body_site_text: input.finding.body_site_text,
-    size_mm: 0,
-    count: 0,
+    size_mm: null,
+    count: null,
+    resolution_status: "resolved",
     severity: "unknown",
     laterality: input.finding.latest_laterality,
     source_anchor: "Marked as resolved by user",
