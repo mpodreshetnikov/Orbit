@@ -12,6 +12,7 @@ const hookMocks = vi.hoisted(() => ({
   useCreateRecordObservation: vi.fn(),
   useObservationCatalog: vi.fn(),
   useRecordFindings: vi.fn(),
+  useRecordExtractionIssues: vi.fn(),
   useUpdateRecordFinding: vi.fn(),
   useDeleteRecordFinding: vi.fn(),
   useCreateRecordFinding: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("@/hooks", () => ({
   useCreateRecordObservation: (...args: unknown[]) => hookMocks.useCreateRecordObservation(...args),
   useObservationCatalog: (...args: unknown[]) => hookMocks.useObservationCatalog(...args),
   useRecordFindings: (...args: unknown[]) => hookMocks.useRecordFindings(...args),
+  useRecordExtractionIssues: (...args: unknown[]) => hookMocks.useRecordExtractionIssues(...args),
   useUpdateRecordFinding: (...args: unknown[]) => hookMocks.useUpdateRecordFinding(...args),
   useDeleteRecordFinding: (...args: unknown[]) => hookMocks.useDeleteRecordFinding(...args),
   useCreateRecordFinding: (...args: unknown[]) => hookMocks.useCreateRecordFinding(...args),
@@ -279,6 +281,12 @@ describe("StructureReviewStep", () => {
         },
       ],
     });
+    // Most records have nothing to correct; the tests that care set their own.
+    hookMocks.useRecordExtractionIssues.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    });
     hookMocks.useRecordFindings.mockReturnValue({
       data: [
         {
@@ -342,6 +350,58 @@ describe("StructureReviewStep", () => {
 
     await userEvent.setup().click(screen.getByRole("button", { name: "observations.add" }));
     expect(await screen.findByText("observations.addObservation")).toBeInTheDocument();
+  });
+
+  // Value-level corrections used to end in a log line nobody reads. The review screen is the last
+  // moment a person can put the real value back, so it has to say what was substituted.
+  it("shows what the extraction had to correct, and says nothing when there was nothing", async () => {
+    hookMocks.useRecordExtractionIssues.mockReturnValue({
+      data: [
+        {
+          id: "issue-1",
+          record_id: "record-1",
+          entity_kind: "observation",
+          entity_label: "Гемоглобин",
+          field: "observation.status",
+          received: "borderline",
+          resolution: "replaced_with_default",
+          applied_fallback: "unknown",
+          detail: null,
+        },
+      ],
+      isLoading: false,
+      isError: false,
+    });
+
+    const { StructureReviewStep } = await import("./structure-review-step");
+    const { unmount } = render(
+      <StructureReviewStep record={createRecord()} onComplete={vi.fn()} onBack={vi.fn()} />,
+    );
+
+    expect(screen.getByText("records.wizard.extractionIssues")).toBeInTheDocument();
+    expect(screen.getByText("records.wizard.extractionIssueReplaced")).toBeInTheDocument();
+    unmount();
+
+    // And a clean extraction must not leave a warning banner sitting there.
+    hookMocks.useRecordExtractionIssues.mockReturnValue({ data: [], isLoading: false });
+    render(<StructureReviewStep record={createRecord()} onComplete={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.queryByText("records.wizard.extractionIssues")).not.toBeInTheDocument();
+  });
+
+  // A failed read is not the same as a clean extraction: a reviewer must not approve a record
+  // believing nothing was corrected when the warnings simply could not be fetched.
+  it("says so when the corrections could not be read", async () => {
+    hookMocks.useRecordExtractionIssues.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+
+    const { StructureReviewStep } = await import("./structure-review-step");
+    render(<StructureReviewStep record={createRecord()} onComplete={vi.fn()} onBack={vi.fn()} />);
+
+    expect(screen.getByText("records.wizard.extractionIssuesUnavailable")).toBeInTheDocument();
+    expect(screen.queryByText("records.wizard.extractionIssues")).not.toBeInTheDocument();
   });
 
   it("applies suggested checkups and completes review on save", async () => {

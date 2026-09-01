@@ -32,6 +32,11 @@ export interface HealthStructureParseContext {
    * the transcription alone, as it always did.
    */
   pageImages?: string[];
+  /**
+   * Say the run is still working, between stages. Absent for callers with no claim to keep --
+   * the E2E stub and the unit tests.
+   */
+  renewClaim?: () => Promise<boolean>;
 }
 
 export interface HealthStructureServiceDeps {
@@ -310,7 +315,11 @@ export async function runHealthStructureService(
     // Loaded after the claim and never allowed to fail the record: this is context, not content.
     const pageImages = (await deps.loadPageImages?.(input.recordId)) ?? [];
 
+    const claimedRunId = runId;
     const context: HealthStructureParseContext = {
+      // The parse is long enough to outlive a lease short enough to be useful, so it says so
+      // between stages rather than being given an hour up front.
+      renewClaim: () => deps.repository.renewClaim(input.recordId!, claimedRunId),
       observationCatalog,
       findingTypeCatalog,
       bodySiteCatalog,
@@ -367,6 +376,33 @@ export async function runHealthStructureService(
       structuredData,
       observationCatalog,
     );
+    // What had to be corrected to keep the rest of the document, replaced rather than appended so
+    // a re-run does not stack yesterday's corrections on top of today's.
+    //
+    // Placed after the claim-guarded record write on purpose: that write is what discovers this
+    // run no longer owns the record, and it throws before reaching here. Writing the corrections
+    // ahead of it would let a worker that had already lost the record replace the warnings
+    // belonging to the run that replaced it.
+    const issuesSpan = telemetry?.startSpan("edge.health_structure.persist_issues");
+    await deps.repository.replaceRecordExtractionIssues(
+      input.recordId,
+      (parseOutcome.issues ?? []).map((issue) => ({
+        record_id: input.recordId,
+        entity_kind: issue.entityKind,
+        entity_label: issue.entityLabel,
+        field: issue.field,
+        received: issue.received,
+        resolution: issue.resolution,
+        applied_fallback: issue.appliedFallback,
+        detail: issue.detail,
+      })),
+    );
+    await issuesSpan?.end({
+      status: "ok",
+      // A count, never the values: those are document content and live in the record.
+      attrs: { issue_count: (parseOutcome.issues ?? []).length },
+    });
+
     await deps.repository.replaceRecordObservations(input.recordId, observationBuild.rows);
     if (observationBuild.droppedInvalidCount > 0) {
       telemetry?.warn("health_structure_invalid_observations_dropped", {

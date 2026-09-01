@@ -136,6 +136,9 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
           fallbackModels,
           timeoutMs: openRouterTimeoutMs,
           debugRawPayload,
+          // The service supplies this once it holds the claim; without one the parse simply
+          // does not renew, which is what the tests and the stub want.
+          renewClaim: context.renewClaim,
         });
         if (outcome.rejected.length > 0) {
           // Counts and reasons only — reasons are fixed strings, never entity content.
@@ -155,6 +158,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
           structured: outcome.structured,
           usage: outcome.usage,
           stagesRun: outcome.stagesRun,
+          issues: outcome.issues,
         };
       }
       const structured = await callOpenRouterParse(ocrText, context, {

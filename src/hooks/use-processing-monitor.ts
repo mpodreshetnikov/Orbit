@@ -239,6 +239,9 @@ export function useProcessingMonitor(personId: string | null) {
             queryKey: ["medical-record", newRecord.id],
           });
           queryClient.invalidateQueries({
+            queryKey: ["record-extraction-issues", newRecord.id],
+          });
+          queryClient.invalidateQueries({
             queryKey: ["record-observations", newRecord.id],
           });
           queryClient.invalidateQueries({

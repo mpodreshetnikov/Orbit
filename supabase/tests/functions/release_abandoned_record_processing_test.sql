@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(9);
+SELECT plan(10);
 
 SELECT has_function(
   'public',
@@ -86,6 +86,19 @@ SELECT is(
   public.release_abandoned_record_processing(900, 3600),
   3,
   'the three abandoned records are released and the live ones are not'
+);
+
+-- The default the cron job runs with. Structuring renews between stages now, so it no longer
+-- needs its own longer grace, and a dead structuring worker stops holding a record for an hour.
+SELECT is(
+  (
+    SELECT pg_get_function_arg_default(p.oid, 2)
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'release_abandoned_record_processing'
+  ),
+  '900',
+  'the structuring lease defaults to the same as the OCR one'
 );
 
 SELECT is(
