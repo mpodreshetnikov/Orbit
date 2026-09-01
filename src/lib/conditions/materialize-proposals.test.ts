@@ -3,6 +3,7 @@ import {
   materializeConditionProposals,
   ProposalMaterializationError,
 } from "./materialize-proposals";
+import { AUTHORITATIVE_STATUS_FILTER } from "./unverified-closure";
 import type { ConditionRecordWithDetails } from "@/types";
 
 type Row = Record<string, unknown> | null;
@@ -21,6 +22,7 @@ function createSupabaseStub(options: {
   const updated: Array<{ id: unknown; patch: Record<string, unknown> }> = [];
   const statusUpdates: Array<Record<string, unknown>> = [];
   const lookups: string[] = [];
+  const recomputeFilters: string[] = [];
 
   const client = {
     from(table: string) {
@@ -78,17 +80,22 @@ function createSupabaseStub(options: {
               return { error: options.linkError ? { message: options.linkError } : null };
             },
           }),
-          // The status recompute reads the condition's most recent mention.
+          // The status recompute reads the condition's most recent authoritative mention.
           select: () => ({
             eq: () => ({
-              order: () => ({
-                limit: () => ({
-                  maybeSingle: async () => ({
-                    data: { status_in_record: "resolved" },
-                    error: null,
+              or: (filter: string) => {
+                recomputeFilters.push(filter);
+                return {
+                  order: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({
+                        data: { status_in_record: "resolved" },
+                        error: null,
+                      }),
+                    }),
                   }),
-                }),
-              }),
+                };
+              },
             }),
           }),
         };
@@ -98,7 +105,7 @@ function createSupabaseStub(options: {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { client: client as any, inserted, updated, statusUpdates, lookups };
+  return { client: client as any, inserted, updated, statusUpdates, lookups, recomputeFilters };
 }
 
 function proposal(overrides: Partial<ConditionRecordWithDetails> = {}): ConditionRecordWithDetails {
@@ -252,5 +259,23 @@ describe("materializeConditionProposals", () => {
         lookupIcd: foundIcd,
       }),
     ).rejects.toBeInstanceOf(ProposalMaterializationError);
+  });
+
+  it("recomputes through the closure guard, after marking the approved mention verified", async () => {
+    // The order is the whole argument for guarding this path: materialisation sets
+    // is_user_verified on the row it is approving *before* recomputing, so that row passes the
+    // filter on its own merit. What the filter keeps out is an unverified machine closure sitting
+    // in some other draft with a newer date, which would otherwise be read as the newest word and
+    // take the condition off the active chart on an approval that never mentioned it.
+    const stub = createSupabaseStub({ byCode: { id: "cond-existing" } });
+
+    await materializeConditionProposals([proposal({ status_in_record: "active" })], {
+      supabase: stub.client,
+      personId: "person-1",
+      lookupIcd: foundIcd,
+    });
+
+    expect(stub.updated[0].patch).toMatchObject({ is_user_verified: true });
+    expect(stub.recomputeFilters).toEqual([AUTHORITATIVE_STATUS_FILTER]);
   });
 });

@@ -11,6 +11,13 @@
  * row: filtering afterwards would let a suppressed closure shadow the row beneath it and leave the
  * status stale in a different way.
  *
+ * Three places in this tree decide a condition's status from its mentions and all three apply
+ * this: the recompute in `src/hooks/use-conditions.ts`, the recompute on the activation path in
+ * `src/lib/conditions/materialize-proposals.ts`, and the date comparison in
+ * `useLinkConditionToRecord` that decides whether a manual link is the newest word. A path that
+ * reads the mentions and does not apply this is a hole, whatever it does with what it reads: the
+ * suppressed row does not have to be *applied* to do harm, it only has to be counted as newest.
+ *
  * The edge function carries the same rule in
  * `supabase/functions/health-structure/repository.ts`. The two runtimes share no module -- the
  * Deno functions import nothing from this tree -- so the rule is written twice on purpose; change

@@ -623,6 +623,76 @@ describe("use-conditions", () => {
     expect(conditionRecordsBuilder.insert).toHaveBeenCalled();
   });
 
+  it("does not let a suppressed closure outrank a manual link by date", async () => {
+    // The manual-link path compares dates itself instead of calling the recompute helper, so it
+    // needs the same filter. A machine closure it cannot apply must not be counted as the newest
+    // word either: doing so would refuse the person's own confirmed status and leave the
+    // condition stale until that draft is reviewed -- or for good, if it never is.
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-new", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    const medicalRecordsBuilder = createQueryBuilder({
+      data: { record_date: "2026-01-01" },
+      error: null,
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "condition_records") return conditionRecordsBuilder;
+        if (table === "medical_records") return medicalRecordsBuilder;
+        return conditionsBuilder;
+      }),
+    });
+
+    const { useLinkConditionToRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useLinkConditionToRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        condition_id: "cond-1",
+        record_id: "record-1",
+        status_in_record: "active",
+      });
+    });
+
+    expect(conditionRecordsBuilder.or).toHaveBeenCalledWith(AUTHORITATIVE_STATUS_FILTER);
+  });
+
+  it("fails the verification when the recompute it depends on fails", async () => {
+    // The mention is verified by the time the recompute runs, and verifyAllConditions only
+    // revisits unverified rows -- so a swallowed failure would report success and never be
+    // retried, leaving an approved closure that never reaches the chart.
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: null,
+      error: { message: "recompute select failed" },
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "condition_records" ? conditionRecordsBuilder : conditionsBuilder,
+      ),
+    });
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          id: "cr-1",
+          updates: { is_user_verified: true },
+        }),
+      ).rejects.toThrow("recompute select failed");
+    });
+  });
+
   it("handles query errors, null detail states, and disabled hooks", async () => {
     const errorBuilder = createQueryBuilder({
       data: null,
