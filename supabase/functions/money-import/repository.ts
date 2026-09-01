@@ -35,25 +35,39 @@ export function postgrestFilterValue(value: string): string {
 }
 
 /**
- * The filter that finds a transaction by whichever of its identities exists.
+ * The filter that finds a transaction by one identity.
  *
- * A row can carry both -- every T-Bank row does -- and the two unique indexes are independent,
- * so an insert can violate `dedupe_hash` while its `(source, external_id)` is new. Checking only
- * one of them then finds nothing and reports a duplicate it cannot resolve, for a row whose
- * duplicate is sitting right there under the other key.
+ * The two are not interchangeable and must not be OR-ed. `(source, external_id)` is what the
+ * bank calls the operation; `dedupe_hash` is a fallback for rows that have no external id, and
+ * the extension computes it as FNV-1a folded to 32 bits -- eight hex characters, where a
+ * collision between two genuinely different transactions is a matter of scale rather than of
+ * bad luck. Resolving a row to a transaction whose hash matches while its external id differs
+ * would merge two unrelated operations and overwrite one of them.
  */
-function transactionIdentityFilter(row: CanonicalTransactionRowInput): string | null {
-  const clauses: string[] = [];
-  const externalId = normalizeText(row.external_id);
-  if (externalId) {
+function transactionIdentityFilter(
+  row: CanonicalTransactionRowInput,
+  identity: "external_id" | "dedupe_hash",
+): string | null {
+  if (identity === "external_id") {
+    const externalId = normalizeText(row.external_id);
+    if (!externalId) return null;
     const source = postgrestFilterValue(row.source ?? "manual");
-    clauses.push(`and(source.eq.${source},external_id.eq.${postgrestFilterValue(externalId)})`);
+    return `and(source.eq.${source},external_id.eq.${postgrestFilterValue(externalId)})`;
   }
   const dedupeHash = normalizeText(row.dedupe_hash);
-  if (dedupeHash) {
-    clauses.push(`dedupe_hash.eq.${postgrestFilterValue(dedupeHash)}`);
-  }
-  return clauses.length > 0 ? clauses.join(",") : null;
+  return dedupeHash ? `dedupe_hash.eq.${postgrestFilterValue(dedupeHash)}` : null;
+}
+
+/**
+ * The identity a row is resolved by: what the bank calls it, or the hash when it has no name.
+ * Precedence, not alternatives -- see `transactionIdentityFilter`.
+ */
+function resolvingIdentity(
+  row: CanonicalTransactionRowInput,
+): "external_id" | "dedupe_hash" | null {
+  if (normalizeText(row.external_id)) return "external_id";
+  if (normalizeText(row.dedupe_hash)) return "dedupe_hash";
+  return null;
 }
 
 export interface MoneyImportRepository {
@@ -616,8 +630,9 @@ export function createSupabaseMoneyImportRepository(
    */
   async function findTransactionOwnerIgnoringPayer(
     row: CanonicalTransactionRowInput,
+    identity: "external_id" | "dedupe_hash",
   ): Promise<string | null> {
-    const identityFilter = transactionIdentityFilter(row);
+    const identityFilter = transactionIdentityFilter(row, identity);
     if (!identityFilter) return null;
 
     const { data, error } = await getAdminClient()
@@ -638,7 +653,8 @@ export function createSupabaseMoneyImportRepository(
     // service-role client. `(source, external_id)` and `dedupe_hash` are unique across the whole
     // table, not per person, so without this predicate a caller could reuse another payer's
     // external id, let the insert conflict, and have their row resolved and overwritten here.
-    const identityFilter = transactionIdentityFilter(row);
+    const identity = resolvingIdentity(row);
+    const identityFilter = identity ? transactionIdentityFilter(row, identity) : null;
     if (!identityFilter) return null;
 
     const { data, error } = await getAdminClient()
@@ -1580,14 +1596,30 @@ export function createSupabaseMoneyImportRepository(
       // "could not be resolved" alone reads like a bug in the importer rather than the real
       // condition, and the real condition is fixable: scoping those indexes by payer is what
       // `scope_money_transaction_identity` does in the money-identity work.
-      const conflictingOwner = await findTransactionOwnerIgnoringPayer(row);
-      if (conflictingOwner && conflictingOwner !== payerPersonId) {
-        throw new Error(
-          "Duplicate transaction belongs to another payer; the money_transactions uniqueness " +
-            "indexes are not scoped by payer, so this row cannot be imported without " +
-            "overwriting theirs",
-        );
+      // Diagnosis only, and it probes both identities because either index can be the one that
+      // was violated. Nothing here feeds resolution: a row found under an identity this row is
+      // not resolved by is, by definition, a different transaction.
+      for (const identity of ["external_id", "dedupe_hash"] as const) {
+        const owner = await findTransactionOwnerIgnoringPayer(row, identity);
+        if (!owner) continue;
+
+        if (owner !== payerPersonId) {
+          throw new Error(
+            `Duplicate transaction belongs to another payer (matched on ${identity}); the ` +
+              "money_transactions uniqueness indexes are not scoped by payer, so this row " +
+              "cannot be imported without overwriting theirs",
+          );
+        }
+
+        if (identity === "dedupe_hash" && normalizeText(row.external_id)) {
+          throw new Error(
+            "Duplicate transaction matched only on dedupe_hash while carrying a different " +
+              "external_id; the extension folds that hash to 32 bits, so this is a collision " +
+              "between two different operations rather than the same one twice",
+          );
+        }
       }
+
       throw new Error("Duplicate transaction but existing row could not be resolved");
     }
 
