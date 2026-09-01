@@ -102,7 +102,7 @@ Deno.test("a page that will not decode is omitted rather than sent as it was sto
   const images = await loadRecordPageImages("record-1", {
     getAttachments: () => Promise.resolve([attachment("bad.png"), attachment("good.png")]),
     downloadAttachment: () => Promise.resolve(new Blob([new TextEncoder().encode("raw")])),
-    preprocessImage: (_bytes, _mimeType) => Promise.resolve(_bytes && false ? null : null),
+    preprocessImage: () => Promise.resolve(null),
     log: { log: () => {}, warn: () => {}, error: (...args: unknown[]) => errors.push(args) },
   });
 
