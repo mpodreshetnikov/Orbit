@@ -31,6 +31,7 @@ function createRepositoryMock(): HealthStructureRepository {
     fetchPersonConditions: async () => [],
     fetchPersonActiveFindings: async () => [],
     fetchUpcomingOverdueCheckupItems: async () => [],
+    claimRecord: async () => "run-1",
     updateMedicalRecord: async () => {},
     replaceRecordObservations: async () => {},
     replaceRecordFindings: async () => {},

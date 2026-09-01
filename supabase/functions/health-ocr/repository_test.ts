@@ -207,14 +207,30 @@ Deno.test("health-ocr repository downloads attachments and updates record states
       auth: { getUser: async () => ({ data: { user: null }, error: null }) },
     },
     adminClient: {
+      rpc: async () => ({ data: true, error: null }),
       from: (table: string) => {
         if (table === "medical_records") {
           return {
             update: (payload: Record<string, unknown>) => ({
-              eq: async () => {
-                updates.push(payload);
-                return { error: null };
-              },
+              eq: () => ({
+                // The terminal writes now narrow by claim and read back the rows they matched.
+                eq: () => ({
+                  select: async () => {
+                    updates.push(payload);
+                    return { data: [{ id: "record-1" }], error: null };
+                  },
+                }),
+                select: async () => {
+                  updates.push(payload);
+                  return { data: [{ id: "record-1" }], error: null };
+                },
+                or: () => ({
+                  select: async () => {
+                    updates.push(payload);
+                    return { data: [{ id: "record-1" }], error: null };
+                  },
+                }),
+              }),
             }),
           };
         }
@@ -235,10 +251,14 @@ Deno.test("health-ocr repository downloads attachments and updates record states
   assertEquals(downloaded instanceof Blob, true);
   assertEquals(await repository.downloadAttachment("missing.png"), null);
 
+  // The claim is one database statement now, so the repository only relays its answer.
+  assertEquals(typeof (await repository.claimRecord("record-1")), "string");
   await repository.updateRecordSuccess("record-1", { ocrText: "text", title: "Title" });
   await repository.updateRecordFailure("record-1", "broken");
   assertEquals(updates.length, 2);
   assertEquals(updates[0].status, "ocr_review");
+  // A finished run releases the record rather than leaving it claimed until the lease expires.
+  assertEquals(updates[0].processing_run_id, null);
   assertEquals(updates[1].status, "ocr_failed");
 });
 
@@ -252,7 +272,12 @@ Deno.test("health-ocr repository throws when updateRecordSuccess fails", async (
         if (table === "medical_records") {
           return {
             update: () => ({
-              eq: async () => ({ error: { message: "write failed" } }),
+              eq: () => ({
+                select: async () => ({ data: null, error: { message: "write failed" } }),
+                eq: () => ({
+                  select: async () => ({ data: null, error: { message: "write failed" } }),
+                }),
+              }),
             }),
           };
         }

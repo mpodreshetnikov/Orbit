@@ -326,11 +326,17 @@ Deno.test("health-structure repository updates and replaces record rows", async 
       auth: { getUser: async () => ({ data: { user: null }, error: null }) },
     },
     adminClient: {
+      rpc: async () => ({ data: true, error: null }),
       from: (table: string) => {
         if (table === "medical_records") {
+          const matched = { data: [{ id: "record-1" }], error: null };
           return {
             update: () => ({
-              eq: async () => ({ error: null }),
+              eq: () => ({
+                select: async () => matched,
+                eq: () => ({ select: async () => matched }),
+                or: () => ({ select: async () => matched }),
+              }),
             }),
           };
         }
@@ -380,9 +386,14 @@ Deno.test("health-structure repository throws on write failures", async () => {
     adminClient: {
       from: (table: string) => {
         if (table === "medical_records") {
+          const failed = { data: null, error: { message: "write failed" } };
           return {
             update: () => ({
-              eq: async () => ({ error: { message: "write failed" } }),
+              eq: () => ({
+                select: async () => failed,
+                eq: () => ({ select: async () => failed }),
+                or: () => ({ select: async () => failed }),
+              }),
             }),
           };
         }

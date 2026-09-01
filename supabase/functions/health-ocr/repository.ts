@@ -1,5 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../_shared/database.types.ts";
+import {
+  ClaimLostError,
+  claimRecordViaRpc,
+  renewClaimViaRpc,
+} from "../_shared/processing-claim.ts";
 
 const BUCKET_NAME = "medical-attachments";
 
@@ -27,8 +32,23 @@ export interface HealthOcrRepository {
   getRecord(recordId: string): Promise<OcrRecord | null>;
   getAttachments(recordId: string): Promise<OcrAttachment[]>;
   downloadAttachment(storagePath: string): Promise<Blob | null>;
-  updateRecordSuccess(recordId: string, payload: { ocrText: string; title: string }): Promise<void>;
-  updateRecordFailure(recordId: string, errorMessage: string): Promise<void>;
+  /**
+   * Take ownership of the record for this run, or report that someone else has it.
+   * Returns the run id on success and null when the record is already claimed.
+   */
+  claimRecord(recordId: string): Promise<string | null>;
+  /** Extend this run's lease while it is still working; false once the claim has been taken. */
+  renewClaim(recordId: string, runId: string): Promise<boolean>;
+  updateRecordSuccess(
+    recordId: string,
+    payload: { ocrText: string; title: string },
+    options?: { runId?: string },
+  ): Promise<void>;
+  updateRecordFailure(
+    recordId: string,
+    errorMessage: string,
+    options?: { runId?: string },
+  ): Promise<void>;
 }
 
 interface CreateRepositoryDeps {
@@ -110,30 +130,49 @@ export function createSupabaseHealthOcrRepository(deps: CreateRepositoryDeps): H
       return data;
     },
 
-    async updateRecordSuccess(recordId, payload) {
-      const { error } = await admin
+    async claimRecord(recordId) {
+      return await claimRecordViaRpc(admin, recordId, "ocr_processing");
+    },
+
+    async renewClaim(recordId, runId) {
+      return await renewClaimViaRpc(admin, recordId, runId);
+    },
+
+    async updateRecordSuccess(recordId, payload, options = {}) {
+      let query = admin
         .from("medical_records")
         .update({
           ocr_text: payload.ocrText,
           title: payload.title,
           status: "ocr_review",
           ocr_error: null,
+          processing_run_id: null,
+          processing_started_at: null,
         })
         .eq("id", recordId);
+      // A worker whose client already gave up used to overwrite the ocr_failed that replaced it.
+      if (options.runId) query = query.eq("processing_run_id", options.runId);
+      const { data, error } = await query.select("id");
 
       if (error) {
         throw new Error(`Failed to update record: ${error.message}`);
       }
+      if (options.runId && (data ?? []).length === 0) throw new ClaimLostError(recordId);
     },
 
-    async updateRecordFailure(recordId, errorMessage) {
-      await admin
+    async updateRecordFailure(recordId, errorMessage, options = {}) {
+      let query = admin
         .from("medical_records")
         .update({
           status: "ocr_failed",
           ocr_error: errorMessage,
+          processing_run_id: null,
+          processing_started_at: null,
         })
         .eq("id", recordId);
+      if (options.runId) query = query.eq("processing_run_id", options.runId);
+      const { data } = await query.select("id");
+      if (options.runId && (data ?? []).length === 0) throw new ClaimLostError(recordId);
     },
   };
 }
