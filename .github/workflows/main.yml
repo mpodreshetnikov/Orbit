@@ -304,15 +304,20 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Extension Release
     environment: production
-    # Serialised across main runs. Two runs that both sampled production before
-    # either uploaded would both be told to publish, and the one finishing last
-    # would win regardless of which release is older. The guard in
-    # `publishPreparedExtensionRelease` re-reads the published version at upload
-    # time, and this makes that read meaningful by keeping two uploads out of the
-    # same window. Neither is sufficient alone. `cancel-in-progress` is left off
-    # so a queued newer run waits its turn rather than being dropped.
+    # Serialised per release version, not globally. Two runs uploading the same
+    # version are the double-write worth preventing, and they queue here; two
+    # runs uploading different versions are kept apart by the guard in
+    # `publishPreparedExtensionRelease`, which re-reads the published version
+    # through the authenticated Storage API immediately before writing.
+    #
+    # A single global group would have been worse than none: GitHub keeps at most
+    # one running and one pending job per group, and a new entrant replaces the
+    # pending one even with `cancel-in-progress: false`. Re-running an old 0.1.2
+    # workflow would then displace a pending 0.1.4, which would refuse its own
+    # upload and leave 0.1.4 unpublished until someone pushed again. Keying the
+    # group by version means an older run can only ever displace itself.
     concurrency:
-      group: publish-extension-release
+      group: publish-extension-release-${{ needs.quality-gates.outputs.extension_next_version }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     env:

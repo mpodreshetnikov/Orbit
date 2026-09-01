@@ -6,6 +6,10 @@ import {
   buildExtensionReleaseMetadata,
   buildSupabaseStoragePublicUrl,
   compareExtensionVersions,
+  assertReleaseMayBePublished,
+  EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL,
+  EXTENSION_RELEASE_METADATA_CACHE_CONTROL,
+  fetchPublishedExtensionVersionFromStorage,
   mayPublishOverPublished,
   EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
   EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
@@ -530,5 +534,149 @@ describe("re-reading production at upload time", () => {
     expect(may({ status: "unknown", reason: "network" })).toBe(true);
     expect(may({ status: "published", version: "not-a-version" })).toBe(true);
     expect(may(undefined)).toBe(true);
+  });
+});
+
+describe("reading the published version authoritatively", () => {
+  const clientReturning = (result: { data: Blob | null; error: unknown }) => ({
+    storage: {
+      from: (bucket: string) => {
+        if (bucket !== "extension-releases") throw new Error(`Unexpected bucket: ${bucket}`);
+        return { download: () => Promise.resolve(result) };
+      },
+    },
+  });
+
+  it("reads latest.json through the client rather than the public URL", async () => {
+    // The public route is a CDN. A guard deciding whether to overwrite
+    // production cannot read production through a cache.
+    const asked: string[] = [];
+    const client = {
+      storage: {
+        from: () => ({
+          download: (path: string) => {
+            asked.push(path);
+            return Promise.resolve({
+              data: new Blob([JSON.stringify({ version: "0.1.4" })]),
+              error: null,
+            });
+          },
+        }),
+      },
+    };
+
+    await expect(fetchPublishedExtensionVersionFromStorage(client)).resolves.toEqual({
+      status: "published",
+      version: "0.1.4",
+    });
+    expect(asked).toEqual(["latest.json"]);
+  });
+
+  it("reports absent when the object is not there", async () => {
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: null, error: { statusCode: "404", code: "NoSuchKey" } }),
+      ),
+    ).resolves.toEqual({ status: "absent" });
+
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: null, error: { status: 404, message: "Object not found" } }),
+      ),
+    ).resolves.toEqual({ status: "absent" });
+  });
+
+  it("reports unknown for an error that is not a missing object", async () => {
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: null, error: { status: 403, message: "Unauthorized" } }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+  });
+
+  it("reports unknown for a body that is not usable metadata", async () => {
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: new Blob(["<html>proxy</html>"]), error: null }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientReturning({ data: new Blob([JSON.stringify({ published_at: "now" })]), error: null }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+  });
+});
+
+describe("the publish-time gate", () => {
+  const clientPublishing = (version: string | null) => ({
+    storage: {
+      from: () => ({
+        download: () =>
+          Promise.resolve(
+            version === null
+              ? { data: null, error: { status: 404, message: "Object not found" } }
+              : { data: new Blob([JSON.stringify({ version })]), error: null },
+          ),
+      }),
+    },
+  });
+
+  it("refuses to overwrite a release that is not older", async () => {
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing("0.1.4"), releaseVersion: "0.1.3" }),
+    ).rejects.toThrow(/Refusing to publish 0\.1\.3: 0\.1\.4 is already published/);
+
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing("0.1.3"), releaseVersion: "0.1.3" }),
+    ).rejects.toThrow(/already published/);
+  });
+
+  it("allows an older release to be replaced, and a first publish", async () => {
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing("0.1.2"), releaseVersion: "0.1.3" }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertReleaseMayBePublished({ client: clientPublishing(null), releaseVersion: "0.1.3" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("reads through the client it is given, never a URL", async () => {
+    // This is the point of the gate rather than an implementation detail: the
+    // public route is a CDN, and a check that decides whether to overwrite
+    // production must not read production through a cache.
+    let downloads = 0;
+    const client = {
+      storage: {
+        from: () => ({
+          download: () => {
+            downloads += 1;
+            return Promise.resolve({
+              data: new Blob([JSON.stringify({ version: "0.1.2" })]),
+              error: null,
+            });
+          },
+        }),
+      },
+    };
+
+    await assertReleaseMayBePublished({ client, releaseVersion: "0.1.3" });
+    expect(downloads).toBe(1);
+  });
+});
+
+describe("how long each object may be cached", () => {
+  it("keeps the pointer fresh and the archive immutable", () => {
+    // Supabase defaults an upload to max-age=3600. On latest.json that served an
+    // hour-old pointer to every reader — the extension checking for an update,
+    // and the publish gate checking what is already out.
+    expect(EXTENSION_RELEASE_METADATA_CACHE_CONTROL).toBe("no-cache");
+    expect(EXTENSION_RELEASE_METADATA_CACHE_CONTROL).not.toMatch(/max-age=[1-9]/);
+
+    // An archive is content-addressed by the version in its path, so it never
+    // changes once written.
+    expect(EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL).toMatch(/immutable/);
   });
 });

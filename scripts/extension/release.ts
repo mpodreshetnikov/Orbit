@@ -25,6 +25,19 @@ const EXTENSION_RELEASE_MANIFEST_PATH = "browserExtension/manifest.json";
  */
 const EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE = "application/zip";
 const EXTENSION_RELEASE_METADATA_CONTENT_TYPE = "application/json";
+
+/**
+ * An archive is content-addressed by the version in its path, so it never
+ * changes once written and may be cached for as long as anyone likes.
+ */
+const EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL = "public, max-age=31536000, immutable";
+/**
+ * `latest.json` is the opposite: a pointer whose whole purpose is to be current.
+ * Supabase defaults an upload to `max-age=3600`, which would have served an
+ * hour-old pointer to every reader -- the extension checking for an update, and
+ * the publish guard checking what is already out.
+ */
+const EXTENSION_RELEASE_METADATA_CACHE_CONTROL = "no-cache";
 const EXTENSION_RELEASE_DIST_DIR = "browserExtension/dist";
 const DEFAULT_ARTIFACT_DIR = ".artifacts/extension-release";
 
@@ -298,6 +311,76 @@ export function publishedVersionOf(
   return published.version;
 }
 
+/** The slice of a Supabase client this module needs to read an object back. */
+export interface ExtensionReleaseDownloader {
+  storage: {
+    from(bucket: string): {
+      download(path: string): Promise<{ data: Blob | null; error: unknown }>;
+    };
+  };
+}
+
+/**
+ * Reads the published version through the authenticated Storage API rather than
+ * the public URL.
+ *
+ * The public route is served from a CDN, so it answers with whatever it last
+ * cached -- and a guard that decides whether to overwrite production cannot read
+ * production through a cache. Even with `no-cache` now set on the object, an
+ * edge that has not yet seen the newest write would let the very rollback this
+ * guard exists to stop through. The authenticated route is the object store
+ * itself, which is the only answer worth deciding on.
+ */
+export async function fetchPublishedExtensionVersionFromStorage(
+  client: ExtensionReleaseDownloader,
+  bucketName: string = EXTENSION_RELEASE_BUCKET,
+): Promise<PublishedExtensionVersion> {
+  let result: { data: Blob | null; error: unknown };
+  try {
+    result = await client.storage.from(bucketName).download(EXTENSION_RELEASE_LATEST_PATH);
+  } catch (error) {
+    return {
+      status: "unknown",
+      reason: `reading ${EXTENSION_RELEASE_LATEST_PATH} failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  if (result.error) {
+    // Storage reports a missing object in the error body rather than by status,
+    // the same shape the public route uses.
+    if (isStorageObjectMissing(result.error)) return { status: "absent" };
+    const message =
+      typeof (result.error as { message?: unknown }).message === "string"
+        ? (result.error as { message: string }).message
+        : JSON.stringify(result.error);
+    return { status: "unknown", reason: `reading ${EXTENSION_RELEASE_LATEST_PATH}: ${message}` };
+  }
+
+  if (!result.data) return { status: "absent" };
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(await result.data.text());
+  } catch (error) {
+    return {
+      status: "unknown",
+      reason: `${EXTENSION_RELEASE_LATEST_PATH} is not JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  const version = (payload as { version?: unknown } | null)?.version;
+  if (typeof version !== "string" || !version.trim()) {
+    return { status: "unknown", reason: `${EXTENSION_RELEASE_LATEST_PATH} carries no version` };
+  }
+
+  // As written, not trimmed: whether it is a version is the comparison's call.
+  return { status: "published", version };
+}
+
 /**
  * Whether the release may still be uploaded, re-asked at the moment of upload.
  *
@@ -325,6 +408,27 @@ export function mayPublishOverPublished(input: {
     // alone, and an unusable answer means "do not block".
     manifestVersionChanged: true,
   });
+}
+
+/**
+ * The publish-time gate, as one callable thing so it can be exercised without
+ * a prepared artifact on disk. It reads production through the client it is
+ * given -- never the public URL -- and refuses when what is already out is not
+ * older than what this run is about to write.
+ */
+export async function assertReleaseMayBePublished(input: {
+  client: ExtensionReleaseDownloader;
+  releaseVersion: string;
+  bucketName?: string;
+}): Promise<void> {
+  const published = await fetchPublishedExtensionVersionFromStorage(input.client, input.bucketName);
+  if (mayPublishOverPublished({ published, releaseVersion: input.releaseVersion })) return;
+
+  throw new Error(
+    `Refusing to publish ${input.releaseVersion}: ${
+      published.status === "published" ? published.version : "an unknown version"
+    } is already published. A newer release must not be overwritten by an older run.`,
+  );
 }
 
 export function shouldPublishRelease(input: {
@@ -394,9 +498,11 @@ const STORAGE_MISSING_CODES = new Set(["NoSuchKey", "NoSuchBucket"]);
  */
 function isStorageObjectMissing(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
-  const body = payload as { statusCode?: unknown; code?: unknown };
+  const body = payload as { statusCode?: unknown; status?: unknown; code?: unknown };
   if (typeof body.code === "string" && STORAGE_MISSING_CODES.has(body.code)) return true;
-  return String(body.statusCode ?? "") === "404";
+  // The public route puts the real status in `statusCode`; the client's own
+  // error object carries `status`. Both mean the same thing here.
+  return String(body.statusCode ?? "") === "404" || String(body.status ?? "") === "404";
 }
 
 /**
@@ -783,14 +889,7 @@ export async function publishPreparedExtensionRelease(
     serviceRoleKey,
   });
 
-  const published = await fetchPublishedExtensionVersion({ supabaseUrl });
-  if (!mayPublishOverPublished({ published, releaseVersion: metadata.version })) {
-    throw new Error(
-      `Refusing to publish ${metadata.version}: ${
-        published.status === "published" ? published.version : "an unknown version"
-      } is already published. A newer release must not be overwritten by an older run.`,
-    );
-  }
+  await assertReleaseMayBePublished({ client: supabase, releaseVersion: metadata.version });
 
   const artifactContent = await fs.readFile(artifactPath);
   const latestMetadataContent = await fs.readFile(metadataPath);
@@ -800,6 +899,7 @@ export async function publishPreparedExtensionRelease(
     .upload(artifactRelativePath, artifactContent, {
       upsert: true,
       contentType: EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
+      cacheControl: EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL,
     });
   if (artifactUpload.error) {
     throw new Error(`Failed to upload extension artifact: ${artifactUpload.error.message}`);
@@ -810,6 +910,7 @@ export async function publishPreparedExtensionRelease(
     .upload(EXTENSION_RELEASE_LATEST_PATH, latestMetadataContent, {
       upsert: true,
       contentType: EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
+      cacheControl: EXTENSION_RELEASE_METADATA_CACHE_CONTROL,
     });
   if (latestUpload.error) {
     throw new Error(`Failed to upload extension release metadata: ${latestUpload.error.message}`);
@@ -982,6 +1083,8 @@ if (invokedScript === import.meta.url) {
 
 export {
   DEFAULT_ARTIFACT_DIR,
+  EXTENSION_RELEASE_ARTIFACT_CACHE_CONTROL,
+  EXTENSION_RELEASE_METADATA_CACHE_CONTROL,
   EXTENSION_RELEASE_ARTIFACT_CONTENT_TYPE,
   EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
   EXTENSION_RELEASE_BUCKET,
