@@ -60,3 +60,17 @@ SELECT cron.schedule(
   '0 0 * * *',
   $$DELETE FROM cron.job_run_details WHERE end_time < now() - interval '7 days'$$
 );
+
+-- ============================================================================
+-- Job: release-abandoned-record-processing
+-- Return records whose pipeline claim outlived its lease to a retryable state
+-- Runs every five minutes
+-- ============================================================================
+SELECT cron.unschedule('release-abandoned-record-processing')
+WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'release-abandoned-record-processing');
+
+SELECT cron.schedule(
+  'release-abandoned-record-processing',
+  '*/5 * * * *',
+  $$SELECT public.release_abandoned_record_processing()$$
+);

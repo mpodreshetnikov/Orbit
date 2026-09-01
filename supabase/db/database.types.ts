@@ -623,11 +623,14 @@ export type Database = {
           ocr_error: string | null
           ocr_text: string | null
           person_id: string
+          processing_run_id: string | null
+          processing_started_at: string | null
           record_date: string | null
           record_type: Database["public"]["Enums"]["record_type"]
           removed_at: string | null
           search_vector: unknown
           status: Database["public"]["Enums"]["record_status"]
+          structure_error: string | null
           title: string
           updated_at: string
         }
@@ -642,11 +645,14 @@ export type Database = {
           ocr_error?: string | null
           ocr_text?: string | null
           person_id: string
+          processing_run_id?: string | null
+          processing_started_at?: string | null
           record_date?: string | null
           record_type?: Database["public"]["Enums"]["record_type"]
           removed_at?: string | null
           search_vector?: unknown
           status?: Database["public"]["Enums"]["record_status"]
+          structure_error?: string | null
           title: string
           updated_at?: string
         }
@@ -661,11 +667,14 @@ export type Database = {
           ocr_error?: string | null
           ocr_text?: string | null
           person_id?: string
+          processing_run_id?: string | null
+          processing_started_at?: string | null
           record_date?: string | null
           record_type?: Database["public"]["Enums"]["record_type"]
           removed_at?: string | null
           search_vector?: unknown
           status?: Database["public"]["Enums"]["record_status"]
+          structure_error?: string | null
           title?: string
           updated_at?: string
         }
@@ -2054,6 +2063,7 @@ export type Database = {
           morphology: string | null
           person_id: string
           record_id: string
+          resolution_status: string
           severity: string
           site_code: string | null
           size_mm: number | null
@@ -2079,6 +2089,7 @@ export type Database = {
           morphology?: string | null
           person_id: string
           record_id: string
+          resolution_status?: string
           severity?: string
           site_code?: string | null
           size_mm?: number | null
@@ -2104,6 +2115,7 @@ export type Database = {
           morphology?: string | null
           person_id?: string
           record_id?: string
+          resolution_status?: string
           severity?: string
           site_code?: string | null
           size_mm?: number | null
@@ -2273,6 +2285,15 @@ export type Database = {
       checkup_recompute_next_due_for_item: {
         Args: { p_checkup_item_id: string }
         Returns: undefined
+      }
+      claim_medical_record: {
+        Args: {
+          p_lease_seconds?: number
+          p_record_id: string
+          p_run_id: string
+          p_status: string
+        }
+        Returns: boolean
       }
       clear_future_med_dose_events: {
         Args: { p_auth_user_id: string; p_horizon_days?: number }
@@ -2659,6 +2680,14 @@ export type Database = {
       money_upsert_transactions_batch: {
         Args: { p_batch_id: string; p_payer_person_id: string; p_rows: Json }
         Returns: Json
+      }
+      release_abandoned_record_processing: {
+        Args: { p_lease_seconds?: number; p_structuring_lease_seconds?: number }
+        Returns: number
+      }
+      renew_medical_record_claim: {
+        Args: { p_record_id: string; p_run_id: string }
+        Returns: boolean
       }
       run_med_event_generation_for_all_users: {
         Args: { p_horizon_days?: number }

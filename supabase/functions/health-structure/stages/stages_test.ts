@@ -92,9 +92,26 @@ function recordingFetch(responder: (body: Record<string, unknown>) => Response) 
   return { bodies, fetchFn };
 }
 
+type MessageContent = string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+
 function promptOf(body: Record<string, unknown>): string {
-  const messages = body.messages as Array<{ role: string; content: string }>;
-  return messages.map((m) => m.content).join("\n");
+  const messages = body.messages as Array<{ role: string; content: MessageContent }>;
+  return messages
+    .map((m) =>
+      typeof m.content === "string"
+        ? m.content
+        : m.content.map((part) => part.text ?? "").join("\n"),
+    )
+    .join("\n");
+}
+
+function imagesOf(body: Record<string, unknown>): string[] {
+  const messages = body.messages as Array<{ role: string; content: MessageContent }>;
+  return messages.flatMap((m) =>
+    typeof m.content === "string"
+      ? []
+      : m.content.flatMap((part) => (part.image_url ? [part.image_url.url] : [])),
+  );
 }
 
 Deno.test("fenceBlock labels untrusted content as data, not instructions", () => {
@@ -1011,4 +1028,122 @@ Deno.test("a negation standing before its own term still suppresses the finding"
     model: "m",
   });
   assertEquals(result.value.findings.length, 0);
+});
+
+Deno.test("a skipped reconcile leaves the total known, not unknown", async () => {
+  const { bodies, fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: ["cbc"],
+      });
+    }
+    return jsonResponse({ observations: [], findings: [], conditions: [] });
+  });
+
+  const context = {
+    ...CATALOGS,
+    existingConditions: [],
+    existingFindings: [],
+    checkupItems: [],
+  } as unknown as HealthStructureParseContext;
+
+  const outcome = await runStagedParse("Гемоглобин 97", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "default-model",
+  });
+
+  assertEquals(bodies.length, 2);
+  assertEquals(outcome.stagesRun, ["classify", "extract"]);
+  // The stage that never ran has no cost to be unknown about.
+  assertEquals(outcome.usage.promptTokens, 20);
+  assertEquals(outcome.usage.completionTokens, 10);
+});
+
+// The transcription is a lossy hand-off: whatever it failed to express about a table -- which
+// column a value sat under, which range goes with which analyte -- is unrecoverable from the text.
+Deno.test("the document's pages reach extraction, and no other stage", async () => {
+  const page = "data:image/jpeg;base64,AAAA";
+  const { bodies, fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    if (prompt.includes("Extract clinical entities")) {
+      return jsonResponse({ observations: [], findings: [], conditions: [] });
+    }
+    return jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    });
+  });
+
+  const context = {
+    ...CATALOGS,
+    ...PATIENT,
+    pageImages: [page],
+  } as unknown as HealthStructureParseContext;
+  await runStagedParse("Гемоглобин 97 г/л", context, {
+    fetchFn,
+    apiKey: "k",
+    defaultModel: "m",
+  });
+
+  const extractBody = bodies.find((body) => promptOf(body).includes("Extract clinical entities"));
+  if (!extractBody) throw new Error("no extract request was made");
+  assertEquals(imagesOf(extractBody), [page]);
+  // And the text stays the record: anchors are quoted from it, never read off the image.
+  assertEquals(promptOf(extractBody).includes("Copy source_anchor from the text"), true);
+
+  for (const body of bodies) {
+    if (body === extractBody) continue;
+    assertEquals(imagesOf(body), []);
+  }
+});
+
+Deno.test("with no pages, the request body is exactly what it always was", async () => {
+  const { bodies, fetchFn } = recordingFetch((body) => {
+    const prompt = promptOf(body);
+    if (prompt.includes("describe it as a whole")) {
+      return jsonResponse({
+        record_type: "lab",
+        title: "CBC",
+        record_date: "2026-01-05",
+        summary: "s",
+        keywords: [],
+      });
+    }
+    if (prompt.includes("Extract clinical entities")) {
+      return jsonResponse({ observations: [], findings: [], conditions: [] });
+    }
+    return jsonResponse({
+      findings_to_resolve: [],
+      conditions_to_resolve: [],
+      checkups_to_complete: [],
+    });
+  });
+
+  const context = { ...CATALOGS, ...PATIENT } as unknown as HealthStructureParseContext;
+  await runStagedParse("Гемоглобин 97 г/л", context, { fetchFn, apiKey: "k", defaultModel: "m" });
+
+  for (const body of bodies) {
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    // A plain string, not a one-element parts array: the long stable prefix has to stay
+    // byte-identical for provider-side prompt caching to keep working.
+    assertEquals(typeof messages[1].content, "string");
+    // And a stage with no pages says nothing about images at all.
+    assertEquals(promptOf(body).includes("The images accompanying this prompt"), false);
+  }
 });

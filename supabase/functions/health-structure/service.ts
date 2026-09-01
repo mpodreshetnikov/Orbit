@@ -6,7 +6,12 @@ import {
 } from "./resolution.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import type { HealthStructureRepository } from "./repository.ts";
-import type { IcdLookupResult, StructuredDataWithEntities } from "./types.ts";
+import { usageAttrs } from "../_shared/llm-usage.ts";
+import type {
+  IcdLookupResult,
+  StructuredDataWithEntities,
+  StructuredParseOutcome,
+} from "./types.ts";
 import { convertRefRangeToCanonical, convertToCanonical } from "./unit-conversion.ts";
 
 export interface HealthStructureServiceInput {
@@ -21,6 +26,12 @@ export interface HealthStructureParseContext {
   existingConditions: Awaited<ReturnType<HealthStructureRepository["fetchPersonConditions"]>>;
   existingFindings: Awaited<ReturnType<HealthStructureRepository["fetchPersonActiveFindings"]>>;
   checkupItems: Awaited<ReturnType<HealthStructureRepository["fetchUpcomingOverdueCheckupItems"]>>;
+  /**
+   * The record's own pages, as data URLs, for the stage that has to read a table. Empty when the
+   * record has no raster attachments or they could not be loaded -- structuring then works from
+   * the transcription alone, as it always did.
+   */
+  pageImages?: string[];
 }
 
 export interface HealthStructureServiceDeps {
@@ -28,8 +39,13 @@ export interface HealthStructureServiceDeps {
   parseStructuredData: (
     ocrText: string,
     context: HealthStructureParseContext,
-  ) => Promise<StructuredDataWithEntities>;
+  ) => Promise<StructuredParseOutcome>;
   lookupIcdCode: (code: string) => Promise<IcdLookupResult | null>;
+  /**
+   * Load the record's pages for the extraction stage. Absent, structuring sees only the text --
+   * which is what it saw before, and what the E2E stub and the unit tests want.
+   */
+  loadPageImages?: (recordId: string) => Promise<string[]>;
   log?: Pick<Console, "log" | "warn" | "error">;
   telemetry?: EdgeTelemetry;
 }
@@ -175,7 +191,8 @@ export function buildFindingRows(
       site_code: bodySiteEntry?.site_code ?? null,
       body_site_text: item.body_site_text,
       size_mm: item.size_mm,
-      count: item.count || 1,
+      // A real zero is a real count. It used to be coerced to 1 because zero meant "resolved".
+      count: item.count ?? null,
       severity: item.severity,
       laterality: item.laterality,
       morphology: item.morphology,
@@ -198,6 +215,11 @@ export async function runHealthStructureService(
 ): Promise<ServiceResult> {
   const telemetry = deps.telemetry;
   const serviceSpan = telemetry?.startSpan("edge.health_structure.service");
+  // The failure write below uses the service-role client and this function runs with
+  // verify_jwt = false, so it must not be reachable before the caller has been authenticated
+  // and the record resolved -- otherwise anyone who guesses a record id could stamp it.
+  let mayRecordFailure = false;
+  let runId: string | null = null;
   try {
     telemetry?.info("health_structure_service_started", {
       has_record_id: Boolean(input.recordId),
@@ -228,6 +250,27 @@ export async function runHealthStructureService(
     if (!record) throw new Error("Record not found or access denied");
     const personId = asString(record.person_id);
     if (!personId) throw new Error("Record is missing person_id");
+    // The claim is taken server-side, after the record is known to exist: the client used to
+    // write `structuring` before invoking, which let two callers both believe they had the work.
+    const claimSpan = telemetry?.startSpan("edge.health_structure.claim");
+    runId = await deps.repository.claimRecord(input.recordId);
+    if (!runId) {
+      await claimSpan?.end({ status: "ok", attrs: { claimed: false } });
+      telemetry?.info("health_structure_already_running", { record_id: input.recordId });
+      // Not a failure of this record: another run owns it, and stamping structure_error here
+      // would report that run's progress as this caller's error.
+      mayRecordFailure = false;
+      await serviceSpan?.end({ status: "ok", attrs: { claimed: false } });
+      return {
+        status: 409,
+        payload: { success: false, error: "Structuring is already running for this record" },
+      };
+    }
+    await claimSpan?.end({ status: "ok", attrs: { claimed: true } });
+    // Only a run that holds the claim may write a failure: before this point an error belongs to
+    // a caller that never owned the record, and stamping it would clear the owner's claim.
+    mayRecordFailure = true;
+
     const ocrText = asString(record.ocr_text);
     if (!ocrText) throw new Error("No OCR text found for this record. Run health-ocr first.");
     await recordSpan?.end({
@@ -263,6 +306,10 @@ export async function runHealthStructureService(
       },
     });
 
+    // The pages themselves, so extraction can settle what the transcription left ambiguous.
+    // Loaded after the claim and never allowed to fail the record: this is context, not content.
+    const pageImages = (await deps.loadPageImages?.(input.recordId)) ?? [];
+
     const context: HealthStructureParseContext = {
       observationCatalog,
       findingTypeCatalog,
@@ -270,33 +317,48 @@ export async function runHealthStructureService(
       existingConditions,
       existingFindings,
       checkupItems,
+      pageImages,
     };
 
     const parseSpan = telemetry?.startSpan("edge.health_structure.parse_llm");
-    const structuredData = await deps.parseStructuredData(ocrText, context);
+    const parseOutcome = await deps.parseStructuredData(ocrText, context);
+    const structuredData = parseOutcome.structured;
     await parseSpan?.end({
       status: "ok",
       attrs: {
+        page_image_count: pageImages.length,
         observation_count: structuredData.observations.length,
         finding_count: structuredData.findings.length,
         condition_count: structuredData.conditions.length,
+        // On the record's own span, so per-record cost is readable off the trace rather than
+        // off an uncorrelated log line. Absent values are omitted, never sent as zero.
+        ...usageAttrs(parseOutcome.usage),
+        ...(parseOutcome.stagesRun.length > 0
+          ? { stages_run: parseOutcome.stagesRun.join(",") }
+          : {}),
       },
     });
     const checkupSuggestions = buildCheckupSuggestions(structuredData, checkupItems);
 
     const updateRecordSpan = telemetry?.startSpan("edge.health_structure.update_record");
-    await deps.repository.updateMedicalRecord(input.recordId, {
-      title: structuredData.title,
-      record_type: structuredData.record_type,
-      record_date: structuredData.record_date,
-      // `notes` is user-editable and deliberately not written here. It previously received the
-      // same text as llm_summary, so re-running structuring silently overwrote whatever the user
-      // had typed.
-      llm_summary: structuredData.summary,
-      llm_keywords: structuredData.keywords,
-      llm_suggested_checkup_completions: checkupSuggestions,
-      status: "structure_review",
-    });
+    await deps.repository.updateMedicalRecord(
+      input.recordId,
+      {
+        title: structuredData.title,
+        record_type: structuredData.record_type,
+        record_date: structuredData.record_date,
+        // `notes` is user-editable and deliberately not written here. It previously received the
+        // same text as llm_summary, so re-running structuring silently overwrote whatever the user
+        // had typed.
+        llm_summary: structuredData.summary,
+        llm_keywords: structuredData.keywords,
+        llm_suggested_checkup_completions: checkupSuggestions,
+        status: "structure_review",
+        // A previous failure is cleared by the run that succeeds, the way ocr_error is.
+        structure_error: null,
+      },
+      { runId },
+    );
     await updateRecordSpan?.end({ status: "ok" });
 
     const observationSpan = telemetry?.startSpan("edge.health_structure.persist_observations");
@@ -390,6 +452,17 @@ export async function runHealthStructureService(
     );
     await resolutionSpan?.end({ status: "ok" });
 
+    // Only now is the record's content complete. Releasing the claim with the status write above
+    // would have opened the record to a second run while observations, findings and resolutions
+    // were still being written -- two workers deleting and inserting the same rows.
+    const releaseSpan = telemetry?.startSpan("edge.health_structure.release_claim");
+    await deps.repository.updateMedicalRecord(
+      input.recordId,
+      { processing_run_id: null, processing_started_at: null },
+      { runId },
+    );
+    await releaseSpan?.end({ status: "ok" });
+
     telemetry?.info("health_structure_service_completed", {
       record_id: input.recordId,
       observation_count: structuredData.observations.length,
@@ -411,6 +484,31 @@ export async function runHealthStructureService(
       record_id: input.recordId ?? "missing",
       error_message: message,
     });
+    // Durable trace of the failure, and only for a caller who got past authentication and whose
+    // record was found. Best-effort on purpose: the original error is what the caller must see,
+    // so a record that cannot be written must not replace it with a second one.
+    if (mayRecordFailure && input.recordId) {
+      try {
+        await deps.repository.updateMedicalRecord(
+          input.recordId,
+          {
+            structure_error: message,
+            // Back to where a retry starts from. Leaving `structuring` behind would show the
+            // record as being worked on by a run that no longer exists -- the client-side
+            // rollback only happens when a browser is still there to do it.
+            status: "ocr_review",
+            // Release the claim so a retry is not locked out until the lease expires.
+            processing_run_id: null,
+            processing_started_at: null,
+          },
+          { runId: runId ?? undefined },
+        );
+      } catch (writeError) {
+        // Includes the case where the claim was lost: a worker that no longer owns the record
+        // must not stamp its error over whatever replaced it.
+        deps.log?.error?.("[health-structure] failed to persist structure_error:", writeError);
+      }
+    }
     await serviceSpan?.end({
       status: "error",
       statusMessage: message,

@@ -218,8 +218,7 @@ Deno.test("health-structure repository loads catalogs and person context", async
                         body_site_text: "Lung",
                         finding_type_id: "ft-1",
                         body_site_id: "bs-1",
-                        size_mm: 2,
-                        count: 1,
+                        resolution_status: "observed",
                       },
                       {
                         finding_code: "F1",
@@ -228,8 +227,7 @@ Deno.test("health-structure repository loads catalogs and person context", async
                         body_site_text: "Lung",
                         finding_type_id: "ft-1",
                         body_site_id: "bs-1",
-                        size_mm: 3,
-                        count: 1,
+                        resolution_status: "observed",
                       },
                       {
                         finding_code: "F2",
@@ -238,8 +236,7 @@ Deno.test("health-structure repository loads catalogs and person context", async
                         body_site_text: "Liver",
                         finding_type_id: "ft-2",
                         body_site_id: "bs-2",
-                        size_mm: 0,
-                        count: 1,
+                        resolution_status: "resolved",
                       },
                     ],
                     error: null,
@@ -329,11 +326,17 @@ Deno.test("health-structure repository updates and replaces record rows", async 
       auth: { getUser: async () => ({ data: { user: null }, error: null }) },
     },
     adminClient: {
+      rpc: async () => ({ data: true, error: null }),
       from: (table: string) => {
         if (table === "medical_records") {
+          const matched = { data: [{ id: "record-1" }], error: null };
           return {
             update: () => ({
-              eq: async () => ({ error: null }),
+              eq: () => ({
+                select: async () => matched,
+                eq: () => ({ select: async () => matched }),
+                or: () => ({ select: async () => matched }),
+              }),
             }),
           };
         }
@@ -383,9 +386,14 @@ Deno.test("health-structure repository throws on write failures", async () => {
     adminClient: {
       from: (table: string) => {
         if (table === "medical_records") {
+          const failed = { data: null, error: { message: "write failed" } };
           return {
             update: () => ({
-              eq: async () => ({ error: { message: "write failed" } }),
+              eq: () => ({
+                select: async () => failed,
+                eq: () => ({ select: async () => failed }),
+                or: () => ({ select: async () => failed }),
+              }),
             }),
           };
         }
@@ -625,8 +633,7 @@ Deno.test(
                           body_site_text: null,
                           finding_type_id: null,
                           body_site_id: null,
-                          size_mm: "not-number",
-                          count: "not-number",
+                          resolution_status: "observed",
                         },
                       ],
                       error: null,

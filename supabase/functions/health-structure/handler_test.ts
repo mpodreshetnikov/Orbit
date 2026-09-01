@@ -4,11 +4,23 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { assertJsonResponse } from "../_shared/testing/response.ts";
 import { createHealthStructureHandler } from "./handler.ts";
 import type { HealthStructureRepository } from "./repository.ts";
-import type { StructuredDataWithEntities } from "./types.ts";
+import { emptyLlmUsage, type LlmUsage } from "../_shared/llm-usage.ts";
+import type { StructuredDataWithEntities, StructuredParseOutcome } from "./types.ts";
+
+/** The parse dependency now reports what the call cost alongside the entities it produced. */
+function parsed(
+  structured: StructuredDataWithEntities,
+  usage: LlmUsage = emptyLlmUsage(),
+  stagesRun: string[] = [],
+): StructuredParseOutcome {
+  return { structured, usage, stagesRun };
+}
 
 function createRepositoryMock(): HealthStructureRepository {
   return {
     authenticateAllowedUser: async () => ({ id: "user-1", email: "user@example.com" }),
+    getAttachments: async () => [],
+    downloadAttachment: async () => null,
     getRecord: async () => ({
       id: "record-1",
       person_id: "person-1",
@@ -21,6 +33,7 @@ function createRepositoryMock(): HealthStructureRepository {
     fetchPersonConditions: async () => [],
     fetchPersonActiveFindings: async () => [],
     fetchUpcomingOverdueCheckupItems: async () => [],
+    claimRecord: async () => "run-1",
     updateMedicalRecord: async () => {},
     replaceRecordObservations: async () => {},
     replaceRecordFindings: async () => {},
@@ -57,7 +70,7 @@ Deno.test("health-structure handler responds to OPTIONS", async () => {
       supabaseServiceRoleKey: "service-role",
     },
     repository: createRepositoryMock(),
-    parseStructuredData: async () => minimalStructuredData,
+    parseStructuredData: async () => parsed(minimalStructuredData),
     lookupIcdCode: async () => null,
   });
   const response = await handler(
@@ -78,7 +91,7 @@ Deno.test("health-structure handler rejects non-POST methods", async () => {
       supabaseServiceRoleKey: "service-role",
     },
     repository: createRepositoryMock(),
-    parseStructuredData: async () => minimalStructuredData,
+    parseStructuredData: async () => parsed(minimalStructuredData),
     lookupIcdCode: async () => null,
   });
   const payload = await assertJsonResponse<{ success: boolean; error: string }>(
@@ -97,7 +110,7 @@ Deno.test("health-structure handler validates env configuration", async () => {
       supabaseServiceRoleKey: "service-role",
     },
     repository: createRepositoryMock(),
-    parseStructuredData: async () => minimalStructuredData,
+    parseStructuredData: async () => parsed(minimalStructuredData),
     lookupIcdCode: async () => null,
   });
 
@@ -120,7 +133,7 @@ Deno.test("health-structure handler validates env configuration", async () => {
       supabaseServiceRoleKey: undefined,
     },
     repository: createRepositoryMock(),
-    parseStructuredData: async () => minimalStructuredData,
+    parseStructuredData: async () => parsed(minimalStructuredData),
     lookupIcdCode: async () => null,
   });
 
@@ -148,7 +161,7 @@ Deno.test(
         supabaseServiceRoleKey: "service-role",
       },
       repository: createRepositoryMock(),
-      parseStructuredData: async () => minimalStructuredData,
+      parseStructuredData: async () => parsed(minimalStructuredData),
       lookupIcdCode: async () => null,
     });
 
@@ -178,7 +191,7 @@ Deno.test("health-structure handler executes success and auth-failure paths", as
       supabaseServiceRoleKey: "service-role",
     },
     repository: createRepositoryMock(),
-    parseStructuredData: async () => minimalStructuredData,
+    parseStructuredData: async () => parsed(minimalStructuredData),
     lookupIcdCode: async () => null,
   });
 
@@ -207,7 +220,7 @@ Deno.test("health-structure handler executes success and auth-failure paths", as
       ...createRepositoryMock(),
       authenticateAllowedUser: async () => null,
     },
-    parseStructuredData: async () => minimalStructuredData,
+    parseStructuredData: async () => parsed(minimalStructuredData),
     lookupIcdCode: async () => null,
   });
 
@@ -238,7 +251,7 @@ Deno.test(
         supabaseServiceRoleKey: "service-role",
       },
       repository: createRepositoryMock(),
-      parseStructuredData: async () => minimalStructuredData,
+      parseStructuredData: async () => parsed(minimalStructuredData),
       lookupIcdCode: async () => null,
     });
 

@@ -34,6 +34,17 @@ function createRepositoryWithClients(clients: {
   });
 }
 
+/**
+ * `order()` is chained twice now -- `sort_order` then `id`, because the first is not unique and
+ * health-structure has to see the same page order. A mock that returns a bare promise breaks on
+ * the second call, so this is awaitable and chainable at once.
+ */
+function orderable<T>(result: T) {
+  const chain = Promise.resolve(result) as Promise<T> & { order: () => typeof chain };
+  chain.order = () => chain;
+  return chain;
+}
+
 Deno.test("health-ocr repository authenticates user and checks allowlist", async () => {
   const repository = createRepositoryWithClients({
     anonClient: {
@@ -124,17 +135,18 @@ Deno.test("health-ocr repository loads record and attachments", async () => {
           return {
             select: () => ({
               eq: () => ({
-                order: async () => ({
-                  data: [
-                    {
-                      id: "att-1",
-                      storage_path: "a.png",
-                      mime_type: "image/png",
-                      original_filename: "a.png",
-                    },
-                  ],
-                  error: null,
-                }),
+                order: () =>
+                  orderable({
+                    data: [
+                      {
+                        id: "att-1",
+                        storage_path: "a.png",
+                        mime_type: "image/png",
+                        original_filename: "a.png",
+                      },
+                    ],
+                    error: null,
+                  }),
               }),
             }),
           };
@@ -177,7 +189,7 @@ Deno.test("health-ocr repository handles missing record and attachment query err
           return {
             select: () => ({
               eq: () => ({
-                order: async () => ({ data: null, error: { message: "broken" } }),
+                order: () => orderable({ data: null, error: { message: "broken" } }),
               }),
             }),
           };
@@ -207,14 +219,30 @@ Deno.test("health-ocr repository downloads attachments and updates record states
       auth: { getUser: async () => ({ data: { user: null }, error: null }) },
     },
     adminClient: {
+      rpc: async () => ({ data: true, error: null }),
       from: (table: string) => {
         if (table === "medical_records") {
           return {
             update: (payload: Record<string, unknown>) => ({
-              eq: async () => {
-                updates.push(payload);
-                return { error: null };
-              },
+              eq: () => ({
+                // The terminal writes now narrow by claim and read back the rows they matched.
+                eq: () => ({
+                  select: async () => {
+                    updates.push(payload);
+                    return { data: [{ id: "record-1" }], error: null };
+                  },
+                }),
+                select: async () => {
+                  updates.push(payload);
+                  return { data: [{ id: "record-1" }], error: null };
+                },
+                or: () => ({
+                  select: async () => {
+                    updates.push(payload);
+                    return { data: [{ id: "record-1" }], error: null };
+                  },
+                }),
+              }),
             }),
           };
         }
@@ -235,10 +263,14 @@ Deno.test("health-ocr repository downloads attachments and updates record states
   assertEquals(downloaded instanceof Blob, true);
   assertEquals(await repository.downloadAttachment("missing.png"), null);
 
+  // The claim is one database statement now, so the repository only relays its answer.
+  assertEquals(typeof (await repository.claimRecord("record-1")), "string");
   await repository.updateRecordSuccess("record-1", { ocrText: "text", title: "Title" });
   await repository.updateRecordFailure("record-1", "broken");
   assertEquals(updates.length, 2);
   assertEquals(updates[0].status, "ocr_review");
+  // A finished run releases the record rather than leaving it claimed until the lease expires.
+  assertEquals(updates[0].processing_run_id, null);
   assertEquals(updates[1].status, "ocr_failed");
 });
 
@@ -252,7 +284,12 @@ Deno.test("health-ocr repository throws when updateRecordSuccess fails", async (
         if (table === "medical_records") {
           return {
             update: () => ({
-              eq: async () => ({ error: { message: "write failed" } }),
+              eq: () => ({
+                select: async () => ({ data: null, error: { message: "write failed" } }),
+                eq: () => ({
+                  select: async () => ({ data: null, error: { message: "write failed" } }),
+                }),
+              }),
             }),
           };
         }
@@ -291,7 +328,7 @@ Deno.test(
                 return {
                   select: () => ({
                     eq: () => ({
-                      order: async () => ({ data: null, error: null }),
+                      order: () => orderable({ data: null, error: null }),
                     }),
                   }),
                 };

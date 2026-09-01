@@ -291,7 +291,10 @@ CREATE TABLE "public"."medical_records" (
     "llm_keywords" "text"[],
     "search_vector" "tsvector" GENERATED ALWAYS AS ((("setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("title", ''::"text")), 'A'::"char") || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("notes", ''::"text")), 'B'::"char")) || "setweight"("to_tsvector"('"english"'::"regconfig", COALESCE("ocr_text", ''::"text")), 'C'::"char"))) STORED,
     "ocr_error" "text",
-    "llm_suggested_checkup_completions" "jsonb"
+    "llm_suggested_checkup_completions" "jsonb",
+    "structure_error" "text",
+    "processing_run_id" "uuid",
+    "processing_started_at" timestamp with time zone
 );
 
 ALTER TABLE ONLY "public"."medical_records" REPLICA IDENTITY FULL;
@@ -797,7 +800,9 @@ CREATE TABLE "public"."record_findings" (
     "confidence" numeric,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "resolution_status" "text" DEFAULT 'observed'::"text" NOT NULL,
     CONSTRAINT "record_findings_laterality_check" CHECK (("laterality" = ANY (ARRAY['left'::"text", 'right'::"text", 'bilateral'::"text", 'none'::"text"]))),
+    CONSTRAINT "record_findings_resolution_status_check" CHECK (("resolution_status" = ANY (ARRAY['observed'::"text", 'resolved'::"text"]))),
     CONSTRAINT "record_findings_severity_check" CHECK (("severity" = ANY (ARRAY['mild'::"text", 'moderate'::"text", 'severe'::"text", 'unknown'::"text"])))
 );
 
@@ -1625,6 +1630,13 @@ CREATE INDEX "idx_medical_records_person_id" ON "public"."medical_records" USING
 
 
 --
+-- Name: idx_medical_records_processing_run_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_medical_records_processing_run_id" ON "public"."medical_records" USING "btree" ("processing_run_id") WHERE ("processing_run_id" IS NOT NULL);
+
+
+--
 -- Name: idx_medical_records_record_date; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2119,6 +2131,13 @@ CREATE INDEX "idx_record_findings_person_id" ON "public"."record_findings" USING
 --
 
 CREATE INDEX "idx_record_findings_record_id" ON "public"."record_findings" USING "btree" ("record_id");
+
+
+--
+-- Name: idx_record_findings_resolution_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_record_findings_resolution_status" ON "public"."record_findings" USING "btree" ("resolution_status");
 
 
 --

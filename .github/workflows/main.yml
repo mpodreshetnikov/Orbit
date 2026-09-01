@@ -109,6 +109,8 @@ jobs:
       - name: Detect extension release policy
         id: extension-version-policy
         shell: bash
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="$(node -p "require('./browserExtension/manifest.json').version")"
@@ -129,7 +131,20 @@ jobs:
             TO="${{ github.sha }}"
           fi
 
-          npx tsx scripts/extension/release.ts check-version-bump --from "$FROM" --to "$TO" --format github-output --output-file "$GITHUB_OUTPUT"
+          # On a push to main the publish decision is taken against what is actually published, not
+          # against the previous commit, so a publish that failed is retried by the next push
+          # instead of being skipped forever as "version unchanged". T-260901-0dr. The bucket is
+          # public, so this reads latest.json with no key; an unreachable Storage falls back to the
+          # commit-range comparison rather than publishing on every push.
+          #
+          # Pull requests keep the commit-range comparison. They never publish, and comparing
+          # against production there would build the release bundle on every one of them.
+          PUBLISHED_ARGS=()
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" && -n "$SUPABASE_PROJECT_REF" ]]; then
+            PUBLISHED_ARGS=(--supabase-url "https://${SUPABASE_PROJECT_REF}.supabase.co")
+          fi
+
+          npx tsx scripts/extension/release.ts check-version-bump --from "$FROM" --to "$TO" "${PUBLISHED_ARGS[@]}" --format github-output --output-file "$GITHUB_OUTPUT"
       - name: Enforce extension manifest version bump
         if: steps.extension-version-policy.outputs.requiresVersionBump == 'true'
         shell: bash

@@ -130,6 +130,7 @@ function makeRecord(
     updated_at: "2026-01-01T00:00:00.000Z",
     ocr_text: null,
     ocr_error: null,
+    structure_error: null,
     llm_summary: null,
     llm_keywords: null,
     llm_suggested_checkup_completions: null,

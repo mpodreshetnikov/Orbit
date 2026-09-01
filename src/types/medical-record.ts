@@ -42,6 +42,7 @@ export interface MedicalRecord {
   // Extraction fields (populated by LLM in Stage 4)
   ocr_text: string | null;
   ocr_error: string | null; // Set when OCR fails; cleared on success or retry
+  structure_error: string | null; // Set when structuring fails; cleared on success or retry
   llm_summary: string | null;
   llm_keywords: string[] | null;
   /** LLM-suggested checkup completions; applied only when record is activated */
@@ -87,6 +88,7 @@ export interface UpdateMedicalRecordInput {
   status?: RecordStatus;
   ocr_text?: string | null;
   ocr_error?: string | null;
+  structure_error?: string | null;
   llm_keywords?: string[] | null;
   llm_suggested_checkup_completions?: LlmSuggestedCheckupCompletion[] | null;
 }
@@ -133,6 +135,11 @@ export interface OcrResult {
 
 export interface HealthOcrResponse {
   success: boolean;
+  /**
+   * The request was accepted and the transcription is running server-side. The text is not in
+   * this response and never will be: the record's status is what reports the outcome.
+   */
+  accepted?: boolean;
   ocr_text?: string;
   char_count?: number;
   /** Document name suggested by OCR LLM; shown instead of "Processing" */
