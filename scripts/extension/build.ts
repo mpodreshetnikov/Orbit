@@ -16,7 +16,8 @@ import {
   unique,
 } from "./build-lib";
 import { listMoneyImportSourceDefinitions } from "./money-import-sources";
-import { buildSourcePageWidgetInpageBundle } from "./esbuild-widget";
+import { buildClassicScriptBundles } from "./esbuild-widget";
+import { formatClassicScriptProblems, verifyClassicScripts } from "./verify-classic-scripts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..", "..");
@@ -108,8 +109,8 @@ function runViteBuild(): Promise<void> {
   });
 }
 
-function runEsbuildSourcePageWidgetInpageBundle(): Promise<void> {
-  return buildSourcePageWidgetInpageBundle({ extensionDir, distDir });
+function runEsbuildClassicScriptBundles(): Promise<void> {
+  return buildClassicScriptBundles({ extensionDir, distDir });
 }
 
 async function build(mode: string): Promise<void> {
@@ -141,7 +142,7 @@ async function build(mode: string): Promise<void> {
 
   await copyStaticToDist();
   await runTscExtension();
-  await runEsbuildSourcePageWidgetInpageBundle();
+  await runEsbuildClassicScriptBundles();
   await runViteBuild();
 
   const envJs = [
@@ -163,6 +164,13 @@ async function build(mode: string): Promise<void> {
     `${JSON.stringify({ buildId: new Date().toISOString(), mode }, null, 2)}\n`,
     "utf8",
   );
+
+  // After the manifest is written, so it verifies what was actually shipped rather than what the
+  // template said.
+  const classicScriptProblems = await verifyClassicScripts(distDir);
+  if (classicScriptProblems.length > 0) {
+    throw new Error(formatClassicScriptProblems(classicScriptProblems));
+  }
 
   console.log(
     `[extension:${mode}] built -> browserExtension/dist (origins: ${appOrigins.join(", ")})`,
