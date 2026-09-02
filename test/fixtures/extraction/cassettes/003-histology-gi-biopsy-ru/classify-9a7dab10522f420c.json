@@ -3,9 +3,9 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1788282673-qlQZtG4wMR8g7hPB0btg",
+    "id": "gen-1788335509-ocZR59upaCF0vS5jveXh",
     "object": "chat.completion",
-    "created": 1788282673,
+    "created": 1788335509,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -18,16 +18,16 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"lab\",\"title\":\"Гистологическое исследование биопсийного материала\",\"record_date\":\"2020-02-02\",\"summary\":\"Histology report of diagnostic biopsy specimens from the ascending colon, sigmoid colon, and antrum of the stomach. Findings include a tubular adenoma of the ascending colon with low-grade epithelial dysplasia, a hyperplastic pedunculated polyp of the sigmoid colon without dysplasia, and moderately active chronic active antral gastritis associated with Helicobacter pylori; intestinal metaplasia and atrophy are not identified. ICD-10 code D12.2 is listed.\",\"keywords\":[\"histology\",\"biopsy\",\"ascending colon\",\"tubular adenoma\",\"low-grade dysplasia\",\"sigmoid colon\",\"hyperplastic polyp\",\"stomach antrum\",\"chronic active gastritis\",\"Helicobacter pylori\",\"ICD-10 D12.2\"]}",
+          "content": "{\"record_type\":\"lab\",\"title\":\"Гистологическое исследование биопсийного материала (биопсийное исследование № 000000)\",\"record_date\":\"2020-02-02\",\"summary\":\"Histology report of diagnostic biopsies from the ascending colon, sigmoid colon, and gastric antrum. Findings include a tubular adenoma of the ascending colon with low-grade epithelial dysplasia, a hyperplastic pedunculated sigmoid polyp without dysplasia, and moderate chronic active antral gastritis associated with Helicobacter pylori.\",\"keywords\":[\"histology\",\"biopsy\",\"ascending colon\",\"tubular adenoma\",\"low-grade dysplasia\",\"sigmoid colon\",\"hyperplastic polyp\",\"stomach antrum\",\"chronic active gastritis\",\"Helicobacter pylori\",\"ICD-10 D12.2\"]}",
           "refusal": null
         }
       }
     ],
     "usage": {
       "prompt_tokens": 1497,
-      "completion_tokens": 274,
-      "total_tokens": 1771,
-      "cost": 0.012782385,
+      "completion_tokens": 260,
+      "total_tokens": 1757,
+      "cost": 0.012394305,
       "is_byok": false,
       "prompt_tokens_details": {
         "cached_tokens": 0,
@@ -36,12 +36,12 @@
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.0129115,
+        "upstream_inference_cost": 0.0125195,
         "upstream_inference_prompt_cost": 0.0052395,
-        "upstream_inference_completions_cost": 0.007672
+        "upstream_inference_completions_cost": 0.00728
       },
       "completion_tokens_details": {
-        "reasoning_tokens": 76,
+        "reasoning_tokens": 79,
         "image_tokens": 0,
         "audio_tokens": 0
       }
