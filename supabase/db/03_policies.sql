@@ -59,6 +59,7 @@ BEGIN;
 \i policies/money_mcc_canonical_category_map.sql
 \i policies/money_import_batches.sql
 \i policies/money_import_sessions.sql
+\i policies/money_import_grants.sql
 \i policies/money_import_batch_rows.sql
 \i policies/money_import_batch_brand_resolutions.sql
 \i policies/money_budget_targets.sql

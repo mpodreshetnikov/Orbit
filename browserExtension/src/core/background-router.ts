@@ -6,10 +6,14 @@ import {
 } from "./import-runner.js";
 import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
+import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
+import type { AutoRunStore } from "./auto-run-store.js";
+import { nextAutoRunState } from "./auto-run-policy.js";
 
 export interface BackgroundMessage {
   type: string;
   session?: Record<string, unknown>;
+  grant?: unknown;
   session_id?: string;
   source?: string;
   payer_person_id?: string;
@@ -38,6 +42,12 @@ type BackgroundImportRunnerDeps = ImportRunnerDeps & {
 
 export interface BackgroundRouterDeps {
   sessionStore: SessionStore;
+  grantStore: GrantStore;
+  /**
+   * Optional so the router stays usable without it, but when it is wired a manual run is the
+   * only way back from an automatic run that has failed itself into silence.
+   */
+  autoRunStore?: AutoRunStore;
   importRunnerDeps: BackgroundImportRunnerDeps;
   debugStore: ImportDebugStore;
 }
@@ -249,6 +259,26 @@ function buildActiveRunSnapshot(
   };
 }
 
+async function resetAutoRunBackoff(
+  deps: BackgroundRouterDeps,
+  session: Record<string, unknown>,
+): Promise<void> {
+  if (!deps.autoRunStore) return;
+  const sourceId = typeof session.source === "string" ? session.source.trim() : "";
+  const payerPersonId =
+    typeof session.payer_person_id === "string" ? session.payer_person_id.trim() : "";
+  if (!sourceId || !payerPersonId) return;
+
+  try {
+    const scope = { sourceId, payerPersonId };
+    const autoState = await deps.autoRunStore.getState(scope);
+    await deps.autoRunStore.setState(scope, nextAutoRunState(autoState, Date.now(), "ok"));
+  } catch {
+    // Swallowed on purpose: see the call site. The worst case is that automatic import stays
+    // backed off a while longer, which the next successful manual run clears.
+  }
+}
+
 export async function routeBackgroundMessage(
   message: BackgroundMessage,
   deps: BackgroundRouterDeps,
@@ -260,6 +290,39 @@ export async function routeBackgroundMessage(
       extension_id: resolveRuntimeExtensionId(),
       extension_version: resolveExtensionVersion(),
     };
+  }
+
+  if (message.type === "MONEY_IMPORT_SET_GRANT") {
+    const hostPermissions = chrome?.runtime?.getManifest?.()?.host_permissions ?? [];
+    const grant = parseIncomingGrant(message.grant, hostPermissions, new Date().toISOString());
+    // Refusing is the whole point of the parse: the bridge listens on window.postMessage, so
+    // anything on the app's page can send one of these, and the function_url is where the token
+    // would later be sent.
+    if (!grant) return { ok: false, error: "Grant payload was rejected" };
+
+    await deps.grantStore.setGrant(grant);
+    return { ok: true };
+  }
+
+  if (message.type === "MONEY_IMPORT_GET_GRANT") {
+    const grant = await deps.grantStore.getGrant();
+    // The token is deliberately not returned. The app has no use for it -- it issued it -- and
+    // a reply carrying it would put the secret back on a page it has already left.
+    return {
+      ok: true,
+      grant: grant
+        ? {
+            person_id: grant.person_id,
+            allowed_sources: grant.allowed_sources,
+            received_at: grant.received_at,
+          }
+        : null,
+    };
+  }
+
+  if (message.type === "MONEY_IMPORT_CLEAR_GRANT") {
+    await deps.grantStore.setGrant(null);
+    return { ok: true };
   }
 
   if (message.type === "MONEY_IMPORT_START_SESSION") {
@@ -471,6 +534,17 @@ export async function routeBackgroundMessage(
           debug_run_id: run.debug_run_id,
         });
       }
+      // A run the person started is the documented way out of the automatic backoff: after
+      // enough consecutive failures `shouldAutoRun` stops trying entirely, and without this
+      // nothing ever cleared that count -- so a fortnight signed out of the bank would have
+      // ended automatic import permanently, with no way back short of reinstalling.
+      //
+      // Best-effort, and deliberately so. The import above has already completed its session on
+      // the server; letting a storage failure here fall into the catch below would mark that
+      // finished session failed, clear it, and tell the person their successful import errored.
+      // Local bookkeeping does not get to fail a transaction that has already committed.
+      await resetAutoRunBackoff(deps, session);
+
       const response: Record<string, unknown> = {
         ok: true,
         result,

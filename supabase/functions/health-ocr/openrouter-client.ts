@@ -1,6 +1,11 @@
 import { extractContentText, parseJsonObject } from "../_shared/llm-json.ts";
 import { type LlmUsage, parseLlmUsage, sumLlmUsage } from "../_shared/llm-usage.ts";
 import {
+  NO_PROVIDER_RESPONSE_MESSAGE,
+  OcrProviderError,
+  UnsupportedOcrMediaError,
+} from "./failure.ts";
+import {
   DEFAULT_MAX_ATTEMPTS,
   isRetryableStatus,
   parseRetryAfterMs,
@@ -135,7 +140,7 @@ export function createOpenRouterOcrClient(
       };
     }
 
-    throw new Error(`Unsupported OCR attachment MIME type: ${attachment.mimeType}`);
+    throw new UnsupportedOcrMediaError(attachment.mimeType);
   }
 
   return {
@@ -205,8 +210,10 @@ export function createOpenRouterOcrClient(
                   parseRetryAfterMs(response.headers.get("retry-after"), Date.now()),
                 );
               }
-              // The provider's body can quote the request, which for OCR includes the image.
-              throw new Error(message);
+              // The provider's body can quote the request, which for OCR includes the image, so
+              // only the status travels — and it travels typed, because the caller has to tell a
+              // rejected key from a refused request without parsing this message back apart.
+              throw new OcrProviderError(message, response.status);
             }
 
             const payload = (await response.json()) as {
@@ -215,7 +222,7 @@ export function createOpenRouterOcrClient(
             };
             const choice = payload.choices?.[0];
             const contentText = extractContentText(choice?.message ?? {});
-            if (!contentText) throw new Error("No response from OpenRouter");
+            if (!contentText) throw new Error(NO_PROVIDER_RESPONSE_MESSAGE);
 
             const parsed = parseJsonObject(contentText);
             const ocrText = typeof parsed.ocr_text === "string" ? parsed.ocr_text : "";

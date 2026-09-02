@@ -68,8 +68,14 @@ const NON_REVIEWABLE = [
   /(^|\/)deno\.lock$/,
   /(^|\/)skills-lock\.json$/,
   /^\.claude\/skills\//,
-  /^supabase\/db\/generated\//,
-  /^src\/types\/database\.types\.ts$/,
+  // The two generated DB artifacts, by the paths they actually have. The entries here used to name
+  // `supabase/db/generated/` and `src/types/database.types.ts`, neither of which exists: the
+  // snapshot and the types live beside the SQL, and `src/types/database.ts` is a one-line re-export
+  // of the latter. Nothing noticed, because the generator was never regenerating them (T-260829-el7)
+  // -- so the size gate never met a diff in a file these lines were written for. Two defects that
+  // hid each other.
+  /^supabase\/db\/schema\.snapshot\.sql$/,
+  /^supabase\/db\/database\.types\.ts$/,
   /(^|\/)__snapshots__\//,
 ];
 

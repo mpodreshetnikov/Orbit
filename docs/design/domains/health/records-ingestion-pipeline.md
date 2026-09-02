@@ -31,6 +31,30 @@ Failure branch:
 
 Legacy compatibility status (`processing`) still appears in monitor logic and should be phased out in future cleanup.
 
+### What `ocr_error` carries
+
+`ocr_error` holds a classified cause, not a sentence: `ocr_cause:<code> <English summary>`, capped
+at 500 characters with the code first so truncation can only cost the summary. The vocabulary is
+declared in `supabase/functions/health-ocr/failure.ts` and mirrored for the browser in
+`src/lib/health/ocr-failure.ts`, which also translates it — the server composes in English and does
+not know the reader's language.
+
+Two rules the column depends on:
+
+- The provider's own error body is never quoted into it. That body can echo the request, and for
+  OCR the request is the patient's document.
+- Both writers use this format. The edge function writes it, and says in its failure payload
+  (`persisted`) whether the record actually carries it — an answer is not proof of a write, since
+  a request refused before the record is known is answered in JSON and written nowhere. The
+  browser leaves the column alone for a persisted failure, and settles the record itself
+  otherwise — but always through `reconcileAfterFailedHandoff`, because a lost response is not a
+  request that never landed and a run holding the claim must not be failed from the browser.
+
+A run that transcribed the document but lost a page writes the same string on the success path,
+so a three-page document that came back with two does not read as a clean success. A page the
+model cut short at its completion budget counts as such a loss too (`truncated_page`): it has
+text, but everything downstream reads that prefix as the whole page.
+
 ### Health-specific edge cases and failure recovery patterns
 
 - OCR returns empty/low-quality text:

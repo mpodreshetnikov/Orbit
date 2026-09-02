@@ -509,3 +509,22 @@ export function isUniqueViolation(error: unknown): boolean {
   const code = (error as { code?: string })?.code;
   return code === "23505";
 }
+
+/**
+ * The source a row is written under when the request is authenticated by an import session.
+ *
+ * A session is opened for exactly one source, so the row does not get to name its own: without
+ * this, a session opened for one source could import under another, and a grant's
+ * `allowed_sources` -- checked once, when the session is created -- would mean nothing
+ * afterwards.
+ *
+ * The value pinned is the *canonical* one. Sessions carry connector ids (`tbank_web`), while
+ * transactions carry `tbank`; writing the connector id would open a second source namespace,
+ * miss existing `(source, external_id)` duplicates and stop feeding `findLastImportedAt`.
+ */
+export function pinRowToSessionSource<T extends { source?: string | null }>(
+  row: T,
+  sessionSource: string,
+): T {
+  return { ...row, source: normalizeSourceForTransactions(sessionSource) };
+}

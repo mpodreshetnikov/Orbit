@@ -1060,7 +1060,7 @@ export function registerMedicationTools(server: McpToolServer): void {
     {
       title: "Log a medication intake",
       description:
-        "Record that a dose of a medication the person already has was taken, or skipped. Covers both a scheduled intake and an unplanned one outside the schedule — a dose already on the plan at that time is resolved rather than duplicated. Use this, not add_medication, whenever a course for that medication already exists; find its regimen_id with list_medications. Taking a dose decrements the stock if the medication tracks one.",
+        "Record that a dose of a medication the person already has was taken, or skipped. Covers both a scheduled intake and an unplanned one outside the schedule — a dose already on the plan at that time is resolved rather than duplicated. Use this, not add_medication, whenever a course for that medication already exists; find its regimen_id with list_medications. Taking a dose decrements the stock if the medication tracks one. Pass planned_for when the dose was taken late, so it resolves the dose that was due instead of adding an extra one. Call it again for the same time to correct an intake already recorded — a different amount, or a different status — and the stock moves by the difference.",
       inputSchema: z.object({
         regimen_id: uuidSchema.describe("The existing medication this intake belongs to."),
         taken_at: z
@@ -1069,11 +1069,19 @@ export function registerMedicationTools(server: McpToolServer): void {
           .describe(
             "When the dose was taken. Either ISO 8601 with an offset ('2026-08-19T23:10:00+07:00') or a local wall-clock time ('2026-08-19T23:10'), which is read in `timezone`. Defaults to now.",
           ),
+        planned_for: z
+          .string()
+          .optional()
+          .describe(
+            "The time the dose was due, when that differs from when it was taken — the 08:00 dose swallowed at 08:15. Same formats as `taken_at`. This is what picks the dose on the plan; without it a late intake is filed as an extra one and the dose it was meant for stays unresolved. Defaults to `taken_at`.",
+          ),
         amount: z
           .number()
           .positive()
           .optional()
-          .describe("Amount taken; halves are allowed. Defaults to the medication's planned dose."),
+          .describe(
+            "Amount taken; halves are allowed. Defaults to the medication's planned dose. Pass it to correct an intake already recorded at that time.",
+          ),
         status: z.enum(["taken", "skipped"]).default("taken"),
         note: z.string().optional(),
         timezone: z
@@ -1088,6 +1096,7 @@ export function registerMedicationTools(server: McpToolServer): void {
     withUserClient<{
       regimen_id: string;
       taken_at?: string;
+      planned_for?: string;
       amount?: number;
       status: "taken" | "skipped";
       note?: string;
@@ -1112,41 +1121,74 @@ export function registerMedicationTools(server: McpToolServer): void {
       }
       const timezone = zone.timezone;
 
-      const requested = args.taken_at?.trim();
-      let at: Date;
-      let readAsLocal = false;
-
-      if (!requested) {
-        at = new Date();
-      } else {
+      // Both times go through the same reader, so a wall-clock `planned_for`
+      // lands in the same zone its `taken_at` does.
+      const readInstant = (raw: string | undefined, field: "taken_at" | "planned_for") => {
+        const requested = raw?.trim();
+        if (!requested) {
+          return { at: null, readAsLocal: false, error: null as string | null };
+        }
         const parsed = instantFromInput(requested, timezone);
         if (!parsed.ok) {
-          return fail(
-            parsed.zoneApplied
-              ? `Could not read "${args.taken_at}" as a date and time in ${timezone}. Pass ISO 8601 ` +
-                  `with an offset ("2026-08-19T23:10:00+07:00"), or a local wall-clock time ` +
-                  `("2026-08-19T23:10") that exists in that zone — a clock-change gap has no such ` +
-                  `local time.`
-              : `Could not read "${args.taken_at}" as a date and time.`,
-          );
+          return {
+            at: null,
+            readAsLocal: false,
+            error: parsed.zoneApplied
+              ? `Could not read "${raw}" as a date and time in ${timezone} for ${field}. Pass ` +
+                `ISO 8601 with an offset ("2026-08-19T23:10:00+07:00"), or a local wall-clock ` +
+                `time ("2026-08-19T23:10") that exists in that zone — a clock-change gap has no ` +
+                `such local time.`
+              : `Could not read "${raw}" as a date and time for ${field}.`,
+          };
         }
-        at = new Date(parsed.instant);
-        readAsLocal = parsed.zoneApplied;
+        return { at: new Date(parsed.instant), readAsLocal: parsed.zoneApplied, error: null };
+      };
+
+      const taken = readInstant(args.taken_at, "taken_at");
+      if (taken.error) {
+        return fail(taken.error);
+      }
+      const due = readInstant(args.planned_for, "planned_for");
+      if (due.error) {
+        return fail(due.error);
       }
 
-      const { regimen, dose, planned, alreadyRecorded } = await logDose(supabase, {
+      const at = taken.at ?? new Date();
+      const readAsLocal = taken.readAsLocal;
+      // The dose being resolved is picked by when it was due; the intake time
+      // is only recorded on it. Collapsing the two is what filed a late intake
+      // as an extra one and left the dose it was meant for still owed.
+      const slot = due.at ?? at;
+
+      const { regimen, dose, planned, alreadyRecorded, corrected } = await logDose(supabase, {
         regimenId: args.regimen_id,
-        at: at.toISOString(),
+        at: slot.toISOString(),
+        // Only for an intake that has one. `mark_dose_skipped` takes no such
+        // argument, so offering it there would promise a time the record will
+        // not carry.
+        takenAt: due.at && args.status === "taken" ? at.toISOString() : null,
         amount: args.amount ?? null,
         status: args.status,
         note: args.note ?? null,
       });
 
       const intake = dose.planned_intake?.intake;
+      // What the row ended up carrying, not what was asked for: a skipped dose
+      // keeps the slot's own time whatever `taken_at` said, and quoting the
+      // request back described a dose as skipped at 08:15 while the record --
+      // returned in the same reply -- said 08:00.
+      const resolvedAt = dose.taken_at ? new Date(dose.taken_at) : at;
       // The time goes back in the caller's zone, carrying its offset, and names
       // the zone -- an intake quoted in UTC reads to the person as a dose taken
-      // seven hours from when they took it.
-      const when = `${formatZoned(at, timezone)} (${timezone}${readAsLocal ? ", as given" : ""})`;
+      // seven hours from when they took it. "as given" only while the stored
+      // time is still the one that was given.
+      const storedAsAsked = resolvedAt.getTime() === at.getTime();
+      const when =
+        `${formatZoned(resolvedAt, timezone)} ` +
+        `(${timezone}${readAsLocal && storedAsAsked ? ", as given" : ""})`;
+      // Named only when the caller separated the two, so an ordinary intake
+      // does not gain a second timestamp it never asked about.
+      const dueWhen = due.at ? formatZoned(slot, timezone) : null;
       const zonedDose = withZonedTimestamps(
         dose as unknown as Record<string, unknown>,
         timezone,
@@ -1158,15 +1200,38 @@ export function registerMedicationTools(server: McpToolServer): void {
       // one stock decrement too many.
       if (alreadyRecorded) {
         return ok(
-          `${regimen.custom_name} was already recorded as ${dose.status} at ${when}` +
-            `, so nothing was written. Pass a different taken_at for a separate ` +
-            `intake, or status: "${args.status === "taken" ? "skipped" : "taken"}" to correct it.`,
+          `${regimen.custom_name} was already recorded as ${dose.status} at ${when} for the same ` +
+            `amount, so nothing was written. Pass a different amount to correct it, a different ` +
+            `taken_at for a separate intake, or status: ` +
+            `"${args.status === "taken" ? "skipped" : "taken"}" to change the outcome.`,
           {
             medication: regimen,
             dose: zonedDose,
             planned,
             timezone,
             already_recorded: true,
+            corrected: false,
+          },
+        );
+      }
+
+      // A correction is not a fresh intake, and saying "logged" for one invites
+      // the caller to think a second dose went on the record -- as does
+      // "resolved the dose already on the plan" for one that was resolved long
+      // before this call.
+      if (corrected) {
+        return ok(
+          `Corrected the intake already recorded for ${regimen.custom_name} at ${when}: now ` +
+            `${dose.status}${intake ? `, ${intake.amount} ${intake.unit}` : ""}. ` +
+            `The record was changed in place, not duplicated.` +
+            `${regimen.inventory?.enabled ? " Stock was moved to match." : ""}`,
+          {
+            medication: regimen,
+            dose: zonedDose,
+            planned,
+            timezone,
+            already_recorded: false,
+            corrected: true,
           },
         );
       }
@@ -1174,13 +1239,18 @@ export function registerMedicationTools(server: McpToolServer): void {
       return ok(
         `Logged ${intake ? `${intake.amount} ${intake.unit} of ` : ""}${regimen.custom_name} as ` +
           `${dose.status} at ${when}. ` +
-          `${planned ? "This resolved the dose already on the plan for that time." : "Recorded as an extra intake outside the plan."}`,
+          `${
+            planned
+              ? `This resolved the dose already on the plan for ${dueWhen ?? "that time"}.`
+              : `Recorded as an extra intake outside the plan${dueWhen ? `, filed at ${dueWhen}` : ""}.`
+          }`,
         {
           medication: regimen,
           dose: zonedDose,
           planned,
           timezone,
           already_recorded: false,
+          corrected: false,
         },
       );
     }, WRITE_SCOPE),
@@ -1202,7 +1272,12 @@ export function registerMedicationTools(server: McpToolServer): void {
         duration: medDurationSchema.optional(),
         intake_advice_type: z.enum(INTAKE_ADVICE_TYPES).optional(),
         intake_advice_text: z.string().nullable().optional(),
-        inventory: regimenInventorySchema.nullable().optional(),
+        inventory: regimenInventorySchema
+          .nullable()
+          .optional()
+          .describe(
+            "Stock fields to change. Merged with what is stored, so a field you leave out keeps its value; pass null to stop tracking stock altogether.",
+          ),
         notes: z.string().nullable().optional(),
         timezone: z.string().optional().describe("IANA timezone for regenerating intake times."),
       }),

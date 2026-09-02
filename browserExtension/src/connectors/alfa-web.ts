@@ -50,7 +50,12 @@ interface MapOperationRecordOptions {
 const connector: Connector = {
   sourceId: "alfa_web",
   displayName: "Alfa Bank Web",
-  async parse({ windowFrom, session, debug }: ConnectorParseInput): Promise<ConnectorParseOutput> {
+  async parse({
+    windowFrom,
+    windowTo,
+    session,
+    debug,
+  }: ConnectorParseInput): Promise<ConnectorParseOutput> {
     const emitProgress = async (
       phase: string,
       progressPercent: number,
@@ -68,6 +73,9 @@ const connector: Connector = {
     ).toISOString();
     const normalizedWindowFrom =
       toIsoString(windowFrom) || toIsoString(session?.last_imported_at) || fallbackWindowFromIso;
+    // A history slice is bounded at both ends. Until this was honoured, a slice planned as one
+    // month read from its start through to today, so each run did more work than the last.
+    const normalizedWindowTo = toIsoString(windowTo);
 
     const activeTab =
       typeof debug?.tab_id === "number"
@@ -91,7 +99,11 @@ const connector: Connector = {
     }
 
     await emitProgress("parse_extracting_page_data", 20);
-    const extraction = await extractOperationsWithRetry(readyTab.id, normalizedWindowFrom);
+    const extraction = await extractOperationsWithRetry(
+      readyTab.id,
+      normalizedWindowFrom,
+      normalizedWindowTo,
+    );
     if (extraction.blocked_reason) {
       throw formatDiagnosticError(extraction.blocked_reason, {
         blocked_reason: extraction.blocked_reason,
@@ -319,6 +331,7 @@ async function prepareHistoryTab(tab: chrome.tabs.Tab): Promise<chrome.tabs.Tab>
 async function extractOperationsWithRetry(
   tabId: number,
   windowFromIso: string,
+  windowToIso: string | null,
 ): Promise<PageExtraction> {
   const attemptDetails: Array<Record<string, unknown>> = [];
 
@@ -337,7 +350,7 @@ async function extractOperationsWithRetry(
       const injected = await chrome.scripting.executeScript({
         target: { tabId },
         func: extractOperationsInPage,
-        args: [{ windowFromIso }],
+        args: [{ windowFromIso, windowToIso }],
       });
       const extraction = injected?.[0]?.result as PageExtraction | undefined;
       if (extraction) return extraction;
@@ -370,15 +383,24 @@ async function extractOperationsWithRetry(
   });
 }
 
-function extractOperationsInPage(input: { windowFromIso?: string }): Promise<PageExtraction> {
+function extractOperationsInPage(input: {
+  windowFromIso?: string;
+  windowToIso?: string | null;
+}): Promise<PageExtraction> {
   return run(input);
 
-  async function run(args: { windowFromIso?: string }): Promise<PageExtraction> {
+  async function run(args: {
+    windowFromIso?: string;
+    windowToIso?: string | null;
+  }): Promise<PageExtraction> {
     const startedAtMs = Date.now();
     const normalizedWindowFrom =
       toIsoStringInline(args.windowFromIso) ||
       new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const windowFromMs = toMsInline(normalizedWindowFrom) ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
+    // Absent means "up to now", which is what a catch-up window wants; a history slice sends
+    // its own end.
+    const windowToMs = toMsInline(args.windowToIso ?? undefined) ?? Date.now();
     const origin = String(window.location?.origin || "https://web.alfabank.ru");
     const operationsApiUrl = `${origin}/api/v1/operations-history/operations`;
     const operationDetailApiBaseUrl = `${origin}/api/v1/operations-history/details/../operations/`;
@@ -446,6 +468,9 @@ function extractOperationsInPage(input: { windowFromIso?: string }): Promise<Pag
           stopPaging = true;
           continue;
         }
+        // Newer than the slice: the feed is walked newest-first, so these come before the slice
+        // rather than after it. Skipped, not a reason to stop paging.
+        if (postedAtMs > windowToMs) continue;
         operations.push(operation);
       }
 

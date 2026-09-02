@@ -3,13 +3,19 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 
-const { createClientMock, useProcessingQueueStoreMock, toastSuccessMock, toastErrorMock } =
-  vi.hoisted(() => ({
-    createClientMock: vi.fn(),
-    useProcessingQueueStoreMock: Object.assign(vi.fn(), { getState: vi.fn() }),
-    toastSuccessMock: vi.fn(),
-    toastErrorMock: vi.fn(),
-  }));
+const {
+  createClientMock,
+  useProcessingQueueStoreMock,
+  toastSuccessMock,
+  toastErrorMock,
+  toastWarningMock,
+} = vi.hoisted(() => ({
+  createClientMock: vi.fn(),
+  useProcessingQueueStoreMock: Object.assign(vi.fn(), { getState: vi.fn() }),
+  toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+  toastWarningMock: vi.fn(),
+}));
 
 vi.mock("@/lib/supabase", () => ({
   createClient: createClientMock,
@@ -27,6 +33,7 @@ vi.mock("sonner", () => ({
   toast: {
     success: toastSuccessMock,
     error: toastErrorMock,
+    warning: toastWarningMock,
   },
 }));
 
@@ -222,6 +229,7 @@ describe("use-processing-monitor", () => {
     await waitFor(() =>
       expect(updateJobMock).toHaveBeenCalledWith("record-1", {
         stage: "failed",
+        // Written before the cause vocabulary existed, so it is shown as it stands.
         error: "Failed to extract text from any attachment",
       }),
     );
@@ -233,6 +241,57 @@ describe("use-processing-monitor", () => {
       }),
     );
     expect(toastErrorMock).toHaveBeenCalled();
+  });
+
+  it("announces a transcription that lost a page as partial, not complete", async () => {
+    const updateJobMock = vi.fn();
+    const addNotificationMock = vi.fn();
+    useProcessingQueueStoreMock.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({
+        updateJob: updateJobMock,
+        addNotification: addNotificationMock,
+        getActiveJobs: () => [],
+      }),
+    );
+
+    const { supabase, getChangeHandler } = createSupabaseMock(["record-1"]);
+    createClientMock.mockReturnValue(supabase);
+
+    const { useProcessingMonitor } = await import("./use-processing-monitor");
+    renderHookWithQueryClient(() => useProcessingMonitor("person-1"));
+
+    await waitFor(() => expect(supabase.channel).toHaveBeenCalled());
+    const handler = getChangeHandler();
+
+    act(() => {
+      handler?.({
+        eventType: "UPDATE",
+        old: { id: "record-1", title: "Scan", status: "ocr_processing", person_id: "person-1" },
+        new: {
+          id: "record-1",
+          title: "Scan",
+          status: "ocr_review",
+          person_id: "person-1",
+          ocr_error:
+            "ocr_cause:provider_unavailable the transcription service was unavailable: " +
+            "1 of 3 pages failed",
+        },
+      });
+    });
+
+    // "OCR complete" for a document that came back missing a page is the same defect one level
+    // up from the column this work is about.
+    await waitFor(() => expect(toastWarningMock).toHaveBeenCalled());
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(toastWarningMock).toHaveBeenCalledWith(
+      "processing.ocrPartial",
+      expect.objectContaining({
+        description: "processing.ocrCause.provider_unavailable",
+      }),
+    );
+    expect(addNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "processing.ocrCause.provider_unavailable" }),
+    );
   });
 
   // A structuring failure has no failed status of its own: the record goes back to ocr_review,

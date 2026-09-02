@@ -1,14 +1,15 @@
 import { isSessionUsable } from "./auth.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
-  buildReceiptPersistenceFields,
   buildLineItemImportHash,
+  buildReceiptPersistenceFields,
   extractAccountHintFromRow,
   jsonResponse,
   normalizeLineItems,
   normalizeSourceForTransactions,
   normalizeText,
   normalizeTransactionRow,
+  pinRowToSessionSource,
   toIsoOrNull,
   toNumberOrNull,
 } from "./normalize.ts";
@@ -331,7 +332,9 @@ export async function previewRowsAction(
   };
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
-    const raw = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    const rawInput = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    const raw: CanonicalTransactionRowInput =
+      auth.mode === "session" ? pinRowToSessionSource(rawInput, source) : rawInput;
     const absoluteRowIndex = chunkState.rowOffset + rowIndex;
     const rowSpan = deps.telemetry?.startSpan("edge.money_import.preview_rows.row", {
       attrs: { row_index: absoluteRowIndex },
@@ -458,7 +461,10 @@ export async function previewRowsAction(
       }
       inRangeRowCount += 1;
 
-      const existingTransactionId = await deps.repository.findExistingTransactionId(normalized);
+      const existingTransactionId = await deps.repository.findExistingTransactionId(
+        normalized,
+        payerPersonId,
+      );
       const txStatus: RowStatus = existingTransactionId ? "skipped" : "inserted";
       const txMessage = existingTransactionId ? "Duplicate transaction" : null;
       if (txStatus === "inserted") insertedCount += 1;

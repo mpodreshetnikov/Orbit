@@ -540,11 +540,18 @@ describe("re-reading production at upload time", () => {
 });
 
 describe("reading the published version authoritatively", () => {
-  const clientReturning = (result: { data: Blob | null; error: unknown }) => ({
+  const clientWith = (input: {
+    listing?: { data: { name: string }[] | null; error: unknown };
+    download?: { data: Blob | null; error: unknown };
+  }) => ({
     storage: {
       from: (bucket: string) => {
         if (bucket !== "extension-releases") throw new Error(`Unexpected bucket: ${bucket}`);
-        return { download: () => Promise.resolve(result) };
+        return {
+          list: () =>
+            Promise.resolve(input.listing ?? { data: [{ name: "latest.json" }], error: null }),
+          download: () => Promise.resolve(input.download ?? { data: null, error: { status: 500 } }),
+        };
       },
     },
   });
@@ -556,6 +563,7 @@ describe("reading the published version authoritatively", () => {
     const client = {
       storage: {
         from: () => ({
+          list: () => Promise.resolve({ data: [{ name: "latest.json" }], error: null }),
           download: (path: string) => {
             asked.push(path);
             return Promise.resolve({
@@ -574,24 +582,43 @@ describe("reading the published version authoritatively", () => {
     expect(asked).toEqual(["latest.json"]);
   });
 
-  it("reports absent when the object is not there", async () => {
+  it("reports absent from an empty listing, without inspecting any error", async () => {
+    // This is the whole point of listing first. Storage reports "not there"
+    // differently on every route, and an error object that JSON.stringify
+    // renders as {} told nobody anything — it also failed closed and blocked
+    // the first real publish. An empty array is not an error to classify.
     await expect(
-      fetchPublishedExtensionVersionFromStorage(
-        clientReturning({ data: null, error: { statusCode: "404", code: "NoSuchKey" } }),
-      ),
+      fetchPublishedExtensionVersionFromStorage(clientWith({ listing: { data: [], error: null } })),
     ).resolves.toEqual({ status: "absent" });
 
     await expect(
       fetchPublishedExtensionVersionFromStorage(
-        clientReturning({ data: null, error: { status: 404, message: "Object not found" } }),
+        clientWith({ listing: { data: [{ name: "something-else.json" }], error: null } }),
       ),
     ).resolves.toEqual({ status: "absent" });
   });
 
-  it("reports unknown for an error that is not a missing object", async () => {
+  it("fails closed when the listing itself fails", async () => {
     await expect(
       fetchPublishedExtensionVersionFromStorage(
-        clientReturning({ data: null, error: { status: 403, message: "Unauthorized" } }),
+        clientWith({ listing: { data: null, error: { status: 503, message: "down" } } }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+  });
+
+  it("fails closed when the object is listed but cannot be read", async () => {
+    // The listing said it is there, so a failed read is a failure rather than an
+    // absence — whatever shape the error arrives in.
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientWith({ download: { data: null, error: { status: 403, message: "Unauthorized" } } }),
+      ),
+    ).resolves.toMatchObject({ status: "unknown" });
+
+    // An error with nothing JSON can see, which is what actually happened.
+    await expect(
+      fetchPublishedExtensionVersionFromStorage(
+        clientWith({ download: { data: null, error: new Error("socket hang up") } }),
       ),
     ).resolves.toMatchObject({ status: "unknown" });
   });
@@ -599,15 +626,31 @@ describe("reading the published version authoritatively", () => {
   it("reports unknown for a body that is not usable metadata", async () => {
     await expect(
       fetchPublishedExtensionVersionFromStorage(
-        clientReturning({ data: new Blob(["<html>proxy</html>"]), error: null }),
+        clientWith({ download: { data: new Blob(["<html>proxy</html>"]), error: null } }),
       ),
     ).resolves.toMatchObject({ status: "unknown" });
 
     await expect(
       fetchPublishedExtensionVersionFromStorage(
-        clientReturning({ data: new Blob([JSON.stringify({ published_at: "now" })]), error: null }),
+        clientWith({
+          download: { data: new Blob([JSON.stringify({ published_at: "now" })]), error: null },
+        }),
       ),
     ).resolves.toMatchObject({ status: "unknown" });
+  });
+
+  it("says something useful about an error JSON cannot see", async () => {
+    const result = await fetchPublishedExtensionVersionFromStorage(
+      clientWith({ listing: { data: null, error: new Error("socket hang up") } }),
+    );
+
+    expect(result).toMatchObject({ status: "unknown" });
+    // The first version printed "{}" here, which is how a blocked publish
+    // reported nothing anyone could act on.
+    if (result.status === "unknown") {
+      expect(result.reason).toContain("socket hang up");
+      expect(result.reason).not.toContain("{}");
+    }
   });
 });
 
@@ -615,12 +658,13 @@ describe("the publish-time gate", () => {
   const clientPublishing = (version: string | null) => ({
     storage: {
       from: () => ({
+        list: () =>
+          Promise.resolve({
+            data: version === null ? [] : [{ name: "latest.json" }],
+            error: null,
+          }),
         download: () =>
-          Promise.resolve(
-            version === null
-              ? { data: null, error: { status: 404, message: "Object not found" } }
-              : { data: new Blob([JSON.stringify({ version })]), error: null },
-          ),
+          Promise.resolve({ data: new Blob([JSON.stringify({ version })]), error: null }),
       }),
     },
   });
@@ -639,6 +683,7 @@ describe("the publish-time gate", () => {
     const failing = {
       storage: {
         from: () => ({
+          list: () => Promise.resolve({ data: null, error: { status: 503, message: "down" } }),
           download: () => Promise.resolve({ data: null, error: { status: 503, message: "down" } }),
         }),
       },
@@ -667,6 +712,7 @@ describe("the publish-time gate", () => {
     const client = {
       storage: {
         from: () => ({
+          list: () => Promise.resolve({ data: [{ name: "latest.json" }], error: null }),
           download: () => {
             downloads += 1;
             return Promise.resolve({

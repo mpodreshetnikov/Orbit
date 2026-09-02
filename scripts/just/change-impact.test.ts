@@ -62,6 +62,24 @@ describe("change-impact docsOnly", () => {
     expect(impact.functionsImpact).toBe(false);
   });
 
+  it("counts the artifact generator and the database pin as DB impact", () => {
+    // The lane these two are checked by is the one they control. `config.toml` pins the major
+    // version that decides which pg_dump can dump the database at all, and `db-artifacts.cjs` is
+    // what writes and verifies the generated artifacts — so a change to either was invisible to
+    // the check that would exercise it, and the pull request repairing that check skipped the lane
+    // it repaired.
+    expect(classifyChangedFiles(["scripts/just/db-artifacts.cjs"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["scripts/just/db-artifacts.test.ts"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles(["supabase/config.toml"]).dbImpact).toBe(true);
+  });
+
+  it("does not treat every script or supabase file as DB impact", () => {
+    expect(classifyChangedFiles(["scripts/just/check-pr-size.cjs"]).dbImpact).toBe(false);
+    expect(classifyChangedFiles(["supabase/functions/health-structure/service.ts"]).dbImpact).toBe(
+      false,
+    );
+  });
+
   it("clears the flag as soon as one file is not prose", () => {
     expect(classifyChangedFiles(["docs/design/core-beliefs.md", "src/app/page.tsx"]).docsOnly).toBe(
       false,

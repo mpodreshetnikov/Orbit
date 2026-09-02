@@ -9,7 +9,7 @@ import {
   toIsoOrNull,
 } from "./normalize.ts";
 import { buildImportContext, readRangeSelectionMeta } from "./range-window.ts";
-import type { AuthContext, UserAuthContext } from "./types.ts";
+import type { AuthContext, GrantAuthContext, UserAuthContext } from "./types.ts";
 import type { MoneyImportRepository } from "./repository.ts";
 
 export const DEFAULT_SESSION_TTL_MINUTES = 15;
@@ -71,12 +71,21 @@ export async function getImportContextAction(
 
 export async function createSessionAction(
   body: Record<string, unknown>,
-  auth: UserAuthContext,
+  auth: UserAuthContext | GrantAuthContext,
   deps: SessionActionDeps,
 ): Promise<Response> {
   const span = deps.telemetry?.startSpan("edge.money_import.create_session");
   const source = normalizeText(body.source);
-  const payerPersonId = normalizeText(body.payer_person_id);
+
+  // Under a grant the person is fixed by the credential, not by the request. A grant that
+  // could name any payer would be a general-purpose write token, which is exactly what it
+  // is meant not to be.
+  const isGrant = auth.mode === "grant";
+  const grant = isGrant ? auth.grant : null;
+  const payerPersonId = grant
+    ? normalizeText(grant.person_id)
+    : normalizeText(body.payer_person_id);
+
   if (!source || !payerPersonId) {
     await span?.end({
       status: "error",
@@ -84,6 +93,22 @@ export async function createSessionAction(
     });
     return jsonResponse({ error: "source and payer_person_id are required" }, 400);
   }
+
+  if (grant) {
+    const allowedSources = Array.isArray(grant.allowed_sources)
+      ? grant.allowed_sources.map((value) => normalizeText(value)).filter(Boolean)
+      : [];
+    if (!allowedSources.includes(source)) {
+      await span?.end({
+        status: "error",
+        statusMessage: "Source is not allowed for this grant",
+      });
+      return jsonResponse({ error: "Source is not allowed for this grant" }, 403);
+    }
+  }
+
+  const createdByAuthUserId =
+    auth.mode === "grant" ? (normalizeText(auth.grant.created_by_auth_user_id) ?? "") : auth.userId;
 
   const now = (deps.now ?? (() => new Date()))();
   const sessionTtlMinutes = deps.sessionTtlMinutes ?? DEFAULT_SESSION_TTL_MINUTES;
@@ -99,7 +124,7 @@ export async function createSessionAction(
     token_hash: tokenHash,
     source,
     payer_person_id: payerPersonId,
-    created_by_auth_user_id: auth.userId,
+    created_by_auth_user_id: createdByAuthUserId,
     status: "created",
     window_from: windowFrom,
     window_to: windowTo,
@@ -127,6 +152,11 @@ export async function createSessionAction(
     updated_at: now.toISOString(),
   });
 
+  if (grant) {
+    const grantId = normalizeText(grant.id);
+    if (grantId) await deps.repository.markGrantUsed(grantId, now.toISOString());
+  }
+
   const lastImportedAt = await deps.repository.findLastImportedAt(
     normalizeSourceForTransactions(source),
     payerPersonId,
@@ -135,6 +165,7 @@ export async function createSessionAction(
     session_id: session.id,
     batch_id: batchId,
     source,
+    auth_mode: auth.mode,
   });
   await span?.end({
     status: "ok",

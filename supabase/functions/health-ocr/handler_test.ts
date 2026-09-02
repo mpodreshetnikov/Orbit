@@ -247,7 +247,10 @@ Deno.test("health-ocr handler swallows a background failure", async () => {
   assertEquals(payload.accepted, true);
   // The default dispatcher owns the promise; nothing is left for the runtime to report.
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assertEquals(failures, ["attachments unavailable"]);
+  // Classified before it is stored, like every other durable failure.
+  assertEquals(failures, [
+    "ocr_cause:internal the transcription failed for an unexpected reason: attachments unavailable",
+  ]);
 });
 
 Deno.test("health-ocr default handler fails when OPENROUTER key missing", async () => {
@@ -363,7 +366,11 @@ Deno.test("health-ocr handler handles malformed json and non-Error exceptions", 
     400,
   );
   assertEquals(malformedBody.success, false);
-  assertEquals(malformedBody.error, "Missing required field: record_id");
+  assertEquals(
+    malformedBody.error,
+    "ocr_cause:internal the transcription failed for an unexpected reason: " +
+      "Missing required field: record_id",
+  );
 
   const nonErrorThrowHandler = createHealthOcrHandler({
     config: {

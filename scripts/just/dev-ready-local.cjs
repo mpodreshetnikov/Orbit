@@ -133,9 +133,7 @@ const NPX_BIN = resolveNpxBin();
 const CONCURRENTLY_PACKAGE_JSON = require.resolve("concurrently/package.json");
 const CONCURRENTLY_BIN = path.join(
   path.dirname(CONCURRENTLY_PACKAGE_JSON),
-  "dist",
-  "bin",
-  "concurrently.js",
+  require(CONCURRENTLY_PACKAGE_JSON).bin.concurrently,
 );
 const stopDbOnExit = (process.argv[2] || "true").toLowerCase() !== "false";
 const authMode = (process.argv[3] || "default").toLowerCase();

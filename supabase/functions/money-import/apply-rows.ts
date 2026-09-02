@@ -1,8 +1,8 @@
 import { isSessionUsable } from "./auth.ts";
 import type { EdgeTelemetry } from "../_shared/observability.ts";
 import {
-  buildReceiptPersistenceFields,
   buildLineItemImportHash,
+  buildReceiptPersistenceFields,
   extractAccountHintFromRow,
   hasRealImportLineItems,
   jsonResponse,
@@ -10,6 +10,7 @@ import {
   normalizeSourceForTransactions,
   normalizeText,
   normalizeTransactionRow,
+  pinRowToSessionSource,
   toIsoOrNull,
   toNumberOrNull,
 } from "./normalize.ts";
@@ -201,7 +202,9 @@ export async function applyRowsAction(
   };
 
   for (let rowIndex = 0; rowIndex < rowsRaw.length; rowIndex++) {
-    const raw = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    const rawInput = rowsRaw[rowIndex] as CanonicalTransactionRowInput;
+    const raw: CanonicalTransactionRowInput =
+      auth.mode === "session" ? pinRowToSessionSource(rawInput, source) : rawInput;
     const rowSpan = deps.telemetry?.startSpan("edge.money_import.apply_rows.row", {
       attrs: {
         row_index: rowIndex,

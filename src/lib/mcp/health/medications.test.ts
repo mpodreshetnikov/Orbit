@@ -7,6 +7,7 @@ import {
   listMedications,
   logDose,
   updateRegimen,
+  inventoryToStore,
 } from "./medications";
 import { createSupabaseStub, type StubResult } from "./test-support";
 import { createDoseEventsFake } from "./dose-events-fake";
@@ -391,6 +392,22 @@ describe("createRegimen / updateRegimen", () => {
     });
   });
 
+  it("gives a new course with tracking on the decrement its owner asked for", async () => {
+    // An absent flag reads as false in every function that reads it, and the
+    // web form always writes true -- so a course created over MCP without one
+    // tracked a figure that never moved.
+    const stub = createSupabaseStub({ med_regimens: [{ data: regimen() }] });
+
+    await createRegimen(stub.client, {
+      custom_name: "X",
+      inventory: { enabled: true, current_amount: 10 },
+    });
+
+    expect(stub.argsFor("med_regimens", "insert")[0][0]).toMatchObject({
+      inventory: { enabled: true, current_amount: 10, auto_decrement_on_taken: true },
+    });
+  });
+
   it("surfaces a create error", async () => {
     const stub = createSupabaseStub({ med_regimens: [{ error: { message: "boom" } }] });
     await expect(createRegimen(stub.client, {})).rejects.toThrow(/Failed to create medication/);
@@ -408,6 +425,108 @@ describe("createRegimen / updateRegimen", () => {
 
     expect(stub.argsFor("med_regimens", "eq")).toEqual([["id", "r-1"]]);
     expect(stub.argsFor("med_regimens", "is")).toEqual([["deleted_at", null]]);
+  });
+
+  it("keeps the stock fields an update did not name", async () => {
+    // One jsonb column and every key optional, so "set the stock to 20" used to
+    // drop the threshold, the unit and the decrement flag with it -- the refill
+    // reminder went quiet and the figure stopped moving, silently.
+    const stored = {
+      enabled: true,
+      current_amount: 4,
+      unit: "pill",
+      refill_threshold_amount: 2,
+      capacity_amount: 30,
+      auto_decrement_on_taken: true,
+    };
+    const stub = createSupabaseStub({
+      med_regimens: [
+        { data: { inventory: stored, updated_at: "2026-06-15T08:00:00.000Z" } },
+        { data: regimen() },
+      ],
+    });
+
+    await updateRegimen(stub.client, "r-1", {
+      inventory: { enabled: true, current_amount: 20 },
+    });
+
+    expect(stub.argsFor("med_regimens", "update")[0][0]).toMatchObject({
+      inventory: { ...stored, current_amount: 20 },
+    });
+    // And the write is conditional on the row not having moved under it.
+    expect(stub.argsFor("med_regimens", "eq")).toContainEqual([
+      "updated_at",
+      "2026-06-15T08:00:00.000Z",
+    ]);
+  });
+
+  it("merges again against what a concurrent write left", async () => {
+    // A dose taken between the read and the write moves `current_amount`
+    // through an RPC. Writing the merged object then carries the figure from
+    // before it and gives the decrement back, silently.
+    const stub = createSupabaseStub({
+      med_regimens: [
+        { data: { inventory: { enabled: true, current_amount: 10 }, updated_at: "t1" } },
+        // The guard matched nothing: somebody got there first.
+        { data: null },
+        { data: { inventory: { enabled: true, current_amount: 9 }, updated_at: "t2" } },
+        { data: regimen() },
+      ],
+    });
+
+    await updateRegimen(stub.client, "r-1", { inventory: { refill_threshold_amount: 3 } });
+
+    const writes = stub.argsFor("med_regimens", "update");
+    expect(writes).toHaveLength(2);
+    // The retry keeps their decrement rather than restoring the figure it first
+    // read.
+    expect(writes[1][0]).toMatchObject({
+      inventory: { enabled: true, current_amount: 9, refill_threshold_amount: 3 },
+    });
+  });
+
+  it("says the stock kept moving rather than reporting the medication missing", async () => {
+    // Three collisions in a row is a caller hammering the same course, and an
+    // honest error beats spinning -- but calling it a missing medication would
+    // send them looking for the wrong thing.
+    const contended = { data: { inventory: { enabled: true }, updated_at: "t" } };
+    const stub = createSupabaseStub({
+      med_regimens: [
+        contended,
+        { data: null },
+        contended,
+        { data: null },
+        contended,
+        { data: null },
+        // The existence check on the way out.
+        { data: { id: "r-1" } },
+      ],
+    });
+
+    await expect(
+      updateRegimen(stub.client, "r-1", { inventory: { current_amount: 20 } }),
+    ).rejects.toThrow(/kept changing while this update was being applied/);
+  });
+
+  it("refuses rather than replacing when the stored stock cannot be read", async () => {
+    // Treating an unreadable row as an empty one would store the supplied
+    // object alone, which is the replacement the merge exists to prevent.
+    const stub = createSupabaseStub({
+      med_regimens: [{ error: { message: "connection reset" } }],
+    });
+
+    await expect(
+      updateRegimen(stub.client, "r-1", { inventory: { current_amount: 20 } }),
+    ).rejects.toThrow(/before updating it: connection reset/);
+    expect(stub.argsFor("med_regimens", "update")).toHaveLength(0);
+  });
+
+  it("reads nothing extra when the update does not touch stock", async () => {
+    const stub = createSupabaseStub({ med_regimens: [{ data: regimen() }] });
+
+    await updateRegimen(stub.client, "r-1", { custom_name: "Y" });
+
+    expect(stub.argsFor("med_regimens", "select")).toHaveLength(1);
   });
 
   it("reports a missing regimen on update", async () => {
@@ -720,6 +839,221 @@ describe("logDose", () => {
       ]);
     });
 
+    it("puts back what the dose actually took when the correction changes the amount", async () => {
+      // The ledger hole: `mark_dose_skipped` reverses the amount it reads off
+      // the row, so amending the row first made it restore 0.5 against a
+      // decrement of 1 and leave half a pill missing from stock for good.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+
+      expect(result.dose.status).toBe("skipped");
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "correction", event_id: "d-1", amount: 1 }),
+      ]);
+      // And the record still ends up saying what the person reported.
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+    });
+
+    it("decrements the corrected amount when the correction goes the other way", async () => {
+      // The mirror: `mark_dose_taken` decrements what it reads, so here the
+      // correction has to be on the row before the RPC looks at it.
+      const fake = fakeWith([{ id: "d-1", status: "skipped", taken_at: AT }]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken", amount: 0.5 });
+
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "decrement", event_id: "d-1", amount: 0.5 }),
+      ]);
+    });
+
+    it("corrects the amount of a dose already taken instead of reporting nothing to do", async () => {
+      // "Actually that was half a pill." A matching status is not a matching
+      // outcome: refusing here left the record disagreeing with the person and
+      // sent them round the toggle-to-skipped-and-back workaround.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "taken",
+        amount: 0.5,
+      });
+
+      expect(result.alreadyRecorded).toBe(false);
+      expect(result.corrected).toBe(true);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+      // Reversed in full, then decremented anew -- the ledger moves by the
+      // difference without ever inventing a second intake.
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "correction", amount: 1 }),
+        expect.objectContaining({ type: "decrement", amount: 0.5 }),
+      ]);
+    });
+
+    it("corrects the amount of a dose already skipped without touching stock", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "skipped", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+
+      expect(result.corrected).toBe(true);
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+      // A dose that was skipped never took anything out, so nothing goes back.
+      expect(fake.inventory).toHaveLength(0);
+    });
+
+    it("still writes the corrected amount when only the RPC's response is lost", async () => {
+      // The reversal has committed against the amount really decremented, so
+      // the half of the correction that waited for it is still owed: without
+      // it the event keeps the amount it was taken as, and a later status
+      // change moves stock by the wrong figure.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+      fake.loseRpcResponse("connection reset by peer");
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+
+      expect(result.dose.status).toBe("skipped");
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+      expect(fake.inventory).toEqual([expect.objectContaining({ type: "correction", amount: 1 })]);
+    });
+
+    it("writes the note that came with a skipped-dose correction, and keeps it otherwise", async () => {
+      // Nothing follows this branch to record the note, so dropping it reported
+      // a correction the record did not carry.
+      const withNote = fakeWith([{ id: "d-1", status: "skipped", note: "felt sick" }]);
+      await logDose(withNote.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+        note: "took a quarter instead",
+      });
+      expect(withNote.events[0].note).toBe("took a quarter instead");
+
+      const withoutNote = fakeWith([{ id: "d-1", status: "skipped", note: "felt sick" }]);
+      await logDose(withoutNote.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+      expect(withoutNote.events[0].note).toBe("felt sick");
+    });
+
+    it("answers a resolved dose changed to the other status as a correction", async () => {
+      // It modified an intake already on the record, so "Logged ..." would read
+      // as a second dose -- the very thing the correction reply exists to stop.
+      const resolved = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+      const correction = await logDose(resolved.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+      });
+      expect(correction.corrected).toBe(true);
+
+      // A dose still owed is genuinely being logged for the first time.
+      const owed = fakeWith([{ id: "d-1", status: "scheduled" }]);
+      const logged = await logDose(owed.client, { regimenId: "r-1", at: AT, status: "taken" });
+      expect(logged.corrected).toBe(false);
+    });
+
+    it("resolves the dose that was due when the intake came later", async () => {
+      // The 08:00 dose swallowed at 08:15. One field did both jobs, so the
+      // lookup went to 08:15, found nothing, inserted a second event and
+      // decremented stock for it -- while the 08:00 dose stayed owed and its
+      // reminder stayed armed.
+      const fake = fakeWith([{ id: "d-1", status: "scheduled" }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        takenAt: "2026-06-15T08:15:00.000Z",
+        status: "taken",
+      });
+
+      expect(result.planned).toBe(true);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].status).toBe("taken");
+      expect(fake.inventory).toHaveLength(1);
+      // And the moment the person reported is what the record carries, rather
+      // than the slot the dose sat on.
+      expect(fake.events[0].taken_at).toBe("2026-06-15T08:15:00.000Z");
+      expect(fake.rpc).toHaveBeenCalledWith("mark_dose_taken", {
+        p_dose_event_id: "d-1",
+        p_taken_at: "2026-06-15T08:15:00.000Z",
+      });
+    });
+
+    it("corrects the time a dose was taken, with the amount unchanged", async () => {
+      // "The 8 o'clock one -- I actually took it at quarter past." Neither
+      // status nor amount moves, and reading that as nothing to do left the
+      // record saying 08:00 while the reply said 08:15.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        takenAt: "2026-06-15T08:15:00.000Z",
+        status: "taken",
+      });
+
+      expect(result.alreadyRecorded).toBe(false);
+      expect(result.corrected).toBe(true);
+      expect(fake.events[0].taken_at).toBe("2026-06-15T08:15:00.000Z");
+      // The amount did not change, so nothing moves in the ledger.
+      expect(fake.inventory).toHaveLength(0);
+    });
+
+    it("still says nothing was written when the time is the one on record", async () => {
+      // The column comes back with whatever offset PostgREST renders it in, so
+      // the comparison is between instants rather than between strings.
+      const fake = fakeWith([
+        { id: "d-1", status: "taken", taken_at: "2026-06-15T08:00:00+00:00" },
+      ]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        takenAt: AT,
+        status: "taken",
+      });
+
+      expect(result.alreadyRecorded).toBe(true);
+      expect(fake.rpc).not.toHaveBeenCalled();
+    });
+
+    it("still says nothing was written when the amount is the one on record", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "taken",
+        amount: 1,
+      });
+
+      expect(result.alreadyRecorded).toBe(true);
+      expect(result.corrected).toBe(false);
+      expect(fake.rpc).not.toHaveBeenCalled();
+      expect(fake.inventory).toHaveLength(0);
+    });
+
     it("resolves a snoozed dose instead of leaving its reminder armed", async () => {
       // `snoozed` is outside the unique index too, so the insert would have
       // succeeded and left `d-1` owing a dose that was already taken.
@@ -953,5 +1287,36 @@ describe("logDose", () => {
     await expect(
       logDose(stub.client, { regimenId: "r-1", at: "2026-06-15T08:00:00.000Z", status: "taken" }),
     ).rejects.toThrow(/Failed to record the intake/);
+  });
+});
+
+describe("inventoryToStore", () => {
+  it("means yes when tracking is on and nobody said otherwise", () => {
+    // The only surface that writes the flag always writes true, and turning
+    // tracking on is a request for the number to go down.
+    expect(inventoryToStore(null, { enabled: true, current_amount: 10 })).toEqual({
+      enabled: true,
+      current_amount: 10,
+      auto_decrement_on_taken: true,
+    });
+  });
+
+  it("leaves an explicit refusal alone", () => {
+    expect(inventoryToStore(null, { enabled: true, auto_decrement_on_taken: false })).toMatchObject(
+      { auto_decrement_on_taken: false },
+    );
+  });
+
+  it("adds no default where tracking is off", () => {
+    expect(inventoryToStore(null, { enabled: false })).toEqual({ enabled: false });
+  });
+
+  it("clears the whole thing on an explicit null, which is how tracking is turned off", () => {
+    expect(inventoryToStore({ enabled: true, current_amount: 5 }, null)).toBeNull();
+  });
+
+  it("leaves the stored object alone when the caller named no stock at all", () => {
+    const stored = { enabled: true, current_amount: 5 };
+    expect(inventoryToStore(stored, undefined)).toEqual(stored);
   });
 });

@@ -6,9 +6,15 @@ import { routeBackgroundMessage, type BackgroundMessage } from "./core/backgroun
 import { createImportDebugStore } from "./core/import-debug.js";
 import { createExtensionLogger } from "./core/observability.js";
 import { createSessionStore } from "./core/session-store.js";
+import { createGrantStore } from "./core/grant-store.js";
+import { createBackfillStore } from "./core/backfill-store.js";
+import { createAutoRunStore } from "./core/auto-run-store.js";
+import { createAutoImportSweep } from "./core/auto-import-sweep.js";
+import { runScheduledImport } from "./core/import-runner.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
+  listMoneyImportSourceDefinitions,
   matchesKnownMoneyImportSourcePageUrl,
   shouldShowMoneyImportSourcePageWidget,
 } from "./money-import-sources.js";
@@ -297,11 +303,78 @@ function extractErrorDiagnostics(error: unknown): Record<string, unknown> | null
 }
 
 const sessionStore = createSessionStore(chrome.storage.local);
+const grantStore = createGrantStore(chrome.storage.local);
+const backfillStore = createBackfillStore(chrome.storage.local);
+const autoRunStore = createAutoRunStore(chrome.storage.local);
 const debugStore = createImportDebugStore();
 const telemetry = createExtensionLogger("background");
 telemetry.info("extension_background_initialized", {
   dev_hot_reload: DEV_HOT_RELOAD,
   app_origin_pattern_count: Array.isArray(APP_ORIGIN_PATTERNS) ? APP_ORIGIN_PATTERNS.length : 0,
+});
+
+const AUTO_IMPORT_ALARM = "money-import-auto";
+/**
+ * How often the alarm asks whether anything is due. The cooldown decides whether a run actually
+ * happens, so this only has to be short enough that a machine awake for a few hours a day still
+ * gets asked.
+ */
+const AUTO_IMPORT_ALARM_PERIOD_MINUTES = 180;
+const AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS = 30_000;
+const AUTO_IMPORT_TAB_POLL_INTERVAL_MS = 500;
+
+const autoImportSweep = createAutoImportSweep({
+  listSources: () =>
+    listMoneyImportSourceDefinitions()
+      .filter((definition) => Boolean(definition.targetUrl))
+      .map((definition) => ({
+        sourceId: definition.sourceId,
+        targetUrl: definition.targetUrl,
+      })),
+  grantStore,
+  sessionStore,
+  autoRunStore,
+  openTab: async (url) => {
+    const created = await chrome.tabs.create({ url, active: false });
+    return typeof created.id === "number" ? created.id : null;
+  },
+  waitForTabComplete: async (tabId) => {
+    const startedAtMs = Date.now();
+    while (Date.now() - startedAtMs < AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!tab) return false;
+      if (tab.status === "complete") return true;
+      await new Promise((resolve) => setTimeout(resolve, AUTO_IMPORT_TAB_POLL_INTERVAL_MS));
+    }
+    return false;
+  },
+  closeTab: async (tabId) => {
+    await chrome.tabs.remove(tabId).catch(() => {});
+  },
+  runImport: async ({ grant, sourceId, tabId, nowMs }) =>
+    await runScheduledImport(
+      {
+        sourceId,
+        payerPersonId: grant.person_id,
+        nowMs,
+        functionUrl: grant.function_url,
+        credentials: { grantToken: grant.token },
+        appOrigin: grant.app_origin || null,
+        // Nobody is looking at this tab; the widget is for a run a person started.
+        showSourcePageWidget: false,
+        tabId,
+      },
+      {
+        getConnector,
+        callEdge,
+        broadcastToAppTabs,
+        nowIso: () => new Date().toISOString(),
+        backfillStore,
+        sessionStore,
+      },
+    ),
+  now: () => Date.now(),
+  onWarning: (event, attrs) => telemetry.warn(event, attrs),
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -313,10 +386,42 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
   void (async () => {
     const session = await sessionStore.getSession();
-    if (!session) return;
+    if (!session) {
+      // A finished load on a bank page is the one moment the extension knows the person's bank
+      // session is live. It is a signal only: the sweep works in a tab of its own.
+      if (isComplete && matchesKnownMoneyImportSourcePageUrl(nextUrl)) {
+        await autoImportSweep.run("visit");
+      }
+      return;
+    }
     await syncSourcePageWidgetForSession(session, { tabId, tabUrl: nextUrl });
   })();
 });
+
+/**
+ * Creates the alarm once, and only when it is not already there.
+ *
+ * `alarms.create` on an existing name replaces it and restarts its period. A service worker is
+ * torn down whenever it goes idle and rebuilt on the next event, so re-creating unconditionally
+ * on every startup means a three-hour alarm on a busy machine is reset long before it ever
+ * fires, and the fallback that exists for people who do not visit their bank never runs.
+ */
+async function ensureAutoImportAlarm(): Promise<void> {
+  if (!chrome.alarms?.create) return;
+  const existing = await chrome.alarms.get(AUTO_IMPORT_ALARM).catch(() => null);
+  if (existing) return;
+  await chrome.alarms.create(AUTO_IMPORT_ALARM, {
+    periodInMinutes: AUTO_IMPORT_ALARM_PERIOD_MINUTES,
+  });
+}
+
+if (chrome.alarms?.onAlarm) {
+  void ensureAutoImportAlarm();
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== AUTO_IMPORT_ALARM) return;
+    void autoImportSweep.run("alarm");
+  });
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "money-import-source-widget") return;
@@ -333,6 +438,8 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         message,
         {
           sessionStore,
+          grantStore,
+          autoRunStore,
           debugStore,
           importRunnerDeps: {
             getConnector,
