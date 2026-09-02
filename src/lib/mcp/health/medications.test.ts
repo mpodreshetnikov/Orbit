@@ -720,6 +720,156 @@ describe("logDose", () => {
       ]);
     });
 
+    it("puts back what the dose actually took when the correction changes the amount", async () => {
+      // The ledger hole: `mark_dose_skipped` reverses the amount it reads off
+      // the row, so amending the row first made it restore 0.5 against a
+      // decrement of 1 and leave half a pill missing from stock for good.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+
+      expect(result.dose.status).toBe("skipped");
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "correction", event_id: "d-1", amount: 1 }),
+      ]);
+      // And the record still ends up saying what the person reported.
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+    });
+
+    it("decrements the corrected amount when the correction goes the other way", async () => {
+      // The mirror: `mark_dose_taken` decrements what it reads, so here the
+      // correction has to be on the row before the RPC looks at it.
+      const fake = fakeWith([{ id: "d-1", status: "skipped", taken_at: AT }]);
+
+      await logDose(fake.client, { regimenId: "r-1", at: AT, status: "taken", amount: 0.5 });
+
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "decrement", event_id: "d-1", amount: 0.5 }),
+      ]);
+    });
+
+    it("corrects the amount of a dose already taken instead of reporting nothing to do", async () => {
+      // "Actually that was half a pill." A matching status is not a matching
+      // outcome: refusing here left the record disagreeing with the person and
+      // sent them round the toggle-to-skipped-and-back workaround.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "taken",
+        amount: 0.5,
+      });
+
+      expect(result.alreadyRecorded).toBe(false);
+      expect(result.corrected).toBe(true);
+      expect(fake.events).toHaveLength(1);
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+      // Reversed in full, then decremented anew -- the ledger moves by the
+      // difference without ever inventing a second intake.
+      expect(fake.inventory).toEqual([
+        expect.objectContaining({ type: "correction", amount: 1 }),
+        expect.objectContaining({ type: "decrement", amount: 0.5 }),
+      ]);
+    });
+
+    it("corrects the amount of a dose already skipped without touching stock", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "skipped", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+
+      expect(result.corrected).toBe(true);
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+      // A dose that was skipped never took anything out, so nothing goes back.
+      expect(fake.inventory).toHaveLength(0);
+    });
+
+    it("still writes the corrected amount when only the RPC's response is lost", async () => {
+      // The reversal has committed against the amount really decremented, so
+      // the half of the correction that waited for it is still owed: without
+      // it the event keeps the amount it was taken as, and a later status
+      // change moves stock by the wrong figure.
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+      fake.loseRpcResponse("connection reset by peer");
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+
+      expect(result.dose.status).toBe("skipped");
+      expect(fake.events[0].planned_intake).toMatchObject({ intake: { amount: 0.5 } });
+      expect(fake.inventory).toEqual([expect.objectContaining({ type: "correction", amount: 1 })]);
+    });
+
+    it("writes the note that came with a skipped-dose correction, and keeps it otherwise", async () => {
+      // Nothing follows this branch to record the note, so dropping it reported
+      // a correction the record did not carry.
+      const withNote = fakeWith([{ id: "d-1", status: "skipped", note: "felt sick" }]);
+      await logDose(withNote.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+        note: "took a quarter instead",
+      });
+      expect(withNote.events[0].note).toBe("took a quarter instead");
+
+      const withoutNote = fakeWith([{ id: "d-1", status: "skipped", note: "felt sick" }]);
+      await logDose(withoutNote.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+        amount: 0.5,
+      });
+      expect(withoutNote.events[0].note).toBe("felt sick");
+    });
+
+    it("answers a resolved dose changed to the other status as a correction", async () => {
+      // It modified an intake already on the record, so "Logged ..." would read
+      // as a second dose -- the very thing the correction reply exists to stop.
+      const resolved = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+      const correction = await logDose(resolved.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "skipped",
+      });
+      expect(correction.corrected).toBe(true);
+
+      // A dose still owed is genuinely being logged for the first time.
+      const owed = fakeWith([{ id: "d-1", status: "scheduled" }]);
+      const logged = await logDose(owed.client, { regimenId: "r-1", at: AT, status: "taken" });
+      expect(logged.corrected).toBe(false);
+    });
+
+    it("still says nothing was written when the amount is the one on record", async () => {
+      const fake = fakeWith([{ id: "d-1", status: "taken", taken_at: AT }]);
+
+      const result = await logDose(fake.client, {
+        regimenId: "r-1",
+        at: AT,
+        status: "taken",
+        amount: 1,
+      });
+
+      expect(result.alreadyRecorded).toBe(true);
+      expect(result.corrected).toBe(false);
+      expect(fake.rpc).not.toHaveBeenCalled();
+      expect(fake.inventory).toHaveLength(0);
+    });
+
     it("resolves a snoozed dose instead of leaving its reminder armed", async () => {
       // `snoozed` is outside the unique index too, so the insert would have
       // succeeded and left `d-1` owing a dose that was already taken.

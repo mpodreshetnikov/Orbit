@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(19);
+SELECT plan(21);
 
 SELECT has_function('public', 'mark_dose_taken', ARRAY['uuid', 'text', 'timestamp with time zone']);
 SELECT has_function('public', 'mark_dose_skipped', ARRAY['uuid', 'text']);
@@ -196,6 +196,69 @@ SELECT is(
   ),
   'refill:5:restock',
   'update_regimen_inventory writes refill transaction with normalized note'
+);
+
+-- A course whose stock is tracked but not decremented automatically. Taking a
+-- dose leaves `current_amount` alone there, so a later edit of the amount must
+-- not add the old one back: that would create stock out of nothing and silence
+-- the refill reminder the figure drives.
+INSERT INTO public.med_regimens (
+  id,
+  person_id,
+  custom_name,
+  schedule,
+  duration,
+  dose_definition,
+  inventory
+)
+VALUES (
+  'dddddddd-dddd-dddd-dddd-dddddddddddd',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  'Manual Stock',
+  '{"mode":"daily_times","times":["09:00"],"amounts":[1]}'::jsonb,
+  '{"type":"ongoing","start_date":"2026-01-01"}'::jsonb,
+  '{"intake":{"amount":1,"unit":"pill"},"active":[]}'::jsonb,
+  '{"enabled":true,"auto_decrement_on_taken":false,"current_amount":10,"refill_threshold_amount":2,"unit":"pill"}'::jsonb
+);
+
+INSERT INTO public.med_dose_events (
+  id,
+  person_id,
+  regimen_id,
+  scheduled_at,
+  actual_at,
+  planned_intake,
+  status
+)
+VALUES (
+  'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  'dddddddd-dddd-dddd-dddd-dddddddddddd',
+  now() + interval '1 hour',
+  now() + interval '1 hour',
+  '{"intake":{"amount":1,"unit":"pill"},"active":[]}'::jsonb,
+  'scheduled'
+);
+
+SELECT public.mark_dose_taken('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
+
+SELECT is(
+  (SELECT (inventory->>'current_amount')::numeric FROM public.med_regimens WHERE id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'),
+  10::numeric,
+  'mark_dose_taken leaves stock alone when auto decrement is off'
+);
+
+SELECT public.update_dose_event_resolution_details(
+  'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+  NULL,
+  0.5,
+  NULL
+);
+
+SELECT is(
+  (SELECT (inventory->>'current_amount')::numeric FROM public.med_regimens WHERE id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'),
+  10::numeric,
+  'update_dose_event_resolution_details invents no stock when auto decrement is off'
 );
 
 SELECT * FROM finish();
