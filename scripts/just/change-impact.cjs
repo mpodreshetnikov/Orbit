@@ -29,8 +29,17 @@ function classifyChangedFiles(changedFiles) {
   const normalizedChangedFiles = uniq(changedFiles.map(normalizePath));
   const hasFiles = normalizedChangedFiles.length > 0;
 
-  const dbImpact = normalizedChangedFiles.some((filePath) =>
-    /^supabase\/(db|migrations|tests)\//.test(filePath),
+  // `supabase/config.toml` and the artifact generator belong here alongside the SQL. The config
+  // pins the database's major version, which decides which pg_dump can dump it at all; the
+  // generator is what writes `schema.snapshot.sql` and `database.types.ts` and what the DB lane
+  // runs to verify them. A change to either can only be exercised by running that lane, and
+  // leaving them out meant the pull request that repaired the verification could not demonstrate
+  // it -- the lane it fixed was skipped on the change that fixed it.
+  const dbImpact = normalizedChangedFiles.some(
+    (filePath) =>
+      /^supabase\/(db|migrations|tests)\//.test(filePath) ||
+      filePath === "supabase/config.toml" ||
+      /^scripts\/just\/db-artifacts(\.|$)/.test(filePath),
   );
   const webImpact = normalizedChangedFiles.some(
     (filePath) =>

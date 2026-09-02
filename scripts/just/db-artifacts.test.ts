@@ -9,6 +9,26 @@ const { assertPgDumpMajorMatches, parsePgDumpMajor, readConfiguredMajorVersion }
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 
+/**
+ * A stand-in for `just` that fails with a chosen status.
+ *
+ * Written per platform because the script resolves `JUST_BIN` to a real executable and spawns it
+ * without a shell: Windows runs neither a shebang nor an executable bit, so a `.sh` stub there
+ * would fail to launch and the test would pass for the wrong reason.
+ */
+function failingJustStub(status: number): string {
+  const stubDir = mkdtempSync(path.join(tmpdir(), "db-artifacts-"));
+  if (process.platform === "win32") {
+    const stub = path.join(stubDir, "just-stub.cmd");
+    writeFileSync(stub, `@echo off\r\nexit /b ${status}\r\n`);
+    return stub;
+  }
+  const stub = path.join(stubDir, "just-stub.sh");
+  writeFileSync(stub, `#!/usr/bin/env bash\nexit ${status}\n`);
+  chmodSync(stub, 0o755);
+  return stub;
+}
+
 describe("db-artifacts exit propagation", () => {
   /**
    * The defect this covers is not a wrong answer, it is a right answer nobody hears. Every failure
@@ -21,22 +41,62 @@ describe("db-artifacts exit propagation", () => {
    * has one. The `just` recipe is stubbed so nothing here needs Docker or a database.
    */
   it("exits non-zero when the step it shells out to fails", () => {
-    const stubDir = mkdtempSync(path.join(tmpdir(), "db-artifacts-"));
-    const stub = path.join(stubDir, "just-stub.sh");
-    writeFileSync(stub, "#!/usr/bin/env bash\nexit 3\n");
-    chmodSync(stub, 0o755);
+    const result = spawnSync(process.execPath, ["scripts/just/db-artifacts.cjs", "--verify"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        JUST_BIN: failingJustStub(3),
+        SUPABASE_ALREADY_RUNNING: "1",
+      },
+    });
+
+    expect(result.status).toBe(3);
+  });
+
+  it("lets an unexpected exception end the process rather than reporting success", () => {
+    // The exit code is not the only way this can go quiet. An exception nothing catches -- a
+    // read-only workspace, a full disk -- must still end the run: converting it into a zero would
+    // be the same false green wearing a different hat. Provoked with a docker-preflight stub that
+    // throws, since that runs before anything needs a database.
+    // The throw has to happen *inside* the block the cleanup wraps, or the test proves nothing:
+    // an exception raised before it propagates however the cleanup is written. So `spawnSync` is
+    // what throws — the first thing the run reaches once it is past the preflight.
+    //
+    // Preloaded with --require so the script still runs as the main module: it only calls `main()`
+    // when it is, and requiring it from a wrapper would test nothing.
+    const stubDir = mkdtempSync(path.join(tmpdir(), "db-artifacts-throw-"));
+    const preload = path.join(stubDir, "preload.cjs");
+    writeFileSync(
+      preload,
+      [
+        "const Module = require('node:module');",
+        "const original = Module._load;",
+        "Module._load = function (request, ...rest) {",
+        "  const loaded = original.call(this, request, ...rest);",
+        "  if (request === 'child_process' || request === 'node:child_process') {",
+        "    return { ...loaded, spawnSync: () => { throw new Error('boom'); } };",
+        "  }",
+        "  if (request.endsWith('docker-preflight.cjs')) {",
+        "    return { ensureDockerReady: () => 0 };",
+        "  }",
+        "  return loaded;",
+        "};",
+      ].join("\n"),
+    );
 
     const result = spawnSync(process.execPath, ["scripts/just/db-artifacts.cjs", "--verify"], {
       cwd: repoRoot,
       encoding: "utf8",
       env: {
         ...process.env,
-        JUST_BIN: stub,
         SUPABASE_ALREADY_RUNNING: "1",
+        NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
       },
     });
 
-    expect(result.status).toBe(3);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("boom");
   });
 });
 

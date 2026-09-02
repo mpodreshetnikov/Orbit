@@ -284,86 +284,96 @@ function generateTableOnlySnapshot() {
   fs.writeFileSync(SCHEMA_SNAPSHOT_PATH, `${snapshotSql.trimEnd()}\n`, "utf8");
 }
 
+/**
+ * Regenerate both artifacts, and in verify mode fail when they differ from what is committed.
+ *
+ * **Returns the exit code; it never sets one and returns nothing.** That shape is the whole point.
+ * The previous version set an `exitCode` variable and used a bare `return` on every failure path,
+ * with `process.exit(exitCode)` after the enclosing `try/finally` — where a `return` inside the
+ * `try` never reaches it. Every failure, including "artifacts are out of date", exited 0, which is
+ * how this check passed for months while regenerating nothing. A function that returns its status
+ * cannot fail that way: a bare `return` would be `undefined`, not a silent success.
+ *
+ * `state.started` is out-parameter rather than local because the caller has to stop a stack this
+ * function started even when it throws.
+ */
+function runArtifacts(state) {
+  const reuseSupabase = process.env.SUPABASE_ALREADY_RUNNING === "1";
+
+  if (!reuseSupabase) {
+    const startResult = runOrExit(JUST_BIN, ["supabase-local-start"]);
+    if (startResult.status !== 0) return startResult.status ?? 1;
+    state.started = true;
+  }
+
+  const resetDeployResult = runOrExit(JUST_BIN, ["supabase-local-reset-and-deploy"]);
+  if (resetDeployResult.status !== 0) return resetDeployResult.status ?? 1;
+
+  try {
+    generateTableOnlySnapshot();
+  } catch (error) {
+    console.error(
+      error instanceof Error ? error.message : "Failed generating table-only schema snapshot.",
+    );
+    return 1;
+  }
+
+  const typesResult = runSupabaseCli(
+    ["gen", "types", "--local", "--lang", "typescript", "--schema", "public"],
+    { captureOutput: true },
+  );
+
+  if (typesResult.status !== 0) {
+    if (typesResult.stdout) process.stdout.write(typesResult.stdout);
+    if (typesResult.stderr) process.stderr.write(typesResult.stderr);
+    return typesResult.status ?? 1;
+  }
+
+  fs.writeFileSync(DB_TYPES_PATH, typesResult.stdout, "utf8");
+
+  if (verifyMode) {
+    const diffResult = run("git", [
+      "diff",
+      "--exit-code",
+      "--",
+      "supabase/db/schema.snapshot.sql",
+      "supabase/db/database.types.ts",
+    ]);
+    if (diffResult.status !== 0) {
+      console.error("Generated DB artifacts are out of date.");
+      console.error("Run: just supabase-local-artifacts-refresh");
+      return diffResult.status ?? 1;
+    }
+  }
+
+  return 0;
+}
+
 function main() {
   const dockerReadyCode = ensureDockerReady();
   if (dockerReadyCode !== 0) {
     process.exit(dockerReadyCode);
   }
 
-  const reuseSupabase = process.env.SUPABASE_ALREADY_RUNNING === "1";
-  let started = false;
-  let exitCode = 0;
+  const state = { started: false };
+  let exitCode;
 
   try {
-    if (!reuseSupabase) {
-      const startResult = runOrExit(JUST_BIN, ["supabase-local-start"]);
-      if (startResult.status !== 0) {
-        exitCode = startResult.status ?? 1;
-        return;
-      }
-      started = true;
-    }
-
-    const resetDeployResult = runOrExit(JUST_BIN, ["supabase-local-reset-and-deploy"]);
-    if (resetDeployResult.status !== 0) {
-      exitCode = resetDeployResult.status ?? 1;
-      return;
-    }
-
-    try {
-      generateTableOnlySnapshot();
-    } catch (error) {
-      console.error(
-        error instanceof Error ? error.message : "Failed generating table-only schema snapshot.",
-      );
-      exitCode = 1;
-      return;
-    }
-
-    const typesResult = runSupabaseCli(
-      ["gen", "types", "--local", "--lang", "typescript", "--schema", "public"],
-      { captureOutput: true },
-    );
-
-    if (typesResult.status !== 0) {
-      if (typesResult.stdout) process.stdout.write(typesResult.stdout);
-      if (typesResult.stderr) process.stderr.write(typesResult.stderr);
-      exitCode = typesResult.status ?? 1;
-      return;
-    }
-
-    fs.writeFileSync(DB_TYPES_PATH, typesResult.stdout, "utf8");
-
-    if (verifyMode) {
-      const diffResult = run("git", [
-        "diff",
-        "--exit-code",
-        "--",
-        "supabase/db/schema.snapshot.sql",
-        "supabase/db/database.types.ts",
-      ]);
-      if (diffResult.status !== 0) {
-        console.error("Generated DB artifacts are out of date.");
-        console.error("Run: just supabase-local-artifacts-refresh");
-        exitCode = diffResult.status ?? 1;
-        return;
-      }
-    }
+    exitCode = runArtifacts(state);
   } finally {
-    if (started) {
+    // Stop a stack this run started, whether it finished or threw. Nothing here decides the exit:
+    // an unexpected exception -- a read-only workspace, a full disk -- must keep propagating and
+    // end the process with a stack trace rather than be converted into a silent success, which is
+    // the same false green in a different disguise.
+    if (state.started) {
       const stopResult = runJust("supabase-local-stop");
       if (exitCode === 0 && stopResult.status !== 0) {
         exitCode = stopResult.status ?? 1;
       }
     }
-
-    // Exit from inside the `finally`, because every failure path above reports itself with a
-    // bare `return`. A `return` inside a `try` runs the `finally` and then leaves the function,
-    // so an exit placed after the block is never reached and the process ends with status 0 --
-    // which is how this check spent months passing while regenerating nothing. Anything that
-    // sets a non-zero code and returns must still reach an exit.
-    process.exit(exitCode);
   }
+
+  process.exit(exitCode);
 }
 
 if (require.main === module) {
