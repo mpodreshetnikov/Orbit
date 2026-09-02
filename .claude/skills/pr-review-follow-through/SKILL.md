@@ -101,6 +101,10 @@ Confidence is a claim about evidence, not a mood. If condition 5 — what would 
 see it — cannot be answered in one sentence naming a check, a query, a log, a dashboard or a screen,
 the session is not sure, and the answer is another review rather than a merge.
 
+The push that answers a review is not a reason to wait for another one. `docs/QUALITY.md` settles
+this in condition 2: what blocks a merge is a gap that earns a pass, and the last review's findings
+fixed in place is on the list of gaps that do not.
+
 ## Done With This PR
 
 A PR is decided when all four hold, and then one of the three outcomes is taken:

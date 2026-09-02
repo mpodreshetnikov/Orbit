@@ -178,7 +178,7 @@ A finished pull request has three outcomes, and the session picks one rather tha
 **Merge it, when all five hold.**
 
 1. **CI is green** on the current head.
-2. **The automated review has finished on this head**, and every finding is fixed and pushed or answered on its thread, with the threads resolved. A review that has not posted yet is not a review that found nothing: #36 was merged on green CI one minute before its review posted a `P1`, and production stood broken for an hour.
+2. **The automated review has run on this branch and been answered** — every finding fixed and pushed or answered on its thread, with the threads resolved — **and the gap between the reviewed commit and this head does not itself earn another pass**, by the two lists above. Answering the last review in place is named in **Do not request one when** as a gap that does not, so the push that answers a review does not lock the branch out of merging; a gap that does earn a pass is the next outcome, not a reason to wait. What this condition refuses is merging past a review that never ran: a review that has not posted yet is not a review that found nothing — #36 was merged on green CI one minute before its review posted a `P1`, and production stood broken for an hour.
 3. **No merge conflict** against the base.
 4. **The change is off the stop list** below.
 5. **The session can state what would break and how it would see it** — a check, a query, a log, a dashboard, a screen. If the answer is "I would not see it", that is the not-sure branch, not a risk to accept quietly.
