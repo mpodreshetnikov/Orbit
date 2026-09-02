@@ -3,9 +3,9 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1788335477-RvKyvq8eGH3atKduABZW",
+    "id": "gen-1788337000-m80zgmfL2ujx2qWNRSAm",
     "object": "chat.completion",
-    "created": 1788335477,
+    "created": 1788337000,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -18,7 +18,7 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"imaging\",\"title\":\"УЗИ почек — заключение врача\",\"record_date\":\"2026-03-05\",\"summary\":\"Renal ultrasound report for a 25-year-old male. Kidneys are described as normally positioned, with excessive mobility of the right kidney; no stones, masses, or collecting system dilatation are reported, and adrenal glands are not enlarged. Conclusion states no urodynamic impairment and recommends follow-up ultrasound and a family doctor consultation.\",\"keywords\":[\"renal ultrasound\",\"kidneys\",\"right kidney hypermobility\",\"urodynamics\",\"no hydronephrosis\",\"no stones\",\"retroperitoneal space\",\"adrenal glands\",\"follow-up ultrasound\",\"ICD-10 Z01.8\"]}",
+          "content": "{\"record_type\":\"imaging\",\"title\":\"УЗИ почек — заключение\",\"record_date\":\"2026-03-05\",\"summary\":\"Renal ultrasound consultation report for a 25-year-old male, performed on 2026-03-05. Findings describe no signs of impaired urodynamics, no stones or masses, and note excessive mobility of the right kidney; adrenal glands are not enlarged and retroperitoneal space without pathology.\",\"keywords\":[\"УЗИ\",\"почки\",\"ультразвук\",\"правая почка\",\"избыточная подвижность\",\"уродинамика\",\"надпочечники\",\"забрюшинное пространство\",\"конкременты\",\"Mindray DC-80\"]}",
           "refusal": null
         }
       }
@@ -27,17 +27,17 @@
       "prompt_tokens": 1442,
       "completion_tokens": 159,
       "total_tokens": 1601,
-      "cost": 0.00940401,
+      "cost": 0.00541233,
       "is_byok": false,
       "prompt_tokens_details": {
-        "cached_tokens": 0,
+        "cached_tokens": 1280,
         "cache_write_tokens": 0,
         "audio_tokens": 0,
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.009499,
-        "upstream_inference_prompt_cost": 0.005047,
+        "upstream_inference_cost": 0.005467,
+        "upstream_inference_prompt_cost": 0.001015,
         "upstream_inference_completions_cost": 0.004452
       },
       "completion_tokens_details": {

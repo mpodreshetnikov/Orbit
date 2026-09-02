@@ -3,9 +3,9 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1788335457-MpW62VNTKeVd3nK6EwR5",
+    "id": "gen-1788336970-h8vAzPIDDULdPxaBAxSQ",
     "object": "chat.completion",
-    "created": 1788335457,
+    "created": 1788336970,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -18,30 +18,30 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"lab\",\"title\":\"Промежуточный лабораторный отчет: биохимия, липидограмма и витамин B12\",\"record_date\":\"2026-03-06\",\"summary\":\"Intermediate laboratory report from a diagnostics center for a 25-year-old male, with some analyses noted as still in progress. It includes biochemical tests (bilirubin fractions, liver enzymes, glucose), a lipid panel, and an immunology test for vitamin B12, with some results flagged outside the stated reference ranges.\",\"keywords\":[\"laboratory report\",\"biochemistry\",\"lipid panel\",\"bilirubin\",\"liver enzymes\",\"glucose\",\"vitamin B12\",\"intermediate report\",\"sample collection date\"]}",
+          "content": "{\"record_type\":\"lab\",\"title\":\"Промежуточный лабораторный отчет: биохимия, липидограмма, витамин B12\",\"record_date\":\"2026-03-06\",\"summary\":\"Промежуточный лабораторный отчет центра лабораторной диагностики для пациента (мужчина, 25 лет) с биохимическими исследованиями, липидограммой и определением витамина B12. В отчете отмечены отклонения: повышен непрямой билирубин и холестерин ЛПВП; остальные представленные показатели указаны в пределах референсных значений. Включены комментарии по интерпретации общего холестерина и ЛПНП, а также сведения о датах забора, регистрации и печати.\" ,\"keywords\":[\"лабораторный отчет\",\"биохимия крови\",\"липидограмма\",\"билирубин\",\"непрямой билирубин\",\"АЛТ\",\"АСТ\",\"глюкоза\",\"общий холестерин\",\"ЛПНП\",\"ЛПВП\",\"витамин B12\"]}",
           "refusal": null
         }
       }
     ],
     "usage": {
       "prompt_tokens": 1536,
-      "completion_tokens": 213,
-      "total_tokens": 1749,
-      "cost": 0.0112266,
+      "completion_tokens": 314,
+      "total_tokens": 1850,
+      "cost": 0.009635472,
       "is_byok": false,
       "prompt_tokens_details": {
-        "cached_tokens": 0,
+        "cached_tokens": 1408,
         "cache_write_tokens": 0,
         "audio_tokens": 0,
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.01134,
-        "upstream_inference_prompt_cost": 0.005376,
-        "upstream_inference_completions_cost": 0.005964
+        "upstream_inference_cost": 0.0097328,
+        "upstream_inference_prompt_cost": 0.0009408,
+        "upstream_inference_completions_cost": 0.008792
       },
       "completion_tokens_details": {
-        "reasoning_tokens": 58,
+        "reasoning_tokens": 71,
         "image_tokens": 0,
         "audio_tokens": 0
       }
