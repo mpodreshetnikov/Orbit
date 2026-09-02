@@ -2,6 +2,40 @@ import type { RecordObservation } from "@/types/medical-record";
 import { CLOSING_STATUSES } from "./unverified-closure";
 
 /**
+ * What each analyte entry requires, mirroring `RESOLVING_ANALYTES` in
+ * `supabase/functions/health-structure/resolution.ts`.
+ *
+ * The citation names one code, but an entry can rest on more than one measurement: iron-deficiency
+ * anaemia needs ferritin *and* haemoglobin, because haemoglobin is what makes it anaemia and
+ * ferritin is what makes it iron deficiency. Re-checking only the cited code would confirm a
+ * closure after the reviewer corrected the other half of it.
+ *
+ * Written twice on purpose, like `AUTHORITATIVE_STATUS_FILTER` beside it and for the same reason:
+ * the Deno edge functions and this tree share no module. Change one and change the other. An
+ * analyte missing from this map fails closed rather than falling back to the cited code alone —
+ * if the copies have drifted, the safe answer about ending an entry in a medical record is no.
+ */
+const REQUIRED_OBSERVATIONS: Record<string, readonly string[]> = {
+  vitamin_b12: ["vitamin_b12"],
+  vitamin_d_25oh: ["vitamin_d_25oh"],
+  ferritin: ["ferritin", "hemoglobin"],
+};
+
+/** The columns this re-check reads: what the record actually holds, not the whole row. */
+export type PersistedObservation = Pick<
+  RecordObservation,
+  | "obs_code"
+  | "is_applied"
+  | "value_numeric"
+  | "value_canonical"
+  | "ref_range_low"
+  | "ref_range_high"
+  | "ref_range_low_canonical"
+  | "ref_range_high_canonical"
+  | "status"
+>;
+
+/**
  * Whether a proposed closure still rests on something, at the moment a person approves the record.
  *
  * The edge function checked the citation when it wrote the proposal, against the observations
@@ -15,11 +49,12 @@ import { CLOSING_STATUSES } from "./unverified-closure";
  * once against what the person left standing. Only the second one can be wrong in the direction
  * that ends an entry in someone's medical record.
  *
- * Deliberately narrower than the edge-side gate in
- * `supabase/functions/health-structure/resolution.ts`. Whether this analyte may speak to this
- * condition is a property of the pair, and neither the pair nor the analyte table moves between
- * extraction and review; what moves is the measurement. So this re-checks the measurement and
- * nothing else. The in-range rule below is the same rule as that gate's `isObservationInRange`,
+ * Narrower than the edge-side gate in `supabase/functions/health-structure/resolution.ts`, but
+ * only in one respect: whether this analyte may speak to this condition is a property of the pair,
+ * and neither the pair nor the analyte table moves between extraction and review. What moves is
+ * the measurements -- all of the ones the entry requires, not only the one the citation names, or
+ * a reviewer could correct the haemoglobin behind an iron-deficiency closure and still have it
+ * confirmed. The in-range rule below is the same rule as that gate's `isObservationInRange`,
  * written twice because the two runtimes share no module -- change one and change the other.
  */
 export function proposedClosureStillHolds(
@@ -27,29 +62,22 @@ export function proposedClosureStillHolds(
     status_in_record: string;
     supporting_obs_code: string | null;
   },
-  observations: Pick<
-    RecordObservation,
-    | "obs_code"
-    | "is_applied"
-    | "value_numeric"
-    | "value_canonical"
-    | "ref_range_low"
-    | "ref_range_high"
-    | "ref_range_low_canonical"
-    | "ref_range_high_canonical"
-    | "status"
-  >[],
+  observations: PersistedObservation[],
 ): boolean {
   // Nothing to re-check: a mention that is not a lab-driven closure never rested on a measurement.
   if (!mention.supporting_obs_code) return true;
   if (!(CLOSING_STATUSES as readonly string[]).includes(mention.status_in_record)) return true;
 
-  const cited = observations.filter(
-    (item) => item.obs_code === mention.supporting_obs_code && item.is_applied,
-  );
-  // Deleted, unapplied, or recoded to something else: the citation names nothing on this record.
-  if (cited.length === 0) return false;
-  return cited.every(isObservationInRange);
+  const required = REQUIRED_OBSERVATIONS[mention.supporting_obs_code];
+  // An analyte this copy does not know cannot be re-checked, so it is not confirmed.
+  if (!required) return false;
+
+  return required.every((code) => {
+    const rows = observations.filter((item) => item.obs_code === code && item.is_applied);
+    // Deleted, unapplied, or recoded to something else: the requirement names nothing on this record.
+    if (rows.length === 0) return false;
+    return rows.every(isObservationInRange);
+  });
 }
 
 /**

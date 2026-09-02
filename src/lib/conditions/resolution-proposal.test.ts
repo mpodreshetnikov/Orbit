@@ -97,3 +97,59 @@ describe("proposedClosureStillHolds", () => {
     expect(proposedClosureStillHolds({ ...closure, status_in_record: "history" }, [])).toBe(false);
   });
 });
+
+describe("multi-analyte entries", () => {
+  const ironDeficiency = { status_in_record: "resolved", supporting_obs_code: "ferritin" };
+
+  function iron(overrides: Partial<RecordObservation> = {}): ObservationInput {
+    return observation({
+      obs_code: "ferritin",
+      value_numeric: 60,
+      ref_range_low: 10,
+      ref_range_high: 120,
+      ...overrides,
+    });
+  }
+
+  it("holds only when every observation the entry requires still stands", () => {
+    // Iron-deficiency anaemia rests on two measurements. The citation names one of them, so
+    // re-checking only that one would confirm the closure after the reviewer corrected the other.
+    const haemoglobin = iron({
+      obs_code: "hemoglobin",
+      value_numeric: 140,
+      ref_range_low: 120,
+      ref_range_high: 160,
+    });
+
+    expect(proposedClosureStillHolds(ironDeficiency, [iron(), haemoglobin])).toBe(true);
+    expect(
+      proposedClosureStillHolds(ironDeficiency, [
+        iron(),
+        iron({
+          obs_code: "hemoglobin",
+          value_numeric: 95,
+          ref_range_low: 120,
+          ref_range_high: 160,
+        }),
+      ]),
+    ).toBe(false);
+    // Deleted or left unapplied, which activation turns into deleted.
+    expect(proposedClosureStillHolds(ironDeficiency, [iron()])).toBe(false);
+    expect(
+      proposedClosureStillHolds(ironDeficiency, [
+        iron(),
+        iron({ obs_code: "hemoglobin", is_applied: false }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("refuses an analyte this copy does not know", () => {
+    // The two copies of the table have drifted, or the edge side gained an entry. Either way the
+    // claim cannot be re-checked here, and an unverifiable closure is not confirmed.
+    expect(
+      proposedClosureStillHolds({ ...ironDeficiency, supporting_obs_code: "tsh" }, [
+        observation({ obs_code: "tsh", value_numeric: 2 }),
+      ]),
+    ).toBe(false);
+  });
+});
