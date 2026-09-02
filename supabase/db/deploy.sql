@@ -3,12 +3,26 @@
 --
 -- Usage: psql $DATABASE_URL -v GIT_SHA=$(git rev-parse HEAD) -f supabase/db/deploy.sql
 --
+-- This file is the single-shot form, kept for a manual run. CI and the local `db-run` recipe go
+-- through supabase/db/run-deploy.js, which applies the same phases in the same order as separate
+-- psql invocations so that a phase which loses a lock to live traffic can be retried on its own.
+-- A test asserts the two orders stay identical.
+--
 -- Phases:
 --   1. Types + Functions (single transaction)
 --   2. Triggers (single transaction)
---   3. Policies (single transaction)
+--   3. Policies (one transaction per policy file, so a lock is held for one file, not sixty)
 --   4. Cron Jobs (no transaction - pg_cron is finicky)
 --   5. Version stamp
+
+-- Lock behaviour for the whole deploy session. lock_timeout is deliberately *below*
+-- deadlock_timeout: a deploy that cannot get a lock then gives it up itself, quickly and with a
+-- named error, instead of waiting long enough for the deadlock detector to pick a victim at an
+-- arbitrary point -- which on 2026-09-01 and 2026-09-02 was repeatedly the deploy, halfway
+-- through the policy phase (T-260902-60d). The counterpart session may still detect the deadlock
+-- first on its own timer; either way the wait is bounded and the loss is one file wide.
+SET lock_timeout = '2s';
+SET deadlock_timeout = '5s';
 
 \echo '=========================================='
 \echo 'Supabase DB Code Deploy'

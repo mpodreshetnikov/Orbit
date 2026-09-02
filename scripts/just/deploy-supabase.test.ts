@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as deploySupabase from "./deploy-supabase.cjs";
 
@@ -40,6 +42,48 @@ describe("deploy-supabase step composition", () => {
 
     expect(sqlDeploy.env).toEqual({ DATABASE_URL });
     expect(sqlDeploy.args).not.toContain(DATABASE_URL);
+  });
+});
+
+describe("production deploy serialisation", () => {
+  const workflow = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "main.yml"), {
+    encoding: "utf8",
+  });
+
+  /** The body of one top-level job, from its key down to the next job key at the same indent. */
+  function jobBlock(jobId: string): string {
+    const match = new RegExp(`^  ${jobId}:\\n(?:(?! {2}\\S).*\\n)*`, "m").exec(workflow);
+    expect(match, `job ${jobId} not found in main.yml`).not.toBeNull();
+    return match![0];
+  }
+
+  it.each(["deploy-supabase", "deploy-vercel-production"])(
+    "queues %s instead of letting two pushes to main race",
+    (jobId) => {
+      const block = jobBlock(jobId);
+
+      expect(block).toMatch(/^ {4}concurrency:$/m);
+      expect(block).toMatch(/^ {6}cancel-in-progress: false$/m);
+    },
+  );
+
+  it("gives each production deploy its own group", () => {
+    // A group shared between the two jobs would let a newer run's pending job displace this run's
+    // other deploy, so one of the two would never run for that commit at all.
+    const groupOf = (jobId: string) => /^ {6}group: (.+)$/m.exec(jobBlock(jobId))?.[1];
+
+    expect(groupOf("deploy-supabase")).toBeDefined();
+    expect(groupOf("deploy-vercel-production")).toBeDefined();
+    expect(groupOf("deploy-supabase")).not.toBe(groupOf("deploy-vercel-production"));
+  });
+
+  it("keys the groups on nothing that varies per run, so two runs actually collide", () => {
+    // A group interpolating github.sha or github.run_id is one group per run, which serialises
+    // nothing while looking like it does.
+    for (const jobId of ["deploy-supabase", "deploy-vercel-production"]) {
+      const group = /^ {6}group: (.+)$/m.exec(jobBlock(jobId))?.[1] ?? "";
+      expect(group).not.toMatch(/github\.(sha|run_id|run_number|ref|event)/);
+    }
   });
 });
 

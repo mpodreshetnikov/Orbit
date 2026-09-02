@@ -377,6 +377,17 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
+    # Serialised, because the production alias lands on whichever run finishes last rather than
+    # on the newest commit. On 2026-09-02 four merges a minute apart ran four deploys at once and
+    # the oldest finished last, so private-orbit.vercel.app served a build three merges behind
+    # main with every job green and nothing reporting it (T-260902-60d).
+    #
+    # Its own group, not one shared with deploy-supabase: GitHub holds at most one running and one
+    # pending job per group, so a shared group would let a newer run's Supabase job displace this
+    # run's pending Vercel job and the commit would never reach the alias at all.
+    concurrency:
+      group: deploy-vercel-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -402,6 +413,22 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production
+    # Serialised for a different reason than the Vercel job: two overlapping deploys replace the
+    # same pg_proc row and Phase 1 dies with `tuple concurrently updated`, which is what killed
+    # run 33585250551 (T-260902-60d).
+    #
+    # A global group is right here although it was wrong for publish-extension-release above. The
+    # hazard there is that a displaced pending run leaves a version unpublished for good; here
+    # each deploy applies the full desired state of its own commit, so a superseded commit's
+    # deploy being cancelled costs nothing -- the newer one that displaced it deploys everything
+    # the older one would have. What matters is only that the last deploy to run is the newest
+    # commit, and the pending slot always holds the newest.
+    #
+    # cancel-in-progress stays false: cancelling a running deploy would kill psql partway through
+    # the phases, which is the state this task exists to stop production ending up in.
+    concurrency:
+      group: deploy-supabase-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
