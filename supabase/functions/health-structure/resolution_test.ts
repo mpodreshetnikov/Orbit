@@ -6,7 +6,33 @@ import {
   processFindingsToResolve,
 } from "./resolution.ts";
 import type { ResolutionRepository } from "./resolution.ts";
-import type { ExistingCondition, ExistingFinding, ExtractedCondition } from "./types.ts";
+import type {
+  ConditionToResolve,
+  ExistingCondition,
+  ExistingFinding,
+  ExtractedCondition,
+  ExtractedObservation,
+} from "./types.ts";
+
+/**
+ * One extracted observation, defaulting to case 001's B12 row: 704 pg/mL against a printed
+ * 187–883. Overriding one field at a time keeps each test's subject visible.
+ */
+function observation(overrides: Partial<ExtractedObservation> = {}): ExtractedObservation {
+  return {
+    obs_code: "vitamin_b12",
+    obs_name: "Витамин B12",
+    value: "704",
+    value_numeric: 704,
+    unit: "пг/мл",
+    ref_range: "187-883",
+    ref_range_low: 187,
+    ref_range_high: 883,
+    status: "normal",
+    confidence: 0.9,
+    ...overrides,
+  };
+}
 
 interface ResolutionState {
   conditionRecords: Record<string, unknown>[];
@@ -225,7 +251,7 @@ Deno.test("processConditionsToResolve inserts only known conditions", async () =
   const existingConditions: ExistingCondition[] = [
     {
       id: "cond-1",
-      name: "Condition",
+      name: "Дефицит витамина B12",
       code: null,
       current_status: "active",
       onset_date: null,
@@ -238,24 +264,28 @@ Deno.test("processConditionsToResolve inserts only known conditions", async () =
     [
       {
         condition_id: "",
+        supporting_obs_code: "vitamin_b12",
         reason: "skip-empty",
         source_anchor: "line",
         confidence: 0.1,
       },
       {
         condition_id: "cond-1",
+        supporting_obs_code: "vitamin_b12",
         reason: "resolved",
         source_anchor: "line",
         confidence: 0.9,
       },
       {
         condition_id: "missing",
+        supporting_obs_code: "vitamin_b12",
         reason: "skip",
         source_anchor: "line",
         confidence: 0.1,
       },
     ],
     existingConditions,
+    [observation({ obs_code: "vitamin_b12", value_numeric: 704 })],
     {
       repository,
     },
@@ -263,7 +293,233 @@ Deno.test("processConditionsToResolve inserts only known conditions", async () =
 
   assertEquals(state.conditionRecords.length, 1);
   assertEquals(state.conditionRecords[0].status_in_record, "resolved");
+  assertEquals(state.conditionRecords[0].supporting_obs_code, "vitamin_b12");
+  assertEquals(state.conditionRecords[0].review_decision, "pending");
+  assertEquals(state.conditionRecords[0].is_user_verified, false);
   assertEquals(state.recomputedIds, ["cond-1"]);
+});
+
+/**
+ * The gate, exercised through the function that writes rather than only through `checkLabResolution`.
+ *
+ * A rejection that is never consulted by the caller is not a gate, and testing the predicate alone
+ * cannot tell the two apart: every case below asserts that nothing was written, not merely that a
+ * reason was returned.
+ */
+function b12Condition(overrides: Partial<ExistingCondition> = {}): ExistingCondition {
+  return {
+    id: "cond-b12",
+    name: "Дефицит витамина B12",
+    code: "E53.8",
+    current_status: "active",
+    onset_date: null,
+    resolved_date: null,
+    ...overrides,
+  };
+}
+
+async function runGate(
+  toResolve: Partial<ConditionToResolve>,
+  conditions: ExistingCondition[],
+  observations: ExtractedObservation[],
+) {
+  const { repository, state } = createResolutionRepository();
+  const rejected = await processConditionsToResolve(
+    "record-1",
+    [
+      {
+        condition_id: conditions[0].id,
+        supporting_obs_code: null,
+        reason: "in range",
+        source_anchor: "line",
+        confidence: 0.9,
+        ...toResolve,
+      },
+    ],
+    conditions,
+    observations,
+    { repository },
+  );
+  return { rejected, state };
+}
+
+Deno.test("a sibling ICD code under the same parent does not match", async () => {
+  // E53.0 is riboflavin and E53.1 is pyridoxine. Both sit under E53 with B12, and neither is
+  // measured by a B12 assay, so a prefix wide enough to reach them would close a deficiency this
+  // document says nothing about. The name has to be foreign to B12 as well, or the second list
+  // would permit what the first refused.
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition({ id: "cond-b6", name: "Дефицит пиридоксина", code: "E53.1" })],
+    [observation({ obs_code: "vitamin_b12", value_numeric: 704 })],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["analyte does not match this condition"],
+  );
+});
+
+Deno.test("a resolution citing nothing is dropped", async () => {
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: null },
+    [b12Condition()],
+    [observation({ obs_code: "vitamin_b12", value_numeric: 704 })],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["no supporting observation cited"],
+  );
+});
+
+Deno.test("a resolution citing an analyte the table does not carry is dropped", async () => {
+  // Every lipid on case 001 is in range, and an in-range panel under management is control rather
+  // than cure. The table's silence is what refuses it.
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "cholesterol_total" },
+    [b12Condition({ id: "cond-lipid", name: "Дислипидемия", code: "E78.5" })],
+    [observation({ obs_code: "cholesterol_total", value_numeric: 4.2 })],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["analyte cannot resolve a condition"],
+  );
+});
+
+Deno.test("a permitted analyte cited against an unrelated condition is dropped", async () => {
+  // The case the gate exists for: cited, permitted, present and in range, and about a different
+  // condition entirely. Every check but the matcher passes.
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition({ id: "cond-lipid", name: "Дислипидемия", code: "E78.5" })],
+    [observation({ obs_code: "vitamin_b12", value_numeric: 704 })],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["analyte does not match this condition"],
+  );
+});
+
+Deno.test("a condition with no ICD code still matches on its name", async () => {
+  // `conditions.code` is nullable and routinely null, which is why the matcher carries two lists.
+  // The name here is spelled with a Cyrillic В, as a Russian lab prints it.
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition({ code: null, name: "Дефицит витамина В12" })],
+    [observation({ obs_code: "vitamin_b12", value_numeric: 704 })],
+  );
+
+  assertEquals(rejected, []);
+  assertEquals(state.conditionRecords.length, 1);
+});
+
+Deno.test("an entry requiring two analytes is not satisfied by one", async () => {
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "ferritin" },
+    [b12Condition({ id: "cond-ida", name: "Железодефицитная анемия", code: "D50.9" })],
+    [
+      observation({
+        obs_code: "ferritin",
+        value_numeric: 60,
+        ref_range_low: 10,
+        ref_range_high: 120,
+      }),
+    ],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["required observation absent from this document"],
+  );
+});
+
+Deno.test("a resolution citing an out-of-range observation is dropped", async () => {
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition()],
+    [observation({ obs_code: "vitamin_b12", value_numeric: 120 })],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["supporting observation is not in range"],
+  );
+});
+
+Deno.test("a printed range decides, and an unreadable value never passes", async () => {
+  // The document's own range beats the extracted status, and a status of `normal` cannot rescue a
+  // value that contradicts it.
+  const contradicted = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition()],
+    [observation({ obs_code: "vitamin_b12", value_numeric: 900, status: "normal" })],
+  );
+  assertEquals(contradicted.state.conditionRecords.length, 0);
+
+  // No number to compare, with a range printed: not in range rather than passing.
+  const unreadable = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition()],
+    [observation({ obs_code: "vitamin_b12", value_numeric: null, status: "normal" })],
+  );
+  assertEquals(unreadable.state.conditionRecords.length, 0);
+
+  // No range printed: the extracted status is the fallback, and only `normal` passes.
+  const statusOnly = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition()],
+    [
+      observation({
+        obs_code: "vitamin_b12",
+        value_numeric: null,
+        ref_range_low: null,
+        ref_range_high: null,
+        status: "normal",
+      }),
+    ],
+  );
+  assertEquals(statusOnly.state.conditionRecords.length, 1);
+
+  const statusUnknown = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition()],
+    [
+      observation({
+        obs_code: "vitamin_b12",
+        value_numeric: null,
+        ref_range_low: null,
+        ref_range_high: null,
+        status: "unknown",
+      }),
+    ],
+  );
+  assertEquals(statusUnknown.state.conditionRecords.length, 0);
+});
+
+Deno.test("a repeated analyte must be in range every time it appears", async () => {
+  const { rejected, state } = await runGate(
+    { supporting_obs_code: "vitamin_b12" },
+    [b12Condition()],
+    [
+      observation({ obs_code: "vitamin_b12", value_numeric: 704 }),
+      observation({ obs_code: "vitamin_b12", value_numeric: 120 }),
+    ],
+  );
+
+  assertEquals(state.conditionRecords.length, 0);
+  assertEquals(
+    rejected.map((item) => item.reason),
+    ["supporting observation is not in range"],
+  );
 });
 
 Deno.test("processExtractedConditions logs insertion failures and non-string names", async () => {
@@ -375,6 +631,7 @@ Deno.test("processConditionsToResolve logs insert failures", async () => {
     [
       {
         condition_id: "cond-1",
+        supporting_obs_code: "vitamin_b12",
         reason: "resolved",
         source_anchor: "line",
         confidence: 0.9,
@@ -383,13 +640,14 @@ Deno.test("processConditionsToResolve logs insert failures", async () => {
     [
       {
         id: "cond-1",
-        name: "Condition",
+        name: "Дефицит витамина B12",
         code: null,
         current_status: "active",
         onset_date: null,
         resolved_date: null,
       },
     ],
+    [observation()],
     {
       repository,
       log: {

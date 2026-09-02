@@ -100,8 +100,11 @@ CREATE TABLE "public"."condition_records" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "proposed_name" "text",
     "proposed_icd_code" "text",
+    "supporting_obs_code" "text",
+    "review_decision" "text" DEFAULT 'pending'::"text" NOT NULL,
     CONSTRAINT "condition_records_confidence_check" CHECK ((("confidence" >= (0)::numeric) AND ("confidence" <= (1)::numeric))),
     CONSTRAINT "condition_records_link_or_proposal_check" CHECK ((("condition_id" IS NOT NULL) OR (("proposed_name" IS NOT NULL) AND ("btrim"("proposed_name") <> ''::"text")))),
+    CONSTRAINT "condition_records_review_decision_check" CHECK (("review_decision" = ANY (ARRAY['pending'::"text", 'confirmed'::"text", 'dismissed'::"text"]))),
     CONSTRAINT "condition_records_status_in_record_check" CHECK (("status_in_record" = ANY (ARRAY['active'::"text", 'resolved'::"text", 'suspected'::"text", 'history'::"text"])))
 );
 
@@ -1692,6 +1695,13 @@ CREATE INDEX "idx_condition_records_proposals" ON "public"."condition_records" U
 --
 
 CREATE INDEX "idx_condition_records_record_id" ON "public"."condition_records" USING "btree" ("record_id");
+
+
+--
+-- Name: idx_condition_records_supporting_obs_code; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_condition_records_supporting_obs_code" ON "public"."condition_records" USING "btree" ("supporting_obs_code") WHERE ("supporting_obs_code" IS NOT NULL);
 
 
 --

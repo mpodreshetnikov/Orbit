@@ -8,6 +8,10 @@ import { createClient } from "@/lib/supabase";
 import { lookupIcdCode } from "@/hooks/use-icd-lookup";
 import { materializeConditionProposals } from "@/lib/conditions/materialize-proposals";
 import {
+  proposedClosureStillHolds,
+  type PersistedObservation,
+} from "@/lib/conditions/resolution-proposal";
+import {
   Save,
   FileCheck,
   Loader2,
@@ -1411,12 +1415,45 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
   const verifyAllConditions = async () => {
     if (!conditionRecords || conditionRecords.length === 0) return;
 
+    // Approving the record confirms every mention on it -- except a proposed closure whose
+    // measurement no longer stands. The person may have corrected the cited value, recoded it, or
+    // left it unapplied, and `runSave` deletes unapplied observations before this runs. Verifying
+    // such a row would close a condition on evidence the same person just withdrew, so it is left
+    // unverified and pending: suppressed by the closure guard, and still visible as a proposal.
     const unverified = conditionRecords.filter((cr) => !cr.is_user_verified);
+    const closures = unverified.filter((cr) => cr.supporting_obs_code);
+
+    // Read the rows back rather than trusting the cached list. The observation mutations invalidate
+    // their query without awaiting the refetch, so `mutateAsync` resolves -- and this button becomes
+    // usable -- while `observations` can still hold the values from before the edit. Confirming a
+    // closure against a stale in-range value is the exact failure this re-check exists to prevent,
+    // so it is worth the round trip; skipped entirely when no closure is waiting on it.
+    let persisted: PersistedObservation[] = [];
+    if (closures.length > 0) {
+      const { data, error } = await createClient()
+        .from("record_observations")
+        .select(
+          "obs_code, is_applied, value_numeric, value_canonical, ref_range_low, ref_range_high, ref_range_low_canonical, ref_range_high_canonical, status",
+        )
+        .eq("record_id", record.id);
+      // A read that failed is not evidence that the closure still holds. Leaving these rows
+      // unverified costs a person one confirmation later; confirming them on an unknown costs an
+      // entry in a medical record.
+      if (error) {
+        toast.error(t("conditions.proposalsFailed"), { description: error.message });
+        return;
+      }
+      persisted = (data ?? []) as PersistedObservation[];
+    }
+
+    const confirmable = unverified.filter(
+      (cr) => !cr.supporting_obs_code || proposedClosureStillHolds(cr, persisted),
+    );
     await Promise.all(
-      unverified.map((cr) =>
+      confirmable.map((cr) =>
         updateConditionRecordMutation.mutateAsync({
           id: cr.id,
-          updates: { is_user_verified: true },
+          updates: { is_user_verified: true, review_decision: "confirmed" },
         }),
       ),
     );

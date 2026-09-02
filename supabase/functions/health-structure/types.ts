@@ -69,6 +69,15 @@ export interface FindingToResolve {
 
 export interface ConditionToResolve {
   condition_id: string;
+  /**
+   * The catalogue code of the observation whose value establishes this resolution, or null.
+   *
+   * A citation, not a decoration: `processConditionsToResolve` checks it against the analyte
+   * table and against this document's own observations, and drops a resolution that cites
+   * nothing, cites an analyte that cannot close anything, cites one unrelated to the condition
+   * named, or cites one that is absent or out of range.
+   */
+  supporting_obs_code: string | null;
   reason: string;
   source_anchor: string;
   confidence: number;

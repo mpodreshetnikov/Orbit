@@ -189,8 +189,10 @@ export type Database = {
           proposed_icd_code: string | null
           proposed_name: string | null
           record_id: string
+          review_decision: string
           source_anchor: string | null
           status_in_record: string
+          supporting_obs_code: string | null
         }
         Insert: {
           condition_id?: string | null
@@ -202,8 +204,10 @@ export type Database = {
           proposed_icd_code?: string | null
           proposed_name?: string | null
           record_id: string
+          review_decision?: string
           source_anchor?: string | null
           status_in_record: string
+          supporting_obs_code?: string | null
         }
         Update: {
           condition_id?: string | null
@@ -215,8 +219,10 @@ export type Database = {
           proposed_icd_code?: string | null
           proposed_name?: string | null
           record_id?: string
+          review_decision?: string
           source_anchor?: string | null
           status_in_record?: string
+          supporting_obs_code?: string | null
         }
         Relationships: [
           {
@@ -2877,8 +2883,10 @@ export type Database = {
           is_proposal: boolean
           is_user_verified: boolean
           record_id: string
+          review_decision: string
           source_anchor: string
           status_in_record: string
+          supporting_obs_code: string
         }[]
       }
       get_record_findings: {

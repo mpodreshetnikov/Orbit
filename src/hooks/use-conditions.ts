@@ -403,10 +403,21 @@ async function updateConditionRecord({
 }): Promise<ConditionRecord> {
   const supabase = createClient();
 
+  // A verification is a person ruling on the mention, so it carries the ruling. Recorded here
+  // rather than at each call site because the two must never disagree: `is_user_verified` says a
+  // person approved the row and `review_decision` says what they decided, and a row that is
+  // verified while still reading `pending` would count as "nobody looked" in the counts that
+  // decide whether an analyte may ever close a condition unattended. A caller that states its own
+  // decision -- a dismissal -- keeps it.
+  const verifiedUpdates: UpdateConditionRecordInput =
+    updates.is_user_verified === true && updates.review_decision === undefined
+      ? { ...updates, review_decision: "confirmed" }
+      : updates;
+
   // Perform update first
   const { error: updateError } = await supabase
     .from("condition_records")
-    .update(updates)
+    .update(verifiedUpdates)
     .eq("id", id);
 
   if (updateError) {
@@ -612,6 +623,8 @@ export function useCreateConditionWithRecord() {
         source_anchor: input.source_anchor || null,
         is_llm_extracted: false,
         is_user_verified: true,
+        // A person wrote this row; it is not waiting on anyone's review.
+        review_decision: "confirmed",
       });
 
       if (crError) {
@@ -659,6 +672,7 @@ export function useLinkConditionToRecord() {
           source_anchor: input.source_anchor || null,
           is_llm_extracted: false,
           is_user_verified: true,
+          review_decision: "confirmed",
         })
         .select()
         .single();

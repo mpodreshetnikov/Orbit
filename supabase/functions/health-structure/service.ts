@@ -469,16 +469,22 @@ export async function runHealthStructureService(
       },
     );
 
-    await processConditionsToResolve(
+    // The gate needs this document's own observations: a citation is only checkable against the
+    // measurements the same document produced.
+    const droppedResolutions = await processConditionsToResolve(
       input.recordId,
       structuredData.conditions_to_resolve,
       existingConditions,
+      structuredData.observations,
       {
         repository: deps.repository,
         log: deps.log,
       },
     );
-    await resolutionSpan?.end({ status: "ok" });
+    await resolutionSpan?.end({
+      status: "ok",
+      attrs: { dropped_condition_resolution_count: droppedResolutions.length },
+    });
 
     // Only now is the record's content complete. Releasing the claim with the status write above
     // would have opened the record to a second run while observations, findings and resolutions

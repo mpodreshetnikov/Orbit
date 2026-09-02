@@ -118,6 +118,8 @@ function proposal(overrides: Partial<ConditionRecordWithDetails> = {}): Conditio
     confidence: 0.9,
     is_llm_extracted: true,
     is_user_verified: false,
+    supporting_obs_code: null,
+    review_decision: "pending",
     created_at: "2026-08-31T00:00:00.000Z",
     is_proposal: true,
     condition_name: "Asthma",
@@ -160,6 +162,8 @@ describe("materializeConditionProposals", () => {
         proposed_name: null,
         proposed_icd_code: null,
         is_user_verified: true,
+        // Approving the record is the ruling, so the row does not stay `pending` behind it.
+        review_decision: "confirmed",
       },
     });
   });

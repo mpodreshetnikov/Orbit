@@ -53,11 +53,16 @@ export const RECONCILE_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["condition_id", "reason", "source_anchor", "confidence"],
+        required: ["condition_id", "supporting_obs_code", "reason", "source_anchor", "confidence"],
         properties: {
           condition_id: {
             type: "string",
             description: "Must be one of the supplied existing condition ids.",
+          },
+          supporting_obs_code: {
+            type: ["string", "null"],
+            description:
+              "The catalogue code of the observation whose value establishes this resolution, or null when no measurement does.",
           },
           reason: { type: "string" },
           source_anchor: { type: "string" },
@@ -235,6 +240,7 @@ export async function runReconcileStage(
     }
     conditionsToResolve.push({
       condition_id: conditionId,
+      supporting_obs_code: asNullableString(obj.supporting_obs_code),
       reason: asString(obj.reason, ""),
       source_anchor: asString(obj.source_anchor, ""),
       confidence: asNumber(obj.confidence) ?? 0,
