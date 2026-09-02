@@ -53,7 +53,8 @@
       "supabase/tests/functions/medication_notifications_test.sql"
     ],
     "supabase/db/functions/mark_dose_skipped.sql": [
-      "supabase/tests/functions/medication_dose_lifecycle_test.sql"
+      "supabase/tests/functions/medication_dose_lifecycle_test.sql",
+      "supabase/tests/functions/medication_manual_stock_test.sql"
     ],
     "supabase/db/functions/mark_dose_taken.sql": [
       "supabase/tests/functions/mark_dose_taken_test.sql",
@@ -144,7 +145,8 @@
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
     ],
     "supabase/db/functions/undo_dose_intake.sql": [
-      "supabase/tests/functions/medication_dose_lifecycle_test.sql"
+      "supabase/tests/functions/medication_dose_lifecycle_test.sql",
+      "supabase/tests/functions/medication_manual_stock_test.sql"
     ],
     "supabase/db/functions/update_dose_event_resolution_details.sql": [
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
