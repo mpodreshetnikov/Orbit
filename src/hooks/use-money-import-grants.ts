@@ -54,7 +54,8 @@ interface MoneyImportGrantsTable {
   insert(values: {
     id: string;
     person_id: string;
-    created_by_auth_user_id: string;
+    // No issuer: the column defaults to `auth.uid()` and the insert policy requires it to equal
+    // `auth.uid()`, so naming it here could only ever repeat what the database already knows.
     label: string;
     token_hash: string;
     allowed_sources: string[];
@@ -114,12 +115,13 @@ export function useCreateMoneyImportGrant() {
       input: CreateMoneyImportGrantInput,
     ): Promise<{ grant: MoneyImportGrant; token: string }> => {
       const supabase = createClient();
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError) throw new Error(userError.message);
-      if (!user) throw new Error("Not signed in");
+
+      // The issuer is not sent. `created_by_auth_user_id` defaults to `auth.uid()`, and the
+      // insert policy has always required it to equal `auth.uid()` -- so asking
+      // `supabase.auth.getUser()` first was a network round trip to learn the only value the
+      // database would have accepted anyway. It was also in front of the one thing on this
+      // screen that must not hang: the key lives in this closure and nowhere else until the row
+      // lands, so a call that never settles loses a credential that is already real.
 
       // The token exists in this function and in the reply to the caller, nowhere else:
       // only its hash is stored, so a lost token is reissued rather than recovered.
@@ -133,7 +135,6 @@ export function useCreateMoneyImportGrant() {
         .insert({
           id,
           person_id: input.personId,
-          created_by_auth_user_id: user.id,
           label: input.label.trim(),
           token_hash: await hashGrantToken(token),
           allowed_sources: input.allowedSources,
