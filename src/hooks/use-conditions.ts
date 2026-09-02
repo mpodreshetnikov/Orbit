@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { AUTHORITATIVE_STATUS_FILTER } from "@/lib/conditions/unverified-closure";
 import type {
   Condition,
   ConditionRecord,
@@ -428,15 +429,24 @@ async function updateConditionRecord({
   // When status_in_record changed, recompute condition's current_status from history
   // (status of the most recent mention by record_date). This avoids leaving a condition
   // "resolved" when the user edits the only resolved history entry to suspected/active.
-  if (updates.status_in_record && conditionId) {
-    await recomputeConditionCurrentStatus(supabase, conditionId);
+  // A verification is a recompute trigger in its own right, not only a status edit. A closure the
+  // model wrote is suppressed until someone confirms it, and confirming is exactly what activating
+  // a record does -- `verifyAllConditions` sets `is_user_verified` and passes no status and no
+  // condition id. Without this the approved closure would never reach the condition, which is the
+  // failure the suppression would otherwise cause rather than prevent. The condition id comes off
+  // the row we just read, since the caller need not have supplied one.
+  const linkedConditionId = conditionId ?? (conditionRecord.condition_id as string | null);
+  const verificationConfirmed = updates.is_user_verified === true;
+
+  if ((updates.status_in_record || verificationConfirmed) && linkedConditionId) {
+    await recomputeConditionCurrentStatus(supabase, linkedConditionId);
     const conditionUpdates: Record<string, string | null> = {};
     if (code !== undefined) {
       conditionUpdates.code = code;
       conditionUpdates.icd_name_en = icd_name_en ?? null;
     }
     if (Object.keys(conditionUpdates).length > 0) {
-      await supabase.from("conditions").update(conditionUpdates).eq("id", conditionId);
+      await supabase.from("conditions").update(conditionUpdates).eq("id", linkedConditionId);
     }
   }
 
@@ -470,25 +480,34 @@ export function useUpdateConditionRecord() {
   });
 }
 
-// Recompute condition's current_status from the most recent condition_record by record_date
+// Recompute condition's current_status from the most recent condition_record by record_date,
+// ignoring machine-authored closures nobody has confirmed -- see AUTHORITATIVE_STATUS_FILTER.
 async function recomputeConditionCurrentStatus(
   supabase: ReturnType<typeof createClient>,
   conditionId: string,
 ): Promise<void> {
-  const { data: latestMention } = await supabase
+  // Both errors are raised rather than discarded, because a verification now depends on this
+  // running. The mention is already marked verified by the time we get here, and
+  // `verifyAllConditions` only ever revisits unverified rows -- so a swallowed failure would
+  // report success, never be retried, and leave an approved closure that never reaches the chart.
+  const { data: latestMention, error: selectError } = await supabase
     .from("condition_records")
     .select("status_in_record, medical_records!inner(record_date)")
     .eq("condition_id", conditionId)
+    .or(AUTHORITATIVE_STATUS_FILTER)
     .order("medical_records(record_date)", { ascending: false })
     .limit(1)
     .maybeSingle();
 
+  if (selectError) throw new Error(selectError.message);
+
   const derivedStatus = latestMention?.status_in_record;
   if (derivedStatus) {
-    await supabase
+    const { error: updateError } = await supabase
       .from("conditions")
       .update({ current_status: derivedStatus })
       .eq("id", conditionId);
+    if (updateError) throw new Error(updateError.message);
   }
 }
 
@@ -655,11 +674,16 @@ export function useLinkConditionToRecord() {
         .eq("id", input.record_id)
         .single();
 
-      // Get the most recent record date for this condition
+      // Get the most recent record date for this condition, counting only mentions allowed to
+      // decide its status. A machine closure suppressed by AUTHORITATIVE_STATUS_FILTER must not
+      // win this comparison either: it cannot set the status itself, so letting it look newest
+      // would only stop the person's own confirmed mention from applying and leave the condition
+      // stale until that draft is reviewed -- or for good, if it never is.
       const { data: mostRecentMention } = await supabase
         .from("condition_records")
         .select("medical_records!inner(record_date)")
         .eq("condition_id", input.condition_id)
+        .or(AUTHORITATIVE_STATUS_FILTER)
         .order("medical_records(record_date)", { ascending: false })
         .limit(1)
         .single();

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { AUTHORITATIVE_STATUS_FILTER } from "./unverified-closure";
 import type { ConditionRecordWithDetails, IcdLookupResult } from "@/types";
 
 /**
@@ -76,11 +77,17 @@ async function findByName(deps: ProposalMaterializationDeps, name: string): Prom
 }
 
 /**
- * Bring a condition's current status in line with its most recent mention.
+ * Bring a condition's current status in line with its most recent authoritative mention.
  *
  * The edge function does this for every mention it links; the activation path has to do the same
  * for a condition it reuses, or an approved `resolved` proposal leaves the chart still showing
  * the condition as active. Nothing in the database does it for us.
+ *
+ * The filter belongs here too, and the order of writes is why it is safe: the caller marks the
+ * proposal `is_user_verified: true` before calling this, so the row the person just approved
+ * passes the filter on its own merit. What the filter keeps out is a machine closure sitting
+ * unverified in some *other* draft with a newer date -- without it, approving even an `active`
+ * proposal would pick that unrelated row up and take the condition off the active chart.
  */
 async function recomputeCurrentStatus(
   deps: ProposalMaterializationDeps,
@@ -90,6 +97,7 @@ async function recomputeCurrentStatus(
     .from("condition_records")
     .select("status_in_record, medical_records!inner(record_date)")
     .eq("condition_id", conditionId)
+    .or(AUTHORITATIVE_STATUS_FILTER)
     .order("medical_records(record_date)", { ascending: false })
     .limit(1)
     .maybeSingle();

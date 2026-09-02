@@ -8,6 +8,7 @@ import type {
 } from "@/types";
 import { createTestQueryClient, createTestQueryWrapper } from "../../test/utils/web/render";
 import { createQueryBuilder } from "../../test/utils/web/supabase-query";
+import { AUTHORITATIVE_STATUS_FILTER } from "@/lib/conditions/unverified-closure";
 
 const { createClientMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
@@ -229,6 +230,79 @@ describe("use-conditions", () => {
       code: "J45",
       icd_name_en: "Asthma",
     });
+  });
+
+  it("recomputes on verification alone, so an approved closure reaches the condition", async () => {
+    // Activating a record verifies every mention and passes nothing else -- no status, no
+    // condition id. The closure is suppressed until exactly this moment, so if verification did
+    // not trigger the recompute the confirmed resolution would never reach the chart.
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: {
+        id: "cr-1",
+        record_id: "record-1",
+        condition_id: "cond-1",
+      },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: { status_in_record: "resolved" },
+      error: null,
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "condition_records" ? conditionRecordsBuilder : conditionsBuilder,
+      ),
+    });
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { is_user_verified: true },
+      });
+    });
+
+    expect(conditionsBuilder.update).toHaveBeenCalledWith({ current_status: "resolved" });
+  });
+
+  it("excludes unconfirmed machine closures from the recompute", async () => {
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: { status_in_record: "active" },
+      error: null,
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "condition_records" ? conditionRecordsBuilder : conditionsBuilder,
+      ),
+    });
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { status_in_record: "active" },
+        conditionId: "cond-1",
+      });
+    });
+
+    // The filter has to reach the query, and it has to reach it before the limit -- a recompute
+    // that filtered afterwards would let a suppressed closure shadow the row beneath it.
+    expect(conditionRecordsBuilder.or).toHaveBeenCalledWith(AUTHORITATIVE_STATUS_FILTER);
+    expect(conditionRecordsBuilder.or.mock.invocationCallOrder[0]).toBeLessThan(
+      conditionRecordsBuilder.limit.mock.invocationCallOrder[0],
+    );
   });
 
   it("deletes condition record and recomputes status", async () => {
@@ -547,6 +621,76 @@ describe("use-conditions", () => {
 
     expect(conditionsBuilder.update).not.toHaveBeenCalled();
     expect(conditionRecordsBuilder.insert).toHaveBeenCalled();
+  });
+
+  it("does not let a suppressed closure outrank a manual link by date", async () => {
+    // The manual-link path compares dates itself instead of calling the recompute helper, so it
+    // needs the same filter. A machine closure it cannot apply must not be counted as the newest
+    // word either: doing so would refuse the person's own confirmed status and leave the
+    // condition stale until that draft is reviewed -- or for good, if it never is.
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-new", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    const medicalRecordsBuilder = createQueryBuilder({
+      data: { record_date: "2026-01-01" },
+      error: null,
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "condition_records") return conditionRecordsBuilder;
+        if (table === "medical_records") return medicalRecordsBuilder;
+        return conditionsBuilder;
+      }),
+    });
+
+    const { useLinkConditionToRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useLinkConditionToRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        condition_id: "cond-1",
+        record_id: "record-1",
+        status_in_record: "active",
+      });
+    });
+
+    expect(conditionRecordsBuilder.or).toHaveBeenCalledWith(AUTHORITATIVE_STATUS_FILTER);
+  });
+
+  it("fails the verification when the recompute it depends on fails", async () => {
+    // The mention is verified by the time the recompute runs, and verifyAllConditions only
+    // revisits unverified rows -- so a swallowed failure would report success and never be
+    // retried, leaving an approved closure that never reaches the chart.
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: null,
+      error: { message: "recompute select failed" },
+    });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "condition_records" ? conditionRecordsBuilder : conditionsBuilder,
+      ),
+    });
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          id: "cr-1",
+          updates: { is_user_verified: true },
+        }),
+      ).rejects.toThrow("recompute select failed");
+    });
   });
 
   it("handles query errors, null detail states, and disabled hooks", async () => {
