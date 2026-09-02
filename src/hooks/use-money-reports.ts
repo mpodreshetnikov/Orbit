@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import type { Database } from "@/types/database";
 import type {
   MoneyBudgetCategoryNode,
   MoneyBudgetFxStatus,
@@ -322,6 +323,8 @@ export function useMoneyBudgetReport(
   });
 }
 
+type SelfAliasInsert = Database["public"]["Tables"]["money_transfer_self_aliases"]["Insert"];
+
 type SupabaseMutationClient = ReturnType<typeof createClient> & {
   from: (relation: string) => {
     select: (columns?: string) => {
@@ -452,9 +455,15 @@ export function useDeleteMoneyBudgetTarget() {
 }
 
 async function fetchMoneyTransferSelfAliases(personId: string): Promise<MoneyTransferSelfAlias[]> {
-  const supabase = createClient() as SupabaseMutationClient;
-  const relation = supabase.from("money_transfer_self_aliases").eq("person_id", personId);
-  const { data, error } = await relation.order("created_at", { ascending: false });
+  // Against the real client, not the loose one: `from()` returns a builder with no `.eq` on it, so
+  // the missing `.select()` here was a runtime TypeError that only the generated types could have
+  // caught -- and they could not, because this table was missing from them (T-260829-el7).
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("money_transfer_self_aliases")
+    .select("*")
+    .eq("person_id", personId)
+    .order("created_at", { ascending: false });
 
   if (error) throw new Error(error.message);
 
@@ -495,13 +504,18 @@ export interface CreateMoneyTransferSelfAliasInput {
 async function createMoneyTransferSelfAlias(
   input: CreateMoneyTransferSelfAliasInput,
 ): Promise<MoneyTransferSelfAlias> {
-  const supabase = createClient() as SupabaseMutationClient;
+  const supabase = createClient();
+  // `normalized_alias` is filled by the BEFORE INSERT trigger
+  // `set_money_transfer_self_aliases_normalized_alias`, so the insert must not supply it. The
+  // generated types cannot see triggers and mark the column required, which is what this cast
+  // says -- and all it says.
+  const payload: Omit<SelfAliasInsert, "normalized_alias"> = {
+    person_id: input.personId,
+    alias: input.alias,
+  };
   const { data, error } = await supabase
     .from("money_transfer_self_aliases")
-    .insert({
-      person_id: input.personId,
-      alias: input.alias,
-    })
+    .insert(payload as SelfAliasInsert)
     .select("*")
     .single();
 
