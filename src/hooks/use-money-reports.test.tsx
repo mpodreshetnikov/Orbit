@@ -303,6 +303,9 @@ describe("use-money-reports", () => {
     const aliases = renderHookWithQueryClient(() => useMoneyTransferSelfAliases("person-1"));
     await waitFor(() => expect(aliases.result.current.isSuccess).toBe(true));
     expect(aliases.result.current.data?.[0]?.normalized_alias).toBe("подрешетниковм");
+    // The read has to start with a select. `from()` alone returns a builder with no `.eq` on it,
+    // so omitting this was a runtime TypeError that the chainable double here happily swallowed.
+    expect(selectBuilder.select).toHaveBeenCalledWith("*");
 
     const createAlias = renderHookWithQueryClient(() => useCreateMoneyTransferSelfAlias());
     await act(async () => {
