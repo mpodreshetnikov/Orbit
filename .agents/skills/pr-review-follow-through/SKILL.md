@@ -50,7 +50,7 @@ docs, comments, formatting or test names, only a clean base merge, or when nothi
 since the watermark. A review of a change it has already seen returns findings you have already
 answered.
 
-### 3. Ask on a finished state, and at most twice
+### 3. Ask on a finished state, and at most three times
 
 Comment `@codex review` once the branch is in a state you would hand over: fixes batched, checks
 green. A review asked for mid-fix reads a half-answered branch and spends its pass saying so.
@@ -150,7 +150,14 @@ Staying subscribed forever is its own kind of watching. So the subscription has 
 
 The quiet hour is what the merge decision waits on when the only thing missing is condition 2: the
 automated review has not posted yet. A quiet window is not a review that found nothing — #36 merged
-into that gap and put a `P1` into production for an hour. Once the review has landed and been
+into that gap and put a `P1` into production for an hour.
+
+**When the hour passes and no review has posted at all**, the window has answered a different
+question: the reviewer did not run. Request one — `@codex review`, and it costs from the budget like
+any other. If that request is also unanswered by the next wake, or the reviewer has said it cannot
+run (a usage limit, no environment for the repository), hand the pull request over saying its head is
+unreviewed and why. That is the outcome; waiting another hour is not, and neither is merging on the
+silence. Once the review has landed and been
 answered, decide; if the decision was to hand over, the PR moves only on the owner's word. Do not
 re-subscribe, re-check, or nudge on your own; if they pick it back up, they will say so, and that is
 the event.

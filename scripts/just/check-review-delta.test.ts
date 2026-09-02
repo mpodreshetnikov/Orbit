@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import * as checkReviewDelta from "./check-review-delta.cjs";
 import * as checkPrSize from "./check-pr-size.cjs";
 
-const { evaluateReviewDelta, parseArgs, sensitiveAmong } = checkReviewDelta;
+const { evaluateReviewDelta, formatReport, parseArgs, sensitiveAmong } = checkReviewDelta;
 const { parseAllowlist } = checkPrSize;
 
 const FIXTURE_RATIONALE = "recorded upstream responses, verified by replay rather than by reading";
@@ -130,6 +130,15 @@ describe("reporting", () => {
 
     expect(result.request).toBe(false);
     expect(result.files).toBe(0);
+  });
+
+  it("quotes the budget docs/QUALITY.md sets, so the command cannot hand a branch over a round early", () => {
+    const report = formatReport(evaluate([[10, 0, "src/small.ts"]]), "abc123");
+
+    expect(report).toContain(
+      "at most three requested reviews beyond the one the pull request opened with",
+    );
+    expect(report).not.toContain("at most two requested reviews");
   });
 });
 

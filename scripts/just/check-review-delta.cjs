@@ -206,7 +206,7 @@ function formatReport(result, sinceRef) {
     "the fixes since the last one changed a shape other code reads -- a column, an ordering, a key,",
     "a signature. Skip it regardless when the change is only the last review's findings fixed",
     "locally, or only docs, comments, formatting or a clean base merge. docs/QUALITY.md has both",
-    "lists, and the cap: at most two requested reviews beyond the one the pull request opened with.",
+    "lists, and the cap: at most three requested reviews beyond the one the pull request opened with.",
   );
 
   return lines.join("\n");
@@ -246,6 +246,7 @@ module.exports = {
   REVIEWABLE_DELTA_THRESHOLD,
   SENSITIVE_SURFACES,
   evaluateReviewDelta,
+  formatReport,
   parseArgs,
   sensitiveAmong,
 };

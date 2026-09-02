@@ -185,13 +185,17 @@ A finished pull request has three outcomes, and the session picks one rather tha
 
 Merging is the session's own call under those five, and needs no permission first. What follows it is not optional: the acceptance review the registry's `task-registry` skill requires — verify the outcome on the production surface with whatever the session can reach, then hand the owner a guide for what the machine could not exercise, and leave the task `in-progress` until they answer. A merge is not a close.
 
-**Buy another review, when unsure.** Unsure is a state to spend the budget on, not to escalate. Request a review when any trigger in **Request another review when any of these holds** applies to the gap since the watermark, or when condition 5 fails, then re-decide on what comes back. Once the budget is spent and the doubt remains, it becomes the owner's question: hand it over saying what the doubt is.
+**Buy another review, when unsure.** Unsure is a state to spend the budget on, not to escalate. Request a review when any trigger in **Request another review when any of these holds** applies to the gap since the watermark, then re-decide on what comes back.
+
+Condition 5 is the one doubt a review does not answer, and it never justifies re-reading a commit the reviewer has already read — the unchanged-head prohibition above still stands. A missing "how would I see it" is missing evidence, so produce it: add the check, the test, the log line or the query that would show the failure, push that, and decide again on the head it makes. When the evidence cannot be produced inside this pull request, that is the owner's question and not a round to spend — hand it over saying what could not be observed.
+
+Once the budget is spent and the doubt remains, it becomes the owner's question too: hand it over saying what the doubt is.
 
 **Hand it over, on the stop list.** Three surfaces are never self-merged, however sure the session is:
 
 1. **Database schema and migrations** — `supabase/db`, anything under the migrations directory. A migration is not undone by reverting the commit.
 2. **Secrets and deploy configuration** — the deploy workflows, environment and hosting configuration. The effect is not in the diff, so no amount of reading it raises confidence.
-3. **The rules agents follow** — `.agents/skills/` and its generated mirror, this document, and the CI checks that gate them. A rule change alters every future session, including the one deciding whether to merge it.
+3. **The rules agents follow** — `AGENTS.md`, `.agents/skills/` and its generated mirror, this document, and the CI checks that gate them. A rule change alters every future session, including the one deciding whether to merge it, and `AGENTS.md` is on the list for the same reason as the rest: it carries the repository-wide gates every session reads before it starts.
 
 Handing over means naming the merge as the owner's single next action, with the five conditions' state beside it, and then ending the turn — never holding the pull request open on a timer.
 
