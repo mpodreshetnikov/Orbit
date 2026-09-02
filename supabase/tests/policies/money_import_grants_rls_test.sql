@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(22);
+SELECT plan(24);
 
 SELECT has_table('public', 'money_import_grants', 'money_import_grants table exists');
 
@@ -108,6 +108,39 @@ SELECT lives_ok(
   $$,
   'authenticated allowlisted users can delete an import grant'
 );
+
+-- The client does not send the issuer, and must not have to: to name it, the browser first has to
+-- ask the auth server who it is, and that round trip sits in front of the one operation on the
+-- issuing screen that must never hang -- the plaintext key exists only in the browser's memory
+-- until the row lands. The column defaults to auth.uid(), which is the only value the insert
+-- policy above would have accepted anyway.
+SELECT lives_ok(
+  $$
+    INSERT INTO public.money_import_grants (id, person_id, label, token_hash, allowed_sources)
+    VALUES (
+      '7d000000-0000-0000-0000-000000000103',
+      '7d000000-0000-0000-0000-000000000010',
+      'Laptop, issuer defaulted',
+      'hash-money-grants-rls-default',
+      ARRAY['tbank_web']
+    )
+  $$,
+  'an import grant can be issued without naming its issuer'
+);
+
+SELECT is(
+  (
+    SELECT created_by_auth_user_id
+    FROM public.money_import_grants
+    WHERE id = '7d000000-0000-0000-0000-000000000103'
+  ),
+  '7d000000-0000-0000-0000-000000000001'::uuid,
+  'the defaulted issuer is the caller, not null and not anyone else'
+);
+
+-- Taken back out so the table is empty again: the assertions below count the rows an allowlisted
+-- user can see, and a fixture left behind here would be counted there.
+DELETE FROM public.money_import_grants WHERE id = '7d000000-0000-0000-0000-000000000103';
 
 -- Everything above proves what the policies permit, and a policy of USING (true) would pass all
 -- of it. These prove what they refuse, which is the half that matters for a table of long-lived
