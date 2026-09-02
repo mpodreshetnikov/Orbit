@@ -167,9 +167,33 @@ A review that reads a change it has already seen returns findings you have alrea
 
 ### The request budget
 
-**At most two requested reviews beyond the one the pull request opened with.** After the second, hand the pull request to its owner with what is unreviewed, why another pass looked worthwhile, and what it would cost.
+**At most three requested reviews beyond the one the pull request opened with.** Requesting one is the session's own call and needs no permission first — the budget is the limit, not a gate. After the third, hand the pull request to its owner with what is unreviewed, why another pass looked worthwhile, and what it would cost.
 
 The budget is per pull request. Rebasing does not reset it, reopening does not reset it, and a requested review that returned no finding still counts — it was still a review.
+
+### The merge decision
+
+A finished pull request has three outcomes, and the session picks one rather than handing every branch to a person. Waiting is not among them.
+
+**Merge it, when all five hold.**
+
+1. **CI is green** on the current head.
+2. **The automated review has finished on this head**, and every finding is fixed and pushed or answered on its thread, with the threads resolved. A review that has not posted yet is not a review that found nothing: #36 was merged on green CI one minute before its review posted a `P1`, and production stood broken for an hour.
+3. **No merge conflict** against the base.
+4. **The change is off the stop list** below.
+5. **The session can state what would break and how it would see it** — a check, a query, a log, a dashboard, a screen. If the answer is "I would not see it", that is the not-sure branch, not a risk to accept quietly.
+
+Merging is the session's own call under those five, and needs no permission first. What follows it is not optional: the acceptance review the registry's `task-registry` skill requires — verify the outcome on the production surface with whatever the session can reach, then hand the owner a guide for what the machine could not exercise, and leave the task `in-progress` until they answer. A merge is not a close.
+
+**Buy another review, when unsure.** Unsure is a state to spend the budget on, not to escalate. Request a review when any trigger in **Request another review when any of these holds** applies to the gap since the watermark, or when condition 5 fails, then re-decide on what comes back. Once the budget is spent and the doubt remains, it becomes the owner's question: hand it over saying what the doubt is.
+
+**Hand it over, on the stop list.** Three surfaces are never self-merged, however sure the session is:
+
+1. **Database schema and migrations** — `supabase/db`, anything under the migrations directory. A migration is not undone by reverting the commit.
+2. **Secrets and deploy configuration** — the deploy workflows, environment and hosting configuration. The effect is not in the diff, so no amount of reading it raises confidence.
+3. **The rules agents follow** — `.agents/skills/` and its generated mirror, this document, and the CI checks that gate them. A rule change alters every future session, including the one deciding whether to merge it.
+
+Handing over means naming the merge as the owner's single next action, with the five conditions' state beside it, and then ending the turn — never holding the pull request open on a timer.
 
 ### Answer a review by class, not by finding
 
