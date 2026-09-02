@@ -1618,7 +1618,7 @@ export type Database = {
         Insert: {
           allowed_sources?: string[]
           created_at?: string
-          created_by_auth_user_id: string
+          created_by_auth_user_id?: string
           expires_at?: string | null
           id?: string
           label: string

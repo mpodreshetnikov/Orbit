@@ -628,7 +628,7 @@ CREATE TABLE "public"."money_import_batches" (
 CREATE TABLE "public"."money_import_grants" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "person_id" "uuid" NOT NULL,
-    "created_by_auth_user_id" "uuid" NOT NULL,
+    "created_by_auth_user_id" "uuid" DEFAULT "auth"."uid"() NOT NULL,
     "label" "text" NOT NULL,
     "token_hash" "text" NOT NULL,
     "allowed_sources" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
