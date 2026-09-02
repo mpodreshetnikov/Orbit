@@ -1,12 +1,12 @@
 --
 -- PostgreSQL database dump
 --
--- Dumped from database version 17.6
--- Dumped by pg_dump version 18.1
+
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -180,6 +180,76 @@ CREATE TABLE "public"."finding_type_catalog" (
 
 
 --
+-- Name: mcp_oauth_authorization_codes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."mcp_oauth_authorization_codes" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "code_hash" "text" NOT NULL,
+    "client_id" "text" NOT NULL,
+    "auth_user_id" "uuid" NOT NULL,
+    "user_email" "text" NOT NULL,
+    "redirect_uri" "text" NOT NULL,
+    "scope" "text" NOT NULL,
+    "code_challenge" "text" NOT NULL,
+    "code_challenge_method" "text" DEFAULT 'S256'::"text" NOT NULL,
+    "resource" "text",
+    "expires_at" timestamp with time zone NOT NULL,
+    "consumed_at" timestamp with time zone,
+    "issued_grant_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mcp_oauth_authorization_codes_s256_only" CHECK (("code_challenge_method" = 'S256'::"text"))
+);
+
+
+--
+-- Name: mcp_oauth_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."mcp_oauth_clients" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "client_id" "text" NOT NULL,
+    "client_name" "text",
+    "redirect_uris" "text"[] NOT NULL,
+    "grant_types" "text"[] DEFAULT ARRAY['authorization_code'::"text", 'refresh_token'::"text"] NOT NULL,
+    "response_types" "text"[] DEFAULT ARRAY['code'::"text"] NOT NULL,
+    "token_endpoint_auth_method" "text" DEFAULT 'none'::"text" NOT NULL,
+    "scope" "text" DEFAULT 'health:read health:write'::"text" NOT NULL,
+    "client_uri" "text",
+    "logo_uri" "text",
+    "policy_uri" "text",
+    "tos_uri" "text",
+    "software_id" "text",
+    "software_version" "text",
+    "disabled_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mcp_oauth_clients_redirect_uris_bounded" CHECK (("array_length"("redirect_uris", 1) <= 5)),
+    CONSTRAINT "mcp_oauth_clients_redirect_uris_not_empty" CHECK (("array_length"("redirect_uris", 1) >= 1))
+);
+
+
+--
+-- Name: mcp_oauth_grants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."mcp_oauth_grants" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "client_id" "text" NOT NULL,
+    "auth_user_id" "uuid" NOT NULL,
+    "user_email" "text" NOT NULL,
+    "scope" "text" NOT NULL,
+    "access_token_hash" "text" NOT NULL,
+    "access_token_expires_at" timestamp with time zone NOT NULL,
+    "refresh_token_hash" "text",
+    "refresh_token_expires_at" timestamp with time zone,
+    "rotated_from" "uuid",
+    "revoked_at" timestamp with time zone,
+    "last_used_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+--
 -- Name: measurement_catalog; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -339,6 +409,24 @@ CREATE TABLE "public"."money_accounts" (
 
 
 --
+-- Name: money_budget_targets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_budget_targets" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "person_id" "uuid" NOT NULL,
+    "category_id" "uuid" NOT NULL,
+    "month_start" "date" NOT NULL,
+    "target_amount" numeric NOT NULL,
+    "currency" character(3) NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "money_budget_targets_currency_check" CHECK ((("currency")::"text" = "upper"(("currency")::"text"))),
+    CONSTRAINT "money_budget_targets_month_start_check" CHECK (("month_start" = ("date_trunc"('month'::"text", ("month_start")::timestamp with time zone))::"date"))
+);
+
+
+--
 -- Name: money_cards; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -443,6 +531,22 @@ CREATE TABLE "public"."money_category_rules" (
 
 
 --
+-- Name: money_fx_rates; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_fx_rates" (
+    "rate_date" "date" NOT NULL,
+    "base_currency" character(3) NOT NULL,
+    "quote_currency" character(3) NOT NULL,
+    "rate" numeric NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "money_fx_rates_currency_check" CHECK (((("base_currency")::"text" = "upper"(("base_currency")::"text")) AND (("quote_currency")::"text" = "upper"(("quote_currency")::"text")) AND ("base_currency" <> "quote_currency"))),
+    CONSTRAINT "money_fx_rates_rate_check" CHECK (("rate" > (0)::numeric))
+);
+
+
+--
 -- Name: money_import_batch_brand_resolutions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -518,6 +622,25 @@ CREATE TABLE "public"."money_import_batches" (
 
 
 --
+-- Name: money_import_grants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_import_grants" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "person_id" "uuid" NOT NULL,
+    "created_by_auth_user_id" "uuid" NOT NULL,
+    "label" "text" NOT NULL,
+    "token_hash" "text" NOT NULL,
+    "allowed_sources" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "expires_at" timestamp with time zone,
+    "revoked_at" timestamp with time zone,
+    "last_used_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+--
 -- Name: money_import_sessions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -536,6 +659,7 @@ CREATE TABLE "public"."money_import_sessions" (
     "meta" "jsonb",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "grant_id" "uuid",
     CONSTRAINT "money_import_sessions_status_check" CHECK (("status" = ANY (ARRAY['created'::"text", 'running'::"text", 'completed'::"text", 'failed'::"text", 'expired'::"text", 'revoked'::"text"])))
 );
 
@@ -669,6 +793,22 @@ CREATE TABLE "public"."money_transactions" (
     "source_category_name" "text",
     "receipt_request_key" "text",
     "receipt_enrichment_status" "text"
+);
+
+
+--
+-- Name: money_transfer_self_aliases; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."money_transfer_self_aliases" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "person_id" "uuid" NOT NULL,
+    "alias" "text" NOT NULL,
+    "normalized_alias" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "money_transfer_self_aliases_alias_check" CHECK (("btrim"("alias") <> ''::"text")),
+    CONSTRAINT "money_transfer_self_aliases_normalized_alias_check" CHECK (("btrim"("normalized_alias") <> ''::"text"))
 );
 
 
@@ -891,12 +1031,12 @@ ALTER TABLE ONLY "public"."db_deploy_log" ALTER COLUMN "id" SET DEFAULT "nextval
 --
 -- PostgreSQL database dump
 --
--- Dumped from database version 17.6
--- Dumped by pg_dump version 18.1
+
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;SET client_encoding = 'UTF8';
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
@@ -1011,6 +1151,62 @@ ALTER TABLE ONLY "public"."finding_type_catalog"
 
 
 --
+-- Name: mcp_oauth_authorization_codes mcp_oauth_authorization_codes_code_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_authorization_codes"
+    ADD CONSTRAINT "mcp_oauth_authorization_codes_code_hash_key" UNIQUE ("code_hash");
+
+
+--
+-- Name: mcp_oauth_authorization_codes mcp_oauth_authorization_codes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_authorization_codes"
+    ADD CONSTRAINT "mcp_oauth_authorization_codes_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: mcp_oauth_clients mcp_oauth_clients_client_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_clients"
+    ADD CONSTRAINT "mcp_oauth_clients_client_id_key" UNIQUE ("client_id");
+
+
+--
+-- Name: mcp_oauth_clients mcp_oauth_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_clients"
+    ADD CONSTRAINT "mcp_oauth_clients_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: mcp_oauth_grants mcp_oauth_grants_access_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_grants"
+    ADD CONSTRAINT "mcp_oauth_grants_access_token_hash_key" UNIQUE ("access_token_hash");
+
+
+--
+-- Name: mcp_oauth_grants mcp_oauth_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_grants"
+    ADD CONSTRAINT "mcp_oauth_grants_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: mcp_oauth_grants mcp_oauth_grants_refresh_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_grants"
+    ADD CONSTRAINT "mcp_oauth_grants_refresh_token_hash_key" UNIQUE ("refresh_token_hash");
+
+
+--
 -- Name: measurement_catalog measurement_catalog_code_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1091,6 +1287,14 @@ ALTER TABLE ONLY "public"."money_accounts"
 
 
 --
+-- Name: money_budget_targets money_budget_targets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_budget_targets"
+    ADD CONSTRAINT "money_budget_targets_pkey" PRIMARY KEY ("id");
+
+
+--
 -- Name: money_cards money_cards_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1139,6 +1343,14 @@ ALTER TABLE ONLY "public"."money_category_rules"
 
 
 --
+-- Name: money_fx_rates money_fx_rates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_fx_rates"
+    ADD CONSTRAINT "money_fx_rates_pkey" PRIMARY KEY ("rate_date", "base_currency", "quote_currency");
+
+
+--
 -- Name: money_import_batch_brand_resolutions money_import_batch_brand_resolutions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1160,6 +1372,22 @@ ALTER TABLE ONLY "public"."money_import_batch_rows"
 
 ALTER TABLE ONLY "public"."money_import_batches"
     ADD CONSTRAINT "money_import_batches_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_import_grants money_import_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_grants"
+    ADD CONSTRAINT "money_import_grants_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_import_grants money_import_grants_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_grants"
+    ADD CONSTRAINT "money_import_grants_token_hash_key" UNIQUE ("token_hash");
 
 
 --
@@ -1232,6 +1460,14 @@ ALTER TABLE ONLY "public"."money_transaction_edit_audits"
 
 ALTER TABLE ONLY "public"."money_transactions"
     ADD CONSTRAINT "money_transactions_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: money_transfer_self_aliases money_transfer_self_aliases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transfer_self_aliases"
+    ADD CONSTRAINT "money_transfer_self_aliases_pkey" PRIMARY KEY ("id");
 
 
 --
@@ -1522,6 +1758,34 @@ CREATE INDEX "idx_finding_type_catalog_synonyms_ru" ON "public"."finding_type_ca
 
 
 --
+-- Name: idx_mcp_oauth_authorization_codes_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_mcp_oauth_authorization_codes_expires_at" ON "public"."mcp_oauth_authorization_codes" USING "btree" ("expires_at");
+
+
+--
+-- Name: idx_mcp_oauth_grants_access_token_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_mcp_oauth_grants_access_token_expires_at" ON "public"."mcp_oauth_grants" USING "btree" ("access_token_expires_at");
+
+
+--
+-- Name: idx_mcp_oauth_grants_active_client; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_mcp_oauth_grants_active_client" ON "public"."mcp_oauth_grants" USING "btree" ("client_id") WHERE ("revoked_at" IS NULL);
+
+
+--
+-- Name: idx_mcp_oauth_grants_auth_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_mcp_oauth_grants_auth_user_id" ON "public"."mcp_oauth_grants" USING "btree" ("auth_user_id");
+
+
+--
 -- Name: idx_measurement_catalog_category; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1739,6 +2003,27 @@ CREATE INDEX "idx_money_accounts_owner_person_id" ON "public"."money_accounts" U
 
 
 --
+-- Name: idx_money_budget_targets_category_month; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_budget_targets_category_month" ON "public"."money_budget_targets" USING "btree" ("category_id", "month_start");
+
+
+--
+-- Name: idx_money_budget_targets_person_category_month; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_budget_targets_person_category_month" ON "public"."money_budget_targets" USING "btree" ("person_id", "category_id", "month_start");
+
+
+--
+-- Name: idx_money_budget_targets_person_month; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_budget_targets_person_month" ON "public"."money_budget_targets" USING "btree" ("person_id", "month_start");
+
+
+--
 -- Name: idx_money_cards_account_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1823,6 +2108,13 @@ CREATE UNIQUE INDEX "idx_money_category_rules_person_sort_order" ON "public"."mo
 
 
 --
+-- Name: idx_money_fx_rates_pair_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_fx_rates_pair_date" ON "public"."money_fx_rates" USING "btree" ("base_currency", "quote_currency", "rate_date" DESC);
+
+
+--
 -- Name: idx_money_import_batch_brand_resolutions_batch_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1893,6 +2185,13 @@ CREATE INDEX "idx_money_import_batches_status" ON "public"."money_import_batches
 
 
 --
+-- Name: idx_money_import_grants_person_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_grants_person_id" ON "public"."money_import_grants" USING "btree" ("person_id");
+
+
+--
 -- Name: idx_money_import_sessions_created_by_auth_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1904,6 +2203,13 @@ CREATE INDEX "idx_money_import_sessions_created_by_auth_user_id" ON "public"."mo
 --
 
 CREATE INDEX "idx_money_import_sessions_expires_at" ON "public"."money_import_sessions" USING "btree" ("expires_at");
+
+
+--
+-- Name: idx_money_import_sessions_grant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_import_sessions_grant_id" ON "public"."money_import_sessions" USING "btree" ("grant_id");
 
 
 --
@@ -2030,6 +2336,20 @@ CREATE INDEX "idx_money_transactions_posted_at" ON "public"."money_transactions"
 --
 
 CREATE UNIQUE INDEX "idx_money_transactions_source_external_id" ON "public"."money_transactions" USING "btree" ("source", "external_id") WHERE ("external_id" IS NOT NULL);
+
+
+--
+-- Name: idx_money_transfer_self_aliases_person_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "idx_money_transfer_self_aliases_person_id" ON "public"."money_transfer_self_aliases" USING "btree" ("person_id");
+
+
+--
+-- Name: idx_money_transfer_self_aliases_person_normalized; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "idx_money_transfer_self_aliases_person_normalized" ON "public"."money_transfer_self_aliases" USING "btree" ("person_id", "normalized_alias");
 
 
 --
@@ -2237,73 +2557,128 @@ CREATE INDEX "idx_record_observations_record_id" ON "public"."record_observation
 
 --
 -- Name: money_line_items audit_money_line_items_edits; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transactions audit_money_transactions_edits; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_delete_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_insert_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_completions checkup_completion_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items checkup_item_after_update_trigger; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items checkup_item_set_next_due_insert; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: money_budget_targets enforce_money_budget_targets_invariants; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: money_categories enforce_money_categories_invariants; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: money_import_grants enforce_money_import_grant_authority; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: money_categories prevent_money_categories_delete; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: money_transfer_self_aliases set_money_transfer_self_aliases_normalized_alias; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: body_site_catalog update_body_site_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: checkup_items update_checkup_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: conditions update_conditions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: finding_type_catalog update_finding_type_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: measurement_catalog update_measurement_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: measurements update_measurements_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: med_dose_events update_med_dose_events_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: med_regimens update_med_regimens_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: medical_records update_medical_records_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: medication_refill_snoozes update_medication_refill_snoozes_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_accounts update_money_accounts_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: money_budget_targets update_money_budget_targets_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: money_cards update_money_cards_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_categories update_money_categories_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_category_rules update_money_category_rules_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: money_fx_rates update_money_fx_rates_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: money_import_batch_brand_resolutions update_money_import_batch_brand_resolutions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: money_import_grants update_money_import_grants_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: money_line_items update_money_line_items_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transaction_brand_aliases update_money_transaction_brand_aliases_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transaction_brands update_money_transaction_brands_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: money_transactions update_money_transactions_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
+-- Name: money_transfer_self_aliases update_money_transfer_self_aliases_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+--
 -- Name: notification_routing update_notification_routing_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: observation_catalog update_observation_catalog_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: persons update_persons_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: record_findings update_record_findings_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: record_observations update_record_observations_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: user_preferences update_user_preferences_updated_at; Type: TRIGGER; Schema: public; Owner: -
-----
+--
+--
 -- Name: allowed_users allowed_users_auth_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2365,6 +2740,30 @@ ALTER TABLE ONLY "public"."condition_records"
 
 ALTER TABLE ONLY "public"."conditions"
     ADD CONSTRAINT "conditions_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: mcp_oauth_authorization_codes mcp_oauth_authorization_codes_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_authorization_codes"
+    ADD CONSTRAINT "mcp_oauth_authorization_codes_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."mcp_oauth_clients"("client_id") ON DELETE CASCADE;
+
+
+--
+-- Name: mcp_oauth_grants mcp_oauth_grants_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_grants"
+    ADD CONSTRAINT "mcp_oauth_grants_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."mcp_oauth_clients"("client_id") ON DELETE CASCADE;
+
+
+--
+-- Name: mcp_oauth_grants mcp_oauth_grants_rotated_from_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."mcp_oauth_grants"
+    ADD CONSTRAINT "mcp_oauth_grants_rotated_from_fkey" FOREIGN KEY ("rotated_from") REFERENCES "public"."mcp_oauth_grants"("id") ON DELETE SET NULL;
 
 
 --
@@ -2469,6 +2868,22 @@ ALTER TABLE ONLY "public"."medication_refill_snoozes"
 
 ALTER TABLE ONLY "public"."money_accounts"
     ADD CONSTRAINT "money_accounts_owner_person_id_fkey" FOREIGN KEY ("owner_person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_budget_targets money_budget_targets_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_budget_targets"
+    ADD CONSTRAINT "money_budget_targets_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."money_categories"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_budget_targets money_budget_targets_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_budget_targets"
+    ADD CONSTRAINT "money_budget_targets_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
 
 
 --
@@ -2680,11 +3095,27 @@ ALTER TABLE ONLY "public"."money_import_batches"
 
 
 --
+-- Name: money_import_grants money_import_grants_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_grants"
+    ADD CONSTRAINT "money_import_grants_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
 -- Name: money_import_sessions money_import_sessions_batch_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY "public"."money_import_sessions"
     ADD CONSTRAINT "money_import_sessions_batch_id_fkey" FOREIGN KEY ("batch_id") REFERENCES "public"."money_import_batches"("id") ON DELETE SET NULL;
+
+
+--
+-- Name: money_import_sessions money_import_sessions_grant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_import_sessions"
+    ADD CONSTRAINT "money_import_sessions_grant_id_fkey" FOREIGN KEY ("grant_id") REFERENCES "public"."money_import_grants"("id") ON DELETE CASCADE;
 
 
 --
@@ -2805,6 +3236,14 @@ ALTER TABLE ONLY "public"."money_transactions"
 
 ALTER TABLE ONLY "public"."money_transactions"
     ADD CONSTRAINT "money_transactions_payer_person_id_fkey" FOREIGN KEY ("payer_person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: money_transfer_self_aliases money_transfer_self_aliases_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY "public"."money_transfer_self_aliases"
+    ADD CONSTRAINT "money_transfer_self_aliases_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "public"."persons"("id") ON DELETE CASCADE;
 
 
 --
