@@ -204,6 +204,16 @@ function assertTableOnlySnapshot(sql) {
   }
 }
 
+/**
+ * The oldest pg_dump that can produce this snapshot, regardless of what the server is.
+ *
+ * `--no-policies` arrives in pg_dump 18; a 17 client rejects the flag outright and the dump never
+ * runs. So the client has to clear two separate bars — the server's major version, because pg_dump
+ * refuses a newer server, and this one, because the snapshot is defined by flags only 18 knows.
+ * Raising this means every developer and the runner need the newer client.
+ */
+const MIN_PG_DUMP_MAJOR = 18;
+
 /** The leading integer of a `pg_dump (PostgreSQL) 17.6` banner, or null when it is unreadable. */
 function parsePgDumpMajor(versionOutput) {
   const match = /PostgreSQL\)?\s+(\d+)/i.exec(String(versionOutput ?? ""));
@@ -232,12 +242,19 @@ function readConfiguredMajorVersion(configPath = path.join(repoRoot, "supabase",
  * front turns "aborting because of server version mismatch" into a sentence that names the fix.
  */
 function assertPgDumpMajorMatches(clientMajor, serverMajor) {
-  if (clientMajor === null || serverMajor === null) return;
-  if (clientMajor >= serverMajor) return;
+  if (clientMajor === null) return;
+  const required = Math.max(serverMajor ?? 0, MIN_PG_DUMP_MAJOR);
+  if (clientMajor >= required) return;
+
+  const because =
+    serverMajor !== null && serverMajor > MIN_PG_DUMP_MAJOR
+      ? `supabase/config.toml pins the database to ${serverMajor}, and pg_dump cannot dump a newer server`
+      : `this snapshot is defined with --no-policies, which pg_dump only understands from ${MIN_PG_DUMP_MAJOR}`;
+
   throw new Error(
-    `pg_dump is version ${clientMajor} but supabase/config.toml pins the database to ${serverMajor}. ` +
-      `pg_dump cannot dump a newer server, so the snapshot would never be written. ` +
-      `Install postgresql-client-${serverMajor} (or newer) and put it ahead of pg_dump ${clientMajor} on PATH.`,
+    `pg_dump is version ${clientMajor}, but ${required} or newer is required: ${because}. ` +
+      `The snapshot would never be written. Install postgresql-client-${required} (or newer) and ` +
+      `put it ahead of pg_dump ${clientMajor} on PATH.`,
   );
 }
 

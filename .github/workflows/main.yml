@@ -200,17 +200,21 @@ jobs:
         run: |
           mkdir -p .cache/docker
           docker ps --format '{{.Image}}' | sort -u > .cache/docker/supabase-images.txt
-      # The runner ships pg_dump 16, and supabase/config.toml pins the database to 17. pg_dump
-      # refuses a newer server, so without this the snapshot is never written -- which is exactly
-      # how the artifact check passed for weeks while regenerating nothing. Read the major version
-      # from the config rather than pinning it twice.
-      - name: Install pg_dump matching the database
+      # The runner ships pg_dump 16, which fails twice over: it refuses the 17 server that
+      # supabase/config.toml pins, and it does not know --no-policies, which the snapshot is
+      # defined with and which arrived in pg_dump 18. Without a client clearing both bars the
+      # snapshot is never written -- exactly how this check passed for weeks while regenerating
+      # nothing. The two bars are read rather than pinned twice: the server major comes from the
+      # config, the flag floor from the script.
+      - name: Install pg_dump for the artifact snapshot
         if: steps.impact.outputs.dbImpact == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          major="$(grep -oPm1 '^\s*major_version\s*=\s*\K\d+' supabase/config.toml)"
-          echo "supabase/config.toml pins PostgreSQL ${major}"
+          server="$(grep -oPm1 '^\s*major_version\s*=\s*\K\d+' supabase/config.toml)"
+          floor="$(grep -oPm1 'MIN_PG_DUMP_MAJOR\s*=\s*\K\d+' scripts/just/db-artifacts.cjs)"
+          major=$(( server > floor ? server : floor ))
+          echo "database pinned to ${server}, snapshot flags need ${floor}: installing client ${major}"
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc

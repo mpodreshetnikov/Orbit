@@ -112,15 +112,24 @@ describe("pg_dump version preflight", () => {
     expect(readConfiguredMajorVersion()).toBe(17);
   });
 
-  it("refuses a client older than the server, naming what to install", () => {
-    expect(() => assertPgDumpMajorMatches(16, 17)).toThrow(/postgresql-client-17/);
-    expect(() => assertPgDumpMajorMatches(16, 17)).toThrow(/pg_dump is version 16/);
+  it("refuses a client that cannot run the snapshot's own flags", () => {
+    // 17 clears the server but not `--no-policies`, which is a pg_dump 18 option. This is the case
+    // that failed in CI once the check could fail at all: matching the server is not sufficient.
+    expect(() => assertPgDumpMajorMatches(17, 17)).toThrow(/postgresql-client-18/);
+    expect(() => assertPgDumpMajorMatches(17, 17)).toThrow(/--no-policies/);
   });
 
-  it("allows a client at or ahead of the server, and says nothing when either is unreadable", () => {
-    expect(() => assertPgDumpMajorMatches(17, 17)).not.toThrow();
+  it("names the server when the server is the higher bar", () => {
+    expect(() => assertPgDumpMajorMatches(18, 19)).toThrow(/pins the database to 19/);
+    expect(() => assertPgDumpMajorMatches(18, 19)).toThrow(/postgresql-client-19/);
+  });
+
+  it("allows a client that clears both bars, and says nothing when it cannot be read", () => {
     expect(() => assertPgDumpMajorMatches(18, 17)).not.toThrow();
+    expect(() => assertPgDumpMajorMatches(19, 17)).not.toThrow();
     expect(() => assertPgDumpMajorMatches(null, 17)).not.toThrow();
-    expect(() => assertPgDumpMajorMatches(16, null)).not.toThrow();
+    // No server to compare against still leaves the flag floor, which is the bar that matters.
+    expect(() => assertPgDumpMajorMatches(18, null)).not.toThrow();
+    expect(() => assertPgDumpMajorMatches(16, null)).toThrow(/--no-policies/);
   });
 });
