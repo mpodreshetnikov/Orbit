@@ -1272,7 +1272,12 @@ export function registerMedicationTools(server: McpToolServer): void {
         duration: medDurationSchema.optional(),
         intake_advice_type: z.enum(INTAKE_ADVICE_TYPES).optional(),
         intake_advice_text: z.string().nullable().optional(),
-        inventory: regimenInventorySchema.nullable().optional(),
+        inventory: regimenInventorySchema
+          .nullable()
+          .optional()
+          .describe(
+            "Stock fields to change. Merged with what is stored, so a field you leave out keeps its value; pass null to stop tracking stock altogether.",
+          ),
         notes: z.string().nullable().optional(),
         timezone: z.string().optional().describe("IANA timezone for regenerating intake times."),
       }),

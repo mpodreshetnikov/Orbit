@@ -111,7 +111,12 @@ export const regimenInventorySchema = z.object({
     .nonnegative()
     .optional()
     .describe("Remaining amount at which a refill reminder fires."),
-  auto_decrement_on_taken: z.boolean().optional(),
+  auto_decrement_on_taken: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether taking a dose reduces the stock figure. Defaults to true where tracking is enabled; pass false to keep the number by hand.",
+    ),
 });
 
 // ---------------------------------------------------------------------------
