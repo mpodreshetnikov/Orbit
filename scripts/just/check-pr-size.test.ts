@@ -287,8 +287,19 @@ describe("reviewability", () => {
     expect(isReviewable("src/lib/mcp/health/medications.ts", [])).toBe(true);
   });
 
-  it("treats a generated DB type file as not reviewable", () => {
-    expect(isReviewable("src/types/database.types.ts", [])).toBe(false);
+  it("treats the generated DB artifacts as not reviewable", () => {
+    // The paths they actually have. This assertion previously named
+    // `src/types/database.types.ts`, a file that does not exist, so it passed while the rule it
+    // stands for matched nothing — and the miss was invisible because the artifacts were never
+    // being regenerated.
+    expect(isReviewable("supabase/db/schema.snapshot.sql", [])).toBe(false);
+    expect(isReviewable("supabase/db/database.types.ts", [])).toBe(false);
+  });
+
+  it("still reads the hand-written SQL that sits beside them", () => {
+    expect(isReviewable("supabase/db/functions/get_record_conditions.sql", [])).toBe(true);
+    expect(isReviewable("supabase/db/policies/mcp_oauth.sql", [])).toBe(true);
+    expect(isReviewable("src/types/database.ts", [])).toBe(true);
   });
 
   it("ignores a branch entry when deciding whether a path is reviewable", () => {
