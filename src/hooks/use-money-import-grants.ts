@@ -26,53 +26,14 @@ const GRANTS_QUERY_KEY = ["money-import-grants"];
 const GRANT_COLUMNS =
   "id, person_id, label, allowed_sources, expires_at, revoked_at, last_used_at, created_at";
 
-interface GrantRowError {
-  message: string;
-}
-
 /**
- * `money_import_grants` is absent from the generated `Database` types, as `money_fx_rates` and
- * the `mcp_oauth_*` tables are, so the typed client cannot name it. Rather than widen the
- * generated artifacts from here, describe the three calls this hook makes -- the same answer
- * `supabase/functions/money-fx-sync/handler.ts` already gives for `money_fx_rates`. What the
- * columns really are is held by the migration and by
- * `supabase/tests/policies/money_import_grants_rls_test.sql`.
+ * `money_import_grants` is in the generated `Database` types now, so the typed client can name it
+ * directly. It was not when this hook was written -- the artifact check passed while the table was
+ * missing from them entirely, which #61 has since fixed -- and a hand-written interface plus an
+ * `as unknown as` cast stood in for it. Both go with the reason for them.
  */
-interface MoneyImportGrantsTable {
-  select(columns: string): {
-    order(
-      column: string,
-      options: { ascending: boolean },
-    ): Promise<{ data: MoneyImportGrant[] | null; error: GrantRowError | null }>;
-    eq(
-      column: string,
-      value: string,
-    ): {
-      maybeSingle(): Promise<{ data: MoneyImportGrant | null; error: GrantRowError | null }>;
-    };
-  };
-  insert(values: {
-    id: string;
-    person_id: string;
-    created_by_auth_user_id: string;
-    label: string;
-    token_hash: string;
-    allowed_sources: string[];
-    expires_at: string | null;
-  }): {
-    select(columns: string): {
-      single(): Promise<{ data: MoneyImportGrant | null; error: GrantRowError | null }>;
-    };
-  };
-  update(values: { revoked_at: string }): {
-    eq(column: string, value: string): Promise<{ error: GrantRowError | null }>;
-  };
-}
-
-function grantsTable(supabase: ReturnType<typeof createClient>): MoneyImportGrantsTable {
-  return (
-    supabase as unknown as { from(table: "money_import_grants"): MoneyImportGrantsTable }
-  ).from("money_import_grants");
+function grantsTable(supabase: ReturnType<typeof createClient>) {
+  return supabase.from("money_import_grants");
 }
 
 /** 32 bytes of randomness, hex-encoded. Shown once, then only its SHA-256 is kept. */
@@ -114,12 +75,13 @@ export function useCreateMoneyImportGrant() {
       input: CreateMoneyImportGrantInput,
     ): Promise<{ grant: MoneyImportGrant; token: string }> => {
       const supabase = createClient();
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError) throw new Error(userError.message);
-      if (!user) throw new Error("Not signed in");
+
+      // The issuer is not sent. `created_by_auth_user_id` defaults to `auth.uid()`, and the insert
+      // policy has always required it to equal `auth.uid()` -- so asking `supabase.auth.getUser()`
+      // first was a network round trip to learn the only value the database would have accepted.
+      // It was also in front of the one call on this screen that must not fail to settle: the key
+      // below lives in this closure and nowhere else until the row lands, so a request that never
+      // returns loses a credential that is already real.
 
       // The token exists in this function and in the reply to the caller, nowhere else:
       // only its hash is stored, so a lost token is reissued rather than recovered.
@@ -133,7 +95,6 @@ export function useCreateMoneyImportGrant() {
         .insert({
           id,
           person_id: input.personId,
-          created_by_auth_user_id: user.id,
           label: input.label.trim(),
           token_hash: await hashGrantToken(token),
           allowed_sources: input.allowedSources,
