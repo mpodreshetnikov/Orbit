@@ -14,6 +14,7 @@
 /** Causes the edge function reports. Kept in the order the server file declares them. */
 export const SERVER_OCR_CAUSES = [
   "provider_auth",
+  "provider_model_missing",
   "provider_rejected",
   "provider_unavailable",
   "unsupported_media",

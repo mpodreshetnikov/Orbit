@@ -27,6 +27,15 @@ export const NO_PROVIDER_RESPONSE_MESSAGE = "No response from OpenRouter";
 export type OcrFailureCause =
   /** The transcription service rejected our credentials. A configuration problem, not a document. */
   | "provider_auth"
+  /**
+   * The service has no such model. The id we are configured to call names nothing it serves.
+   *
+   * Separated from `provider_rejected` because the two send you to different places: a refused
+   * request is about the body we sent, while this is about a name that has gone stale — a model
+   * withdrawn, or a variant suffix that stopped being accepted. It is also never per-document,
+   * so seeing it once means every document is failing.
+   */
+  | "provider_model_missing"
   /** The service refused the request itself — an unsupported parameter, a body it would not take. */
   | "provider_rejected"
   /** Rate limited, unavailable, timed out, or answered with something unusable. Worth retrying. */
@@ -53,6 +62,7 @@ export type OcrFailureCause =
  */
 const CAUSE_PRECEDENCE: OcrFailureCause[] = [
   "provider_auth",
+  "provider_model_missing",
   "provider_rejected",
   "unsupported_media",
   "attachment_unavailable",
@@ -115,6 +125,11 @@ export function classifyOcrError(error: unknown): OcrFailureCause {
   if (error instanceof UnsupportedOcrMediaError) return "unsupported_media";
   if (error instanceof OcrProviderError) {
     if (error.status === 401 || error.status === 403) return "provider_auth";
+    // 404 from the completions endpoint is OpenRouter's answer for "no such model", not for a
+    // missing route: the path is fixed and the only variable in it is the model id. Reported as
+    // itself because it is the one provider failure no retry, no better photograph and no
+    // redeploy of this function can fix — the configured id has to change.
+    if (error.status === 404) return "provider_model_missing";
     return "provider_rejected";
   }
   if (error instanceof Error && error.name === "RetryableLlmError") return "provider_unavailable";
@@ -139,6 +154,7 @@ export function dominantCause(causes: OcrFailureCause[]): OcrFailureCause {
 
 const CAUSE_SUMMARIES: Record<OcrFailureCause, string> = {
   provider_auth: "the transcription service rejected this deployment's credentials",
+  provider_model_missing: "the transcription service does not offer the configured model",
   provider_rejected: "the transcription service refused the request",
   provider_unavailable: "the transcription service was unavailable",
   unsupported_media: "the file type cannot be transcribed",

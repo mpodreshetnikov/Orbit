@@ -1,4 +1,5 @@
 import { extractContentText, parseJsonObject } from "../_shared/llm-json.ts";
+import { DEFAULT_OPENROUTER_MODEL } from "../_shared/llm-model.ts";
 import { type LlmUsage, parseLlmUsage, sumLlmUsage } from "../_shared/llm-usage.ts";
 import {
   NO_PROVIDER_RESPONSE_MESSAGE,
@@ -71,7 +72,6 @@ type OpenRouterUserContentPart =
     };
 
 const DEFAULT_TIMEOUT_MS = 55_000;
-const DEFAULT_MODEL = "openai/gpt-5.2:nitro";
 const DEFAULT_MAX_TOKENS = 12_000;
 const DEFAULT_FALLBACK_TITLE = "Медицинский документ";
 
@@ -119,7 +119,7 @@ export function createOpenRouterOcrClient(
   deps: CreateOpenRouterOcrClientDeps,
 ): OpenRouterOcrClient {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const model = deps.model ?? DEFAULT_MODEL;
+  const model = deps.model ?? DEFAULT_OPENROUTER_MODEL;
   const baseMaxTokens = deps.maxTokens ?? DEFAULT_MAX_TOKENS;
 
   function buildAttachmentContentPart(attachment: OcrAttachmentPayload): OpenRouterUserContentPart {

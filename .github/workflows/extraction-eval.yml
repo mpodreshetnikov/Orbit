@@ -17,7 +17,7 @@ on:
         type: boolean
         default: false
       model:
-        description: "Model override, e.g. openai/gpt-5.2:nitro. Blank uses the pipeline default."
+        description: "Model override, e.g. openai/gpt-5.2. Blank uses the pipeline default."
         type: string
         default: ""
       cases:

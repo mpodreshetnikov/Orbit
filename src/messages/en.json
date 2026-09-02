@@ -970,6 +970,7 @@
     "retryIfStillProcessing": "Open the record and use Retry OCR if it still shows processing.",
     "ocrCause": {
       "provider_auth": "The text recognition service rejected this app's credentials. The document is fine — an administrator needs to fix the API key.",
+      "provider_model_missing": "The text recognition service does not offer the model this app is configured to use. The document is fine — an administrator needs to point it at a model the service still serves.",
       "provider_rejected": "The text recognition service refused the request. This is a configuration problem, not a problem with the document.",
       "provider_unavailable": "The text recognition service was unavailable. Try again in a few minutes.",
       "unsupported_media": "This file type cannot be recognised. Upload the document as a photo, an image or a PDF.",
