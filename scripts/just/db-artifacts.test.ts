@@ -1,32 +1,44 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as dbArtifacts from "./db-artifacts.cjs";
 
-const { assertPgDumpMajorMatches, parsePgDumpMajor, readConfiguredMajorVersion } = dbArtifacts;
+const {
+  assertPgDumpMajorMatches,
+  parsePgDumpMajor,
+  readConfiguredMajorVersion,
+  sanitizeCommonSql,
+} = dbArtifacts;
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 
 /**
- * A stand-in for `just` that fails with a chosen status.
+ * A stand-in for `just` that fails with a chosen status, on every platform.
  *
- * Written per platform because the script resolves `JUST_BIN` to a real executable and spawns it
- * without a shell: Windows runs neither a shebang nor an executable bit, so a `.sh` stub there
- * would fail to launch and the test would pass for the wrong reason.
+ * The script spawns `JUST_BIN` directly, with no shell, so the stub has to be something the OS can
+ * execute on its own. That rules out a shell script on Windows (no shebang, no executable bit) and
+ * a `.cmd` too, which Node cannot spawn without a shell. What is left, and is genuinely executable
+ * everywhere, is the Node binary already running this test.
+ *
+ * It is pointed at a preload that exits with the chosen status. The preload has to tell the two
+ * processes apart, because `NODE_OPTIONS` is inherited: the script under test is Node as well, and
+ * a preload that exited unconditionally would kill it before it ran a line.
  */
-function failingJustStub(status: number): string {
+function failingJustStub(status: number): { bin: string; nodeOptions: string } {
   const stubDir = mkdtempSync(path.join(tmpdir(), "db-artifacts-"));
-  if (process.platform === "win32") {
-    const stub = path.join(stubDir, "just-stub.cmd");
-    writeFileSync(stub, `@echo off\r\nexit /b ${status}\r\n`);
-    return stub;
-  }
-  const stub = path.join(stubDir, "just-stub.sh");
-  writeFileSync(stub, `#!/usr/bin/env bash\nexit ${status}\n`);
-  chmodSync(stub, 0o755);
-  return stub;
+  const preload = path.join(stubDir, "exit-stub.cjs");
+  writeFileSync(
+    preload,
+    [
+      "const entry = process.argv[1] || '';",
+      "if (!entry.endsWith('db-artifacts.cjs')) {",
+      `  process.exit(${status});`,
+      "}",
+    ].join("\n"),
+  );
+  return { bin: process.execPath, nodeOptions: `--require ${JSON.stringify(preload)}` };
 }
 
 describe("db-artifacts exit propagation", () => {
@@ -41,12 +53,14 @@ describe("db-artifacts exit propagation", () => {
    * has one. The `just` recipe is stubbed so nothing here needs Docker or a database.
    */
   it("exits non-zero when the step it shells out to fails", () => {
+    const stub = failingJustStub(3);
     const result = spawnSync(process.execPath, ["scripts/just/db-artifacts.cjs", "--verify"], {
       cwd: repoRoot,
       encoding: "utf8",
       env: {
         ...process.env,
-        JUST_BIN: failingJustStub(3),
+        JUST_BIN: stub.bin,
+        NODE_OPTIONS: stub.nodeOptions,
         SUPABASE_ALREADY_RUNNING: "1",
       },
     });
@@ -57,8 +71,8 @@ describe("db-artifacts exit propagation", () => {
   it("lets an unexpected exception end the process rather than reporting success", () => {
     // The exit code is not the only way this can go quiet. An exception nothing catches -- a
     // read-only workspace, a full disk -- must still end the run: converting it into a zero would
-    // be the same false green wearing a different hat. Provoked with a docker-preflight stub that
-    // throws, since that runs before anything needs a database.
+    // be the same false green wearing a different hat.
+    //
     // The throw has to happen *inside* the block the cleanup wraps, or the test proves nothing:
     // an exception raised before it propagates however the cleanup is written. So `spawnSync` is
     // what throws — the first thing the run reaches once it is past the preflight.
@@ -131,5 +145,33 @@ describe("pg_dump version preflight", () => {
     // No server to compare against still leaves the flag floor, which is the bar that matters.
     expect(() => assertPgDumpMajorMatches(18, null)).not.toThrow();
     expect(() => assertPgDumpMajorMatches(16, null)).toThrow(/--no-policies/);
+  });
+});
+
+describe("snapshot sanitisation", () => {
+  it("drops the version banners, which describe the tools rather than the schema", () => {
+    // Left in, the snapshot becomes a function of whichever pg_dump patch release the runner
+    // installed that morning: the next PGDG minor would report drift on an untouched schema and
+    // block every DB-impacting pull request. Pinning the patch instead does not survive contact --
+    // the previous snapshot was made with 18.1, which PGDG no longer publishes.
+    const dumped = [
+      "--",
+      "-- PostgreSQL database dump",
+      "--",
+      "",
+      "-- Dumped from database version 17.6",
+      "-- Dumped by pg_dump version 18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
+      "",
+      `SET client_encoding = 'UTF8';`,
+      'CREATE TABLE "public"."x" ("id" "uuid" NOT NULL);',
+    ].join("\n");
+
+    const sanitized = sanitizeCommonSql(dumped);
+
+    expect(sanitized).not.toContain("Dumped by pg_dump version");
+    expect(sanitized).not.toContain("Dumped from database version");
+    // The schema itself, and the header that is not a version, both survive.
+    expect(sanitized).toContain("-- PostgreSQL database dump");
+    expect(sanitized).toContain('CREATE TABLE "public"."x"');
   });
 });

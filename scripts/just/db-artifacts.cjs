@@ -167,10 +167,21 @@ function buildPgDumpConfig(dbUrl) {
   return { args, env };
 }
 
+/**
+ * Strip what the dump says about the tools rather than about the schema.
+ *
+ * pg_dump stamps its own exact build and the server's into every section header --
+ * `-- Dumped by pg_dump version 18.6 (Ubuntu 18.6-1.pgdg24.04+2)`. Keeping that makes the snapshot
+ * a function of whichever patch release the runner installed that morning, so the next PGDG minor
+ * would report drift on a schema nobody touched and block every DB-impacting pull request until
+ * someone regenerated. Pinning the exact patch instead is not an option that survives: the
+ * previous snapshot was made with pg_dump 18.1, which PGDG no longer publishes.
+ */
 function sanitizeCommonSql(sql) {
   return sql
     .replace(/^\s*\\(?:un)?restrict\b.*(?:\r?\n|$)/gim, "")
-    .replace(/^\s*SET\s+transaction_timeout\s*=\s*0;\s*(?:\r?\n|$)/gim, "");
+    .replace(/^\s*SET\s+transaction_timeout\s*=\s*0;\s*(?:\r?\n|$)/gim, "")
+    .replace(/^--\s*Dumped (?:from database|by pg_dump) version .*(?:\r?\n|$)/gim, "");
 }
 
 function stripPolicyAndRlsSql(sql) {
@@ -399,6 +410,7 @@ if (require.main === module) {
 
 module.exports = {
   assertPgDumpMajorMatches,
+  sanitizeCommonSql,
   parsePgDumpMajor,
   readConfiguredMajorVersion,
 };
