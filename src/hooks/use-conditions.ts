@@ -367,9 +367,7 @@ async function createConditionRecord(input: CreateConditionRecordInput): Promise
     throw new Error(error.message);
   }
 
-  // Through `unknown` for the same reason as the other two casts here: the generated DB types do
-  // not carry the two review columns yet.
-  return data as unknown as ConditionRecord;
+  return data as ConditionRecord;
 }
 
 export function useCreateConditionRecord() {
@@ -437,11 +435,7 @@ async function updateConditionRecord({
     throw new Error(selectError.message);
   }
 
-  // Through `unknown` because the generated DB types do not carry `supporting_obs_code` or
-  // `review_decision` yet: `supabase/db/database.types.ts` is regenerated from a local stack and
-  // is already behind the migrations on main (T-260829-el7 tracks the same staleness for the
-  // money tables). The row selected here does have both columns.
-  const conditionRecord = data as unknown as ConditionRecord;
+  const conditionRecord = data as ConditionRecord;
 
   // When status_in_record changed, recompute condition's current_status from history
   // (status of the most recent mention by record_date). This avoids leaving a condition
@@ -735,8 +729,7 @@ export function useLinkConditionToRecord() {
         await supabase.from("conditions").update(conditionUpdates).eq("id", input.condition_id);
       }
 
-      // Through `unknown` for the same reason as above: the generated types lag the migration.
-      return conditionRecord as unknown as ConditionRecord;
+      return conditionRecord as ConditionRecord;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({
