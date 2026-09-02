@@ -332,6 +332,35 @@ export function checkLabResolution(
 }
 
 /**
+ * The anchor to persist for a lab-driven resolution: the cited observation's own, never the
+ * model's.
+ *
+ * The reconcile prompt tells the model to copy the observation's anchor verbatim and never to
+ * assemble one out of a code and a value. That instruction is worth having and it is not worth
+ * trusting. `source_anchor` is shown to a person as a quotation from their own document while they
+ * decide whether to end an entry in their medical record, and a fabricated one is indistinguishable
+ * from a real one by reading it — which is exactly the case for deciding it here rather than asking
+ * the model nicely. Every other check in this file runs after the model for the same reason.
+ *
+ * Derived from the code the resolution cites, which `checkLabResolution` has already established is
+ * present, in range and permitted for this condition. The model's string is used only when the
+ * observation carries no anchor at all, which is the pre-staged parser's output: older records
+ * should keep whatever evidence they had rather than lose it to a stricter rule.
+ */
+function resolutionAnchor(
+  toResolve: ConditionToResolve,
+  observations: ExtractedObservation[],
+): string {
+  const cited = normalizeText(toResolve.supporting_obs_code);
+  if (!cited) return toResolve.source_anchor;
+
+  const anchored = observations.find(
+    (item) => item.obs_code === cited && normalizeText(item.source_anchor),
+  );
+  return normalizeText(anchored?.source_anchor) ?? toResolve.source_anchor;
+}
+
+/**
  * Record the resolutions this document supports, as proposals a person still has to confirm.
  *
  * Every resolution passes `checkLabResolution` first, against the observations extracted from
@@ -368,7 +397,7 @@ export async function processConditionsToResolve(
         condition_id: toResolve.condition_id,
         record_id: recordId,
         status_in_record: "resolved",
-        source_anchor: toResolve.source_anchor,
+        source_anchor: resolutionAnchor(toResolve, observations),
         confidence: toResolve.confidence,
         supporting_obs_code: normalizeText(toResolve.supporting_obs_code),
         review_decision: "pending",

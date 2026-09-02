@@ -660,3 +660,90 @@ Deno.test("processConditionsToResolve logs insert failures", async () => {
 
   assertEquals(errors.length > 0, true);
 });
+
+Deno.test(
+  "processConditionsToResolve persists the observation's anchor, not the model's",
+  async () => {
+    // The prompt asks the model to copy the observation's anchor verbatim. Nothing makes it, and the
+    // string is shown to a person as a quotation from their own document while they decide whether to
+    // end an entry in their record. So it is derived here rather than trusted.
+    const { repository, state } = createResolutionRepository();
+    const existingConditions: ExistingCondition[] = [
+      {
+        id: "cond-1",
+        name: "Дефицит витамина B12",
+        code: null,
+        current_status: "active",
+        onset_date: null,
+        resolved_date: null,
+      },
+    ];
+
+    await processConditionsToResolve(
+      "record-1",
+      [
+        {
+          condition_id: "cond-1",
+          supporting_obs_code: "vitamin_b12",
+          reason: "resolved",
+          // Fluent, plausible, and absent from the document.
+          source_anchor: "Витамин B12: 704 — в пределах нормы",
+          confidence: 0.9,
+        },
+      ],
+      existingConditions,
+      [
+        observation({
+          obs_code: "vitamin_b12",
+          value_numeric: 704,
+          source_anchor: "Витамин В12\t704.00\tпг/мл\t187.00–883.00",
+        }),
+      ],
+      { repository },
+    );
+
+    assertEquals(state.conditionRecords.length, 1);
+    assertEquals(
+      state.conditionRecords[0].source_anchor,
+      "Витамин В12\t704.00\tпг/мл\t187.00–883.00",
+    );
+  },
+);
+
+Deno.test(
+  "processConditionsToResolve keeps the model's anchor when the observation carries none",
+  async () => {
+    // The pre-staged parser did not produce observation anchors. An older record should keep whatever
+    // evidence it had rather than lose it to a stricter rule.
+    const { repository, state } = createResolutionRepository();
+    const existingConditions: ExistingCondition[] = [
+      {
+        id: "cond-1",
+        name: "Дефицит витамина B12",
+        code: null,
+        current_status: "active",
+        onset_date: null,
+        resolved_date: null,
+      },
+    ];
+
+    await processConditionsToResolve(
+      "record-1",
+      [
+        {
+          condition_id: "cond-1",
+          supporting_obs_code: "vitamin_b12",
+          reason: "resolved",
+          source_anchor: "whatever the model said",
+          confidence: 0.9,
+        },
+      ],
+      existingConditions,
+      [observation({ obs_code: "vitamin_b12", value_numeric: 704, source_anchor: null })],
+      { repository },
+    );
+
+    assertEquals(state.conditionRecords.length, 1);
+    assertEquals(state.conditionRecords[0].source_anchor, "whatever the model said");
+  },
+);
