@@ -1772,11 +1772,91 @@ describe("log_dose", () => {
     expect(meds.logDose).toHaveBeenCalledWith(expect.anything(), {
       regimenId: "r-1",
       at: "2026-08-19T16:10:00.000Z",
+      // No `planned_for`, so the dose is picked by the time it was taken and
+      // there is no separate intake moment to record.
+      takenAt: null,
       amount: 0.5,
       status: "taken",
       note: null,
     });
     expect(result.content[0].text).toContain("0.5 pill of Атаракс as taken");
+  });
+
+  it("picks the dose by when it was due and records when it was actually taken", async () => {
+    // The 08:00 dose swallowed at 08:15. Reading both times as one, the tool
+    // looked for a plan at 08:15, found none, and filed a second intake beside
+    // the 08:00 one it left owed -- two doses on the record, stock down twice.
+    await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-08-19T08:15:00+07:00",
+        planned_for: "2026-08-19T08:00:00+07:00",
+        status: "taken",
+      },
+      ctx(),
+    );
+
+    expect(meds.logDose).toHaveBeenCalledWith(expect.anything(), {
+      regimenId: "r-1",
+      at: "2026-08-19T01:00:00.000Z",
+      takenAt: "2026-08-19T01:15:00.000Z",
+      amount: null,
+      status: "taken",
+      note: null,
+    });
+  });
+
+  it("quotes the time the record ended up carrying, not the one asked for", async () => {
+    // `mark_dose_skipped` takes no taken time, so a dose skipped against an
+    // 08:00 slot keeps 08:00. Quoting the request back described it as skipped
+    // at 08:15 while the dose returned in the same reply said 08:00.
+    meds.logDose.mockResolvedValue({
+      regimen: { id: "r-1", custom_name: "Атаракс", effective_status: "active" },
+      dose: {
+        id: "d-1",
+        status: "skipped",
+        taken_at: "2026-08-19T01:00:00.000Z",
+        planned_intake: { intake: { amount: 1, unit: "pill" } },
+      },
+      planned: true,
+      alreadyRecorded: false,
+      corrected: false,
+    });
+
+    const result = await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-08-19T08:15:00+07:00",
+        planned_for: "2026-08-19T08:00:00+07:00",
+        status: "skipped",
+        timezone: "Asia/Bangkok",
+      },
+      ctx(),
+    );
+
+    expect(result.content[0].text).toContain("08:00");
+    expect(result.content[0].text).not.toContain("08:15");
+    // And nothing promises the database a time it will not store.
+    expect(meds.logDose).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ takenAt: null, at: "2026-08-19T01:00:00.000Z" }),
+    );
+  });
+
+  it("refuses a planned_for it cannot read, naming the field", async () => {
+    const result = await (await handlers()).get("log_dose")!(
+      {
+        regimen_id: "r-1",
+        taken_at: "2026-08-19T08:15:00+07:00",
+        planned_for: "0",
+        status: "taken",
+      },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("planned_for");
+    expect(meds.logDose).not.toHaveBeenCalled();
   });
 
   it("logging an intake does not regenerate the plan", async () => {
