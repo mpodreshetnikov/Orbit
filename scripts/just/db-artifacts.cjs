@@ -204,6 +204,43 @@ function assertTableOnlySnapshot(sql) {
   }
 }
 
+/** The leading integer of a `pg_dump (PostgreSQL) 17.6` banner, or null when it is unreadable. */
+function parsePgDumpMajor(versionOutput) {
+  const match = /PostgreSQL\)?\s+(\d+)/i.exec(String(versionOutput ?? ""));
+  return match ? Number(match[1]) : null;
+}
+
+/** The `major_version` the local database is pinned to in `supabase/config.toml`. */
+function readConfiguredMajorVersion(configPath = path.join(repoRoot, "supabase", "config.toml")) {
+  let contents;
+  try {
+    contents = fs.readFileSync(configPath, "utf8");
+  } catch {
+    return null;
+  }
+  const match = /^\s*major_version\s*=\s*(\d+)/m.exec(contents);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Refuse a dump the client cannot produce, and say what to install.
+ *
+ * pg_dump refuses a server newer than itself, which is a normal thing to get wrong: the database
+ * is pinned by `supabase/config.toml` while pg_dump comes from whatever the machine happens to
+ * have. On the CI runner that was `pg_dump` 16 against a 17.6 database, so the snapshot was never
+ * regenerated -- and because the failure was swallowed, the check reported success. Checking up
+ * front turns "aborting because of server version mismatch" into a sentence that names the fix.
+ */
+function assertPgDumpMajorMatches(clientMajor, serverMajor) {
+  if (clientMajor === null || serverMajor === null) return;
+  if (clientMajor >= serverMajor) return;
+  throw new Error(
+    `pg_dump is version ${clientMajor} but supabase/config.toml pins the database to ${serverMajor}. ` +
+      `pg_dump cannot dump a newer server, so the snapshot would never be written. ` +
+      `Install postgresql-client-${serverMajor} (or newer) and put it ahead of pg_dump ${clientMajor} on PATH.`,
+  );
+}
+
 function generateTableOnlySnapshot() {
   const versionResult = run(PG_DUMP_BIN, ["--version"], { captureOutput: true });
   if (versionResult.status !== 0) {
@@ -211,6 +248,7 @@ function generateTableOnlySnapshot() {
     if (versionResult.stderr) process.stderr.write(versionResult.stderr);
     throw new Error("pg_dump is required to generate table-only schema snapshot.");
   }
+  assertPgDumpMajorMatches(parsePgDumpMajor(versionResult.stdout), readConfiguredMajorVersion());
 
   const dbUrl = getLocalDbUrl();
   if (!dbUrl) {
@@ -318,9 +356,22 @@ function main() {
         exitCode = stopResult.status ?? 1;
       }
     }
-  }
 
-  process.exit(exitCode);
+    // Exit from inside the `finally`, because every failure path above reports itself with a
+    // bare `return`. A `return` inside a `try` runs the `finally` and then leaves the function,
+    // so an exit placed after the block is never reached and the process ends with status 0 --
+    // which is how this check spent months passing while regenerating nothing. Anything that
+    // sets a non-zero code and returns must still reach an exit.
+    process.exit(exitCode);
+  }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  assertPgDumpMajorMatches,
+  parsePgDumpMajor,
+  readConfiguredMajorVersion,
+};
