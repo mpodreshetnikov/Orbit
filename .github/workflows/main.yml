@@ -404,13 +404,14 @@ jobs:
       # The concurrency group above serialises these deploys but neither orders them nor keeps the
       # newest one: a job joins the queue when its `needs` finish, and the single pending slot goes
       # to the newest arrival, so an older push can arrive after a newer one, displace it, and be
-      # the only one left to run. So the run decides here, by commit order, which commit it deploys
-      # -- its own while it is the tip of `main`, the verified tip when it has been superseded --
-      # and checks that commit out, so the build below is of what gets aliased. Nothing further
-      # runs when there is nothing to deploy.
-      - name: Decide which commit this run deploys
+      # the only one left to run. So the run checks here, before it spends a build, whether it is
+      # still the tip of `main`; it stands down when a newer commit's own run will deploy, and
+      # fails naming that run when the newer commit's deploy was displaced and will not.
+      - name: Check this commit is still the tip of main
         id: tip
         uses: ./.github/actions/production-tip-check
+        with:
+          job: Deploy Vercel Production
       - uses: actions/setup-node@v4
         if: steps.tip.outputs.deploy_sha != ''
         with:
@@ -466,11 +467,13 @@ jobs:
       # Same reason as the Vercel job: the group serialises these deploys without ordering them or
       # keeping the newest, so a push that reached `quality-gates` first can reach the deploy queue
       # second and apply its migrations, functions, policies and version stamp over a newer
-      # commit's -- or displace the newer commit's pending deploy altogether. The check decides
-      # which commit to deploy and checks it out, so the version stamp records what was applied.
-      - name: Decide which commit this run deploys
+      # commit's -- or displace the newer commit's pending deploy altogether. The check stands
+      # this run down when the tip's own run will deploy, and fails naming that run when it will not.
+      - name: Check this commit is still the tip of main
         id: tip
         uses: ./.github/actions/production-tip-check
+        with:
+          job: Deploy Supabase Production
       - uses: supabase/setup-cli@v1
         if: steps.tip.outputs.deploy_sha != ''
         with:

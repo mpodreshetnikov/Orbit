@@ -120,9 +120,7 @@ describe("production deploy serialisation", () => {
     },
   );
 
-  it("builds the Vercel artifacts after the check, so a verified tip is what gets built", () => {
-    // When the check checks out the tip in place of a superseded commit, a build done before it
-    // would alias the superseded commit's build under the tip's name.
+  it("checks before it builds, so a superseded run spends no build on nothing", () => {
     const block = jobBlock("deploy-vercel-production");
     const checkAt = block.indexOf("uses: ./.github/actions/production-tip-check");
     const buildAt = block.search(/vercel build --prod/);
@@ -142,7 +140,18 @@ describe("production deploy serialisation", () => {
     },
   );
 
-  it("deploys by commit order: its own commit, the verified tip, or nothing", () => {
+  it.each([
+    ["deploy-supabase", "Deploy Supabase Production"],
+    ["deploy-vercel-production", "Deploy Vercel Production"],
+  ])("tells the check %s's own job name, so it inspects the right counterpart", (jobId, name) => {
+    const check = steps(jobId).find((step) => step.includes("production-tip-check"));
+
+    expect(check).toBeDefined();
+    expect(check!).toMatch(new RegExp(`job: ${name}$`, "m"));
+    expect(jobBlock(jobId)).toMatch(new RegExp(`^    name: ${name}$`, "m"));
+  });
+
+  it("stands down for a tip its own run deploys, and fails for a tip whose deploy was displaced", () => {
     const action = readFileSync(
       join(__dirname, "..", "..", ".github", "actions", "production-tip-check", "action.yml"),
       { encoding: "utf8" },
@@ -151,21 +160,22 @@ describe("production deploy serialisation", () => {
     expect(action).toMatch(/git fetch --depth=1 origin/);
     expect(action).toMatch(/superseded=true/);
     expect(action).toMatch(/superseded=false/);
-    // The three outcomes the mutating step is gated on.
+    // Only ever this run's own commit or nothing: the tip is never deployed in this run's place,
+    // because a run cancelled by hand looks like a displaced one and the tip may have changed
+    // the deploy job itself.
     expect(action).toMatch(/deploy_sha=\$\{RUN_SHA\}/);
-    expect(action).toMatch(/deploy_sha=\$\{tip\}/);
     expect(action).toMatch(/echo "deploy_sha=" >>/);
-    // The tip is deployed only when its own push run has passed the gates, read from the API
-    // rather than assumed, and from a checkout of the tip rather than of the superseded commit.
+    expect(action).not.toMatch(/deploy_sha=\$\{tip\}/);
+    expect(action).not.toMatch(/git checkout/);
+    // The tip's own run is read from the API, and this job's counterpart in it decides: a
+    // cancelled one was displaced by this run and fails it with the re-run to make.
     expect(action).toMatch(
       /actions\/workflows\/\$\{WORKFLOW\}\/runs\?head_sha=\$\{tip\}&event=push/,
     );
-    expect(action).toMatch(/conclusion == "success"/);
-    expect(action).toMatch(/git checkout --quiet --detach "\$tip"/);
-    expect(action).toMatch(/default: Quality Gates,Secret Scan/);
-    // Standing down is a success: a superseded commit has nothing to deploy that the commit
-    // replacing it will not deploy, so failing here would be noise on every burst of merges.
-    expect(action).not.toMatch(/^\s*exit 1\s*$/m);
+    expect(action).toMatch(/select\(\.name == \$name\)/);
+    expect(action).toMatch(/if \[\[ "\$job_state" == "cancelled" \]\]; then/);
+    expect(action).toMatch(/Re-run run \$\{run_id\}/);
+    expect(action).toMatch(/^\s*exit 1\s*$/m);
   });
 
   it("keys the groups on nothing that varies per run, so two runs actually collide", () => {
