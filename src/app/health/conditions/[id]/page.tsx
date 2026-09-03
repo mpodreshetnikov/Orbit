@@ -49,6 +49,7 @@ import {
   useIcdLookup,
   useMedicalRecords,
   useCheckupsForCondition,
+  useUpdateConditionRecord,
 } from "@/hooks";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
 import { isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
@@ -74,6 +75,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const { data: condition, isLoading, error, refetch } = useConditionDetail(conditionId);
   const updateConditionMutation = useUpdateCondition();
   const deleteConditionMutation = useDeleteCondition();
+  const updateConditionRecordMutation = useUpdateConditionRecord();
   const { data: linkedCheckups } = useCheckupsForCondition(conditionId);
   const { data: personRecords } = useMedicalRecords(
     condition?.person_id ? { person_id: condition.person_id } : {},
@@ -86,6 +88,8 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const [editNotes, setEditNotes] = useState("");
   const [addHistoryOpen, setAddHistoryOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  /** Which proposal is being ruled on, so both of its buttons disable while the write is in flight. */
+  const [rulingOnId, setRulingOnId] = useState<string | null>(null);
 
   // ICD validation (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
@@ -121,6 +125,35 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const getGoogleSearchUrl = (conditionName: string) => {
     const searchQuery = encodeURIComponent(`${conditionName} ICD-10 code`);
     return `https://www.google.com/search?q=${searchQuery}`;
+  };
+
+  /**
+   * Rule on a proposed closure.
+   *
+   * Both rulings go through `useUpdateConditionRecord`, which already writes `review_decision`
+   * beside `is_user_verified` and recomputes the condition when a verification lands. Confirming
+   * therefore needs to say only that a person verified it; the recompute is what finally lets the
+   * suppressed closure reach the chart.
+   *
+   * Dismissing writes the decision and nothing else. It deliberately does not touch
+   * `is_user_verified` or delete the row: the mention stays, still suppressed, and the dismissal is
+   * the negative label the promotion rule counts. A boolean cannot hold this -- "not verified"
+   * already means "nobody has looked" -- which is why the column has three values.
+   */
+  const ruleOnClosure = async (recordRowId: string, decision: "confirmed" | "dismissed") => {
+    setRulingOnId(recordRowId);
+    try {
+      await updateConditionRecordMutation.mutateAsync({
+        id: recordRowId,
+        conditionId,
+        updates:
+          decision === "confirmed"
+            ? { is_user_verified: true }
+            : { review_decision: "dismissed" as const },
+      });
+    } finally {
+      setRulingOnId(null);
+    }
   };
 
   const canDeleteCondition = condition && condition.mention_count === 0;
@@ -478,7 +511,78 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                                   {t("conditions.awaitingReview")}
                                 </Badge>
                               )}
+                              {record.review_decision === "dismissed" && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] sm:text-xs"
+                                  title={t("conditions.dismissedTitle")}
+                                >
+                                  {t("conditions.dismissed")}
+                                </Badge>
+                              )}
                             </div>
+
+                            {/* The proposal, the measurement it rests on, and the two rulings. */}
+                            {awaitingReview && (
+                              <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 space-y-2">
+                                {record.supporting_obs_code &&
+                                  (record.supporting_observation ? (
+                                    <div className="text-[10px] sm:text-xs">
+                                      <span className="text-muted-foreground">
+                                        {t("conditions.measurementBehind")}:{" "}
+                                      </span>
+                                      <span className="font-medium">
+                                        {record.supporting_observation.obs_name}
+                                      </span>{" "}
+                                      <span className="font-mono">
+                                        {record.supporting_observation.value_numeric ??
+                                          record.supporting_observation.value_text}
+                                        {record.supporting_observation.unit
+                                          ? ` ${record.supporting_observation.unit}`
+                                          : ""}
+                                      </span>
+                                      {(record.supporting_observation.ref_range_low !== null ||
+                                        record.supporting_observation.ref_range_high !== null) && (
+                                        <span className="text-muted-foreground font-mono">
+                                          {" "}
+                                          ({record.supporting_observation.ref_range_low ?? "…"}–
+                                          {record.supporting_observation.ref_range_high ?? "…"})
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    // Not a loading state. The reviewer corrected, recoded or
+                                    // deleted the measurement this cites, and saying so is the
+                                    // whole reason the citation is stored on the row.
+                                    <div className="text-[10px] sm:text-xs text-muted-foreground italic">
+                                      {t("conditions.measurementGone")}
+                                    </div>
+                                  ))}
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1"
+                                    disabled={rulingOnId !== null}
+                                    title={t("conditions.confirmClosureTitle")}
+                                    onClick={() => ruleOnClosure(record.id, "confirmed")}
+                                  >
+                                    <Check className="h-3 w-3 shrink-0" />
+                                    {t("conditions.confirmClosure")}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs"
+                                    disabled={rulingOnId !== null}
+                                    title={t("conditions.dismissClosureTitle")}
+                                    onClick={() => ruleOnClosure(record.id, "dismissed")}
+                                  >
+                                    {t("conditions.dismissClosure")}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
 
                             {/* Source anchor */}
                             {record.source_anchor && (

@@ -577,6 +577,22 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     setIsAddingCondition(false);
   };
 
+  /**
+   * Reject a proposed closure without destroying it.
+   *
+   * The delete control beside this used to be the only way a reviewer could say "no" to a
+   * proposed resolution, and it removed the row. That throws away the dismissal the promotion
+   * rule counts -- the one signal that says an analyte should not close this condition -- so the
+   * row stays, suppressed, carrying the decision instead.
+   */
+  const handleDismissCondition = async (cr: ConditionRecordWithDetails) => {
+    await updateConditionRecordMutation.mutateAsync({
+      id: cr.id,
+      recordId: recordId,
+      updates: { review_decision: "dismissed" as const },
+    });
+  };
+
   const handleDeleteCondition = async (cr: ConditionRecordWithDetails) => {
     await deleteConditionRecordMutation.mutateAsync({
       id: cr.id,
@@ -1232,6 +1248,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                       comparison={getComparisonForCondition(cr)}
                       onEdit={isRemoved ? undefined : () => handleEditCondition(cr)}
                       onDelete={isRemoved ? undefined : () => handleDeleteCondition(cr)}
+                      onDismiss={isRemoved ? undefined : () => handleDismissCondition(cr)}
                       isProcessing={isConditionProcessing}
                       showActions={!isRemoved}
                     />

@@ -69,6 +69,17 @@ export function usePersonConditionsWithHistory(personId: string | null) {
 }
 
 // Fetch a single condition by ID with its full history
+/** The measurement a proposed closure rests on, read back rather than asserted to exist. */
+export interface SupportingObservation {
+  obs_name: string;
+  value_numeric: number | null;
+  value_text: string | null;
+  unit: string | null;
+  ref_range_low: number | null;
+  ref_range_high: number | null;
+  status: string | null;
+}
+
 interface ConditionHistoryRecord {
   id: string;
   record_id: string;
@@ -77,10 +88,19 @@ interface ConditionHistoryRecord {
   confidence: number | null;
   is_llm_extracted: boolean;
   is_user_verified: boolean;
+  supporting_obs_code: string | null;
+  review_decision: string | null;
   created_at: string;
   record_title: string | null;
   record_date: string | null;
   record_type: string | null;
+  /**
+   * The observation `supporting_obs_code` names, on that same record, or null when it is not there
+   * any more. Null is informative rather than a loading state: the reviewer can correct, recode or
+   * delete the very measurement a proposal cites, and a proposal whose evidence has gone must not
+   * be presented as though it still had any.
+   */
+  supporting_observation: SupportingObservation | null;
 }
 
 export interface ConditionDetail extends Condition {
@@ -117,6 +137,8 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
       confidence,
       is_llm_extracted,
       is_user_verified,
+      supporting_obs_code,
+      review_decision,
       created_at,
       medical_records!inner (
         title,
@@ -131,6 +153,53 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
   if (recError) {
     throw new Error(recError.message);
   }
+
+  // The measurement behind each proposed closure, read from the record rather than assumed. Only
+  // applied rows count: an unapplied observation is invisible everywhere else in the chart, so
+  // showing one here would offer a person evidence the rest of the app says does not exist.
+  const citations = (records || [])
+    .map((r) => ({ recordId: r.record_id as string, code: r.supporting_obs_code as string | null }))
+    .filter((c): c is { recordId: string; code: string } => Boolean(c.code));
+
+  let observations: Array<Record<string, unknown>> = [];
+  if (citations.length > 0) {
+    const { data: obsRows, error: obsError } = await supabase
+      .from("record_observations")
+      .select(
+        "record_id, obs_code, obs_name, value_numeric, value_text, unit, ref_range_low, ref_range_high, status",
+      )
+      .in(
+        "record_id",
+        citations.map((c) => c.recordId),
+      )
+      .in(
+        "obs_code",
+        citations.map((c) => c.code),
+      )
+      .eq("is_applied", true);
+
+    // A failure here must not pass for "the measurement is gone": that reads as evidence having
+    // been withdrawn, which is a claim about the record rather than about the request.
+    if (obsError) {
+      throw new Error(obsError.message);
+    }
+    observations = (obsRows || []) as Array<Record<string, unknown>>;
+  }
+
+  const observationFor = (recordId: string, code: string | null): SupportingObservation | null => {
+    if (!code) return null;
+    const match = observations.find((o) => o.record_id === recordId && o.obs_code === code);
+    if (!match) return null;
+    return {
+      obs_name: match.obs_name as string,
+      value_numeric: match.value_numeric as number | null,
+      value_text: match.value_text as string | null,
+      unit: match.unit as string | null,
+      ref_range_low: match.ref_range_low as number | null,
+      ref_range_high: match.ref_range_high as number | null,
+      status: match.status as string | null,
+    };
+  };
 
   // Transform the records to include record info
   const mapped: ConditionHistoryRecord[] = (records || []).map((r) => {
@@ -147,10 +216,16 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
       confidence: r.confidence as number | null,
       is_llm_extracted: r.is_llm_extracted as boolean,
       is_user_verified: r.is_user_verified as boolean,
+      supporting_obs_code: (r.supporting_obs_code as string | null) ?? null,
+      review_decision: (r.review_decision as string | null) ?? null,
       created_at: r.created_at as string,
       record_title: medRec?.title || null,
       record_date: medRec?.record_date || null,
       record_type: medRec?.record_type || null,
+      supporting_observation: observationFor(
+        r.record_id as string,
+        (r.supporting_obs_code as string | null) ?? null,
+      ),
     };
   });
 

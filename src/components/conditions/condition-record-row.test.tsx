@@ -158,4 +158,40 @@ describe("a closure nobody has confirmed", () => {
     expect(screen.queryByText("conditions.awaitingReview")).not.toBeInTheDocument();
     expect(screen.getByText("(conditions.statusChange)")).toBeInTheDocument();
   });
+  it("offers dismissal instead of delete, so rejecting cannot destroy the row", async () => {
+    // The dismissal is the negative label the promotion rule counts. Leaving delete beside it
+    // would keep the destructive path one click from the reviewer who means "no".
+    const onDelete = vi.fn();
+    const onDismiss = vi.fn();
+    const { container } = render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({ ...pendingClosure, condition_current_status: "active" })}
+        onDelete={onDelete}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    expect(container.querySelector("button.text-destructive")).toBeNull();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "conditions.dismissClosure" }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("keeps delete on a mention that is not a proposed closure", async () => {
+    const onDelete = vi.fn();
+    const { container } = render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({ ...pendingClosure, is_user_verified: true })}
+        onDelete={onDelete}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    await userEvent
+      .setup()
+      .click(container.querySelector("button.text-destructive") as HTMLButtonElement);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
 });

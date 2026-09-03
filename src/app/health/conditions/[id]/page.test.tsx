@@ -10,6 +10,7 @@ const hookMocks = vi.hoisted(() => ({
   useIcdLookup: vi.fn(),
   useMedicalRecords: vi.fn(),
   useCheckupsForCondition: vi.fn(),
+  useUpdateConditionRecord: vi.fn(),
 }));
 
 const routerMock = {
@@ -22,6 +23,7 @@ const routerMock = {
 
 const updateMutateAsync = vi.fn();
 const deleteMutateAsync = vi.fn();
+const ruleMutateAsync = vi.fn();
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -42,6 +44,7 @@ vi.mock("@/hooks", () => ({
   useIcdLookup: (...args: unknown[]) => hookMocks.useIcdLookup(...args),
   useMedicalRecords: (...args: unknown[]) => hookMocks.useMedicalRecords(...args),
   useCheckupsForCondition: (...args: unknown[]) => hookMocks.useCheckupsForCondition(...args),
+  useUpdateConditionRecord: (...args: unknown[]) => hookMocks.useUpdateConditionRecord(...args),
 }));
 
 vi.mock("@/components/conditions", () => ({
@@ -150,6 +153,12 @@ describe("ConditionDetailPage", () => {
     hookMocks.useCheckupsForCondition.mockReturnValue({
       data: [{ id: "chk-1", title: "Pulmo follow-up", next_due_at: "2025-03-10" }],
     });
+    ruleMutateAsync.mockReset();
+    ruleMutateAsync.mockResolvedValue(undefined);
+    hookMocks.useUpdateConditionRecord.mockReturnValue({
+      mutateAsync: ruleMutateAsync,
+      isPending: false,
+    });
   });
 
   it("renders loading and not-found/error states", async () => {
@@ -239,6 +248,113 @@ describe("ConditionDetailPage", () => {
         personId: "person-1",
       });
       expect(routerMock.push).toHaveBeenCalledWith("/health/conditions");
+    });
+  });
+
+  describe("ruling on a proposed closure", () => {
+    const pendingClosure = {
+      id: "hist-pending",
+      record_id: "rec-2",
+      status_in_record: "resolved",
+      source_anchor: "Витамин В12\t704.00\tпг/мл\t187.00–883.00",
+      confidence: 0.9,
+      is_llm_extracted: true,
+      is_user_verified: false,
+      supporting_obs_code: "vitamin_b12",
+      review_decision: "pending",
+      created_at: "2026-03-06T08:00:00.000Z",
+      record_title: "Lab",
+      record_date: "2026-03-06",
+      record_type: "lab",
+      supporting_observation: {
+        obs_name: "Витамин B12",
+        value_numeric: 704,
+        value_text: null,
+        unit: "пг/мл",
+        ref_range_low: 187,
+        ref_range_high: 883,
+        status: "normal",
+      },
+    };
+
+    async function renderWith(history: Record<string, unknown>[]) {
+      hookMocks.useConditionDetail.mockReturnValue({
+        data: makeCondition({ history, mention_count: history.length }),
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      const Page = (await import("./page")).default;
+      render(<Page params={resolvedParams("cond-1")} />);
+    }
+
+    it("shows the measurement the proposal rests on, read back rather than asserted", async () => {
+      await renderWith([pendingClosure]);
+
+      expect(screen.getByText("conditions.awaitingReview")).toBeInTheDocument();
+      expect(screen.getByText("Витамин B12")).toBeInTheDocument();
+      expect(screen.getByText("704 пг/мл")).toBeInTheDocument();
+      expect(screen.getByText("(187–883)")).toBeInTheDocument();
+    });
+
+    it("says so when the measurement it cited is no longer on the record", async () => {
+      // The reviewer corrected, recoded or deleted it. Saying "the evidence is gone" is the whole
+      // reason the citation is stored, and it is not the same as having nothing to show.
+      await renderWith([{ ...pendingClosure, supporting_observation: null }]);
+
+      expect(screen.getByText("conditions.measurementGone")).toBeInTheDocument();
+      expect(screen.queryByText("Витамин B12")).not.toBeInTheDocument();
+    });
+
+    it("confirming verifies the mention, which is what lets it reach the chart", async () => {
+      await renderWith([pendingClosure]);
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
+
+      await waitFor(() => {
+        expect(ruleMutateAsync).toHaveBeenCalledWith({
+          id: "hist-pending",
+          conditionId: "cond-1",
+          updates: { is_user_verified: true },
+        });
+      });
+    });
+
+    it("dismissing records the decision and neither verifies nor deletes the row", async () => {
+      await renderWith([pendingClosure]);
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "conditions.dismissClosure" }));
+
+      await waitFor(() => {
+        expect(ruleMutateAsync).toHaveBeenCalledWith({
+          id: "hist-pending",
+          conditionId: "cond-1",
+          updates: { review_decision: "dismissed" },
+        });
+      });
+      // A dismissal that verified the row would apply the very closure it rejects; one that deleted
+      // it would destroy the negative label the promotion rule counts.
+      const call = ruleMutateAsync.mock.calls.at(-1);
+      expect(call?.[0].updates.is_user_verified).toBeUndefined();
+    });
+
+    it("offers no ruling on a mention nobody needs to rule on", async () => {
+      await renderWith([
+        { ...pendingClosure, is_user_verified: true, review_decision: "confirmed" },
+      ]);
+
+      expect(screen.queryByRole("button", { name: /conditions.confirmClosure/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: "conditions.dismissClosure" })).toBeNull();
+    });
+
+    it("shows a dismissed proposal as dismissed rather than as untouched", async () => {
+      await renderWith([{ ...pendingClosure, review_decision: "dismissed" }]);
+
+      expect(screen.getByText("conditions.dismissed")).toBeInTheDocument();
     });
   });
 });
