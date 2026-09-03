@@ -9,13 +9,15 @@ const {
   changedPathsOutsideRegistry,
   evaluate,
   gitPath,
+  writePreSnapshot,
   isRegistryPath,
   locateRegistry,
   message,
   shouldReport,
   taskStatusOnMain,
 } = hook as unknown as {
-  changedPathsOutsideRegistry: (repoRoot: string) => string[];
+  changedPathsOutsideRegistry: (repoRoot: string, snapshot?: unknown) => string[];
+  writePreSnapshot: (repoRoot: string, snapshotPath?: string) => unknown;
   gitPath: (name: string, repoRoot: string) => string;
   evaluate: (input: {
     marker: string | null;
@@ -72,8 +74,13 @@ function fixture(tasks: { id: string; status: string }[]) {
   return { base, registry, code };
 }
 
-function runHook(code: string, input: unknown, env: Record<string, string> = {}) {
-  const result = spawnSync(process.execPath, [HOOK], {
+function runHook(
+  code: string,
+  input: unknown,
+  env: Record<string, string> = {},
+  args: string[] = [],
+) {
+  const result = spawnSync(process.execPath, [HOOK, ...args], {
     encoding: "utf8",
     input: JSON.stringify(input),
     env: { ...process.env, TASK_CLAIM_HOOK_REPO_ROOT: code, ORBIT_TASKS_REGISTRY: "", ...env },
@@ -269,6 +276,33 @@ describe("the hook itself", () => {
     expect(runHook(code, bash, env)).toContain("src/x.ts");
   });
 
+  it("sees a shell command that wrote and committed in one go, against the snapshot taken before it", () => {
+    const { registry, code } = fixture([]);
+    const env = { ORBIT_TASKS_REGISTRY: registry };
+    const bash = { tool_name: "Bash", tool_input: { command: "write && git commit" } };
+    fs.writeFileSync(path.join(code, "README.md"), "x\n");
+    git(code, "add", "-A");
+    git(code, "commit", "-q", "-m", "init");
+    git(code, "config", "user.email", "t@example.com");
+    git(code, "config", "user.name", "t");
+
+    // Before: the PreToolUse half records HEAD and the (clean) status.
+    expect(runHook(code, bash, env, ["--pre"])).toBe("");
+    // The command: a file written, staged and committed. The tree ends clean.
+    fs.writeFileSync(path.join(code, "src", "generated.ts"), "generated\n");
+    git(code, "add", "-A");
+    git(code, "commit", "-q", "-m", "generated");
+    expect(changedPathsOutsideRegistry(code)).toEqual([]);
+
+    // After: the commit's files are the edit.
+    expect(runHook(code, bash, env)).toContain("src/generated.ts");
+
+    // A pre-existing modification is not re-reported by a command that left it alone.
+    fs.writeFileSync(path.join(code, "src", "old.ts"), "was already dirty\n");
+    const snapshot = writePreSnapshot(code);
+    expect(changedPathsOutsideRegistry(code, snapshot)).toEqual([]);
+  });
+
   it("keeps its marker and state inside a linked worktree, where .git is a file", () => {
     const { registry, code } = fixture([{ id: "T-260902-jxe", status: "in-progress" }]);
     fs.writeFileSync(path.join(code, "README.md"), "x\n");
@@ -306,5 +340,12 @@ describe("the hook itself", () => {
       (e) => e.matcher === "Bash" && e.hooks.some((h) => h.command.includes("task-claim-hook.cjs")),
     );
     expect(shell).toBeDefined();
+    // With the snapshot before it, so a command that commits is compared against where it started.
+    const pre = (
+      settings as unknown as { hooks: { PreToolUse: typeof settings.hooks.PostToolUse } }
+    ).hooks.PreToolUse.find(
+      (e) => e.matcher === "Bash" && e.hooks.some((h) => h.command.includes("--pre")),
+    );
+    expect(pre).toBeDefined();
   });
 });

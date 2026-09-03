@@ -20,9 +20,11 @@
  * makes -- claim one, or create one after the duplicate search and the user's confirmation -- not
  * a refused edit. Whether it earns teeth later is decided on whether these warnings are ignored.
  *
- * It also runs after `Bash`, which is the other way a file changes: there it has no path to judge,
- * so it looks at whether the working tree now carries changes outside `docs/tasks/` and speaks
- * about those. A shell command that changed nothing stays silent.
+ * It also runs around `Bash`, which is the other way a file changes. Before the command it
+ * snapshots HEAD and the working tree's status (`--pre`); after it, the paths that differ from that
+ * snapshot -- files the tree now carries changed, and files any commit made meanwhile touched -- are
+ * what it judges, so a command that writes, stages and commits in one go is seen as the edit it
+ * is. A shell command that changed nothing stays silent.
  *
  * Reported once per verdict per REPORT_INTERVAL_MS, tracked in .git/task-claim-hook-state, so a
  * fresh session hears it on its first code edit and then is left alone until the situation changes.
@@ -67,6 +69,7 @@ function gitPath(name, repoRoot = REPO_ROOT) {
 const MARKER_PATH = gitPath("current-task");
 const STATE_PATH = gitPath("task-claim-hook-state");
 const FETCH_STAMP_PATH = gitPath("task-claim-hook-fetched");
+const PRE_SNAPSHOT_PATH = gitPath("task-claim-hook-pre");
 
 /** Registry files are the one place an edit needs no claim: recording is how a claim is made. */
 function isRegistryPath(filePath, repoRoot = REPO_ROOT) {
@@ -214,19 +217,78 @@ function shouldReport(key, statePath = STATE_PATH, now = Date.now()) {
   return true;
 }
 
-/**
- * After a shell command: the paths the working tree now differs in, outside the registry. Empty
- * when the command changed nothing tracked or added nothing, which is most of them.
- */
-function changedPathsOutsideRegistry(repoRoot = REPO_ROOT) {
+/** Working-tree status as `path -> code`, outside the registry; renames count as their new name. */
+function statusOutsideRegistry(repoRoot = REPO_ROOT) {
   const result = git(repoRoot, ["status", "--porcelain", "--untracked-files=all", "--", "."]);
-  if (result.status !== 0) return [];
-  return result.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => line.slice(3).trim().replace(/^"|"$/g, ""))
-    .map((entry) => entry.split(" -> ").pop())
-    .filter((file) => !isRegistryPath(file, repoRoot));
+  const entries = new Map();
+  if (result.status !== 0) return entries;
+  for (const line of result.stdout.split("\n").filter(Boolean)) {
+    const file = line.slice(3).trim().replace(/^"|"$/g, "").split(" -> ").pop();
+    if (!isRegistryPath(file, repoRoot)) entries.set(file, line.slice(0, 2));
+  }
+  return entries;
+}
+
+function headSha(repoRoot = REPO_ROOT) {
+  const result = git(repoRoot, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+/** Before a shell command: what the tree and HEAD look like, for the comparison afterwards. */
+function writePreSnapshot(repoRoot = REPO_ROOT, snapshotPath = PRE_SNAPSHOT_PATH) {
+  const snapshot = {
+    head: headSha(repoRoot),
+    status: Object.fromEntries(statusOutsideRegistry(repoRoot)),
+  };
+  try {
+    fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
+  } catch {
+    // Without a snapshot the post-command check falls back to the status alone.
+  }
+  return snapshot;
+}
+
+function readPreSnapshot(snapshotPath = PRE_SNAPSHOT_PATH) {
+  try {
+    const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+    fs.rmSync(snapshotPath, { force: true });
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * After a shell command: the paths outside the registry that the command changed. With a snapshot
+ * from before it, that is every status entry that is new or different plus every file a commit
+ * made since then touched; without one, whatever the tree now differs in.
+ */
+function changedPathsOutsideRegistry(repoRoot = REPO_ROOT, snapshot = null) {
+  const now = statusOutsideRegistry(repoRoot);
+  const changed = new Set();
+  if (!snapshot) {
+    for (const file of now.keys()) changed.add(file);
+    return [...changed];
+  }
+  for (const [file, code] of now) {
+    if (snapshot.status?.[file] !== code) changed.add(file);
+  }
+  const head = headSha(repoRoot);
+  if (snapshot.head && head && snapshot.head !== head) {
+    const diff = git(repoRoot, ["diff", "--name-only", `${snapshot.head}..${head}`]);
+    if (diff.status === 0) {
+      for (const file of diff.stdout.split("\n").filter(Boolean)) {
+        if (!isRegistryPath(file, repoRoot)) changed.add(file);
+      }
+    }
+  } else if (!snapshot.head && head) {
+    // The command made the first commit of the repository.
+    const listed = git(repoRoot, ["ls-tree", "-r", "--name-only", head]);
+    for (const file of (listed.stdout || "").split("\n").filter(Boolean)) {
+      if (!isRegistryPath(file, repoRoot)) changed.add(file);
+    }
+  }
+  return [...changed];
 }
 
 function readInput() {
@@ -240,9 +302,13 @@ function readInput() {
 
 function main() {
   const input = readInput();
+  if (process.argv.includes("--pre")) {
+    if (!input.tool_name || SHELL_TOOLS.has(input.tool_name)) writePreSnapshot();
+    return;
+  }
   let filePath = "";
   if (input.tool_name && SHELL_TOOLS.has(input.tool_name)) {
-    const changed = changedPathsOutsideRegistry();
+    const changed = changedPathsOutsideRegistry(REPO_ROOT, readPreSnapshot());
     if (changed.length === 0) return;
     filePath = changed.length === 1 ? changed[0] : `${changed[0]} and ${changed.length - 1} more`;
   } else {
@@ -289,6 +355,8 @@ module.exports = {
   changedPathsOutsideRegistry,
   evaluate,
   gitPath,
+  readPreSnapshot,
+  writePreSnapshot,
   isRegistryPath,
   locateRegistry,
   message,
