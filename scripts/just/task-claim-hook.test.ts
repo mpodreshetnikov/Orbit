@@ -70,6 +70,9 @@ function fixture(tasks: { id: string; status: string }[]) {
   git(registry, "push", "-q", "-u", "origin", "main");
 
   git(base, "init", "-q", "-b", "main", code);
+  // The tests commit here; a CI runner has no git identity of its own.
+  git(code, "config", "user.email", "t@example.com");
+  git(code, "config", "user.name", "t");
   fs.mkdirSync(path.join(code, "src"), { recursive: true });
   return { base, registry, code };
 }
@@ -283,8 +286,6 @@ describe("the hook itself", () => {
     fs.writeFileSync(path.join(code, "README.md"), "x\n");
     git(code, "add", "-A");
     git(code, "commit", "-q", "-m", "init");
-    git(code, "config", "user.email", "t@example.com");
-    git(code, "config", "user.name", "t");
 
     // Before: the PreToolUse half records HEAD and the (clean) status.
     expect(runHook(code, bash, env, ["--pre"])).toBe("");
