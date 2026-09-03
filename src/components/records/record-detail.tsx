@@ -108,6 +108,7 @@ import {
   usePersonObservationHistory,
   useBackgroundOCR,
   usePersons,
+  useRuleOnProposedClosure,
 } from "@/hooks";
 import { FindingRow, FindingEditDialog, type FindingComparison } from "@/components/findings";
 import {
@@ -342,6 +343,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const deleteFindingMutation = useDeleteRecordFinding();
   const createFindingMutation = useCreateRecordFinding();
   const updateConditionRecordMutation = useUpdateConditionRecord();
+  const { ruleOnClosure } = useRuleOnProposedClosure();
   const deleteConditionRecordMutation = useDeleteConditionRecord();
   const createConditionWithRecordMutation = useCreateConditionWithRecord();
   const linkConditionToRecordMutation = useLinkConditionToRecord();
@@ -585,12 +587,27 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
    * rule counts -- the one signal that says an analyte should not close this condition -- so the
    * row stays, suppressed, carrying the decision instead.
    */
-  const handleDismissCondition = async (cr: ConditionRecordWithDetails) => {
-    await updateConditionRecordMutation.mutateAsync({
-      id: cr.id,
-      recordId: recordId,
-      updates: { review_decision: "dismissed" as const },
-    });
+  /**
+   * Rule on a proposed closure without leaving the document that proposed it.
+   *
+   * The person reading this record is the one best placed to say whether it closes the condition,
+   * so both answers live here. Confirming re-checks the cited measurement against the record --
+   * see `useRuleOnProposedClosure`, which is the single place that rule lives.
+   */
+  const handleRuleOnCondition = async (
+    cr: ConditionRecordWithDetails,
+    decision: "confirmed" | "dismissed",
+  ) => {
+    await ruleOnClosure(
+      {
+        id: cr.id,
+        record_id: cr.record_id,
+        condition_id: cr.condition_id,
+        status_in_record: cr.status_in_record,
+        supporting_obs_code: cr.supporting_obs_code,
+      },
+      decision,
+    );
   };
 
   const handleDeleteCondition = async (cr: ConditionRecordWithDetails) => {
@@ -1248,7 +1265,12 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
                       comparison={getComparisonForCondition(cr)}
                       onEdit={isRemoved ? undefined : () => handleEditCondition(cr)}
                       onDelete={isRemoved ? undefined : () => handleDeleteCondition(cr)}
-                      onDismiss={isRemoved ? undefined : () => handleDismissCondition(cr)}
+                      onConfirm={
+                        isRemoved ? undefined : () => handleRuleOnCondition(cr, "confirmed")
+                      }
+                      onDismiss={
+                        isRemoved ? undefined : () => handleRuleOnCondition(cr, "dismissed")
+                      }
                       isProcessing={isConditionProcessing}
                       showActions={!isRemoved}
                     />

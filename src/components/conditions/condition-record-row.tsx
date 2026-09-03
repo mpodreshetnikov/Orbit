@@ -16,6 +16,7 @@ import {
   History,
   CirclePlus,
   ExternalLink,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,12 @@ interface ConditionRecordRowProps {
   onEdit?: () => void;
   onAddHistory?: () => void;
   onDelete?: () => void;
+  /**
+   * Accept a proposed closure, here rather than on the condition page. A person reading the
+   * document is the person best placed to rule on what it proposes, and making them navigate to
+   * the condition to agree -- while letting them disagree on the spot -- is a strange asymmetry.
+   */
+  onConfirm?: () => void;
   /**
    * Reject a proposed closure. On a mention that is one, this replaces delete rather than sitting
    * beside it -- see the comment where the buttons are rendered.
@@ -77,6 +84,7 @@ export function ConditionRecordRow({
   onEdit,
   onAddHistory,
   onDelete,
+  onConfirm,
   onDismiss,
   isProcessing = false,
   showActions = true,
@@ -243,17 +251,34 @@ export function ConditionRecordRow({
                * away from the reviewer who means "no".
                */}
               {awaitingReview
-                ? onDismiss && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs"
-                      onClick={onDismiss}
-                      disabled={isProcessing}
-                      title={t("conditions.dismissClosureTitle")}
-                    >
-                      {t("conditions.dismissClosure")}
-                    </Button>
+                ? (onConfirm || onDismiss) && (
+                    <>
+                      {onConfirm && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs gap-1"
+                          onClick={onConfirm}
+                          disabled={isProcessing}
+                          title={t("conditions.confirmClosureTitle")}
+                        >
+                          <Check className="h-3 w-3 shrink-0" />
+                          {t("conditions.confirmClosure")}
+                        </Button>
+                      )}
+                      {onDismiss && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={onDismiss}
+                          disabled={isProcessing}
+                          title={t("conditions.dismissClosureTitle")}
+                        >
+                          {t("conditions.dismissClosure")}
+                        </Button>
+                      )}
+                    </>
                   )
                 : onDelete && (
                     <Button

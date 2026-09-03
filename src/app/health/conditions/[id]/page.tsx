@@ -49,16 +49,10 @@ import {
   useIcdLookup,
   useMedicalRecords,
   useCheckupsForCondition,
-  useUpdateConditionRecord,
+  useRuleOnProposedClosure,
 } from "@/hooks";
-import { toast } from "sonner";
-import { createClient } from "@/lib/supabase";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
 import { isAwaitingClosureReview } from "@/lib/conditions/unverified-closure";
-import {
-  proposedClosureStillHolds,
-  type PersistedObservation,
-} from "@/lib/conditions/resolution-proposal";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
 
@@ -81,7 +75,6 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const { data: condition, isLoading, error, refetch } = useConditionDetail(conditionId);
   const updateConditionMutation = useUpdateCondition();
   const deleteConditionMutation = useDeleteCondition();
-  const updateConditionRecordMutation = useUpdateConditionRecord();
   const { data: linkedCheckups } = useCheckupsForCondition(conditionId);
   const { data: personRecords } = useMedicalRecords(
     condition?.person_id ? { person_id: condition.person_id } : {},
@@ -94,8 +87,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const [editNotes, setEditNotes] = useState("");
   const [addHistoryOpen, setAddHistoryOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  /** Which proposal is being ruled on, so both of its buttons disable while the write is in flight. */
-  const [rulingOnId, setRulingOnId] = useState<string | null>(null);
+  const { ruleOnClosure, rulingOnId } = useRuleOnProposedClosure();
 
   // ICD validation (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
@@ -134,60 +126,27 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   };
 
   /**
-   * Rule on a proposed closure.
+   * Rule on a proposed closure from the condition page.
    *
-   * Both rulings go through `useUpdateConditionRecord`, which already writes `review_decision`
-   * beside `is_user_verified` and recomputes the condition when a verification lands. Confirming
-   * therefore needs to say only that a person verified it; the recompute is what finally lets the
-   * suppressed closure reach the chart.
-   *
-   * Dismissing writes the decision and nothing else. It deliberately does not touch
-   * `is_user_verified` or delete the row: the mention stays, still suppressed, and the dismissal is
-   * the negative label the promotion rule counts. A boolean cannot hold this -- "not verified"
-   * already means "nobody has looked" -- which is why the column has three values.
+   * The same hook the record screen uses, so the evidence re-check before confirming exists once
+   * rather than once per screen -- this page having a confirm button without that check is exactly
+   * what the milestone-4 review found.
    */
-  const ruleOnClosure = async (recordRowId: string, decision: "confirmed" | "dismissed") => {
+  const ruleOn = async (recordRowId: string, decision: "confirmed" | "dismissed") => {
     const mention = condition?.history.find((h) => h.id === recordRowId);
-    setRulingOnId(recordRowId);
-    try {
-      // Confirming is the moment a suppressed closure becomes authoritative, so the claim is
-      // re-checked here against what the record actually holds -- the same guard the activation
-      // path applies, for the same reason and with the same function. The panel above shows the
-      // cited observation, but showing is not checking: it reads one code, while an entry can rest
-      // on two (iron-deficiency anaemia needs ferritin *and* haemoglobin), and a person can correct
-      // the value between the page loading and the click. Without this, "the measurement is gone"
-      // could be on screen while Confirm still ended the condition.
-      if (decision === "confirmed" && mention?.supporting_obs_code) {
-        const { data, error } = await createClient()
-          .from("record_observations")
-          .select(
-            "obs_code, is_applied, value_numeric, value_canonical, ref_range_low, ref_range_high, ref_range_low_canonical, ref_range_high_canonical, status",
-          )
-          .eq("record_id", mention.record_id);
-
-        // A read that failed is not evidence that the closure still holds.
-        if (error) {
-          toast.error(t("conditions.confirmClosureFailed"), { description: error.message });
-          return;
-        }
-        if (!proposedClosureStillHolds(mention, (data ?? []) as PersistedObservation[])) {
-          toast.error(t("conditions.confirmClosureNoLongerHolds"));
-          await refetch();
-          return;
-        }
-      }
-
-      await updateConditionRecordMutation.mutateAsync({
-        id: recordRowId,
-        conditionId,
-        updates:
-          decision === "confirmed"
-            ? { is_user_verified: true }
-            : { review_decision: "dismissed" as const },
-      });
-    } finally {
-      setRulingOnId(null);
-    }
+    if (!mention) return;
+    const written = await ruleOnClosure(
+      {
+        id: mention.id,
+        record_id: mention.record_id,
+        condition_id: conditionId,
+        status_in_record: mention.status_in_record,
+        supporting_obs_code: mention.supporting_obs_code,
+      },
+      decision,
+    );
+    // A refused confirmation means the page is showing evidence the record no longer has.
+    if (!written) await refetch();
   };
 
   const canDeleteCondition = condition && condition.mention_count === 0;
@@ -599,7 +558,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                                     className="h-7 text-xs gap-1"
                                     disabled={rulingOnId !== null}
                                     title={t("conditions.confirmClosureTitle")}
-                                    onClick={() => ruleOnClosure(record.id, "confirmed")}
+                                    onClick={() => ruleOn(record.id, "confirmed")}
                                   >
                                     <Check className="h-3 w-3 shrink-0" />
                                     {t("conditions.confirmClosure")}
@@ -610,7 +569,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                                     className="h-7 text-xs"
                                     disabled={rulingOnId !== null}
                                     title={t("conditions.dismissClosureTitle")}
-                                    onClick={() => ruleOnClosure(record.id, "dismissed")}
+                                    onClick={() => ruleOn(record.id, "dismissed")}
                                   >
                                     {t("conditions.dismissClosure")}
                                   </Button>

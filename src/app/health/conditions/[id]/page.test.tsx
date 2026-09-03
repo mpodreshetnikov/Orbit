@@ -10,7 +10,7 @@ const hookMocks = vi.hoisted(() => ({
   useIcdLookup: vi.fn(),
   useMedicalRecords: vi.fn(),
   useCheckupsForCondition: vi.fn(),
-  useUpdateConditionRecord: vi.fn(),
+  useRuleOnProposedClosure: vi.fn(),
 }));
 
 const routerMock = {
@@ -37,21 +37,6 @@ vi.mock("@/lib/date-locale", () => ({
   useDateFnsLocale: () => undefined,
 }));
 
-const observationRows = vi.hoisted(() => ({ data: [] as unknown[], error: null as unknown }));
-const toastError = vi.hoisted(() => vi.fn());
-
-vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
-
-vi.mock("@/lib/supabase", () => ({
-  createClient: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => Promise.resolve({ data: observationRows.data, error: observationRows.error }),
-      }),
-    }),
-  }),
-}));
-
 vi.mock("@/hooks", () => ({
   useConditionDetail: (...args: unknown[]) => hookMocks.useConditionDetail(...args),
   useUpdateCondition: (...args: unknown[]) => hookMocks.useUpdateCondition(...args),
@@ -59,7 +44,7 @@ vi.mock("@/hooks", () => ({
   useIcdLookup: (...args: unknown[]) => hookMocks.useIcdLookup(...args),
   useMedicalRecords: (...args: unknown[]) => hookMocks.useMedicalRecords(...args),
   useCheckupsForCondition: (...args: unknown[]) => hookMocks.useCheckupsForCondition(...args),
-  useUpdateConditionRecord: (...args: unknown[]) => hookMocks.useUpdateConditionRecord(...args),
+  useRuleOnProposedClosure: (...args: unknown[]) => hookMocks.useRuleOnProposedClosure(...args),
 }));
 
 vi.mock("@/components/conditions", () => ({
@@ -170,25 +155,9 @@ describe("ConditionDetailPage", () => {
     });
     ruleMutateAsync.mockReset();
     ruleMutateAsync.mockResolvedValue(undefined);
-    toastError.mockReset();
-    // A B12 closure whose cited measurement is still on the record and in range.
-    observationRows.data = [
-      {
-        obs_code: "vitamin_b12",
-        is_applied: true,
-        value_numeric: 704,
-        value_canonical: null,
-        ref_range_low: 187,
-        ref_range_high: 883,
-        ref_range_low_canonical: null,
-        ref_range_high_canonical: null,
-        status: "normal",
-      },
-    ];
-    observationRows.error = null;
-    hookMocks.useUpdateConditionRecord.mockReturnValue({
-      mutateAsync: ruleMutateAsync,
-      isPending: false,
+    hookMocks.useRuleOnProposedClosure.mockReturnValue({
+      ruleOnClosure: ruleMutateAsync,
+      rulingOnId: null,
     });
   });
 
@@ -308,12 +277,15 @@ describe("ConditionDetailPage", () => {
       },
     };
 
+    const refetchMock = vi.fn();
+
     async function renderWith(history: Record<string, unknown>[]) {
+      refetchMock.mockClear();
       hookMocks.useConditionDetail.mockReturnValue({
         data: makeCondition({ history, mention_count: history.length }),
         isLoading: false,
         error: null,
-        refetch: vi.fn(),
+        refetch: refetchMock,
       });
       const Page = (await import("./page")).default;
       render(<Page params={resolvedParams("cond-1")} />);
@@ -345,11 +317,15 @@ describe("ConditionDetailPage", () => {
         .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
 
       await waitFor(() => {
-        expect(ruleMutateAsync).toHaveBeenCalledWith({
-          id: "hist-pending",
-          conditionId: "cond-1",
-          updates: { is_user_verified: true },
-        });
+        expect(ruleMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "hist-pending",
+            record_id: "rec-2",
+            condition_id: "cond-1",
+            supporting_obs_code: "vitamin_b12",
+          }),
+          "confirmed",
+        );
       });
     });
 
@@ -361,16 +337,11 @@ describe("ConditionDetailPage", () => {
         .click(screen.getByRole("button", { name: "conditions.dismissClosure" }));
 
       await waitFor(() => {
-        expect(ruleMutateAsync).toHaveBeenCalledWith({
-          id: "hist-pending",
-          conditionId: "cond-1",
-          updates: { review_decision: "dismissed" },
-        });
+        expect(ruleMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "hist-pending" }),
+          "dismissed",
+        );
       });
-      // A dismissal that verified the row would apply the very closure it rejects; one that deleted
-      // it would destroy the negative label the promotion rule counts.
-      const call = ruleMutateAsync.mock.calls.at(-1);
-      expect(call?.[0].updates.is_user_verified).toBeUndefined();
     });
 
     it("offers no ruling on a mention nobody needs to rule on", async () => {
@@ -382,57 +353,17 @@ describe("ConditionDetailPage", () => {
       expect(screen.queryByRole("button", { name: "conditions.dismissClosure" })).toBeNull();
     });
 
-    it("refuses to confirm when the cited measurement no longer supports the closure", async () => {
-      // The activation path guards this with proposedClosureStillHolds; this page opened a second
-      // route to the same write and has to apply the same guard. Showing the observation is not
-      // checking it — a person can correct the value between the page loading and the click.
-      observationRows.data = [
-        {
-          obs_code: "vitamin_b12",
-          is_applied: true,
-          value_numeric: 120,
-          value_canonical: null,
-          ref_range_low: 187,
-          ref_range_high: 883,
-          ref_range_low_canonical: null,
-          ref_range_high_canonical: null,
-          status: "low",
-        },
-      ];
+    it("re-reads the page when a ruling is refused, so the stale evidence stops showing", async () => {
+      // The guard itself lives in useRuleOnProposedClosure and is tested there. What this page owes
+      // is not to keep displaying a measurement the record no longer supports.
+      ruleMutateAsync.mockResolvedValueOnce(false);
       await renderWith([pendingClosure]);
 
       await userEvent
         .setup()
         .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
 
-      await waitFor(() => expect(toastError).toHaveBeenCalled());
-      expect(ruleMutateAsync).not.toHaveBeenCalled();
-    });
-
-    it("refuses to confirm when the measurement cannot be read at all", async () => {
-      // A failed read is not evidence that the closure still holds.
-      observationRows.data = [];
-      observationRows.error = { message: "network" };
-      await renderWith([pendingClosure]);
-
-      await userEvent
-        .setup()
-        .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
-
-      await waitFor(() => expect(toastError).toHaveBeenCalled());
-      expect(ruleMutateAsync).not.toHaveBeenCalled();
-    });
-
-    it("dismisses without re-reading the evidence, because rejecting needs none", async () => {
-      observationRows.error = { message: "network" };
-      await renderWith([pendingClosure]);
-
-      await userEvent
-        .setup()
-        .click(screen.getByRole("button", { name: "conditions.dismissClosure" }));
-
-      await waitFor(() => expect(ruleMutateAsync).toHaveBeenCalled());
-      expect(toastError).not.toHaveBeenCalled();
+      await waitFor(() => expect(refetchMock).toHaveBeenCalled());
     });
 
     it("offers no ruling once a person has dismissed it", async () => {
