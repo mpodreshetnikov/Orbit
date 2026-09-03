@@ -147,12 +147,13 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
             evalCase.context.existingFindings,
           ),
           diagnostics,
+          stageSpend: cassette.stageSpend(),
         });
         completed = true;
         process.stdout.write(`[extraction-eval] ${label}${evalCase.id}: scored\n`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        results.push({ caseId: evalCase.id, error: message });
+        results.push({ caseId: evalCase.id, error: message, stageSpend: cassette.stageSpend() });
         process.stderr.write(`[extraction-eval] ${label}${evalCase.id}: FAILED — ${message}\n`);
       } finally {
         await cassette.flush({ prune: completed });

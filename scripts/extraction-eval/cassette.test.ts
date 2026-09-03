@@ -231,3 +231,98 @@ describe("createCassetteFetch", () => {
     expect(await readdir(dir)).toHaveLength(0);
   });
 });
+
+describe("stageSpend", () => {
+  const RECONCILE = {
+    model: "test-model",
+    messages: [{ role: "user", content: "Compare against the existing record." }],
+  };
+
+  function withUsage(prompt: number, completion: number, cost: number | null): unknown {
+    const usage: Record<string, number> = {
+      prompt_tokens: prompt,
+      completion_tokens: completion,
+    };
+    if (cost !== null) usage.cost = cost;
+    return { choices: [{ message: { content: "{}" } }], usage };
+  }
+
+  it("accounts a live call against the stage its prompt names", async () => {
+    const cassette = await createCassetteFetch({
+      dir: await tempDir(),
+      mode: "live",
+      liveFetch: liveFetchReturning(withUsage(100, 20, 0.5)),
+    });
+    await cassette.fetchFn("https://openrouter.test", post(REQUEST));
+    expect(cassette.stageSpend()).toEqual([
+      { stage: "extract", calls: 1, promptTokens: 100, completionTokens: 20, costUsd: 0.5 },
+    ]);
+  });
+
+  it("keeps stages apart and sums repeat calls within one", async () => {
+    const cassette = await createCassetteFetch({
+      dir: await tempDir(),
+      mode: "live",
+      liveFetch: liveFetchReturning(withUsage(10, 5, 0.25)),
+    });
+    await cassette.fetchFn("https://openrouter.test", post(REQUEST));
+    await cassette.fetchFn("https://openrouter.test", post(REQUEST));
+    await cassette.fetchFn("https://openrouter.test", post(RECONCILE));
+    expect(cassette.stageSpend()).toEqual([
+      { stage: "extract", calls: 2, promptTokens: 20, completionTokens: 10, costUsd: 0.5 },
+      { stage: "reconcile", calls: 1, promptTokens: 10, completionTokens: 5, costUsd: 0.25 },
+    ]);
+  });
+
+  // A stage that saw one unpriced answer cannot report a trustworthy total, and reporting the
+  // priced subset as if it were the whole would understate the run — the same reasoning as
+  // `CaseDiagnostics.costUsd`.
+  it("nulls a stage's cost when any of its calls was unpriced", async () => {
+    let call = 0;
+    const alternating = (async () => {
+      call += 1;
+      return new Response(JSON.stringify(withUsage(10, 5, call === 1 ? 0.25 : null)), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+    const cassette = await createCassetteFetch({
+      dir: await tempDir(),
+      mode: "live",
+      liveFetch: alternating,
+    });
+    await cassette.fetchFn("https://openrouter.test", post(REQUEST));
+    await cassette.fetchFn("https://openrouter.test", post(REQUEST));
+    expect(cassette.stageSpend()[0]).toMatchObject({ calls: 2, costUsd: null });
+  });
+
+  // A retried 429 bought nothing, so counting it would inflate the call count with attempts that
+  // produced no answer and carried no usage block.
+  it("ignores a failed response", async () => {
+    const failing = (async () =>
+      new Response("rate limited", { status: 429 })) as unknown as typeof fetch;
+    const cassette = await createCassetteFetch({
+      dir: await tempDir(),
+      mode: "live",
+      liveFetch: failing,
+    });
+    await cassette.fetchFn("https://openrouter.test", post(REQUEST));
+    expect(cassette.stageSpend()).toEqual([]);
+  });
+
+  it("reports the recorded price when replaying", async () => {
+    const dir = await tempDir();
+    const recording = await createCassetteFetch({
+      dir,
+      mode: "record",
+      liveFetch: liveFetchReturning(withUsage(100, 20, 0.5)),
+    });
+    await recording.fetchFn("https://openrouter.test", post(REQUEST));
+    await recording.flush();
+
+    const replay = await createCassetteFetch({ dir, mode: "replay" });
+    await replay.fetchFn("https://openrouter.test", post(REQUEST));
+    expect(replay.stageSpend()).toEqual([
+      { stage: "extract", calls: 1, promptTokens: 100, completionTokens: 20, costUsd: 0.5 },
+    ]);
+  });
+});

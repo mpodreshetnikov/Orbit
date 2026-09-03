@@ -26,6 +26,56 @@ export interface CassetteEntry {
 }
 
 /**
+ * What one stage spent across a case, split out of the total the eval otherwise reports.
+ *
+ * The per-stage split is the thing a mixed model configuration is decided on. The stage overrides
+ * in `health-structure/deps.ts` let classify, extract and reconcile each run a different model, but
+ * a single total per case cannot say what moving one of them would save — a stage that is 5% of the
+ * bill and a stage that is 60% of it look identical in one number.
+ *
+ * Accounted here, in the cassette's fetch wrapper, rather than in the stage orchestrator: this
+ * layer already sees every request, already infers the stage from the prompt, and is the eval's own
+ * code. Threading usage back out of `stages/index.ts` would put this task's change inside the
+ * directory two other in-progress tasks are editing, for no gain in what gets measured.
+ */
+export interface StageSpend {
+  stage: string;
+  /** Requests that returned a usable answer. A retried 429 counts once per successful attempt. */
+  calls: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  /** Null rather than zero when the router priced nothing, matching `CaseDiagnostics.costUsd`. */
+  costUsd: number | null;
+}
+
+/**
+ * Add a response's usage into a stage's running total.
+ *
+ * Nulls are contagious in one direction only: a stage that saw one unpriced answer cannot report a
+ * trustworthy total, so the total goes null rather than silently reporting the priced subset as if
+ * it were everything. That mirrors `sumUsage` in `_shared/llm-usage.ts` and the reasoning on
+ * `CaseDiagnostics.costUsd`.
+ */
+function addUsage(into: StageSpend, usage: Record<string, unknown> | null): void {
+  into.calls += 1;
+  const read = (key: string): number | null => {
+    const value = usage?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+  const merge = (current: number | null, next: number | null): number | null =>
+    current === null || next === null ? null : current + next;
+  into.promptTokens = merge(into.promptTokens, read("prompt_tokens"));
+  into.completionTokens = merge(into.completionTokens, read("completion_tokens"));
+  into.costUsd = merge(into.costUsd, read("cost"));
+}
+
+function usageOf(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const usage = (payload as Record<string, unknown>).usage;
+  return usage && typeof usage === "object" ? (usage as Record<string, unknown>) : null;
+}
+
+/**
  * Stage names are inferred from the prompt because the request itself carries no stage marker.
  * These anchors are copied from the stage instruction strings; if a prompt is reworded the
  * cassette is simply labelled "unknown", which affects the filename and nothing else.
@@ -121,6 +171,14 @@ export interface CassetteFetch {
    */
   flush: (options?: { prune?: boolean }) => Promise<void>;
   misses: () => string[];
+  /**
+   * What each stage spent, in the order the stages first ran.
+   *
+   * On a replay this is the price of the calls that *recorded* the cassettes, exactly as the
+   * case total is — worth reporting as what those answers cost to obtain, and emphatically not
+   * what the replay cost. `renderMarkdown` carries that caveat for both.
+   */
+  stageSpend: () => StageSpend[];
 }
 
 export async function createCassetteFetch(options: {
@@ -133,6 +191,19 @@ export async function createCassetteFetch(options: {
   const existing = await loadDir(dir);
   const recorded = new Map<string, CassetteEntry>();
   const misses: string[] = [];
+  // Insertion-ordered, so the report lists stages in the order the pipeline ran them rather than
+  // alphabetically — classify, extract, reconcile reads as the pipeline; classify, extract,
+  // reconcile happens to as well, but a renamed stage should not silently reorder the table.
+  const spend = new Map<string, StageSpend>();
+
+  function record(stage: string, payload: unknown): void {
+    let entry = spend.get(stage);
+    if (!entry) {
+      entry = { stage, calls: 0, promptTokens: 0, completionTokens: 0, costUsd: 0 };
+      spend.set(stage, entry);
+    }
+    addUsage(entry, usageOf(payload));
+  }
 
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
@@ -150,18 +221,27 @@ export async function createCassetteFetch(options: {
             `  just test-extraction --record --live`,
         );
       }
+      record(stage, hit.response);
       return new Response(JSON.stringify(hit.response), { status: 200 });
     }
 
     const response = await liveFetch(url as never, init);
-    if (mode === "record" && response.ok) {
+    // Only a successful answer carries usage. A 429 or a 5xx that the stage client retries has no
+    // `usage` block to account, and counting it as a call would inflate the stage's call count with
+    // attempts that bought nothing.
+    if (response.ok) {
+      // Cloned because the stage client reads the body itself; consuming it here would leave it
+      // with an already-used stream. `record` mode clones for the same reason.
       const payload = stripReasoning(await response.clone().json());
-      recorded.set(key, {
-        request_hash: key,
-        stage,
-        model: String(body.model ?? ""),
-        response: payload,
-      });
+      record(stage, payload);
+      if (mode === "record") {
+        recorded.set(key, {
+          request_hash: key,
+          stage,
+          model: String(body.model ?? ""),
+          response: payload,
+        });
+      }
     }
     return response;
   }) as unknown as typeof fetch;
@@ -169,6 +249,7 @@ export async function createCassetteFetch(options: {
   return {
     fetchFn,
     misses: () => misses,
+    stageSpend: () => [...spend.values()].map((entry) => ({ ...entry })),
     flush: async (options?: { prune?: boolean }) => {
       if (recorded.size === 0) return;
       await mkdir(dir, { recursive: true });
