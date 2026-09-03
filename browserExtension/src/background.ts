@@ -16,6 +16,7 @@ import {
   getMoneyImportSourcePagePatterns,
   listMoneyImportSourceDefinitions,
   matchesKnownMoneyImportSourcePageUrl,
+  matchesMoneyImportSourcePageUrl,
   shouldShowMoneyImportSourcePageWidget,
 } from "./money-import-sources.js";
 
@@ -315,6 +316,19 @@ telemetry.info("extension_background_initialized", {
 
 const AUTO_IMPORT_ALARM = "money-import-auto";
 /**
+ * A visit does not start a sweep; it schedules one. The person who just opened their bank may
+ * be about to import by hand, and a sweep opening a second copy of the same bank in that moment
+ * put two connectors on one site at once -- the bank redirected one and the run failed with
+ * "did not stay on the operations page". One minute later, a manual run that has begun holds
+ * the session field and the sweep stands down; one that has not is not coming.
+ *
+ * A chrome.alarm rather than setTimeout because the service worker does not survive a minute
+ * idle. Creating an alarm with a name that already exists replaces it, so repeated navigations
+ * inside the bank keep pushing the deadline out: the sweep waits for the person to stop moving.
+ */
+const VISIT_SWEEP_ALARM_PREFIX = "money-import-visit:";
+const VISIT_SWEEP_DELAY_MINUTES = 1;
+/**
  * How often the alarm asks whether anything is due. The cooldown decides whether a run actually
  * happens, so this only has to be short enough that a machine awake for a few hours a day still
  * gets asked.
@@ -388,9 +402,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const session = await sessionStore.getSession();
     if (!session) {
       // A finished load on a bank page is the one moment the extension knows the person's bank
-      // session is live. It is a signal only: the sweep works in a tab of its own.
-      if (isComplete && matchesKnownMoneyImportSourcePageUrl(nextUrl)) {
-        await autoImportSweep.run("visit");
+      // session is live. It is a signal only -- for that bank, not for every bank the grant
+      // covers -- and the sweep it schedules works in a tab of its own.
+      if (isComplete) {
+        const visited = listMoneyImportSourceDefinitions().find((definition) =>
+          matchesMoneyImportSourcePageUrl(definition.sourceId, nextUrl),
+        );
+        if (visited && chrome.alarms?.create) {
+          await chrome.alarms.create(`${VISIT_SWEEP_ALARM_PREFIX}${visited.sourceId}`, {
+            delayInMinutes: VISIT_SWEEP_DELAY_MINUTES,
+          });
+        }
       }
       return;
     }
@@ -418,8 +440,14 @@ async function ensureAutoImportAlarm(): Promise<void> {
 if (chrome.alarms?.onAlarm) {
   void ensureAutoImportAlarm();
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name !== AUTO_IMPORT_ALARM) return;
-    void autoImportSweep.run("alarm");
+    if (alarm.name === AUTO_IMPORT_ALARM) {
+      void autoImportSweep.run("alarm");
+      return;
+    }
+    if (alarm.name.startsWith(VISIT_SWEEP_ALARM_PREFIX)) {
+      const sourceId = alarm.name.slice(VISIT_SWEEP_ALARM_PREFIX.length);
+      void autoImportSweep.run("visit", { sourceId });
+    }
   });
 }
 

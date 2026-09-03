@@ -290,4 +290,46 @@ describe("createAutoImportSweep", () => {
       ),
     ).toBe(true);
   });
+
+  it("sweeps only the bank that was visited", async () => {
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+    });
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    // Opening T-Bank says T-Bank's session is live. It says nothing about Alfa-Bank, and the
+    // first live run opened both -- which is what this pins down.
+    expect(harness.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
+    expect(harness.states["alfabank::person-1"]).toBeUndefined();
+  });
+
+  it("sweeps every covered bank on the alarm", async () => {
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+    });
+    await harness.sweep.run("alarm");
+
+    expect(harness.openedTabs).toHaveLength(2);
+  });
+
+  it("opens nothing for a visit to a bank the grant does not cover", async () => {
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+    });
+    await harness.sweep.run("visit", { sourceId: "alfabank" });
+
+    expect(harness.openedTabs).toEqual([]);
+  });
 });

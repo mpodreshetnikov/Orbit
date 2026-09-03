@@ -39,6 +39,15 @@ export interface AutoImportSweepDeps {
 
 export type AutoImportTrigger = "visit" | "alarm";
 
+export interface AutoImportRunOptions {
+  /**
+   * Restrict the sweep to one source. A visit to a bank is evidence that *that* bank's session
+   * is live and says nothing about any other -- so a visit sweeps the bank that was visited, and
+   * only the alarm sweeps everything. Without this, opening T-Bank opened Alfa-Bank too.
+   */
+  sourceId?: string;
+}
+
 /**
  * Whether the server refused the credential itself, rather than failing for any other reason.
  *
@@ -51,7 +60,7 @@ export function isCredentialRefusal(error: unknown): boolean {
 }
 
 export interface AutoImportSweep {
-  run: (trigger: AutoImportTrigger) => Promise<void>;
+  run: (trigger: AutoImportTrigger, options?: AutoImportRunOptions) => Promise<void>;
 }
 
 export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSweep {
@@ -133,7 +142,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
   }
 
   return {
-    async run(trigger) {
+    async run(trigger, options = {}) {
       if (inFlight) return;
       inFlight = true;
 
@@ -144,10 +153,14 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
         if (!grant) return;
 
         // A run the person started owns the session field and the bank's rate limits; a second
-        // one racing it would cost them both.
+        // one racing it would cost them both. For a visit this check is also what the grace period
+        // exists for: the sweep is deferred a minute after the page loads precisely so that a
+        // person who opened their bank in order to import by hand has started by the time this
+        // runs, and is found here.
         if (await deps.sessionStore.getSession()) return;
 
         for (const source of deps.listSources()) {
+          if (options.sourceId && source.sourceId !== options.sourceId) continue;
           // `parseIncomingGrant` refuses a grant that names no sources, so an empty list cannot
           // reach here -- and reading one as "every source" would be the wrong way to be wrong.
           if (!grant.allowed_sources.includes(source.sourceId)) continue;
