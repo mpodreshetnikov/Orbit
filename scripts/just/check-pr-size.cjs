@@ -42,7 +42,11 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+// PR_SIZE_REPO_ROOT exists for the tests: they build a repository with a known history and
+// measure it, instead of measuring whichever checkout happens to run them.
+const REPO_ROOT = process.env.PR_SIZE_REPO_ROOT
+  ? path.resolve(process.env.PR_SIZE_REPO_ROOT)
+  : path.resolve(__dirname, "..", "..");
 const ALLOWLIST_PATH = path.join(REPO_ROOT, ".large-change-allowlist");
 const BASE_REF_CANDIDATES = ["origin/main", "main"];
 const MAX_REVIEWABLE_ADDED_LINES = 1500;
