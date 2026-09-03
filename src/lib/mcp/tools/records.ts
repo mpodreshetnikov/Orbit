@@ -130,8 +130,15 @@ export function registerRecordTools(server: McpToolServer): void {
         delete record.ocr_text;
       }
 
+      const awaitingHere = conditions.filter(
+        (mention) => (mention as { awaiting_confirmation?: boolean }).awaiting_confirmation,
+      ).length;
+
       return ok(
-        `${record.title as string} (${record.record_type as string}${record.record_date ? `, ${record.record_date as string}` : ""}): ${observations.length} observation(s), ${findings.length} finding(s), ${conditions.length} diagnosis mention(s).`,
+        `${record.title as string} (${record.record_type as string}${record.record_date ? `, ${record.record_date as string}` : ""}): ${observations.length} observation(s), ${findings.length} finding(s), ${conditions.length} diagnosis mention(s).` +
+          (awaitingHere > 0
+            ? ` ${awaitingHere} of those mention(s) propose closing a condition and are not confirmed — they have NOT changed any condition's status.`
+            : ""),
         { record, observations, findings, conditions },
       );
     }),

@@ -102,7 +102,7 @@ export async function getCondition(
  * A derived boolean rather than a caller's inference, because the alternative is every consumer
  * re-deriving the rule from three columns and one of them getting it wrong.
  */
-function markUnconfirmedClosure(mention: Record<string, unknown>): Record<string, unknown> {
+export function markUnconfirmedClosure(mention: Record<string, unknown>): Record<string, unknown> {
   const awaiting = isUnverifiedClosure({
     status_in_record: String(mention.status_in_record ?? ""),
     is_llm_extracted: mention.is_llm_extracted === true,
