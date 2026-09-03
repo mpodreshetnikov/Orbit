@@ -340,16 +340,10 @@ export async function routeBackgroundMessage(
     if (!grant) return { ok: false, error: "Grant payload was rejected" };
 
     // The origin the grant names is where the extension will later open tabs -- the report,
-<<<<<<< HEAD
-    // the attention page. The page that sent the grant is the app, so the origin it names has
-    // to be its own: one it leaves out is filled in from the sender, one that differs is the
-    // page asking the extension to send the person somewhere else, and is refused.
-=======
     // and whatever else comes to be opened for the person. The page that sent the grant is the
     // app, so the origin it names has to be its own: one it leaves out is filled in from the
     // sender, one that differs is the page asking the extension to send the person somewhere
     // else, and is refused.
->>>>>>> claude/last-success-and-grant-origin
     const senderOrigin = resolveAppOrigin(context?.senderOrigin);
     if (senderOrigin) {
       if (!grant.app_origin) grant.app_origin = senderOrigin;
