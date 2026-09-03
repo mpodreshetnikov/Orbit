@@ -1,16 +1,16 @@
 ---
 name: pr-review-follow-through
-description: Finish a pull request and stop, instead of watching it forever or handing over a head nobody reviewed. Use after opening a PR, when an automated reviewer posts findings, when deciding whether to ask for another review after pushing more work, when asked to watch, monitor, babysit or autofix one, and whenever deciding whether to push or check again. The automated review arrives once on open; this defines when to request another, how to answer one, and what "done with this PR" means.
+description: Finish a pull request and stop, instead of watching it forever or handing over a head nobody reviewed. Use after opening a PR, when an automated reviewer posts findings, when deciding whether to ask for another review after pushing more work, when asked to watch, monitor, babysit or autofix one, and whenever deciding whether to push or check again. The automated review arrives once on open; this defines when to request another, how to answer one, and whether the session merges the PR itself or hands it over.
 ---
 
 # PR Review Follow-Through
 
-A pull request is finished work handed to a human, not a process to supervise. This skill says how
-to answer the reviewer, and when to stop.
+A pull request is a decision to take, not a process to supervise. This skill says how to answer the
+reviewer, how to reach that decision, and when to stop.
 
-Canonical policy — the round budget, the class rule, the reviewable size limit — is
-`docs/QUALITY.md` under **Automated Review Policy** and **Reviewable Change Size**. This is how to
-apply it.
+Canonical policy — the round budget, the class rule, the merge decision, the reviewable size limit
+— is `docs/QUALITY.md` under **Automated Review Policy** and **Reviewable Change Size**. This is how
+to apply it.
 
 ## The Review Arrives Once, On Open
 
@@ -50,15 +50,15 @@ docs, comments, formatting or test names, only a clean base merge, or when nothi
 since the watermark. A review of a change it has already seen returns findings you have already
 answered.
 
-### 3. Ask on a finished state, and at most twice
+### 3. Ask on a finished state, and at most three times
 
 Comment `@codex review` once the branch is in a state you would hand over: fixes batched, checks
 green. A review asked for mid-fix reads a half-answered branch and spends its pass saying so.
 
-**At most two requested reviews beyond the opening one.** After the second, hand the pull request
-to its owner with what is unreviewed and why another pass looked worthwhile. The budget is per pull
-request; rebasing and reopening do not reset it, and a request that returned no finding still spent
-one.
+**At most three requested reviews beyond the opening one.** Requesting one is the session's own
+call and needs no permission first. After the third, hand the pull request to its owner with what is
+unreviewed and why another pass looked worthwhile. The budget is per pull request; rebasing and
+reopening do not reset it, and a request that returned no finding still spent one.
 
 ## Answering A Review
 
@@ -85,18 +85,38 @@ These cost nothing and still close the finding:
 
 Resolve the threads you addressed either way.
 
+## Deciding The PR
+
+`docs/QUALITY.md` under **The merge decision** owns the three outcomes and their five conditions.
+What this skill adds is that the session reaches one of them in the turn the bar below is met, and
+that none of them is waiting:
+
+- **Merge** — press it, then run the acceptance review the registry's `task-registry` skill requires:
+  verify on the production surface, publish what was verified, hand the owner the guide for the rest.
+  The task stays `in-progress` until their verdict.
+- **Buy a review** — comment `@codex review`, say in one line what the doubt is, and end the turn.
+- **Hand over** — only on the stop list, or with the budget spent and the doubt unresolved.
+
+Confidence is a claim about evidence, not a mood. If condition 5 — what would break and how you would
+see it — cannot be answered in one sentence naming a check, a query, a log, a dashboard or a screen,
+the session is not sure, and the answer is another review rather than a merge.
+
+The push that answers a review is not a reason to wait for another one. `docs/QUALITY.md` settles
+this in condition 2: what blocks a merge is a gap that earns a pass, and the last review's findings
+fixed in place is on the list of gaps that do not.
+
 ## Done With This PR
 
-A PR is handed off when all four hold:
+A PR is decided when all four hold, and then one of the three outcomes is taken:
 
 1. **CI is green**, or the repository runs no check on it and you have said so.
 2. **Every finding is addressed** — fixed and pushed, or answered on its thread with why not — and
    the threads you addressed are resolved.
 3. **No merge conflict** against the base branch.
-4. **You have said what is left for a human**: review, approval, merge — and how many rounds the
-   pull request has spent.
+4. **You have said what is left for a human**: what the decision was, and — when it is theirs —
+   the merge, with how many rounds the pull request has spent.
 
-At that point say so once and stop. Do not schedule a check-in, do not re-read the PR "to be sure",
+At that point take the decision, say so once, and stop. Do not schedule a check-in, do not re-read the PR "to be sure",
 and do not send a status message that reports no change. Silence is the correct output of a PR that
 is waiting on somebody else.
 
@@ -128,10 +148,19 @@ Staying subscribed forever is its own kind of watching. So the subscription has 
 3. **An hour with nothing new ends the subscription.** Unsubscribe, say you have stopped watching,
    and leave the PR alone.
 
-After that the PR moves only on the owner's word. Their approval is what unblocks the merge, and the
-merge is theirs to make or to ask for explicitly — never merge a PR because it looks ready and has
-been quiet. Do not re-subscribe, re-check, or nudge on your own; if they pick it back up, they will
-say so, and that is the event.
+The quiet hour is what the merge decision waits on when the only thing missing is condition 2: the
+automated review has not posted yet. A quiet window is not a review that found nothing — #36 merged
+into that gap and put a `P1` into production for an hour.
+
+**When the hour passes and no review has posted at all**, the window has answered a different
+question: the reviewer did not run. Request one — `@codex review`, and it costs from the budget like
+any other. If that request is also unanswered by the next wake, or the reviewer has said it cannot
+run (a usage limit, no environment for the repository), hand the pull request over saying its head is
+unreviewed and why. That is the outcome; waiting another hour is not, and neither is merging on the
+silence. Once the review has landed and been
+answered, decide; if the decision was to hand over, the PR moves only on the owner's word. Do not
+re-subscribe, re-check, or nudge on your own; if they pick it back up, they will say so, and that is
+the event.
 
 The one scheduled wake-up this permits — the timer that ends the quiet hour — is bounded and
 terminal: its only job is to unsubscribe. It is not a check-in, it never re-arms itself, and it is
@@ -141,18 +170,22 @@ the only timer a finished PR may have.
 
 - Never push once per finding. One push answers the whole review.
 - Never hand over a branch whose head is unreviewed without saying so. Silence reads as reviewed.
-- Never request a review for a change the last one already saw, and never a third beyond the
+- Never request a review for a change the last one already saw, and never a fourth beyond the
   opening one without the owner asking.
 - Never fix only the field a finding names when the rule reaches further. The next round will find
   the rest, at full price.
 - Never poll a PR on a timer because it is open. Open and waiting is its normal state. The single
   timer that ends the quiet hour is not polling — it stops the watching rather than continuing it.
-- Never merge a PR that has gone quiet, however ready it looks. Quiet is not approval.
+- Never merge on quiet. Quiet is not one of the five conditions, and a review that has not posted
+  yet is not a review that found nothing.
+- Never merge anything on the stop list, however sure you are.
+- Never leave a merge unverified: a merge obliges the production check and the review guide that
+  follow it.
 - Never push an empty commit, or close and reopen a PR, to make CI or the reviewer run again.
 - Never re-request a review that nothing has changed for.
 - Never send a "no changes since last check" message. If nothing happened, nothing is worth saying.
-- Never treat a green PR awaiting human review as unfinished work of yours. It is finished work
-  waiting on somebody who is not you.
+- Never treat a green PR awaiting human review as unfinished work of yours, once the decision came
+  out as handing it over. It is finished work waiting on somebody who is not you.
 
 ## Final Report Contract
 
@@ -162,6 +195,8 @@ When handing off a PR, state:
 - `checks`: CI outcome, or that the repository runs none on this PR.
 - `review`: the reviewed commit, what has changed since it, whether another review was requested
   and why or why not, findings addressed, and anything deliberately not addressed with the reason.
+- `decision`: merged, another review bought, or handed over — and which condition or stop-list
+  surface decided it.
 - `waiting_on`: what a human has to do next.
 - `watching`: that the session stays subscribed until an hour of quiet passes, or that it has
   already unsubscribed and stopped.
