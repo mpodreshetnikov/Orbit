@@ -391,6 +391,23 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
+    # Serialised, because the production alias lands on whichever run finishes last rather than
+    # on the newest commit. On 2026-09-02 four merges a minute apart ran four deploys at once and
+    # the oldest finished last, so private-orbit.vercel.app served a build three merges behind
+    # main with every job green and nothing reporting it (T-260902-60d).
+    #
+    # Its own group, not one shared with deploy-supabase: GitHub holds at most one running and one
+    # pending job per group, so a shared group would let a newer run's Supabase job displace this
+    # run's pending Vercel job and the commit would never reach the alias at all.
+    #
+    # The group gives mutual exclusion, not ordering -- see the tip check in the steps below.
+    concurrency:
+      group: deploy-vercel-production
+      cancel-in-progress: false
+    # actions: read is for the tip check below, which reads the tip's own run and jobs.
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -398,16 +415,32 @@ jobs:
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
+      # The concurrency group above serialises these deploys but neither orders them nor keeps the
+      # newest one: a job joins the queue when its `needs` finish, and the single pending slot goes
+      # to the newest arrival, so an older push can arrive after a newer one, displace it, and be
+      # the only one left to run. So the run checks here, before it spends a build, whether it is
+      # still the tip of `main`; it stands down when a newer commit's own run will deploy, and
+      # fails naming that run when the newer commit's deploy was displaced and will not.
+      - name: Check this commit is still the tip of main
+        id: tip
+        uses: ./.github/actions/production-tip-check
+        with:
+          job: Deploy Vercel Production
       - uses: actions/setup-node@v4
+        if: steps.tip.outputs.deploy_sha != ''
         with:
           node-version: 22
       - name: Install Vercel CLI
+        if: steps.tip.outputs.deploy_sha != ''
         run: npm install --global vercel@latest
       - name: Pull Vercel Project Settings
+        if: steps.tip.outputs.deploy_sha != ''
         run: vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
       - name: Build Production Artifacts
+        if: steps.tip.outputs.deploy_sha != ''
         run: vercel build --prod --token="${VERCEL_TOKEN}"
       - name: Deploy Production
+        if: steps.tip.outputs.deploy_sha != ''
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
@@ -416,6 +449,28 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Supabase Production
     environment: production
+    # Serialised for a different reason than the Vercel job: two overlapping deploys replace the
+    # same pg_proc row and Phase 1 dies with `tuple concurrently updated`, which is what killed
+    # run 33585250551 (T-260902-60d).
+    #
+    # A global group is right here although it was wrong for publish-extension-release above. The
+    # hazard there is that a displaced pending run leaves a version unpublished for good; here
+    # each deploy applies the full desired state of its own commit, so a superseded commit's
+    # deploy being cancelled costs nothing -- the newer one that displaced it deploys everything
+    # the older one would have.
+    #
+    # What the group does not give is ordering, and the pending slot holds the newest *arrival*
+    # rather than the newest commit -- see the tip check in the steps below.
+    #
+    # cancel-in-progress stays false: cancelling a running deploy would kill psql partway through
+    # the phases, which is the state this task exists to stop production ending up in.
+    concurrency:
+      group: deploy-supabase-production
+      cancel-in-progress: false
+    # actions: read is for the tip check below, which reads the tip's own run and jobs.
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -423,7 +478,18 @@ jobs:
       DATABASE_URL: postgresql://postgres.${{ vars.SUPABASE_PROJECT_REF }}:${{ secrets.SUPABASE_DB_PASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
     steps:
       - uses: actions/checkout@v4
+      # Same reason as the Vercel job: the group serialises these deploys without ordering them or
+      # keeping the newest, so a push that reached `quality-gates` first can reach the deploy queue
+      # second and apply its migrations, functions, policies and version stamp over a newer
+      # commit's -- or displace the newer commit's pending deploy altogether. The check stands
+      # this run down when the tip's own run will deploy, and fails naming that run when it will not.
+      - name: Check this commit is still the tip of main
+        id: tip
+        uses: ./.github/actions/production-tip-check
+        with:
+          job: Deploy Supabase Production
       - uses: actions/setup-node@v4
+        if: steps.tip.outputs.deploy_sha != ''
         with:
           node-version: 22
       # `npm ci` rather than supabase/setup-cli. deploy-supabase.cjs runs `npx supabase`, and
@@ -435,6 +501,9 @@ jobs:
       # makes this job run the CLI version the repository records, the same one a developer's
       # `npx supabase` runs, and reaches GitHub for nothing (T-260903-ut8).
       - name: Install dependencies
+        if: steps.tip.outputs.deploy_sha != ''
         run: npm ci
       - uses: taiki-e/install-action@just
-      - run: just ci-deploy-supabase
+        if: steps.tip.outputs.deploy_sha != ''
+      - if: steps.tip.outputs.deploy_sha != ''
+        run: just ci-deploy-supabase

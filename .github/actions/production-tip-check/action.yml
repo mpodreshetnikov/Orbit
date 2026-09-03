@@ -1,0 +1,148 @@
+name: Production tip check
+description: >-
+  Decide whether this production job still deploys its own commit: yes while it is the tip of the
+  default branch; no once a newer commit has superseded it. When the newer commit's own deploy was
+  displaced from the concurrency group and will never run, fail loudly with the recovery.
+
+# Why this exists, and why the concurrency groups on the production deploy jobs are not enough.
+#
+# A `concurrency` group gives mutual exclusion: two production deploys never run at once. It does
+# not give ordering, and it does not preserve the newest commit. Two consequences, both found by
+# review on Orbit#73 (T-260902-60d):
+#
+#   1. A job joins its group when its `needs` finish, and `quality-gates` takes minutes longer for
+#      a DB-impacting commit than for a docs-only one, so a push made first can reach the group
+#      second and mutate production last -- production left on an older commit than `main`, every
+#      job green.
+#   2. The group holds one running and one pending job, and the pending slot is taken by the newest
+#      *arrival*, not the newest commit. An older, slower run arriving after a newer pending one
+#      replaces it; the newer run's deploy is cancelled and never happens.
+#
+# So each production job asks this immediately before it mutates anything:
+#
+#   - `main` is still at this run's commit: deploy it.
+#   - `main` has moved on and the tip's own run of this workflow is still running, has not started,
+#     or has already deployed: stand down, as a success. The tip is deployed by its own run, and a
+#     superseded commit has nothing to deploy that the tip will not.
+#   - `main` has moved on and the tip's own run has this job *cancelled* -- displaced by an older
+#     arrival, which is what this run is: fail, naming the run to re-run. Nothing else will deploy
+#     the tip until somebody does, or until the next merge, and a quiet stand-down here is exactly
+#     the "production behind main with every job green" this check exists to end.
+#
+# What this deliberately does not do is deploy the tip in this run's place. Review found two
+# holes in that: a run cancelled by hand to stop a rollout looks the same as one displaced by the
+# group, so substitution would override the veto; and the tip may have changed the deploy job
+# itself, which only its own run executes. Re-running the tip's run has neither problem.
+#
+# Failing to *determine* the tip or the tip's run state also fails the job: better red than a
+# mutation on an unverified assumption.
+
+inputs:
+  branch:
+    description: Branch whose tip the run is checked against.
+    required: false
+    default: main
+  workflow:
+    description: Workflow file whose push run on the tip is inspected.
+    required: false
+    default: main.yml
+  job:
+    description: The `name` of the calling job, to find its counterpart in the tip's run.
+    required: true
+  token:
+    description: A token granted `actions:read` on the repository.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  superseded:
+    description: '"true" when the default branch has moved past this run''s commit.'
+    value: ${{ steps.check.outputs.superseded }}
+  tip:
+    description: The commit the branch is currently at.
+    value: ${{ steps.check.outputs.tip }}
+  deploy_sha:
+    description: >-
+      This run's own commit when it is to be deployed, empty when the job must stand down; the
+      mutating step is gated on `!= ''`.
+    value: ${{ steps.check.outputs.deploy_sha }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.branch }}
+        WORKFLOW: ${{ inputs.workflow }}
+        JOB_NAME: ${{ inputs.job }}
+        RUN_SHA: ${{ github.sha }}
+        REPO: ${{ github.repository }}
+        API_URL: ${{ github.api_url }}
+        SERVER_URL: ${{ github.server_url }}
+      run: |
+        set -euo pipefail
+        git fetch --depth=1 origin "$BRANCH"
+        tip="$(git rev-parse FETCH_HEAD)"
+        echo "tip=${tip}" >> "$GITHUB_OUTPUT"
+
+        if [[ "$tip" == "$RUN_SHA" ]]; then
+          echo "superseded=false" >> "$GITHUB_OUTPUT"
+          echo "deploy_sha=${RUN_SHA}" >> "$GITHUB_OUTPUT"
+          echo "${BRANCH} is at ${tip}, the commit this run deploys." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        echo "superseded=true" >> "$GITHUB_OUTPUT"
+        echo "deploy_sha=" >> "$GITHUB_OUTPUT"
+
+        # What became of the tip's own run of this workflow? Read from the API rather than
+        # assumed. A failed request fails this step on purpose (curl -f under set -e).
+        api() {
+          curl -fsS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API_URL}/repos/${REPO}/$1"
+        }
+        runs_json="$(api "actions/workflows/${WORKFLOW}/runs?head_sha=${tip}&event=push&per_page=10")"
+        run_id="$(jq -r --arg branch "$BRANCH" \
+          '[.workflow_runs[] | select(.head_branch == $branch)] | sort_by(.run_number) | last | .id // empty' \
+          <<<"$runs_json")"
+
+        job_state="no run yet"
+        if [[ -n "$run_id" ]]; then
+          jobs_json="$(api "actions/runs/${run_id}/jobs?per_page=100")"
+          job_state="$(jq -r --arg name "$JOB_NAME" \
+            '[.jobs[] | select(.name == $name)] | last | if . == null then "no job yet" else (.conclusion // .status) end' \
+            <<<"$jobs_json")"
+        fi
+
+        if [[ "$job_state" == "cancelled" ]]; then
+          {
+            echo "### Failed: the tip's own deploy was displaced and will not run"
+            echo
+            echo "This run was started for \`${RUN_SHA}\`, but \`${BRANCH}\` is now at \`${tip}\`, and the tip's"
+            echo "own \`${JOB_NAME}\` job in run ${run_id} is cancelled -- displaced from the concurrency group's"
+            echo "pending slot by an older arrival, this run. Nothing deploys \`${tip}\` until somebody does:"
+            echo
+            echo "**Re-run run ${run_id}** (${SERVER_URL}/${REPO}/actions/runs/${run_id}), or merge the next"
+            echo "change. This run does not deploy the tip in its place: a run cancelled by hand to stop a"
+            echo "rollout looks the same from here, and the tip may have changed this very job."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=Tip deploy displaced::${BRANCH} is at ${tip}; its ${JOB_NAME} in run ${run_id} was cancelled. Re-run ${SERVER_URL}/${REPO}/actions/runs/${run_id} to deploy the tip."
+          exit 1
+        fi
+
+        {
+          echo "### Skipped: superseded commit"
+          echo
+          echo "This run was started for \`${RUN_SHA}\`, but \`${BRANCH}\` is now at \`${tip}\`, whose own"
+          echo "\`${JOB_NAME}\` is: ${job_state}${run_id:+ (run ${run_id})}."
+          echo "Production is not mutated: the tip's own run deploys it."
+          echo
+          echo "Re-running an older run reaches this too, and deliberately -- putting production back"
+          echo "on \`${BRANCH}\` means re-running the newest run, not an older one."
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "::notice title=Superseded commit::${BRANCH} is at ${tip} (its ${JOB_NAME}: ${job_state}); not deploying ${RUN_SHA}."
