@@ -37,6 +37,15 @@ const VIRTUAL_OVERSCAN = 6;
 const VIRTUAL_ROW_THRESHOLD = 40;
 const REPORT_GRID_COLUMNS = "grid-cols-[160px_110px_140px_120px_180px_minmax(300px,1fr)_120px]";
 
+/** The history screen translates the same enum; the report's summary line did not. */
+const BATCH_STATUS_KEYS: Record<string, string> = {
+  pending: "money.importBatchStatusPending",
+  running: "money.importBatchStatusRunning",
+  completed: "money.importBatchStatusCompleted",
+  failed: "money.importBatchStatusFailed",
+  discarded: "money.importBatchStatusDiscarded",
+};
+
 function normalizeId(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -264,7 +273,7 @@ export default function MoneyImportReportPage() {
 
   useEffect(() => {
     if (!batchId) {
-      setError("Batch id is missing");
+      setError(t("money.importReportBatchIdMissing"));
       setLoading(false);
       return;
     }
@@ -284,7 +293,7 @@ export default function MoneyImportReportPage() {
 
       if (batchError || !batchData) {
         if (!cancelled) {
-          setError(batchError?.message ?? "Batch not found");
+          setError(batchError?.message ?? t("money.importReportBatchNotFound"));
           setLoading(false);
         }
         return;
@@ -320,7 +329,7 @@ export default function MoneyImportReportPage() {
           setError(
             brandResolutionsResponse.error?.message ??
               brandsResponse.error?.message ??
-              "Load failed",
+              t("money.importReportLoadFailed"),
           );
           setLoading(false);
         }
@@ -374,7 +383,9 @@ export default function MoneyImportReportPage() {
         if (accountsResponse.error || cardsResponse.error) {
           if (!cancelled) {
             setError(
-              accountsResponse.error?.message ?? cardsResponse.error?.message ?? "Load failed",
+              accountsResponse.error?.message ??
+                cardsResponse.error?.message ??
+                t("money.importReportLoadFailed"),
             );
             setLoading(false);
           }
@@ -397,7 +408,7 @@ export default function MoneyImportReportPage() {
           const accountId = normalizeId((account as { id?: unknown }).id);
           if (!accountId) return;
           const label = normalizeId((account as { account_label?: unknown }).account_label);
-          nextAccountNameById[accountId] = label ?? "Account";
+          nextAccountNameById[accountId] = label ?? t("money.account");
         });
 
         const nextCardNameById: Record<string, string> = {};
@@ -424,7 +435,7 @@ export default function MoneyImportReportPage() {
               cardId,
               cardLabel,
               currentAccountId,
-              currentAccountLabel: nextAccountNameById[currentAccountId] ?? "Account",
+              currentAccountLabel: nextAccountNameById[currentAccountId] ?? t("money.account"),
               targetAccountId: currentAccountId,
             } satisfies CardMappingOption;
           })
@@ -446,7 +457,7 @@ export default function MoneyImportReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [batchId, refreshTick]);
+  }, [batchId, refreshTick, t]);
 
   useEffect(() => {
     const node = listRef.current;
@@ -494,14 +505,12 @@ export default function MoneyImportReportPage() {
     () => batch?.source === "tbank_web" && transactionsWithoutFullDetailsCount > 0,
     [batch?.source, transactionsWithoutFullDetailsCount],
   );
-  const transactionsWithoutFullDetailsLabel =
-    transactionsWithoutFullDetailsCount === 1 ? "transaction" : "transactions";
-  const transactionsWithoutFullDetailsVerb =
-    transactionsWithoutFullDetailsCount === 1 ? "was" : "were";
-  const receiptWarningMessage = `Warning: ${transactionsWithoutFullDetailsCount} TBank Web ${transactionsWithoutFullDetailsLabel} ${transactionsWithoutFullDetailsVerb} imported without full details because receipt line items were skipped due to TBank rate limiting. You can retry receipt enrichment later.`;
+  const receiptWarningMessage = t("money.importReportReceiptWarning", {
+    count: transactionsWithoutFullDetailsCount,
+  });
   const summaryWithoutFullDetails =
     transactionsWithoutFullDetailsCount > 0
-      ? `Transactions without full details: ${transactionsWithoutFullDetailsCount}`
+      ? t("money.importReportSummaryWithoutDetails", { value: transactionsWithoutFullDetailsCount })
       : null;
   const shouldVirtualize = visibleGroupedForFilter.length >= VIRTUAL_ROW_THRESHOLD;
 
@@ -605,13 +614,18 @@ export default function MoneyImportReportPage() {
     }));
   };
 
+  const batchStatusLabel = useMemo(() => {
+    const key = batch?.status ? BATCH_STATUS_KEYS[batch.status] : undefined;
+    return key ? t(key) : (batch?.status ?? "");
+  }, [batch?.status, t]);
+
   const accountLabelById = useMemo(() => {
     const map: Record<string, string> = {};
     sourceAccounts.forEach((account) => {
-      map[account.id] = normalizeId(account.account_label) ?? "Account";
+      map[account.id] = normalizeId(account.account_label) ?? t("money.account");
     });
     return map;
-  }, [sourceAccounts]);
+  }, [sourceAccounts, t]);
 
   const batchMeta = useMemo(() => asRecord(batch?.meta), [batch?.meta]);
   const rangeSelectionMeta = useMemo(() => asRecord(batchMeta.range_selection_meta), [batchMeta]);
@@ -658,7 +672,7 @@ export default function MoneyImportReportPage() {
           },
           accessToken,
         );
-        toast.success("Preview card mapping updated.");
+        toast.success(t("money.importReportToastCardMappingUpdated"));
       } else {
         const supabase = createClient();
         const { data, error: remapError } = await supabase.rpc("money_reassign_card_account", {
@@ -673,14 +687,14 @@ export default function MoneyImportReportPage() {
 
         toast.success(
           merged
-            ? `Card merged. Updated ${movedTransactionsCount} transactions.`
-            : `Card reassigned. Updated ${movedTransactionsCount} transactions.`,
+            ? t("money.importReportToastCardMerged", { count: movedTransactionsCount })
+            : t("money.importReportToastCardReassigned", { count: movedTransactionsCount }),
         );
       }
       setRefreshTick((current) => current + 1);
     } catch (remapError) {
       toast.error(
-        remapError instanceof Error ? remapError.message : "Failed to remap card to account",
+        remapError instanceof Error ? remapError.message : t("money.importReportRemapFailed"),
       );
     } finally {
       setRemapPendingCardId(null);
@@ -699,10 +713,12 @@ export default function MoneyImportReportPage() {
         },
         accessToken,
       );
-      toast.success("Batch applied.");
+      toast.success(t("money.importReportBatchApplied"));
       setRefreshTick((current) => current + 1);
     } catch (applyError) {
-      toast.error(applyError instanceof Error ? applyError.message : "Failed to apply batch");
+      toast.error(
+        applyError instanceof Error ? applyError.message : t("money.importReportApplyFailed"),
+      );
     } finally {
       setReviewActionPending(null);
     }
@@ -720,10 +736,12 @@ export default function MoneyImportReportPage() {
         },
         accessToken,
       );
-      toast.success("Batch marked as not applied.");
+      toast.success(t("money.importReportBatchDiscarded"));
       setRefreshTick((current) => current + 1);
     } catch (discardError) {
-      toast.error(discardError instanceof Error ? discardError.message : "Failed to discard batch");
+      toast.error(
+        discardError instanceof Error ? discardError.message : t("money.importReportDiscardFailed"),
+      );
     } finally {
       setReviewActionPending(null);
     }
@@ -767,7 +785,7 @@ export default function MoneyImportReportPage() {
       );
     } catch (saveError) {
       toast.error(
-        saveError instanceof Error ? saveError.message : "Failed to save brand resolution",
+        saveError instanceof Error ? saveError.message : t("money.importReportBrandSaveFailed"),
       );
     } finally {
       setBrandResolutionPendingId(null);
@@ -794,7 +812,7 @@ export default function MoneyImportReportPage() {
             {t("common.back")}
           </Link>
         </Button>
-        <p className="text-sm text-destructive">{error ?? "Unknown error"}</p>
+        <p className="text-sm text-destructive">{error ?? t("money.importReportUnknownError")}</p>
       </div>
     );
   }
@@ -826,18 +844,32 @@ export default function MoneyImportReportPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-          <div>{`Batch: ${batch.id}`}</div>
-          <div>{`Source: ${batch.source}`}</div>
-          <div>{`Status: ${batch.status}`}</div>
-          <div>{`Parsed rows: ${parsedRowCount}`}</div>
-          <div>{`Selected range: ${formatRangeSummary(batch.window_from, batch.window_to)}`}</div>
-          <div>{`Range mode: ${selectionMode ?? "-"}${presetKey ? ` (${presetKey})` : ""}`}</div>
-          <div>{`Imported / in range: ${inRangeRowCount}`}</div>
-          <div>{`Filtered out of range: ${filteredOutOfRangeCount}`}</div>
-          <div>{`Invalid date rows: ${filteredInvalidDateCount}`}</div>
+          <div>{t("money.importReportSummaryBatch", { value: batch.id })}</div>
+          <div>{t("money.importReportSummarySource", { value: batch.source })}</div>
+          <div>{t("money.importReportSummaryStatus", { value: batchStatusLabel })}</div>
+          <div>{t("money.importReportSummaryParsedRows", { value: parsedRowCount })}</div>
+          <div>
+            {t("money.importReportSummarySelectedRange", {
+              value: formatRangeSummary(batch.window_from, batch.window_to),
+            })}
+          </div>
+          <div>
+            {t("money.importReportSummaryRangeMode", {
+              value: `${selectionMode ?? "-"}${presetKey ? ` (${presetKey})` : ""}`,
+            })}
+          </div>
+          <div>{t("money.importReportSummaryInRange", { value: inRangeRowCount })}</div>
+          <div>{t("money.importReportSummaryOutOfRange", { value: filteredOutOfRangeCount })}</div>
+          <div>
+            {t("money.importReportSummaryInvalidDate", { value: filteredInvalidDateCount })}
+          </div>
           {summaryWithoutFullDetails && <div>{summaryWithoutFullDetails}</div>}
           {batch.completed_at && (
-            <div>{`Completed: ${format(new Date(batch.completed_at), "dd.MM.yyyy HH:mm")}`}</div>
+            <div>
+              {t("money.importReportSummaryCompleted", {
+                value: format(new Date(batch.completed_at), "dd.MM.yyyy HH:mm"),
+              })}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -874,12 +906,13 @@ export default function MoneyImportReportPage() {
       {isPendingReview && brandResolutions.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Brand review</CardTitle>
+            <CardTitle className="text-base">{t("money.importReportBrandReview")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {standardBrandResolutions.map((resolution) => {
               const suggestedBrandName = resolution.suggested_brand_id
-                ? (brandNameById[resolution.suggested_brand_id] ?? "Unknown brand")
+                ? (brandNameById[resolution.suggested_brand_id] ??
+                  t("money.importReportUnknownBrand"))
                 : null;
               return (
                 <div key={resolution.id} className="rounded-md border p-3">
@@ -889,14 +922,18 @@ export default function MoneyImportReportPage() {
                         // eslint-disable-next-line @next/next/no-img-element -- imported source brand logos are arbitrary remote URLs
                         <img
                           src={resolution.logo_url}
-                          alt={`${resolution.source_name} logo`}
+                          alt={t("money.importReportBrandLogoAlt", {
+                            name: resolution.source_name,
+                          })}
                           className="h-8 w-8 shrink-0 rounded object-contain"
                         />
                       ) : null}
                       <div>
                         <div className="font-medium">{resolution.source_name}</div>
                         <div className="text-xs text-muted-foreground">
-                          {`Confidence: ${resolution.suggested_confidence}`}
+                          {t("money.importReportBrandConfidence", {
+                            value: resolution.suggested_confidence,
+                          })}
                         </div>
                         {suggestedBrandName ? (
                           <div className="text-sm text-muted-foreground">{suggestedBrandName}</div>
@@ -927,8 +964,10 @@ export default function MoneyImportReportPage() {
                       }}
                       className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                     >
-                      <option value="create_new">Create new canonical brand</option>
-                      <option value="match_existing">Match existing canonical brand</option>
+                      <option value="create_new">{t("money.importReportBrandCreateNew")}</option>
+                      <option value="match_existing">
+                        {t("money.importReportBrandMatchExisting")}
+                      </option>
                     </select>
 
                     <select
@@ -947,7 +986,7 @@ export default function MoneyImportReportPage() {
                       }}
                       className="h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
                     >
-                      <option value="">Select canonical brand</option>
+                      <option value="">{t("money.importReportBrandSelect")}</option>
                       {brands.map((brand) => (
                         <option key={brand.id} value={brand.id}>
                           {brand.name}
@@ -967,7 +1006,11 @@ export default function MoneyImportReportPage() {
                   onClick={() => setShowNewBrandResolutions((current) => !current)}
                   aria-expanded={showNewBrandResolutions}
                 >
-                  <span>{`New Brands to review (${newBrandResolutions.length})`}</span>
+                  <span>
+                    {t("money.importReportNewBrandsToReview", {
+                      count: newBrandResolutions.length,
+                    })}
+                  </span>
                   {showNewBrandResolutions ? (
                     <ChevronDown className="h-4 w-4 text-muted-foreground" />
                   ) : (
@@ -979,7 +1022,8 @@ export default function MoneyImportReportPage() {
                   <div className="space-y-3 border-t px-3 py-3">
                     {newBrandResolutions.map((resolution) => {
                       const suggestedBrandName = resolution.suggested_brand_id
-                        ? (brandNameById[resolution.suggested_brand_id] ?? "Unknown brand")
+                        ? (brandNameById[resolution.suggested_brand_id] ??
+                          t("money.importReportUnknownBrand"))
                         : null;
                       return (
                         <div key={resolution.id} className="rounded-md border p-3">
@@ -989,14 +1033,18 @@ export default function MoneyImportReportPage() {
                                 // eslint-disable-next-line @next/next/no-img-element -- imported source brand logos are arbitrary remote URLs
                                 <img
                                   src={resolution.logo_url}
-                                  alt={`${resolution.source_name} logo`}
+                                  alt={t("money.importReportBrandLogoAlt", {
+                                    name: resolution.source_name,
+                                  })}
                                   className="h-8 w-8 shrink-0 rounded object-contain"
                                 />
                               ) : null}
                               <div>
                                 <div className="font-medium">{resolution.source_name}</div>
                                 <div className="text-xs text-muted-foreground">
-                                  {`Confidence: ${resolution.suggested_confidence}`}
+                                  {t("money.importReportBrandConfidence", {
+                                    value: resolution.suggested_confidence,
+                                  })}
                                 </div>
                                 {suggestedBrandName ? (
                                   <div className="text-sm text-muted-foreground">
@@ -1031,8 +1079,12 @@ export default function MoneyImportReportPage() {
                               }}
                               className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                             >
-                              <option value="create_new">Create new canonical brand</option>
-                              <option value="match_existing">Match existing canonical brand</option>
+                              <option value="create_new">
+                                {t("money.importReportBrandCreateNew")}
+                              </option>
+                              <option value="match_existing">
+                                {t("money.importReportBrandMatchExisting")}
+                              </option>
                             </select>
 
                             <select
@@ -1051,7 +1103,7 @@ export default function MoneyImportReportPage() {
                               }}
                               className="h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
                             >
-                              <option value="">Select canonical brand</option>
+                              <option value="">{t("money.importReportBrandSelect")}</option>
                               {brands.map((brand) => (
                                 <option key={brand.id} value={brand.id}>
                                   {brand.name}
@@ -1081,8 +1133,7 @@ export default function MoneyImportReportPage() {
       {hasDomFallbackWarning && (
         <Card className="border-amber-300 bg-amber-50">
           <CardContent className="p-4 text-sm text-amber-950">
-            Warning: some TBank Web transactions were imported using DOM fallback. Verify amounts,
-            merchants, and line items before trusting the result.
+            {t("money.importReportDomFallbackWarning")}
           </CardContent>
         </Card>
       )}
@@ -1096,7 +1147,7 @@ export default function MoneyImportReportPage() {
       {showCardMapping && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Card mapping</CardTitle>
+            <CardTitle className="text-base">{t("money.importReportCardMapping")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {cardMappings.map((mapping) => (
@@ -1106,7 +1157,7 @@ export default function MoneyImportReportPage() {
               >
                 <div className="text-sm font-medium">{mapping.cardLabel}</div>
                 <div className="text-sm text-muted-foreground">
-                  {`Current: ${mapping.currentAccountLabel}`}
+                  {t("money.importReportCurrentAccount", { value: mapping.currentAccountLabel })}
                 </div>
                 <select
                   data-testid={`card-remap-select-${mapping.cardId}`}
@@ -1125,7 +1176,7 @@ export default function MoneyImportReportPage() {
                 >
                   {sourceAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
-                      {accountLabelById[account.id] ?? "Account"}
+                      {accountLabelById[account.id] ?? t("money.account")}
                     </option>
                   ))}
                 </select>
@@ -1139,7 +1190,7 @@ export default function MoneyImportReportPage() {
                   }
                   onClick={() => void applyCardRemap(mapping.cardId)}
                 >
-                  {remapPendingCardId === mapping.cardId ? t("common.loading") : "Apply"}
+                  {remapPendingCardId === mapping.cardId ? t("common.loading") : t("common.apply")}
                 </Button>
               </div>
             ))}
@@ -1159,12 +1210,14 @@ export default function MoneyImportReportPage() {
               size="sm"
               onClick={() => setShowFilteredRows((current) => !current)}
             >
-              {showFilteredRows ? "Hide filtered rows" : "Show filtered rows"}
+              {showFilteredRows
+                ? t("money.importReportHideFilteredRows")
+                : t("money.importReportShowFilteredRows")}
             </Button>
           )}
 
           {visibleGroupedForFilter.length === 0 && (
-            <p className="text-sm text-muted-foreground">No rows imported for this batch.</p>
+            <p className="text-sm text-muted-foreground">{t("money.importReportNoRows")}</p>
           )}
 
           {grouped.length > 0 && (
@@ -1173,13 +1226,13 @@ export default function MoneyImportReportPage() {
                 className={`grid min-w-[1130px] ${REPORT_GRID_COLUMNS} items-center gap-x-3 border-b bg-muted/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground`}
                 data-testid="report-table-header-row"
               >
-                <div>Date</div>
-                <div className="text-center">Status</div>
-                <div className="text-right">Amount</div>
-                <div className="text-right">Cashback</div>
-                <div>Card</div>
-                <div>Details</div>
-                <div className="text-right">Line items</div>
+                <div>{t("money.importReportColumnDate")}</div>
+                <div className="text-center">{t("money.importReportColumnStatus")}</div>
+                <div className="text-right">{t("money.importReportColumnAmount")}</div>
+                <div className="text-right">{t("money.importReportColumnCashback")}</div>
+                <div>{t("money.importReportColumnCard")}</div>
+                <div>{t("money.importReportColumnDetails")}</div>
+                <div className="text-right">{t("money.importReportColumnLineItems")}</div>
               </div>
 
               <div
@@ -1210,7 +1263,9 @@ export default function MoneyImportReportPage() {
                   const receiptEnrichmentStatus = readReceiptEnrichmentStatus(tx);
                   const hasReceiptSkipped = hasReceiptSkippedMarker(tx);
                   const isExpanded = Boolean(expandedTxIds[tx.id]);
-                  const lineItemsLabel = `Line items (${lines.length})`;
+                  const lineItemsLabel = t("money.importReportLineItemsCount", {
+                    count: lines.length,
+                  });
                   const rowTone = index % 2 === 0 ? "bg-background" : "bg-muted/10";
 
                   return (
@@ -1288,8 +1343,8 @@ export default function MoneyImportReportPage() {
                               >
                                 {receiptEnrichmentStatus === "rate_limited" ||
                                 receiptEnrichmentStatus === "skipped_after_budget"
-                                  ? "Receipt line items skipped (rate limited)"
-                                  : "Receipt line items skipped"}
+                                  ? t("money.importReportReceiptSkippedRateLimited")
+                                  : t("money.importReportReceiptSkipped")}
                               </Badge>
                             </div>
                           ) : null}
@@ -1303,7 +1358,12 @@ export default function MoneyImportReportPage() {
                               size="sm"
                               className="h-7 px-2 text-xs"
                               onClick={() =>
-                                openPayloadJson(`Transaction payload: ${merchant}`, payload)
+                                openPayloadJson(
+                                  t("money.importReportTransactionPayloadTitle", {
+                                    name: merchant,
+                                  }),
+                                  payload,
+                                )
                               }
                             >
                               JSON
@@ -1340,7 +1400,7 @@ export default function MoneyImportReportPage() {
                               const lineTitle =
                                 typeof linePayload.title === "string" && linePayload.title.trim()
                                   ? linePayload.title.trim()
-                                  : "Line item";
+                                  : t("money.importReportLineItemUntitled");
                               const lineComment =
                                 typeof linePayload.comment === "string" &&
                                 linePayload.comment.trim()
@@ -1359,7 +1419,9 @@ export default function MoneyImportReportPage() {
                                     lineIndex % 2 === 0 ? "bg-background" : "bg-muted/20"
                                   }`}
                                 >
-                                  <div className="text-xs font-medium text-muted-foreground">{`Line ${lineNumber}`}</div>
+                                  <div className="text-xs font-medium text-muted-foreground">
+                                    {t("money.importReportLineNumber", { number: lineNumber })}
+                                  </div>
 
                                   <div className="flex justify-center">
                                     <RowStatusBadge status={line.status} t={t} />
@@ -1415,7 +1477,12 @@ export default function MoneyImportReportPage() {
                                       size="sm"
                                       className="h-7 px-2 text-xs"
                                       onClick={() =>
-                                        openPayloadJson(`Line payload: ${lineTitle}`, linePayload)
+                                        openPayloadJson(
+                                          t("money.importReportLinePayloadTitle", {
+                                            name: lineTitle,
+                                          }),
+                                          linePayload,
+                                        )
                                       }
                                     >
                                       JSON
@@ -1447,7 +1514,7 @@ export default function MoneyImportReportPage() {
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>{lineJsonModal.title}</DialogTitle>
-            <DialogDescription>Import payload JSON</DialogDescription>
+            <DialogDescription>{t("money.importReportPayloadJson")}</DialogDescription>
           </DialogHeader>
           <pre className="max-h-[70vh] overflow-auto rounded border bg-muted/40 p-3 text-xs">
             {lineJsonModal.json}

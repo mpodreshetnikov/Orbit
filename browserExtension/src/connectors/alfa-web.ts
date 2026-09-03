@@ -1,4 +1,5 @@
 import { registerConnector } from "./registry.js";
+import { isPathUnder } from "../core/page-url.js";
 import type { Connector, ConnectorParseInput, ConnectorParseOutput } from "./types.js";
 
 const HISTORY_PAGE_URL = "https://web.alfabank.ru/history/";
@@ -155,6 +156,7 @@ registerConnector(connector);
 export default connector;
 
 export const __test__ = {
+  isHistoryPageUrl,
   detectBlockedReasonFromPageState,
   extractOperationsInPage,
   mapOperationRecordToRow,
@@ -239,8 +241,9 @@ function isAlfaUrl(url: unknown): url is string {
 function isHistoryPageUrl(url: unknown): boolean {
   if (!isAlfaUrl(url)) return false;
   try {
-    const pathname = new URL(url).pathname;
-    return pathname === "/history" || pathname === "/history/";
+    // Same class as T-Bank's operations page: the history is wherever the bank serves it under
+    // this prefix, not only at the address the connector navigated to.
+    return isPathUnder(new URL(url).pathname, new URL(HISTORY_PAGE_URL).pathname);
   } catch {
     return false;
   }

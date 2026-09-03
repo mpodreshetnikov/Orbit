@@ -110,6 +110,7 @@ function App() {
         }
       })(),
       default_account_id: params.get("default_account_id") || null,
+      locale: params.get("locale") || null,
     };
     await sendMessage({ type: "MONEY_IMPORT_START_SESSION", session });
   }, []);

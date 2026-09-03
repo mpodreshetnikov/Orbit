@@ -36,6 +36,7 @@ describe("background-router", () => {
       autoRunStore: {
         getState: vi.fn(async () => createInitialAutoRunState()),
         setState: vi.fn(async () => {}),
+        forgiveFailures: vi.fn(async () => 0),
       },
       debugStore: createImportDebugStore(),
     };
