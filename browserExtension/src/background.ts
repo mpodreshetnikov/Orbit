@@ -437,6 +437,22 @@ async function ensureAutoImportAlarm(): Promise<void> {
   });
 }
 
+/**
+ * A new version is the one moment the extension has reason to believe a failed run might
+ * succeed now. The backoff cannot tell a signed-out bank from a connector that was broken, and
+ * kept a fixed connector silent for the rest of the day after the fix was installed.
+ */
+chrome.runtime.onInstalled?.addListener((details) => {
+  if (details.reason !== "update") return;
+  void autoRunStore.forgiveFailures().then((forgiven) => {
+    if (forgiven === 0) return;
+    telemetry.info("money_import_auto_failures_forgiven", {
+      scopes: forgiven,
+      previous_version: details.previousVersion ?? null,
+    });
+  });
+});
+
 if (chrome.alarms?.onAlarm) {
   void ensureAutoImportAlarm();
   chrome.alarms.onAlarm.addListener((alarm) => {
