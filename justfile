@@ -216,6 +216,10 @@ quality-db-lint:
 quality-db-test:
   npx supabase test db --local supabase/tests
 
+# Claim a task in the linked registry and arm this checkout's .git/current-task marker for the editor hook.
+tasks-claim id *options:
+  node scripts/just/tasks-claim-here.cjs "{{ id }}" {{ options }}
+
 # Start local Supabase stack. Through the retry runner: the CLI's readiness probe reaches the
 # API gateway before the edge runtime is listening and calls the resulting 502 fatal, which fails
 # this lane roughly six times in ten. Only that signature is retried — see T-260829-hhj.
