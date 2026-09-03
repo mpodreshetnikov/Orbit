@@ -51,6 +51,8 @@ interface MapOperationRecordOptions {
 const connector: Connector = {
   sourceId: "alfa_web",
   displayName: "Alfa Bank Web",
+  // Receipts are read the one way; a session that asks for `full` gets the same parse.
+  parseStrategies: ["fast"],
   async parse({
     windowFrom,
     windowTo,

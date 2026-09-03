@@ -154,7 +154,16 @@ function buildPreviewResetMeta(
   const incomingRangeSelectionMeta = asRecord(incomingMeta?.range_selection_meta);
   const existingRangeSelectionMeta = asRecord(existingMeta?.range_selection_meta);
 
+  // Counters start over with the preview; what describes the batch itself does not. The
+  // strategy and the unattended mark are set once, at create_session, and the final chunk
+  // reads the mark to decide whether anyone is coming back to apply this batch.
+  const kept: Record<string, unknown> = {};
+  for (const key of ["parse_strategy", "unattended"] as const) {
+    if (existingMeta && key in existingMeta) kept[key] = existingMeta[key];
+  }
+
   return {
+    ...kept,
     range_selection_meta: incomingRangeSelectionMeta ?? existingRangeSelectionMeta ?? null,
   };
 }

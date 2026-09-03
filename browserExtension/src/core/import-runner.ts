@@ -1,4 +1,8 @@
-import type { Connector, ConnectorParseDebugSummary } from "../connectors/types.js";
+import type {
+  Connector,
+  ConnectorParseDebugSummary,
+  ConnectorParseStrategy,
+} from "../connectors/types.js";
 import {
   planBackfillSlice,
   planIncrementalWindow,
@@ -549,6 +553,22 @@ async function clearOwnSession(
  * request. Separate sessions also read better on the import history screen, where the catch-up
  * and the history slice show up as the two different things they are.
  */
+/** Receipt strategy for a run nobody is watching: slower, and complete. */
+const UNATTENDED_PARSE_STRATEGY: ConnectorParseStrategy = "full";
+
+/**
+ * The strategy an unattended run states for this connector: the slow, complete one where the
+ * connector tells strategies apart, nothing where it does not. Stating `full` to a connector
+ * that ignores it changed nothing about the parse and everything about the session -- the
+ * server pays a full parse with a four-hour token, and Alfa's sweep was collecting one for a
+ * fifteen-minute run.
+ */
+function unattendedParseStrategy(connector: Connector | null): ConnectorParseStrategy | null {
+  return connector?.parseStrategies?.includes(UNATTENDED_PARSE_STRATEGY)
+    ? UNATTENDED_PARSE_STRATEGY
+    : null;
+}
+
 export async function runScheduledImport(
   input: ScheduledImportInput,
   deps: ImportRunnerDeps & { backfillStore: BackfillStore; sessionStore: SessionStore },
@@ -558,6 +578,11 @@ export async function runScheduledImport(
   if (!token) throw new Error("No credentials available for a scheduled import");
 
   const windowDebug: ImportRunnerDebugConfig = { ...(debug ?? {}), tabId: input.tabId };
+  // Nobody is waiting on this tab, so it pays the bank's rate limit with time instead of with
+  // receipts. The fast strategy shares one retry budget across the run and skips every receipt
+  // after it is spent: the first live run lost 45 of 177 that way.
+  const parseStrategy = unattendedParseStrategy(deps.getConnector(input.sourceId));
+  const parseStrategyFields = parseStrategy ? { parse_strategy: parseStrategy } : {};
 
   const runWindow = async (window: BackfillSlice): Promise<ScheduledImportRunResult> => {
     const created = await deps.callEdge(input.functionUrl, token, {
@@ -566,6 +591,11 @@ export async function runScheduledImport(
       payer_person_id: input.payerPersonId,
       window_from: window.windowFromIso,
       window_to: window.windowToIso,
+      meta: {
+        ...parseStrategyFields,
+        // Kept on the batch, so the history screen can say which imports nobody started.
+        unattended: true,
+      },
     });
 
     const session: Record<string, unknown> = {
@@ -583,6 +613,8 @@ export async function runScheduledImport(
       // through to today -- the difference between a bounded walk and one that grows every run.
       window_from: window.windowFromIso,
       window_to: window.windowToIso,
+      // Stated here as well, for a server that does not echo it.
+      ...parseStrategyFields,
       // The app navigates to the report on MONEY_IMPORT_DONE. That is right for a run someone
       // started and wrong for one they did not: it would take a person off whatever they were
       // doing -- including a manual import in progress -- and onto a report for a run they never
