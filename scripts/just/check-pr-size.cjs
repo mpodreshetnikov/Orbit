@@ -367,8 +367,15 @@ function readAllowlist() {
 /** The branch pull requests merge into; a push to it is a pull request that already merged. */
 const DEFAULT_BRANCH = "main";
 
-function isDefaultBranch(branch) {
-  return branch === DEFAULT_BRANCH;
+/**
+ * Whether this run is CI on a push to the default branch, from the variables Actions sets
+ * itself (never from PR_SIZE_BRANCH: a pull request from a fork can name its head branch
+ * `main`, and the pre-push hook sees the local branch name, not where the push is going).
+ *
+ * @param {Readonly<Record<string, string | undefined>>} env
+ */
+function isPushToDefaultBranch(env) {
+  return env.GITHUB_EVENT_NAME === "push" && env.GITHUB_REF === `refs/heads/${DEFAULT_BRANCH}`;
 }
 
 function resolveBranch(explicitBranch) {
@@ -469,10 +476,10 @@ function main() {
   // pull request that has merged: there is nothing left to re-cut, and a merge commit measured
   // against the commit before it is the whole pull request again, this time with no branch
   // name for an allowlist entry to match. The gate had its say on the pull request.
-  if (isDefaultBranch(branch)) {
+  if (isPushToDefaultBranch(process.env)) {
     if (!advisory) {
       console.log(
-        `PR size check skipped: '${branch}' carries what was merged; the gate judges pull requests.`,
+        `PR size check skipped: '${DEFAULT_BRANCH}' carries what was merged; the gate judges pull requests.`,
       );
     }
     return 0;
@@ -552,7 +559,7 @@ if (require.main === module) {
 
 module.exports = {
   DEFAULT_BRANCH,
-  isDefaultBranch,
+  isPushToDefaultBranch,
   MAX_REVIEWABLE_ADDED_LINES,
   WARNING_FRACTION,
   ZERO_SHA,
