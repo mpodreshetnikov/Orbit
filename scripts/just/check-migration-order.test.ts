@@ -308,6 +308,36 @@ describe("landing order", () => {
     ).toEqual([]);
   });
 
+  it("holds this change's own migrations back to the pending batch, however they were committed", () => {
+    // A branch that committed a newer migration and then an older one. History says they landed
+    // apart; the merge commit brings them in together, to be applied in filename order.
+    expect(
+      misorderedInTree({
+        headFiles: [
+          "20260902000000_base.sql",
+          "20260904000000_newer.sql",
+          "20260903000000_older.sql",
+        ],
+        landingOrder: [
+          ["20260902000000_base.sql"],
+          ["20260904000000_newer.sql"],
+          ["20260903000000_older.sql"],
+        ],
+        pending: ["20260904000000_newer.sql", "20260903000000_older.sql"],
+      }),
+    ).toEqual([]);
+  });
+
+  it("still judges this change's migrations against what the base already has", () => {
+    expect(
+      misorderedInTree({
+        headFiles: ["20260902000000_base.sql", "20260901000000_mine.sql"],
+        landingOrder: [["20260902000000_base.sql"]],
+        pending: ["20260901000000_mine.sql"],
+      }),
+    ).toEqual([{ file: "20260901000000_mine.sql", landsAfter: "20260902000000" }]);
+  });
+
   it("puts a file that has not landed yet last, where merging would put it", () => {
     expect(
       misorderedInTree({

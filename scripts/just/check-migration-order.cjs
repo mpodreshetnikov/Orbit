@@ -167,18 +167,29 @@ function parseLandingOrder(output) {
 /**
  * Which files in the tree land after a version later than their own was already there.
  *
- * Files present in the tree but absent from the recorded landing order have not landed yet -- they
- * are this change's additions, committed or not -- so they form the final batch, which is where
- * merging would put them.
+ * `pending` is what this change contributes -- the migrations the base branch does not have. They
+ * are held out of the historical batches even when history already shows them landing, and form the
+ * final batch together, which is where merging puts them. Without that, a branch that committed a
+ * newer migration and then an older one would fail locally while its own merge commit -- which
+ * brings both in at once, to be applied in filename order -- passes, and a verdict that disagrees
+ * with itself is worse than either answer.
  *
- * @param {{ headFiles: string[], landingOrder: string[][] }} input
+ * @param {{ headFiles: string[], landingOrder: string[][], pending?: string[] }} input
  * @returns {{ file: string, landsAfter: string }[]}
  */
-function misorderedInTree({ headFiles, landingOrder }) {
+function misorderedInTree({ headFiles, landingOrder, pending = [] }) {
   const present = new Set(migrationsOnly(headFiles));
   const landed = new Set(landingOrder.flat());
-  const pending = [...present].filter((fileName) => !landed.has(fileName)).sort();
-  const batches = [...landingOrder.map((batch) => batch.filter((f) => present.has(f))), pending];
+  const contributed = new Set([
+    ...migrationsOnly(pending),
+    ...[...present].filter((fileName) => !landed.has(fileName)),
+  ]);
+  const batches = [
+    ...landingOrder.map((batch) =>
+      batch.filter((fileName) => present.has(fileName) && !contributed.has(fileName)),
+    ),
+    [...contributed].filter((fileName) => present.has(fileName)).sort(),
+  ];
 
   const misordered = [];
   let highest = null;
@@ -273,7 +284,7 @@ function evaluateMigrationOrder({
           ? []
           : added.filter((fileName) => String(versionOf(fileName)) <= String(latestBaseVersion))
         ).map((fileName) => ({ file: fileName, landsAfter: String(latestBaseVersion) }))
-      : misorderedInTree({ headFiles, landingOrder });
+      : misorderedInTree({ headFiles, landingOrder, pending: added });
 
   const judged = outOfOrder
     .filter((entry) => !duplicateNames.has(entry.file))
