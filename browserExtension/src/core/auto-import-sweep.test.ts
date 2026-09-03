@@ -66,6 +66,7 @@ function createHarness(
       setState: async (scope, state) => {
         states[`${scope.sourceId}::${scope.payerPersonId}`] = state;
       },
+      forgiveFailures: async () => 0,
     },
     openTab,
     waitForTabComplete: overrides.waitForTabComplete ?? vi.fn(async () => true),
