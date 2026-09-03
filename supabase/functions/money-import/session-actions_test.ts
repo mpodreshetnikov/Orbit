@@ -411,6 +411,29 @@ Deno.test("completeSessionAction validates ownership for user auth", async () =>
   assertEquals(payload.error, "Session not found");
 });
 
+Deno.test("completeSessionAction does not fail a batch that has already been applied", async () => {
+  const { repository, state } = createRepositoryMock({
+    sessionForUser: { id: "session-1", batch_id: "batch-1" },
+    batchById: { id: "batch-1", status: "completed" },
+  });
+
+  await assertJsonResponse(
+    await completeSessionAction({ session_id: "session-1", status: "failed" }, userAuth, {
+      repository,
+      now: () => new Date("2026-01-01T10:00:00.000Z"),
+    }),
+    200,
+  );
+
+  // The session is closed as asked; the batch keeps its result and only gains a timestamp.
+  const batchUpdates = state.batchUpdates.map((update) => update.patch);
+  assertEquals(
+    batchUpdates.some((patch) => patch.status === "failed"),
+    false,
+  );
+  assertEquals(batchUpdates.at(-1)?.completed_at, "2026-01-01T10:00:00.000Z");
+});
+
 Deno.test("completeSessionAction updates session and leaves pending batch untouched", async () => {
   const { repository, state } = createRepositoryMock({
     sessionForUser: {

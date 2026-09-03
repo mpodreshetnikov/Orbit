@@ -51,9 +51,9 @@ export async function applyBatchAction(
   auth: AuthContext,
   deps: ApplyBatchDeps,
 ): Promise<Response> {
-  const actionSpan = deps.telemetry?.startSpan("edge.money_import.apply_batch");
   const batchId = normalizeText(body.batch_id);
   if (!batchId) {
+    const actionSpan = deps.telemetry?.startSpan("edge.money_import.apply_batch");
     await actionSpan?.end({
       status: "error",
       statusMessage: "batch_id is required",
@@ -62,6 +62,7 @@ export async function applyBatchAction(
   }
 
   if (auth.mode !== "user") {
+    const actionSpan = deps.telemetry?.startSpan("edge.money_import.apply_batch");
     await actionSpan?.end({
       status: "error",
       statusMessage: "Unauthorized",
@@ -69,6 +70,20 @@ export async function applyBatchAction(
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
+  return await applyPendingBatch(batchId, deps);
+}
+
+/**
+ * Replays a pending batch's preview rows into final rows, with the decisions the preview
+ * suggested wherever nobody chose otherwise.
+ *
+ * Two callers: a person's "Apply" on the report (through `applyBatchAction`, which checks
+ * that the caller is a signed-in user), and the final preview chunk of an unattended run,
+ * where the server applies on its own -- an import nobody started is an import nobody would
+ * come back to apply. The batch itself, not the caller, says which it is.
+ */
+export async function applyPendingBatch(batchId: string, deps: ApplyBatchDeps): Promise<Response> {
+  const actionSpan = deps.telemetry?.startSpan("edge.money_import.apply_batch");
   const batch = await deps.repository.getImportBatch(batchId);
   if (!batch) {
     await actionSpan?.end({
@@ -444,8 +459,12 @@ export async function applyBatchAction(
           .sort()[0] ?? null)
       : null);
   if (parsedThrough) patch.parsed_through_at = parsedThrough;
-  if (toIsoOrNull(batch.window_from)) patch.window_from = toIsoOrNull(batch.window_from);
-  if (toIsoOrNull(batch.window_to)) patch.window_to = toIsoOrNull(batch.window_to);
+  if (toIsoOrNull(batch.window_from)) {
+    patch.window_from = toIsoOrNull(batch.window_from);
+  }
+  if (toIsoOrNull(batch.window_to)) {
+    patch.window_to = toIsoOrNull(batch.window_to);
+  }
 
   await deps.repository.updateImportBatch(batchId, patch);
   deps.telemetry?.info("money_import_apply_batch_completed", {

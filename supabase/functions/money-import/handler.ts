@@ -2,7 +2,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { createEdgeRequestContext, createEdgeTelemetry } from "../_shared/observability.ts";
 import { type MoneyImportAuthDeps, resolveAuth } from "./auth.ts";
 import { applyRowsAction } from "./apply-rows.ts";
-import { applyBatchAction } from "./apply-batch.ts";
+import { applyBatchAction, applyPendingBatch } from "./apply-batch.ts";
 import { createDefaultMoneyImportDeps, type MoneyImportDeps } from "./deps.ts";
 import { discardBatchAction } from "./discard-batch.ts";
 import { getExistingTransactionStatesAction } from "./existing-transaction-states.ts";
@@ -21,7 +21,9 @@ import type { GrantAuthContext, SessionAuthContext, UserAuthContext } from "./ty
 export interface MoneyImportHandlerDeps extends MoneyImportDeps {}
 
 function asBody(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object") return value as Record<string, unknown>;
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
   return {};
 }
 
@@ -98,7 +100,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           { ...authDeps, getGrantByToken: deps.repository.getGrantByToken },
           { allowUser: true, allowSession: false, allowGrant: true },
         )) as UserAuthContext | GrantAuthContext;
-        const response = await createSessionAction(body, auth, { ...deps, telemetry });
+        const response = await createSessionAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -173,7 +178,11 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
       if (action === "preview_rows") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.preview_rows");
         const auth = await resolveAuth(req, authDeps, { allowUser: true, allowSession: true });
-        const response = await previewRowsAction(body, auth, { ...deps, telemetry });
+        const response = await previewRowsAction(body, auth, {
+          ...deps,
+          telemetry,
+          applyPendingBatch: (batchId) => applyPendingBatch(batchId, { ...deps, telemetry }),
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",

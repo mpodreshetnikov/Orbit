@@ -847,3 +847,65 @@ Deno.test("money-import handler lets a session token run the receipt preflight",
   // The session's own import, whatever the body named.
   assertEquals(askedFor, { source: "tbank_web", payerPersonId: "person-1" });
 });
+
+Deno.test(
+  "money-import handler applies an unattended batch on its final preview chunk",
+  async () => {
+    // The wiring, not the action. `previewRowsAction` applies through a dependency it is handed,
+    // and the handler is the one place in production that hands it one; a unit test with an
+    // injected dependency cannot see that line missing. A run nobody started sends its rows on the
+    // session token, and when the batch carries the extension's mark, the same request ends with
+    // the batch applied.
+    let batchStatus = "running";
+    let batchMeta: Record<string, unknown> | null = { parse_strategy: "full", unattended: true };
+    const handler = createMoneyImportHandler({
+      repository: {
+        ...createRepositoryMock({
+          sessionByToken: {
+            id: "session-1",
+            batch_id: "batch-1",
+            source: "tbank_web",
+            payer_person_id: "person-1",
+            status: "running",
+            revoked_at: null,
+            expires_at: "2999-01-01T00:00:00.000Z",
+            meta: { parse_strategy: "full", unattended: true },
+          },
+        }),
+        getImportBatch: async () => ({
+          id: "batch-1",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          import_type: "file",
+          parsed_transactions_count: 0,
+          inserted_count: 0,
+          skipped_count: 0,
+          error_count: 0,
+          parsed_through_at: null,
+          status: batchStatus,
+          meta: batchMeta,
+        }),
+        updateImportBatch: async (_batchId, patch) => {
+          if (typeof patch.status === "string") batchStatus = patch.status;
+          if (patch.meta !== undefined) batchMeta = patch.meta as Record<string, unknown> | null;
+        },
+      },
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{ inserted: number; auto_applied: boolean }>(
+      await handler(
+        sessionTokenRequest("preview_rows", {
+          rows: [
+            { posted_at: "2026-01-01T00:00:00.000Z", amount: 10, transaction_type: "expense" },
+          ],
+        }),
+      ),
+      200,
+    );
+    assertEquals(payload.inserted, 1);
+    assertEquals(payload.auto_applied, true);
+    // Nobody pressed Apply; the batch is applied all the same.
+    assertEquals(batchStatus, "completed");
+  },
+);
