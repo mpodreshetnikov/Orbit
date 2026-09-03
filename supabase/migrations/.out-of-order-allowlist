@@ -1,0 +1,10 @@
+# Migrations applied against a schema newer than their own timestamp, and why each was safe.
+#
+# `quality-migration-order` refuses a migration that does not sort after the base branch's latest.
+# The ordinary fix is to rename the file, and it is only available while nothing has applied that
+# version: once production's `supabase_migrations.schema_migrations` records it, the version is
+# permanent and a rename would present the same change as unapplied and run it again under a new
+# key. An entry here is what remains for those, and it is a record rather than a permission — the
+# rationale is the point, and the checker refuses a line without one.
+
+20260901150000 # condition_record_resolution_review; applied to production 2026-09-02 after 20260902060000 was already there. Fully additive and idempotent (ADD COLUMN IF NOT EXISTS, constraint guarded on duplicate_object, CREATE INDEX IF NOT EXISTS), touches only condition_records, and no later migration reads or alters what it adds, so applying it against the newer schema changed nothing that applying it in order would not have. Verified against the live history rather than assumed. It reached production because the gate compares only the migrations a push adds, and by the push that deployed it the file was no longer new -- see T-260902-1ui.
