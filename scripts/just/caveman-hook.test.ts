@@ -44,7 +44,7 @@ describe("what the hook writes to stdout", () => {
     const payload = JSON.parse(result.stdout);
     expect(payload.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(payload.hookSpecificOutput.additionalContext).toContain("caveman");
-    expect(payload.hookSpecificOutput.additionalContext).toContain("full");
+    expect(payload.hookSpecificOutput.additionalContext).toContain("ultra");
   });
 
   it("writes nothing at all on a skipped source", () => {
