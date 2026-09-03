@@ -126,7 +126,12 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
         });
       }
 
-      await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "ok"));
+      // From the state as it is now, not as it was read before the run: a manual import that
+      // succeeded meanwhile must not have its success overwritten by this one's outcome.
+      await deps.autoRunStore.setState(
+        scope,
+        nextAutoRunState(await deps.autoRunStore.getState(scope), nowMs, "ok"),
+      );
     } catch (error) {
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
       // backoff widens and the attempts stop after a few, and the person is told nothing: they
@@ -138,7 +143,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       });
       await deps.autoRunStore.setState(
         scope,
-        nextAutoRunState(state, nowMs, "error", errorMessage),
+        nextAutoRunState(await deps.autoRunStore.getState(scope), nowMs, "error", errorMessage),
       );
 
       // Revoking a grant happens in the app and reaches the database, not this extension -- so

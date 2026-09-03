@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAutoImportSweep, type AutoImportSweepDeps } from "./auto-import-sweep";
-import { createInitialAutoRunState, type AutoRunState } from "./auto-run-policy";
+import { createInitialAutoRunState, nextAutoRunState, type AutoRunState } from "./auto-run-policy";
 import type { StoredImportGrant } from "./grant-store";
 
 const NOW = Date.parse("2026-08-23T12:00:00.000Z");
@@ -427,5 +427,33 @@ describe("createAutoImportSweep", () => {
       "https://web.alfabank.ru/",
       "https://www.tbank.ru/mybank/operations/",
     ]);
+  });
+});
+
+describe("a success recorded while the sweep runs", () => {
+  it("survives the sweep's own failure", async () => {
+    // A manual import of the same source finishes while the unattended one is still going,
+    // and records its success; the unattended one then fails. Its failure is written over
+    // the state as it is now, so the success stays on record.
+    const manualOkAt = NOW - 1;
+    const harness = createHarness({
+      runImport: vi.fn(async () => {
+        harness.states["tbank::person-1"] = nextAutoRunState(
+          null,
+          manualOkAt,
+          "ok",
+          null,
+          "manual",
+        );
+        throw new Error("tbank did not stay on the operations page");
+      }),
+    });
+
+    await harness.sweep.run("alarm");
+
+    const state = harness.states["tbank::person-1"];
+    expect(state.lastResult).toBe("error");
+    expect(state.consecutiveFailures).toBe(1);
+    expect(state.lastOkAtMs).toBe(manualOkAt);
   });
 });

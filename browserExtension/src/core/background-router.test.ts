@@ -6,6 +6,20 @@ import type { StoredImportGrant } from "./grant-store.js";
 import { createInitialAutoRunState } from "./auto-run-policy.js";
 
 describe("background-router", () => {
+  /**
+   * An https host the manifest permits, for a function_url the grant parser will accept. The
+   * first permission is localhost over http, and a test that took it and returned early on the
+   * https regex passed without running -- so this fails loudly instead of skipping.
+   */
+  function permittedHttpsHost(): string {
+    const permitted = (extensionManifest.host_permissions ?? []).find((pattern) =>
+      /^https:\/\/[^*/]+\//.test(pattern),
+    );
+    const host = permitted ? /^https:\/\/([^/]+)\//.exec(permitted)?.[1] : undefined;
+    expect(host).toBeDefined();
+    return host as string;
+  }
+
   function createDeferred<T>() {
     let resolve!: (value: T | PromiseLike<T>) => void;
     let reject!: (reason?: unknown) => void;
@@ -46,10 +60,7 @@ describe("background-router", () => {
 
   it("stores a grant the app sends, and refuses one pointed elsewhere", async () => {
     const deps = createDeps();
-    const permitted = extensionManifest.host_permissions?.[0] ?? "";
-    const host = /^https:\/\/([^/]+)\//.exec(permitted)?.[1];
-    // Skip rather than assert a false thing if the manifest ever ships without one.
-    if (!host) return;
+    const host = permittedHttpsHost();
 
     await expect(
       routeBackgroundMessage(
@@ -87,9 +98,7 @@ describe("background-router", () => {
 
   it("takes the grant's origin from the page that sent it, and refuses one pointed elsewhere", async () => {
     const deps = createDeps();
-    const permitted = extensionManifest.host_permissions?.[0] ?? "";
-    const host = /^https:\/\/([^/]+)\//.exec(permitted)?.[1];
-    if (!host) return;
+    const host = permittedHttpsHost();
     const grant = {
       token: "plain-token",
       person_id: "person-1",
