@@ -16,11 +16,13 @@ import {
   History,
   CirclePlus,
   ExternalLink,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ConditionStatusBadge } from "./condition-status-badge";
+import { isAwaitingClosureReview } from "@/lib/conditions/unverified-closure";
 import { getConditionIcdName } from "@/hooks";
 import type { ConditionRecordWithDetails } from "@/types";
 
@@ -36,6 +38,17 @@ interface ConditionRecordRowProps {
   onEdit?: () => void;
   onAddHistory?: () => void;
   onDelete?: () => void;
+  /**
+   * Accept a proposed closure, here rather than on the condition page. A person reading the
+   * document is the person best placed to rule on what it proposes, and making them navigate to
+   * the condition to agree -- while letting them disagree on the spot -- is a strange asymmetry.
+   */
+  onConfirm?: () => void;
+  /**
+   * Reject a proposed closure. On a mention that is one, this replaces delete rather than sitting
+   * beside it -- see the comment where the buttons are rendered.
+   */
+  onDismiss?: () => void;
   isProcessing?: boolean;
   showActions?: boolean;
 }
@@ -71,6 +84,8 @@ export function ConditionRecordRow({
   onEdit,
   onAddHistory,
   onDelete,
+  onConfirm,
+  onDismiss,
   isProcessing = false,
   showActions = true,
 }: ConditionRecordRowProps) {
@@ -85,6 +100,11 @@ export function ConditionRecordRow({
   const isActiveOrSuspected =
     conditionRecord.status_in_record === "active" ||
     conditionRecord.status_in_record === "suspected";
+
+  // A closure the chart is deliberately ignoring. Rendered plainly it reads as an ordinary
+  // resolution, so this row would say the condition ended while the condition's own header still
+  // says it is active -- the record contradicting itself, with nothing to say which half is true.
+  const awaitingReview = isAwaitingClosureReview(conditionRecord);
 
   // ICD name (English only for ICD-10), if present
   const icdName = getConditionIcdName(conditionRecord.condition_icd_name_en);
@@ -129,7 +149,7 @@ export function ConditionRecordRow({
               <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
               <ConditionStatusBadge status={conditionRecord.status_in_record} />
               <span className="text-xs text-muted-foreground">
-                ({t("conditions.statusChange")})
+                ({t(awaitingReview ? "conditions.proposedChange" : "conditions.statusChange")})
               </span>
             </div>
           )}
@@ -160,6 +180,16 @@ export function ConditionRecordRow({
             >
               <CircleDot className="h-3 w-3" />
               {t("conditions.proposal")}
+            </Badge>
+          )}
+          {awaitingReview && (
+            <Badge
+              variant="outline"
+              className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+              title={t("conditions.awaitingReviewTitle")}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              {t("conditions.awaitingReview")}
             </Badge>
           )}
           {comparison && <ConditionComparisonBadge comparison={comparison} />}
@@ -212,17 +242,55 @@ export function ConditionRecordRow({
                   <CirclePlus className="h-4 w-4" />
                 </Button>
               )}
-              {onDelete && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-destructive hover:text-destructive"
-                  onClick={onDelete}
-                  disabled={isProcessing}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
+              {/*
+               * Rejecting a proposed closure is a decision to record, not a row to destroy. The
+               * dismissal is the negative label that decides whether an analyte may ever close a
+               * condition unattended, and deleting the row throws away the most informative thing
+               * anyone has said about that pair. So on such a mention this replaces delete rather
+               * than sitting beside it: leaving both would keep the destructive path one click
+               * away from the reviewer who means "no".
+               */}
+              {awaitingReview
+                ? (onConfirm || onDismiss) && (
+                    <>
+                      {onConfirm && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs gap-1"
+                          onClick={onConfirm}
+                          disabled={isProcessing}
+                          title={t("conditions.confirmClosureTitle")}
+                        >
+                          <Check className="h-3 w-3 shrink-0" />
+                          {t("conditions.confirmClosure")}
+                        </Button>
+                      )}
+                      {onDismiss && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={onDismiss}
+                          disabled={isProcessing}
+                          title={t("conditions.dismissClosureTitle")}
+                        >
+                          {t("conditions.dismissClosure")}
+                        </Button>
+                      )}
+                    </>
+                  )
+                : onDelete && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={onDelete}
+                      disabled={isProcessing}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
             </div>
           )}
         </div>

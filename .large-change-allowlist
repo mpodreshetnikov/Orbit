@@ -14,3 +14,4 @@
 
 path test/fixtures/** # recorded upstream responses and sample documents, verified by replay rather than by reading
 branch claude/task-t-0021-dm659m # T-0021 is one milestone: the browser is the last writer on every OCR failure path, so a service-only change is overwritten before anyone sees it and a client-only change has no cause to render -- the halves do not ship independently
+branch claude/task-t-0026-elevated-access-ttb5y8 # T-0026 milestone 4 is one safety rule in three places -- the predicate that says who is waiting on a decision, the controls that take it, and the guard at the mutation that re-checks the evidence before the write. Splitting it ships a half where a write path exists without the guard, which is the exact defect this branch's review found three times. 857 of the 1574 lines are tests

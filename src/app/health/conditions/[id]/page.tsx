@@ -49,8 +49,10 @@ import {
   useIcdLookup,
   useMedicalRecords,
   useCheckupsForCondition,
+  useRuleOnProposedClosure,
 } from "@/hooks";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
+import { isAwaitingClosureReview } from "@/lib/conditions/unverified-closure";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
 
@@ -85,6 +87,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const [editNotes, setEditNotes] = useState("");
   const [addHistoryOpen, setAddHistoryOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const { ruleOnClosure, rulingOnId } = useRuleOnProposedClosure();
 
   // ICD validation (validates entered code)
   const { data: icdLookup, isLoading: icdLoading } = useIcdLookup(
@@ -120,6 +123,30 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
   const getGoogleSearchUrl = (conditionName: string) => {
     const searchQuery = encodeURIComponent(`${conditionName} ICD-10 code`);
     return `https://www.google.com/search?q=${searchQuery}`;
+  };
+
+  /**
+   * Rule on a proposed closure from the condition page.
+   *
+   * The same hook the record screen uses, so the evidence re-check before confirming exists once
+   * rather than once per screen -- this page having a confirm button without that check is exactly
+   * what the milestone-4 review found.
+   */
+  const ruleOn = async (recordRowId: string, decision: "confirmed" | "dismissed") => {
+    const mention = condition?.history.find((h) => h.id === recordRowId);
+    if (!mention) return;
+    const written = await ruleOnClosure(
+      {
+        id: mention.id,
+        record_id: mention.record_id,
+        condition_id: conditionId,
+        status_in_record: mention.status_in_record,
+        supporting_obs_code: mention.supporting_obs_code,
+      },
+      decision,
+    );
+    // A refused confirmation means the page is showing evidence the record no longer has.
+    if (!written) await refetch();
   };
 
   const canDeleteCondition = condition && condition.mention_count === 0;
@@ -416,71 +443,160 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
               <div className="absolute left-3 sm:left-4 top-0 bottom-0 w-px bg-border" />
 
               <div className="space-y-3 sm:space-y-4">
-                {condition.history.map((record) => (
-                  <div key={record.id} className="relative pl-8 sm:pl-10">
-                    {/* Timeline dot */}
-                    <div
-                      className={cn(
-                        "absolute left-1.5 sm:left-2 top-2 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 bg-background",
-                        record.status_in_record === "active" && "border-orange-500",
-                        record.status_in_record === "suspected" && "border-yellow-500",
-                        record.status_in_record === "resolved" && "border-green-500",
-                        record.status_in_record === "history" && "border-gray-500",
-                      )}
-                    />
+                {condition.history.map((record) => {
+                  // A closure the chart is ignoring must not read as a settled one here either.
+                  // The timeline is where a person reconstructs what happened, so a green dot and
+                  // a plain "Resolved" against a header that says active is the contradiction at
+                  // its most convincing.
+                  const awaitingReview = isAwaitingClosureReview(record);
+                  return (
+                    <div key={record.id} className="relative pl-8 sm:pl-10">
+                      {/* Timeline dot */}
+                      <div
+                        className={cn(
+                          "absolute left-1.5 sm:left-2 top-2 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 bg-background",
+                          record.status_in_record === "active" && "border-orange-500",
+                          record.status_in_record === "suspected" && "border-yellow-500",
+                          record.status_in_record === "resolved" && "border-green-500",
+                          record.status_in_record === "history" && "border-gray-500",
+                          awaitingReview && "border-dashed border-amber-500",
+                        )}
+                      />
 
-                    <div className="rounded-lg border p-2.5 sm:p-3 hover:bg-muted/50 transition-colors">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          {/* Record title */}
-                          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                            <Link
-                              href={`/health/records/${record.record_id}`}
-                              className="font-medium hover:underline truncate text-sm sm:text-base"
-                            >
-                              {record.record_title || t("records.title")}
-                            </Link>
-                            {record.record_type && (
-                              <Badge variant="outline" className="text-[10px] sm:text-xs">
-                                {t(`records.types.${record.record_type}`)}
-                              </Badge>
-                            )}
-                          </div>
+                      <div className="rounded-lg border p-2.5 sm:p-3 hover:bg-muted/50 transition-colors">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            {/* Record title */}
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                              <Link
+                                href={`/health/records/${record.record_id}`}
+                                className="font-medium hover:underline truncate text-sm sm:text-base"
+                              >
+                                {record.record_title || t("records.title")}
+                              </Link>
+                              {record.record_type && (
+                                <Badge variant="outline" className="text-[10px] sm:text-xs">
+                                  {t(`records.types.${record.record_type}`)}
+                                </Badge>
+                              )}
+                            </div>
 
-                          {/* Date and status */}
-                          <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-xs sm:text-sm text-muted-foreground flex-wrap">
-                            {record.record_date && (
-                              <div className="flex items-center gap-1">
-                                <Calendar className="h-3 w-3 shrink-0" />
-                                {format(new Date(record.record_date), "dd.MM.yyyy", {
-                                  locale: dateLocale,
-                                })}
+                            {/* Date and status */}
+                            <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-xs sm:text-sm text-muted-foreground flex-wrap">
+                              {record.record_date && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 shrink-0" />
+                                  {format(new Date(record.record_date), "dd.MM.yyyy", {
+                                    locale: dateLocale,
+                                  })}
+                                </div>
+                              )}
+                              <ConditionStatusBadge
+                                status={record.status_in_record as ConditionStatus}
+                              />
+                              {awaitingReview && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] sm:text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+                                  title={t("conditions.awaitingReviewTitle")}
+                                >
+                                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                                  {t("conditions.awaitingReview")}
+                                </Badge>
+                              )}
+                              {record.review_decision === "dismissed" && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] sm:text-xs"
+                                  title={t("conditions.dismissedTitle")}
+                                >
+                                  {t("conditions.dismissed")}
+                                </Badge>
+                              )}
+                            </div>
+
+                            {/* The proposal, the measurement it rests on, and the two rulings. */}
+                            {awaitingReview && (
+                              <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 space-y-2">
+                                {record.supporting_obs_code &&
+                                  (record.supporting_observation ? (
+                                    <div className="text-[10px] sm:text-xs">
+                                      <span className="text-muted-foreground">
+                                        {t("conditions.measurementBehind")}:{" "}
+                                      </span>
+                                      <span className="font-medium">
+                                        {record.supporting_observation.obs_name}
+                                      </span>{" "}
+                                      <span className="font-mono">
+                                        {record.supporting_observation.value_numeric ??
+                                          record.supporting_observation.value_text}
+                                        {record.supporting_observation.unit
+                                          ? ` ${record.supporting_observation.unit}`
+                                          : ""}
+                                      </span>
+                                      {(record.supporting_observation.ref_range_low !== null ||
+                                        record.supporting_observation.ref_range_high !== null) && (
+                                        <span className="text-muted-foreground font-mono">
+                                          {" "}
+                                          ({record.supporting_observation.ref_range_low ?? "…"}–
+                                          {record.supporting_observation.ref_range_high ?? "…"})
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    // Not a loading state. The reviewer corrected, recoded or
+                                    // deleted the measurement this cites, and saying so is the
+                                    // whole reason the citation is stored on the row.
+                                    <div className="text-[10px] sm:text-xs text-muted-foreground italic">
+                                      {t("conditions.measurementGone")}
+                                    </div>
+                                  ))}
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1"
+                                    disabled={rulingOnId !== null}
+                                    title={t("conditions.confirmClosureTitle")}
+                                    onClick={() => ruleOn(record.id, "confirmed")}
+                                  >
+                                    <Check className="h-3 w-3 shrink-0" />
+                                    {t("conditions.confirmClosure")}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs"
+                                    disabled={rulingOnId !== null}
+                                    title={t("conditions.dismissClosureTitle")}
+                                    onClick={() => ruleOn(record.id, "dismissed")}
+                                  >
+                                    {t("conditions.dismissClosure")}
+                                  </Button>
+                                </div>
                               </div>
                             )}
-                            <ConditionStatusBadge
-                              status={record.status_in_record as ConditionStatus}
-                            />
+
+                            {/* Source anchor */}
+                            {record.source_anchor && (
+                              <div className="mt-1.5 sm:mt-2 flex items-start gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-muted-foreground bg-muted/50 rounded p-1.5 sm:p-2">
+                                <Quote className="h-3 w-3 shrink-0 mt-0.5" />
+                                <span className="italic line-clamp-2">{record.source_anchor}</span>
+                              </div>
+                            )}
                           </div>
 
-                          {/* Source anchor */}
-                          {record.source_anchor && (
-                            <div className="mt-1.5 sm:mt-2 flex items-start gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-muted-foreground bg-muted/50 rounded p-1.5 sm:p-2">
-                              <Quote className="h-3 w-3 shrink-0 mt-0.5" />
-                              <span className="italic line-clamp-2">{record.source_anchor}</span>
-                            </div>
-                          )}
+                          {/* Link to record */}
+                          <Link href={`/health/records/${record.record_id}`} className="shrink-0">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
+                              <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </Button>
+                          </Link>
                         </div>
-
-                        {/* Link to record */}
-                        <Link href={`/health/records/${record.record_id}`} className="shrink-0">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
-                            <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                          </Button>
-                        </Link>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (
