@@ -10,6 +10,7 @@ const {
   formatFailure,
   formatWarning,
   globToRegExp,
+  isPushToDefaultBranch,
   isReviewable,
   parseAllowlist,
   parseArgs,
@@ -150,6 +151,28 @@ describe("change size evaluation", () => {
     });
 
     expect(result.branchExemption).toBeUndefined();
+  });
+
+  it("steps aside on a push to main and nowhere else", () => {
+    // A merge commit on main, measured against the commit before it, is the whole pull request
+    // once more -- with no branch name for its allowlist entry to match. The gate has already
+    // had its say on the pull request; main carries what was merged. Decided from the event
+    // Actions reports, not from a branch name: a pull request from a fork may call its head
+    // branch `main`, and must be measured like any other.
+    expect(
+      isPushToDefaultBranch({ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main" }),
+    ).toBe(true);
+    expect(
+      isPushToDefaultBranch({
+        GITHUB_EVENT_NAME: "pull_request",
+        GITHUB_REF: "refs/pull/96/merge",
+        PR_SIZE_BRANCH: "main",
+      }),
+    ).toBe(false);
+    expect(
+      isPushToDefaultBranch({ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/feature/x" }),
+    ).toBe(false);
+    expect(isPushToDefaultBranch({})).toBe(false);
   });
 
   it("claims no branch exemption when the checkout names no branch", () => {

@@ -364,6 +364,20 @@ function readAllowlist() {
   return parseAllowlist(fs.readFileSync(ALLOWLIST_PATH, "utf8"));
 }
 
+/** The branch pull requests merge into; a push to it is a pull request that already merged. */
+const DEFAULT_BRANCH = "main";
+
+/**
+ * Whether this run is CI on a push to the default branch, from the variables Actions sets
+ * itself (never from PR_SIZE_BRANCH: a pull request from a fork can name its head branch
+ * `main`, and the pre-push hook sees the local branch name, not where the push is going).
+ *
+ * @param {Readonly<Record<string, string | undefined>>} env
+ */
+function isPushToDefaultBranch(env) {
+  return env.GITHUB_EVENT_NAME === "push" && env.GITHUB_REF === `refs/heads/${DEFAULT_BRANCH}`;
+}
+
 function resolveBranch(explicitBranch) {
   if (explicitBranch) {
     return explicitBranch;
@@ -457,6 +471,20 @@ function main() {
   const advisory = args.advisory === true;
   const envBase = (process.env.PR_SIZE_BASE || "").trim();
   const branch = resolveBranch(args.branch);
+
+  // The gate judges a pull request, where the cut can still be changed. A push to main is a
+  // pull request that has merged: there is nothing left to re-cut, and a merge commit measured
+  // against the commit before it is the whole pull request again, this time with no branch
+  // name for an allowlist entry to match. The gate had its say on the pull request.
+  if (isPushToDefaultBranch(process.env)) {
+    if (!advisory) {
+      console.log(
+        `PR size check skipped: '${DEFAULT_BRANCH}' carries what was merged; the gate judges pull requests.`,
+      );
+    }
+    return 0;
+  }
+
   const requestedBase =
     args.base || (envBase === ZERO_SHA ? "" : envBase) || resolveConfiguredBaseRef(branch) || "";
   const baseRef = requestedBase ? resolveExplicitBaseRef(requestedBase) : resolveDefaultBaseRef();
@@ -530,6 +558,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_BRANCH,
+  isPushToDefaultBranch,
   MAX_REVIEWABLE_ADDED_LINES,
   WARNING_FRACTION,
   ZERO_SHA,
