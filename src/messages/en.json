@@ -718,6 +718,7 @@
     "importAttentionThresholdInvalid": "Enter a whole number of days, at least one.",
     "importAttentionThresholdSaved": "Saved: {days} d.",
     "importAttentionBadgeHint": "The number on the extension's icon is how many sources are stale. When there are any, the extension opens this page at the browser's start, at most once a day.",
+    "importAttentionRefreshMissed": "The extension did not answer the last request; what is shown is its previous answer, and the page keeps asking.",
     "importHistoryImportTypeUnattended": "Automatic (extension)"
   },
   "records": {

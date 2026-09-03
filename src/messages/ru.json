@@ -718,6 +718,7 @@
     "importAttentionThresholdInvalid": "Введите целое число дней, не меньше одного.",
     "importAttentionThresholdSaved": "Сохранено: {days} дн.",
     "importAttentionBadgeHint": "Число на значке расширения — сколько источников устарело. Когда такие есть, расширение открывает эту страницу при старте браузера, не чаще раза в сутки.",
+    "importAttentionRefreshMissed": "Расширение не ответило на последний запрос; показан его прошлый ответ, страница продолжает спрашивать.",
     "importHistoryImportTypeUnattended": "Автоимпорт (расширение)"
   },
   "records": {

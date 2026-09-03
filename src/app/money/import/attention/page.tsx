@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { ArrowLeft } from "lucide-react";
 import { format } from "date-fns";
 import { MONEY_ACCOUNT_SOURCES } from "@/types";
+import { useUIStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -75,10 +76,14 @@ export default function MoneyImportAttentionPage() {
   const [state, setState] = useState<PageState>("loading");
   const [attention, setAttention] = useState<ExtensionAttention | null>(null);
   const [requests, setRequests] = useState<Record<string, RequestState>>({});
+  // The last refresh got no answer; what is shown is the answer before it.
+  const [refreshMissed, setRefreshMissed] = useState(false);
   const [thresholdDays, setThresholdDays] = useState("1");
   const [thresholdNotice, setThresholdNotice] = useState<string | null>(null);
+  const [thresholdSaving, setThresholdSaving] = useState(false);
   // A value the person is typing is not overwritten by a refresh landing mid-keystroke.
   const thresholdTouched = useRef(false);
+  const selectedPersonId = useUIStore((store) => store.selectedPersonId);
 
   const refresh = useCallback(async () => {
     const alive = await pingExtension();
@@ -91,12 +96,27 @@ export default function MoneyImportAttentionPage() {
     // version or a slow service-worker wake, not an absence.
     const next = await requestExtensionAttention();
     if (!next) {
-      setState("unavailable");
-      setAttention(null);
+      // One missed answer after a good one is a slow wake, not a lost extension: the last
+      // answer stays on the screen and the polling below keeps asking. Only a page that never
+      // got an answer says the extension cannot give one.
+      setRefreshMissed(true);
+      setState((current) => (current === "ready" ? current : "unavailable"));
       return;
     }
+    setRefreshMissed(false);
     setAttention(next);
     setState("ready");
+    // A request the extension no longer holds has settled -- the run succeeded, or the hour
+    // passed -- so the page stops telling the person to sign in for it.
+    setRequests((previous) => {
+      const settled = next.sources.filter(
+        (source) => !source.run_requested && previous[source.source_id]?.kind === "sent",
+      );
+      if (settled.length === 0) return previous;
+      const reconciled = { ...previous };
+      for (const source of settled) delete reconciled[source.source_id];
+      return reconciled;
+    });
     if (!thresholdTouched.current) setThresholdDays(String(thresholdDaysOf(next.stale_after_ms)));
   }, []);
 
@@ -104,7 +124,11 @@ export default function MoneyImportAttentionPage() {
     void refresh();
   }, [refresh]);
 
-  const pendingRun = attention?.sources.some((source) => source.run_requested) ?? false;
+  // Pending as the extension reports it, or as this page asked -- a missed refresh must not
+  // stop the asking, or a run that finishes during a slow wake is never seen finishing.
+  const pendingRun =
+    (attention?.sources.some((source) => source.run_requested) ?? false) ||
+    Object.values(requests).some((request) => request.kind === "sent");
   useEffect(() => {
     if (state !== "ready" || !pendingRun) return;
     const timer = window.setInterval(() => {
@@ -126,23 +150,39 @@ export default function MoneyImportAttentionPage() {
   );
 
   const handleSaveThreshold = useCallback(async () => {
-    const days = Number(thresholdDays);
+    const submitted = thresholdDays;
+    const days = Number(submitted);
     if (!Number.isInteger(days) || days < 1) {
       setThresholdNotice(t("money.importAttentionThresholdInvalid"));
       return;
     }
-    const stored = await setExtensionStaleAfter(days * DAY_MS);
-    if (stored === null) {
-      setThresholdNotice(t("money.importAutoStatusUnavailable"));
-      return;
+    setThresholdSaving(true);
+    try {
+      const stored = await setExtensionStaleAfter(days * DAY_MS);
+      if (stored === null) {
+        setThresholdNotice(t("money.importAutoStatusUnavailable"));
+        return;
+      }
+      // The field is handed back to the refresh only if it still shows what was saved; an
+      // edit made while the save was in flight is the person's, and stays.
+      setThresholdDays((current) => {
+        if (current === submitted) thresholdTouched.current = false;
+        return current;
+      });
+      setThresholdNotice(
+        t("money.importAttentionThresholdSaved", { days: thresholdDaysOf(stored) }),
+      );
+      void refresh();
+    } finally {
+      setThresholdSaving(false);
     }
-    thresholdTouched.current = false;
-    setThresholdNotice(t("money.importAttentionThresholdSaved", { days: thresholdDaysOf(stored) }));
-    void refresh();
   }, [thresholdDays, refresh, t]);
 
   const grant = attention?.grant ?? null;
-  const sources = attention?.sources ?? [];
+  // A key held for someone else is not this person's: its sources are not shown as theirs,
+  // and Update would import for the key's person, whatever the app shell says.
+  const grantIsForSelectedPerson = Boolean(grant && grant.person_id === selectedPersonId);
+  const sources = grantIsForSelectedPerson ? (attention?.sources ?? []) : [];
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -177,11 +217,26 @@ export default function MoneyImportAttentionPage() {
           {state === "ready" && !grant && (
             <p className="text-muted-foreground">{t("money.importAutoStatusNoGrant")}</p>
           )}
-          {state === "ready" && grant && sources.length === 0 && (
+          {state === "ready" && grant && !grantIsForSelectedPerson && (
+            <p className="text-muted-foreground" data-testid="money-import-attention-other-person">
+              {t("money.importAutoStatusGrantOtherPerson", {
+                date: formatMoment(grant.received_at),
+              })}
+            </p>
+          )}
+          {state === "ready" && grantIsForSelectedPerson && sources.length === 0 && (
             <p className="text-muted-foreground">{t("money.importAttentionNoSources")}</p>
           )}
-          {state === "ready" && grant && sources.length > 0 && attention?.stale_count === 0 && (
-            <p className="text-muted-foreground">{t("money.importAttentionAllFresh")}</p>
+          {state === "ready" &&
+            grantIsForSelectedPerson &&
+            sources.length > 0 &&
+            attention?.stale_count === 0 && (
+              <p className="text-muted-foreground">{t("money.importAttentionAllFresh")}</p>
+            )}
+          {state === "ready" && refreshMissed && (
+            <p className="text-muted-foreground" data-testid="money-import-attention-missed">
+              {t("money.importAttentionRefreshMissed")}
+            </p>
           )}
           {state === "ready" &&
             sources.map((source) => {
@@ -220,7 +275,7 @@ export default function MoneyImportAttentionPage() {
                 </div>
               );
             })}
-          {state === "ready" && grant && (
+          {state === "ready" && grantIsForSelectedPerson && (
             <p className="text-xs text-muted-foreground">{t("money.importAttentionUpdateHint")}</p>
           )}
         </CardContent>
@@ -251,7 +306,12 @@ export default function MoneyImportAttentionPage() {
                   }}
                 />
               </div>
-              <Button type="button" variant="outline" onClick={() => void handleSaveThreshold()}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={thresholdSaving}
+                onClick={() => void handleSaveThreshold()}
+              >
                 {t("common.save")}
               </Button>
             </div>
