@@ -163,8 +163,39 @@ export async function processFindingsToResolve(
  * ICD is the strong signal where it exists, the name pattern is what remains where it does not.
  *
  * `confident` is a claim about clinical certainty, and it is written by a non-clinician. It means
- * only that the entry could ever be promoted to closing a condition without a person; nothing in
- * this milestone reads it, because today every entry proposes and a person confirms.
+ * only that the entry could ever be promoted to closing a condition without a person; nothing
+ * reads it yet, because today every entry proposes and a person confirms.
+ *
+ * ## How an entry earns auto-close
+ *
+ * An entry marked `confident: false` may only ever propose. That is not a temporary state waiting
+ * for someone to feel better about it: promoting an entry takes evidence out of the database, and
+ * the evidence is what people did with the proposals it produced. Read it with the query in the
+ * T-0026 ExecPlan, which counts `condition_records.review_decision` per `supporting_obs_code`:
+ *
+ *     select supporting_obs_code,
+ *            count(*) filter (where review_decision = 'confirmed') as confirmed,
+ *            count(*) filter (where review_decision = 'dismissed') as dismissed,
+ *            count(*) filter (where review_decision = 'pending')   as pending
+ *     from public.condition_records
+ *     where supporting_obs_code is not null
+ *     group by supporting_obs_code
+ *     order by confirmed desc;
+ *
+ * The threshold: **twenty confirmations and zero dismissals** for that analyte. Twenty because a
+ * handful of confirmations is one person's habit rather than evidence, and because the harm is
+ * asymmetric — a proposal that should have auto-closed costs a click, while an auto-close that
+ * should not have happened ends a live entry in someone's chart with nothing to prompt a second
+ * look. Zero and not "few" for the same reason: a dismissal is a person saying this closure was
+ * wrong, and one such person is enough to say the entry is not ready to act alone.
+ *
+ * `pending` is not evidence and must never be added to `confirmed`. A proposal nobody has ruled on
+ * says nothing about whether the rule is right; counting the two together — which is all a boolean
+ * `is_user_verified` could ever have offered — would let an entry nobody has looked at read as an
+ * entry nobody objected to. That is why Milestone 2 made the column three-valued.
+ *
+ * Any dismissal after promotion returns the entry to `confident: false` and is worth investigating
+ * rather than filing: it means the rule closed something a person could see should stay open.
  */
 export interface ResolvingAnalyte {
   requires: string[];

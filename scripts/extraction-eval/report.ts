@@ -308,6 +308,16 @@ export function renderMarkdown(summary: RunSummary): string {
   lines.push(...fieldSection("Observation fields", "observation", agg.observationFields));
   lines.push(...fieldSection("Finding fields", "finding", agg.findingFields));
   lines.push(...fieldSection("Condition fields", "condition", agg.conditionFields));
+  // Printed beside the set score rather than folded into it: the set says the right condition was
+  // named, this says it was named on evidence the production gate accepts. A run can be perfect on
+  // the first and apply nothing.
+  lines.push(
+    ...fieldSection(
+      "Condition resolution fields",
+      "condition resolution",
+      agg.conditionResolutionFields,
+    ),
+  );
 
   lines.push("## Cases");
   lines.push("");

@@ -110,6 +110,7 @@ export async function runCasePipeline(
     })),
     conditions_to_resolve: structured.conditions_to_resolve.map((item) => ({
       condition_id: item.condition_id,
+      supporting_obs_code: str(item.supporting_obs_code),
     })),
     checkups_to_complete: checkups.map((row) => ({
       checkup_item_id: String(row.checkup_item_id ?? ""),

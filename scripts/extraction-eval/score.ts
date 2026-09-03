@@ -127,6 +127,8 @@ export interface CaseScore {
   conditionFields: FieldAccuracy[];
   findingsToResolve: SetScore;
   conditionsToResolve: SetScore;
+  /** Per-field accuracy over the resolutions both sides name — today, the cited analyte. */
+  conditionResolutionFields: FieldAccuracy[];
   checkupsToComplete: SetScore;
   checkupDate: FieldAccuracy;
 }
@@ -227,6 +229,19 @@ export const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
 export const CONDITION_FIELDS: (keyof ExpectedCondition)[] = ["icd_code", "status"];
 
 /**
+ * A condition resolution's scored fields — the first this collection has had.
+ *
+ * `conditions_to_resolve` was matched on `condition_id` alone and scored on nothing, which made it
+ * blind to the one thing that decides whether a resolution survives: the analyte it cites.
+ * `checkLabResolution` discards a resolution whose `supporting_obs_code` is missing, uncovered by
+ * the table, or unrelated to the condition, so a run could report `conditions_to_resolve` at 100%
+ * while production applied none of them. Scoring the citation closes that gap, and it is the
+ * field-level counterpart of the set score rather than a replacement for it: the set says the right
+ * condition was named, this says it was named on the right evidence.
+ */
+export const RESOLUTION_FIELDS: (keyof ExpectedResolution)[] = ["supporting_obs_code"];
+
+/**
  * Every key a fixture may carry, per collection, and why it is legitimate.
  *
  * Exported so `fixture-coverage.test.ts` can check the corpus against what this file actually
@@ -243,7 +258,7 @@ export const SCORED_FIELDS: Record<string, readonly string[]> = {
   findings: FINDING_FIELDS.map(String),
   conditions: CONDITION_FIELDS.map(String),
   findings_to_resolve: [],
-  conditions_to_resolve: [],
+  conditions_to_resolve: RESOLUTION_FIELDS.map(String),
   checkups_to_complete: ["suggested_done_at"],
 };
 
@@ -489,6 +504,13 @@ export function scoreCase(
       expected.conditions_to_resolve.map(resolutionKey),
       actual.conditions_to_resolve.map(resolutionKey),
     ),
+    conditionResolutionFields: scoreFields(
+      expected.conditions_to_resolve,
+      actual.conditions_to_resolve,
+      (row) => resolutionKey(row).key,
+      (row) => resolutionKey(row).label,
+      RESOLUTION_FIELDS,
+    ),
     checkupsToComplete: scoreSet(
       expected.checkups_to_complete.map(checkupKey),
       actual.checkups_to_complete.map(checkupKey),
@@ -516,6 +538,7 @@ export interface Aggregate {
   observationFields: FieldAccuracy[];
   findingFields: FieldAccuracy[];
   conditionFields: FieldAccuracy[];
+  conditionResolutionFields: FieldAccuracy[];
   /**
    * Wrongful closures across the whole run — findings and conditions both. The number to look at
    * first. A wrongfully closed finding is the same class of harm as a wrongfully closed condition:
@@ -578,6 +601,11 @@ export function aggregate(scores: CaseScore[]): Aggregate {
     observationFields: fields,
     findingFields: sumFields(scores, (s) => s.findingFields, FINDING_FIELDS.map(String)),
     conditionFields: sumFields(scores, (s) => s.conditionFields, CONDITION_FIELDS.map(String)),
+    conditionResolutionFields: sumFields(
+      scores,
+      (s) => s.conditionResolutionFields,
+      RESOLUTION_FIELDS.map(String),
+    ),
     wrongfulResolutions: conditionsToResolve.fp + findingsToResolve.fp,
   };
 }

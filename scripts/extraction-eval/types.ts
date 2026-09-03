@@ -30,8 +30,18 @@ export interface ExpectedCondition {
   status?: string | null;
 }
 
+/**
+ * A condition the document shows to have resolved, and the measurement it says so on.
+ *
+ * `supporting_obs_code` is not decoration: `checkLabResolution` discards a resolution that cites
+ * nothing, cites an analyte no table entry covers, or cites one unrelated to the condition, so the
+ * citation is the difference between a proposal that reaches a person and one that is thrown away.
+ * Scoring it is therefore scoring whether the closure would happen at all — a resolution keyed to
+ * the right condition on the wrong analyte is a pass under set scoring and a discard in production.
+ */
 export interface ExpectedResolution {
   condition_id: string;
+  supporting_obs_code?: string | null;
 }
 
 /**

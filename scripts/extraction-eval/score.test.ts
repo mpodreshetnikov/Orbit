@@ -146,6 +146,62 @@ describe("scoreCase", () => {
     expect(score.conditionsToResolve.falseNegatives).toEqual(["cond-b12"]);
   });
 
+  it("catches a resolution on the right condition citing the wrong analyte", () => {
+    // The set score cannot see this: the condition matches, so it reads as a clean true positive
+    // while production discards the row -- `checkLabResolution` refuses a citation the table does
+    // not tie to this condition. Before `supporting_obs_code` was scored, that was invisible.
+    const expected = snapshot({
+      conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "vitamin_b12" }],
+    });
+    const actual = snapshot({
+      conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "ferritin" }],
+    });
+    const score = scoreCase("case", expected, actual, []);
+    expect(score.conditionsToResolve).toMatchObject({ tp: 1, fp: 0, fn: 0 });
+    const cited = score.conditionResolutionFields.find((f) => f.field === "supporting_obs_code");
+    expect(cited).toMatchObject({ correct: 0, total: 1 });
+    expect(cited?.mismatches[0]).toMatchObject({
+      key: "cond-b12",
+      expected: "vitamin_b12",
+      actual: "ferritin",
+    });
+  });
+
+  it("catches a resolution that cites nothing at all", () => {
+    // The gate's first rejection is `noCitation`, so an uncited resolution closes nothing. It has
+    // to score as a field miss rather than as a match, or a run of them reads as a clean sweep.
+    const score = scoreCase(
+      "case",
+      snapshot({
+        conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "vitamin_b12" }],
+      }),
+      snapshot({
+        conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: null }],
+      }),
+      [],
+    );
+    expect(
+      score.conditionResolutionFields.find((f) => f.field === "supporting_obs_code"),
+    ).toMatchObject({ correct: 0, total: 1 });
+  });
+
+  it("does not charge the citation against a resolution the model never proposed", () => {
+    // Matched rows only. A missing resolution is already a recall miss; counting it again here
+    // would let one absent row read as a citation defect it never had the chance to commit.
+    const score = scoreCase(
+      "case",
+      snapshot({
+        conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "vitamin_b12" }],
+      }),
+      snapshot({ conditions_to_resolve: [] }),
+      [],
+    );
+    expect(score.conditionsToResolve).toMatchObject({ tp: 0, fn: 1 });
+    expect(
+      score.conditionResolutionFields.find((f) => f.field === "supporting_obs_code"),
+    ).toMatchObject({ correct: 0, total: 0 });
+  });
+
   it("scores a checkup matched on id but suggested for the wrong day", () => {
     const expected = snapshot({
       checkups_to_complete: [{ checkup_item_id: "chk-1", suggested_done_at: "2026-03-06" }],
