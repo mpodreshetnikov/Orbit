@@ -139,6 +139,7 @@ describe("background-router", () => {
             lastResult: "error" as const,
             consecutiveFailures: 1,
             lastError: "T-Bank did not stay on the operations page",
+            lastRunOrigin: "auto" as const,
           }
         : createInitialAutoRunState(),
     );
@@ -146,8 +147,14 @@ describe("background-router", () => {
       { type: "MONEY_IMPORT_GET_AUTO_STATUS" },
       {
         ...deps,
+        now: () => failedAt + 60_000,
         listAutoImportSources: () => ["tbank_web", "alfa_web"],
-        listScheduledSweeps: async () => [{ sourceId: "alfa_web", atMs: failedAt + 60_000 }],
+        // T-Bank's visit alarm fires inside its cooldown, so the policy will turn it away;
+        // Alfa's is a run.
+        listScheduledSweeps: async () => [
+          { sourceId: "tbank_web", atMs: failedAt + 60_000 },
+          { sourceId: "alfa_web", atMs: failedAt + 60_000 },
+        ],
       },
     );
 
@@ -166,6 +173,7 @@ describe("background-router", () => {
           last_result: "error",
           consecutive_failures: 1,
           last_error: "T-Bank did not stay on the operations page",
+          last_run_origin: "auto",
           // One failure: the ordinary twenty-hour cooldown, not yet doubled.
           next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
           scheduled_at: null,
@@ -176,6 +184,7 @@ describe("background-router", () => {
           last_result: null,
           consecutive_failures: 0,
           last_error: null,
+          last_run_origin: null,
           next_run: { kind: "now" },
           scheduled_at: "2026-09-03T05:03:00.000Z",
         },
@@ -829,7 +838,11 @@ describe("background-router", () => {
 
     expect(deps.autoRunStore.setState).toHaveBeenCalledWith(
       { sourceId: "tbank", payerPersonId: "person-1" },
-      expect.objectContaining({ lastResult: "ok", consecutiveFailures: 0 }),
+      expect.objectContaining({
+        lastResult: "ok",
+        consecutiveFailures: 0,
+        lastRunOrigin: "manual",
+      }),
     );
   });
 

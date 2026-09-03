@@ -105,6 +105,7 @@ describe("createAutoImportSweep", () => {
       lastResult: "ok",
       consecutiveFailures: 0,
       lastError: null,
+      lastRunOrigin: "auto",
     });
   });
 

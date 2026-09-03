@@ -694,8 +694,11 @@
     "importAutoStatusLastOk": "Last automatic run {date} succeeded.",
     "importAutoStatusLastFailed": "Last automatic run {date} failed: {error}",
     "importAutoStatusNextAfter": "Next attempt not before {next}.",
-    "importAutoStatusNextVisit": "Next attempt on the next visit to the bank.",
-    "importAutoStatusStopped": "Stopped after {count} failed attempts in a row. A successful manual import or an extension update resumes it."
+    "importAutoStatusStopped": "Stopped after {count} failed attempts in a row. A successful manual import or an extension update resumes it.",
+    "importAutoStatusUnavailable": "The extension answered but did not report its status. It may need updating.",
+    "importAutoStatusGrantOtherPerson": "The extension holds a key for another person, received {date}. Issue one for this person above and send it to the extension.",
+    "importAutoStatusLastManualOk": "Last import {date} was started by hand and succeeded.",
+    "importAutoStatusEligibleNow": "May run now: the next visit to the bank, or the extension's own periodic check, starts it."
   },
   "records": {
     "title": "Medical Records",

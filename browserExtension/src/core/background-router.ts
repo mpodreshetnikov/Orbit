@@ -8,7 +8,7 @@ import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
 import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
 import type { AutoRunStore } from "./auto-run-store.js";
-import { describeAutoRunEligibility, nextAutoRunState } from "./auto-run-policy.js";
+import { describeAutoRunEligibility, nextAutoRunState, shouldAutoRun } from "./auto-run-policy.js";
 
 export interface BackgroundMessage {
   type: string;
@@ -68,7 +68,9 @@ export interface AutoImportStatusSource {
   last_result: "ok" | "error" | null;
   consecutive_failures: number;
   last_error: string | null;
+  last_run_origin: "auto" | "manual" | null;
   next_run: { kind: "now" } | { kind: "after"; at: string } | { kind: "stopped" };
+  /** A visit-triggered sweep waiting on its minute, and only one the policy will let run. */
   scheduled_at: string | null;
 }
 
@@ -292,7 +294,12 @@ async function resetAutoRunBackoff(
   try {
     const scope = { sourceId, payerPersonId };
     const autoState = await deps.autoRunStore.getState(scope);
-    await deps.autoRunStore.setState(scope, nextAutoRunState(autoState, Date.now(), "ok"));
+    // The backoff is cleared and the cooldown bought as by an automatic run; the origin is
+    // kept so the import page does not report this as one.
+    await deps.autoRunStore.setState(
+      scope,
+      nextAutoRunState(autoState, Date.now(), "ok", null, "manual"),
+    );
   } catch {
     // Swallowed on purpose: see the call site. The worst case is that automatic import stays
     // backed off a while longer, which the next successful manual run clears.
@@ -348,6 +355,7 @@ export async function routeBackgroundMessage(
   if (message.type === "MONEY_IMPORT_GET_AUTO_STATUS") {
     const grant = await deps.grantStore.getGrant();
     const scheduled = deps.listScheduledSweeps ? await deps.listScheduledSweeps() : [];
+    const nowMs = deps.now?.() ?? Date.now();
     const sources: AutoImportStatusSource[] = [];
     if (grant && deps.autoRunStore) {
       const known = new Set(deps.listAutoImportSources?.() ?? grant.allowed_sources);
@@ -357,8 +365,12 @@ export async function routeBackgroundMessage(
           sourceId,
           payerPersonId: grant.person_id,
         });
-        const eligibility = describeAutoRunEligibility(state);
-        const pending = scheduled.find((entry) => entry.sourceId === sourceId);
+        const eligibility = describeAutoRunEligibility(state, nowMs);
+        // A visit inside the cooldown still sets the alarm; when it fires the policy turns the
+        // sweep away. Reporting that alarm as a run would contradict the line above it.
+        const pending = scheduled.find(
+          (entry) => entry.sourceId === sourceId && shouldAutoRun(state, entry.atMs),
+        );
         sources.push({
           source_id: sourceId,
           last_run_at:
@@ -366,6 +378,7 @@ export async function routeBackgroundMessage(
           last_result: state.lastResult,
           consecutive_failures: state.consecutiveFailures,
           last_error: state.lastError ?? null,
+          last_run_origin: state.lastRunOrigin ?? null,
           next_run:
             eligibility.kind === "after"
               ? { kind: "after", at: new Date(eligibility.atMs).toISOString() }

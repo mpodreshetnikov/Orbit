@@ -20,6 +20,7 @@ export interface ExtensionAutoStatusSource {
   last_result: "ok" | "error" | null;
   consecutive_failures: number;
   last_error: string | null;
+  last_run_origin: "auto" | "manual" | null;
   next_run: { kind: "now" } | { kind: "after"; at: string } | { kind: "stopped" };
   scheduled_at: string | null;
 }
@@ -41,6 +42,10 @@ function asString(value: unknown): string | null {
 
 function readResult(value: unknown): ExtensionAutoStatusSource["last_result"] {
   return value === "ok" || value === "error" ? value : null;
+}
+
+function readOrigin(value: unknown): ExtensionAutoStatusSource["last_run_origin"] {
+  return value === "auto" || value === "manual" ? value : null;
 }
 
 function readNextRun(value: unknown): ExtensionAutoStatusSource["next_run"] {
@@ -80,6 +85,7 @@ export function readExtensionAutoStatus(data: Record<string, unknown>): Extensio
       consecutive_failures:
         typeof record.consecutive_failures === "number" ? record.consecutive_failures : 0,
       last_error: asString(record.last_error),
+      last_run_origin: readOrigin(record.last_run_origin),
       next_run: readNextRun(record.next_run),
       scheduled_at: asString(record.scheduled_at),
     }));
@@ -101,7 +107,7 @@ function describeSource(
     source.next_run.kind === "after"
       ? t("money.importAutoStatusNextAfter", { next: formatMoment(source.next_run.at) })
       : source.next_run.kind === "now"
-        ? t("money.importAutoStatusNextVisit")
+        ? t("money.importAutoStatusEligibleNow")
         : null;
   const scheduled = source.scheduled_at
     ? t("money.importAutoStatusScheduled", { time: formatMoment(source.scheduled_at) })
@@ -133,6 +139,9 @@ function describeSource(
         error: source.last_error ?? "-",
       }),
     );
+  } else if (source.last_run_origin === "manual") {
+    // A manual import clears the backoff and buys the cooldown; it is not an automatic run.
+    lines.push(t("money.importAutoStatusLastManualOk", { date: formatMoment(source.last_run_at) }));
   } else {
     lines.push(t("money.importAutoStatusLastOk", { date: formatMoment(source.last_run_at) }));
   }
@@ -143,8 +152,11 @@ function describeSource(
 
 interface MoneyImportAutoStatusProps {
   t: Translate;
-  state: "loading" | "inactive" | "ready";
+  /** "unavailable": the extension answered the ping but not the status request -- too old, or slow. */
+  state: "loading" | "inactive" | "unavailable" | "ready";
   status: ExtensionAutoStatus | null;
+  /** The person the page is showing; a key held for someone else is not this person's. */
+  selectedPersonId: string | null;
   /** Localized names for the extension sources, by source id. */
   sourceLabels: Record<string, string>;
   onRefresh: () => void;
@@ -154,10 +166,12 @@ export function MoneyImportAutoStatus({
   t,
   state,
   status,
+  selectedPersonId,
   sourceLabels,
   onRefresh,
 }: MoneyImportAutoStatusProps) {
   const grant = status?.grant ?? null;
+  const grantIsForSelectedPerson = Boolean(grant && grant.person_id === selectedPersonId);
   return (
     <Card data-testid="money-import-auto-status">
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
@@ -173,10 +187,18 @@ export function MoneyImportAutoStatus({
         {state === "inactive" && (
           <p className="text-muted-foreground">{t("money.importAutoStatusExtensionInactive")}</p>
         )}
+        {state === "unavailable" && (
+          <p className="text-muted-foreground">{t("money.importAutoStatusUnavailable")}</p>
+        )}
         {state === "ready" && !grant && (
           <p className="text-muted-foreground">{t("money.importAutoStatusNoGrant")}</p>
         )}
-        {state === "ready" && grant && (
+        {state === "ready" && grant && !grantIsForSelectedPerson && (
+          <p className="text-muted-foreground" data-testid="money-import-auto-status-other-person">
+            {t("money.importAutoStatusGrantOtherPerson", { date: formatMoment(grant.received_at) })}
+          </p>
+        )}
+        {state === "ready" && grant && grantIsForSelectedPerson && (
           <>
             <p className="text-muted-foreground">
               {t("money.importAutoStatusGrantHeld", {

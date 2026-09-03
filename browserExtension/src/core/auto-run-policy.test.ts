@@ -64,6 +64,7 @@ describe("nextAutoRunState", () => {
       lastResult: "error",
       consecutiveFailures: 1,
       lastError: null,
+      lastRunOrigin: "auto",
     });
 
     state = nextAutoRunState(state, NOW + 1, "error");
@@ -75,6 +76,7 @@ describe("nextAutoRunState", () => {
       lastResult: "ok",
       consecutiveFailures: 0,
       lastError: null,
+      lastRunOrigin: "auto",
     });
   });
 });
@@ -90,29 +92,29 @@ describe("describeAutoRunEligibility", () => {
       { lastRunAtMs: NOW - 60_000, lastResult: "error" as const, consecutiveFailures: 3 },
     ];
     for (const state of cases) {
-      const eligibility = describeAutoRunEligibility(state);
       for (const at of [
         NOW,
         NOW + DEFAULT_AUTO_RUN_COOLDOWN_MS,
         NOW + 10 * DEFAULT_AUTO_RUN_COOLDOWN_MS,
       ]) {
-        const expected =
-          eligibility.kind === "now"
-            ? true
-            : eligibility.kind === "stopped"
-              ? false
-              : at >= eligibility.atMs;
-        expect(shouldAutoRun(state, at)).toBe(expected);
+        const eligibilityAt = describeAutoRunEligibility(state, at);
+        expect(shouldAutoRun(state, at)).toBe(eligibilityAt.kind === "now");
+        // "after" is only ever a moment still ahead.
+        if (eligibilityAt.kind === "after") expect(eligibilityAt.atMs).toBeGreaterThan(at);
       }
     }
   });
 
   it("names the moment a failed run may be retried", () => {
     const twoFailures = { lastRunAtMs: NOW, lastResult: "error" as const, consecutiveFailures: 2 };
-    expect(describeAutoRunEligibility(twoFailures)).toEqual({
+    expect(describeAutoRunEligibility(twoFailures, NOW)).toEqual({
       kind: "after",
       atMs: NOW + 2 * DEFAULT_AUTO_RUN_COOLDOWN_MS,
     });
+    // Once that moment has passed it is "now", not a receding timestamp.
+    expect(describeAutoRunEligibility(twoFailures, NOW + 2 * DEFAULT_AUTO_RUN_COOLDOWN_MS)).toEqual(
+      { kind: "now" },
+    );
   });
 });
 
@@ -128,5 +130,10 @@ describe("nextAutoRunState", () => {
     // A failure without a message keeps the previous one rather than forgetting it.
     expect(nextAutoRunState(failed, NOW + 1, "error").lastError).toBe(failed.lastError);
     expect(nextAutoRunState(failed, NOW + 2, "ok").lastError).toBeNull();
+  });
+
+  it("remembers who started the run", () => {
+    expect(nextAutoRunState(null, NOW, "ok", null, "manual").lastRunOrigin).toBe("manual");
+    expect(nextAutoRunState(null, NOW, "ok").lastRunOrigin).toBe("auto");
   });
 });

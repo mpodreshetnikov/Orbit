@@ -28,6 +28,7 @@ describe("readExtensionAutoStatus", () => {
             last_result: "error",
             consecutive_failures: 1,
             last_error: "T-Bank did not stay on the operations page",
+            last_run_origin: "auto",
             next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
             scheduled_at: null,
           },
@@ -45,6 +46,7 @@ describe("readExtensionAutoStatus", () => {
           last_result: "error",
           consecutive_failures: 1,
           last_error: "T-Bank did not stay on the operations page",
+          last_run_origin: "auto",
           next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
           scheduled_at: null,
         },
@@ -54,6 +56,7 @@ describe("readExtensionAutoStatus", () => {
           last_result: null,
           consecutive_failures: 0,
           last_error: null,
+          last_run_origin: null,
           next_run: { kind: "now" },
           scheduled_at: null,
         },
@@ -69,6 +72,7 @@ describe("MoneyImportAutoStatus", () => {
         t={t}
         state="inactive"
         status={null}
+        selectedPersonId="person-1"
         sourceLabels={labels}
         onRefresh={() => {}}
       />,
@@ -80,6 +84,7 @@ describe("MoneyImportAutoStatus", () => {
         t={t}
         state="ready"
         status={{ grant: null, sources: [] }}
+        selectedPersonId="person-1"
         sourceLabels={labels}
         onRefresh={() => {}}
       />,
@@ -101,6 +106,7 @@ describe("MoneyImportAutoStatus", () => {
               last_result: "error",
               consecutive_failures: 1,
               last_error: "T-Bank did not stay on the operations page",
+              last_run_origin: null,
               next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
               scheduled_at: null,
             },
@@ -110,11 +116,13 @@ describe("MoneyImportAutoStatus", () => {
               last_result: null,
               consecutive_failures: 0,
               last_error: null,
+              last_run_origin: null,
               next_run: { kind: "now" },
               scheduled_at: "2026-09-03T07:31:00.000Z",
             },
           ],
         }}
+        selectedPersonId="person-1"
         sourceLabels={labels}
         onRefresh={() => {}}
       />,
@@ -153,11 +161,13 @@ describe("MoneyImportAutoStatus", () => {
               last_result: "error",
               consecutive_failures: 3,
               last_error: "T-Bank session is not authorized. Sign in and retry import.",
+              last_run_origin: null,
               next_run: { kind: "stopped" },
               scheduled_at: null,
             },
           ],
         }}
+        selectedPersonId="person-1"
         sourceLabels={labels}
         onRefresh={() => {}}
       />,
@@ -165,5 +175,62 @@ describe("MoneyImportAutoStatus", () => {
     const tbank = screen.getByTestId("money-import-auto-status-tbank_web");
     expect(within(tbank).getByText("money.importAutoStatusStopped 3")).toBeInTheDocument();
     expect(within(tbank).getByText(/not authorized/)).toBeInTheDocument();
+  });
+
+  it("says when the extension answered but gave no status, and when the key is someone else's", () => {
+    const { rerender } = render(
+      <MoneyImportAutoStatus
+        t={t}
+        state="unavailable"
+        status={null}
+        selectedPersonId="person-1"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+      />,
+    );
+    expect(screen.getByText("money.importAutoStatusUnavailable")).toBeInTheDocument();
+
+    rerender(
+      <MoneyImportAutoStatus
+        t={t}
+        state="ready"
+        status={{ grant, sources: [] }}
+        selectedPersonId="person-2"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("money-import-auto-status-other-person")).toBeInTheDocument();
+    expect(screen.queryByText(/^money\.importAutoStatusGrantHeld/)).not.toBeInTheDocument();
+  });
+
+  it("does not call a manual import an automatic run", () => {
+    render(
+      <MoneyImportAutoStatus
+        t={t}
+        state="ready"
+        status={{
+          grant,
+          sources: [
+            {
+              source_id: "tbank_web",
+              last_run_at: "2026-09-03T05:02:00.000Z",
+              last_result: "ok",
+              consecutive_failures: 0,
+              last_error: null,
+              last_run_origin: "manual",
+              next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
+              scheduled_at: null,
+            },
+          ],
+        }}
+        selectedPersonId="person-1"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+      />,
+    );
+    const tbank = screen.getByTestId("money-import-auto-status-tbank_web");
+    expect(within(tbank).getByText(/^money\.importAutoStatusLastManualOk /)).toBeInTheDocument();
+    expect(within(tbank).queryByText(/^money\.importAutoStatusLastOk /)).not.toBeInTheDocument();
   });
 });

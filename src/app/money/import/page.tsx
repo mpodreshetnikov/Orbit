@@ -417,7 +417,7 @@ export default function MoneyImportPage() {
 
   const [extensionActive, setExtensionActive] = useState<boolean | null>(null);
   const [extensionAutoStatus, setExtensionAutoStatus] = useState<{
-    state: "loading" | "inactive" | "ready";
+    state: "loading" | "inactive" | "unavailable" | "ready";
     status: ExtensionAutoStatus | null;
   }>({ state: "loading", status: null });
   const [extensionStatusMessage, setExtensionStatusMessage] = useState<string | null>(null);
@@ -903,9 +903,11 @@ export default function MoneyImportPage() {
       setExtensionAutoStatus({ state: "inactive", status: null });
       return;
     }
+    // The ping succeeded, so the extension is there; a status it cannot give (an older
+    // version, a slow service-worker wake) is "unavailable", not "not installed".
     const status = await requestExtensionAutoStatus();
     setExtensionAutoStatus(
-      status ? { state: "ready", status } : { state: "inactive", status: null },
+      status ? { state: "ready", status } : { state: "unavailable", status: null },
     );
   }, [pingExtension, requestExtensionAutoStatus]);
 
@@ -1299,6 +1301,7 @@ export default function MoneyImportPage() {
         t={t}
         state={extensionAutoStatus.state}
         status={extensionAutoStatus.status}
+        selectedPersonId={selectedPersonId}
         sourceLabels={extensionSourceLabels}
         onRefresh={() => void refreshExtensionAutoStatus()}
       />
