@@ -1,7 +1,7 @@
 import "./connectors/tbank-web.js";
 import "./connectors/alfa-web.js";
 import { getConnector } from "./connectors/registry.js";
-import { APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
+import { APP_ORIGINS, APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
 import { routeBackgroundMessage, type BackgroundMessage } from "./core/background-router.js";
 import { createImportDebugStore } from "./core/import-debug.js";
 import { createExtensionLogger } from "./core/observability.js";
@@ -10,6 +10,8 @@ import { createGrantStore } from "./core/grant-store.js";
 import { createBackfillStore } from "./core/backfill-store.js";
 import { createAutoRunStore } from "./core/auto-run-store.js";
 import { createAutoImportSweep } from "./core/auto-import-sweep.js";
+import { createAttentionStore } from "./core/attention-store.js";
+import { createAttentionRefresher, type RefreshOptions } from "./core/attention-refresh.js";
 import { runScheduledImport } from "./core/import-runner.js";
 import {
   getAllMoneyImportSourcePagePatterns,
@@ -307,6 +309,7 @@ const sessionStore = createSessionStore(chrome.storage.local);
 const grantStore = createGrantStore(chrome.storage.local);
 const backfillStore = createBackfillStore(chrome.storage.local);
 const autoRunStore = createAutoRunStore(chrome.storage.local);
+const attentionStore = createAttentionStore(chrome.storage.local);
 const debugStore = createImportDebugStore();
 const telemetry = createExtensionLogger("background");
 telemetry.info("extension_background_initialized", {
@@ -337,17 +340,53 @@ const AUTO_IMPORT_ALARM_PERIOD_MINUTES = 180;
 const AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS = 30_000;
 const AUTO_IMPORT_TAB_POLL_INTERVAL_MS = 500;
 
+function listAutoImportSourceTargets(): Array<{ sourceId: string; targetUrl: string }> {
+  return listMoneyImportSourceDefinitions()
+    .filter((definition) => Boolean(definition.targetUrl))
+    .map((definition) => ({ sourceId: definition.sourceId, targetUrl: definition.targetUrl }));
+}
+
+async function setAttentionBadge(staleCount: number): Promise<void> {
+  if (!chrome.action?.setBadgeText) return;
+  await chrome.action.setBadgeText({ text: staleCount > 0 ? String(staleCount) : "" });
+  if (staleCount > 0 && chrome.action.setBadgeBackgroundColor) {
+    await chrome.action.setBadgeBackgroundColor({ color: "#d97706" });
+  }
+}
+
+/**
+ * Run at the browser's start and after every sweep, because those are the moments something
+ * may have changed: a sweep that failed on the login screen is what makes a source stale, and
+ * one that succeeded is what makes it fresh again. The refresher decides the rest -- the badge,
+ * whether the page opens, and one refresh at a time.
+ */
+const attentionRefresher = createAttentionRefresher({
+  grantStore,
+  autoRunStore,
+  attentionStore,
+  listSourceIds: () => listAutoImportSourceTargets().map((source) => source.sourceId),
+  allowedAppOrigins: () => (Array.isArray(APP_ORIGINS) ? APP_ORIGINS : []),
+  setBadge: setAttentionBadge,
+  openPage: async (url) => {
+    await chrome.tabs.create({ url, active: true });
+  },
+  hasActiveSession: async () => Boolean(await sessionStore.getSession()),
+  now: () => Date.now(),
+  onInfo: (event, attrs) => telemetry.info(event, attrs),
+  onWarning: (event, attrs) => telemetry.warn(event, attrs),
+});
+
+function refreshAttention(reason: string, options: RefreshOptions): Promise<void> {
+  return attentionRefresher.refresh(reason, options);
+}
+
 const autoImportSweep = createAutoImportSweep({
-  listSources: () =>
-    listMoneyImportSourceDefinitions()
-      .filter((definition) => Boolean(definition.targetUrl))
-      .map((definition) => ({
-        sourceId: definition.sourceId,
-        targetUrl: definition.targetUrl,
-      })),
+  listSources: listAutoImportSourceTargets,
   grantStore,
   sessionStore,
   autoRunStore,
+  isRunRequested: (scope, nowMs) => attentionStore.isRunRequested(scope, nowMs),
+  clearRunRequest: (scope) => attentionStore.clearRunRequest(scope),
   openTab: async (url) => {
     const created = await chrome.tabs.create({ url, active: false });
     return typeof created.id === "number" ? created.id : null;
@@ -399,6 +438,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!isComplete && !hasNavigated) return;
 
   void (async () => {
+    // A load in a tab the sweep opened is the sweep's own doing, not a person's visit.
+    if (autoImportSweep.ownsTab(tabId)) return;
     const session = await sessionStore.getSession();
     if (!session) {
       // A finished load on a bank page is the one moment the extension knows the person's bank
@@ -451,18 +492,34 @@ chrome.runtime.onInstalled?.addListener((details) => {
       previous_version: details.previousVersion ?? null,
     });
   });
+  // The badge does not survive an update; the count it showed still holds.
+  void refreshAttention("install", { mayOpenPage: false });
+});
+
+// The browser's start is the one moment a page opening by itself reads as a reminder rather
+// than an interruption, and the badge has to be drawn again in any case.
+chrome.runtime.onStartup?.addListener(() => {
+  void attentionStore
+    .markBrowserStarted(Date.now())
+    .then(() => refreshAttention("startup", { mayOpenPage: true }));
 });
 
 if (chrome.alarms?.onAlarm) {
   void ensureAutoImportAlarm();
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === AUTO_IMPORT_ALARM) {
-      void autoImportSweep.run("alarm");
+      void autoImportSweep
+        .run("alarm")
+        .then(() =>
+          refreshAttention("alarm", { mayOpenPage: true, onlyIfNotOpenedSinceStart: true }),
+        );
       return;
     }
     if (alarm.name.startsWith(VISIT_SWEEP_ALARM_PREFIX)) {
       const sourceId = alarm.name.slice(VISIT_SWEEP_ALARM_PREFIX.length);
-      void autoImportSweep.run("visit", { sourceId });
+      void autoImportSweep
+        .run("visit", { sourceId })
+        .then(() => refreshAttention("visit", { mayOpenPage: false }));
     }
   });
 }
@@ -486,9 +543,16 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
           autoRunStore,
           debugStore,
           listAutoImportSources: () =>
-            listMoneyImportSourceDefinitions()
-              .filter((definition) => Boolean(definition.targetUrl))
-              .map((definition) => definition.sourceId),
+            listAutoImportSourceTargets().map((source) => source.sourceId),
+          attentionStore,
+          resolveSourceTargetUrl: (sourceId) =>
+            listAutoImportSourceTargets().find((source) => source.sourceId === sourceId)
+              ?.targetUrl ?? null,
+          openSourceTab: async (url) => {
+            // For the person, so in front of them -- the sweep's own tab stays in the background.
+            const created = await chrome.tabs.create({ url, active: true });
+            return typeof created.id === "number" ? created.id : null;
+          },
           listScheduledSweeps: async () => {
             if (!chrome.alarms?.getAll) return [];
             const alarms = await chrome.alarms.getAll().catch(() => []);
@@ -509,6 +573,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         },
         {
           senderTabId: sender.tab?.id ?? null,
+          senderOrigin: sender.origin ?? sender.url ?? null,
         },
       );
 
@@ -527,6 +592,19 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
 
       if (message.type === "MONEY_IMPORT_RUN" && message.origin === "source_page_overlay") {
         await maybeOpenReportTab((response as Record<string, unknown>).report_url);
+      }
+
+      // A manual run may have freshened a source; a request or a new threshold changes what
+      // counts; a key set or cleared changes whose sources count at all. The badge follows,
+      // and the page is never opened from here.
+      if (
+        message.type === "MONEY_IMPORT_RUN" ||
+        message.type === "MONEY_IMPORT_REQUEST_RUN" ||
+        message.type === "MONEY_IMPORT_SET_ATTENTION_SETTINGS" ||
+        message.type === "MONEY_IMPORT_SET_GRANT" ||
+        message.type === "MONEY_IMPORT_CLEAR_GRANT"
+      ) {
+        await refreshAttention("message", { mayOpenPage: false });
       }
 
       sendResponse(response);
