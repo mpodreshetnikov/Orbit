@@ -302,7 +302,115 @@ Deno.test(
     assertEquals(chunkPayload.auto_applied, false);
     assertEquals(applied, ["batch-auto"]);
 
-    // An apply that fails leaves the batch pending for a person, and says so, not throws.
+    // A preview with a row error is what a person is for: the batch stays pending, unapplied.
+    const withErrors = createRepositoryMock({
+      batch: {
+        id: "batch-errors",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const errorsPayload = await assertJsonResponse<{
+      auto_applied: boolean;
+      error_count: number;
+    }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-errors",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "e-1" }), txRow({ posted_at: "not-a-date" })],
+        },
+        userAuth,
+        { repository: withErrors.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(errorsPayload.error_count, 1);
+    assertEquals(errorsPayload.auto_applied, false);
+    assertEquals(applied, ["batch-auto"]);
+    assertEquals(withErrors.state.batch?.status, "pending");
+
+    // An apply whose own rows error is still an applied batch; the count is reported.
+    const rowErrors = createRepositoryMock({
+      batch: {
+        id: "batch-row-errors",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const rowErrorsPayload = await assertJsonResponse<{
+      auto_applied: boolean;
+      auto_apply_error_count: number | null;
+    }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-row-errors",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "r-1" })],
+        },
+        userAuth,
+        {
+          repository: rowErrors.repository,
+          applyPendingBatch: async () =>
+            new Response(JSON.stringify({ inserted: 0, skipped: 0, error_count: 2 }), {
+              status: 200,
+            }),
+        },
+      ),
+      200,
+    );
+    assertEquals(rowErrorsPayload.auto_applied, true);
+    assertEquals(rowErrorsPayload.auto_apply_error_count, 2);
+
+    // An apply that throws has already discarded the preview: the batch is failed and the
+    // request fails with it, so the extension leaves the window for the next run.
+    const throwing = createRepositoryMock({
+      batch: {
+        id: "batch-throwing",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const thrownPayload = await assertJsonResponse<{ error: string }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-throwing",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "t-1" })],
+        },
+        userAuth,
+        {
+          repository: throwing.repository,
+          applyPendingBatch: async () => {
+            throw new Error("database went away");
+          },
+        },
+      ),
+      500,
+    );
+    assertEquals(thrownPayload.error, "Batch apply failed");
+    assertEquals(throwing.state.batch?.status, "failed");
+    assertEquals(
+      (throwing.state.batch?.meta as Record<string, unknown>).auto_apply_error,
+      "database went away",
+    );
+
+    // An apply refused before it touched anything leaves the batch pending for a person.
     const failing = createRepositoryMock({
       batch: {
         id: "batch-failing",

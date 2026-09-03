@@ -667,28 +667,6 @@ export async function previewRowsAction(
 
   await deps.repository.updateImportBatch(batchId, patch);
 
-  // The same apply a person's click goes through, with the decisions the preview suggested.
-  // A failure leaves the batch pending for a person, and says so in telemetry rather than to
-  // a caller that has nobody behind it.
-  let autoApplied = false;
-  if (patch.status === "pending" && isUnattendedBatchMeta(patch.meta) && deps.applyPendingBatch) {
-    try {
-      const applied = await deps.applyPendingBatch(batchId);
-      autoApplied = applied.status < 400;
-      if (!autoApplied) {
-        deps.telemetry?.warn("money_import_auto_apply_failed", {
-          batch_id: batchId,
-          status_code: applied.status,
-        });
-      }
-    } catch (error) {
-      deps.telemetry?.warn("money_import_auto_apply_failed", {
-        batch_id: batchId,
-        error_message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
   if (sessionId) {
     const sessionPatch: Record<string, unknown> = {
       status: "running",
@@ -737,6 +715,63 @@ export async function previewRowsAction(
     },
   });
 
+  // Last, after every piece of bookkeeping above has succeeded: nothing that runs after the
+  // apply may fail this request, because a failed request makes the extension complete the
+  // session as failed, and a completed batch must not be reported as one that was not.
+  //
+  // The batch goes through the same apply a person's click does, with the decisions the
+  // preview suggested. Only a batch whose preview raised no row error: a row that could not
+  // be normalised or matched to an account is exactly what a person is for, and the batch
+  // stays pending for them. An apply whose rows error after that is still an applied batch --
+  // the report shows the rows -- and is reported as such. An apply that throws has already
+  // discarded the preview and may have written part of the batch, so the batch is marked
+  // failed and the request fails with it: the extension then leaves this window unlanded and
+  // the next run reads it again, with duplicates refused by their import hash.
+  let autoApplied = false;
+  let autoApplyErrorCount: number | null = null;
+  const accumulatedErrorCount = Number(patch.error_count) || 0;
+  if (
+    patch.status === "pending" &&
+    isUnattendedBatchMeta(patch.meta) &&
+    deps.applyPendingBatch &&
+    accumulatedErrorCount === 0
+  ) {
+    try {
+      const applied = await deps.applyPendingBatch(batchId);
+      autoApplied = applied.status < 400;
+      if (autoApplied) {
+        const appliedPayload = (await applied.json().catch(() => null)) as Record<
+          string,
+          unknown
+        > | null;
+        autoApplyErrorCount = toNumberOrNull(appliedPayload?.error_count) ?? 0;
+        if (autoApplyErrorCount > 0) {
+          deps.telemetry?.warn("money_import_auto_apply_row_errors", {
+            batch_id: batchId,
+            error_count: autoApplyErrorCount,
+          });
+        }
+      } else {
+        deps.telemetry?.warn("money_import_auto_apply_failed", {
+          batch_id: batchId,
+          status_code: applied.status,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.telemetry?.error("money_import_auto_apply_failed", {
+        batch_id: batchId,
+        error_message: message,
+      });
+      await deps.repository.updateImportBatch(batchId, {
+        status: "failed",
+        completed_at: (deps.now ?? (() => new Date()))().toISOString(),
+        meta: { ...(patch.meta as Record<string, unknown>), auto_apply_error: message },
+      });
+      return jsonResponse({ error: "Batch apply failed", batch_id: batchId }, 500);
+    }
+  }
+
   return jsonResponse({
     batch_id: batchId,
     inserted: insertedCount,
@@ -744,5 +779,6 @@ export async function previewRowsAction(
     error_count: errorCount,
     row_results: rowResults,
     auto_applied: autoApplied,
+    auto_apply_error_count: autoApplyErrorCount,
   });
 }
