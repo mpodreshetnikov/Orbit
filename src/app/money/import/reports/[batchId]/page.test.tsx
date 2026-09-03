@@ -38,8 +38,14 @@ let brandsResult: { data: unknown; error: { message: string } | null } = {
 };
 const rpcMock = vi.fn();
 
+// The key, plus any values, so "Line items (1)" is distinguishable from "Line items (2)".
+// One function for the whole test, as next-intl's is stable for a locale: a fresh `t` on every
+// render would re-run every effect that depends on it.
+const translate = (key: string, values?: Record<string, string | number>) =>
+  values ? `${key} ${Object.values(values).join(" ")}` : key;
+
 vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => translate,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -252,7 +258,7 @@ describe("MoneyImportReportPage", () => {
     paramsState = {};
     render(<MoneyImportReportPage />);
 
-    expect(await screen.findByText("Batch id is missing")).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportBatchIdMissing")).toBeInTheDocument();
   });
 
   it("shows batch fetch error and rows fetch error states", async () => {
@@ -297,12 +303,12 @@ describe("MoneyImportReportPage", () => {
     );
 
     expect(screen.getByTestId("report-table-header-row")).toBeInTheDocument();
-    expect(screen.getByText(/^Date$/)).toBeInTheDocument();
-    expect(screen.getByText(/^Status$/)).toBeInTheDocument();
-    expect(screen.getByText(/^Amount$/)).toBeInTheDocument();
-    expect(screen.getByText(/^Cashback$/)).toBeInTheDocument();
-    expect(screen.getByText(/^Card$/)).toBeInTheDocument();
-    expect(screen.getByText(/^Details$/)).toBeInTheDocument();
+    expect(screen.getByText("money.importReportColumnDate")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportColumnStatus")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportColumnAmount")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportColumnCashback")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportColumnCard")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportColumnDetails")).toBeInTheDocument();
 
     expect(screen.getByText("Store A")).toBeInTheDocument();
     expect(screen.getByText("Store B")).toBeInTheDocument();
@@ -315,7 +321,7 @@ describe("MoneyImportReportPage", () => {
     expect(screen.queryByText("money.importResultRowError")).not.toBeInTheDocument();
     expect(screen.getByText("-250 RUB")).toBeInTheDocument();
     expect(screen.getByText("25 RUB")).toBeInTheDocument();
-    expect(screen.getByText("Line items (1)")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportLineItemsCount 1")).toBeInTheDocument();
 
     expect(screen.queryByText(/payload_json/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^account_id$/i)).not.toBeInTheDocument();
@@ -332,7 +338,9 @@ describe("MoneyImportReportPage", () => {
     await user.click(within(storeARow!).getByRole("button", { name: /^JSON$/i }));
 
     expect(
-      await screen.findByRole("heading", { name: /Transaction payload: Store A/i }),
+      await screen.findByRole("heading", {
+        name: /money\.importReportTransactionPayloadTitle Store A/,
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText(/"merchant_name": "Store A"/)).toBeInTheDocument();
     expect(screen.getByText(/"raw_payload"/)).toBeInTheDocument();
@@ -340,14 +348,16 @@ describe("MoneyImportReportPage", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(
-        screen.queryByRole("heading", { name: /Transaction payload: Store A/i }),
+        screen.queryByRole("heading", {
+          name: /money\.importReportTransactionPayloadTitle Store A/,
+        }),
       ).not.toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: /Line items \(1\)/i }));
+    await user.click(screen.getByRole("button", { name: /money\.importReportLineItemsCount 1/ }));
 
     expect(await screen.findByText("Item A")).toBeInTheDocument();
-    expect(screen.getByText("Line 1")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportLineNumber 1")).toBeInTheDocument();
     expect(screen.getByText("-125 RUB")).toBeInTheDocument();
     expect(screen.getByText("10 RUB")).toBeInTheDocument();
     expect(screen.getByText("2 pcs")).toBeInTheDocument();
@@ -357,14 +367,14 @@ describe("MoneyImportReportPage", () => {
     const jsonButtonsAfterExpand = screen.getAllByRole("button", { name: /^JSON$/i });
     await user.click(jsonButtonsAfterExpand[2]!);
     expect(
-      await screen.findByRole("heading", { name: /Line payload: Item A/i }),
+      await screen.findByRole("heading", { name: /money\.importReportLinePayloadTitle Item A/ }),
     ).toBeInTheDocument();
     expect(screen.getByText(/"title": "Item A"/)).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(
-        screen.queryByRole("heading", { name: /Line payload: Item A/i }),
+        screen.queryByRole("heading", { name: /money\.importReportLinePayloadTitle Item A/ }),
       ).not.toBeInTheDocument();
     });
   });
@@ -405,11 +415,7 @@ describe("MoneyImportReportPage", () => {
 
     render(<MoneyImportReportPage />);
 
-    expect(
-      await screen.findByText(
-        "Warning: some TBank Web transactions were imported using DOM fallback. Verify amounts, merchants, and line items before trusting the result.",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportDomFallbackWarning")).toBeInTheDocument();
   });
 
   it("shows transactions without full details count for tbank web batches", async () => {
@@ -464,12 +470,10 @@ describe("MoneyImportReportPage", () => {
 
     render(<MoneyImportReportPage />);
 
-    expect(await screen.findByText("Transactions without full details: 2")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        "Warning: 2 TBank Web transactions were imported without full details because receipt line items were skipped due to TBank rate limiting. You can retry receipt enrichment later.",
-      ),
+      await screen.findByText("money.importReportSummaryWithoutDetails 2"),
     ).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportReceiptWarning 2")).toBeInTheDocument();
   });
 
   it("shows transaction posted date and orders transactions by newest date first", async () => {
@@ -548,7 +552,7 @@ describe("MoneyImportReportPage", () => {
 
     render(<MoneyImportReportPage />);
 
-    expect(await screen.findByText("No rows imported for this batch.")).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportNoRows")).toBeInTheDocument();
   });
 
   it("shows pending preview actions, applies batch, and keeps card mapping available", async () => {
@@ -589,7 +593,7 @@ describe("MoneyImportReportPage", () => {
     expect(await screen.findByText("money.importPendingReviewBanner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "money.importApplyBatch" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "money.importDiscardBatch" })).toBeInTheDocument();
-    expect(screen.getByText("Card mapping")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportCardMapping")).toBeInTheDocument();
     expect(screen.getByTestId("card-remap-apply-card-1")).toBeDisabled();
 
     const user = userEvent.setup();
@@ -652,13 +656,12 @@ describe("MoneyImportReportPage", () => {
 
     render(<MoneyImportReportPage />);
 
-    expect(await screen.findByText("Brand review")).toBeInTheDocument();
-    expect(await screen.findByText("Confidence: 90")).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportBrandReview")).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportBrandConfidence 90")).toBeInTheDocument();
     expect(screen.getAllByText("Known Brand").length).toBeGreaterThan(0);
-    expect(screen.getByRole("img", { name: "Known Brand logo" })).toHaveAttribute(
-      "src",
-      "https://cdn.example.com/known-brand.png",
-    );
+    expect(
+      screen.getByRole("img", { name: "money.importReportBrandLogoAlt Known Brand" }),
+    ).toHaveAttribute("src", "https://cdn.example.com/known-brand.png");
 
     fireEvent.change(screen.getByTestId("brand-resolution-action-resolution-1"), {
       target: { value: "match_existing" },
@@ -740,20 +743,21 @@ describe("MoneyImportReportPage", () => {
 
     render(<MoneyImportReportPage />);
 
-    expect(await screen.findByText("Brand review")).toBeInTheDocument();
-    expect(screen.getByText("Confidence: 90")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /New Brands to review/i })).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportBrandReview")).toBeInTheDocument();
+    expect(screen.getByText("money.importReportBrandConfidence 90")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /money\.importReportNewBrandsToReview/ }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Unseen Brand")).not.toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /New Brands to review/i }));
+    await user.click(screen.getByRole("button", { name: /money\.importReportNewBrandsToReview/ }));
 
     expect(await screen.findByText("Unseen Brand")).toBeInTheDocument();
-    expect(screen.getByText("Confidence: 0")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Unseen Brand logo" })).toHaveAttribute(
-      "src",
-      "https://cdn.example.com/unseen-brand.png",
-    );
+    expect(screen.getByText("money.importReportBrandConfidence 0")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "money.importReportBrandLogoAlt Unseen Brand" }),
+    ).toHaveAttribute("src", "https://cdn.example.com/unseen-brand.png");
   });
 
   it("shows discarded batch state without review actions", async () => {
@@ -881,7 +885,9 @@ describe("MoneyImportReportPage", () => {
     const store50Row = screen.getByText("Store 50").closest("section");
     expect(store50Row).not.toBeNull();
 
-    await user.click(within(store50Row!).getByRole("button", { name: /Line items \(1\)/i }));
+    await user.click(
+      within(store50Row!).getByRole("button", { name: /money\.importReportLineItemsCount 1/ }),
+    );
 
     expect(await screen.findByText("Expanded item")).toBeInTheDocument();
 
@@ -889,7 +895,9 @@ describe("MoneyImportReportPage", () => {
       expect(screen.queryByText("Store 1")).not.toBeInTheDocument();
     });
 
-    await user.click(within(store50Row!).getByRole("button", { name: /Line items \(1\)/i }));
+    await user.click(
+      within(store50Row!).getByRole("button", { name: /money\.importReportLineItemsCount 1/ }),
+    );
 
     await waitFor(() => {
       expect(screen.queryByText("Expanded item")).not.toBeInTheDocument();
@@ -1007,7 +1015,7 @@ describe("MoneyImportReportPage", () => {
 
     render(<MoneyImportReportPage />);
 
-    expect(await screen.findByText("Card mapping")).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportCardMapping")).toBeInTheDocument();
     expect(screen.getByText("Travel card")).toBeInTheDocument();
     const user = userEvent.setup();
 

@@ -10,7 +10,12 @@ import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } fro
 import { useUIStore } from "@/stores/ui-store";
 import { useMoneyAccounts, useCreateMoneyAccount, useMoneyCardsByAccountIds } from "@/hooks";
 import { getConnectors } from "@/lib/import/connector-types";
-import { MoneyImportGrants } from "@/components/money";
+import {
+  MoneyImportAutoStatus,
+  MoneyImportGrants,
+  readExtensionAutoStatus,
+  type ExtensionAutoStatus,
+} from "@/components/money";
 import {
   isExtensionOutdated,
   normalizeExtensionRelease,
@@ -318,6 +323,7 @@ function defaultRangeChoiceForContext(
 }
 
 function buildRangeSelectionPayload(
+  t: ReturnType<typeof useTranslations>,
   context: MoneyImportSourceContextResult,
   choice: ExtensionRangeChoice,
   customFromInput: string,
@@ -345,7 +351,7 @@ function buildRangeSelectionPayload(
     const windowFrom = toIsoFromDateTimeInput(customFromInput);
     const windowTo = toIsoFromDateTimeInput(customToInput) ?? context.window_to;
     if (!windowFrom || !windowTo) {
-      throw new Error("Custom import range is invalid.");
+      throw new Error(t("money.importRangeCustomInvalid"));
     }
     return {
       windowFrom,
@@ -367,7 +373,7 @@ function buildRangeSelectionPayload(
     context.last_imported_at,
   );
   if (!windowFrom || !context.window_to) {
-    throw new Error("Preset import range is invalid.");
+    throw new Error(t("money.importRangePresetInvalid"));
   }
   return {
     windowFrom,
@@ -410,6 +416,10 @@ export default function MoneyImportPage() {
   const [defaultAccountId, setDefaultAccountId] = useState<string>("");
 
   const [extensionActive, setExtensionActive] = useState<boolean | null>(null);
+  const [extensionAutoStatus, setExtensionAutoStatus] = useState<{
+    state: "loading" | "inactive" | "unavailable" | "ready";
+    status: ExtensionAutoStatus | null;
+  }>({ state: "loading", status: null });
   const [extensionStatusMessage, setExtensionStatusMessage] = useState<string | null>(null);
   const [installedExtensionId, setInstalledExtensionId] = useState<string | null>(null);
   const [installedExtensionVersion, setInstalledExtensionVersion] = useState<string | null>(null);
@@ -579,7 +589,7 @@ export default function MoneyImportPage() {
         }
       } catch (error) {
         setExtensionStatusMessage(
-          error instanceof Error ? error.message : "Failed to poll session status",
+          error instanceof Error ? error.message : t("money.importPollFailed"),
         );
       }
     };
@@ -593,7 +603,7 @@ export default function MoneyImportPage() {
         pollingRef.current = null;
       }
     };
-  }, [activeSessionId, router]);
+  }, [activeSessionId, router, t]);
 
   useEffect(() => {
     const onBridgeMessage = (event: MessageEvent) => {
@@ -633,14 +643,14 @@ export default function MoneyImportPage() {
 
       if (data.type === "MONEY_IMPORT_ERROR") {
         setExtensionStatusMessage(
-          typeof data.error === "string" ? data.error : "Extension import failed",
+          typeof data.error === "string" ? data.error : t("money.importExtensionFailed"),
         );
       }
     };
 
     window.addEventListener("message", onBridgeMessage);
     return () => window.removeEventListener("message", onBridgeMessage);
-  }, [router]);
+  }, [router, t]);
 
   const uniqueHints = useMemo(() => {
     if (!parseResult?.transactions.length) return [];
@@ -716,7 +726,7 @@ export default function MoneyImportPage() {
     if (!parseResult?.transactions.length) return [];
     return parseResult.transactions.map((row) => {
       const accountId = resolveAccountId(row);
-      if (!accountId) throw new Error("Unresolved account mapping");
+      if (!accountId) throw new Error(t("money.importUnresolvedAccountMapping"));
       const accountHint = getAccountHint(row);
       return {
         account_id: accountId,
@@ -748,7 +758,7 @@ export default function MoneyImportPage() {
         line_items: row.line_items,
       };
     });
-  }, [parseResult?.transactions, resolveAccountId]);
+  }, [parseResult?.transactions, resolveAccountId, t]);
 
   const handleApplyFileImport = useCallback(async () => {
     if (!selectedPersonId || !selectedConnector || selectedConnector.kind !== "file") return;
@@ -776,7 +786,7 @@ export default function MoneyImportPage() {
     } catch (error) {
       setParseResult((prev) => ({
         transactions: prev?.transactions ?? [],
-        errors: [error instanceof Error ? error.message : "Import failed"],
+        errors: [error instanceof Error ? error.message : t("money.importFailed")],
       }));
     } finally {
       setIsSubmitting(false);
@@ -789,6 +799,7 @@ export default function MoneyImportPage() {
     router,
     selectedConnector,
     selectedPersonId,
+    t,
   ]);
 
   const pingExtension = useCallback(async (): Promise<ExtensionPingResult> => {
@@ -853,6 +864,62 @@ export default function MoneyImportPage() {
     }
   }, [shouldUsePublishedExtensionFlow]);
 
+  const requestExtensionAutoStatus = useCallback(async (): Promise<ExtensionAutoStatus | null> => {
+    return await new Promise<ExtensionAutoStatus | null>((resolve) => {
+      // The bridge echoes this, so a reply to an earlier request -- a Re-check while the
+      // post-grant refresh is still pending -- cannot answer this one with older state.
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        resolve(null);
+      }, EXTENSION_PING_TIMEOUT_MS);
+
+      const onMessage = (event: MessageEvent) => {
+        const data = event.data as Record<string, unknown> | null;
+        if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
+        if (data.type !== "MONEY_IMPORT_AUTO_STATUS") return;
+        if (data.request_id !== requestId) return;
+
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        resolve(readExtensionAutoStatus(data));
+      };
+
+      window.addEventListener("message", onMessage);
+      window.postMessage(
+        {
+          source: EXTENSION_WEBAPP_SOURCE,
+          type: "MONEY_IMPORT_GET_AUTO_STATUS",
+          request_id: requestId,
+          ts: Date.now(),
+        },
+        "*",
+      );
+    });
+  }, []);
+
+  // The extension's own account of what it will do on its own. Asked on its own ping rather
+  // than the connector's, because the grants panel above it is shown whatever source is
+  // selected -- and "nothing happens" is a question people bring to this screen first.
+  const refreshExtensionAutoStatus = useCallback(async () => {
+    setExtensionAutoStatus({ state: "loading", status: null });
+    const pingResult = await pingExtension();
+    if (!pingResult.active) {
+      setExtensionAutoStatus({ state: "inactive", status: null });
+      return;
+    }
+    // The ping succeeded, so the extension is there; a status it cannot give (an older
+    // version, a slow service-worker wake) is "unavailable", not "not installed".
+    const status = await requestExtensionAutoStatus();
+    setExtensionAutoStatus(
+      status ? { state: "ready", status } : { state: "unavailable", status: null },
+    );
+  }, [pingExtension, requestExtensionAutoStatus]);
+
+  useEffect(() => {
+    void refreshExtensionAutoStatus();
+  }, [refreshExtensionAutoStatus]);
+
   const checkExtension = useCallback(async () => {
     setExtensionActive(null);
     setInstalledExtensionId(null);
@@ -862,7 +929,8 @@ export default function MoneyImportPage() {
     setInstalledExtensionId(pingResult.extensionId);
     setInstalledExtensionVersion(pingResult.extensionVersion);
     setExtensionStatusMessage(null);
-  }, [pingExtension]);
+    void refreshExtensionAutoStatus();
+  }, [pingExtension, refreshExtensionAutoStatus]);
 
   useEffect(() => {
     if (!isExtensionConnector) return;
@@ -915,15 +983,16 @@ export default function MoneyImportPage() {
     }
     void loadExtensionImportContext().catch((error) => {
       setExtensionStatusMessage(
-        error instanceof Error ? error.message : "Failed to load import context",
+        error instanceof Error ? error.message : t("money.importContextLoadFailed"),
       );
     });
-  }, [extensionActive, isExtensionConnector, loadExtensionImportContext, selectedPersonId]);
+  }, [extensionActive, isExtensionConnector, loadExtensionImportContext, selectedPersonId, t]);
 
   const resolvedExtensionRange = useMemo(() => {
     if (!extensionImportContext) return null;
     try {
       return buildRangeSelectionPayload(
+        t,
         extensionImportContext,
         extensionRangeChoice,
         customRangeFrom,
@@ -932,7 +1001,7 @@ export default function MoneyImportPage() {
     } catch {
       return null;
     }
-  }, [customRangeFrom, customRangeTo, extensionImportContext, extensionRangeChoice]);
+  }, [customRangeFrom, customRangeTo, extensionImportContext, extensionRangeChoice, t]);
 
   const extensionDownloadUrl = useMemo(() => {
     if (latestExtensionRelease?.downloadUrl) return latestExtensionRelease.downloadUrl;
@@ -997,6 +1066,26 @@ export default function MoneyImportPage() {
       });
     },
     [],
+  );
+
+  // A key the extension just took changes what the status card should say.
+  const sendGrantToExtensionAndRefresh = useCallback(
+    async (grant: { token: string; personId: string; allowedSources: string[] }) => {
+      const delivered = await sendGrantToExtension(grant);
+      if (delivered) void refreshExtensionAutoStatus();
+      return delivered;
+    },
+    [refreshExtensionAutoStatus, sendGrantToExtension],
+  );
+
+  const extensionSourceLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        connectors
+          .filter((connector) => connector.kind !== "file")
+          .map((connector) => [connector.sourceId, resolveConnectorSourceLabel(t, connector)]),
+      ) as Record<string, string>,
+    [connectors, t],
   );
 
   const sendSessionToExtension = useCallback(
@@ -1116,9 +1205,10 @@ export default function MoneyImportPage() {
     try {
       const importContext = extensionImportContext ?? (await loadExtensionImportContext());
       if (!importContext) {
-        throw new Error("Import context is unavailable.");
+        throw new Error(t("money.importContextUnavailable"));
       }
       const rangeSelection = buildRangeSelectionPayload(
+        t,
         importContext,
         extensionRangeChoice,
         customRangeFrom,
@@ -1165,7 +1255,7 @@ export default function MoneyImportPage() {
       }
     } catch (error) {
       setExtensionStatusMessage(
-        error instanceof Error ? error.message : "Failed to start extension import",
+        error instanceof Error ? error.message : t("money.importStartFailed"),
       );
     } finally {
       setIsStartingExtension(false);
@@ -1209,7 +1299,16 @@ export default function MoneyImportPage() {
         t={t}
         personId={selectedPersonId}
         availableSources={extensionConnectorOptions}
-        onSendToExtension={sendGrantToExtension}
+        onSendToExtension={sendGrantToExtensionAndRefresh}
+      />
+
+      <MoneyImportAutoStatus
+        t={t}
+        state={extensionAutoStatus.state}
+        status={extensionAutoStatus.status}
+        selectedPersonId={selectedPersonId}
+        sourceLabels={extensionSourceLabels}
+        onRefresh={() => void refreshExtensionAutoStatus()}
       />
 
       <Card>
@@ -1550,13 +1649,13 @@ export default function MoneyImportPage() {
                 )}
                 <div className="space-y-3 rounded-md border p-4">
                   <div className="space-y-1">
-                    <div className="text-sm font-medium">Import history range</div>
+                    <div className="text-sm font-medium">{t("money.importRangeTitle")}</div>
                     <p className="text-sm text-muted-foreground">
                       {isLoadingExtensionImportContext
-                        ? "Loading import context..."
+                        ? t("money.importRangeLoading")
                         : extensionImportContext?.requires_history_prompt
-                          ? "No recent imports were found for this source. Choose how much history to import."
-                          : "Recent import history was found. The default range will continue from the last imported transaction."}
+                          ? t("money.importRangePromptHistory")
+                          : t("money.importRangeContinue")}
                     </p>
                   </div>
 
@@ -1569,7 +1668,7 @@ export default function MoneyImportPage() {
                         !extensionImportContext || extensionImportContext.requires_history_prompt
                       }
                     >
-                      Automatic
+                      {t("money.importRangeAuto")}
                     </Button>
                     <Button
                       type="button"
@@ -1577,7 +1676,7 @@ export default function MoneyImportPage() {
                       onClick={() => setExtensionRangeChoice("preset:1y")}
                       disabled={!extensionImportContext}
                     >
-                      1 year
+                      {t("money.importRange1y")}
                     </Button>
                     <Button
                       type="button"
@@ -1587,7 +1686,7 @@ export default function MoneyImportPage() {
                       onClick={() => setExtensionRangeChoice("preset:since_last_import")}
                       disabled={!extensionImportContext?.last_imported_at}
                     >
-                      Since last import
+                      {t("money.importRangeSinceLastImport")}
                     </Button>
                   </div>
 
@@ -1598,7 +1697,7 @@ export default function MoneyImportPage() {
                       onClick={() => setExtensionRangeChoice("preset:1m")}
                       disabled={!extensionImportContext}
                     >
-                      1 month
+                      {t("money.importRange1m")}
                     </Button>
                     <Button
                       type="button"
@@ -1606,7 +1705,7 @@ export default function MoneyImportPage() {
                       onClick={() => setExtensionRangeChoice("preset:3m")}
                       disabled={!extensionImportContext}
                     >
-                      3 months
+                      {t("money.importRange3m")}
                     </Button>
                     <Button
                       type="button"
@@ -1614,7 +1713,7 @@ export default function MoneyImportPage() {
                       onClick={() => setExtensionRangeChoice("preset:6m")}
                       disabled={!extensionImportContext}
                     >
-                      6 months
+                      {t("money.importRange6m")}
                     </Button>
                     <Button
                       type="button"
@@ -1622,14 +1721,14 @@ export default function MoneyImportPage() {
                       onClick={() => setExtensionRangeChoice("custom")}
                       disabled={!extensionImportContext}
                     >
-                      Custom
+                      {t("money.importRangeCustom")}
                     </Button>
                   </div>
 
                   {extensionRangeChoice === "custom" && (
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label htmlFor="customRangeFrom">From</Label>
+                        <Label htmlFor="customRangeFrom">{t("money.importRangeFrom")}</Label>
                         <Input
                           id="customRangeFrom"
                           type="datetime-local"
@@ -1638,7 +1737,7 @@ export default function MoneyImportPage() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="customRangeTo">To</Label>
+                        <Label htmlFor="customRangeTo">{t("money.importRangeTo")}</Label>
                         <Input
                           id="customRangeTo"
                           type="datetime-local"
@@ -1650,21 +1749,24 @@ export default function MoneyImportPage() {
                   )}
 
                   <div className="text-sm text-muted-foreground">
-                    {`Selected range: ${formatSelectedRange(
-                      resolvedExtensionRange?.windowFrom ??
-                        extensionImportContext?.window_from ??
-                        null,
-                      resolvedExtensionRange?.windowTo ?? extensionImportContext?.window_to ?? null,
-                    )}`}
+                    {t("money.importRangeSelected", {
+                      range: formatSelectedRange(
+                        resolvedExtensionRange?.windowFrom ??
+                          extensionImportContext?.window_from ??
+                          null,
+                        resolvedExtensionRange?.windowTo ??
+                          extensionImportContext?.window_to ??
+                          null,
+                      ),
+                    })}
                   </div>
                 </div>
                 {isTbankExtensionConnector && (
                   <div className="space-y-3 rounded-md border p-4">
                     <div className="space-y-1">
-                      <div className="text-sm font-medium">Receipt detail strategy</div>
+                      <div className="text-sm font-medium">{t("money.importStrategyTitle")}</div>
                       <p className="text-sm text-muted-foreground">
-                        Full waits longer between receipt requests to reduce T-Bank rate limit
-                        errors.
+                        {t("money.importStrategyHint")}
                       </p>
                     </div>
                     <div className="grid gap-2 md:grid-cols-2">
@@ -1674,7 +1776,7 @@ export default function MoneyImportPage() {
                         data-state={extensionParseStrategy === "fast" ? "on" : "off"}
                         onClick={() => setExtensionParseStrategy("fast")}
                       >
-                        Fast
+                        {t("money.importStrategyFast")}
                       </Button>
                       <Button
                         type="button"
@@ -1682,7 +1784,7 @@ export default function MoneyImportPage() {
                         data-state={extensionParseStrategy === "full" ? "on" : "off"}
                         onClick={() => setExtensionParseStrategy("full")}
                       >
-                        Full
+                        {t("money.importStrategyFull")}
                       </Button>
                     </div>
                   </div>

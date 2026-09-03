@@ -32,6 +32,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
       type?: string;
       session?: unknown;
       grant?: unknown;
+      request_id?: unknown;
     };
     if (!data || data.source !== WEBAPP_SOURCE) return;
 
@@ -70,6 +71,30 @@ export function createContentBridge(deps: ContentBridgeDeps) {
               source: BRIDGE_SOURCE,
               type: "MONEY_IMPORT_GRANT_ACK",
               ok: Boolean(response?.ok),
+            },
+            "*",
+          );
+        },
+      );
+      return;
+    }
+
+    if (data.type === "MONEY_IMPORT_GET_AUTO_STATUS") {
+      // Echoed so the page can tell which of its requests a reply answers: two refreshes in
+      // flight -- a Re-check while the post-grant refresh is pending -- would otherwise both
+      // take the first reply, and the newer one would show the state from before the grant.
+      const requestId = typeof data.request_id === "string" ? data.request_id : null;
+      deps.runtimeSendMessage(
+        { type: "MONEY_IMPORT_GET_AUTO_STATUS" },
+        (response: Record<string, unknown> | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_AUTO_STATUS",
+              request_id: requestId,
+              ok: Boolean(response?.ok),
+              grant: response?.grant ?? null,
+              sources: Array.isArray(response?.sources) ? response.sources : [],
             },
             "*",
           );

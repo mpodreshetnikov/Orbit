@@ -485,6 +485,20 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
           grantStore,
           autoRunStore,
           debugStore,
+          listAutoImportSources: () =>
+            listMoneyImportSourceDefinitions()
+              .filter((definition) => Boolean(definition.targetUrl))
+              .map((definition) => definition.sourceId),
+          listScheduledSweeps: async () => {
+            if (!chrome.alarms?.getAll) return [];
+            const alarms = await chrome.alarms.getAll().catch(() => []);
+            return alarms
+              .filter((alarm) => alarm.name.startsWith(VISIT_SWEEP_ALARM_PREFIX))
+              .map((alarm) => ({
+                sourceId: alarm.name.slice(VISIT_SWEEP_ALARM_PREFIX.length),
+                atMs: alarm.scheduledTime,
+              }));
+          },
           importRunnerDeps: {
             getConnector,
             callEdge,
