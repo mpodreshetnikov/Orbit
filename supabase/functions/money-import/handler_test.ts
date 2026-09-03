@@ -818,3 +818,32 @@ Deno.test(
     assertEquals(response.status !== 401, true, JSON.stringify(body));
   },
 );
+
+Deno.test("money-import handler lets a session token run the receipt preflight", async () => {
+  // Before this, the action took user tokens only. A grant-backed run has none, so its preflight
+  // came back 401, read as "nothing exists", and every receipt was fetched again.
+  let askedFor: { source: string; payerPersonId: string } | undefined;
+  const handler = createMoneyImportHandler({
+    repository: {
+      ...createRepositoryMock(),
+      getExistingTransactionStates: async (source: string, payerPersonId: string) => {
+        askedFor = { source, payerPersonId };
+        return [];
+      },
+    },
+  });
+
+  const payload = await assertJsonResponse<{ states: unknown[] }>(
+    await handler(
+      sessionTokenRequest("get_existing_transaction_states", {
+        source: "alfa_web",
+        payer_person_id: "person-somebody-else",
+        candidates: [{ external_id: "ext-1" }],
+      }),
+    ),
+    200,
+  );
+  assertEquals(payload.states, []);
+  // The session's own import, whatever the body named.
+  assertEquals(askedFor, { source: "tbank_web", payerPersonId: "person-1" });
+});
