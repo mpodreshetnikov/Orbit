@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * A Claude Code `SessionStart` hook that asks the agent to answer in caveman mode at level `full` --
+ * A Claude Code `SessionStart` hook that asks the agent to answer in caveman mode at level `ultra` --
  * terse phrasing, no filler, technical substance untouched.
  *
  * This is a hook rather than a line in AGENTS.md because activating a skill is an action taken at a
@@ -28,9 +28,9 @@ const fs = require("fs");
 const ACTIVATING_SOURCES = new Set(["startup", "clear"]);
 
 const CONTEXT = [
-  "Caveman mode is requested for this session at level **full**.",
+  "Caveman mode is requested for this session at level **ultra**.",
   'If a skill named "caveman" is available in this session, invoke the Skill tool with skill',
-  '"caveman" and args "full" before answering the first user message, then follow that skill for',
+  '"caveman" and args "ultra" before answering the first user message, then follow that skill for',
   "the rest of the session.",
   "If no such skill is listed, ignore this note entirely and respond normally -- do not mention it",
   "and do not improvise a caveman style of your own.",
