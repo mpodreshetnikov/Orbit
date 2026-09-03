@@ -385,6 +385,8 @@ jobs:
     # Its own group, not one shared with deploy-supabase: GitHub holds at most one running and one
     # pending job per group, so a shared group would let a newer run's Supabase job displace this
     # run's pending Vercel job and the commit would never reach the alias at all.
+    #
+    # The group gives mutual exclusion, not ordering -- see the tip check in the steps below.
     concurrency:
       group: deploy-vercel-production
       cancel-in-progress: false
@@ -404,7 +406,17 @@ jobs:
         run: vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
       - name: Build Production Artifacts
         run: vercel build --prod --token="${VERCEL_TOKEN}"
+      # The concurrency group above serialises these deploys but does not order them. A job joins
+      # the queue when its `needs` finish, and `quality-gates` takes minutes longer for a
+      # DB-impacting commit than for a docs-only one, so an older push can arrive at the group
+      # after a newer one and alias production last. That is the same stale-alias failure the
+      # group was added for, reached through arrival order instead of through overlap, so the run
+      # checks it is still the tip of `main` immediately before it mutates production.
+      - name: Check this commit is still the tip of main
+        id: tip
+        uses: ./.github/actions/production-tip-check
       - name: Deploy Production
+        if: steps.tip.outputs.superseded != 'true'
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
@@ -421,8 +433,10 @@ jobs:
     # hazard there is that a displaced pending run leaves a version unpublished for good; here
     # each deploy applies the full desired state of its own commit, so a superseded commit's
     # deploy being cancelled costs nothing -- the newer one that displaced it deploys everything
-    # the older one would have. What matters is only that the last deploy to run is the newest
-    # commit, and the pending slot always holds the newest.
+    # the older one would have.
+    #
+    # What the group does not give is ordering, and the pending slot holds the newest *arrival*
+    # rather than the newest commit -- see the tip check in the steps below.
     #
     # cancel-in-progress stays false: cancelling a running deploy would kill psql partway through
     # the phases, which is the state this task exists to stop production ending up in.
@@ -440,4 +454,11 @@ jobs:
         with:
           version: latest
       - uses: taiki-e/install-action@just
-      - run: just ci-deploy-supabase
+      # Same reason as the Vercel job: the group serialises these deploys without ordering them,
+      # so a push that reached `quality-gates` first can reach the deploy queue second and apply
+      # its migrations, functions, policies and version stamp over a newer commit's.
+      - name: Check this commit is still the tip of main
+        id: tip
+        uses: ./.github/actions/production-tip-check
+      - if: steps.tip.outputs.superseded != 'true'
+        run: just ci-deploy-supabase

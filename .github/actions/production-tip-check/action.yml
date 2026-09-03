@@ -1,0 +1,65 @@
+name: Production tip check
+description: >-
+  Report whether the commit this run was started for is still the tip of the default branch, so a
+  production mutation can stand down when a newer commit has already superseded it.
+
+# Why this exists, and why the concurrency groups on the production deploy jobs are not enough.
+#
+# A `concurrency` group gives mutual exclusion: two production deploys never run at once. It does
+# not give ordering. A job joins its group when its `needs` finish, and `quality-gates` takes
+# minutes longer for a DB-impacting commit than for a docs-only one, so a push made first can
+# reach the group second and mutate production last. The result is the failure the groups were
+# added for -- production left on an older commit than `main`, every job green -- reached through
+# arrival order instead of through overlap. Codex review on Orbit#73, T-260902-60d.
+#
+# So each production mutation asks this immediately before it runs, and skips itself when the
+# answer is "superseded". Together with the group that is enough: a newer run cannot have finished
+# earlier, because the group held it, so the last deploy to succeed is the newest commit.
+#
+# Standing down is a success, not a failure. A superseded commit has nothing to deploy that the
+# commit which replaced it will not deploy, so a red run here would be noise on every burst of
+# merges. Failing to *determine* the tip is the opposite: it fails the job rather than mutating
+# production on an unverified assumption.
+
+inputs:
+  branch:
+    description: Branch whose tip the run is checked against.
+    required: false
+    default: main
+
+outputs:
+  superseded:
+    description: '"true" when the default branch has moved past this run''s commit.'
+    value: ${{ steps.check.outputs.superseded }}
+  tip:
+    description: The commit the branch is currently at.
+    value: ${{ steps.check.outputs.tip }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      run: |
+        set -euo pipefail
+        git fetch --depth=1 origin "${{ inputs.branch }}"
+        tip="$(git rev-parse FETCH_HEAD)"
+        echo "tip=${tip}" >> "$GITHUB_OUTPUT"
+
+        if [[ "${tip}" == "${{ github.sha }}" ]]; then
+          echo "superseded=false" >> "$GITHUB_OUTPUT"
+          echo "${{ inputs.branch }} is at ${tip}, the commit this run deploys." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        echo "superseded=true" >> "$GITHUB_OUTPUT"
+        {
+          echo "### Skipped: superseded commit"
+          echo
+          echo "This run deploys \`${{ github.sha }}\`, but \`${{ inputs.branch }}\` is now at \`${tip}\`."
+          echo "Production is not mutated: the run for \`${tip}\` deploys everything this one would have."
+          echo
+          echo "Re-running an older run reaches this too, and deliberately -- putting production back"
+          echo "on \`${{ inputs.branch }}\` means re-running the newest run, not an older one."
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "::notice title=Superseded commit::${{ inputs.branch }} is at ${tip}; not deploying ${{ github.sha }}."

@@ -77,6 +77,64 @@ describe("production deploy serialisation", () => {
     expect(groupOf("deploy-supabase")).not.toBe(groupOf("deploy-vercel-production"));
   });
 
+  // A concurrency group excludes but does not order: a job joins its group when `needs` finish,
+  // and quality-gates is minutes slower for a DB-impacting commit than for a docs-only one, so an
+  // older push can arrive second and deploy last. Serialisation alone therefore still leaves
+  // production behind main, which is the failure the groups were added for.
+  const PRODUCTION_MUTATIONS: [job: string, mutation: RegExp][] = [
+    ["deploy-supabase", /just ci-deploy-supabase/],
+    ["deploy-vercel-production", /vercel deploy --prebuilt --prod/],
+  ];
+
+  it.each(PRODUCTION_MUTATIONS)(
+    "makes %s check it is still the tip of main before it mutates production",
+    (jobId, mutation) => {
+      const block = jobBlock(jobId);
+      const checkAt = block.indexOf("uses: ./.github/actions/production-tip-check");
+      const mutationAt = block.search(mutation);
+
+      expect(checkAt, "the tip check is missing").toBeGreaterThan(-1);
+      expect(mutationAt).toBeGreaterThan(-1);
+      expect(checkAt, "the tip check runs after the mutation it guards").toBeLessThan(mutationAt);
+    },
+  );
+
+  /** One job's steps, split on the `- ` that opens each entry of the `steps:` list. */
+  function steps(jobId: string): string[] {
+    const block = jobBlock(jobId);
+    return block
+      .slice(block.indexOf("\n    steps:"))
+      .split(/^ {6}- /m)
+      .slice(1);
+  }
+
+  it.each(PRODUCTION_MUTATIONS)(
+    "skips %s's production mutation when the check says the commit is superseded",
+    (jobId, mutation) => {
+      const mutationStep = steps(jobId).filter((step) => mutation.test(step));
+
+      // The condition has to sit on the step that mutates production, not merely somewhere in the
+      // job: a guard on a neighbouring step leaves the deploy itself unconditional.
+      expect(mutationStep).toHaveLength(1);
+      expect(mutationStep[0]).toMatch(/if: steps\.tip\.outputs\.superseded != 'true'/);
+    },
+  );
+
+  it("decides superseded by comparing against this run's own commit", () => {
+    const action = readFileSync(
+      join(__dirname, "..", "..", ".github", "actions", "production-tip-check", "action.yml"),
+      { encoding: "utf8" },
+    );
+
+    expect(action).toMatch(/git fetch --depth=1 origin/);
+    expect(action).toMatch(/\$\{\{ github\.sha \}\}/);
+    expect(action).toMatch(/superseded=true/);
+    expect(action).toMatch(/superseded=false/);
+    // Standing down is a success: a superseded commit has nothing to deploy that the commit
+    // replacing it will not deploy, so failing here would be noise on every burst of merges.
+    expect(action).not.toMatch(/^\s*exit 1\s*$/m);
+  });
+
   it("keys the groups on nothing that varies per run, so two runs actually collide", () => {
     // A group interpolating github.sha or github.run_id is one group per run, which serialises
     // nothing while looking like it does.
