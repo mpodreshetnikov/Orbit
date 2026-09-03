@@ -1315,6 +1315,62 @@ describe("MoneyImportPage", () => {
       } as MoneyImportSessionStatus),
     ).toBe(50);
   });
+
+  it("shows only the status reply that answers its own request", async () => {
+    hookMocks.useMoneyAccounts.mockReturnValue({
+      data: [makeAccount("tbank", "acc-tbank")],
+      isLoading: false,
+    });
+
+    // A reply to some earlier request arrives first, carrying the state from before the key
+    // was delivered; the reply to this request follows. Only the second may be shown.
+    const postMessageSpy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
+      const payload = message as { type?: string; request_id?: string };
+      if (payload.type === "MONEY_IMPORT_PING") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "orbit-extension", type: "MONEY_IMPORT_PONG" },
+          }),
+        );
+      }
+      if (payload.type === "MONEY_IMPORT_GET_AUTO_STATUS") {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: {
+              source: "orbit-extension",
+              type: "MONEY_IMPORT_AUTO_STATUS",
+              request_id: "someone-else",
+              ok: true,
+              grant: null,
+              sources: [],
+            },
+          }),
+        );
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: {
+              source: "orbit-extension",
+              type: "MONEY_IMPORT_AUTO_STATUS",
+              request_id: payload.request_id,
+              ok: true,
+              grant: {
+                person_id: "person-1",
+                allowed_sources: ["tbank_web"],
+                received_at: "2026-09-03T05:00:00.000Z",
+              },
+              sources: [],
+            },
+          }),
+        );
+      }
+    });
+
+    render(<MoneyImportPage />);
+
+    expect(await screen.findByText(/^money\.importAutoStatusGrantHeld /)).toBeInTheDocument();
+    expect(screen.queryByText("money.importAutoStatusNoGrant")).not.toBeInTheDocument();
+    postMessageSpy.mockRestore();
+  });
 });
 fetchMock.mockResolvedValueOnce({
   ok: true,

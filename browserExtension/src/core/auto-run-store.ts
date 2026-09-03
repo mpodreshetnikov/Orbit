@@ -43,6 +43,10 @@ function readState(value: unknown): AutoRunState | null {
       record.lastResult === "ok" || record.lastResult === "error" ? record.lastResult : null,
     consecutiveFailures:
       typeof record.consecutiveFailures === "number" ? record.consecutiveFailures : 0,
+    lastError: typeof record.lastError === "string" ? record.lastError : null,
+    ...(record.lastRunOrigin === "auto" || record.lastRunOrigin === "manual"
+      ? { lastRunOrigin: record.lastRunOrigin }
+      : {}),
   };
 }
 

@@ -131,11 +131,15 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
       // backoff widens and the attempts stop after a few, and the person is told nothing: they
       // did not ask for this run and there is nothing for them to do about it.
+      const errorMessage = error instanceof Error ? error.message : String(error);
       deps.onWarning("money_import_auto_run_failed", {
         source_id: source.sourceId,
-        error_message: error instanceof Error ? error.message : String(error),
+        error_message: errorMessage,
       });
-      await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "error"));
+      await deps.autoRunStore.setState(
+        scope,
+        nextAutoRunState(state, nowMs, "error", errorMessage),
+      );
 
       // Revoking a grant happens in the app and reaches the database, not this extension -- so
       // the only way the extension learns is the server refusing it. Holding on to a credential
