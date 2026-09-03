@@ -116,18 +116,23 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
   async function runSource(
     source: AutoImportSourceTarget,
     grant: StoredImportGrant,
+    trigger: AutoImportTrigger,
   ): Promise<void> {
     if (!source.targetUrl) return;
 
     const nowMs = deps.now();
     const scope = { sourceId: source.sourceId, payerPersonId: grant.person_id };
     const state = await deps.autoRunStore.getState(scope);
-    const requested = (await deps.isRunRequested?.(source.sourceId, nowMs)) ?? false;
+    // A request is for the visit it sends the person on, not for the alarm: the alarm firing
+    // in the hour after Update would try before they had signed in, and fail.
+    const requested =
+      trigger === "visit" && ((await deps.isRunRequested?.(source.sourceId, nowMs)) ?? false);
     if (!requested && !shouldAutoRun(state, nowMs)) return;
 
     const tabId = await deps.openTab(source.targetUrl);
     if (tabId === null) return;
     ownedTabs.add(tabId);
+    let succeeded = false;
 
     try {
       if (!(await deps.waitForTabComplete(tabId))) {
@@ -146,7 +151,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       }
 
       await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "ok"));
-      if (requested) await deps.clearRunRequest?.(source.sourceId);
+      succeeded = true;
     } catch (error) {
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
       // backoff widens and the attempts stop after a few, and the person is told nothing: they
@@ -175,6 +180,19 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       // whether the session still there is its own or one a person has just started.
       await deps.closeTab(tabId);
       ownedTabs.delete(tabId);
+    }
+
+    // Bookkeeping after the outcome is settled, and unable to unsettle it: a request that
+    // will not clear is a request honoured once more, not a successful import reported failed.
+    if (succeeded && requested) {
+      try {
+        await deps.clearRunRequest?.(source.sourceId);
+      } catch (error) {
+        deps.onWarning("money_import_run_request_clear_failed", {
+          source_id: source.sourceId,
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -223,7 +241,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
             // `parseIncomingGrant` refuses a grant that names no sources, so an empty list cannot
             // reach here -- and reading one as "every source" would be the wrong way to be wrong.
             if (!grant.allowed_sources.includes(source.sourceId)) continue;
-            await runSource(source, grant);
+            await runSource(source, grant, trigger);
           }
 
           // Anything queued during this pass is taken now rather than left for hours.

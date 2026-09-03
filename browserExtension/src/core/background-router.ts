@@ -86,6 +86,8 @@ export interface AutoImportStatusSource {
 
 export interface BackgroundRouterContext {
   senderTabId?: number | null;
+  /** The origin of the page that sent the message, as the runtime reports it. */
+  senderOrigin?: string | null;
 }
 
 const activeImportRunsBySessionId = new Set<string>();
@@ -336,6 +338,18 @@ export async function routeBackgroundMessage(
     // anything on the app's page can send one of these, and the function_url is where the token
     // would later be sent.
     if (!grant) return { ok: false, error: "Grant payload was rejected" };
+
+    // The origin the grant names is where the extension will later open tabs -- the report,
+    // the attention page. The page that sent the grant is the app, so the origin it names has
+    // to be its own: one it leaves out is filled in from the sender, one that differs is the
+    // page asking the extension to send the person somewhere else, and is refused.
+    const senderOrigin = resolveAppOrigin(context?.senderOrigin);
+    if (senderOrigin) {
+      if (!grant.app_origin) grant.app_origin = senderOrigin;
+      else if (resolveAppOrigin(grant.app_origin) !== senderOrigin) {
+        return { ok: false, error: "Grant payload was rejected" };
+      }
+    }
 
     await deps.grantStore.setGrant(grant);
     return { ok: true };

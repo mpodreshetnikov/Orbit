@@ -25,12 +25,36 @@ export function buildAttentionPageUrl(appOrigin: string): string | null {
   }
 }
 
+/**
+ * Whether an origin a grant names is one of the app's own. The grant arrives over
+ * `window.postMessage`, which anything on the page can send, and its origin is where the
+ * extension later opens a tab; an origin that is not the app's is a link nobody asked to be
+ * sent to, and is not opened.
+ */
+export function isAppOriginAllowed(candidate: string, allowedOrigins: string[]): boolean {
+  let origin: string;
+  try {
+    origin = new URL(candidate).origin;
+  } catch {
+    return false;
+  }
+  return allowedOrigins.some((allowed) => {
+    try {
+      return new URL(allowed).origin === origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export interface AttentionRefresherDeps {
   grantStore: GrantStore;
   autoRunStore: AutoRunStore;
   attentionStore: AttentionStore;
   /** The sources an unattended run can visit. */
   listSourceIds: () => string[];
+  /** The app's own origins; a grant naming any other is not followed. */
+  allowedAppOrigins: () => string[];
   setBadge: (staleCount: number) => Promise<void>;
   openPage: (url: string) => Promise<void>;
   now: () => number;
@@ -71,6 +95,10 @@ export function createAttentionRefresher(deps: AttentionRefresherDeps): Attentio
           nowMs,
         })
       ) {
+        return;
+      }
+      if (!isAppOriginAllowed(grant.app_origin, deps.allowedAppOrigins())) {
+        deps.onWarning("money_import_attention_origin_refused", { reason });
         return;
       }
       const url = buildAttentionPageUrl(grant.app_origin);

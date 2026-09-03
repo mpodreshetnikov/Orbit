@@ -41,8 +41,26 @@ function readState(value: unknown): AttentionState {
   };
 }
 
-/** The settings and bookkeeping of the attention page, in `chrome.storage.local`. */
+/**
+ * The settings and bookkeeping of the attention page, in `chrome.storage.local`.
+ *
+ * Every change is a read of the whole record, a change, and a write of the whole record, and
+ * the background script handles messages concurrently -- two Updates pressed for two banks
+ * would each read the record without the other's request and the later write would drop it.
+ * Changes run one at a time.
+ */
 export function createAttentionStore(storage: LocalStorageLike): AttentionStore {
+  let chain: Promise<unknown> = Promise.resolve();
+
+  function change<T>(mutate: (state: AttentionState) => Promise<T> | T): Promise<T> {
+    const next = chain.then(async () => {
+      const state = await read();
+      return await mutate(state);
+    });
+    chain = next.catch(() => undefined);
+    return next;
+  }
+
   async function read(): Promise<AttentionState> {
     const data = await storage.get([ATTENTION_STORAGE_KEY]);
     return readState(data[ATTENTION_STORAGE_KEY]);
@@ -54,29 +72,31 @@ export function createAttentionStore(storage: LocalStorageLike): AttentionStore 
 
   return {
     getState: read,
-    async setStaleAfterMs(value) {
-      const state = await read();
-      const staleAfterMs = normalizeStaleAfterMs(value);
-      await write({ ...state, staleAfterMs });
-      return staleAfterMs;
+    setStaleAfterMs(value) {
+      return change(async (state) => {
+        const staleAfterMs = normalizeStaleAfterMs(value);
+        await write({ ...state, staleAfterMs });
+        return staleAfterMs;
+      });
     },
-    async markPageOpened(nowMs) {
-      const state = await read();
-      await write({ ...state, lastOpenedAtMs: nowMs });
+    markPageOpened(nowMs) {
+      return change((state) => write({ ...state, lastOpenedAtMs: nowMs }));
     },
-    async requestRun(sourceId, nowMs) {
-      const state = await read();
-      await write({ ...state, runRequests: { ...state.runRequests, [sourceId]: nowMs } });
+    requestRun(sourceId, nowMs) {
+      return change((state) =>
+        write({ ...state, runRequests: { ...state.runRequests, [sourceId]: nowMs } }),
+      );
     },
     async isRunRequested(sourceId, nowMs) {
       const state = await read();
       return isRunRequestLive(state.runRequests[sourceId], nowMs);
     },
-    async clearRunRequest(sourceId) {
-      const state = await read();
-      if (!(sourceId in state.runRequests)) return;
-      const { [sourceId]: _cleared, ...rest } = state.runRequests;
-      await write({ ...state, runRequests: rest });
+    clearRunRequest(sourceId) {
+      return change(async (state) => {
+        if (!(sourceId in state.runRequests)) return;
+        const { [sourceId]: _cleared, ...rest } = state.runRequests;
+        await write({ ...state, runRequests: rest });
+      });
     },
   };
 }

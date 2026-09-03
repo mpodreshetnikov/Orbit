@@ -474,6 +474,34 @@ describe("a run the person asked for", () => {
     expect(cleared).toEqual([]);
   });
 
+  it("is honoured by the visit it sent the person on, not by the alarm", async () => {
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => true;
+
+    // The alarm in the hour after Update would try before the person had signed in.
+    await harness.sweep.run("alarm");
+    expect(harness.openedTabs).toEqual([]);
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    expect(harness.openedTabs).toHaveLength(1);
+  });
+
+  it("reports a successful run as successful even when the request will not clear", async () => {
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {
+      throw new Error("storage is full");
+    };
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(0);
+    expect(harness.warnings.map((warning) => warning.event)).toEqual([
+      "money_import_run_request_clear_failed",
+    ]);
+  });
+
   it("changes nothing for a source nobody asked about", async () => {
     const harness = createHarness({ states: { "tbank::person-1": stopped } });
     harness.deps.isRunRequested = async () => false;

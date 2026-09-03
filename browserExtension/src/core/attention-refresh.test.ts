@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createAttentionRefresher, type AttentionRefresherDeps } from "./attention-refresh";
+import {
+  createAttentionRefresher,
+  isAppOriginAllowed,
+  type AttentionRefresherDeps,
+} from "./attention-refresh";
 import { createAttentionStore } from "./attention-store";
 import { DAY_MS, HOUR_MS } from "./attention-policy";
 import { createInitialAutoRunState, nextAutoRunState, type AutoRunState } from "./auto-run-policy";
@@ -24,6 +28,7 @@ function createHarness(
     grant?: StoredImportGrant | null;
     states?: Record<string, AutoRunState>;
     openPage?: AttentionRefresherDeps["openPage"];
+    allowedAppOrigins?: string[];
   } = {},
 ) {
   const grant =
@@ -53,6 +58,7 @@ function createHarness(
     },
     attentionStore,
     listSourceIds: () => ["tbank_web"],
+    allowedAppOrigins: () => options.allowedAppOrigins ?? ["https://app.example.com"],
     setBadge: async (count) => {
       badges.push(count);
     },
@@ -132,6 +138,16 @@ describe("createAttentionRefresher", () => {
     expect(harness.opened).toEqual([]);
   });
 
+  it("does not follow a grant to an origin that is not the app's", async () => {
+    const harness = createHarness({ allowedAppOrigins: ["https://app.example.com:8443"] });
+
+    await harness.refresher.refresh("startup", { mayOpenPage: true });
+
+    expect(harness.badges).toEqual([1]);
+    expect(harness.opened).toEqual([]);
+    expect(harness.warnings).toEqual([{ reason: "startup" }]);
+  });
+
   it("survives a page that will not open, and says so", async () => {
     const harness = createHarness({
       openPage: async () => {
@@ -146,5 +162,19 @@ describe("createAttentionRefresher", () => {
     // A later refresh still works: the queue is not stuck on the failure.
     await harness.refresher.refresh("alarm", { mayOpenPage: false });
     expect(harness.badges).toEqual([1, 1]);
+  });
+});
+
+describe("isAppOriginAllowed", () => {
+  it("compares origins, not strings", () => {
+    const allowed = ["https://app.example.com/", "http://localhost:3000"];
+    expect(isAppOriginAllowed("https://app.example.com", allowed)).toBe(true);
+    expect(isAppOriginAllowed("https://app.example.com/money/import", allowed)).toBe(true);
+    expect(isAppOriginAllowed("http://localhost:3000/", allowed)).toBe(true);
+    expect(isAppOriginAllowed("http://app.example.com", allowed)).toBe(false);
+    expect(isAppOriginAllowed("https://app.example.com.evil.example", allowed)).toBe(false);
+    expect(isAppOriginAllowed("https://evil.example/app.example.com", allowed)).toBe(false);
+    expect(isAppOriginAllowed("not a url", allowed)).toBe(false);
+    expect(isAppOriginAllowed("https://app.example.com", ["garbage"])).toBe(false);
   });
 });

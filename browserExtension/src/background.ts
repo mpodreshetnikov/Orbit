@@ -1,7 +1,7 @@
 import "./connectors/tbank-web.js";
 import "./connectors/alfa-web.js";
 import { getConnector } from "./connectors/registry.js";
-import { APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
+import { APP_ORIGINS, APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
 import { routeBackgroundMessage, type BackgroundMessage } from "./core/background-router.js";
 import { createImportDebugStore } from "./core/import-debug.js";
 import { createExtensionLogger } from "./core/observability.js";
@@ -365,6 +365,7 @@ const attentionRefresher = createAttentionRefresher({
   autoRunStore,
   attentionStore,
   listSourceIds: () => listAutoImportSourceTargets().map((source) => source.sourceId),
+  allowedAppOrigins: () => (Array.isArray(APP_ORIGINS) ? APP_ORIGINS : []),
   setBadge: setAttentionBadge,
   openPage: async (url) => {
     await chrome.tabs.create({ url, active: true });
@@ -567,6 +568,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         },
         {
           senderTabId: sender.tab?.id ?? null,
+          senderOrigin: sender.origin ?? sender.url ?? null,
         },
       );
 

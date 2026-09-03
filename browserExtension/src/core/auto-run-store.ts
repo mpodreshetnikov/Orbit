@@ -82,8 +82,15 @@ export function createAutoRunStore(storage: LocalStorageLike): AutoRunStore {
       const kept: Record<string, unknown> = {};
       let forgiven = 0;
       for (const [key, value] of Object.entries(bySource)) {
-        if (readState(value)?.lastResult === "error") {
+        const state = readState(value);
+        if (state?.lastResult === "error") {
           forgiven += 1;
+          // The failures go; the last success stays. It is what "how long has this been
+          // stale" is answered from, and an update that dropped it would call a source that
+          // imported yesterday stale since the grant was issued.
+          if (state.lastOkAtMs !== null && state.lastOkAtMs !== undefined) {
+            kept[key] = { ...createInitialAutoRunState(), lastOkAtMs: state.lastOkAtMs };
+          }
           continue;
         }
         kept[key] = value;

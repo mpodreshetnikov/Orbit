@@ -62,3 +62,18 @@ describe("attention-store", () => {
     });
   });
 });
+
+describe("attention-store under concurrent changes", () => {
+  it("keeps both of two requests made at the same moment", async () => {
+    const store = createAttentionStore(createStorage());
+    await Promise.all([store.requestRun("tbank_web", NOW), store.requestRun("alfa_web", NOW + 1)]);
+    expect((await store.getState()).runRequests).toEqual({ tbank_web: NOW, alfa_web: NOW + 1 });
+
+    await Promise.all([store.clearRunRequest("tbank_web"), store.setStaleAfterMs(2 * DAY_MS)]);
+    expect(await store.getState()).toEqual({
+      staleAfterMs: 2 * DAY_MS,
+      lastOpenedAtMs: null,
+      runRequests: { alfa_web: NOW + 1 },
+    });
+  });
+});
