@@ -1,4 +1,5 @@
 import type { LocalStorageLike } from "./session-store.js";
+import type { AutoRunScope } from "./auto-run-store.js";
 import { isRunRequestLive, normalizeStaleAfterMs } from "./attention-policy.js";
 
 const ATTENTION_STORAGE_KEY = "money_import_attention";
@@ -7,8 +8,16 @@ export interface AttentionState {
   staleAfterMs: number;
   /** When the extension last opened the attention page of its own accord. */
   lastOpenedAtMs: number | null;
-  /** Runs a person asked for from the page, by source: when each was asked. */
+  /**
+   * Runs a person asked for from the page, keyed by `requestKey` (one person at one bank):
+   * when each was asked. Keyed on the source alone, a key issued to another person within
+   * the hour would have inherited the request and imported for them.
+   */
   runRequests: Record<string, number>;
+}
+
+export function requestKey(scope: AutoRunScope): string {
+  return `${scope.sourceId}::${scope.payerPersonId}`;
 }
 
 export interface AttentionStore {
@@ -16,9 +25,9 @@ export interface AttentionStore {
   /** Stores the threshold, bounded; returns what was stored. */
   setStaleAfterMs(value: unknown): Promise<number>;
   markPageOpened(nowMs: number): Promise<void>;
-  requestRun(sourceId: string, nowMs: number): Promise<void>;
-  isRunRequested(sourceId: string, nowMs: number): Promise<boolean>;
-  clearRunRequest(sourceId: string): Promise<void>;
+  requestRun(scope: AutoRunScope, nowMs: number): Promise<void>;
+  isRunRequested(scope: AutoRunScope, nowMs: number): Promise<boolean>;
+  clearRunRequest(scope: AutoRunScope): Promise<void>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -82,19 +91,20 @@ export function createAttentionStore(storage: LocalStorageLike): AttentionStore 
     markPageOpened(nowMs) {
       return change((state) => write({ ...state, lastOpenedAtMs: nowMs }));
     },
-    requestRun(sourceId, nowMs) {
+    requestRun(scope, nowMs) {
       return change((state) =>
-        write({ ...state, runRequests: { ...state.runRequests, [sourceId]: nowMs } }),
+        write({ ...state, runRequests: { ...state.runRequests, [requestKey(scope)]: nowMs } }),
       );
     },
-    async isRunRequested(sourceId, nowMs) {
+    async isRunRequested(scope, nowMs) {
       const state = await read();
-      return isRunRequestLive(state.runRequests[sourceId], nowMs);
+      return isRunRequestLive(state.runRequests[requestKey(scope)], nowMs);
     },
-    clearRunRequest(sourceId) {
+    clearRunRequest(scope) {
       return change(async (state) => {
-        if (!(sourceId in state.runRequests)) return;
-        const { [sourceId]: _cleared, ...rest } = state.runRequests;
+        const key = requestKey(scope);
+        if (!(key in state.runRequests)) return;
+        const { [key]: _cleared, ...rest } = state.runRequests;
         await write({ ...state, runRequests: rest });
       });
     },

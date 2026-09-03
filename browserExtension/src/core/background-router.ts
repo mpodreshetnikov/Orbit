@@ -465,8 +465,22 @@ export async function routeBackgroundMessage(
     }
     const targetUrl = deps.resolveSourceTargetUrl?.(sourceId) ?? null;
     if (!targetUrl) return { ok: false, error: "Source has no page to open" };
-    await deps.attentionStore.requestRun(sourceId, deps.now?.() ?? Date.now());
-    const tabId = deps.openSourceTab ? await deps.openSourceTab(targetUrl) : null;
+    // The bank first, the request second: a request remembered for a tab that never opened
+    // would be honoured by whatever visit came next, which nobody asked for.
+    let tabId: number | null = null;
+    try {
+      tabId = deps.openSourceTab ? await deps.openSourceTab(targetUrl) : null;
+    } catch (error) {
+      return {
+        ok: false,
+        error: `Could not open the bank: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (tabId === null) return { ok: false, error: "Could not open the bank" };
+    await deps.attentionStore.requestRun(
+      { sourceId, payerPersonId: grant.person_id },
+      deps.now?.() ?? Date.now(),
+    );
     return { ok: true, source_id: sourceId, target_url: targetUrl, tab_id: tabId };
   }
 

@@ -934,12 +934,17 @@ describe("background-router", () => {
         markPageOpened: vi.fn(async (nowMs: number) => {
           state.lastOpenedAtMs = nowMs;
         }),
-        requestRun: vi.fn(async (sourceId: string, nowMs: number) => {
-          state.runRequests[sourceId] = nowMs;
-        }),
-        isRunRequested: vi.fn(async (sourceId: string) => sourceId in state.runRequests),
-        clearRunRequest: vi.fn(async (sourceId: string) => {
-          delete state.runRequests[sourceId];
+        requestRun: vi.fn(
+          async (scope: { sourceId: string; payerPersonId: string }, nowMs: number) => {
+            state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`] = nowMs;
+          },
+        ),
+        isRunRequested: vi.fn(
+          async (scope: { sourceId: string; payerPersonId: string }) =>
+            `${scope.sourceId}::${scope.payerPersonId}` in state.runRequests,
+        ),
+        clearRunRequest: vi.fn(async (scope: { sourceId: string; payerPersonId: string }) => {
+          delete state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`];
         }),
       };
     }
@@ -1022,7 +1027,7 @@ describe("background-router", () => {
         tab_id: 42,
       });
       expect(opened).toEqual(["https://www.tbank.ru/mybank/operations/"]);
-      expect(attentionStore.state.runRequests).toEqual({ tbank_web: NOW });
+      expect(attentionStore.state.runRequests).toEqual({ "tbank_web::person-1": NOW });
       // The attempt history is not touched: nothing has succeeded yet.
       expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
 
@@ -1033,6 +1038,37 @@ describe("background-router", () => {
         ),
       ).resolves.toEqual({ ok: false, error: "Source is not covered by the grant" });
       expect(opened).toHaveLength(1);
+    });
+
+    it("remembers no request for a bank that did not open", async () => {
+      const deps = createDeps();
+      deps.grantStore.getGrant.mockResolvedValue(createGrant());
+      const attentionStore = createAttentionStore();
+      const base = {
+        ...deps,
+        attentionStore,
+        resolveSourceTargetUrl: () => "https://www.tbank.ru/mybank/operations/",
+        now: () => NOW,
+      };
+
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "tbank_web" },
+          { ...base, openSourceTab: async () => null },
+        ),
+      ).resolves.toEqual({ ok: false, error: "Could not open the bank" });
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "tbank_web" },
+          {
+            ...base,
+            openSourceTab: async () => {
+              throw new Error("no window");
+            },
+          },
+        ),
+      ).resolves.toEqual({ ok: false, error: "Could not open the bank: no window" });
+      expect(attentionStore.state.runRequests).toEqual({});
     });
 
     it("refuses a run request without a grant", async () => {

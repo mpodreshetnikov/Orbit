@@ -34,7 +34,11 @@ describe("buildAttentionStatus", () => {
         "tbank_web::person-1": nextAutoRunState(null, NOW - 2 * HOUR_MS, "ok"),
         // Never succeeded: counted from the grant's arrival, three days ago.
       }),
-      attention: { staleAfterMs: DAY_MS, lastOpenedAtMs: null, runRequests: { alfa_web: NOW } },
+      attention: {
+        staleAfterMs: DAY_MS,
+        lastOpenedAtMs: null,
+        runRequests: { "alfa_web::person-1": NOW },
+      },
       nowMs: NOW,
     });
 

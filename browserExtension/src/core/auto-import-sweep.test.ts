@@ -441,9 +441,9 @@ describe("a run the person asked for", () => {
   it("runs past the cooldown and the stop after failures, and clears the request on success", async () => {
     const cleared: string[] = [];
     const harness = createHarness({ states: { "tbank::person-1": stopped } });
-    harness.deps.isRunRequested = async (sourceId) => sourceId === "tbank";
-    harness.deps.clearRunRequest = async (sourceId) => {
-      cleared.push(sourceId);
+    harness.deps.isRunRequested = async (scope) => scope.sourceId === "tbank";
+    harness.deps.clearRunRequest = async (scope) => {
+      cleared.push(scope.sourceId);
     };
 
     await harness.sweep.run("visit", { sourceId: "tbank" });
@@ -463,8 +463,8 @@ describe("a run the person asked for", () => {
       }),
     });
     harness.deps.isRunRequested = async () => true;
-    harness.deps.clearRunRequest = async (sourceId) => {
-      cleared.push(sourceId);
+    harness.deps.clearRunRequest = async (scope) => {
+      cleared.push(scope.sourceId);
     };
 
     await harness.sweep.run("visit", { sourceId: "tbank" });
@@ -500,6 +500,20 @@ describe("a run the person asked for", () => {
     expect(harness.warnings.map((warning) => warning.event)).toEqual([
       "money_import_run_request_clear_failed",
     ]);
+  });
+
+  it("keeps its trigger when queued behind the alarm", async () => {
+    // Update pressed, the person signs in, and their visit lands while the alarm's sweep is
+    // still running: the visit is drained as a visit, so the request it carries is honoured.
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => true;
+
+    const alarm = harness.sweep.run("alarm");
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    await alarm;
+
+    expect(harness.openedTabs).toHaveLength(1);
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
   });
 
   it("changes nothing for a source nobody asked about", async () => {

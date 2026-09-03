@@ -370,6 +370,7 @@ const attentionRefresher = createAttentionRefresher({
   openPage: async (url) => {
     await chrome.tabs.create({ url, active: true });
   },
+  hasActiveSession: async () => Boolean(await sessionStore.getSession()),
   now: () => Date.now(),
   onInfo: (event, attrs) => telemetry.info(event, attrs),
   onWarning: (event, attrs) => telemetry.warn(event, attrs),
@@ -384,8 +385,8 @@ const autoImportSweep = createAutoImportSweep({
   grantStore,
   sessionStore,
   autoRunStore,
-  isRunRequested: (sourceId, nowMs) => attentionStore.isRunRequested(sourceId, nowMs),
-  clearRunRequest: (sourceId) => attentionStore.clearRunRequest(sourceId),
+  isRunRequested: (scope, nowMs) => attentionStore.isRunRequested(scope, nowMs),
+  clearRunRequest: (scope) => attentionStore.clearRunRequest(scope),
   openTab: async (url) => {
     const created = await chrome.tabs.create({ url, active: false });
     return typeof created.id === "number" ? created.id : null;

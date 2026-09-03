@@ -29,6 +29,7 @@ function createHarness(
     states?: Record<string, AutoRunState>;
     openPage?: AttentionRefresherDeps["openPage"];
     allowedAppOrigins?: string[];
+    activeSession?: boolean;
   } = {},
 ) {
   const grant =
@@ -62,6 +63,7 @@ function createHarness(
     setBadge: async (count) => {
       badges.push(count);
     },
+    hasActiveSession: async () => options.activeSession ?? false,
     openPage:
       options.openPage ??
       (async (url) => {
@@ -135,6 +137,15 @@ describe("createAttentionRefresher", () => {
     await harness.refresher.refresh("startup", { mayOpenPage: true });
 
     expect(harness.badges).toEqual([0]);
+    expect(harness.opened).toEqual([]);
+  });
+
+  it("draws the badge but opens no page over a run the person started", async () => {
+    const harness = createHarness({ activeSession: true });
+
+    await harness.refresher.refresh("alarm", { mayOpenPage: true });
+
+    expect(harness.badges).toEqual([1]);
     expect(harness.opened).toEqual([]);
   });
 

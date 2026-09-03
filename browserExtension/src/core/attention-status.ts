@@ -1,6 +1,6 @@
 import type { AutoRunStore } from "./auto-run-store.js";
 import type { StoredImportGrant } from "./grant-store.js";
-import type { AttentionState } from "./attention-store.js";
+import { requestKey, type AttentionState } from "./attention-store.js";
 import { describeSourceFreshness, isRunRequestLive } from "./attention-policy.js";
 
 /**
@@ -39,10 +39,8 @@ export async function buildAttentionStatus(input: {
     const receivedAtMs = Date.parse(input.grant.received_at);
     for (const sourceId of input.grant.allowed_sources) {
       if (!known.has(sourceId)) continue;
-      const state = await input.autoRunStore.getState({
-        sourceId,
-        payerPersonId: input.grant.person_id,
-      });
+      const scope = { sourceId, payerPersonId: input.grant.person_id };
+      const state = await input.autoRunStore.getState(scope);
       const freshness = describeSourceFreshness(
         state,
         // A grant whose arrival cannot be read counts from the epoch: stale, and asked about.
@@ -57,7 +55,10 @@ export async function buildAttentionStatus(input: {
         since: new Date(freshness.sinceMs).toISOString(),
         stale: freshness.stale,
         stale_for_ms: freshness.staleForMs,
-        run_requested: isRunRequestLive(input.attention.runRequests[sourceId], input.nowMs),
+        run_requested: isRunRequestLive(
+          input.attention.runRequests[requestKey(scope)],
+          input.nowMs,
+        ),
       });
     }
   }

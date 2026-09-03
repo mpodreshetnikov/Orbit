@@ -57,6 +57,8 @@ export interface AttentionRefresherDeps {
   allowedAppOrigins: () => string[];
   setBadge: (staleCount: number) => Promise<void>;
   openPage: (url: string) => Promise<void>;
+  /** A run a person started is in flight; the page is not opened over it. */
+  hasActiveSession: () => Promise<boolean>;
   now: () => number;
   onInfo: (event: string, attrs: Record<string, unknown>) => void;
   onWarning: (event: string, attrs: Record<string, unknown>) => void;
@@ -88,6 +90,9 @@ export function createAttentionRefresher(deps: AttentionRefresherDeps): Attentio
       });
       await deps.setBadge(status.stale_count);
       if (!options.mayOpenPage || !grant) return;
+      // The alarm stands down for a person's own import; a page opening over it would take
+      // their focus from the very thing that makes the source fresh.
+      if (await deps.hasActiveSession()) return;
       if (
         !shouldOpenAttentionPage({
           staleCount: status.stale_count,

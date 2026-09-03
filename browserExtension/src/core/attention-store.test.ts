@@ -3,6 +3,8 @@ import { createAttentionStore } from "./attention-store";
 import { DAY_MS, DEFAULT_STALE_AFTER_MS, HOUR_MS, MIN_STALE_AFTER_MS } from "./attention-policy";
 
 const NOW = Date.parse("2026-09-03T12:00:00.000Z");
+const TBANK = { sourceId: "tbank_web", payerPersonId: "person-1" };
+const ALFA = { sourceId: "alfa_web", payerPersonId: "person-1" };
 
 function createStorage() {
   const values: Record<string, unknown> = {};
@@ -38,13 +40,13 @@ describe("attention-store", () => {
 
   it("keeps a run request alive for an hour and clears it on demand", async () => {
     const store = createAttentionStore(createStorage());
-    await store.requestRun("tbank_web", NOW);
-    expect(await store.isRunRequested("tbank_web", NOW + 30 * 60 * 1000)).toBe(true);
-    expect(await store.isRunRequested("alfa_web", NOW)).toBe(false);
-    expect(await store.isRunRequested("tbank_web", NOW + 2 * HOUR_MS)).toBe(false);
+    await store.requestRun(TBANK, NOW);
+    expect(await store.isRunRequested(TBANK, NOW + 30 * 60 * 1000)).toBe(true);
+    expect(await store.isRunRequested(ALFA, NOW)).toBe(false);
+    expect(await store.isRunRequested(TBANK, NOW + 2 * HOUR_MS)).toBe(false);
 
-    await store.clearRunRequest("tbank_web");
-    expect(await store.isRunRequested("tbank_web", NOW)).toBe(false);
+    await store.clearRunRequest(TBANK);
+    expect(await store.isRunRequested(TBANK, NOW)).toBe(false);
     expect((await store.getState()).runRequests).toEqual({});
   });
 
@@ -53,12 +55,12 @@ describe("attention-store", () => {
     storage.values.money_import_attention = {
       staleAfterMs: "soon",
       lastOpenedAtMs: "never",
-      runRequests: { tbank_web: "now", alfa_web: NOW },
+      runRequests: { "tbank_web::person-1": "now", "alfa_web::person-1": NOW },
     };
     expect(await createAttentionStore(storage).getState()).toEqual({
       staleAfterMs: DEFAULT_STALE_AFTER_MS,
       lastOpenedAtMs: null,
-      runRequests: { alfa_web: NOW },
+      runRequests: { "alfa_web::person-1": NOW },
     });
   });
 });
@@ -66,14 +68,25 @@ describe("attention-store", () => {
 describe("attention-store under concurrent changes", () => {
   it("keeps both of two requests made at the same moment", async () => {
     const store = createAttentionStore(createStorage());
-    await Promise.all([store.requestRun("tbank_web", NOW), store.requestRun("alfa_web", NOW + 1)]);
-    expect((await store.getState()).runRequests).toEqual({ tbank_web: NOW, alfa_web: NOW + 1 });
+    await Promise.all([store.requestRun(TBANK, NOW), store.requestRun(ALFA, NOW + 1)]);
+    expect((await store.getState()).runRequests).toEqual({
+      "tbank_web::person-1": NOW,
+      "alfa_web::person-1": NOW + 1,
+    });
 
-    await Promise.all([store.clearRunRequest("tbank_web"), store.setStaleAfterMs(2 * DAY_MS)]);
+    await Promise.all([store.clearRunRequest(TBANK), store.setStaleAfterMs(2 * DAY_MS)]);
     expect(await store.getState()).toEqual({
       staleAfterMs: 2 * DAY_MS,
       lastOpenedAtMs: null,
-      runRequests: { alfa_web: NOW + 1 },
+      runRequests: { "alfa_web::person-1": NOW + 1 },
     });
+  });
+});
+
+describe("attention-store per person", () => {
+  it("does not hand one person's request to another at the same bank", async () => {
+    const store = createAttentionStore(createStorage());
+    await store.requestRun(TBANK, NOW);
+    expect(await store.isRunRequested({ ...TBANK, payerPersonId: "person-2" }, NOW)).toBe(false);
   });
 });
