@@ -717,6 +717,70 @@ describe("tbank-web connector", () => {
     expect(result.rows[0]?.line_items).toHaveLength(1);
   });
 
+  it("recognises the versioned operations page the bank redirects to", () => {
+    // Recorded 2026-09-03: navigating to /mybank/operations/ lands here, and an exact match
+    // made every run -- manual and unattended -- fail with "did not stay on the operations page".
+    expect(
+      __test__.isOperationsPageUrl(
+        "https://www.tbank.ru/mybank/operations/v8/?dco_ic=4aeb041b-9421-484f-ab8a-9f1642e789d4",
+      ),
+    ).toBe(true);
+    expect(__test__.isOperationsPageUrl("https://www.tbank.ru/mybank/operations/")).toBe(true);
+    expect(__test__.isOperationsPageUrl("https://www.tbank.ru/mybank/operations")).toBe(true);
+
+    expect(__test__.isOperationsPageUrl("https://www.tbank.ru/mybank/")).toBe(false);
+    expect(__test__.isOperationsPageUrl("https://www.tbank.ru/mybank/operations-settings/")).toBe(
+      false,
+    );
+    expect(__test__.isOperationsPageUrl("https://example.com/mybank/operations/")).toBe(false);
+  });
+
+  it("stays on the versioned operations page instead of navigating away from it", async () => {
+    const query = vi.fn().mockResolvedValue([
+      {
+        id: 77,
+        url: "https://www.tbank.ru/mybank/operations/v8/?dco_ic=4aeb041b-9421-484f-ab8a-9f1642e789d4",
+        status: "complete",
+      },
+    ]);
+    const update = vi.fn();
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          method: "api",
+          operation_records: [],
+          window_to: "2026-03-05T12:00:00.000Z",
+          parsed_through_at: "2026-02-01T00:00:00.000Z",
+          parsed_transactions_count: 0,
+        },
+      },
+    ]);
+
+    (globalThis as { chrome: Record<string, unknown> }).chrome = {
+      tabs: {
+        query,
+        update,
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript,
+      },
+    } as unknown as typeof chrome;
+
+    const result = await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+    });
+
+    // Navigating "to the operations page" from here would only trigger the same redirect again.
+    expect(update).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledOnce();
+    expect(result.rows).toHaveLength(0);
+  });
+
   it("throws blocked reason from page extraction", async () => {
     (globalThis as { chrome: Record<string, unknown> }).chrome = {
       tabs: {

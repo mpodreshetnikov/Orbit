@@ -1,0 +1,36 @@
+# Migrations applied against a schema newer than their own timestamp.
+#
+# `quality-migration-order` refuses a migration that does not sort after the base branch's latest.
+# The ordinary fix is to rename the file, and it is only available while nothing has applied that
+# version: once production's `supabase_migrations.schema_migrations` records it, the version is
+# permanent, and a rename would present the same change as unapplied and run it again under a new
+# key. That distinction is not in the checker's failure text, which recommends a rename
+# unconditionally -- see T-260902-1ui.
+#
+# An entry below is a live exemption: `<version> # rationale`, matched by version alone. Read the
+# hazard before adding one. Because the match ignores the filename, an exemption also waves through
+# a *replacement* -- a branch that deletes the recorded file and adds different SQL under the same
+# version passes, and production then skips it entirely, because that version is already in
+# schema_migrations. Duplicate detection does not catch it either: it counts occurrences among the
+# files the head still has, and the original is gone. So an exemption is worth its cost only while
+# the migration is genuinely being re-added; for one already on the base branch it grants nothing
+# and risks that.
+#
+# ---------------------------------------------------------------------------------------------
+# 20260901150000_condition_record_resolution_review
+#
+# Recorded here rather than exempted, deliberately: it sits on the base branch, so the checker
+# never treats it as added and never consults this list for it. An entry would grant nothing today
+# and open the replacement hazard above.
+#
+# It was applied to production on 2026-09-02 AFTER 20260902060000 was already there -- verified
+# against the live schema_migrations, not inferred from CI. That was harmless in effect: the
+# migration is additive and idempotent throughout (ADD COLUMN IF NOT EXISTS, a constraint guarded
+# on duplicate_object, CREATE INDEX IF NOT EXISTS), it touches only condition_records, and no later
+# migration reads or alters what it adds.
+#
+# It reached production because the checker compares only the migrations a push ADDS. The deploy
+# was skipped on the commit that merged it, Quality Gates being red; by the next push the file was
+# no longer new, the check went quiet, and `db push --include-all` applied it. That blind spot is
+# T-260902-1ui. Should that task make the checker examine the whole tree, this migration will start
+# failing and will need a real entry -- decide it then, together with binding entries to a filename.

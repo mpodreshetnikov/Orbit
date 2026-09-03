@@ -4,7 +4,7 @@ import React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useDropzone } from "react-dropzone";
 import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
@@ -389,6 +389,7 @@ function formatSelectedRange(windowFrom: string | null, windowTo: string | null)
 
 export default function MoneyImportPage() {
   const t = useTranslations();
+  const locale = useLocale();
   const router = useRouter();
   const selectedPersonId = useUIStore((state) => state.selectedPersonId);
   const { data: accounts } = useMoneyAccounts(selectedPersonId);
@@ -1042,13 +1043,16 @@ export default function MoneyImportPage() {
               function_url: getFunctionUrl("money-import"),
               app_origin: window.location.origin,
               show_source_page_widget: true,
+              // The widget on the bank page carries its own strings and needs to be told which
+              // language the app is showing; it cannot read the app's translations from there.
+              locale,
             },
           },
           "*",
         );
       });
     },
-    [],
+    [locale],
   );
 
   const launchExtensionFallback = useCallback(
@@ -1076,12 +1080,15 @@ export default function MoneyImportPage() {
         `&range_selection_meta=${encodeURIComponent(
           JSON.stringify(payload.range_selection_meta ?? null),
         )}` +
-        `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}`;
+        `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}` +
+        // The same field the postMessage path sends; the popup seeds a session from this URL
+        // and the widget would otherwise fall back to the browser's language on this path.
+        `&locale=${encodeURIComponent(locale)}`;
 
       window.open(launchUrl, "_blank", "noopener,noreferrer");
       return true;
     },
-    [installedExtensionId, latestExtensionRelease?.extensionId],
+    [installedExtensionId, latestExtensionRelease?.extensionId, locale],
   );
 
   const handleStartExtensionImport = useCallback(async () => {
