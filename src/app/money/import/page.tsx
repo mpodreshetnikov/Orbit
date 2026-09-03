@@ -1080,12 +1080,15 @@ export default function MoneyImportPage() {
         `&range_selection_meta=${encodeURIComponent(
           JSON.stringify(payload.range_selection_meta ?? null),
         )}` +
-        `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}`;
+        `&default_account_id=${encodeURIComponent(defaultExtensionAccountId ?? "")}` +
+        // The same field the postMessage path sends; the popup seeds a session from this URL
+        // and the widget would otherwise fall back to the browser's language on this path.
+        `&locale=${encodeURIComponent(locale)}`;
 
       window.open(launchUrl, "_blank", "noopener,noreferrer");
       return true;
     },
-    [installedExtensionId, latestExtensionRelease?.extensionId],
+    [installedExtensionId, latestExtensionRelease?.extensionId, locale],
   );
 
   const handleStartExtensionImport = useCallback(async () => {
