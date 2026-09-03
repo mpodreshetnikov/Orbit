@@ -42,6 +42,18 @@ function evaluate(
   });
 }
 
+/**
+ * The environment the script is spawned with: the runner's own, minus what Actions says about
+ * the event it is running for. On a push to main the script steps aside (#96); these tests are
+ * about what it measures, and must measure the same wherever they run.
+ */
+function scriptEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.GITHUB_EVENT_NAME;
+  delete env.GITHUB_REF;
+  return { ...env, ...overrides };
+}
+
 describe("change size evaluation", () => {
   it("passes a change the size of the pull requests that drew no review rounds", () => {
     const result = evaluate([
@@ -428,12 +440,11 @@ describe("the base a pull request run measures against", () => {
   function measure(dir: string, base: string) {
     const result = spawnSync(process.execPath, [script], {
       encoding: "utf8",
-      env: {
-        ...process.env,
+      env: scriptEnv({
         PR_SIZE_REPO_ROOT: dir,
         PR_SIZE_BASE: base,
         PR_SIZE_BRANCH: "pr-size-merge-ref-fixture",
-      },
+      }),
     });
     expect(result.status, result.stderr).toBe(0);
     return `${result.stdout}${result.stderr}`;
@@ -464,12 +475,11 @@ describe("base ref resolution", () => {
       // branch, so these tests would report on whichever branch happens to run them -- and pass or
       // fail depending on whether that branch is in `.large-change-allowlist`. This name is not,
       // and never should be, so what they measure is the base resolution they are about.
-      env: {
-        ...process.env,
+      env: scriptEnv({
         PR_SIZE_BASE: "",
         PR_SIZE_BRANCH: "pr-size-base-resolution-fixture",
         ...env,
-      },
+      }),
     });
   }
 
@@ -494,6 +504,22 @@ describe("base ref resolution", () => {
     expect(result.status, result.stderr).toBeLessThan(2);
     return `${result.stdout}${result.stderr}`;
   }
+
+  it("steps aside on CI's push to main, and measures a pull request whatever its branch is called", () => {
+    // The deploy of #96 itself failed here: the tests inherited the runner's environment, and on
+    // the push to main every one of them was told the gate had stepped aside.
+    const skipped = runScript([], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main" });
+    expect(skipped.status, skipped.stderr).toBe(0);
+    expect(skipped.stdout).toContain("PR size check skipped");
+
+    const measured = runScript([], {
+      GITHUB_EVENT_NAME: "pull_request",
+      GITHUB_REF: "refs/pull/1/merge",
+      PR_SIZE_BRANCH: "main",
+    });
+    expect(measured.status, measured.stderr).toBeLessThan(2);
+    expect(`${measured.stdout}${measured.stderr}`).not.toContain("PR size check skipped");
+  });
 
   it("checks against the base it was given", () => {
     expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: "origin/main" }))).toContain(
