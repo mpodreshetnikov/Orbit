@@ -30,6 +30,20 @@ export interface PreviewRowsDeps {
   repository: MoneyImportRepository;
   now?: () => Date;
   telemetry?: EdgeTelemetry;
+  /**
+   * Applies a pending batch as a person's "Apply" would. Called for the final chunk of a batch
+   * the extension marked unattended: nobody started it, so nobody would come back to apply
+   * it, and the first live run left two batches waiting on a review the owner never asked for.
+   */
+  applyPendingBatch?: (batchId: string) => Promise<Response>;
+}
+
+function isUnattendedBatchMeta(meta: unknown): boolean {
+  return (
+    Boolean(meta) &&
+    typeof meta === "object" &&
+    (meta as Record<string, unknown>).unattended === true
+  );
 }
 
 type RowErrorSignature =
@@ -46,8 +60,12 @@ function normalizeErrorMessageForTelemetry(message: string): string {
 
 function classifyRowErrorSignature(message: string): RowErrorSignature {
   const normalized = message.toLowerCase();
-  if (normalized.includes("no money account found for source")) return "no_account_for_source";
-  if (normalized.includes("duplicate transaction")) return "duplicate_transaction";
+  if (normalized.includes("no money account found for source")) {
+    return "no_account_for_source";
+  }
+  if (normalized.includes("duplicate transaction")) {
+    return "duplicate_transaction";
+  }
   if (normalized.includes("invalid posted_at") || normalized.includes("invalid amount")) {
     return "validation_error";
   }
@@ -88,7 +106,9 @@ function brandCacheKeyForRow(
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  if (value && typeof value === "object") return value as Record<string, unknown>;
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
   return null;
 }
 
@@ -154,7 +174,16 @@ function buildPreviewResetMeta(
   const incomingRangeSelectionMeta = asRecord(incomingMeta?.range_selection_meta);
   const existingRangeSelectionMeta = asRecord(existingMeta?.range_selection_meta);
 
+  // Counters start over with the preview; what describes the batch itself does not. The
+  // strategy and the unattended mark are set once, at create_session, and the final chunk
+  // reads the mark to decide whether anyone is coming back to apply this batch.
+  const kept: Record<string, unknown> = {};
+  for (const key of ["parse_strategy", "unattended"] as const) {
+    if (existingMeta && key in existingMeta) kept[key] = existingMeta[key];
+  }
+
   return {
+    ...kept,
     range_selection_meta: incomingRangeSelectionMeta ?? existingRangeSelectionMeta ?? null,
   };
 }
@@ -638,6 +667,28 @@ export async function previewRowsAction(
 
   await deps.repository.updateImportBatch(batchId, patch);
 
+  // The same apply a person's click goes through, with the decisions the preview suggested.
+  // A failure leaves the batch pending for a person, and says so in telemetry rather than to
+  // a caller that has nobody behind it.
+  let autoApplied = false;
+  if (patch.status === "pending" && isUnattendedBatchMeta(patch.meta) && deps.applyPendingBatch) {
+    try {
+      const applied = await deps.applyPendingBatch(batchId);
+      autoApplied = applied.status < 400;
+      if (!autoApplied) {
+        deps.telemetry?.warn("money_import_auto_apply_failed", {
+          batch_id: batchId,
+          status_code: applied.status,
+        });
+      }
+    } catch (error) {
+      deps.telemetry?.warn("money_import_auto_apply_failed", {
+        batch_id: batchId,
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   if (sessionId) {
     const sessionPatch: Record<string, unknown> = {
       status: "running",
@@ -692,5 +743,6 @@ export async function previewRowsAction(
     skipped: skippedCount,
     error_count: errorCount,
     row_results: rowResults,
+    auto_applied: autoApplied,
   });
 }

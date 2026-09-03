@@ -114,7 +114,10 @@ function createRepositoryMock(
       has_only_synthetic_line_items: false,
       has_real_line_items: false,
     }),
-    insertOrResolveTransaction: async () => ({ transactionId: "unused", inserted: true }),
+    insertOrResolveTransaction: async () => ({
+      transactionId: "unused",
+      inserted: true,
+    }),
     insertLineItemIfNew: async () => ({ lineItemId: "unused", inserted: true }),
     insertReportRow: async (payload) => {
       state.reportRows.push(payload);
@@ -195,6 +198,143 @@ Deno.test(
     assertEquals(state.deletedBatchBrandResolutionsCount, 1);
     assertEquals(state.batch?.status, "pending");
     assertEquals(state.batch?.parsed_transactions_count, 1);
+  },
+);
+
+Deno.test(
+  "previewRowsAction applies a batch the extension marked unattended, once it is complete",
+  async () => {
+    const applied: string[] = [];
+    const applyPendingBatch = async (batchId: string) => {
+      applied.push(batchId);
+      return new Response(JSON.stringify({ batch_id: batchId }), {
+        status: 200,
+      });
+    };
+
+    // A person's batch: pending, waiting for their "Apply".
+    const manual = createRepositoryMock({
+      batch: {
+        id: "batch-manual",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { parse_strategy: "fast" },
+      },
+    });
+    const manualPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-manual",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "m-1" })],
+        },
+        userAuth,
+        { repository: manual.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(manualPayload.auto_applied, false);
+    assertEquals(applied, []);
+    assertEquals(manual.state.batch?.status, "pending");
+
+    // The extension's batch: nobody started it, so nobody would come back to apply it.
+    const unattended = createRepositoryMock({
+      batch: {
+        id: "batch-auto",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { parse_strategy: "full", unattended: true },
+      },
+    });
+    const autoPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-auto",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "a-1" })],
+        },
+        userAuth,
+        { repository: unattended.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(autoPayload.auto_applied, true);
+    assertEquals(applied, ["batch-auto"]);
+
+    // Not before the last chunk: the batch is not whole yet.
+    const chunked = createRepositoryMock({
+      batch: {
+        id: "batch-chunked",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const chunkPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-chunked",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "c-1" })],
+          chunk_index: 0,
+          chunk_count: 2,
+          row_offset: 0,
+          total_row_count: 2,
+          is_final_chunk: false,
+        },
+        userAuth,
+        { repository: chunked.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(chunkPayload.auto_applied, false);
+    assertEquals(applied, ["batch-auto"]);
+
+    // An apply that fails leaves the batch pending for a person, and says so, not throws.
+    const failing = createRepositoryMock({
+      batch: {
+        id: "batch-failing",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const failingPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-failing",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "f-1" })],
+        },
+        userAuth,
+        {
+          repository: failing.repository,
+          applyPendingBatch: async () =>
+            new Response(JSON.stringify({ error: "Batch payer is missing" }), {
+              status: 400,
+            }),
+        },
+      ),
+      200,
+    );
+    assertEquals(failingPayload.auto_applied, false);
+    assertEquals(failing.state.batch?.status, "pending");
   },
 );
 

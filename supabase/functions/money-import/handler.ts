@@ -2,7 +2,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { createEdgeRequestContext, createEdgeTelemetry } from "../_shared/observability.ts";
 import { resolveAuth } from "./auth.ts";
 import { applyRowsAction } from "./apply-rows.ts";
-import { applyBatchAction } from "./apply-batch.ts";
+import { applyBatchAction, applyPendingBatch } from "./apply-batch.ts";
 import { createDefaultMoneyImportDeps, type MoneyImportDeps } from "./deps.ts";
 import { discardBatchAction } from "./discard-batch.ts";
 import { getExistingTransactionStatesAction } from "./existing-transaction-states.ts";
@@ -21,7 +21,9 @@ import type { GrantAuthContext, UserAuthContext } from "./types.ts";
 export interface MoneyImportHandlerDeps extends MoneyImportDeps {}
 
 function asBody(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object") return value as Record<string, unknown>;
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
   return {};
 }
 
@@ -92,7 +94,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: false, allowGrant: true },
         )) as UserAuthContext | GrantAuthContext;
-        const response = await createSessionAction(body, auth, { ...deps, telemetry });
+        const response = await createSessionAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -112,7 +117,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: false },
         )) as UserAuthContext;
-        const response = await getImportContextAction(body, auth, { ...deps, telemetry });
+        const response = await getImportContextAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -157,7 +165,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: false },
         )) as UserAuthContext;
-        const response = await sessionStatusAction(body, auth, { ...deps, telemetry });
+        const response = await sessionStatusAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -177,7 +188,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: true },
         );
-        const response = await applyRowsAction(body, auth, { ...deps, telemetry });
+        const response = await applyRowsAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -197,7 +211,11 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: true },
         );
-        const response = await previewRowsAction(body, auth, { ...deps, telemetry });
+        const response = await previewRowsAction(body, auth, {
+          ...deps,
+          telemetry,
+          applyPendingBatch: (batchId) => applyPendingBatch(batchId, { ...deps, telemetry }),
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -217,7 +235,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: false },
         )) as UserAuthContext;
-        const response = await applyBatchAction(body, auth, { ...deps, telemetry });
+        const response = await applyBatchAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -237,7 +258,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: false },
         )) as UserAuthContext;
-        const response = await discardBatchAction(body, auth, { ...deps, telemetry });
+        const response = await discardBatchAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -301,7 +325,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
           },
           { allowUser: true, allowSession: true },
         );
-        const response = await completeSessionAction(body, auth, { ...deps, telemetry });
+        const response = await completeSessionAction(body, auth, {
+          ...deps,
+          telemetry,
+        });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
