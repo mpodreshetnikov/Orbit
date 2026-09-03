@@ -63,6 +63,17 @@ describe("getCondition", () => {
     expect(detail.mentions[0].not_applied_reason).toBeUndefined();
   });
 
+  it("tells a dismissal apart from a proposal nobody has ruled on", async () => {
+    // Both are suppressed, and that still needs saying — but reporting a dismissal as "nobody has
+    // confirmed it" turns a decision that was made into one that is outstanding.
+    const stub = stubFor([mention({ review_decision: "dismissed" })]);
+    const detail = await getCondition(stub.client, "cond-1");
+
+    expect(detail.mentions[0].awaiting_confirmation).toBe(false);
+    expect(String(detail.mentions[0].not_applied_reason)).toContain("rejected it");
+    expect(String(detail.mentions[0].not_applied_reason)).toContain("NOT changed");
+  });
+
   it("leaves a closure a person wrote themselves unmarked", async () => {
     const stub = stubFor([mention({ is_llm_extracted: false })]);
     const detail = await getCondition(stub.client, "cond-1");

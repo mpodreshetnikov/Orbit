@@ -37,6 +37,21 @@ vi.mock("@/lib/date-locale", () => ({
   useDateFnsLocale: () => undefined,
 }));
 
+const observationRows = vi.hoisted(() => ({ data: [] as unknown[], error: null as unknown }));
+const toastError = vi.hoisted(() => vi.fn());
+
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
+
+vi.mock("@/lib/supabase", () => ({
+  createClient: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => Promise.resolve({ data: observationRows.data, error: observationRows.error }),
+      }),
+    }),
+  }),
+}));
+
 vi.mock("@/hooks", () => ({
   useConditionDetail: (...args: unknown[]) => hookMocks.useConditionDetail(...args),
   useUpdateCondition: (...args: unknown[]) => hookMocks.useUpdateCondition(...args),
@@ -155,6 +170,22 @@ describe("ConditionDetailPage", () => {
     });
     ruleMutateAsync.mockReset();
     ruleMutateAsync.mockResolvedValue(undefined);
+    toastError.mockReset();
+    // A B12 closure whose cited measurement is still on the record and in range.
+    observationRows.data = [
+      {
+        obs_code: "vitamin_b12",
+        is_applied: true,
+        value_numeric: 704,
+        value_canonical: null,
+        ref_range_low: 187,
+        ref_range_high: 883,
+        ref_range_low_canonical: null,
+        ref_range_high_canonical: null,
+        status: "normal",
+      },
+    ];
+    observationRows.error = null;
     hookMocks.useUpdateConditionRecord.mockReturnValue({
       mutateAsync: ruleMutateAsync,
       isPending: false,
@@ -349,6 +380,67 @@ describe("ConditionDetailPage", () => {
 
       expect(screen.queryByRole("button", { name: /conditions.confirmClosure/ })).toBeNull();
       expect(screen.queryByRole("button", { name: "conditions.dismissClosure" })).toBeNull();
+    });
+
+    it("refuses to confirm when the cited measurement no longer supports the closure", async () => {
+      // The activation path guards this with proposedClosureStillHolds; this page opened a second
+      // route to the same write and has to apply the same guard. Showing the observation is not
+      // checking it — a person can correct the value between the page loading and the click.
+      observationRows.data = [
+        {
+          obs_code: "vitamin_b12",
+          is_applied: true,
+          value_numeric: 120,
+          value_canonical: null,
+          ref_range_low: 187,
+          ref_range_high: 883,
+          ref_range_low_canonical: null,
+          ref_range_high_canonical: null,
+          status: "low",
+        },
+      ];
+      await renderWith([pendingClosure]);
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
+
+      await waitFor(() => expect(toastError).toHaveBeenCalled());
+      expect(ruleMutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("refuses to confirm when the measurement cannot be read at all", async () => {
+      // A failed read is not evidence that the closure still holds.
+      observationRows.data = [];
+      observationRows.error = { message: "network" };
+      await renderWith([pendingClosure]);
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: /conditions.confirmClosure/ }));
+
+      await waitFor(() => expect(toastError).toHaveBeenCalled());
+      expect(ruleMutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("dismisses without re-reading the evidence, because rejecting needs none", async () => {
+      observationRows.error = { message: "network" };
+      await renderWith([pendingClosure]);
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "conditions.dismissClosure" }));
+
+      await waitFor(() => expect(ruleMutateAsync).toHaveBeenCalled());
+      expect(toastError).not.toHaveBeenCalled();
+    });
+
+    it("offers no ruling once a person has dismissed it", async () => {
+      // Still a suppressed closure forever, but no longer waiting on anyone.
+      await renderWith([{ ...pendingClosure, review_decision: "dismissed" }]);
+
+      expect(screen.queryByRole("button", { name: /conditions.confirmClosure/ })).toBeNull();
+      expect(screen.queryByText("conditions.awaitingReview")).toBeNull();
     });
 
     it("shows a dismissed proposal as dismissed rather than as untouched", async () => {

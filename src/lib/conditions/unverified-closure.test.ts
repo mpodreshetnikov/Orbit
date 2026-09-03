@@ -2,12 +2,16 @@ import { describe, it, expect } from "vitest";
 import {
   AUTHORITATIVE_STATUS_FILTER,
   CLOSING_STATUSES,
+  isAwaitingClosureReview,
+  isConfirmedByRecordApproval,
   isUnverifiedClosure,
   type ClosureCandidate,
 } from "./unverified-closure";
 import { CONDITION_STATUSES } from "@/types/condition";
 
-function mention(overrides: Partial<ClosureCandidate> = {}): ClosureCandidate {
+function mention(
+  overrides: Partial<ClosureCandidate & { review_decision: string | null }> = {},
+): ClosureCandidate & { review_decision?: string | null } {
   return {
     status_in_record: "resolved",
     is_llm_extracted: true,
@@ -101,5 +105,56 @@ describe("the predicate is the negation of the filter", () => {
       `status_in_record.not.in.(${CLOSING_STATUSES.join(",")})`,
     );
     expect(() => rowPassesFilter(mention())).not.toThrow();
+  });
+});
+
+describe("isAwaitingClosureReview", () => {
+  it("is false once a person has dismissed it, though it is still suppressed", () => {
+    // The defect this exists for: a dismissal deliberately leaves is_user_verified false, so the
+    // wider predicate stays true forever and the screen kept offering Confirm beside the
+    // "Dismissed" badge it had just drawn.
+    const dismissed = mention({ review_decision: "dismissed" });
+    expect(isUnverifiedClosure(dismissed)).toBe(true);
+    expect(isAwaitingClosureReview(dismissed)).toBe(false);
+  });
+
+  it("is true while the decision is pending, or absent entirely", () => {
+    expect(isAwaitingClosureReview(mention({ review_decision: "pending" }))).toBe(true);
+    // Rows written before the column existed: nobody has ruled on them either.
+    expect(isAwaitingClosureReview(mention({ review_decision: null }))).toBe(true);
+    expect(isAwaitingClosureReview(mention())).toBe(true);
+  });
+
+  it("is false for anything the wider predicate already excludes", () => {
+    expect(isAwaitingClosureReview(mention({ is_user_verified: true }))).toBe(false);
+    expect(isAwaitingClosureReview(mention({ is_llm_extracted: false }))).toBe(false);
+    expect(isAwaitingClosureReview(mention({ status_in_record: "active" }))).toBe(false);
+  });
+});
+
+describe("isConfirmedByRecordApproval", () => {
+  it("never reaches a mention a person already rejected", () => {
+    // The defect: approving the record filtered on !is_user_verified alone, and a dismissal leaves
+    // that false on purpose — so Save & activate wrote `confirmed` over the person's own "no" and
+    // closed the condition they had just rejected.
+    expect(
+      isConfirmedByRecordApproval({ is_user_verified: false, review_decision: "dismissed" }),
+    ).toBe(false);
+  });
+
+  it("confirms what nobody has ruled on", () => {
+    expect(
+      isConfirmedByRecordApproval({ is_user_verified: false, review_decision: "pending" }),
+    ).toBe(true);
+    expect(isConfirmedByRecordApproval({ is_user_verified: false, review_decision: null })).toBe(
+      true,
+    );
+    expect(isConfirmedByRecordApproval({ is_user_verified: false })).toBe(true);
+  });
+
+  it("leaves an already-verified mention alone", () => {
+    expect(
+      isConfirmedByRecordApproval({ is_user_verified: true, review_decision: "confirmed" }),
+    ).toBe(false);
   });
 });

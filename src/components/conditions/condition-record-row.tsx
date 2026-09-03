@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ConditionStatusBadge } from "./condition-status-badge";
-import { isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
+import { isAwaitingClosureReview } from "@/lib/conditions/unverified-closure";
 import { getConditionIcdName } from "@/hooks";
 import type { ConditionRecordWithDetails } from "@/types";
 
@@ -96,7 +96,7 @@ export function ConditionRecordRow({
   // A closure the chart is deliberately ignoring. Rendered plainly it reads as an ordinary
   // resolution, so this row would say the condition ended while the condition's own header still
   // says it is active -- the record contradicting itself, with nothing to say which half is true.
-  const awaitingReview = isUnverifiedClosure(conditionRecord);
+  const awaitingReview = isAwaitingClosureReview(conditionRecord);
 
   // ICD name (English only for ICD-10), if present
   const icdName = getConditionIcdName(conditionRecord.condition_icd_name_en);

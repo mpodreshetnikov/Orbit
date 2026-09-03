@@ -51,8 +51,14 @@ import {
   useCheckupsForCondition,
   useUpdateConditionRecord,
 } from "@/hooks";
+import { toast } from "sonner";
+import { createClient } from "@/lib/supabase";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
-import { isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
+import { isAwaitingClosureReview } from "@/lib/conditions/unverified-closure";
+import {
+  proposedClosureStillHolds,
+  type PersistedObservation,
+} from "@/lib/conditions/resolution-proposal";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
 
@@ -141,8 +147,36 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
    * already means "nobody has looked" -- which is why the column has three values.
    */
   const ruleOnClosure = async (recordRowId: string, decision: "confirmed" | "dismissed") => {
+    const mention = condition?.history.find((h) => h.id === recordRowId);
     setRulingOnId(recordRowId);
     try {
+      // Confirming is the moment a suppressed closure becomes authoritative, so the claim is
+      // re-checked here against what the record actually holds -- the same guard the activation
+      // path applies, for the same reason and with the same function. The panel above shows the
+      // cited observation, but showing is not checking: it reads one code, while an entry can rest
+      // on two (iron-deficiency anaemia needs ferritin *and* haemoglobin), and a person can correct
+      // the value between the page loading and the click. Without this, "the measurement is gone"
+      // could be on screen while Confirm still ended the condition.
+      if (decision === "confirmed" && mention?.supporting_obs_code) {
+        const { data, error } = await createClient()
+          .from("record_observations")
+          .select(
+            "obs_code, is_applied, value_numeric, value_canonical, ref_range_low, ref_range_high, ref_range_low_canonical, ref_range_high_canonical, status",
+          )
+          .eq("record_id", mention.record_id);
+
+        // A read that failed is not evidence that the closure still holds.
+        if (error) {
+          toast.error(t("conditions.confirmClosureFailed"), { description: error.message });
+          return;
+        }
+        if (!proposedClosureStillHolds(mention, (data ?? []) as PersistedObservation[])) {
+          toast.error(t("conditions.confirmClosureNoLongerHolds"));
+          await refetch();
+          return;
+        }
+      }
+
       await updateConditionRecordMutation.mutateAsync({
         id: recordRowId,
         conditionId,
@@ -455,7 +489,7 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
                   // The timeline is where a person reconstructs what happened, so a green dot and
                   // a plain "Resolved" against a header that says active is the contradiction at
                   // its most convincing.
-                  const awaitingReview = isUnverifiedClosure(record);
+                  const awaitingReview = isAwaitingClosureReview(record);
                   return (
                     <div key={record.id} className="relative pl-8 sm:pl-10">
                       {/* Timeline dot */}

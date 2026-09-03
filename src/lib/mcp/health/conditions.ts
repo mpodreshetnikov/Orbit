@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import { isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
+import { isAwaitingClosureReview, isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
 
 /**
  * Conditions -- the app's word for diagnoses.
@@ -103,19 +103,26 @@ export async function getCondition(
  * re-deriving the rule from three columns and one of them getting it wrong.
  */
 export function markUnconfirmedClosure(mention: Record<string, unknown>): Record<string, unknown> {
-  const awaiting = isUnverifiedClosure({
+  const candidate = {
     status_in_record: String(mention.status_in_record ?? ""),
     is_llm_extracted: mention.is_llm_extracted === true,
     is_user_verified: mention.is_user_verified === true,
-  });
+    review_decision: (mention.review_decision as string | null | undefined) ?? null,
+  };
+  const suppressed = isUnverifiedClosure(candidate);
+  const awaiting = isAwaitingClosureReview(candidate);
+
+  if (!suppressed) return { ...mention, awaiting_confirmation: false };
+
+  // Two ways a closure fails to reach the chart, and they are not the same news. One is waiting on
+  // a person; the other is a person having already said no. Reporting a dismissal as "nobody has
+  // confirmed it" misrepresents a decision that was made as one that is outstanding -- and both
+  // still need saying, because either way the row reads `resolved` while the condition does not.
   return {
     ...mention,
     awaiting_confirmation: awaiting,
-    ...(awaiting
-      ? {
-          not_applied_reason:
-            "Proposed by document extraction and not yet confirmed by a person, so it has NOT changed this condition's status. Report the condition's current_status, not this row.",
-        }
-      : {}),
+    not_applied_reason: awaiting
+      ? "Proposed by document extraction and not yet confirmed by a person, so it has NOT changed this condition's status. Report the condition's current_status, not this row."
+      : "A person reviewed this proposed closure and rejected it, so it has NOT changed this condition's status. Report the condition's current_status, not this row.",
   };
 }

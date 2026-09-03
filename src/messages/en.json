@@ -1297,7 +1297,9 @@
     "measurementBehind": "Measurement it rests on",
     "measurementGone": "The measurement this rested on is no longer on the record",
     "dismissed": "Dismissed",
-    "dismissedTitle": "You decided this document does not close the condition"
+    "dismissedTitle": "You decided this document does not close the condition",
+    "confirmClosureFailed": "Could not check the measurement behind this proposal; nothing was changed",
+    "confirmClosureNoLongerHolds": "The measurement this rested on no longer supports closing the condition, so it was not confirmed"
   },
   "checkups": {
     "navTitle": "Checkups",
