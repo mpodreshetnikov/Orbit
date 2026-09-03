@@ -1,20 +1,21 @@
-import fs from "node:fs";
-import path from "node:path";
+/// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import { WIDGET_LOCALES, knownWidgetPhases } from "../../browserExtension/src/core/widget-strings";
+import { WIDGET_LOCALES, knownWidgetPhases } from "./widget-strings";
 
 /**
  * Every phase the extension can show in its widget must be named in every language.
  *
  * Read from the source rather than from a list kept here: the finding that prompted this was a
  * phase Alfa-Bank emits on every import, missing from a table that had been written against
- * T-Bank. A list in the test would have been written the same way. Lives under scripts/ because
- * extension code may not import node:fs, and this is a check on the repository, not on the
- * extension.
+ * T-Bank. A list in the test would have been written the same way. The sources come in through
+ * the bundler as raw text, because extension code may not import node:fs and build scripts may
+ * not import extension code -- this is the one place that can see both.
  */
-
-const EXTENSION_SRC = path.resolve(__dirname, "../../browserExtension/src");
-const SOURCES = ["connectors/tbank-web.ts", "connectors/alfa-web.ts", "core/import-runner.ts"];
+const SOURCES = import.meta.glob(["../connectors/*-web.ts", "./import-runner.ts"], {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
 
 /** Share the prefix, are not phases: session fields and connector options. */
 const NOT_PHASES = new Set(["parse_strategy", "parse_output", "parse_only"]);
@@ -26,14 +27,14 @@ const NOT_PHASES = new Set(["parse_strategy", "parse_output", "parse_only"]);
  */
 export function emittedWidgetPhases(): string[] {
   const seen = new Map<string, { total: number; debugOnly: number }>();
-  for (const relative of SOURCES) {
-    const source = fs.readFileSync(path.join(EXTENSION_SRC, relative), "utf8");
+  for (const source of Object.values(SOURCES)) {
     for (const match of source.matchAll(/"(parse_[a-z_]+)"/g)) {
       const name = match[1];
       if (NOT_PHASES.has(name)) continue;
       const entry = seen.get(name) ?? { total: 0, debugOnly: 0 };
       entry.total += 1;
-      if (source.slice(Math.max(0, match.index - 6), match.index) === "emit(") entry.debugOnly += 1;
+      const before = source.slice(Math.max(0, match.index - 8), match.index);
+      if (before.endsWith("emit(")) entry.debugOnly += 1;
       seen.set(name, entry);
     }
   }
@@ -44,7 +45,8 @@ export function emittedWidgetPhases(): string[] {
 }
 
 describe("widget phases", () => {
-  it("finds the phases the connectors emit", () => {
+  it("reads the sources and finds the phases the connectors emit", () => {
+    expect(Object.keys(SOURCES).length).toBe(3);
     const phases = emittedWidgetPhases();
     expect(phases).toContain("parse_loading_operations_page");
     expect(phases).toContain("parse_loading_history_page");
