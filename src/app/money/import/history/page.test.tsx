@@ -185,4 +185,35 @@ describe("MoneyImportHistoryPage", () => {
     expect(screen.getByText("money.importBatchStatusFailed")).toBeInTheDocument();
     expect(screen.getByText("money.importBatchStatusDiscarded")).toBeInTheDocument();
   });
+
+  it("labels an import nobody started, and shows the window each batch covered", async () => {
+    batchesResult = {
+      data: [
+        makeBatch({
+          id: "batch-auto",
+          source: "tbank_web",
+          import_type: "web_export",
+          status: "pending",
+          window_from: "2026-07-31T09:11:35.308Z",
+          window_to: "2026-08-31T09:11:35.308Z",
+          meta: { unattended: true, parse_strategy: "full" },
+        }),
+        makeBatch({
+          id: "batch-manual",
+          source: "tbank_web",
+          import_type: "web_export",
+          status: "pending",
+          meta: { parse_strategy: "fast" },
+        }),
+      ],
+      error: null,
+    };
+
+    render(<MoneyImportHistoryPage />);
+
+    // Two batches from one unattended visit are two windows; the label says nobody started them.
+    expect(await screen.findByText("money.importHistoryImportTypeUnattended")).toBeInTheDocument();
+    expect(screen.getByText("31.07.2026 – 31.08.2026")).toBeInTheDocument();
+    expect(screen.getByText("money.importHistoryImportTypeWebExport")).toBeInTheDocument();
+  });
 });
