@@ -169,6 +169,15 @@ jobs:
         # The PR-size gate takes the same base, for the same reasons, and additionally the head
         # branch name: a pull request run checks out a detached merge commit, where git names no
         # branch and a `branch` allowlist entry could never match.
+        #
+        # A pull-request verdict is evidence about the base as it stood when the event fired, and a
+        # commit landing on the base fires no pull_request event, so on its own it expires the
+        # moment anything else merges. What makes it bind is the `main protection` ruleset, which
+        # requires the branch to be up to date with `main` before it can merge: a merge to `main`
+        # puts every open pull request behind, and each one has to take the new tip and re-run this
+        # before it can go in. The base this run measures against is therefore the base it merges
+        # onto. (A merge queue would give the same guarantee and is not available here: GitHub
+        # offers it to organisation-owned repositories only.)
         env:
           MIGRATION_ORDER_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           PR_SIZE_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
