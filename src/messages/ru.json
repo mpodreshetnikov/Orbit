@@ -699,7 +699,8 @@
     "importAutoStatusGrantOtherPerson": "У расширения ключ другого человека, получен {date}. Выпустите ключ для этого человека выше и отправьте в расширение.",
     "importAutoStatusLastManualOk": "Последний импорт {date} был запущен вручную и прошёл успешно.",
     "importAutoStatusEligibleNow": "Может запуститься сейчас: при ближайшем визите в банк или по периодической проверке расширения.",
-    "importAutoStatusLastOkUnknownOrigin": "Последний импорт {date} прошёл успешно."
+    "importAutoStatusLastOkUnknownOrigin": "Последний импорт {date} прошёл успешно.",
+    "importHistoryImportTypeUnattended": "Автоимпорт (расширение)"
   },
   "records": {
     "title": "Медицинские записи",

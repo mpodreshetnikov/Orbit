@@ -136,6 +136,30 @@ describe("runScheduledImport", () => {
     expect(result.backfill).not.toBeNull();
   });
 
+  it("asks for the full receipt strategy and marks the batch as unattended", async () => {
+    const harness = createHarness();
+    await runScheduledImport(INPUT, harness.deps);
+
+    const createCalls = harness.callEdge.mock.calls.filter(
+      (call) => (call[2] as Record<string, unknown>).action === "create_session",
+    );
+    expect(createCalls.length).toBeGreaterThan(0);
+    for (const call of createCalls) {
+      // The batch keeps this meta as sent, so the history screen can tell these imports apart.
+      expect((call[2] as Record<string, unknown>).meta).toEqual({
+        parse_strategy: "full",
+        unattended: true,
+      });
+    }
+    // The connector reads the strategy from the session; a server that does not echo it must
+    // not leave the run on the fast one.
+    const sessions = harness.connector.parse.mock.calls.map(
+      (call) => (call[0] as { session?: Record<string, unknown> }).session,
+    );
+    expect(sessions.length).toBeGreaterThan(0);
+    for (const session of sessions) expect(session?.parse_strategy).toBe("full");
+  });
+
   it("spends the grant only on create_session and works on session tokens after that", async () => {
     const harness = createHarness();
     await runScheduledImport(INPUT, harness.deps);
