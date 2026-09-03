@@ -173,21 +173,38 @@ export async function processFindingsToResolve(
  * the evidence is what people did with the proposals it produced. Read it with the query in the
  * T-0026 ExecPlan, which counts `condition_records.review_decision` per `supporting_obs_code`:
  *
- *     select supporting_obs_code,
- *            count(*) filter (where review_decision = 'confirmed') as confirmed,
- *            count(*) filter (where review_decision = 'dismissed') as dismissed,
- *            count(*) filter (where review_decision = 'pending')   as pending
- *     from public.condition_records
- *     where supporting_obs_code is not null
- *     group by supporting_obs_code
+ *     select cr.supporting_obs_code,
+ *            count(*) filter (where cr.review_decision = 'confirmed') as confirmed,
+ *            count(*) filter (where cr.review_decision = 'dismissed') as dismissed,
+ *            count(*) filter (where cr.review_decision = 'pending')   as pending,
+ *            count(distinct mr.person_id)
+ *              filter (where cr.review_decision = 'confirmed')        as people,
+ *            count(distinct cr.record_id)
+ *              filter (where cr.review_decision = 'confirmed')        as documents
+ *     from public.condition_records cr
+ *     join public.medical_records mr on mr.id = cr.record_id
+ *     where cr.supporting_obs_code is not null
+ *     group by cr.supporting_obs_code
  *     order by confirmed desc;
  *
- * The threshold: **twenty confirmations and zero dismissals** for that analyte. Twenty because a
- * handful of confirmations is one person's habit rather than evidence, and because the harm is
- * asymmetric — a proposal that should have auto-closed costs a click, while an auto-close that
- * should not have happened ends a live entry in someone's chart with nothing to prompt a second
- * look. Zero and not "few" for the same reason: a dismissal is a person saying this closure was
- * wrong, and one such person is enough to say the entry is not ready to act alone.
+ * The threshold: **twenty confirmations and zero dismissals** for that analyte, across at least two
+ * people and twenty separate documents. Twenty because a handful of confirmations is one person's
+ * habit rather than evidence, and because the harm is asymmetric — a proposal that should have
+ * auto-closed costs a click, while an auto-close that should not have happened ends a live entry in
+ * someone's chart with nothing to prompt a second look. Zero and not "few" for the same reason: a
+ * dismissal is a person saying this closure was wrong, and one such person is enough to say the
+ * entry is not ready to act alone.
+ *
+ * Say plainly what the count cannot do. Nothing records *who* ruled on a proposal —
+ * `condition_records` has no reviewer column, and `review_decision` is written by whichever session
+ * the person was in. So `confirmed` counts decisions, not judges, and the two extra columns are
+ * proxies: `person_id` is whose chart it was, `record_id` is which document. On a single-person
+ * account twenty confirmations are one person agreeing with themselves twenty times over twenty
+ * documents — worth more than one confirmation, and not the independent agreement the number is
+ * meant to stand for. Read the threshold as a floor that stops a rule being promoted on a handful
+ * of cases, not as proof of independence; recording the ruling user is what would make it that, and
+ * until it exists, treat promotion as a judgement a person makes with these counts in front of them
+ * rather than a line the query crosses on its own.
  *
  * `pending` is not evidence and must never be added to `confirmed`. A proposal nobody has ruled on
  * says nothing about whether the rule is right; counting the two together — which is all a boolean

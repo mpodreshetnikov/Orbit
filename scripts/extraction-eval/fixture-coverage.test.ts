@@ -84,6 +84,45 @@ describe("fixture coverage", () => {
     ).toEqual([]);
   });
 
+  it("writes every scored field into every row, so an omitted one cannot score itself correct", async () => {
+    // The mirror of the check above, and the half that was missing. An unread key flatters by
+    // reading as coverage; an *unwritten* one flatters harder, because `valuesEqual` treats a
+    // missing expectation and a null actual as agreeing. A `conditions_to_resolve` entry that
+    // simply omits `supporting_obs_code` therefore scores 100% citation accuracy against a model
+    // response that cited nothing -- which production would have discarded on `noCitation`. The
+    // scorer cannot tell "no expectation" from "expected nothing", so the corpus has to.
+    const fixtures = await loadFixtures();
+    const missing: string[] = [];
+
+    for (const { caseId, snapshot } of fixtures) {
+      for (const collection of COLLECTIONS) {
+        const rows = snapshot[collection];
+        if (!Array.isArray(rows)) continue;
+        rows.forEach((row, index) => {
+          if (!row || typeof row !== "object") return;
+          for (const field of SCORED_FIELDS[collection as string]) {
+            if (field in row) continue;
+            missing.push(`${caseId}/expected.json → ${collection}[${index}].${field}`);
+          }
+        });
+      }
+    }
+
+    expect(
+      missing,
+      missing.length === 0
+        ? ""
+        : [
+            "These scored fields are absent from rows the corpus does carry:",
+            ...missing.map((entry) => `  - ${entry}`),
+            "",
+            "An absent expectation is not a lenient one, it is an unscored one: it agrees with",
+            "whatever the model produced. Write the value the run must produce -- null included,",
+            "where null is genuinely what is expected.",
+          ].join("\n"),
+    ).toEqual([]);
+  });
+
   it("declares every collection the snapshot defines, so a new one cannot go unchecked", async () => {
     const fixtures = await loadFixtures();
     // Unioned across every case, not read off the first one. A new array introduced by a later case

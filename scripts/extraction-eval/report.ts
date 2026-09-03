@@ -1,4 +1,5 @@
 /** Rendering only — pure, so the shape of a report can be asserted without running an eval. */
+import { RESOLUTION_FIELDS } from "./score.ts";
 import type { Aggregate, CaseScore, FieldAccuracy, SetScore } from "./score.ts";
 import type { CaseDiagnostics } from "./types.ts";
 
@@ -92,6 +93,23 @@ export function renderVariance(runs: Aggregate[]): string {
             values: runs.map((a) => a.wrongfulResolutions),
           },
           (value) => value.toFixed(1),
+        ),
+        // The set metrics above cannot see this. A run that names the same condition every pass but
+        // cites a different analyte on one of them -- or cites one production's gate then rejects --
+        // is stable on `conditions_to_resolve` and unstable on whether the closure happens at all.
+        // Only the last pass is rendered in full, so without these rows that swing leaves no trace.
+        ...RESOLUTION_FIELDS.map((field) =>
+          varianceRow(
+            {
+              dimension: `condition resolution ${String(field)}`,
+              values: runs.map(
+                (a) =>
+                  a.conditionResolutionFields.find((entry) => entry.field === String(field))
+                    ?.accuracy ?? 0,
+              ),
+            },
+            (value) => pct(value),
+          ),
         ),
       ],
     ),

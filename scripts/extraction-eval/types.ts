@@ -41,7 +41,27 @@ export interface ExpectedCondition {
  */
 export interface ExpectedResolution {
   condition_id: string;
-  supporting_obs_code?: string | null;
+  /**
+   * Required, and not because every resolution has one — because an omitted expectation scores as
+   * agreement. `valuesEqual(undefined, null)` is true, so a fixture that leaves the citation out
+   * reports perfect citation accuracy against a response that cited nothing at all. Write `null`
+   * where nothing is expected and say so; `fixture-coverage.test.ts` enforces the presence.
+   */
+  supporting_obs_code: string | null;
+  /**
+   * What production's own gate does with this resolution: `null` when `checkLabResolution` accepts
+   * it and the proposal is written, otherwise the rejection it returns.
+   *
+   * Scoring the citation says the model named the analyte the fixture expects. It does not say the
+   * proposal survives, and the two can disagree: the gate reads the *staged* observations, whose
+   * `obs_code` the model assigned, while the snapshot's observations have been through
+   * `buildObservationRows` and its catalogue resolution. A citation can therefore be exactly right
+   * against a document whose measurement production cannot find — perfect on both existing scores,
+   * `observationAbsent` in production, nothing written. `conditionUnknown` is this harness's name
+   * for the one drop production makes silently: a resolution naming a condition the person does
+   * not have, which `processConditionsToResolve` skips without a rejection.
+   */
+  gate_rejection: string | null;
 }
 
 /**

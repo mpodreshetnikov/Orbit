@@ -238,8 +238,17 @@ export const CONDITION_FIELDS: (keyof ExpectedCondition)[] = ["icd_code", "statu
  * while production applied none of them. Scoring the citation closes that gap, and it is the
  * field-level counterpart of the set score rather than a replacement for it: the set says the right
  * condition was named, this says it was named on the right evidence.
+ *
+ * `gate_rejection` is the third question, and it is not implied by the first two. Scoring the
+ * citation compares the model's string to the fixture's; it does not ask production. The gate reads
+ * the staged observations, the snapshot's have been through catalogue resolution, and where those
+ * disagree a resolution is right on both scores and dropped in production. So the harness runs
+ * `checkLabResolution` itself and scores its verdict — see `pipeline.ts:gateOutcome`.
  */
-export const RESOLUTION_FIELDS: (keyof ExpectedResolution)[] = ["supporting_obs_code"];
+export const RESOLUTION_FIELDS: (keyof ExpectedResolution)[] = [
+  "supporting_obs_code",
+  "gate_rejection",
+];
 
 /**
  * Every key a fixture may carry, per collection, and why it is legitimate.

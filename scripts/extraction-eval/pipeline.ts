@@ -20,6 +20,11 @@ import {
   buildFindingRows,
   buildObservationRows,
 } from "../../supabase/functions/health-structure/service.ts";
+import { checkLabResolution } from "../../supabase/functions/health-structure/resolution.ts";
+import type {
+  ConditionToResolve,
+  ExtractedObservation,
+} from "../../supabase/functions/health-structure/types.ts";
 import type { CaseDiagnostics, CaseSnapshot } from "./types.ts";
 
 const FIXTURE_RECORD_ID = "00000000-0000-4000-a000-000000000001";
@@ -38,6 +43,28 @@ function num(value: unknown): number | null {
 
 function str(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * Ask production's gate what it would do with this resolution, instead of assuming.
+ *
+ * The harness already runs the deterministic half of production for observations and findings; the
+ * resolution gate was the one production decision it took on faith. It is also the decision that
+ * matters most, because `checkLabResolution` is what stands between a proposal and nothing at all:
+ * a run could score the citation perfectly on rows production drops, and the report would say the
+ * feature worked. Called with the same two inputs `service.ts` passes it — this document's staged
+ * observations, and the person's existing conditions.
+ */
+function gateOutcome(
+  toResolve: ConditionToResolve,
+  context: HealthStructureParseContext,
+  observations: ExtractedObservation[],
+): string | null {
+  const existing = context.existingConditions.find((item) => item.id === toResolve.condition_id);
+  // Production skips this one without naming a reason, so the harness names it rather than
+  // reporting the silence as acceptance.
+  if (!toResolve.condition_id || !existing) return "conditionUnknown";
+  return checkLabResolution(toResolve, existing, observations);
 }
 
 export async function runCasePipeline(
@@ -111,6 +138,7 @@ export async function runCasePipeline(
     conditions_to_resolve: structured.conditions_to_resolve.map((item) => ({
       condition_id: item.condition_id,
       supporting_obs_code: str(item.supporting_obs_code),
+      gate_rejection: gateOutcome(item, context, structured.observations),
     })),
     checkups_to_complete: checkups.map((row) => ({
       checkup_item_id: String(row.checkup_item_id ?? ""),

@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { formatCost, renderMarkdown, renderVariance, totalCost, type RunSummary } from "./report";
 import { aggregate, scoreCase } from "./score";
-import type { CaseSnapshot } from "./types";
+import type { CaseSnapshot, ExpectedResolution } from "./types";
+
+/** A proposed closure with both scored fields spelled out — see the note in `score.test.ts`. */
+function resolution(
+  conditionId: string,
+  supportingObsCode: string | null = null,
+  gateRejection: string | null = null,
+): ExpectedResolution {
+  return {
+    condition_id: conditionId,
+    supporting_obs_code: supportingObsCode,
+    gate_rejection: gateRejection,
+  };
+}
 
 function snapshot(overrides: Partial<CaseSnapshot> = {}): CaseSnapshot {
   return {
@@ -60,7 +73,7 @@ describe("renderMarkdown", () => {
     const score = scoreCase(
       "001",
       snapshot(),
-      snapshot({ conditions_to_resolve: [{ condition_id: "cond-gastritis" }] }),
+      snapshot({ conditions_to_resolve: [resolution("cond-gastritis")] }),
       [],
     );
     const markdown = renderMarkdown(
@@ -161,6 +174,37 @@ describe("renderVariance", () => {
     expect(variance).toContain("observations fn");
     // The individual runs are printed, not just a summary — the point is to show the disagreement.
     expect(variance).toMatch(/observations fn \| 0\.5 \| 0\.0 – 1\.0 \| 0\.0, 1\.0/);
+  });
+
+  it("shows a citation that moved between runs the set score reads as stable", () => {
+    // The same condition every pass, cited differently on one of them. `conditions_to_resolve` is
+    // identical across both runs and says `stable`; only the field rows show that whether the
+    // closure happens at all was not. Only the last pass is rendered in full, so without these
+    // rows the swing leaves no trace anywhere in the report.
+    const expected = snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] });
+    const cited = aggregate([
+      scoreCase(
+        "001",
+        expected,
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] }),
+        [],
+      ),
+    ]);
+    const miscited = aggregate([
+      scoreCase(
+        "001",
+        expected,
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "ferritin")] }),
+        [],
+      ),
+    ]);
+
+    const variance = renderVariance([cited, miscited]);
+    expect(variance).toMatch(/conditions_to_resolve f1 \| 100\.0% \| stable/);
+    expect(variance).toMatch(
+      /condition resolution supporting_obs_code \| 50\.0% \| 0\.0% – 100\.0%/,
+    );
+    expect(variance).toContain("condition resolution gate_rejection");
   });
 });
 

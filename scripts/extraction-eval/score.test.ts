@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aggregate, keyed, matchKey, scoreCase, scoreSet, valuesEqual } from "./score";
 import type { ExistingFinding } from "../../supabase/functions/health-structure/types.ts";
-import type { CaseSnapshot, ExpectedObservation } from "./types";
+import type { CaseSnapshot, ExpectedObservation, ExpectedResolution } from "./types";
 
 function observation(overrides: Partial<ExpectedObservation> = {}): ExpectedObservation {
   return {
@@ -16,6 +16,23 @@ function observation(overrides: Partial<ExpectedObservation> = {}): ExpectedObse
     unit_canonical: "mmol/L",
     is_applied: true,
     ...overrides,
+  };
+}
+
+/**
+ * A proposed closure, complete. Both scored fields are spelled out on every row on purpose: an
+ * omitted expectation agrees with whatever the run produced, which is the defect
+ * `fixture-coverage.test.ts` now refuses in the corpus and there is no reason to allow here.
+ */
+function resolution(
+  conditionId: string,
+  supportingObsCode: string | null = null,
+  gateRejection: string | null = null,
+): ExpectedResolution {
+  return {
+    condition_id: conditionId,
+    supporting_obs_code: supportingObsCode,
+    gate_rejection: gateRejection,
   };
 }
 
@@ -136,9 +153,9 @@ describe("scoreCase", () => {
   });
 
   it("separates a wrongful condition closure from a missed one", () => {
-    const expected = snapshot({ conditions_to_resolve: [{ condition_id: "cond-b12" }] });
+    const expected = snapshot({ conditions_to_resolve: [resolution("cond-b12")] });
     const actual = snapshot({
-      conditions_to_resolve: [{ condition_id: "cond-anemia" }, { condition_id: "cond-nafld" }],
+      conditions_to_resolve: [resolution("cond-anemia"), resolution("cond-nafld")],
     });
     const score = scoreCase("case", expected, actual, []);
     expect(score.conditionsToResolve).toMatchObject({ tp: 0, fp: 2, fn: 1 });
@@ -151,10 +168,10 @@ describe("scoreCase", () => {
     // while production discards the row -- `checkLabResolution` refuses a citation the table does
     // not tie to this condition. Before `supporting_obs_code` was scored, that was invisible.
     const expected = snapshot({
-      conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "vitamin_b12" }],
+      conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")],
     });
     const actual = snapshot({
-      conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "ferritin" }],
+      conditions_to_resolve: [resolution("cond-b12", "ferritin")],
     });
     const score = scoreCase("case", expected, actual, []);
     expect(score.conditionsToResolve).toMatchObject({ tp: 1, fp: 0, fn: 0 });
@@ -173,10 +190,10 @@ describe("scoreCase", () => {
     const score = scoreCase(
       "case",
       snapshot({
-        conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "vitamin_b12" }],
+        conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")],
       }),
       snapshot({
-        conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: null }],
+        conditions_to_resolve: [resolution("cond-b12", null)],
       }),
       [],
     );
@@ -185,13 +202,39 @@ describe("scoreCase", () => {
     ).toMatchObject({ correct: 0, total: 1 });
   });
 
+  it("catches a resolution production would drop while both other scores read clean", () => {
+    // The finding this test exists for: citation right, condition right, nothing written. The gate
+    // reads the staged observations, whose codes the model assigned; the snapshot's have been
+    // through catalogue resolution. Where those disagree the run looks perfect and applies nothing,
+    // which is precisely the report `conditions_to_resolve` was giving before the citation was
+    // scored -- one level further in.
+    const expected = snapshot({
+      conditions_to_resolve: [resolution("cond-b12", "vitamin_b12", null)],
+    });
+    const actual = snapshot({
+      conditions_to_resolve: [resolution("cond-b12", "vitamin_b12", "observationAbsent")],
+    });
+    const score = scoreCase("case", expected, actual, []);
+    expect(score.conditionsToResolve).toMatchObject({ tp: 1, fp: 0, fn: 0 });
+    expect(
+      score.conditionResolutionFields.find((f) => f.field === "supporting_obs_code"),
+    ).toMatchObject({ correct: 1, total: 1 });
+    const gate = score.conditionResolutionFields.find((f) => f.field === "gate_rejection");
+    expect(gate).toMatchObject({ correct: 0, total: 1 });
+    expect(gate?.mismatches[0]).toMatchObject({
+      key: "cond-b12",
+      expected: null,
+      actual: "observationAbsent",
+    });
+  });
+
   it("does not charge the citation against a resolution the model never proposed", () => {
     // Matched rows only. A missing resolution is already a recall miss; counting it again here
     // would let one absent row read as a citation defect it never had the chance to commit.
     const score = scoreCase(
       "case",
       snapshot({
-        conditions_to_resolve: [{ condition_id: "cond-b12", supporting_obs_code: "vitamin_b12" }],
+        conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")],
       }),
       snapshot({ conditions_to_resolve: [] }),
       [],
@@ -511,7 +554,7 @@ describe("aggregate", () => {
     const dirty = scoreCase(
       "b",
       snapshot(),
-      snapshot({ conditions_to_resolve: [{ condition_id: "cond-gastritis" }] }),
+      snapshot({ conditions_to_resolve: [resolution("cond-gastritis")] }),
       [],
     );
     const agg = aggregate([clean, dirty]);
