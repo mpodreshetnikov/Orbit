@@ -1286,7 +1286,10 @@
     "proposal": "Proposed",
     "proposalTitle": "Created in the chart when you activate this record",
     "proposalsNotLoaded": "Conditions are still loading — try again in a moment",
-    "proposalsFailed": "Could not add the proposed conditions to the chart; the record was left in review"
+    "proposalsFailed": "Could not add the proposed conditions to the chart; the record was left in review",
+    "awaitingReview": "Awaiting your confirmation",
+    "awaitingReviewTitle": "A document proposes closing this condition. Nobody has confirmed it, so the chart still shows the condition as it was.",
+    "proposedChange": "proposed, not applied"
   },
   "checkups": {
     "navTitle": "Checkups",

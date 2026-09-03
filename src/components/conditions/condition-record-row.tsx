@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ConditionStatusBadge } from "./condition-status-badge";
+import { isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
 import { getConditionIcdName } from "@/hooks";
 import type { ConditionRecordWithDetails } from "@/types";
 
@@ -86,6 +87,11 @@ export function ConditionRecordRow({
     conditionRecord.status_in_record === "active" ||
     conditionRecord.status_in_record === "suspected";
 
+  // A closure the chart is deliberately ignoring. Rendered plainly it reads as an ordinary
+  // resolution, so this row would say the condition ended while the condition's own header still
+  // says it is active -- the record contradicting itself, with nothing to say which half is true.
+  const awaitingReview = isUnverifiedClosure(conditionRecord);
+
   // ICD name (English only for ICD-10), if present
   const icdName = getConditionIcdName(conditionRecord.condition_icd_name_en);
   // Display: ICD name or original name
@@ -129,7 +135,7 @@ export function ConditionRecordRow({
               <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
               <ConditionStatusBadge status={conditionRecord.status_in_record} />
               <span className="text-xs text-muted-foreground">
-                ({t("conditions.statusChange")})
+                ({t(awaitingReview ? "conditions.proposedChange" : "conditions.statusChange")})
               </span>
             </div>
           )}
@@ -160,6 +166,16 @@ export function ConditionRecordRow({
             >
               <CircleDot className="h-3 w-3" />
               {t("conditions.proposal")}
+            </Badge>
+          )}
+          {awaitingReview && (
+            <Badge
+              variant="outline"
+              className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+              title={t("conditions.awaitingReviewTitle")}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              {t("conditions.awaitingReview")}
             </Badge>
           )}
           {comparison && <ConditionComparisonBadge comparison={comparison} />}

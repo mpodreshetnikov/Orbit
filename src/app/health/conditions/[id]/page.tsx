@@ -51,6 +51,7 @@ import {
   useCheckupsForCondition,
 } from "@/hooks";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
+import { isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
 
@@ -416,71 +417,89 @@ function ConditionDetailContent({ conditionId }: { conditionId: string }) {
               <div className="absolute left-3 sm:left-4 top-0 bottom-0 w-px bg-border" />
 
               <div className="space-y-3 sm:space-y-4">
-                {condition.history.map((record) => (
-                  <div key={record.id} className="relative pl-8 sm:pl-10">
-                    {/* Timeline dot */}
-                    <div
-                      className={cn(
-                        "absolute left-1.5 sm:left-2 top-2 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 bg-background",
-                        record.status_in_record === "active" && "border-orange-500",
-                        record.status_in_record === "suspected" && "border-yellow-500",
-                        record.status_in_record === "resolved" && "border-green-500",
-                        record.status_in_record === "history" && "border-gray-500",
-                      )}
-                    />
+                {condition.history.map((record) => {
+                  // A closure the chart is ignoring must not read as a settled one here either.
+                  // The timeline is where a person reconstructs what happened, so a green dot and
+                  // a plain "Resolved" against a header that says active is the contradiction at
+                  // its most convincing.
+                  const awaitingReview = isUnverifiedClosure(record);
+                  return (
+                    <div key={record.id} className="relative pl-8 sm:pl-10">
+                      {/* Timeline dot */}
+                      <div
+                        className={cn(
+                          "absolute left-1.5 sm:left-2 top-2 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 bg-background",
+                          record.status_in_record === "active" && "border-orange-500",
+                          record.status_in_record === "suspected" && "border-yellow-500",
+                          record.status_in_record === "resolved" && "border-green-500",
+                          record.status_in_record === "history" && "border-gray-500",
+                          awaitingReview && "border-dashed border-amber-500",
+                        )}
+                      />
 
-                    <div className="rounded-lg border p-2.5 sm:p-3 hover:bg-muted/50 transition-colors">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          {/* Record title */}
-                          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                            <Link
-                              href={`/health/records/${record.record_id}`}
-                              className="font-medium hover:underline truncate text-sm sm:text-base"
-                            >
-                              {record.record_title || t("records.title")}
-                            </Link>
-                            {record.record_type && (
-                              <Badge variant="outline" className="text-[10px] sm:text-xs">
-                                {t(`records.types.${record.record_type}`)}
-                              </Badge>
-                            )}
-                          </div>
+                      <div className="rounded-lg border p-2.5 sm:p-3 hover:bg-muted/50 transition-colors">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            {/* Record title */}
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                              <Link
+                                href={`/health/records/${record.record_id}`}
+                                className="font-medium hover:underline truncate text-sm sm:text-base"
+                              >
+                                {record.record_title || t("records.title")}
+                              </Link>
+                              {record.record_type && (
+                                <Badge variant="outline" className="text-[10px] sm:text-xs">
+                                  {t(`records.types.${record.record_type}`)}
+                                </Badge>
+                              )}
+                            </div>
 
-                          {/* Date and status */}
-                          <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-xs sm:text-sm text-muted-foreground flex-wrap">
-                            {record.record_date && (
-                              <div className="flex items-center gap-1">
-                                <Calendar className="h-3 w-3 shrink-0" />
-                                {format(new Date(record.record_date), "dd.MM.yyyy", {
-                                  locale: dateLocale,
-                                })}
+                            {/* Date and status */}
+                            <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-xs sm:text-sm text-muted-foreground flex-wrap">
+                              {record.record_date && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 shrink-0" />
+                                  {format(new Date(record.record_date), "dd.MM.yyyy", {
+                                    locale: dateLocale,
+                                  })}
+                                </div>
+                              )}
+                              <ConditionStatusBadge
+                                status={record.status_in_record as ConditionStatus}
+                              />
+                              {awaitingReview && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] sm:text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 gap-1"
+                                  title={t("conditions.awaitingReviewTitle")}
+                                >
+                                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                                  {t("conditions.awaitingReview")}
+                                </Badge>
+                              )}
+                            </div>
+
+                            {/* Source anchor */}
+                            {record.source_anchor && (
+                              <div className="mt-1.5 sm:mt-2 flex items-start gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-muted-foreground bg-muted/50 rounded p-1.5 sm:p-2">
+                                <Quote className="h-3 w-3 shrink-0 mt-0.5" />
+                                <span className="italic line-clamp-2">{record.source_anchor}</span>
                               </div>
                             )}
-                            <ConditionStatusBadge
-                              status={record.status_in_record as ConditionStatus}
-                            />
                           </div>
 
-                          {/* Source anchor */}
-                          {record.source_anchor && (
-                            <div className="mt-1.5 sm:mt-2 flex items-start gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-muted-foreground bg-muted/50 rounded p-1.5 sm:p-2">
-                              <Quote className="h-3 w-3 shrink-0 mt-0.5" />
-                              <span className="italic line-clamp-2">{record.source_anchor}</span>
-                            </div>
-                          )}
+                          {/* Link to record */}
+                          <Link href={`/health/records/${record.record_id}`} className="shrink-0">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
+                              <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </Button>
+                          </Link>
                         </div>
-
-                        {/* Link to record */}
-                        <Link href={`/health/records/${record.record_id}`} className="shrink-0">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
-                            <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                          </Button>
-                        </Link>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (

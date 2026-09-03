@@ -30,3 +30,34 @@ export const AUTHORITATIVE_STATUS_FILTER = [
   "is_llm_extracted.is.false",
   "is_user_verified.is.true",
 ].join(",");
+
+/** The columns the predicate below reads. Anything carrying these can be asked the question. */
+export interface ClosureCandidate {
+  status_in_record: string;
+  is_llm_extracted: boolean;
+  is_user_verified: boolean;
+}
+
+/**
+ * Is this mention a closure the chart is deliberately ignoring?
+ *
+ * The exact negation of `AUTHORITATIVE_STATUS_FILTER` above, which is an `or=` of three ways a row
+ * can be authoritative: a row is suppressed when none of them holds. The two must stay each other's
+ * mirror -- a reader that decides differently from the recompute will describe a row the chart is
+ * not applying as one it is, or the reverse -- so `unverified-closure.test.ts` derives one from the
+ * other rather than restating it.
+ *
+ * The filter exists so a suppressed row cannot *set* a status. This exists so it cannot *say* it
+ * did. The chart being right is not the same as the history being readable: a mention rendered as
+ * an ordinary resolution, on a condition whose header still reads active, tells a person their
+ * record contradicts itself, and tells an assistant reading the same rows that the condition
+ * resolved. Every reader of `condition_records` is expected to ask this before presenting
+ * `status_in_record` as something that happened.
+ */
+export function isUnverifiedClosure(mention: ClosureCandidate): boolean {
+  return (
+    (CLOSING_STATUSES as readonly string[]).includes(mention.status_in_record) &&
+    mention.is_llm_extracted &&
+    !mention.is_user_verified
+  );
+}

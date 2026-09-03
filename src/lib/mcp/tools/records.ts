@@ -272,8 +272,18 @@ export function registerRecordTools(server: McpToolServer): void {
         return fail(`No diagnosis with id ${args.condition_id}.`);
       }
 
+      // A closure waiting on a person is named in the summary, not only in the rows. The summary
+      // is what gets read; a mention that says "resolved" while the condition says "active" is
+      // otherwise reconciled by guessing, and the guess that a condition ended is the harmful one.
+      const awaiting = detail.mentions.filter(
+        (mention) => (mention as { awaiting_confirmation?: boolean }).awaiting_confirmation,
+      ).length;
+
       return ok(
-        `${detail.condition.name}${detail.condition.code ? ` (${detail.condition.code})` : ""} — ${detail.condition.current_status}. ${detail.mentions.length} record mention(s), ${detail.checkups.length} linked checkup(s).`,
+        `${detail.condition.name}${detail.condition.code ? ` (${detail.condition.code})` : ""} — ${detail.condition.current_status}. ${detail.mentions.length} record mention(s), ${detail.checkups.length} linked checkup(s).` +
+          (awaiting > 0
+            ? ` ${awaiting} mention(s) propose closing this condition but are not confirmed and have NOT changed its status — it is still ${detail.condition.current_status}.`
+            : ""),
         detail as unknown as Record<string, unknown>,
       );
     }),
