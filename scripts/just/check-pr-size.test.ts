@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as checkPrSize from "./check-pr-size.cjs";
@@ -340,6 +342,92 @@ describe("allowlist parsing", () => {
   it("treats a missing or empty file as no exemptions", () => {
     expect(parseAllowlist(undefined)).toEqual([]);
     expect(parseAllowlist("")).toEqual([]);
+  });
+});
+
+describe("the base a pull request run measures against", () => {
+  const script = path.join(__dirname, "check-pr-size.cjs");
+  const workflow = readFileSync(
+    path.join(__dirname, "..", "..", ".github", "workflows", "main.yml"),
+    "utf8",
+  );
+
+  it("is the first parent of the merge ref, not the base sha the event recorded", () => {
+    // refs/pull/N/merge is a merge of the head into the base branch as it stands when the run is
+    // created; HEAD^1 is that base tip. github.event.pull_request.base.sha is the base when the
+    // event fired, and the tree contains everything merged since -- T-260902-h3e.
+    expect(workflow).toMatch(
+      /PR_SIZE_BASE: \$\{\{ github\.event_name == 'pull_request' && 'HEAD\^1' \|\| github\.event\.before \}\}/,
+    );
+    expect(workflow).toMatch(
+      /MIGRATION_ORDER_BASE: \$\{\{ github\.event_name == 'pull_request' && 'HEAD\^1' \|\| github\.event\.before \}\}/,
+    );
+    expect(workflow).not.toMatch(/PR_SIZE_BASE: .*pull_request\.base\.sha/);
+  });
+
+  /** A repository shaped like a pull request run's checkout: the branch merged into a base that
+   * moved on after the pull request was opened. Returns the base sha the event would have carried. */
+  function buildMergeRefRepository(dir: string) {
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    const write = (name: string, lines: number) =>
+      writeFileSync(
+        path.join(dir, name),
+        Array.from({ length: lines }, (_, i) => `${name} ${i}`).join("\n") + "\n",
+      );
+
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "t@example.com");
+    git("config", "user.name", "t");
+    write("base.ts", 5);
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    const eventBaseSha = git("rev-parse", "HEAD");
+
+    git("switch", "-q", "-c", "feature");
+    write("feature.ts", 10);
+    git("add", ".");
+    git("commit", "-q", "-m", "the branch's own change");
+
+    git("switch", "-q", "main");
+    write("other.ts", 100);
+    git("add", ".");
+    git("commit", "-q", "-m", "somebody else's pull request, merged meanwhile");
+
+    // What actions/checkout checks out for a pull_request event.
+    git("merge", "-q", "--no-ff", "-m", "refs/pull/1/merge", "feature");
+    return eventBaseSha;
+  }
+
+  function measure(dir: string, base: string) {
+    const result = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PR_SIZE_REPO_ROOT: dir,
+        PR_SIZE_BASE: base,
+        PR_SIZE_BRANCH: "pr-size-merge-ref-fixture",
+      },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    return `${result.stdout}${result.stderr}`;
+  }
+
+  it("charges the branch for its own lines only when measured from the merge ref's first parent", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "pr-size-merge-ref-"));
+    try {
+      const eventBaseSha = buildMergeRefRepository(dir);
+
+      expect(measure(dir, "HEAD^1")).toContain("10 reviewable line(s) added across 1 file(s)");
+      // The defect, kept as the counter-example: against the event's base sha the branch is
+      // charged for the 100 lines somebody else merged while it waited.
+      expect(measure(dir, eventBaseSha)).toContain("110 reviewable line(s) added across 2 file(s)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
