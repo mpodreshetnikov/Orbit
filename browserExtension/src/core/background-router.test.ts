@@ -85,6 +85,50 @@ describe("background-router", () => {
     expect(deps.grantStore.setGrant).toHaveBeenCalledTimes(1);
   });
 
+  it("takes the grant's origin from the page that sent it, and refuses one pointed elsewhere", async () => {
+    const deps = createDeps();
+    const permitted = extensionManifest.host_permissions?.[0] ?? "";
+    const host = /^https:\/\/([^/]+)\//.exec(permitted)?.[1];
+    if (!host) return;
+    const grant = {
+      token: "plain-token",
+      person_id: "person-1",
+      allowed_sources: ["tbank_web"],
+      function_url: `https://${host}/functions/v1/money-import`,
+    };
+    const context = { senderOrigin: "https://app.example.com" };
+
+    // Left out: filled in from the sender.
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_SET_GRANT", grant }, deps, context),
+    ).resolves.toEqual({ ok: true });
+    expect(deps.grantStore.setGrant).toHaveBeenLastCalledWith(
+      expect.objectContaining({ app_origin: "https://app.example.com" }),
+    );
+
+    // The sender's own: kept.
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_SET_GRANT",
+          grant: { ...grant, app_origin: "https://app.example.com/" },
+        },
+        deps,
+        context,
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    // Somewhere else: this is the page asking the extension to send the person there later.
+    await expect(
+      routeBackgroundMessage(
+        { type: "MONEY_IMPORT_SET_GRANT", grant: { ...grant, app_origin: "https://evil.example" } },
+        deps,
+        context,
+      ),
+    ).resolves.toEqual({ ok: false, error: "Grant payload was rejected" });
+    expect(deps.grantStore.setGrant).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a held grant without handing the token back to the page", async () => {
     const deps = createDeps();
     deps.grantStore.getGrant.mockResolvedValue({
