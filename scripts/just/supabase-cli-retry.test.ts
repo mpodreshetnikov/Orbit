@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as retry from "./supabase-cli-retry.cjs";
 
-const { runWithRetry, isRetryable, launchSpec, MAX_ATTEMPTS } = retry as {
+const { runWithRetry, isRetryable, launchSpec, MAX_ATTEMPTS } = retry as unknown as {
   launchSpec: (
     args: string[],
     options: { platform: string; env: Record<string, string>; npxBin?: string },
