@@ -1,4 +1,10 @@
 import { shouldShowMoneyImportSourcePageWidget } from "./money-import-sources.js";
+import {
+  resolveWidgetLocale,
+  widgetPhaseLabel,
+  widgetText,
+  type WidgetLocale,
+} from "./core/widget-strings.js";
 
 type RuntimeSendMessage = (
   message: Record<string, unknown>,
@@ -34,6 +40,8 @@ type WidgetActiveRun = Record<string, unknown> & {
 };
 
 interface WidgetElements {
+  title: HTMLElement;
+  progressLabelText: HTMLElement;
   host: HTMLDivElement;
   statusText: HTMLDivElement;
   sessionText: HTMLDivElement;
@@ -69,27 +77,6 @@ function clampProgress(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
 }
 
-function formatPhase(phase: string | null): string {
-  if (!phase) return "Idle";
-  if (phase === "starting") return "Starting import";
-  if (phase === "parse_preparing_tab") return "Preparing bank tab";
-  if (phase === "parse_loading_operations_page") return "Opening operations page";
-  if (phase === "parse_extracting_page_data") return "Starting page extraction";
-  if (phase === "parse_discovering_endpoints") return "Discovering bank endpoints";
-  if (phase === "parse_fetching_ranges") return "Loading transaction ranges";
-  if (phase === "parse_enriching_operations") return "Loading transaction details";
-  if (phase === "parse_using_dom_fallback") return "Using page fallback";
-  if (phase === "parse_dom_rows_ready") return "Fallback rows ready";
-  if (phase === "parse_mapping_rows") return "Mapping parsed rows";
-  if (phase === "parse_completed") return "Parsing completed";
-  if (phase === "preview_rows_started") return "Preparing preview";
-  if (phase === "complete_session_started") return "Finalizing import";
-  if (phase === "parse_only_completed") return "Parse-only completed";
-  if (phase === "review_ready") return "Preview ready for review";
-  if (phase === "completed") return "Import completed";
-  return phase.replace(/_/g, " ");
-}
-
 function readMessageText(payload: Record<string, unknown>, key: string): string | null {
   const value = payload[key];
   if (typeof value !== "string") return null;
@@ -114,36 +101,39 @@ function formatDurationTimer(durationMs: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatReceiptRequestCountSuffix(receiptRequestCount: number | null): string {
+function formatReceiptRequestCountSuffix(
+  locale: WidgetLocale,
+  receiptRequestCount: number | null,
+): string {
   return typeof receiptRequestCount === "number"
-    ? ` | Receipt detail requests: ${receiptRequestCount}`
+    ? ` | ${widgetText(locale, "receiptRequests")}: ${receiptRequestCount}`
     : "";
 }
 
-function formatFullModeEstimateText(state: WidgetState): string {
-  const requestCountSuffix = formatReceiptRequestCountSuffix(state.estimatedReceiptRequestCount);
+function formatFullModeEstimateText(locale: WidgetLocale, state: WidgetState): string {
+  const requestCountSuffix = formatReceiptRequestCountSuffix(
+    locale,
+    state.estimatedReceiptRequestCount,
+  );
   const estimatedRemainingMs =
     typeof state.estimatedRemainingMs === "number" ? state.estimatedRemainingMs : null;
   const estimateUpdatedAtMs =
     typeof state.estimateUpdatedAtMs === "number" ? state.estimateUpdatedAtMs : null;
 
   if (state.batchId && !state.running) {
-    return "Full mode ETA: completed";
+    return widgetText(locale, "fullModeCompleted");
   }
 
   if (state.running && estimatedRemainingMs !== null && estimateUpdatedAtMs !== null) {
     const elapsedMs = Date.now() - estimateUpdatedAtMs;
     const remainingMs = Math.max(0, estimatedRemainingMs - elapsedMs);
     if (remainingMs > 0) {
-      return `Full mode ETA: ${formatDurationTimer(remainingMs)}${requestCountSuffix}`;
+      return `${widgetText(locale, "fullModeEta")}: ${formatDurationTimer(remainingMs)}${requestCountSuffix}`;
     }
-    return (
-      "Full mode status: waiting for source cooldown or pending detail response" +
-      requestCountSuffix
-    );
+    return widgetText(locale, "fullModeWaiting") + requestCountSuffix;
   }
 
-  return "Full mode ETA appears after the bank counts transactions in the selected range";
+  return widgetText(locale, "fullModePending");
 }
 
 function createStyleElement(): HTMLStyleElement {
@@ -268,7 +258,6 @@ function createElements(): WidgetElements {
 
   const title = document.createElement("h2");
   title.className = "title";
-  title.textContent = "Money import";
   panel.appendChild(title);
 
   const sessionText = document.createElement("div");
@@ -291,7 +280,8 @@ function createElements(): WidgetElements {
   progressWrap.className = "progress-wrap";
   const progressLabel = document.createElement("div");
   progressLabel.className = "progress-label";
-  progressLabel.textContent = "Progress";
+  const progressLabelText = document.createElement("span");
+  progressLabel.appendChild(progressLabelText);
   const progressText = document.createElement("span");
   progressLabel.appendChild(progressText);
   progressWrap.appendChild(progressLabel);
@@ -310,14 +300,12 @@ function createElements(): WidgetElements {
   runButton.className = "button run";
   runButton.type = "button";
   runButton.dataset.testid = "money-import-overlay-run-button";
-  runButton.textContent = "Run import";
   actions.appendChild(runButton);
 
   const retryButton = document.createElement("button");
   retryButton.className = "button retry";
   retryButton.type = "button";
   retryButton.dataset.testid = "money-import-overlay-retry-button";
-  retryButton.textContent = "Retry";
   actions.appendChild(retryButton);
 
   panel.appendChild(actions);
@@ -333,6 +321,8 @@ function createElements(): WidgetElements {
   shadowRoot.appendChild(panel);
 
   return {
+    title,
+    progressLabelText,
     host,
     statusText,
     sessionText,
@@ -350,7 +340,9 @@ function createElements(): WidgetElements {
 function defaultDeps(): SourcePageWidgetDeps {
   const runtimeSendMessage: RuntimeSendMessage = (message, callback) => {
     if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
-      callback?.({ ok: false, error: "Extension runtime is unavailable" });
+      // No session in reach here, so the browser's language is the best guess available.
+      const locale = resolveWidgetLocale(null, navigator.language);
+      callback?.({ ok: false, error: widgetText(locale, "runtimeUnavailable") });
       return;
     }
     if (callback) {
@@ -406,42 +398,52 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   const render = () => {
     if (!elements) return;
 
-    const sessionId = readMessageText(state.session ?? {}, "session_id") ?? "no active session";
-    elements.sessionText.textContent = `Session: ${sessionId}`;
+    // Resolved on every render rather than once: the session, and with it the language the
+    // app is showing, can arrive after the widget is already on the page.
+    const locale = resolveWidgetLocale(state.session, navigator.language);
+    elements.title.textContent = widgetText(locale, "title");
+    elements.progressLabelText.textContent = `${widgetText(locale, "progress")} `;
+    elements.retryButton.textContent = widgetText(locale, "retry");
+
+    const sessionId =
+      readMessageText(state.session ?? {}, "session_id") ?? widgetText(locale, "noActiveSession");
+    elements.sessionText.textContent = `${widgetText(locale, "session")}: ${sessionId}`;
 
     if (state.running) {
-      elements.statusText.textContent = "Import is running";
+      elements.statusText.textContent = widgetText(locale, "statusRunning");
     } else if (state.error) {
-      elements.statusText.textContent = "Import failed";
+      elements.statusText.textContent = widgetText(locale, "statusFailed");
     } else if (state.batchId && state.phase === "review_ready") {
-      elements.statusText.textContent = "Preview ready for review";
+      elements.statusText.textContent = widgetText(locale, "statusReviewReady");
     } else if (state.batchId) {
-      elements.statusText.textContent = "Import completed";
+      elements.statusText.textContent = widgetText(locale, "statusCompleted");
     } else {
-      elements.statusText.textContent = "Ready to run";
+      elements.statusText.textContent = widgetText(locale, "statusReady");
     }
 
     const parsedCountText =
       typeof state.parsedTransactionsCount === "number"
-        ? `Parsed transactions: ${state.parsedTransactionsCount}`
-        : "Parsed transactions: -";
+        ? `${widgetText(locale, "parsedTransactions")}: ${state.parsedTransactionsCount}`
+        : `${widgetText(locale, "parsedTransactions")}: -`;
     elements.parsedCountText.textContent = parsedCountText;
 
     const parseStrategy = readMessageText(state.session ?? {}, "parse_strategy");
     if (parseStrategy === "full") {
-      elements.estimateText.textContent = formatFullModeEstimateText(state);
+      elements.estimateText.textContent = formatFullModeEstimateText(locale, state);
       elements.estimateText.style.display = "block";
     } else {
       elements.estimateText.style.display = "none";
       elements.estimateText.textContent = "";
     }
 
-    const phaseText = formatPhase(state.phase);
+    const phaseText = widgetPhaseLabel(locale, state.phase);
     elements.progressText.textContent = `${phaseText} ${state.progressPercent}%`;
     elements.progressTrack.style.width = `${state.progressPercent}%`;
 
     elements.runButton.disabled = state.running;
-    elements.runButton.textContent = state.running ? "Import running..." : "Run import";
+    elements.runButton.textContent = state.running
+      ? widgetText(locale, "running")
+      : widgetText(locale, "run");
 
     if (state.error) {
       elements.errorText.style.display = "block";
@@ -455,7 +457,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
 
     if (state.batchId) {
       elements.successText.style.display = "block";
-      elements.successText.textContent = `Batch: ${state.batchId}`;
+      elements.successText.textContent = `${widgetText(locale, "batch")}: ${state.batchId}`;
     } else {
       elements.successText.style.display = "none";
       elements.successText.textContent = "";
@@ -488,7 +490,9 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
           state = {
             ...state,
             running: false,
-            error: readMessageText(response ?? {}, "error") ?? "Import failed",
+            error:
+              readMessageText(response ?? {}, "error") ??
+              widgetText(resolveWidgetLocale(state.session, navigator.language), "statusFailed"),
           };
           render();
           return;
@@ -607,7 +611,9 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
       state = {
         ...state,
         running: false,
-        error: readMessageText(message, "error") ?? "Import failed",
+        error:
+          readMessageText(message, "error") ??
+          widgetText(resolveWidgetLocale(state.session, navigator.language), "statusFailed"),
       };
       render();
     }
