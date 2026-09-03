@@ -7,6 +7,8 @@
  *   just test-extraction --live --record      call OpenRouter and refresh the cassettes
  *   just test-extraction --case 001           run a subset
  *   just test-extraction --live --repeat 3    run each case 3 times and report the spread
+ *   just test-extraction --live --model-extract <id>
+ *                                             override one stage; the rest keep --model
  *
  * Exits 0 regardless of score unless --fail-under is given. Scores are a report, not a gate:
  * with a small corpus a threshold is noise, and case 001 deliberately fails one dimension.
@@ -30,11 +32,31 @@ import { aggregate, scoreCase } from "./score.ts";
 
 const DEFAULT_MODEL = "openai/gpt-5.2:nitro";
 
+/**
+ * The stages a model can be pinned to individually, and the flag that pins each.
+ *
+ * Production already resolves per stage — `stages/index.ts` reads
+ * `deps.models?.<stage> ?? deps.defaultModel` — and the three
+ * `OPENROUTER_HEALTH_STAGE_*_MODEL` variables exist to set them. The eval could not express a
+ * mixed configuration at all, so a per-stage recommendation could only ever be inferred from
+ * whole-pipeline runs of one model. The stages are not independent — reconcile consumes what
+ * extract produced — so that inference needed to become a measurement.
+ */
+const STAGE_FLAGS = {
+  "--model-classify": "classify",
+  "--model-extract": "extract",
+  "--model-reconcile": "reconcile",
+} as const;
+
+export type StageModels = { classify?: string; extract?: string; reconcile?: string };
+
 interface ParsedArgs {
   live: boolean;
   record: boolean;
   cases: string[];
   model: string;
+  /** Per-stage overrides; an absent stage falls back to `model`. */
+  stageModels: StageModels;
   outDir: string;
   failUnder: number | null;
   repeat: number;
@@ -51,6 +73,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       process.env.OPENROUTER_HEALTH_STRUCTURE_MODEL.length > 0
         ? process.env.OPENROUTER_HEALTH_STRUCTURE_MODEL
         : DEFAULT_MODEL,
+    stageModels: {},
     outDir: DEFAULT_OUT_DIR,
     failUnder: null,
     repeat: 1,
@@ -63,6 +86,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (current === "--record") parsed.record = true;
     else if (current === "--case" && argv[index + 1]) parsed.cases.push(argv[++index]);
     else if (current === "--model" && argv[index + 1]) parsed.model = argv[++index];
+    else if (current in STAGE_FLAGS && argv[index + 1])
+      parsed.stageModels[STAGE_FLAGS[current as keyof typeof STAGE_FLAGS]] = argv[++index];
     else if (current === "--out" && argv[index + 1]) parsed.outDir = path.resolve(argv[++index]);
     else if (current === "--fail-under" && argv[index + 1])
       parsed.failUnder = Number(argv[++index]);
@@ -98,6 +123,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 function table(headers: string[], rows: string[]): string[] {
   return [`| ${headers.join(" | ")} |`, `|${headers.map(() => "---").join("|")}|`, ...rows];
+}
+
+/**
+ * How the report names what it just measured.
+ *
+ * A mixed run is only worth doing if the artefact says which model ran where; "Model
+ * `openai/gpt-5.2`" on a run where two of three stages were gemini would be a false record.
+ */
+export function describeModels(model: string, stageModels: StageModels): string {
+  const overrides = Object.values(STAGE_FLAGS)
+    .filter((stage) => stageModels[stage])
+    .map((stage) => `${stage}: ${stageModels[stage]}`);
+  return overrides.length > 0 ? `${model} (${overrides.join(", ")})` : model;
 }
 
 export function resolveMode(args: Pick<ParsedArgs, "live" | "record">): CassetteMode {
@@ -136,6 +174,7 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
             fetchFn: cassette.fetchFn,
             apiKey: apiKey.length > 0 ? apiKey : "replay",
             model: args.model,
+            stageModels: args.stageModels,
           },
         );
         results.push({
@@ -171,7 +210,7 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
   const results = passes[passes.length - 1];
   const scored = results.flatMap((result) => (result.score ? [result.score] : []));
   const summary: RunSummary = {
-    model: args.model,
+    model: describeModels(args.model, args.stageModels),
     mode,
     generatedAt: args.generatedAt,
     cases: results,
