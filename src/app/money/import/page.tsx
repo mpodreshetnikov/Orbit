@@ -866,6 +866,9 @@ export default function MoneyImportPage() {
 
   const requestExtensionAutoStatus = useCallback(async (): Promise<ExtensionAutoStatus | null> => {
     return await new Promise<ExtensionAutoStatus | null>((resolve) => {
+      // The bridge echoes this, so a reply to an earlier request -- a Re-check while the
+      // post-grant refresh is still pending -- cannot answer this one with older state.
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const timeout = window.setTimeout(() => {
         window.removeEventListener("message", onMessage);
         resolve(null);
@@ -875,6 +878,7 @@ export default function MoneyImportPage() {
         const data = event.data as Record<string, unknown> | null;
         if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
         if (data.type !== "MONEY_IMPORT_AUTO_STATUS") return;
+        if (data.request_id !== requestId) return;
 
         window.clearTimeout(timeout);
         window.removeEventListener("message", onMessage);
@@ -886,6 +890,7 @@ export default function MoneyImportPage() {
         {
           source: EXTENSION_WEBAPP_SOURCE,
           type: "MONEY_IMPORT_GET_AUTO_STATUS",
+          request_id: requestId,
           ts: Date.now(),
         },
         "*",

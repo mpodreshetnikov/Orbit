@@ -233,4 +233,40 @@ describe("MoneyImportAutoStatus", () => {
     expect(within(tbank).getByText(/^money\.importAutoStatusLastManualOk /)).toBeInTheDocument();
     expect(within(tbank).queryByText(/^money\.importAutoStatusLastOk /)).not.toBeInTheDocument();
   });
+
+  it("calls a run of unknown origin neither automatic nor manual", () => {
+    // States written by 0.1.10 and earlier carry no origin; a manual reset looks like a run.
+    render(
+      <MoneyImportAutoStatus
+        t={t}
+        state="ready"
+        status={{
+          grant,
+          sources: [
+            {
+              source_id: "tbank_web",
+              last_run_at: "2026-09-03T05:02:00.000Z",
+              last_result: "ok",
+              consecutive_failures: 0,
+              last_error: null,
+              last_run_origin: null,
+              next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
+              scheduled_at: null,
+            },
+          ],
+        }}
+        selectedPersonId="person-1"
+        sourceLabels={labels}
+        onRefresh={() => {}}
+      />,
+    );
+    const tbank = screen.getByTestId("money-import-auto-status-tbank_web");
+    expect(
+      within(tbank).getByText(/^money\.importAutoStatusLastOkUnknownOrigin /),
+    ).toBeInTheDocument();
+    expect(within(tbank).queryByText(/^money\.importAutoStatusLastOk /)).not.toBeInTheDocument();
+    expect(
+      within(tbank).queryByText(/^money\.importAutoStatusLastManualOk /),
+    ).not.toBeInTheDocument();
+  });
 });

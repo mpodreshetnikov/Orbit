@@ -142,8 +142,14 @@ function describeSource(
   } else if (source.last_run_origin === "manual") {
     // A manual import clears the backoff and buys the cooldown; it is not an automatic run.
     lines.push(t("money.importAutoStatusLastManualOk", { date: formatMoment(source.last_run_at) }));
-  } else {
+  } else if (source.last_run_origin === "auto") {
     lines.push(t("money.importAutoStatusLastOk", { date: formatMoment(source.last_run_at) }));
+  } else {
+    // Written before the origin was recorded (0.1.10 and earlier): a manual import that reset
+    // the backoff looks the same as an automatic run, so it is called neither.
+    lines.push(
+      t("money.importAutoStatusLastOkUnknownOrigin", { date: formatMoment(source.last_run_at) }),
+    );
   }
   if (next) lines.push(next);
   if (scheduled) lines.push(scheduled);

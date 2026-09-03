@@ -151,7 +151,7 @@ describe("content-bridge", () => {
     bridge.handleWindowMessage(
       new MessageEvent("message", {
         source: window,
-        data: { source: "orbit-webapp", type: "MONEY_IMPORT_GET_AUTO_STATUS" },
+        data: { source: "orbit-webapp", type: "MONEY_IMPORT_GET_AUTO_STATUS", request_id: "r-7" },
       }),
     );
 
@@ -163,6 +163,7 @@ describe("content-bridge", () => {
       {
         source: "orbit-extension",
         type: "MONEY_IMPORT_AUTO_STATUS",
+        request_id: "r-7",
         ok: true,
         grant: { person_id: "person-1", allowed_sources: ["tbank_web"], received_at: "x" },
         sources: [{ source_id: "tbank_web", next_run: { kind: "now" } }],

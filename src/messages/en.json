@@ -698,7 +698,8 @@
     "importAutoStatusUnavailable": "The extension answered but did not report its status. It may need updating.",
     "importAutoStatusGrantOtherPerson": "The extension holds a key for another person, received {date}. Issue one for this person above and send it to the extension.",
     "importAutoStatusLastManualOk": "Last import {date} was started by hand and succeeded.",
-    "importAutoStatusEligibleNow": "May run now: the next visit to the bank, or the extension's own periodic check, starts it."
+    "importAutoStatusEligibleNow": "May run now: the next visit to the bank, or the extension's own periodic check, starts it.",
+    "importAutoStatusLastOkUnknownOrigin": "Last import {date} succeeded."
   },
   "records": {
     "title": "Medical Records",
