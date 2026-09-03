@@ -21,6 +21,7 @@ const getSessionMock = vi.fn();
 const fetchMock = vi.fn();
 
 vi.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string) => key,
 }));
 
