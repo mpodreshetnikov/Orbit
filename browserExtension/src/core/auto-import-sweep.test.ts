@@ -106,6 +106,7 @@ describe("createAutoImportSweep", () => {
       consecutiveFailures: 0,
       lastError: null,
       lastRunOrigin: "auto",
+      lastOkAtMs: NOW,
     });
   });
 
@@ -426,5 +427,59 @@ describe("createAutoImportSweep", () => {
       "https://web.alfabank.ru/",
       "https://www.tbank.ru/mybank/operations/",
     ]);
+  });
+});
+
+describe("a run the person asked for", () => {
+  const stopped: AutoRunState = {
+    lastRunAtMs: NOW - 60_000,
+    lastResult: "error",
+    consecutiveFailures: 3,
+    lastError: "tbank did not stay on the operations page",
+  };
+
+  it("runs past the cooldown and the stop after failures, and clears the request on success", async () => {
+    const cleared: string[] = [];
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async (sourceId) => sourceId === "tbank";
+    harness.deps.clearRunRequest = async (sourceId) => {
+      cleared.push(sourceId);
+    };
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(0);
+    expect(cleared).toEqual(["tbank"]);
+  });
+
+  it("keeps the request when the attempt fails, for the visit after the person has signed in", async () => {
+    const cleared: string[] = [];
+    const harness = createHarness({
+      states: { "tbank::person-1": stopped },
+      runImport: vi.fn(async () => {
+        throw new Error("tbank did not stay on the operations page");
+      }),
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async (sourceId) => {
+      cleared.push(sourceId);
+    };
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toHaveLength(1);
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(4);
+    expect(cleared).toEqual([]);
+  });
+
+  it("changes nothing for a source nobody asked about", async () => {
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => false;
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toEqual([]);
   });
 });

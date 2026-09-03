@@ -10,6 +10,9 @@ import { createGrantStore } from "./core/grant-store.js";
 import { createBackfillStore } from "./core/backfill-store.js";
 import { createAutoRunStore } from "./core/auto-run-store.js";
 import { createAutoImportSweep } from "./core/auto-import-sweep.js";
+import { createAttentionStore } from "./core/attention-store.js";
+import { buildAttentionStatus } from "./core/attention-status.js";
+import { shouldOpenAttentionPage } from "./core/attention-policy.js";
 import { runScheduledImport } from "./core/import-runner.js";
 import {
   getAllMoneyImportSourcePagePatterns,
@@ -307,6 +310,7 @@ const sessionStore = createSessionStore(chrome.storage.local);
 const grantStore = createGrantStore(chrome.storage.local);
 const backfillStore = createBackfillStore(chrome.storage.local);
 const autoRunStore = createAutoRunStore(chrome.storage.local);
+const attentionStore = createAttentionStore(chrome.storage.local);
 const debugStore = createImportDebugStore();
 const telemetry = createExtensionLogger("background");
 telemetry.info("extension_background_initialized", {
@@ -337,17 +341,88 @@ const AUTO_IMPORT_ALARM_PERIOD_MINUTES = 180;
 const AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS = 30_000;
 const AUTO_IMPORT_TAB_POLL_INTERVAL_MS = 500;
 
+function listAutoImportSourceTargets(): Array<{ sourceId: string; targetUrl: string }> {
+  return listMoneyImportSourceDefinitions()
+    .filter((definition) => Boolean(definition.targetUrl))
+    .map((definition) => ({ sourceId: definition.sourceId, targetUrl: definition.targetUrl }));
+}
+
+/** Where the app lists what needs a person: opened by the extension when a source goes stale. */
+const ATTENTION_PAGE_PATH = "/money/import/attention";
+
+function buildAttentionPageUrl(appOrigin: string): string | null {
+  try {
+    return new URL(ATTENTION_PAGE_PATH, appOrigin).toString();
+  } catch {
+    return null;
+  }
+}
+
+async function setAttentionBadge(staleCount: number): Promise<void> {
+  if (!chrome.action?.setBadgeText) return;
+  await chrome.action.setBadgeText({ text: staleCount > 0 ? String(staleCount) : "" });
+  if (staleCount > 0 && chrome.action.setBadgeBackgroundColor) {
+    await chrome.action.setBadgeBackgroundColor({ color: "#d97706" });
+  }
+}
+
+/**
+ * Counts the sources that have gone quiet, shows the count on the icon, and -- when allowed to
+ * -- opens the attention page for a person to act on.
+ *
+ * Run at the browser's start and after every sweep, because those are the moments something
+ * may have changed: a sweep that failed on the login screen is what makes a source stale, and
+ * one that succeeded is what makes it fresh again. Opening the page is offered only from the
+ * start and the alarm: a page that opened itself a minute after the person pressed Update, on
+ * the visit sweep their sign-in caused, would be the extension nagging about the thing they are
+ * in the middle of fixing.
+ */
+async function refreshAttention(reason: string, options: { mayOpenPage: boolean }): Promise<void> {
+  try {
+    const grant = await grantStore.getGrant();
+    const attention = await attentionStore.getState();
+    const nowMs = Date.now();
+    const status = await buildAttentionStatus({
+      grant,
+      knownSources: listAutoImportSourceTargets().map((source) => source.sourceId),
+      autoRunStore,
+      attention,
+      nowMs,
+    });
+    await setAttentionBadge(status.stale_count);
+    if (!options.mayOpenPage || !grant) return;
+    if (
+      !shouldOpenAttentionPage({
+        staleCount: status.stale_count,
+        lastOpenedAtMs: attention.lastOpenedAtMs,
+        nowMs,
+      })
+    ) {
+      return;
+    }
+    const url = buildAttentionPageUrl(grant.app_origin);
+    if (!url) return;
+    await chrome.tabs.create({ url, active: true });
+    await attentionStore.markPageOpened(nowMs);
+    telemetry.info("money_import_attention_page_opened", {
+      reason,
+      stale_count: status.stale_count,
+    });
+  } catch (error) {
+    telemetry.warn("money_import_attention_check_failed", {
+      reason,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 const autoImportSweep = createAutoImportSweep({
-  listSources: () =>
-    listMoneyImportSourceDefinitions()
-      .filter((definition) => Boolean(definition.targetUrl))
-      .map((definition) => ({
-        sourceId: definition.sourceId,
-        targetUrl: definition.targetUrl,
-      })),
+  listSources: listAutoImportSourceTargets,
   grantStore,
   sessionStore,
   autoRunStore,
+  isRunRequested: (sourceId, nowMs) => attentionStore.isRunRequested(sourceId, nowMs),
+  clearRunRequest: (sourceId) => attentionStore.clearRunRequest(sourceId),
   openTab: async (url) => {
     const created = await chrome.tabs.create({ url, active: false });
     return typeof created.id === "number" ? created.id : null;
@@ -451,18 +526,30 @@ chrome.runtime.onInstalled?.addListener((details) => {
       previous_version: details.previousVersion ?? null,
     });
   });
+  // The badge does not survive an update; the count it showed still holds.
+  void refreshAttention("install", { mayOpenPage: false });
+});
+
+// The browser's start is the one moment a page opening by itself reads as a reminder rather
+// than an interruption, and the badge has to be drawn again in any case.
+chrome.runtime.onStartup?.addListener(() => {
+  void refreshAttention("startup", { mayOpenPage: true });
 });
 
 if (chrome.alarms?.onAlarm) {
   void ensureAutoImportAlarm();
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === AUTO_IMPORT_ALARM) {
-      void autoImportSweep.run("alarm");
+      void autoImportSweep
+        .run("alarm")
+        .then(() => refreshAttention("alarm", { mayOpenPage: true }));
       return;
     }
     if (alarm.name.startsWith(VISIT_SWEEP_ALARM_PREFIX)) {
       const sourceId = alarm.name.slice(VISIT_SWEEP_ALARM_PREFIX.length);
-      void autoImportSweep.run("visit", { sourceId });
+      void autoImportSweep
+        .run("visit", { sourceId })
+        .then(() => refreshAttention("visit", { mayOpenPage: false }));
     }
   });
 }
@@ -486,9 +573,16 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
           autoRunStore,
           debugStore,
           listAutoImportSources: () =>
-            listMoneyImportSourceDefinitions()
-              .filter((definition) => Boolean(definition.targetUrl))
-              .map((definition) => definition.sourceId),
+            listAutoImportSourceTargets().map((source) => source.sourceId),
+          attentionStore,
+          resolveSourceTargetUrl: (sourceId) =>
+            listAutoImportSourceTargets().find((source) => source.sourceId === sourceId)
+              ?.targetUrl ?? null,
+          openSourceTab: async (url) => {
+            // For the person, so in front of them -- the sweep's own tab stays in the background.
+            const created = await chrome.tabs.create({ url, active: true });
+            return typeof created.id === "number" ? created.id : null;
+          },
           listScheduledSweeps: async () => {
             if (!chrome.alarms?.getAll) return [];
             const alarms = await chrome.alarms.getAll().catch(() => []);
@@ -527,6 +621,16 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
 
       if (message.type === "MONEY_IMPORT_RUN" && message.origin === "source_page_overlay") {
         await maybeOpenReportTab((response as Record<string, unknown>).report_url);
+      }
+
+      // A manual run may have freshened a source; a request or a new threshold changes what
+      // counts. The badge follows, and the page is never opened from here.
+      if (
+        message.type === "MONEY_IMPORT_RUN" ||
+        message.type === "MONEY_IMPORT_REQUEST_RUN" ||
+        message.type === "MONEY_IMPORT_SET_ATTENTION_SETTINGS"
+      ) {
+        await refreshAttention("message", { mayOpenPage: false });
       }
 
       sendResponse(response);

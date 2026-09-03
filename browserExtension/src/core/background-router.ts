@@ -9,9 +9,13 @@ import type { SessionStore } from "./session-store.js";
 import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
 import type { AutoRunStore } from "./auto-run-store.js";
 import { describeAutoRunEligibility, nextAutoRunState, shouldAutoRun } from "./auto-run-policy.js";
+import type { AttentionStore } from "./attention-store.js";
+import { buildAttentionStatus } from "./attention-status.js";
 
 export interface BackgroundMessage {
   type: string;
+  source_id?: unknown;
+  stale_after_ms?: unknown;
   session?: Record<string, unknown>;
   grant?: unknown;
   session_id?: string;
@@ -55,6 +59,12 @@ export interface BackgroundRouterDeps {
   /** Visit-triggered sweeps waiting on their minute of quiet, by source. */
   listScheduledSweeps?: () => Promise<Array<{ sourceId: string; atMs: number }>>;
   now?: () => number;
+  /** The attention page's settings and requests; without it the page gets "not available". */
+  attentionStore?: AttentionStore;
+  /** Where a source's bank is opened for the person, by source id. */
+  resolveSourceTargetUrl?: (sourceId: string) => string | null;
+  /** Opens the bank for the person -- an active tab, unlike the sweep's own. */
+  openSourceTab?: (url: string) => Promise<number | null>;
 }
 
 /**
@@ -399,6 +409,56 @@ export async function routeBackgroundMessage(
         : null,
       sources,
     };
+  }
+
+  if (message.type === "MONEY_IMPORT_GET_ATTENTION") {
+    if (!deps.attentionStore || !deps.autoRunStore) {
+      return { ok: false, error: "Attention is not available" };
+    }
+    const grant = await deps.grantStore.getGrant();
+    const status = await buildAttentionStatus({
+      grant,
+      knownSources: deps.listAutoImportSources?.() ?? grant?.allowed_sources ?? [],
+      autoRunStore: deps.autoRunStore,
+      attention: await deps.attentionStore.getState(),
+      nowMs: deps.now?.() ?? Date.now(),
+    });
+    // The token stays here, as with MONEY_IMPORT_GET_GRANT.
+    return {
+      ok: true,
+      grant: grant
+        ? {
+            person_id: grant.person_id,
+            allowed_sources: grant.allowed_sources,
+            received_at: grant.received_at,
+          }
+        : null,
+      ...status,
+    };
+  }
+
+  if (message.type === "MONEY_IMPORT_REQUEST_RUN") {
+    // The person has been told a source is stale and pressed Update: the bank opens for them
+    // to sign in, and the visit that follows runs the import whatever the backoff says. The
+    // attempt history is left alone -- nothing has succeeded yet; the run will say.
+    if (!deps.attentionStore) return { ok: false, error: "Attention is not available" };
+    const grant = await deps.grantStore.getGrant();
+    if (!grant) return { ok: false, error: "No import grant" };
+    const sourceId = toTrimmedString(message.source_id);
+    if (!sourceId || !grant.allowed_sources.includes(sourceId)) {
+      return { ok: false, error: "Source is not covered by the grant" };
+    }
+    const targetUrl = deps.resolveSourceTargetUrl?.(sourceId) ?? null;
+    if (!targetUrl) return { ok: false, error: "Source has no page to open" };
+    await deps.attentionStore.requestRun(sourceId, deps.now?.() ?? Date.now());
+    const tabId = deps.openSourceTab ? await deps.openSourceTab(targetUrl) : null;
+    return { ok: true, source_id: sourceId, target_url: targetUrl, tab_id: tabId };
+  }
+
+  if (message.type === "MONEY_IMPORT_SET_ATTENTION_SETTINGS") {
+    if (!deps.attentionStore) return { ok: false, error: "Attention is not available" };
+    const staleAfterMs = await deps.attentionStore.setStaleAfterMs(message.stale_after_ms);
+    return { ok: true, stale_after_ms: staleAfterMs };
   }
 
   if (message.type === "MONEY_IMPORT_START_SESSION") {

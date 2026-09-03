@@ -35,6 +35,15 @@ export interface AutoImportSweepDeps {
   }) => Promise<{ backfillError?: { message: string } } | undefined>;
   now: () => number;
   onWarning: (event: string, attrs: Record<string, unknown>) => void;
+  /**
+   * A run a person asked for from the attention page. Honoured past the cooldown and past the
+   * stop after failures: they have just been told the source is stale and have gone to sign in,
+   * and the failures being backed off from were the signed-out bank they are fixing. The request
+   * lives until the run succeeds or it expires -- not consumed by the attempt, because a visit
+   * that lands before the person has finished signing in would spend it on the login screen.
+   */
+  isRunRequested?: (sourceId: string, nowMs: number) => Promise<boolean>;
+  clearRunRequest?: (sourceId: string) => Promise<void>;
 }
 
 export type AutoImportTrigger = "visit" | "alarm";
@@ -105,7 +114,8 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
     const nowMs = deps.now();
     const scope = { sourceId: source.sourceId, payerPersonId: grant.person_id };
     const state = await deps.autoRunStore.getState(scope);
-    if (!shouldAutoRun(state, nowMs)) return;
+    const requested = (await deps.isRunRequested?.(source.sourceId, nowMs)) ?? false;
+    if (!requested && !shouldAutoRun(state, nowMs)) return;
 
     const tabId = await deps.openTab(source.targetUrl);
     if (tabId === null) return;
@@ -127,6 +137,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       }
 
       await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "ok"));
+      if (requested) await deps.clearRunRequest?.(source.sourceId);
     } catch (error) {
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
       // backoff widens and the attempts stop after a few, and the person is told nothing: they

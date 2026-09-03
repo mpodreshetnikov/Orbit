@@ -47,6 +47,12 @@ function readState(value: unknown): AutoRunState | null {
     ...(record.lastRunOrigin === "auto" || record.lastRunOrigin === "manual"
       ? { lastRunOrigin: record.lastRunOrigin }
       : {}),
+    lastOkAtMs:
+      typeof record.lastOkAtMs === "number"
+        ? record.lastOkAtMs
+        : record.lastResult === "ok" && typeof record.lastRunAtMs === "number"
+          ? record.lastRunAtMs
+          : null,
   };
 }
 
