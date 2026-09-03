@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as checkMigrationOrder from "./check-migration-order.cjs";
@@ -303,6 +304,25 @@ describe("landing order", () => {
   it("reads no batches out of empty output", () => {
     expect(parseLandingOrder("")).toEqual([]);
     expect(parseLandingOrder(undefined)).toEqual([]);
+  });
+});
+
+describe("landing order read from this repository", () => {
+  // A rename to a later timestamp is the remedy this gate recommends, and under git's rename
+  // detection it lands as an `R` rather than an `A`. If detection is ever left on, every renamed
+  // migration disappears from the landing order, is treated as arriving today, and is reported as
+  // out of order -- which is what the gate tells people to do to fix the problem. That regression
+  // is invisible in a fixture, so it is checked against real history.
+  const shallow = fs.existsSync(path.join(__dirname, "..", "..", ".git", "shallow"));
+
+  it.skipIf(shallow)("accounts for every migration in the tree, renamed ones included", () => {
+    const landed = new Set((checkMigrationOrder.readLandingOrder() ?? []).flat());
+    const missing = checkMigrationOrder
+      .readHeadMigrations()
+      .filter((file: string) => versionOf(file))
+      .filter((file: string) => !landed.has(file));
+
+    expect(missing).toEqual([]);
   });
 });
 

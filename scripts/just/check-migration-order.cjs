@@ -316,6 +316,12 @@ function readLandingOrder() {
     "--first-parent",
     "--reverse",
     "--diff-filter=A",
+    // Renames are the point, not noise: the remedy this gate recommends is to rename a migration to
+    // a later timestamp, and under rename detection that lands as an `R` rather than an `A`, so the
+    // new name would never appear to have landed at all and would be judged as if it were arriving
+    // today. Without detection the same commit reads as an add of the new name and a delete of the
+    // old, which is what actually happened to the ordering.
+    "--no-renames",
     "--name-only",
     `--format=${LANDING_COMMIT_PREFIX}%H`,
     "HEAD",
@@ -466,6 +472,8 @@ if (require.main === module) {
 module.exports = {
   ZERO_SHA,
   evaluateMigrationOrder,
+  readHeadMigrations,
+  readLandingOrder,
   misorderedInTree,
   parseAllowlist,
   parseArgs,
