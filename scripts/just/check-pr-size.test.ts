@@ -10,6 +10,7 @@ const {
   formatFailure,
   formatWarning,
   globToRegExp,
+  isDefaultBranch,
   isReviewable,
   parseAllowlist,
   parseArgs,
@@ -150,6 +151,15 @@ describe("change size evaluation", () => {
     });
 
     expect(result.branchExemption).toBeUndefined();
+  });
+
+  it("knows main from a branch, so a merged pull request is not judged again", () => {
+    // A merge commit on main, measured against the commit before it, is the whole pull request
+    // once more -- with no branch name for its allowlist entry to match. The gate has already
+    // had its say on the pull request; main carries what was merged.
+    expect(isDefaultBranch("main")).toBe(true);
+    expect(isDefaultBranch("feature/x")).toBe(false);
+    expect(isDefaultBranch(null)).toBe(false);
   });
 
   it("claims no branch exemption when the checkout names no branch", () => {

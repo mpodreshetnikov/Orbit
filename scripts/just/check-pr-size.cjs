@@ -364,6 +364,13 @@ function readAllowlist() {
   return parseAllowlist(fs.readFileSync(ALLOWLIST_PATH, "utf8"));
 }
 
+/** The branch pull requests merge into; a push to it is a pull request that already merged. */
+const DEFAULT_BRANCH = "main";
+
+function isDefaultBranch(branch) {
+  return branch === DEFAULT_BRANCH;
+}
+
 function resolveBranch(explicitBranch) {
   if (explicitBranch) {
     return explicitBranch;
@@ -457,6 +464,20 @@ function main() {
   const advisory = args.advisory === true;
   const envBase = (process.env.PR_SIZE_BASE || "").trim();
   const branch = resolveBranch(args.branch);
+
+  // The gate judges a pull request, where the cut can still be changed. A push to main is a
+  // pull request that has merged: there is nothing left to re-cut, and a merge commit measured
+  // against the commit before it is the whole pull request again, this time with no branch
+  // name for an allowlist entry to match. The gate had its say on the pull request.
+  if (isDefaultBranch(branch)) {
+    if (!advisory) {
+      console.log(
+        `PR size check skipped: '${branch}' carries what was merged; the gate judges pull requests.`,
+      );
+    }
+    return 0;
+  }
+
   const requestedBase =
     args.base || (envBase === ZERO_SHA ? "" : envBase) || resolveConfiguredBaseRef(branch) || "";
   const baseRef = requestedBase ? resolveExplicitBaseRef(requestedBase) : resolveDefaultBaseRef();
@@ -530,6 +551,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_BRANCH,
+  isDefaultBranch,
   MAX_REVIEWABLE_ADDED_LINES,
   WARNING_FRACTION,
   ZERO_SHA,
