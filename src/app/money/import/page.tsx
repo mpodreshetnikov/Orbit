@@ -1290,9 +1290,14 @@ export default function MoneyImportPage() {
     <div className="space-y-6 max-w-5xl">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl font-semibold">{t("money.importTitle")}</h1>
-        <Button variant="outline" asChild>
-          <Link href="/money/import/history">{t("money.importViewHistory")}</Link>
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" asChild>
+            <Link href="/money/import/attention">{t("money.importAttentionTitle")}</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/money/import/history">{t("money.importViewHistory")}</Link>
+          </Button>
+        </div>
       </div>
 
       <MoneyImportGrants
