@@ -343,7 +343,7 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
   const deleteFindingMutation = useDeleteRecordFinding();
   const createFindingMutation = useCreateRecordFinding();
   const updateConditionRecordMutation = useUpdateConditionRecord();
-  const { ruleOnClosure } = useRuleOnProposedClosure();
+  const { ruleOnClosure, rulingOnId } = useRuleOnProposedClosure();
   const deleteConditionRecordMutation = useDeleteConditionRecord();
   const createConditionWithRecordMutation = useCreateConditionWithRecord();
   const linkConditionToRecordMutation = useLinkConditionToRecord();
@@ -358,7 +358,12 @@ export function RecordDetail({ recordId }: RecordDetailProps) {
     updateConditionRecordMutation.isPending ||
     deleteConditionRecordMutation.isPending ||
     createConditionWithRecordMutation.isPending ||
-    linkConditionToRecordMutation.isPending;
+    linkConditionToRecordMutation.isPending ||
+    // The hook owns its own mutation instance, so the flags above say nothing about a ruling in
+    // flight. Without this the buttons stayed live through the evidence read, and Confirm then
+    // Dismiss could land in that order -- the dismissal written first and overwritten by the
+    // confirmation, making the closure a person had just rejected authoritative.
+    rulingOnId !== null;
 
   const getComparisonForFinding = (finding: RecordFindingWithCatalog): FindingComparison | null =>
     getComparisonForFindingData({

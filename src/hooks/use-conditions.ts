@@ -3,6 +3,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import { AUTHORITATIVE_STATUS_FILTER } from "@/lib/conditions/unverified-closure";
+import {
+  proposedClosureStillHolds,
+  type PersistedObservation,
+} from "@/lib/conditions/resolution-proposal";
 import type {
   Condition,
   ConditionRecord,
@@ -458,6 +462,55 @@ export function useCreateConditionRecord() {
   });
 }
 
+/**
+ * Refuse to verify a proposed closure whose evidence no longer stands.
+ *
+ * Reads the row and, when it is a lab-driven closure, the record's applied observations, and
+ * applies `proposedClosureStillHolds` -- the same rule the activation pass and the Confirm button
+ * use. Throws rather than writing silently: a verification that cannot be justified is a person
+ * being told, not a write to skip quietly.
+ *
+ * Callers that already checked pay one extra read for it. That is the price of the guard being
+ * impossible to route around, and it is only paid when something is actually being verified.
+ */
+async function assertClosureStillHolds(
+  supabase: ReturnType<typeof createClient>,
+  conditionRecordId: string,
+): Promise<void> {
+  const { data: row, error } = await supabase
+    .from("condition_records")
+    .select("status_in_record, supporting_obs_code, record_id")
+    .eq("id", conditionRecordId)
+    .single();
+
+  // A row that cannot be read is not a row that may be verified.
+  if (error) throw new Error(error.message);
+
+  const mention = row as {
+    status_in_record: string;
+    supporting_obs_code: string | null;
+    record_id: string;
+  };
+  if (!mention.supporting_obs_code) return;
+
+  const { data: observations, error: obsError } = await supabase
+    .from("record_observations")
+    .select(
+      "obs_code, is_applied, value_numeric, value_canonical, ref_range_low, ref_range_high, ref_range_low_canonical, ref_range_high_canonical, status",
+    )
+    .eq("record_id", mention.record_id);
+
+  // A read that failed is not evidence that the closure still holds.
+  if (obsError) throw new Error(obsError.message);
+
+  if (!proposedClosureStillHolds(mention, (observations ?? []) as PersistedObservation[])) {
+    throw new Error(CLOSURE_EVIDENCE_WITHDRAWN);
+  }
+}
+
+/** Thrown when a closure is verified after the measurement it cites stopped supporting it. */
+export const CLOSURE_EVIDENCE_WITHDRAWN = "closure-evidence-withdrawn";
+
 // Update a condition record
 // If status_in_record changes and this is the most recent mention, auto-updates condition's current_status
 // Can also update condition's ICD code if provided
@@ -484,6 +537,17 @@ async function updateConditionRecord({
   // verified while still reading `pending` would count as "nobody looked" in the counts that
   // decide whether an analyte may ever close a condition unattended. A caller that states its own
   // decision -- a dismissal -- keeps it.
+  // Verifying a lab-driven closure is the write that ends an entry in a medical record, so the
+  // evidence is re-checked *here*, at the mutation every path goes through, and not only at the
+  // buttons. The Confirm control checks first for the sake of a decent error message, and the
+  // activation pass filters before it writes -- but the review found a third path with neither:
+  // opening the mention's editor and pressing Save wrote `is_user_verified: true` straight past
+  // both. A guard that lives on the paths rather than on the write is a guard the next path will
+  // not have; this is that lesson applied to its own mutation.
+  if (updates.is_user_verified === true) {
+    await assertClosureStillHolds(supabase, id);
+  }
+
   const verifiedUpdates: UpdateConditionRecordInput =
     updates.is_user_verified === true && updates.review_decision === undefined
       ? { ...updates, review_decision: "confirmed" }
