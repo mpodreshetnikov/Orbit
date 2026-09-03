@@ -140,6 +140,21 @@ Deno.test("createSessionAction gives a session the time its receipt strategy nee
     full.state.createdSessionPayloads[0]?.expires_at as string | undefined,
     "2026-01-01T14:00:00.000Z",
   );
+
+  // Full for a source whose connector does not run it earns nothing: Alfa parses receipts the
+  // one way it knows whatever the session says, and a four-hour token for a fifteen-minute run
+  // is exposure for nothing.
+  const alfa = createRepositoryMock();
+  const alfaPayload = await assertJsonResponse<{ ttl_minutes: number; expires_at: string }>(
+    await createSessionAction(
+      { source: "alfa_web", payer_person_id: "person-1", meta: { parse_strategy: "full" } },
+      userAuth,
+      { repository: alfa.repository, ...deps },
+    ),
+    200,
+  );
+  assertEquals(alfaPayload.ttl_minutes, 30);
+  assertEquals(alfaPayload.expires_at, "2026-01-01T10:30:00.000Z");
 });
 
 Deno.test("createSessionAction creates session and batch and returns token payload", async () => {
@@ -183,6 +198,8 @@ Deno.test("createSessionAction creates session and batch and returns token paylo
   assertEquals(state.createdSessionPayloads.length, 1);
   assertEquals(state.createdBatchPayloads.length, 1);
   assertEquals(state.sessionUpdates.length, 1);
+  // A session a person opened has no grant to answer to.
+  assertEquals(state.createdSessionPayloads[0]?.grant_id, null);
   assertEquals(
     (state.createdSessionPayloads[0]?.meta as Record<string, unknown> | undefined)?.parse_strategy,
     "full",
@@ -548,6 +565,9 @@ Deno.test("createSessionAction starts a session from a grant", async () => {
   assertEquals(payload.payer_person_id, "person-grant");
   assertEquals(state.createdSessionPayloads[0]?.payer_person_id, "person-grant");
   assertEquals(state.createdSessionPayloads[0]?.created_by_auth_user_id, "user-grant");
+  // The session remembers which grant minted it, so revoking that grant reaches the session:
+  // `resolveAuth` re-checks the grant on every request that carries the session token.
+  assertEquals(state.createdSessionPayloads[0]?.grant_id, "grant-1");
   assertEquals(markedGrants, [{ grantId: "grant-1", usedAtIso: "2026-08-23T10:00:00.000Z" }]);
 });
 

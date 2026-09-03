@@ -610,6 +610,7 @@ function summarizeExtractionDiagnostics(
 const connector: Connector = {
   sourceId: "tbank_web",
   displayName: "T-Bank Web",
+  parseStrategies: ["fast", "full"],
   async parse({
     windowFrom,
     windowTo,
