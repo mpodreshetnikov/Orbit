@@ -2,50 +2,52 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// `supabase/setup-cli` resolves `version: latest` through an anonymous GitHub API call, whose
-// per-IP limit is shared by every hosted runner. Run 317 lost its database deploy to
-// `rate limit exceeded` in that step, so the version is pinned and downloaded directly instead.
-// The pin must be the CLI the repository already runs through `npx supabase`, otherwise CI and a
-// developer's `db reset` prove different binaries (T-260903-ut8).
+// Which Supabase CLI runs in CI, and where it comes from.
+//
+// Every CLI invocation in the workflow goes through `npx supabase` (the just recipes and
+// scripts/just/deploy-supabase.cjs), so the binary that runs is the one `npm ci` installs from
+// package-lock.json -- or, in a job with no local install, whatever npm serves that day.
+// `supabase/setup-cli` never supplied the binary that ran, and its `version: latest` lookup is
+// an anonymous GitHub API call that cost run 317 its database deploy with `rate limit exceeded`.
+// The npm package ships the binary as a platform optionalDependency from the registry, so with
+// the action gone and `npm ci` in every job that runs the CLI, provisioning touches GitHub for
+// nothing and every job runs the lockfile's version (T-260903-ut8).
 
 const root = join(__dirname, "..", "..");
 const workflow = readFileSync(join(root, ".github", "workflows", "main.yml"), "utf8");
-const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-};
 
-/** The `version:` under every `supabase/setup-cli` step, in file order. */
-function setupCliVersions(): string[] {
-  return [
-    ...workflow.matchAll(/^\s*- uses: supabase\/setup-cli@v\d+\n\s*with:\n\s*version: (\S+)$/gm),
-  ].map((match) => match[1]);
+/** The body of one top-level job, from its key down to the next job key at the same indent. */
+function jobBlock(jobId: string): string {
+  const match = new RegExp(`^  ${jobId}:\\n(?:(?! {2}\\S).*\\n)*`, "m").exec(workflow);
+  expect(match, `job ${jobId} not found in main.yml`).not.toBeNull();
+  return match![0];
 }
 
-describe("Supabase CLI version in CI", () => {
-  it("pins every setup-cli step instead of resolving latest through the GitHub API", () => {
-    const versions = setupCliVersions();
+/** Jobs whose steps invoke the Supabase CLI, through a just recipe or directly. */
+const CLI_JOBS = ["quality-gates", "deploy-supabase"];
 
-    expect(versions.length).toBeGreaterThan(0);
-    for (const version of versions) {
-      expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-    }
+describe("Supabase CLI provisioning in CI", () => {
+  it("does not resolve the CLI through supabase/setup-cli, whose latest lookup hits the API limit", () => {
+    expect(workflow).not.toMatch(/uses:\s*supabase\/setup-cli/);
   });
 
-  it("pins the same CLI package.json installs, so CI and a developer run one binary", () => {
-    const range = packageJson.devDependencies?.supabase ?? packageJson.dependencies?.supabase;
-    expect(range, "package.json no longer declares the supabase CLI").toBeDefined();
-    const declared = range!.replace(/^[\^~]/, "");
+  it.each(CLI_JOBS)("installs the lockfile's CLI with npm ci before %s runs it", (jobId) => {
+    const block = jobBlock(jobId);
+    const install = block.search(/^\s*(?:- )?run: npm ci$/m);
+    const firstUse = block.search(
+      /^\s*(?:- )?run: (just (ci-deploy-supabase|supabase-local-\w+)|npx supabase)/m,
+    );
 
-    expect(declared).toMatch(/^\d+\.\d+\.\d+$/);
-    for (const version of setupCliVersions()) {
-      expect(version).toBe(declared);
-    }
+    expect(install, `${jobId} has no npm ci step`).toBeGreaterThan(-1);
+    expect(firstUse, `${jobId} does not appear to run the CLI`).toBeGreaterThan(-1);
+    expect(install).toBeLessThan(firstUse);
   });
 
-  it("covers both jobs that run the CLI, which is where the step count comes from", () => {
-    // quality-gates and deploy-supabase; a third job running the CLI should pin too, and a job
-    // dropping the step is a change worth noticing here.
-    expect(setupCliVersions()).toHaveLength(2);
+  it("locks the CLI to one exact version, so npm ci cannot drift from what developers run", () => {
+    const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")) as {
+      packages: Record<string, { version?: string }>;
+    };
+
+    expect(lock.packages["node_modules/supabase"]?.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });

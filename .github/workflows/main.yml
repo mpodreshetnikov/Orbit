@@ -100,14 +100,14 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      # Pinned, not `latest`: resolving `latest` is an anonymous call to the GitHub API, whose
-      # per-IP limit is shared by every hosted runner, and run 317 lost its database deploy to
-      # `rate limit exceeded` there. A pinned version downloads the release archive directly.
-      # The value is package.json's `supabase` devDependency; a test holds the two together
-      # (T-260903-ut8).
-      - uses: supabase/setup-cli@v1
-        with:
-          version: 2.116.0
+      # No supabase/setup-cli here, on purpose. Every `supabase` invocation in this job goes
+      # through `npx supabase`, which runs the package `npm ci` installs from package-lock.json;
+      # the action's binary on PATH was never the one that ran. The action also resolved
+      # `version: latest` through an anonymous GitHub API call whose per-IP limit is shared by
+      # every hosted runner, and run 317 lost its production database deploy to
+      # `rate limit exceeded` there. The npm package ships the binary as a platform
+      # optionalDependency from the registry, so the CLI is provisioned with no GitHub call at
+      # all, at the version the lockfile records (T-260903-ut8).
       - uses: taiki-e/install-action@just
       - name: Install dependencies
         run: npm ci
@@ -414,13 +414,18 @@ jobs:
       DATABASE_URL: postgresql://postgres.${{ vars.SUPABASE_PROJECT_REF }}:${{ secrets.SUPABASE_DB_PASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
     steps:
       - uses: actions/checkout@v4
-      # Pinned, not `latest`: resolving `latest` is an anonymous call to the GitHub API, whose
-      # per-IP limit is shared by every hosted runner, and run 317 lost its database deploy to
-      # `rate limit exceeded` there. A pinned version downloads the release archive directly.
-      # The value is package.json's `supabase` devDependency; a test holds the two together
-      # (T-260903-ut8).
-      - uses: supabase/setup-cli@v1
+      - uses: actions/setup-node@v4
         with:
-          version: 2.116.0
+          node-version: 22
+      # `npm ci` rather than supabase/setup-cli. deploy-supabase.cjs runs `npx supabase`, and
+      # with no local install npx fetched the *current* npm package on every run -- run 332's log
+      # says so: "The following package was not found and will be installed: supabase@2.116.0" --
+      # while the action's binary sat unused on PATH. So the production deploy ran whatever npm
+      # served that day, and the action's `version: latest` lookup, an anonymous GitHub API call,
+      # cost run 317 its database deploy with `rate limit exceeded`. Installing from the lockfile
+      # makes this job run the CLI version the repository records, the same one a developer's
+      # `npx supabase` runs, and reaches GitHub for nothing (T-260903-ut8).
+      - name: Install dependencies
+        run: npm ci
       - uses: taiki-e/install-action@just
       - run: just ci-deploy-supabase
