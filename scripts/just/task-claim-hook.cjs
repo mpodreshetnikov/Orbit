@@ -24,7 +24,11 @@
  * snapshots HEAD and the working tree's status (`--pre`); after it, the paths that differ from that
  * snapshot -- files the tree now carries changed, and files any commit made meanwhile touched -- are
  * what it judges, so a command that writes, stages and commits in one go is seen as the edit it
- * is. A shell command that changed nothing stays silent.
+ * is. A file that was already dirty is compared by content, not by status code, and a file put
+ * back to HEAD counts as changed too. The snapshot is keyed by the session that took it, so two
+ * sessions running commands in one worktree do not read each other's. The same check runs after a
+ * command that failed (`PostToolUseFailure`): a failed command has often written before it failed.
+ * A shell command that changed nothing stays silent.
  *
  * Reported once per verdict per REPORT_INTERVAL_MS, tracked in .git/task-claim-hook-state, so a
  * fresh session hears it on its first code edit and then is left alone until the situation changes.
@@ -69,7 +73,15 @@ function gitPath(name, repoRoot = REPO_ROOT) {
 const MARKER_PATH = gitPath("current-task");
 const STATE_PATH = gitPath("task-claim-hook-state");
 const FETCH_STAMP_PATH = gitPath("task-claim-hook-fetched");
-const PRE_SNAPSHOT_PATH = gitPath("task-claim-hook-pre");
+/** One snapshot per session, so concurrent sessions in one worktree keep their own before/after. */
+function preSnapshotPath(sessionId, repoRoot = REPO_ROOT) {
+  const suffix = sessionId
+    ? `-${String(sessionId)
+        .replace(/[^A-Za-z0-9_-]/g, "_")
+        .slice(0, 64)}`
+    : "";
+  return gitPath(`task-claim-hook-pre${suffix}`, repoRoot);
+}
 
 /** Registry files are the one place an edit needs no claim: recording is how a claim is made. */
 function isRegistryPath(filePath, repoRoot = REPO_ROOT) {
@@ -217,14 +229,33 @@ function shouldReport(key, statePath = STATE_PATH, now = Date.now()) {
   return true;
 }
 
-/** Working-tree status as `path -> code`, outside the registry; renames count as their new name. */
+/**
+ * Working-tree status outside the registry as `path -> identity`, where the identity is the status
+ * code plus the blob hash of the file as it is now, so a dirty file edited again reads differently
+ * even though its status code does not. A deleted file has no blob and is identified by its code.
+ * Renames count as their new name.
+ */
 function statusOutsideRegistry(repoRoot = REPO_ROOT) {
   const result = git(repoRoot, ["status", "--porcelain", "--untracked-files=all", "--", "."]);
   const entries = new Map();
   if (result.status !== 0) return entries;
+  const files = [];
   for (const line of result.stdout.split("\n").filter(Boolean)) {
     const file = line.slice(3).trim().replace(/^"|"$/g, "").split(" -> ").pop();
-    if (!isRegistryPath(file, repoRoot)) entries.set(file, line.slice(0, 2));
+    if (!isRegistryPath(file, repoRoot)) {
+      files.push(file);
+      entries.set(file, line.slice(0, 2));
+    }
+  }
+  if (files.length > 0) {
+    const present = files.filter((file) => fs.existsSync(path.join(repoRoot, file)));
+    const hashed = present.length
+      ? git(repoRoot, ["hash-object", "--", ...present], { maxBuffer: 64 * 1024 * 1024 })
+      : { status: 0, stdout: "" };
+    const hashes = hashed.status === 0 ? hashed.stdout.split("\n") : [];
+    present.forEach((file, index) => {
+      entries.set(file, `${entries.get(file)}:${hashes[index] ?? "?"}`);
+    });
   }
   return entries;
 }
@@ -235,7 +266,7 @@ function headSha(repoRoot = REPO_ROOT) {
 }
 
 /** Before a shell command: what the tree and HEAD look like, for the comparison afterwards. */
-function writePreSnapshot(repoRoot = REPO_ROOT, snapshotPath = PRE_SNAPSHOT_PATH) {
+function writePreSnapshot(repoRoot = REPO_ROOT, snapshotPath = preSnapshotPath("", repoRoot)) {
   const snapshot = {
     head: headSha(repoRoot),
     status: Object.fromEntries(statusOutsideRegistry(repoRoot)),
@@ -248,7 +279,7 @@ function writePreSnapshot(repoRoot = REPO_ROOT, snapshotPath = PRE_SNAPSHOT_PATH
   return snapshot;
 }
 
-function readPreSnapshot(snapshotPath = PRE_SNAPSHOT_PATH) {
+function readPreSnapshot(snapshotPath = preSnapshotPath("")) {
   try {
     const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
     fs.rmSync(snapshotPath, { force: true });
@@ -270,8 +301,13 @@ function changedPathsOutsideRegistry(repoRoot = REPO_ROOT, snapshot = null) {
     for (const file of now.keys()) changed.add(file);
     return [...changed];
   }
-  for (const [file, code] of now) {
-    if (snapshot.status?.[file] !== code) changed.add(file);
+  const before = snapshot.status ?? {};
+  for (const [file, identity] of now) {
+    if (before[file] !== identity) changed.add(file);
+  }
+  // Present before and gone now: put back to HEAD, or an untracked file removed.
+  for (const file of Object.keys(before)) {
+    if (!now.has(file)) changed.add(file);
   }
   const head = headSha(repoRoot);
   if (snapshot.head && head && snapshot.head !== head) {
@@ -302,13 +338,15 @@ function readInput() {
 
 function main() {
   const input = readInput();
+  const snapshotPath = preSnapshotPath(input.session_id ?? "");
   if (process.argv.includes("--pre")) {
-    if (!input.tool_name || SHELL_TOOLS.has(input.tool_name)) writePreSnapshot();
+    if (!input.tool_name || SHELL_TOOLS.has(input.tool_name))
+      writePreSnapshot(REPO_ROOT, snapshotPath);
     return;
   }
   let filePath = "";
   if (input.tool_name && SHELL_TOOLS.has(input.tool_name)) {
-    const changed = changedPathsOutsideRegistry(REPO_ROOT, readPreSnapshot());
+    const changed = changedPathsOutsideRegistry(REPO_ROOT, readPreSnapshot(snapshotPath));
     if (changed.length === 0) return;
     filePath = changed.length === 1 ? changed[0] : `${changed[0]} and ${changed.length - 1} more`;
   } else {
@@ -355,6 +393,7 @@ module.exports = {
   changedPathsOutsideRegistry,
   evaluate,
   gitPath,
+  preSnapshotPath,
   readPreSnapshot,
   writePreSnapshot,
   isRegistryPath,

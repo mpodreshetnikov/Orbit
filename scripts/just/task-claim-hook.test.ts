@@ -9,6 +9,7 @@ const {
   changedPathsOutsideRegistry,
   evaluate,
   gitPath,
+  preSnapshotPath,
   writePreSnapshot,
   isRegistryPath,
   locateRegistry,
@@ -18,6 +19,7 @@ const {
 } = hook as unknown as {
   changedPathsOutsideRegistry: (repoRoot: string, snapshot?: unknown) => string[];
   writePreSnapshot: (repoRoot: string, snapshotPath?: string) => unknown;
+  preSnapshotPath: (sessionId: string, repoRoot: string) => string;
   gitPath: (name: string, repoRoot: string) => string;
   evaluate: (input: {
     marker: string | null;
@@ -298,10 +300,37 @@ describe("the hook itself", () => {
     // After: the commit's files are the edit.
     expect(runHook(code, bash, env)).toContain("src/generated.ts");
 
-    // A pre-existing modification is not re-reported by a command that left it alone.
+    // A pre-existing modification is not re-reported by a command that left it alone...
     fs.writeFileSync(path.join(code, "src", "old.ts"), "was already dirty\n");
     const snapshot = writePreSnapshot(code);
     expect(changedPathsOutsideRegistry(code, snapshot)).toEqual([]);
+    // ...but is when the command edited it again, even though its status code is the same...
+    fs.writeFileSync(path.join(code, "src", "old.ts"), "dirty, then edited again\n");
+    expect(changedPathsOutsideRegistry(code, snapshot)).toEqual(["src/old.ts"]);
+    // ...and when the command removed it, which is also a change.
+    fs.rmSync(path.join(code, "src", "old.ts"));
+    expect(changedPathsOutsideRegistry(code, snapshot)).toEqual(["src/old.ts"]);
+  });
+
+  it("keeps one snapshot per session, so concurrent sessions do not consume each other's", () => {
+    const { registry, code } = fixture([]);
+    const env = { ORBIT_TASKS_REGISTRY: registry };
+    const bashFor = (session: string) => ({
+      session_id: session,
+      tool_name: "Bash",
+      tool_input: { command: "x" },
+    });
+
+    expect(preSnapshotPath("s-1", code)).not.toBe(preSnapshotPath("s-2", code));
+    runHook(code, bashFor("s-1"), env, ["--pre"]);
+    fs.writeFileSync(path.join(code, "src", "one.ts"), "session one wrote\n");
+    git(code, "add", "-A");
+    git(code, "commit", "-q", "-m", "one");
+    // Session two starts after session one committed; its snapshot must not hide one's commit.
+    runHook(code, bashFor("s-2"), env, ["--pre"]);
+
+    expect(runHook(code, bashFor("s-1"), env)).toContain("src/one.ts");
+    expect(fs.existsSync(preSnapshotPath("s-2", code))).toBe(true);
   });
 
   it("keeps its marker and state inside a linked worktree, where .git is a file", () => {
@@ -348,5 +377,12 @@ describe("the hook itself", () => {
       (e) => e.matcher === "Bash" && e.hooks.some((h) => h.command.includes("--pre")),
     );
     expect(pre).toBeDefined();
+    // And after a command that failed: it has often written before it failed.
+    const failed = (
+      settings as unknown as { hooks: { PostToolUseFailure: typeof settings.hooks.PostToolUse } }
+    ).hooks.PostToolUseFailure.find(
+      (e) => e.matcher === "Bash" && e.hooks.some((h) => h.command.includes("task-claim-hook.cjs")),
+    );
+    expect(failed).toBeDefined();
   });
 });

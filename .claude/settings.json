@@ -50,6 +50,18 @@
           }
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/task-claim-hook.cjs\"",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
