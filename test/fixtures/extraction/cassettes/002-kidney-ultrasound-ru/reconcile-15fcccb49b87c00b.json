@@ -1,0 +1,50 @@
+{
+  "request_hash": "15fcccb49b87c00b",
+  "stage": "reconcile",
+  "model": "openai/gpt-5.2:nitro",
+  "response": {
+    "id": "gen-1788337028-G6ny4981IVmXO3tytWaQ",
+    "object": "chat.completion",
+    "created": 1788337028,
+    "model": "openai/gpt-5.2",
+    "provider": "OpenAI",
+    "system_fingerprint": null,
+    "service_tier": "priority",
+    "choices": [
+      {
+        "index": 0,
+        "logprobs": null,
+        "finish_reason": "stop",
+        "native_finish_reason": "completed",
+        "message": {
+          "role": "assistant",
+          "content": "{\"findings_to_resolve\":[{\"finding_code\":\"stone\",\"finding_type_text\":\"конкремент\",\"site_code\":\"kidney_right\",\"body_site_text\":\"правая почка\",\"reason\":\"В документе прямо указано отсутствие конкрементов в почках (орган-родитель), что покрывает ранее зарегистрированный конкремент в правой почке.\",\"source_anchor\":\"Конкременты: нет\",\"confidence\":0.9}],\"conditions_to_resolve\":[],\"checkups_to_complete\":[{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000020\",\"reason\":\"Документ представляет собой УЗИ почек с описанием размеров/паренхимы и заключением по мочевыделительной системе, что соответствует запланированному обследованию «УЗИ почек».\",\"suggested_done_at\":\"2026-03-05\"}]}",
+          "refusal": null
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 3389,
+      "completion_tokens": 377,
+      "total_tokens": 3766,
+      "cost": 0.022193325,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.0224175,
+        "upstream_inference_prompt_cost": 0.0118615,
+        "upstream_inference_completions_cost": 0.010556
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 175,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    }
+  }
+}

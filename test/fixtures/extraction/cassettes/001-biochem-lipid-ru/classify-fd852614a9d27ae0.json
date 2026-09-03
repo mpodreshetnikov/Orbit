@@ -3,9 +3,9 @@
   "stage": "classify",
   "model": "openai/gpt-5.2:nitro",
   "response": {
-    "id": "gen-1788282609-PBXvBK6819GtGgsvVUlw",
+    "id": "gen-1788336970-h8vAzPIDDULdPxaBAxSQ",
     "object": "chat.completion",
-    "created": 1788282609,
+    "created": 1788336970,
     "model": "openai/gpt-5.2",
     "provider": "OpenAI",
     "system_fingerprint": null,
@@ -18,30 +18,30 @@
         "native_finish_reason": "completed",
         "message": {
           "role": "assistant",
-          "content": "{\"record_type\":\"lab\",\"title\":\"Промежуточный лабораторный отчет: биохимия, липидограмма, витамин B12\",\"record_date\":\"2026-03-06\",\"summary\":\"Intermediate laboratory report from a diagnostic center for a 25-year-old male, with sample collection dated 2026-03-06. It includes biochemistry (bilirubin fractions, liver enzymes, glucose), a lipid profile, and an immunology test for vitamin B12, with some results flagged relative to the provided reference ranges. The report notes that part of the analyses are still in progress and will be sent as they are completed.\",\"keywords\":[\"laboratory report\",\"biochemistry\",\"lipid profile\",\"bilirubin\",\"liver enzymes\",\"glucose\",\"cholesterol\",\"LDL\",\"HDL\",\"vitamin B12\",\"intermediate report\",\"sample collection date\"]}",
+          "content": "{\"record_type\":\"lab\",\"title\":\"Промежуточный лабораторный отчет: биохимия, липидограмма, витамин B12\",\"record_date\":\"2026-03-06\",\"summary\":\"Промежуточный лабораторный отчет центра лабораторной диагностики для пациента (мужчина, 25 лет) с биохимическими исследованиями, липидограммой и определением витамина B12. В отчете отмечены отклонения: повышен непрямой билирубин и холестерин ЛПВП; остальные представленные показатели указаны в пределах референсных значений. Включены комментарии по интерпретации общего холестерина и ЛПНП, а также сведения о датах забора, регистрации и печати.\" ,\"keywords\":[\"лабораторный отчет\",\"биохимия крови\",\"липидограмма\",\"билирубин\",\"непрямой билирубин\",\"АЛТ\",\"АСТ\",\"глюкоза\",\"общий холестерин\",\"ЛПНП\",\"ЛПВП\",\"витамин B12\"]}",
           "refusal": null
         }
       }
     ],
     "usage": {
       "prompt_tokens": 1536,
-      "completion_tokens": 241,
-      "total_tokens": 1777,
-      "cost": 0.01200276,
+      "completion_tokens": 314,
+      "total_tokens": 1850,
+      "cost": 0.009635472,
       "is_byok": false,
       "prompt_tokens_details": {
-        "cached_tokens": 0,
+        "cached_tokens": 1408,
         "cache_write_tokens": 0,
         "audio_tokens": 0,
         "video_tokens": 0
       },
       "cost_details": {
-        "upstream_inference_cost": 0.012124,
-        "upstream_inference_prompt_cost": 0.005376,
-        "upstream_inference_completions_cost": 0.006748
+        "upstream_inference_cost": 0.0097328,
+        "upstream_inference_prompt_cost": 0.0009408,
+        "upstream_inference_completions_cost": 0.008792
       },
       "completion_tokens_details": {
-        "reasoning_tokens": 52,
+        "reasoning_tokens": 71,
         "image_tokens": 0,
         "audio_tokens": 0
       }
