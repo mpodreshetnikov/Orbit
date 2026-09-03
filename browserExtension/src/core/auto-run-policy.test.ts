@@ -65,6 +65,7 @@ describe("nextAutoRunState", () => {
       consecutiveFailures: 1,
       lastError: null,
       lastRunOrigin: "auto",
+      lastOkAtMs: null,
     });
 
     state = nextAutoRunState(state, NOW + 1, "error");
@@ -77,7 +78,12 @@ describe("nextAutoRunState", () => {
       consecutiveFailures: 0,
       lastError: null,
       lastRunOrigin: "auto",
+      lastOkAtMs: NOW + 2,
     });
+
+    // The success stays on record through the failures that follow it.
+    state = nextAutoRunState(state, NOW + 3, "error", "signed out");
+    expect(state.lastOkAtMs).toBe(NOW + 2);
   });
 });
 

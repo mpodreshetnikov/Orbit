@@ -23,6 +23,13 @@ export interface AutoRunState {
    * buys the cooldown like an automatic one, but the page must not call it automatic.
    */
   lastRunOrigin?: "auto" | "manual";
+  /**
+   * When the last successful run was, kept across the failures that follow it. `lastRunAtMs`
+   * is the last attempt of any kind, so after one failed attempt it said nothing about how
+   * long the data had been stale -- and that is the question the attention page asks. Optional
+   * because states written before it existed have no such field; see `lastOkAtMsOf`.
+   */
+  lastOkAtMs?: number | null;
 }
 
 /** When the next unattended run may start, as the import page tells it. */
@@ -47,7 +54,23 @@ export const DEFAULT_AUTO_RUN_COOLDOWN_MS = 20 * 60 * 60 * 1000;
 export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
 
 export function createInitialAutoRunState(): AutoRunState {
-  return { lastRunAtMs: null, lastResult: null, consecutiveFailures: 0, lastError: null };
+  return {
+    lastRunAtMs: null,
+    lastResult: null,
+    consecutiveFailures: 0,
+    lastError: null,
+    lastOkAtMs: null,
+  };
+}
+
+/**
+ * The last success on record. A state written before the field existed carries it in
+ * `lastRunAtMs` when that run succeeded, and has lost it when a failure came after.
+ */
+export function lastOkAtMsOf(state: AutoRunState | null): number | null {
+  if (!state) return null;
+  if (typeof state.lastOkAtMs === "number") return state.lastOkAtMs;
+  return state.lastResult === "ok" ? state.lastRunAtMs : null;
 }
 
 /**
@@ -99,5 +122,6 @@ export function nextAutoRunState(
     consecutiveFailures: result === "ok" ? 0 : previousFailures + 1,
     lastError: result === "ok" ? null : (error ?? state?.lastError ?? null),
     lastRunOrigin: origin,
+    lastOkAtMs: result === "ok" ? nowMs : lastOkAtMsOf(state),
   };
 }

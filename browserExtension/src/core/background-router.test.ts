@@ -6,6 +6,20 @@ import type { StoredImportGrant } from "./grant-store.js";
 import { createInitialAutoRunState } from "./auto-run-policy.js";
 
 describe("background-router", () => {
+  /**
+   * An https host the manifest permits, for a function_url the grant parser will accept. The
+   * first permission is localhost over http, and a test that took it and returned early on the
+   * https regex passed without running -- so this fails loudly instead of skipping.
+   */
+  function permittedHttpsHost(): string {
+    const permitted = (extensionManifest.host_permissions ?? []).find((pattern) =>
+      /^https:\/\/[^*/]+\//.test(pattern),
+    );
+    const host = permitted ? /^https:\/\/([^/]+)\//.exec(permitted)?.[1] : undefined;
+    expect(host).toBeDefined();
+    return host as string;
+  }
+
   function createDeferred<T>() {
     let resolve!: (value: T | PromiseLike<T>) => void;
     let reject!: (reason?: unknown) => void;
@@ -46,10 +60,7 @@ describe("background-router", () => {
 
   it("stores a grant the app sends, and refuses one pointed elsewhere", async () => {
     const deps = createDeps();
-    const permitted = extensionManifest.host_permissions?.[0] ?? "";
-    const host = /^https:\/\/([^/]+)\//.exec(permitted)?.[1];
-    // Skip rather than assert a false thing if the manifest ever ships without one.
-    if (!host) return;
+    const host = permittedHttpsHost();
 
     await expect(
       routeBackgroundMessage(
@@ -83,6 +94,48 @@ describe("background-router", () => {
       ),
     ).resolves.toEqual({ ok: false, error: "Grant payload was rejected" });
     expect(deps.grantStore.setGrant).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the grant's origin from the page that sent it, and refuses one pointed elsewhere", async () => {
+    const deps = createDeps();
+    const host = permittedHttpsHost();
+    const grant = {
+      token: "plain-token",
+      person_id: "person-1",
+      allowed_sources: ["tbank_web"],
+      function_url: `https://${host}/functions/v1/money-import`,
+    };
+    const context = { senderOrigin: "https://app.example.com" };
+
+    // Left out: filled in from the sender.
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_SET_GRANT", grant }, deps, context),
+    ).resolves.toEqual({ ok: true });
+    expect(deps.grantStore.setGrant).toHaveBeenLastCalledWith(
+      expect.objectContaining({ app_origin: "https://app.example.com" }),
+    );
+
+    // The sender's own: kept.
+    await expect(
+      routeBackgroundMessage(
+        {
+          type: "MONEY_IMPORT_SET_GRANT",
+          grant: { ...grant, app_origin: "https://app.example.com/" },
+        },
+        deps,
+        context,
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    // Somewhere else: this is the page asking the extension to send the person there later.
+    await expect(
+      routeBackgroundMessage(
+        { type: "MONEY_IMPORT_SET_GRANT", grant: { ...grant, app_origin: "https://evil.example" } },
+        deps,
+        context,
+      ),
+    ).resolves.toEqual({ ok: false, error: "Grant payload was rejected" });
+    expect(deps.grantStore.setGrant).toHaveBeenCalledTimes(2);
   });
 
   it("reports a held grant without handing the token back to the page", async () => {
@@ -865,5 +918,187 @@ describe("background-router", () => {
       "still signed out",
     );
     expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
+  });
+  describe("attention", () => {
+    const NOW = Date.parse("2026-09-03T12:00:00.000Z");
+    const DAY = 24 * 60 * 60 * 1000;
+
+    function createAttentionStore(initial?: {
+      staleAfterMs?: number;
+      lastOpenedAtMs?: number | null;
+      runRequests?: Record<string, number>;
+    }) {
+      const state = {
+        staleAfterMs: initial?.staleAfterMs ?? DAY,
+        lastOpenedAtMs: initial?.lastOpenedAtMs ?? null,
+        runRequests: { ...(initial?.runRequests ?? {}) },
+      };
+      return {
+        state,
+        getState: vi.fn(async () => ({ ...state, runRequests: { ...state.runRequests } })),
+        setStaleAfterMs: vi.fn(async (value: unknown) => {
+          state.staleAfterMs = typeof value === "number" ? value : DAY;
+          return state.staleAfterMs;
+        }),
+        markPageOpened: vi.fn(async (nowMs: number) => {
+          state.lastOpenedAtMs = nowMs;
+        }),
+        requestRun: vi.fn(
+          async (scope: { sourceId: string; payerPersonId: string }, nowMs: number) => {
+            state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`] = nowMs;
+          },
+        ),
+        isRunRequested: vi.fn(
+          async (scope: { sourceId: string; payerPersonId: string }) =>
+            `${scope.sourceId}::${scope.payerPersonId}` in state.runRequests,
+        ),
+        clearRunRequest: vi.fn(async (scope: { sourceId: string; payerPersonId: string }) => {
+          delete state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`];
+        }),
+      };
+    }
+
+    function createGrant(): StoredImportGrant {
+      return {
+        token: "grant-token",
+        person_id: "person-1",
+        allowed_sources: ["tbank_web"],
+        function_url: "https://project.supabase.co/functions/v1/money-import",
+        app_origin: "https://app.example.com",
+        received_at: new Date(NOW - 3 * DAY).toISOString(),
+      };
+    }
+
+    it("says what is stale without handing the token back", async () => {
+      const deps = createDeps();
+      deps.grantStore.getGrant.mockResolvedValue(createGrant());
+      const attentionStore = createAttentionStore();
+
+      const reply = (await routeBackgroundMessage(
+        { type: "MONEY_IMPORT_GET_ATTENTION" },
+        {
+          ...deps,
+          attentionStore,
+          listAutoImportSources: () => ["tbank_web"],
+          now: () => NOW,
+        },
+      )) as Record<string, unknown>;
+
+      expect(reply.ok).toBe(true);
+      expect(reply.grant).toEqual({
+        person_id: "person-1",
+        allowed_sources: ["tbank_web"],
+        received_at: new Date(NOW - 3 * DAY).toISOString(),
+      });
+      expect(JSON.stringify(reply)).not.toContain("grant-token");
+      expect(reply.stale_count).toBe(1);
+      expect(reply.stale_after_ms).toBe(DAY);
+      expect((reply.sources as Array<Record<string, unknown>>)[0]).toMatchObject({
+        source_id: "tbank_web",
+        last_ok_at: null,
+        stale: true,
+        run_requested: false,
+      });
+    });
+
+    it("is not available without the store", async () => {
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_ATTENTION" }, createDeps()),
+      ).resolves.toEqual({ ok: false, error: "Attention is not available" });
+    });
+
+    it("opens the bank in front of the person and remembers the request, for a covered source only", async () => {
+      const deps = createDeps();
+      deps.grantStore.getGrant.mockResolvedValue(createGrant());
+      const attentionStore = createAttentionStore();
+      const opened: string[] = [];
+      const routerDeps = {
+        ...deps,
+        attentionStore,
+        resolveSourceTargetUrl: (sourceId: string) =>
+          sourceId === "tbank_web" ? "https://www.tbank.ru/mybank/operations/" : null,
+        openSourceTab: async (url: string) => {
+          opened.push(url);
+          return 42;
+        },
+        now: () => NOW,
+      };
+
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "tbank_web" },
+          routerDeps,
+        ),
+      ).resolves.toEqual({
+        ok: true,
+        source_id: "tbank_web",
+        target_url: "https://www.tbank.ru/mybank/operations/",
+        tab_id: 42,
+      });
+      expect(opened).toEqual(["https://www.tbank.ru/mybank/operations/"]);
+      expect(attentionStore.state.runRequests).toEqual({ "tbank_web::person-1": NOW });
+      // The attempt history is not touched: nothing has succeeded yet.
+      expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
+
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "alfa_web" },
+          routerDeps,
+        ),
+      ).resolves.toEqual({ ok: false, error: "Source is not covered by the grant" });
+      expect(opened).toHaveLength(1);
+    });
+
+    it("remembers no request for a bank that did not open", async () => {
+      const deps = createDeps();
+      deps.grantStore.getGrant.mockResolvedValue(createGrant());
+      const attentionStore = createAttentionStore();
+      const base = {
+        ...deps,
+        attentionStore,
+        resolveSourceTargetUrl: () => "https://www.tbank.ru/mybank/operations/",
+        now: () => NOW,
+      };
+
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "tbank_web" },
+          { ...base, openSourceTab: async () => null },
+        ),
+      ).resolves.toEqual({ ok: false, error: "Could not open the bank" });
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "tbank_web" },
+          {
+            ...base,
+            openSourceTab: async () => {
+              throw new Error("no window");
+            },
+          },
+        ),
+      ).resolves.toEqual({ ok: false, error: "Could not open the bank: no window" });
+      expect(attentionStore.state.runRequests).toEqual({});
+    });
+
+    it("refuses a run request without a grant", async () => {
+      const deps = createDeps();
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "tbank_web" },
+          { ...deps, attentionStore: createAttentionStore() },
+        ),
+      ).resolves.toEqual({ ok: false, error: "No import grant" });
+    });
+
+    it("stores the threshold and echoes what was stored", async () => {
+      const attentionStore = createAttentionStore();
+      await expect(
+        routeBackgroundMessage(
+          { type: "MONEY_IMPORT_SET_ATTENTION_SETTINGS", stale_after_ms: 3 * DAY },
+          { ...createDeps(), attentionStore },
+        ),
+      ).resolves.toEqual({ ok: true, stale_after_ms: 3 * DAY });
+      expect(attentionStore.setStaleAfterMs).toHaveBeenCalledWith(3 * DAY);
+    });
   });
 });

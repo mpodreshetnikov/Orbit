@@ -1,6 +1,6 @@
 import type { StoredImportGrant, GrantStore } from "./grant-store.js";
 import type { SessionStore } from "./session-store.js";
-import type { AutoRunStore } from "./auto-run-store.js";
+import type { AutoRunScope, AutoRunStore } from "./auto-run-store.js";
 import { nextAutoRunState, shouldAutoRun } from "./auto-run-policy.js";
 
 /**
@@ -35,6 +35,15 @@ export interface AutoImportSweepDeps {
   }) => Promise<{ backfillError?: { message: string } } | undefined>;
   now: () => number;
   onWarning: (event: string, attrs: Record<string, unknown>) => void;
+  /**
+   * A run a person asked for from the attention page. Honoured past the cooldown and past the
+   * stop after failures: they have just been told the source is stale and have gone to sign in,
+   * and the failures being backed off from were the signed-out bank they are fixing. The request
+   * lives until the run succeeds or it expires -- not consumed by the attempt, because a visit
+   * that lands before the person has finished signing in would spend it on the login screen.
+   */
+  isRunRequested?: (scope: AutoRunScope, nowMs: number) => Promise<boolean>;
+  clearRunRequest?: (scope: AutoRunScope) => Promise<void>;
 }
 
 export type AutoImportTrigger = "visit" | "alarm";
@@ -61,6 +70,13 @@ export function isCredentialRefusal(error: unknown): boolean {
 
 export interface AutoImportSweep {
   run: (trigger: AutoImportTrigger, options?: AutoImportRunOptions) => Promise<void>;
+  /**
+   * Whether a tab is one this sweep opened and has not yet closed. A page finishing its load
+   * in such a tab is not a visit: it is the sweep's own doing, and counting it scheduled
+   * another sweep a minute later -- which, with a run request held past a failed attempt,
+   * meant a failed attempt at the bank every minute for as long as the request lived.
+   */
+  ownsTab: (tabId: number) => boolean;
 }
 
 export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSweep {
@@ -83,8 +99,12 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
    * worker teardown loses both, and the alarm that would have queued the source has already
    * fired, so the periodic alarm is the backstop either way.
    */
-  const pending = new Set<string>();
-  let pendingAll = false;
+  // What arrived while a sweep was busy, kept with the trigger that brought it: a visit queued
+  // behind the alarm is still the visit a person may be waiting on, and the alarm queued behind
+  // a visit is still the alarm, which a request does not get to bypass.
+  const pendingVisits = new Set<string>();
+  let pendingAlarm = false;
+  const ownedTabs = new Set<number>();
 
   /**
    * Runs one source in a tab opened for the purpose.
@@ -99,16 +119,22 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
   async function runSource(
     source: AutoImportSourceTarget,
     grant: StoredImportGrant,
+    trigger: AutoImportTrigger,
   ): Promise<void> {
     if (!source.targetUrl) return;
 
     const nowMs = deps.now();
     const scope = { sourceId: source.sourceId, payerPersonId: grant.person_id };
     const state = await deps.autoRunStore.getState(scope);
-    if (!shouldAutoRun(state, nowMs)) return;
+    // A request is for the visit it sends the person on, not for the alarm: the alarm firing
+    // in the hour after Update would try before they had signed in, and fail.
+    const requested = trigger === "visit" && ((await deps.isRunRequested?.(scope, nowMs)) ?? false);
+    if (!requested && !shouldAutoRun(state, nowMs)) return;
 
     const tabId = await deps.openTab(source.targetUrl);
     if (tabId === null) return;
+    ownedTabs.add(tabId);
+    let succeeded = false;
 
     try {
       if (!(await deps.waitForTabComplete(tabId))) {
@@ -126,7 +152,13 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
         });
       }
 
-      await deps.autoRunStore.setState(scope, nextAutoRunState(state, nowMs, "ok"));
+      // From the state as it is now, not as it was read before the run: a manual import that
+      // succeeded meanwhile must not have its success overwritten by this one's outcome.
+      await deps.autoRunStore.setState(
+        scope,
+        nextAutoRunState(await deps.autoRunStore.getState(scope), nowMs, "ok"),
+      );
+      succeeded = true;
     } catch (error) {
       // A signed-out bank is the ordinary failure here, not an emergency. It is recorded so the
       // backoff widens and the attempts stop after a few, and the person is told nothing: they
@@ -138,7 +170,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       });
       await deps.autoRunStore.setState(
         scope,
-        nextAutoRunState(state, nowMs, "error", errorMessage),
+        nextAutoRunState(await deps.autoRunStore.getState(scope), nowMs, "error", errorMessage),
       );
 
       // Revoking a grant happens in the app and reaches the database, not this extension -- so
@@ -154,31 +186,48 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       // The session field is cleared by the run itself, which is the only party that knows
       // whether the session still there is its own or one a person has just started.
       await deps.closeTab(tabId);
+      ownedTabs.delete(tabId);
+    }
+
+    // Bookkeeping after the outcome is settled, and unable to unsettle it: a request that
+    // will not clear is a request honoured once more, not a successful import reported failed.
+    if (succeeded && requested) {
+      try {
+        await deps.clearRunRequest?.(scope);
+      } catch (error) {
+        deps.onWarning("money_import_run_request_clear_failed", {
+          source_id: source.sourceId,
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
   return {
+    ownsTab: (tabId) => ownedTabs.has(tabId),
     async run(trigger, options = {}) {
+      type Work = { trigger: AutoImportTrigger; sourceIds?: Set<string> };
+      const enqueue = (work: Work) => {
+        if (work.trigger === "visit" && work.sourceIds) {
+          for (const id of work.sourceIds) pendingVisits.add(id);
+        } else {
+          pendingAlarm = true;
+        }
+      };
+      const asWork = (): Work => ({
+        trigger,
+        sourceIds: options.sourceId ? new Set([options.sourceId]) : undefined,
+      });
+
       if (inFlight) {
-        if (options.sourceId) pending.add(options.sourceId);
-        else pendingAll = true;
+        enqueue(asWork());
         return;
       }
       inFlight = true;
 
       try {
-        // This call's own scope, plus whatever was queued while a sweep was busy. `undefined`
-        // means every source the grant covers.
-        let sourceIds: Set<string> | undefined = options.sourceId
-          ? new Set([options.sourceId])
-          : undefined;
-
-        do {
-          if (pendingAll) sourceIds = undefined;
-          else if (sourceIds) for (const id of pending) sourceIds.add(id);
-          pending.clear();
-          pendingAll = false;
-
+        let work: Work | null = asWork();
+        while (work) {
           const grant = await deps.grantStore.getGrant();
           // No grant means automatic import was never turned on, or has been revoked. Revoking
           // is the off switch, and it has to work here as well as at the server. Nothing queued
@@ -191,22 +240,30 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
           // a person who opened their bank to import by hand has started by the time this runs,
           // and is found here. What was asked for is kept for the next sweep, not dropped.
           if (await deps.sessionStore.getSession()) {
-            if (sourceIds) for (const id of sourceIds) pending.add(id);
-            else pendingAll = true;
+            enqueue(work);
             return;
           }
 
           for (const source of deps.listSources()) {
-            if (sourceIds && !sourceIds.has(source.sourceId)) continue;
+            if (work.sourceIds && !work.sourceIds.has(source.sourceId)) continue;
             // `parseIncomingGrant` refuses a grant that names no sources, so an empty list cannot
             // reach here -- and reading one as "every source" would be the wrong way to be wrong.
             if (!grant.allowed_sources.includes(source.sourceId)) continue;
-            await runSource(source, grant);
+            await runSource(source, grant, work.trigger);
           }
 
-          // Anything queued during this pass is taken now rather than left for hours.
-          sourceIds = new Set();
-        } while (pendingAll || pending.size > 0);
+          // Anything queued during this pass is taken now rather than left for hours -- visits
+          // first, since a person may be waiting on one, then the alarm.
+          if (pendingVisits.size > 0) {
+            work = { trigger: "visit", sourceIds: new Set(pendingVisits) };
+            pendingVisits.clear();
+          } else if (pendingAlarm) {
+            pendingAlarm = false;
+            work = { trigger: "alarm" };
+          } else {
+            work = null;
+          }
+        }
       } catch (error) {
         deps.onWarning("money_import_auto_sweep_failed", {
           trigger,

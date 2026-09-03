@@ -172,3 +172,119 @@ describe("content-bridge", () => {
     );
   });
 });
+
+describe("attention page requests", () => {
+  function createBridge() {
+    const runtimeSendMessage = vi.fn();
+    const windowPostMessage = vi.fn();
+    const bridge = createContentBridge({ runtimeSendMessage, windowPostMessage, nowMs: () => 1 });
+    return { bridge, runtimeSendMessage, windowPostMessage };
+  }
+
+  it("relays the attention request and answers with what came back, request id echoed", () => {
+    const { bridge, runtimeSendMessage, windowPostMessage } = createBridge();
+    runtimeSendMessage.mockImplementation((_message, callback) =>
+      callback?.({
+        ok: true,
+        grant: { person_id: "person-1", allowed_sources: ["tbank_web"], received_at: "x" },
+        stale_after_ms: 86_400_000,
+        stale_count: 1,
+        sources: [{ source_id: "tbank_web", stale: true }],
+      } as never),
+    );
+
+    bridge.handleWindowMessage(
+      new MessageEvent("message", {
+        source: window as unknown as MessageEventSource,
+        data: { source: "orbit-webapp", type: "MONEY_IMPORT_GET_ATTENTION", request_id: "a-1" },
+      }),
+    );
+
+    expect(runtimeSendMessage).toHaveBeenCalledWith(
+      { type: "MONEY_IMPORT_GET_ATTENTION" },
+      expect.any(Function),
+    );
+    expect(windowPostMessage).toHaveBeenCalledWith(
+      {
+        source: "orbit-extension",
+        type: "MONEY_IMPORT_ATTENTION",
+        request_id: "a-1",
+        ok: true,
+        grant: { person_id: "person-1", allowed_sources: ["tbank_web"], received_at: "x" },
+        stale_after_ms: 86_400_000,
+        stale_count: 1,
+        sources: [{ source_id: "tbank_web", stale: true }],
+      },
+      "*",
+    );
+  });
+
+  it("relays a run request with its source and acks the answer", () => {
+    const { bridge, runtimeSendMessage, windowPostMessage } = createBridge();
+    runtimeSendMessage.mockImplementation((_message, callback) =>
+      callback?.({ ok: false, error: "No import grant" } as never),
+    );
+
+    bridge.handleWindowMessage(
+      new MessageEvent("message", {
+        source: window as unknown as MessageEventSource,
+        data: {
+          source: "orbit-webapp",
+          type: "MONEY_IMPORT_REQUEST_RUN",
+          request_id: "r-1",
+          source_id: "tbank_web",
+        },
+      }),
+    );
+
+    expect(runtimeSendMessage).toHaveBeenCalledWith(
+      { type: "MONEY_IMPORT_REQUEST_RUN", source_id: "tbank_web" },
+      expect.any(Function),
+    );
+    expect(windowPostMessage).toHaveBeenCalledWith(
+      {
+        source: "orbit-extension",
+        type: "MONEY_IMPORT_RUN_REQUEST_ACK",
+        request_id: "r-1",
+        ok: false,
+        error: "No import grant",
+        source_id: null,
+      },
+      "*",
+    );
+  });
+
+  it("relays the threshold and acks what was stored", () => {
+    const { bridge, runtimeSendMessage, windowPostMessage } = createBridge();
+    runtimeSendMessage.mockImplementation((_message, callback) =>
+      callback?.({ ok: true, stale_after_ms: 259_200_000 } as never),
+    );
+
+    bridge.handleWindowMessage(
+      new MessageEvent("message", {
+        source: window as unknown as MessageEventSource,
+        data: {
+          source: "orbit-webapp",
+          type: "MONEY_IMPORT_SET_ATTENTION_SETTINGS",
+          request_id: "s-1",
+          stale_after_ms: 259_200_000,
+        },
+      }),
+    );
+
+    expect(runtimeSendMessage).toHaveBeenCalledWith(
+      { type: "MONEY_IMPORT_SET_ATTENTION_SETTINGS", stale_after_ms: 259_200_000 },
+      expect.any(Function),
+    );
+    expect(windowPostMessage).toHaveBeenCalledWith(
+      {
+        source: "orbit-extension",
+        type: "MONEY_IMPORT_ATTENTION_SETTINGS_ACK",
+        request_id: "s-1",
+        ok: true,
+        stale_after_ms: 259_200_000,
+      },
+      "*",
+    );
+  });
+});
