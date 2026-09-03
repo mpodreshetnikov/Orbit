@@ -6,6 +6,14 @@ on:
   pull_request:
     branches:
       - "**"
+  # A pull-request verdict is evidence about the base as it stood when the event fired. Checks whose
+  # truth depends on the base tip -- migration order above all -- expire the moment anything else
+  # merges, and nothing re-runs them, because a commit landing on the base fires no pull_request
+  # event. Running here as well is what makes the verdict bind: the merge queue re-runs the required
+  # checks against the projected merged result, so the state that is judged is the state that
+  # merges. This trigger only has an effect once the merge queue is enabled in the repository's
+  # branch protection for `main` (see docs/QUALITY.md, "Migration Order Policy").
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -29,6 +37,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             FROM="${{ github.event.pull_request.base.sha }}"
             TO="${{ github.event.pull_request.head.sha }}"
+          elif [[ "${{ github.event_name }}" == "merge_group" ]]; then
+            FROM="${{ github.event.merge_group.base_sha }}"
+            TO="${{ github.event.merge_group.head_sha }}"
           else
             FROM="${{ github.event.before }}"
             TO="${{ github.sha }}"
@@ -71,6 +82,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             FROM="${{ github.event.pull_request.base.sha }}"
             TO="${{ github.event.pull_request.head.sha }}"
+          elif [[ "${{ github.event_name }}" == "merge_group" ]]; then
+            FROM="${{ github.event.merge_group.base_sha }}"
+            TO="${{ github.event.merge_group.head_sha }}"
           else
             FROM="${{ github.event.before }}"
             TO="${{ github.sha }}"
@@ -164,10 +178,19 @@ jobs:
         # The PR-size gate takes the same base, for the same reasons, and additionally the head
         # branch name: a pull request run checks out a detached merge commit, where git names no
         # branch and a `branch` allowlist entry could never match.
+        #
+        # A merge_group run is the binding one: it is measured against the group's base, which is
+        # main plus everything queued ahead of this change, so "sorts after everything on the base"
+        # is judged on the state that actually merges rather than on one that has since expired.
+        # The size gate runs advisory there instead -- a queued run checks out a
+        # `gh-readonly-queue/...` ref, where the head branch's name is gone and a `branch` entry in
+        # `.large-change-allowlist` could not match, and unlike migration order the size of a change
+        # against its base does not change when someone else merges.
         env:
-          MIGRATION_ORDER_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          PR_SIZE_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          MIGRATION_ORDER_BASE: ${{ (github.event_name == 'pull_request' && github.event.pull_request.base.sha) || (github.event_name == 'merge_group' && github.event.merge_group.base_sha) || github.event.before }}
+          PR_SIZE_BASE: ${{ (github.event_name == 'pull_request' && github.event.pull_request.base.sha) || (github.event_name == 'merge_group' && github.event.merge_group.base_sha) || github.event.before }}
           PR_SIZE_BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          PR_SIZE_ADVISORY: ${{ github.event_name == 'merge_group' && '1' || '' }}
         run: just quality
       - name: Restore Supabase Docker image cache
         if: steps.impact.outputs.dbImpact == 'true'

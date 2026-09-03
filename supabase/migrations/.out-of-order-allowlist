@@ -1,36 +1,26 @@
 # Migrations applied against a schema newer than their own timestamp.
 #
-# `quality-migration-order` refuses a migration that does not sort after the base branch's latest.
+# `quality-migration-order` refuses a migration that does not sort after the migrations already on
+# the branch it will merge into, and it asks that of the whole tree, not only of what a branch adds
+# -- so a file recorded here stays recorded rather than going quiet on the next push.
+#
 # The ordinary fix is to rename the file, and it is only available while nothing has applied that
 # version: once production's `supabase_migrations.schema_migrations` records it, the version is
 # permanent, and a rename would present the same change as unapplied and run it again under a new
-# key. That distinction is not in the checker's failure text, which recommends a rename
-# unconditionally -- see T-260902-1ui.
+# key. `supabase migration list --linked` answers which case a version is in. This file is for the
+# ones a rename can no longer reach.
 #
-# An entry below is a live exemption: `<version> # rationale`, matched by version alone. Read the
-# hazard before adding one. Because the match ignores the filename, an exemption also waves through
-# a *replacement* -- a branch that deletes the recorded file and adds different SQL under the same
-# version passes, and production then skips it entirely, because that version is already in
-# schema_migrations. Duplicate detection does not catch it either: it counts occurrences among the
-# files the head still has, and the original is gone. So an exemption is worth its cost only while
-# the migration is genuinely being re-added; for one already on the base branch it grants nothing
-# and risks that.
+# An entry is `<migration filename> # rationale`. The key is the filename, not the bare version,
+# because an exemption matched by version alone would also wave through a *replacement*: a branch
+# that deletes the recorded file and adds different SQL under the same version. Production would
+# skip that SQL entirely, the version already being in schema_migrations, and duplicate detection
+# would not see it either, the original being gone.
 #
-# ---------------------------------------------------------------------------------------------
-# 20260901150000_condition_record_resolution_review
-#
-# Recorded here rather than exempted, deliberately: it sits on the base branch, so the checker
-# never treats it as added and never consults this list for it. An entry would grant nothing today
-# and open the replacement hazard above.
-#
-# It was applied to production on 2026-09-02 AFTER 20260902060000 was already there -- verified
-# against the live schema_migrations, not inferred from CI. That was harmless in effect: the
-# migration is additive and idempotent throughout (ADD COLUMN IF NOT EXISTS, a constraint guarded
-# on duplicate_object, CREATE INDEX IF NOT EXISTS), it touches only condition_records, and no later
-# migration reads or alters what it adds.
-#
-# It reached production because the checker compares only the migrations a push ADDS. The deploy
-# was skipped on the commit that merged it, Quality Gates being red; by the next push the file was
-# no longer new, the check went quiet, and `db push --include-all` applied it. That blind spot is
-# T-260902-1ui. Should that task make the checker examine the whole tree, this migration will start
-# failing and will need a real entry -- decide it then, together with binding entries to a filename.
+# The rationale answers one question: why applying this migration against the schema the later ones
+# had already built was safe. Not "why it happened" -- why the result is correct.
+
+20260308124000_add_money_transaction_brand_metadata.sql # applied after 20260308150000 (landed 2026-03-09). Disjoint domains: this creates money_transaction_brands, money_transaction_brand_aliases and columns on money_transactions; the newer migration creates medication_refill_snoozes. Neither reads or alters what the other touches.
+
+20260807120000_inflammation_synonyms_and_hba1c_formula.sql # applied after 20260809120000 (landed 2026-08-23). Catalogue data only: it sets synonyms_ru and a formula on existing finding_type_catalog rows, and is written to be re-runnable. The newer migration adds the MCP OAuth tables, which are disjoint from the catalogue.
+
+20260901150000_condition_record_resolution_review.sql # applied after 20260902060000 (landed 2026-09-02), confirmed against the live schema_migrations rather than inferred from CI. Additive and idempotent throughout (ADD COLUMN IF NOT EXISTS, a constraint guarded on duplicate_object, CREATE INDEX IF NOT EXISTS), it touches only condition_records, and no later migration reads or alters what it adds. The blind spot that let it through is T-260902-1ui; this entry is the record of the instance, not a licence for the next one.
