@@ -11,7 +11,7 @@ import { createBackfillStore } from "./core/backfill-store.js";
 import { createAutoRunStore } from "./core/auto-run-store.js";
 import { createAutoImportSweep } from "./core/auto-import-sweep.js";
 import { createAttentionStore } from "./core/attention-store.js";
-import { createAttentionRefresher } from "./core/attention-refresh.js";
+import { createAttentionRefresher, type RefreshOptions } from "./core/attention-refresh.js";
 import { runScheduledImport } from "./core/import-runner.js";
 import {
   getAllMoneyImportSourcePagePatterns,
@@ -376,7 +376,7 @@ const attentionRefresher = createAttentionRefresher({
   onWarning: (event, attrs) => telemetry.warn(event, attrs),
 });
 
-function refreshAttention(reason: string, options: { mayOpenPage: boolean }): Promise<void> {
+function refreshAttention(reason: string, options: RefreshOptions): Promise<void> {
   return attentionRefresher.refresh(reason, options);
 }
 
