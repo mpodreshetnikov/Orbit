@@ -349,7 +349,16 @@ describe("base ref resolution", () => {
   function runScript(args: string[], env: Record<string, string> = {}) {
     return spawnSync(process.execPath, [script, ...args], {
       encoding: "utf8",
-      env: { ...process.env, PR_SIZE_BASE: "", PR_SIZE_BRANCH: "", ...env },
+      // A named branch rather than "": empty makes the script fall back to the checkout's real
+      // branch, so these tests would report on whichever branch happens to run them -- and pass or
+      // fail depending on whether that branch is in `.large-change-allowlist`. This name is not,
+      // and never should be, so what they measure is the base resolution they are about.
+      env: {
+        ...process.env,
+        PR_SIZE_BASE: "",
+        PR_SIZE_BRANCH: "pr-size-base-resolution-fixture",
+        ...env,
+      },
     });
   }
 

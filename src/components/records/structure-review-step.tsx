@@ -11,6 +11,7 @@ import {
   proposedClosureStillHolds,
   type PersistedObservation,
 } from "@/lib/conditions/resolution-proposal";
+import { isConfirmedByRecordApproval } from "@/lib/conditions/unverified-closure";
 import {
   Save,
   FileCheck,
@@ -1380,6 +1381,22 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     setIsAddingCondition(false);
   };
 
+  /**
+   * Reject a proposed closure without destroying it.
+   *
+   * The delete control beside this used to be the only way a reviewer could say "no" to a
+   * proposed resolution, and it removed the row. That throws away the dismissal the promotion
+   * rule counts -- the one signal that says an analyte should not close this condition -- so the
+   * row stays, suppressed, carrying the decision instead.
+   */
+  const handleDismissCondition = async (cr: ConditionRecordWithDetails) => {
+    await updateConditionRecordMutation.mutateAsync({
+      id: cr.id,
+      recordId: record.id,
+      updates: { review_decision: "dismissed" as const },
+    });
+  };
+
   const handleDeleteCondition = async (cr: ConditionRecordWithDetails) => {
     await deleteConditionRecordMutation.mutateAsync({
       id: cr.id,
@@ -1420,7 +1437,12 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
     // left it unapplied, and `runSave` deletes unapplied observations before this runs. Verifying
     // such a row would close a condition on evidence the same person just withdrew, so it is left
     // unverified and pending: suppressed by the closure guard, and still visible as a proposal.
-    const unverified = conditionRecords.filter((cr) => !cr.is_user_verified);
+    // A dismissal is a decision, and it deliberately leaves `is_user_verified` false -- rejecting a
+    // closure must not verify it. So "unverified" alone sweeps dismissed rows back up, and approving
+    // the record would silently write `confirmed` over the person's own "no", closing the very
+    // condition they rejected. Approving a record confirms what nobody has ruled on, not what
+    // somebody already ruled against.
+    const unverified = conditionRecords.filter(isConfirmedByRecordApproval);
     const closures = unverified.filter((cr) => cr.supporting_obs_code);
 
     // Read the rows back rather than trusting the cached list. The observation mutations invalidate
@@ -1899,6 +1921,7 @@ export function StructureReviewStep({ record, onComplete, onBack }: StructureRev
                     comparison={getComparisonForCondition(cr)}
                     onEdit={() => handleEditCondition(cr)}
                     onDelete={() => handleDeleteCondition(cr)}
+                    onDismiss={() => handleDismissCondition(cr)}
                     isProcessing={isProcessing}
                   />
                 ))}

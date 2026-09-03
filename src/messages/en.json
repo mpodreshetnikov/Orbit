@@ -1382,7 +1382,20 @@
     "proposal": "Proposed",
     "proposalTitle": "Created in the chart when you activate this record",
     "proposalsNotLoaded": "Conditions are still loading — try again in a moment",
-    "proposalsFailed": "Could not add the proposed conditions to the chart; the record was left in review"
+    "proposalsFailed": "Could not add the proposed conditions to the chart; the record was left in review",
+    "awaitingReview": "Awaiting your confirmation",
+    "awaitingReviewTitle": "A document proposes closing this condition. Nobody has confirmed it, so the chart still shows the condition as it was.",
+    "proposedChange": "proposed, not applied",
+    "confirmClosure": "Confirm",
+    "dismissClosure": "Dismiss",
+    "confirmClosureTitle": "Accept that this document closes the condition, and update the chart",
+    "dismissClosureTitle": "Record that this does not close the condition. The mention is kept.",
+    "measurementBehind": "Measurement it rests on",
+    "measurementGone": "The measurement this rested on is no longer on the record",
+    "dismissed": "Dismissed",
+    "dismissedTitle": "You decided this document does not close the condition",
+    "confirmClosureFailed": "Could not check the measurement behind this proposal; nothing was changed",
+    "confirmClosureNoLongerHolds": "The measurement this rested on no longer supports closing the condition, so it was not confirmed"
   },
   "checkups": {
     "navTitle": "Checkups",
