@@ -16,6 +16,8 @@ const {
 const BASE = ["20260802120000_a.sql", "20260809120000_b.sql"];
 const ALLOWED_FILE = "20260807120000_late.sql";
 const RATIONALE = "catalogue rows only; disjoint from every later migration";
+const DIGEST = "3f7a1c9d40b28e55";
+const DIGESTS = { [ALLOWED_FILE]: `${DIGEST}0123456789abcdef` };
 
 /** @param entries offenders or standing entries, which carry the version they land after */
 const names = (entries: { file: string }[]) => entries.map((entry) => entry.file);
@@ -112,11 +114,13 @@ describe("migration order evaluation", () => {
     const result = evaluateMigrationOrder({
       baseFiles: BASE,
       headFiles: [...BASE, ALLOWED_FILE],
-      allowlist: [{ file: ALLOWED_FILE, rationale: RATIONALE }],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: DIGESTS,
     });
 
     expect(result.offenders).toEqual([]);
     expect(result.allowed).toEqual([ALLOWED_FILE]);
+    expect(result.staleExemptions).toEqual([]);
   });
 
   it("does not let an exemption cover a different file that reuses the version", () => {
@@ -124,7 +128,8 @@ describe("migration order evaluation", () => {
     const result = evaluateMigrationOrder({
       baseFiles: BASE,
       headFiles: [...BASE, replacement],
-      allowlist: [{ file: ALLOWED_FILE, rationale: RATIONALE }],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: DIGESTS,
     });
 
     expect(names(result.offenders)).toEqual([replacement]);
@@ -166,6 +171,50 @@ describe("migration order evaluation", () => {
 
     expect(added.treeChecked).toBe(false);
     expect(whole.treeChecked).toBe(true);
+  });
+});
+
+describe("an exemption is pinned to the SQL it was written about", () => {
+  it("stops applying when the file is edited in place, and says the exemption expired", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: [...BASE, ALLOWED_FILE],
+      headFiles: [...BASE, ALLOWED_FILE],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: { [ALLOWED_FILE]: "ffffffffffffffff0000000000000000" },
+      landingOrder: [BASE, [ALLOWED_FILE]],
+    });
+
+    expect(result.staleExemptions).toEqual([
+      {
+        file: ALLOWED_FILE,
+        recorded: DIGEST,
+        actual: "ffffffffffffffff0000000000000000",
+      },
+    ]);
+    expect(names(result.standing)).toEqual([ALLOWED_FILE]);
+    expect(result.allowed).toEqual([]);
+  });
+
+  it("matches on a prefix, so a short digest in the entry is enough", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: [...BASE, ALLOWED_FILE],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: DIGESTS,
+    });
+
+    expect(result.allowed).toEqual([ALLOWED_FILE]);
+  });
+
+  it("says nothing about an entry whose file has left the tree", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: BASE,
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: {},
+    });
+
+    expect(result.staleExemptions).toEqual([]);
   });
 });
 
@@ -339,34 +388,54 @@ describe("migration filename parsing", () => {
 });
 
 describe("allowlist parsing", () => {
-  it("reads a filename and the rationale that justifies it", () => {
-    expect(parseAllowlist(`${ALLOWED_FILE} # ${RATIONALE}`)).toEqual([
-      { file: ALLOWED_FILE, version: "20260807120000", rationale: RATIONALE },
-    ]);
+  const ENTRY = `${ALLOWED_FILE} ${DIGEST} # ${RATIONALE}`;
+  const PARSED = {
+    file: ALLOWED_FILE,
+    version: "20260807120000",
+    digest: DIGEST,
+    rationale: RATIONALE,
+  };
+
+  it("reads a filename, a digest of its contents, and the rationale that justifies it", () => {
+    expect(parseAllowlist(ENTRY)).toEqual([PARSED]);
   });
 
   it("rejects a bare version, which would also exempt a file that reuses it", () => {
-    expect(() => parseAllowlist(`20260807120000 # ${RATIONALE}`)).toThrow(
+    expect(() => parseAllowlist(`20260807120000 ${DIGEST} # ${RATIONALE}`)).toThrow(
+      "Malformed allowlist entry",
+    );
+  });
+
+  it("rejects an entry with no digest, which would survive an edit in place", () => {
+    expect(() => parseAllowlist(`${ALLOWED_FILE} # ${RATIONALE}`)).toThrow(
+      "Malformed allowlist entry",
+    );
+  });
+
+  it("rejects a digest too short to identify the contents", () => {
+    expect(() => parseAllowlist(`${ALLOWED_FILE} 3f7a1c9d # ${RATIONALE}`)).toThrow(
       "Malformed allowlist entry",
     );
   });
 
   it("rejects a filename that is not a timestamped migration", () => {
-    expect(() => parseAllowlist(`notes.sql # ${RATIONALE}`)).toThrow("Malformed allowlist entry");
+    expect(() => parseAllowlist(`notes.sql ${DIGEST} # ${RATIONALE}`)).toThrow(
+      "Malformed allowlist entry",
+    );
   });
 
   it("rejects an entry with no rationale", () => {
-    expect(() => parseAllowlist(ALLOWED_FILE)).toThrow("Malformed allowlist entry");
+    expect(() => parseAllowlist(`${ALLOWED_FILE} ${DIGEST}`)).toThrow("Malformed allowlist entry");
   });
 
   it("rejects an entry whose rationale is empty", () => {
-    expect(() => parseAllowlist(`${ALLOWED_FILE} #   `)).toThrow("Malformed allowlist entry");
+    expect(() => parseAllowlist(`${ALLOWED_FILE} ${DIGEST} #   `)).toThrow(
+      "Malformed allowlist entry",
+    );
   });
 
   it("keeps whole-line comments and blank lines out of the entries", () => {
-    expect(
-      parseAllowlist(["# how to use this file", "", `${ALLOWED_FILE} # ${RATIONALE}`].join("\n")),
-    ).toEqual([{ file: ALLOWED_FILE, version: "20260807120000", rationale: RATIONALE }]);
+    expect(parseAllowlist(["# how to use this file", "", ENTRY].join("\n"))).toEqual([PARSED]);
   });
 
   it("treats a missing or empty file as no exemptions", () => {

@@ -32,6 +32,7 @@
  * base when GitHub runs it there; see `.github/workflows/main.yml`.
  */
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
@@ -72,20 +73,23 @@ function migrationsOnly(fileNames) {
 }
 
 /**
- * Each entry is a migration *filename* and the rationale that justifies it.
+ * Each entry is a migration *filename*, a digest of its contents, and the rationale that justifies
+ * it.
  *
  * The rationale is required: the policy this file enforces asks for a reason an exempted migration
  * is safe against the newer schema, and a rationale nothing checks for is a rationale that stops
  * being written.
  *
- * The key is the filename rather than the bare version, because an exemption matched by version
- * alone also waves through a *replacement*: a branch that deletes the recorded file and adds
- * different SQL under the same version would inherit the exemption, and production would then skip
- * that SQL entirely, the version already being in schema_migrations. An exemption is a judgement
- * about one file's contents, so it names that file.
+ * The digest is required for the same reason the filename is. An exemption keyed by version alone
+ * would be inherited by a *replacement* -- a branch deleting the recorded file and adding different
+ * SQL under the same version -- and one keyed by filename alone would still be inherited by an
+ * edit in place. Either way production skips the new SQL entirely, the version already being in
+ * schema_migrations, and no duplicate is left for the count to see. An exemption is a judgement
+ * about particular SQL against a particular schema, so it names the file *and* pins its contents:
+ * change either, and the exemption stops applying and the ordering question is asked again.
  *
  * @param {string | undefined} contents
- * @returns {{ file: string, version: string, rationale: string }[]}
+ * @returns {{ file: string, version: string, digest: string, rationale: string }[]}
  */
 function parseAllowlist(contents) {
   return (contents || "")
@@ -93,19 +97,36 @@ function parseAllowlist(contents) {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"))
     .map((line) => {
-      const match = /^(\S+\.sql)\s*#\s*(\S.*)$/.exec(line);
+      const match = /^(\S+\.sql)\s+([0-9a-f]{16,64})\s*#\s*(\S.*)$/.exec(line);
       const version = match ? versionOf(match[1]) : null;
       if (!match || !version) {
         throw new Error(
           `Malformed allowlist entry: '${line}'. Each entry must be a migration filename -- not ` +
-            "the bare version, which would also exempt a different file that reuses it -- " +
-            "followed by '# ' and a rationale for why applying it against the newer schema is " +
-            "safe, e.g. '20260807120000_catalogue.sql # catalogue rows only; disjoint from every " +
-            "later migration'.",
+            "the bare version, which would also exempt a different file that reuses it -- then at " +
+            "least 16 hex characters of the file's sha256, then '# ' and a rationale for why " +
+            "applying it against the newer schema is safe, e.g. '20260807120000_catalogue.sql " +
+            "3f7a1c9d40b28e55 # catalogue rows only; disjoint from every later migration'. Read a " +
+            `file's digest with \`shasum -a 256 ${MIGRATIONS_DIR}/<file>\`.`,
         );
       }
-      return { file: match[1], version, rationale: match[2].trim() };
+      return { file: match[1], version, digest: match[2], rationale: match[3].trim() };
     });
+}
+
+/** @param {string} contents @returns {string} */
+function digestOf(contents) {
+  return crypto.createHash("sha256").update(contents, "utf8").digest("hex");
+}
+
+/**
+ * An exemption applies only while the file it was written about is the file in the tree.
+ *
+ * @param {{ file: string, digest: string }} entry
+ * @param {Record<string, string>} digests full sha256 of each migration in the tree, by filename
+ */
+function exemptionApplies(entry, digests) {
+  const actual = digests[entry.file];
+  return typeof actual === "string" && actual.startsWith(entry.digest);
 }
 
 /**
@@ -199,15 +220,31 @@ function misorderedInTree({ headFiles, landingOrder }) {
  * @param {{
  *   baseFiles: string[],
  *   headFiles: string[],
- *   allowlist?: { file: string, rationale?: string }[],
+ *   allowlist?: { file: string, digest?: string, rationale?: string }[],
+ *   digests?: Record<string, string>,
  *   landingOrder?: string[][] | null,
  * }} input
  */
-function evaluateMigrationOrder({ baseFiles, headFiles, allowlist = [], landingOrder = null }) {
+function evaluateMigrationOrder({
+  baseFiles,
+  headFiles,
+  allowlist = [],
+  digests = {},
+  landingOrder = null,
+}) {
   const baseMigrations = migrationsOnly(baseFiles);
   const headMigrations = migrationsOnly(headFiles);
   const baseNames = new Set(baseMigrations);
-  const allowed = new Set(allowlist.map((entry) => entry.file));
+  // An entry whose digest no longer matches the file is not an exemption but a record of one that
+  // has expired, and it is reported as such rather than silently ignored: it means the SQL changed
+  // under a version production has already applied and will therefore skip.
+  const live = allowlist.filter((entry) => !entry.digest || exemptionApplies(entry, digests));
+  const stale = allowlist
+    .filter((entry) => entry.digest && !exemptionApplies(entry, digests))
+    .filter((entry) => typeof digests[entry.file] === "string")
+    .map((entry) => ({ file: entry.file, recorded: entry.digest, actual: digests[entry.file] }))
+    .sort((a, b) => a.file.localeCompare(b.file));
+  const allowed = new Set(live.map((entry) => entry.file));
   const added = headMigrations.filter((fileName) => !baseNames.has(fileName));
 
   const occurrences = new Map();
@@ -248,6 +285,7 @@ function evaluateMigrationOrder({ baseFiles, headFiles, allowlist = [], landingO
     added,
     latestBaseVersion,
     duplicates,
+    staleExemptions: stale,
     treeChecked: landingOrder !== null,
     offenders: unallowed.filter((entry) => addedNames.has(entry.file)),
     standing: unallowed.filter((entry) => !addedNames.has(entry.file)),
@@ -301,6 +339,21 @@ function readBaseMigrations(baseRef) {
 
 function readHeadMigrations() {
   return fs.readdirSync(path.join(REPO_ROOT, MIGRATIONS_DIR));
+}
+
+/** @param {string[]} fileNames @returns {Record<string, string>} */
+function readDigests(fileNames) {
+  /** @type {Record<string, string>} */
+  const digests = {};
+  for (const fileName of fileNames) {
+    if (!versionOf(fileName)) {
+      continue;
+    }
+    digests[fileName] = digestOf(
+      fs.readFileSync(path.join(REPO_ROOT, MIGRATIONS_DIR, fileName), "utf8"),
+    );
+  }
+  return digests;
 }
 
 /**
@@ -357,10 +410,36 @@ function renameSafetyNotice(versions) {
   ];
 }
 
-function formatFailure({ duplicates, offenders, standing, latestBaseVersion, baseRef }) {
+function formatFailure({
+  duplicates,
+  offenders,
+  standing,
+  staleExemptions,
+  latestBaseVersion,
+  baseRef,
+}) {
   const lines = [];
 
+  if (staleExemptions.length > 0) {
+    lines.push(
+      "Allowlisted migration(s) whose contents no longer match the exemption written about them:",
+      ...staleExemptions.map(
+        (entry) => `  ${entry.file} recorded ${entry.recorded}, now ${entry.actual.slice(0, 16)}`,
+      ),
+      "",
+      "An exemption is a judgement about particular SQL against a particular schema, so it stops",
+      "applying when the SQL changes. This is the more serious half: an allowlisted migration is",
+      "one production has already applied, so editing it in place changes nothing there --",
+      "`db push --include-all` skips the version, and the new SQL never runs anywhere but a local",
+      "`db reset`. Put the change in a new migration. If the edit is genuinely cosmetic, update the",
+      "digest in the entry and say in the rationale what changed and why it is not schema.",
+    );
+  }
+
   if (duplicates.length > 0) {
+    if (lines.length > 0) {
+      lines.push("");
+    }
     lines.push(
       "Migration(s) added under a timestamp another migration already uses:",
       ...duplicates.map((fileName) => `  ${fileName}`),
@@ -429,10 +508,12 @@ function main() {
     throw new Error(`Could not read ${MIGRATIONS_DIR} at ${baseRef}.`);
   }
 
+  const headFiles = readHeadMigrations();
   const result = evaluateMigrationOrder({
     baseFiles,
-    headFiles: readHeadMigrations(),
+    headFiles,
     allowlist: readAllowlist(),
+    digests: readDigests(headFiles),
     landingOrder: readLandingOrder(),
   });
 
@@ -447,7 +528,12 @@ function main() {
     console.log(`Migration ${fileName} is out of order but allowlisted; not failing.`);
   }
 
-  if (result.duplicates.length > 0 || result.offenders.length > 0 || result.standing.length > 0) {
+  if (
+    result.duplicates.length > 0 ||
+    result.offenders.length > 0 ||
+    result.standing.length > 0 ||
+    result.staleExemptions.length > 0
+  ) {
     console.error(formatFailure({ ...result, baseRef }));
     return 1;
   }
@@ -471,6 +557,7 @@ if (require.main === module) {
 
 module.exports = {
   ZERO_SHA,
+  digestOf,
   evaluateMigrationOrder,
   readHeadMigrations,
   readLandingOrder,

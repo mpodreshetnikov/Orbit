@@ -10,19 +10,26 @@
 # key. `supabase migration list --linked` answers which case a version is in. This file is for the
 # ones a rename can no longer reach.
 #
-# An entry is `<migration filename> # rationale`. The key is the filename, not the bare version,
-# because an exemption matched by version alone would also wave through a *replacement*: a branch
-# that deletes the recorded file and adds different SQL under the same version. Production would
-# skip that SQL entirely, the version already being in schema_migrations, and duplicate detection
-# would not see it either, the original being gone.
+# An entry is `<migration filename> <sha256 prefix> # rationale`, and it applies only while both
+# still describe the file in the tree.
+#
+# The key is the filename, not the bare version, because an exemption matched by version alone
+# would wave through a *replacement*: a branch that deletes the recorded file and adds different
+# SQL under the same version. The contents are pinned as well, because a filename alone would still
+# carry the exemption across an edit in place. Either way production skips the new SQL entirely,
+# the version already being in schema_migrations, and duplicate detection would not see it either.
+# Change the SQL under an applied version and it runs nowhere but a local `db reset`; put the
+# change in a new migration instead.
+#
+# Read a digest with `shasum -a 256 supabase/migrations/<file>` and record its first 16 characters.
 #
 # The rationale answers one question: why applying this migration against the schema the later ones
 # had already built was safe. Not "why it happened" -- why the result is correct.
 
-20250128000000_add_person_sex_breed.sql # applied after 20250128000001 (landed 2026-01-27, two hours behind it, before this gate existed). Additive and idempotent: two ADD COLUMN IF NOT EXISTS on persons, one of them CHECK-constrained. The newer migration creates the measurements table and neither reads nor alters persons.
+20250128000000_add_person_sex_breed.sql b057e0b65caa2553 # applied after 20250128000001 (landed 2026-01-27, two hours behind it, before this gate existed). Additive and idempotent: two ADD COLUMN IF NOT EXISTS on persons, one of them CHECK-constrained. The newer migration creates the measurements table and neither reads nor alters persons.
 
-20260308124000_add_money_transaction_brand_metadata.sql # applied after 20260308150000 (landed 2026-03-09). Disjoint domains: this creates money_transaction_brands, money_transaction_brand_aliases and columns on money_transactions; the newer migration creates medication_refill_snoozes. Neither reads or alters what the other touches.
+20260308124000_add_money_transaction_brand_metadata.sql bc233130b150949a # applied after 20260308150000 (landed 2026-03-09). Disjoint domains: this creates money_transaction_brands, money_transaction_brand_aliases and columns on money_transactions; the newer migration creates medication_refill_snoozes. Neither reads or alters what the other touches.
 
-20260807120000_inflammation_synonyms_and_hba1c_formula.sql # applied after 20260809120000 (landed 2026-08-23). Catalogue data only: it sets synonyms_ru and a formula on existing finding_type_catalog rows, and is written to be re-runnable. The newer migration adds the MCP OAuth tables, which are disjoint from the catalogue.
+20260807120000_inflammation_synonyms_and_hba1c_formula.sql 487bc0ff0a28caca # applied after 20260809120000 (landed 2026-08-23). Catalogue data only: it sets synonyms_ru and a formula on existing finding_type_catalog rows, and is written to be re-runnable. The newer migration adds the MCP OAuth tables, which are disjoint from the catalogue.
 
-20260901150000_condition_record_resolution_review.sql # applied after 20260902060000 (landed 2026-09-02), confirmed against the live schema_migrations rather than inferred from CI. Additive and idempotent throughout (ADD COLUMN IF NOT EXISTS, a constraint guarded on duplicate_object, CREATE INDEX IF NOT EXISTS), it touches only condition_records, and no later migration reads or alters what it adds. The blind spot that let it through is T-260902-1ui; this entry is the record of the instance, not a licence for the next one.
+20260901150000_condition_record_resolution_review.sql 03a3d298a4ff7ce5 # applied after 20260902060000 (landed 2026-09-02), confirmed against the live schema_migrations rather than inferred from CI. Additive and idempotent throughout (ADD COLUMN IF NOT EXISTS, a constraint guarded on duplicate_object, CREATE INDEX IF NOT EXISTS), it touches only condition_records, and no later migration reads or alters what it adds. The blind spot that let it through is T-260902-1ui; this entry is the record of the instance, not a licence for the next one.
