@@ -8,6 +8,11 @@
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/pr-size-hook.cjs\"",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/task-claim-hook.cjs\"",
+            "timeout": 15
           }
         ]
       }
