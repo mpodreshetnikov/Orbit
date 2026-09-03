@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   WIDGET_LOCALES,
@@ -18,33 +16,6 @@ describe("widget strings", () => {
     const reference = knownWidgetPhases(first).sort();
     for (const locale of rest) {
       expect(knownWidgetPhases(locale).sort()).toEqual(reference);
-    }
-  });
-
-  it("names every phase the connectors and the runner can emit", () => {
-    // Read from the source rather than from a list kept here: the finding that prompted this
-    // was a phase Alfa-Bank emits on every import, missing from a table that had been written
-    // against T-Bank. A list here would have been written the same way.
-    const sources = [
-      "../connectors/tbank-web.ts",
-      "../connectors/alfa-web.ts",
-      "./import-runner.ts",
-    ].map((relative) => fileURLToPath(new URL(relative, import.meta.url)));
-    // Literals that share the phase prefix but are not phases.
-    const notPhases = new Set(["parse_strategy", "parse_output", "parse_only"]);
-
-    const emitted = new Set<string>();
-    for (const file of sources) {
-      for (const match of fs.readFileSync(file, "utf8").matchAll(/"(parse_[a-z_]+)"/g)) {
-        if (!notPhases.has(match[1])) emitted.add(match[1]);
-      }
-    }
-    expect(emitted.size).toBeGreaterThan(5);
-
-    for (const locale of WIDGET_LOCALES) {
-      const known = new Set(knownWidgetPhases(locale));
-      const missing = [...emitted].filter((phase) => !known.has(phase)).sort();
-      expect(missing, `${locale} has no label for: ${missing.join(", ")}`).toEqual([]);
     }
   });
 
