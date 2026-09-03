@@ -220,9 +220,11 @@ quality-db-test:
 tasks-claim id *options:
   node scripts/just/tasks-claim-here.cjs "{{ id }}" {{ options }}
 
-# Start local Supabase stack.
+# Start local Supabase stack. Through the retry runner: the CLI's readiness probe reaches the
+# API gateway before the edge runtime is listening and calls the resulting 502 fatal, which fails
+# this lane roughly six times in ten. Only that signature is retried — see T-260829-hhj.
 supabase-local-start:
-  npx supabase start
+  node scripts/just/supabase-cli-retry.cjs start
 
 # Stop local Supabase stack.
 supabase-local-stop:
@@ -236,9 +238,10 @@ supabase-local-status:
 supabase-local-migrate-only:
   npx supabase migration up
 
-# Reset local DB to migrations and seed (destructive).
+# Reset local DB to migrations and seed (destructive). Through the retry runner for the same
+# readiness 502 as `supabase-local-start`; every other failure still fails on the first attempt.
 supabase-local-reset-only:
-  npx supabase db reset --yes
+  node scripts/just/supabase-cli-retry.cjs db reset --yes
 
 # Apply idempotent SQL objects from supabase/db/deploy.sql to local DB.
 supabase-local-deploy-sql:
