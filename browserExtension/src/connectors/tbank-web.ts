@@ -1,4 +1,5 @@
 import { registerConnector } from "./registry.js";
+import { isPathUnder } from "../core/page-url.js";
 import type {
   Connector,
   ConnectorParseInput,
@@ -738,6 +739,7 @@ registerConnector(connector);
 export default connector;
 
 export const __test__ = {
+  isOperationsPageUrl,
   buildOperationRanges,
   detectBlockedReasonFromApiEnvelope,
   detectBlockedReasonFromPageState,
@@ -2380,8 +2382,9 @@ function isTbankUrl(url: unknown): url is string {
 function isOperationsPageUrl(url: unknown): boolean {
   if (!isTbankUrl(url)) return false;
   try {
-    const pathname = new URL(url).pathname;
-    return pathname === "/mybank/operations/" || pathname === "/mybank/operations";
+    // The bank redirects to a versioned page beneath this one (`/mybank/operations/v8/` as of
+    // 2026-09) and adds a tracking query. Either is the operations page.
+    return isPathUnder(new URL(url).pathname, new URL(OPERATIONS_PAGE_URL).pathname);
   } catch {
     return false;
   }

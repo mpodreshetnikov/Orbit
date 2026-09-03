@@ -266,6 +266,18 @@ describe("alfa-web connector", () => {
     expect(typeof connector.parse).toBe("function");
   });
 
+  it("recognises the history page wherever the bank serves it under /history", () => {
+    // The same class as T-Bank's versioned operations page: an exact match against the address
+    // the connector navigated to fails the moment the bank redirects beneath it.
+    expect(__test__.isHistoryPageUrl("https://web.alfabank.ru/history")).toBe(true);
+    expect(__test__.isHistoryPageUrl("https://web.alfabank.ru/history/")).toBe(true);
+    expect(__test__.isHistoryPageUrl("https://web.alfabank.ru/history/v2/?utm=1")).toBe(true);
+
+    expect(__test__.isHistoryPageUrl("https://web.alfabank.ru/")).toBe(false);
+    expect(__test__.isHistoryPageUrl("https://web.alfabank.ru/history-settings")).toBe(false);
+    expect(__test__.isHistoryPageUrl("https://example.com/history/")).toBe(false);
+  });
+
   it("treats alfa auth pages as blocked before API calls", async () => {
     const isolatedFactory = new Function(
       `return (${__test__.extractOperationsInPage.toString()});`,
