@@ -469,7 +469,6 @@ jobs:
       DATABASE_URL: postgresql://postgres.${{ vars.SUPABASE_PROJECT_REF }}:${{ secrets.SUPABASE_DB_PASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
     steps:
       - uses: actions/checkout@v4
-<<<<<<< HEAD
       # Same reason as the Vercel job: the group serialises these deploys without ordering them or
       # keeping the newest, so a push that reached `quality-gates` first can reach the deploy queue
       # second and apply its migrations, functions, policies and version stamp over a newer
@@ -480,11 +479,8 @@ jobs:
         uses: ./.github/actions/production-tip-check
         with:
           job: Deploy Supabase Production
-      - uses: supabase/setup-cli@v1
-        if: steps.tip.outputs.deploy_sha != ''
-=======
       - uses: actions/setup-node@v4
->>>>>>> origin/main
+        if: steps.tip.outputs.deploy_sha != ''
         with:
           node-version: 22
       # `npm ci` rather than supabase/setup-cli. deploy-supabase.cjs runs `npx supabase`, and
@@ -496,6 +492,7 @@ jobs:
       # makes this job run the CLI version the repository records, the same one a developer's
       # `npx supabase` runs, and reaches GitHub for nothing (T-260903-ut8).
       - name: Install dependencies
+        if: steps.tip.outputs.deploy_sha != ''
         run: npm ci
       - uses: taiki-e/install-action@just
         if: steps.tip.outputs.deploy_sha != ''
