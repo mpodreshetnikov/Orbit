@@ -111,6 +111,26 @@ describe("createAttentionRefresher", () => {
     expect(harness.opened).toHaveLength(1);
   });
 
+  it("lets the alarm open the page only when the start has not", async () => {
+    const harness = createHarness();
+    const alarm = { mayOpenPage: true, onlyIfNotOpenedSinceStart: true };
+
+    // Installed mid-session, no start on record: the first alarm may open once.
+    await harness.refresher.refresh("alarm", alarm);
+    expect(harness.opened).toHaveLength(1);
+
+    // A day later, still the same browser session: the alarm stays quiet.
+    const later = createHarness();
+    await later.attentionStore.markPageOpened(NOW - 2 * DAY_MS);
+    await later.refresher.refresh("alarm", alarm);
+    expect(later.opened).toEqual([]);
+
+    // The browser started after that opening: the alarm after the start may open.
+    await later.attentionStore.markBrowserStarted(NOW - DAY_MS);
+    await later.refresher.refresh("alarm", alarm);
+    expect(later.opened).toHaveLength(1);
+  });
+
   it("only draws the badge when opening is not allowed", async () => {
     const harness = createHarness();
 

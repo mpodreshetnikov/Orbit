@@ -128,7 +128,8 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
     const state = await deps.autoRunStore.getState(scope);
     // A request is for the visit it sends the person on, not for the alarm: the alarm firing
     // in the hour after Update would try before they had signed in, and fail.
-    const requested = trigger === "visit" && ((await deps.isRunRequested?.(scope, nowMs)) ?? false);
+    const requestLive = (await deps.isRunRequested?.(scope, nowMs)) ?? false;
+    const requested = trigger === "visit" && requestLive;
     if (!requested && !shouldAutoRun(state, nowMs)) return;
 
     const tabId = await deps.openTab(source.targetUrl);
@@ -191,7 +192,9 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
 
     // Bookkeeping after the outcome is settled, and unable to unsettle it: a request that
     // will not clear is a request honoured once more, not a successful import reported failed.
-    if (succeeded && requested) {
+    // Any success settles a live request, whoever ran: the page stops asking for a sign-in the
+    // source no longer needs, and the visit after does not import a second time.
+    if (succeeded && requestLive) {
       try {
         await deps.clearRunRequest?.(scope);
       } catch (error) {

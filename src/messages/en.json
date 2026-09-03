@@ -717,7 +717,7 @@
     "importAttentionThresholdLabel": "Count a source stale after (days)",
     "importAttentionThresholdInvalid": "Enter a whole number of days, at least one.",
     "importAttentionThresholdSaved": "Saved: {days} d.",
-    "importAttentionBadgeHint": "The number on the extension's icon is how many sources are stale. When there are any, the extension opens this page at the browser's start, at most once a day.",
+    "importAttentionBadgeHint": "The number on the extension's icon is how many sources are stale. When there are any, the extension opens this page once per browser session — at the start, or at the first check after it — and at most once a day.",
     "importAttentionRefreshMissed": "The extension did not answer the last request; what is shown is its previous answer, and the page keeps asking.",
     "importHistoryImportTypeUnattended": "Automatic (extension)"
   },

@@ -25,6 +25,7 @@ describe("attention-store", () => {
     expect(await store.getState()).toEqual({
       staleAfterMs: DEFAULT_STALE_AFTER_MS,
       lastOpenedAtMs: null,
+      lastStartedAtMs: null,
       runRequests: {},
     });
     expect(await store.setStaleAfterMs(3 * DAY_MS)).toBe(3 * DAY_MS);
@@ -36,6 +37,8 @@ describe("attention-store", () => {
     const store = createAttentionStore(createStorage());
     await store.markPageOpened(NOW);
     expect((await store.getState()).lastOpenedAtMs).toBe(NOW);
+    await store.markBrowserStarted(NOW + 1);
+    expect((await store.getState()).lastStartedAtMs).toBe(NOW + 1);
   });
 
   it("keeps a run request alive for an hour and clears it on demand", async () => {
@@ -60,6 +63,7 @@ describe("attention-store", () => {
     expect(await createAttentionStore(storage).getState()).toEqual({
       staleAfterMs: DEFAULT_STALE_AFTER_MS,
       lastOpenedAtMs: null,
+      lastStartedAtMs: null,
       runRequests: { "alfa_web::person-1": NOW },
     });
   });
@@ -78,6 +82,7 @@ describe("attention-store under concurrent changes", () => {
     expect(await store.getState()).toEqual({
       staleAfterMs: 2 * DAY_MS,
       lastOpenedAtMs: null,
+      lastStartedAtMs: null,
       runRequests: { "alfa_web::person-1": NOW + 1 },
     });
   });

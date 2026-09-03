@@ -70,13 +70,35 @@ export interface AttentionRefresher {
    * minute after the person pressed Update, on the visit sweep their sign-in caused, would be
    * the extension nagging about the thing they are in the middle of fixing.
    */
-  refresh(reason: string, options: { mayOpenPage: boolean }): Promise<void>;
+  refresh(reason: string, options: RefreshOptions): Promise<void>;
+}
+
+export interface RefreshOptions {
+  mayOpenPage: boolean;
+  /**
+   * For the alarm: open only if nothing has been opened since the browser last started. The
+   * start itself is the moment a page opening by itself reads as a reminder; the alarm after
+   * it stands in when the start found nothing stale yet, and never a third time during the
+   * day's work.
+   */
+  onlyIfNotOpenedSinceStart?: boolean;
+}
+
+/** Whether the page has opened by itself since the browser last started. */
+function openedSinceStart(attention: {
+  lastOpenedAtMs: number | null;
+  lastStartedAtMs: number | null;
+}): boolean {
+  if (attention.lastOpenedAtMs === null) return false;
+  // No start on record: the opening counts as this browser session's.
+  if (attention.lastStartedAtMs === null) return true;
+  return attention.lastOpenedAtMs >= attention.lastStartedAtMs;
 }
 
 export function createAttentionRefresher(deps: AttentionRefresherDeps): AttentionRefresher {
   let chain: Promise<void> = Promise.resolve();
 
-  async function run(reason: string, options: { mayOpenPage: boolean }): Promise<void> {
+  async function run(reason: string, options: RefreshOptions): Promise<void> {
     try {
       const grant = await deps.grantStore.getGrant();
       const attention = await deps.attentionStore.getState();
@@ -102,6 +124,7 @@ export function createAttentionRefresher(deps: AttentionRefresherDeps): Attentio
       ) {
         return;
       }
+      if (options.onlyIfNotOpenedSinceStart && openedSinceStart(attention)) return;
       if (!isAppOriginAllowed(grant.app_origin, deps.allowedAppOrigins())) {
         deps.onWarning("money_import_attention_origin_refused", { reason });
         return;

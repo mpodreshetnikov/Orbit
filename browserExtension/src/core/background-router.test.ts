@@ -528,6 +528,9 @@ describe("background-router", () => {
 
     const lastRun = await routeBackgroundMessage({ type: "MONEY_IMPORT_DEBUG_GET_LAST_RUN" }, deps);
     expect((lastRun as { run?: { run?: { status?: string } } }).run?.run?.status).toBe("ok");
+    // A diagnostic is not an import: the attempt history, and with it the attention page's
+    // idea of freshness, is left alone.
+    expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
   });
 
   it("records full debug event sequence for a successful run", async () => {

@@ -8,6 +8,8 @@ export interface AttentionState {
   staleAfterMs: number;
   /** When the extension last opened the attention page of its own accord. */
   lastOpenedAtMs: number | null;
+  /** When the browser last started, as `chrome.runtime.onStartup` told the extension. */
+  lastStartedAtMs: number | null;
   /**
    * Runs a person asked for from the page, keyed by `requestKey` (one person at one bank):
    * when each was asked. Keyed on the source alone, a key issued to another person within
@@ -25,6 +27,7 @@ export interface AttentionStore {
   /** Stores the threshold, bounded; returns what was stored. */
   setStaleAfterMs(value: unknown): Promise<number>;
   markPageOpened(nowMs: number): Promise<void>;
+  markBrowserStarted(nowMs: number): Promise<void>;
   requestRun(scope: AutoRunScope, nowMs: number): Promise<void>;
   isRunRequested(scope: AutoRunScope, nowMs: number): Promise<boolean>;
   clearRunRequest(scope: AutoRunScope): Promise<void>;
@@ -45,6 +48,10 @@ function readState(value: unknown): AttentionState {
     lastOpenedAtMs:
       typeof record.lastOpenedAtMs === "number" && Number.isFinite(record.lastOpenedAtMs)
         ? record.lastOpenedAtMs
+        : null,
+    lastStartedAtMs:
+      typeof record.lastStartedAtMs === "number" && Number.isFinite(record.lastStartedAtMs)
+        ? record.lastStartedAtMs
         : null,
     runRequests: requests,
   };
@@ -90,6 +97,9 @@ export function createAttentionStore(storage: LocalStorageLike): AttentionStore 
     },
     markPageOpened(nowMs) {
       return change((state) => write({ ...state, lastOpenedAtMs: nowMs }));
+    },
+    markBrowserStarted(nowMs) {
+      return change((state) => write({ ...state, lastStartedAtMs: nowMs }));
     },
     requestRun(scope, nowMs) {
       return change((state) =>

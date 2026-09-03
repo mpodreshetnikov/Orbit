@@ -708,7 +708,11 @@ export async function routeBackgroundMessage(
       // the server; letting a storage failure here fall into the catch below would mark that
       // finished session failed, clear it, and tell the person their successful import errored.
       // Local bookkeeping does not get to fail a transaction that has already committed.
-      await resetAutoRunBackoff(deps, session);
+      //
+      // Not for a parse-only diagnostic: it reads the bank and applies nothing, so it neither
+      // proves the bank is signed in for importing nor freshens anything the attention page
+      // should count.
+      if (!message.debug?.parse_only) await resetAutoRunBackoff(deps, session);
 
       const response: Record<string, unknown> = {
         ok: true,

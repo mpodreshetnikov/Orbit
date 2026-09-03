@@ -37,6 +37,7 @@ describe("buildAttentionStatus", () => {
       attention: {
         staleAfterMs: DAY_MS,
         lastOpenedAtMs: null,
+        lastStartedAtMs: null,
         runRequests: { "alfa_web::person-1": NOW },
       },
       nowMs: NOW,
@@ -69,7 +70,12 @@ describe("buildAttentionStatus", () => {
       grant: null,
       knownSources: ["tbank_web"],
       autoRunStore: autoRunStore({}),
-      attention: { staleAfterMs: DAY_MS, lastOpenedAtMs: null, runRequests: {} },
+      attention: {
+        staleAfterMs: DAY_MS,
+        lastOpenedAtMs: null,
+        lastStartedAtMs: null,
+        runRequests: {},
+      },
       nowMs: NOW,
     });
     expect(status).toEqual({ stale_after_ms: DAY_MS, stale_count: 0, sources: [] });

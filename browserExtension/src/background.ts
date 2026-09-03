@@ -499,7 +499,9 @@ chrome.runtime.onInstalled?.addListener((details) => {
 // The browser's start is the one moment a page opening by itself reads as a reminder rather
 // than an interruption, and the badge has to be drawn again in any case.
 chrome.runtime.onStartup?.addListener(() => {
-  void refreshAttention("startup", { mayOpenPage: true });
+  void attentionStore
+    .markBrowserStarted(Date.now())
+    .then(() => refreshAttention("startup", { mayOpenPage: true }));
 });
 
 if (chrome.alarms?.onAlarm) {
@@ -508,7 +510,9 @@ if (chrome.alarms?.onAlarm) {
     if (alarm.name === AUTO_IMPORT_ALARM) {
       void autoImportSweep
         .run("alarm")
-        .then(() => refreshAttention("alarm", { mayOpenPage: true }));
+        .then(() =>
+          refreshAttention("alarm", { mayOpenPage: true, onlyIfNotOpenedSinceStart: true }),
+        );
       return;
     }
     if (alarm.name.startsWith(VISIT_SWEEP_ALARM_PREFIX)) {

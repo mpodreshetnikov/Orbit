@@ -24,6 +24,10 @@ type Reply = Record<string, unknown>;
  */
 function installExtension(options: {
   answersPing: boolean;
+  /** One answer per ping, in order; the last one repeats. Overrides `answersPing` when set. */
+  pingReplies?: boolean[];
+  /** Per attention request, a promise its reply waits for; `null` = reply at once. */
+  attentionGates?: Array<Promise<void> | null>;
   /** One reply per attention request, in order; the last one repeats. `null` = no answer. */
   attention?: Reply | Array<Reply | null>;
   runRequest?: Reply;
@@ -33,6 +37,7 @@ function installExtension(options: {
 }) {
   const posted: Array<Record<string, unknown>> = [];
   let attentionCalls = 0;
+  let pingCalls = 0;
   const spy = vi.spyOn(window, "postMessage").mockImplementation((message) => {
     const data = message as Record<string, unknown>;
     if (data.source !== "orbit-webapp") return;
@@ -45,14 +50,23 @@ function installExtension(options: {
       );
     };
     if (data.type === "MONEY_IMPORT_PING") {
-      if (options.answersPing) reply({ type: "MONEY_IMPORT_PONG" });
+      const replies = options.pingReplies;
+      const answers = replies
+        ? replies[Math.min(pingCalls, replies.length - 1)]
+        : options.answersPing;
+      pingCalls += 1;
+      if (answers) reply({ type: "MONEY_IMPORT_PONG" });
       return;
     }
     if (data.type === "MONEY_IMPORT_GET_ATTENTION" && options.attention !== undefined) {
       const replies = Array.isArray(options.attention) ? options.attention : [options.attention];
       const chosen = replies[Math.min(attentionCalls, replies.length - 1)];
+      const gate = options.attentionGates?.[attentionCalls] ?? null;
       attentionCalls += 1;
-      if (chosen) reply({ type: "MONEY_IMPORT_ATTENTION", ...chosen });
+      if (!chosen) return;
+      const send = () => reply({ type: "MONEY_IMPORT_ATTENTION", ...chosen });
+      if (gate) void gate.then(send);
+      else send();
       return;
     }
     if (data.type === "MONEY_IMPORT_REQUEST_RUN" && options.runRequest) {
@@ -227,6 +241,79 @@ describe("MoneyImportAttentionPage", () => {
     expect(screen.queryByTestId("money-import-attention-missed")).toBeNull();
     expect(extension.attentionCalls()).toBeGreaterThanOrEqual(3);
     vi.useRealTimers();
+  });
+
+  it("keeps asking through a ping that goes unanswered after a good answer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const requested: Reply = {
+      ...STALE_ATTENTION,
+      sources: [{ ...(STALE_ATTENTION.sources as Reply[])[0], run_requested: true }],
+    };
+    const settled: Reply = {
+      ...STALE_ATTENTION,
+      stale_count: 0,
+      sources: [
+        {
+          ...(STALE_ATTENTION.sources as Reply[])[0],
+          stale: false,
+          run_requested: false,
+          last_ok_at: "2026-09-03T12:00:00.000Z",
+        },
+      ],
+    };
+    // First ping answered; the second (a slow wake) not; the third answered again.
+    installExtension({
+      answersPing: true,
+      pingReplies: [true, false, true],
+      attention: [requested, settled],
+    });
+    render(<MoneyImportAttentionPage />);
+    await screen.findByText("money.importAttentionRequested");
+
+    await vi.advanceTimersByTimeAsync(20_000 + 1_000);
+    await waitFor(() => expect(screen.getByTestId("money-import-attention-missed")).toBeTruthy());
+    expect(screen.getByTestId("money-import-attention-tbank_web")).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(20_000 + 1_000);
+    await waitFor(() => expect(screen.queryByText("money.importAttentionRequested")).toBeNull());
+    vi.useRealTimers();
+  });
+
+  it("shows the newest answer when an older refresh lands last", async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const fresh: Reply = {
+      ...STALE_ATTENTION,
+      stale_count: 0,
+      sources: [
+        {
+          ...(STALE_ATTENTION.sources as Reply[])[0],
+          stale: false,
+          last_ok_at: "2026-09-03T12:00:00.000Z",
+        },
+      ],
+    };
+    // The first answer (stale) is held back; Refresh asks again and gets "fresh" at once.
+    installExtension({
+      answersPing: true,
+      attention: [STALE_ATTENTION, fresh],
+      attentionGates: [firstGate, null],
+    });
+    render(<MoneyImportAttentionPage />);
+    await screen.findByText("money.importExtensionChecking");
+
+    fireEvent.click(screen.getByText("common.refresh"));
+    const card = await screen.findByTestId("money-import-attention-tbank_web");
+    expect(card.getAttribute("data-stale")).toBe("false");
+
+    // The older answer arrives last and changes nothing.
+    releaseFirst();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByTestId("money-import-attention-tbank_web").getAttribute("data-stale")).toBe(
+      "false",
+    );
   });
 
   it("drops its own 'requested' once the extension reports the request settled", async () => {

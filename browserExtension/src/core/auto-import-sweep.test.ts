@@ -516,6 +516,21 @@ describe("a run the person asked for", () => {
     expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
   });
 
+  it("is settled by a success the alarm brought, so the visit after does not run twice", async () => {
+    const cleared: string[] = [];
+    // An eligible source: the alarm runs it on its own merits, with a request still live.
+    const harness = createHarness();
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async (scope) => {
+      cleared.push(scope.sourceId);
+    };
+
+    await harness.sweep.run("alarm");
+
+    expect(harness.openedTabs).toHaveLength(1);
+    expect(cleared).toEqual(["tbank"]);
+  });
+
   it("changes nothing for a source nobody asked about", async () => {
     const harness = createHarness({ states: { "tbank::person-1": stopped } });
     harness.deps.isRunRequested = async () => false;

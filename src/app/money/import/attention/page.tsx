@@ -83,11 +83,24 @@ export default function MoneyImportAttentionPage() {
   const [thresholdSaving, setThresholdSaving] = useState(false);
   // A value the person is typing is not overwritten by a refresh landing mid-keystroke.
   const thresholdTouched = useRef(false);
+  // Only the newest refresh may write: two in flight answer in any order, and the older one
+  // landing last would put back a threshold just saved or a run just finished.
+  const refreshGeneration = useRef(0);
+  const hadAnswer = useRef(false);
   const selectedPersonId = useUIStore((store) => store.selectedPersonId);
 
   const refresh = useCallback(async () => {
+    const generation = ++refreshGeneration.current;
     const alive = await pingExtension();
+    if (generation !== refreshGeneration.current) return;
     if (!alive) {
+      // Before any answer, an unanswered ping is an extension that is not there. After one, it
+      // is a slow service-worker wake -- the ping's half-second is the shortest wait on this
+      // page -- and is treated like the missed answer below, so the asking goes on.
+      if (hadAnswer.current) {
+        setRefreshMissed(true);
+        return;
+      }
       setState("inactive");
       setAttention(null);
       return;
@@ -95,6 +108,7 @@ export default function MoneyImportAttentionPage() {
     // The ping answered, so the extension is there; a status it cannot give is an older
     // version or a slow service-worker wake, not an absence.
     const next = await requestExtensionAttention();
+    if (generation !== refreshGeneration.current) return;
     if (!next) {
       // One missed answer after a good one is a slow wake, not a lost extension: the last
       // answer stays on the screen and the polling below keeps asking. Only a page that never
@@ -103,6 +117,7 @@ export default function MoneyImportAttentionPage() {
       setState((current) => (current === "ready" ? current : "unavailable"));
       return;
     }
+    hadAnswer.current = true;
     setRefreshMissed(false);
     setAttention(next);
     setState("ready");
