@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { markUnconfirmedClosure } from "./conditions";
 
 /**
  * Medical records: the uploaded documents (lab reports, visit notes, imaging)
@@ -129,5 +130,10 @@ export async function getRecordConditions(
   if (error) {
     throw new Error(`Failed to load record diagnoses: ${error.message}`);
   }
-  return (data ?? []) as unknown as Array<Record<string, unknown>>;
+  // Marked here rather than at the call site, because this is the source every reader of a
+  // record's diagnoses comes through. `get_condition` was given this treatment first and
+  // `get_medical_record` -- the "show me this report" path, and the more common one -- was left
+  // returning the RPC rows untouched, so a suppressed closure still read as a settled resolution
+  // there. Putting it at the source is what stops the next reader repeating that.
+  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map(markUnconfirmedClosure);
 }
