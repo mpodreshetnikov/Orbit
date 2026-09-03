@@ -450,13 +450,7 @@ function formatWarning(result, baseRef) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  // PR_SIZE_ADVISORY is how the merge queue asks for a warning instead of a verdict. A queued run
-  // checks out a `gh-readonly-queue/...` ref, where the head branch's name is gone, so a `branch`
-  // exemption in the allowlist can no longer match and a run that blocked would refuse exactly the
-  // changes a reviewer had already excused. The blocking verdict is the pull-request run's, and
-  // unlike migration order it does not expire when someone else merges: the size of this change
-  // against its base is not a fact about the base's tip.
-  const advisory = args.advisory === true || (process.env.PR_SIZE_ADVISORY || "").trim() !== "";
+  const advisory = args.advisory === true;
   const envBase = (process.env.PR_SIZE_BASE || "").trim();
   const branch = resolveBranch(args.branch);
   const requestedBase =

@@ -27,9 +27,9 @@
  *
  * A pull-request verdict expires the moment anything else merges: "my version sorts after
  * everything on the base" stops being true with nothing on the branch moving. Only a run against
- * the projected merged result -- a merge queue, or a branch required to be current with its base --
- * is evidence about the state that actually merges. The workflow feeds this check the merge group's
- * base when GitHub runs it there; see `.github/workflows/main.yml`.
+ * the state that actually merges is evidence about it, and what guarantees that here is the `main
+ * protection` ruleset requiring a branch to be up to date with `main` before it merges: the base
+ * CI hands this check is then the base the branch lands on. See `.github/workflows/main.yml`.
  */
 
 const crypto = require("crypto");
