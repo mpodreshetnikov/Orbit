@@ -47,12 +47,22 @@ function run(cmd, cmdArgs, envOverride = {}) {
 // `db push` refuses that file and keeps refusing it on every later push, so one out-of-order merge
 // wedges the deploy until someone intervenes by hand. `--include-all` applies it in place instead.
 // The full set is still proven to apply from scratch in filename order by the `db reset` CI lane.
+//
+// The schema moves before the functions do. The two orders protect opposite directions of a schema
+// change, and this is the one that closes the common case outright: an additive migration (a new
+// column, a new table) paired with a function that writes to it. With functions first there is a
+// window in which the new function writes to a column that does not exist, and the failure is
+// quiet -- T-0026 lost a review proposal that way while the run reported success. With the schema
+// first the old function simply does not know about the new column, which costs nothing.
+//
+// What this order leaves unprotected: a migration that removes or renames something the deployed
+// function still reads, between the migration landing and the function following it. The other
+// order is unsafe for that case too, only in the opposite window, so a destructive migration is
+// not made safe by reordering these steps in either direction. It has to ship as two changes: first
+// a function that tolerates both shapes of the schema, then the migration that drops the old one.
+// See T-260902-r9c in the task registry for the decision.
 function buildSteps({ projectRef, databaseUrl }) {
   return [
-    {
-      cmd: NPX_BIN,
-      args: ["supabase", "functions", "deploy", "--project-ref", projectRef],
-    },
     {
       cmd: NPX_BIN,
       args: ["supabase", "db", "push", "--include-all", "--yes", "--db-url", databaseUrl],
@@ -61,6 +71,10 @@ function buildSteps({ projectRef, databaseUrl }) {
       cmd: "node",
       args: ["supabase/db/run-deploy.js"],
       env: { DATABASE_URL: databaseUrl },
+    },
+    {
+      cmd: NPX_BIN,
+      args: ["supabase", "functions", "deploy", "--project-ref", projectRef],
     },
   ];
 }
