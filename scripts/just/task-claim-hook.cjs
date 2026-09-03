@@ -20,8 +20,14 @@
  * makes -- claim one, or create one after the duplicate search and the user's confirmation -- not
  * a refused edit. Whether it earns teeth later is decided on whether these warnings are ignored.
  *
+ * It also runs after `Bash`, which is the other way a file changes: there it has no path to judge,
+ * so it looks at whether the working tree now carries changes outside `docs/tasks/` and speaks
+ * about those. A shell command that changed nothing stays silent.
+ *
  * Reported once per verdict per REPORT_INTERVAL_MS, tracked in .git/task-claim-hook-state, so a
  * fresh session hears it on its first code edit and then is left alone until the situation changes.
+ * The three files under `.git/` are located through `git rev-parse --git-path`, so a linked
+ * worktree, where `.git` is a file, keeps its own marker and state.
  * The registry is fetched at most once per FETCH_INTERVAL_MS, with a short timeout, so the check
  * reads a snapshot that is minutes old at worst without making every edit wait on the network.
  *
@@ -36,14 +42,31 @@ const { spawnSync } = require("child_process");
 const REPO_ROOT = process.env.TASK_CLAIM_HOOK_REPO_ROOT
   ? path.resolve(process.env.TASK_CLAIM_HOOK_REPO_ROOT)
   : path.resolve(__dirname, "..", "..");
-const MARKER_PATH = path.join(REPO_ROOT, ".git", "current-task");
-const STATE_PATH = path.join(REPO_ROOT, ".git", "task-claim-hook-state");
-const FETCH_STAMP_PATH = path.join(REPO_ROOT, ".git", "task-claim-hook-fetched");
 const REPORT_INTERVAL_MS = 10 * 60 * 1000;
 const FETCH_INTERVAL_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 8000;
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
+const SHELL_TOOLS = new Set(["Bash"]);
 const TASK_ID_RE = /^T-(?:\d{6}-[0-9a-z]{3}|\d{4})$/;
+
+function git(root, args, options = {}) {
+  return spawnSync("git", ["-C", root, ...args], { encoding: "utf8", ...options });
+}
+
+/**
+ * A file under this checkout's git directory, wherever that is: in a linked worktree `.git` is a
+ * file pointing elsewhere, and the marker and state belong to the worktree, not to its siblings.
+ */
+function gitPath(name, repoRoot = REPO_ROOT) {
+  const result = git(repoRoot, ["rev-parse", "--git-path", name]);
+  return result.status === 0
+    ? path.resolve(repoRoot, result.stdout.trim())
+    : path.join(repoRoot, ".git", name);
+}
+
+const MARKER_PATH = gitPath("current-task");
+const STATE_PATH = gitPath("task-claim-hook-state");
+const FETCH_STAMP_PATH = gitPath("task-claim-hook-fetched");
 
 /** Registry files are the one place an edit needs no claim: recording is how a claim is made. */
 function isRegistryPath(filePath, repoRoot = REPO_ROOT) {
@@ -86,10 +109,6 @@ function locateRegistry(repoRoot = REPO_ROOT, env = process.env) {
         fs.existsSync(path.join(root, ".git")),
     ) ?? null
   );
-}
-
-function git(root, args, options = {}) {
-  return spawnSync("git", ["-C", root, ...args], { encoding: "utf8", ...options });
 }
 
 /** Fetch the registry's main at most once per interval; a failure leaves the last snapshot in use. */
@@ -195,6 +214,21 @@ function shouldReport(key, statePath = STATE_PATH, now = Date.now()) {
   return true;
 }
 
+/**
+ * After a shell command: the paths the working tree now differs in, outside the registry. Empty
+ * when the command changed nothing tracked or added nothing, which is most of them.
+ */
+function changedPathsOutsideRegistry(repoRoot = REPO_ROOT) {
+  const result = git(repoRoot, ["status", "--porcelain", "--untracked-files=all", "--", "."]);
+  if (result.status !== 0) return [];
+  return result.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.slice(3).trim().replace(/^"|"$/g, ""))
+    .map((entry) => entry.split(" -> ").pop())
+    .filter((file) => !isRegistryPath(file, repoRoot));
+}
+
 function readInput() {
   try {
     const raw = fs.readFileSync(0, "utf8");
@@ -206,9 +240,17 @@ function readInput() {
 
 function main() {
   const input = readInput();
-  if (input.tool_name && !EDIT_TOOLS.has(input.tool_name)) return;
-  const filePath = input.tool_input?.file_path ?? input.tool_input?.notebook_path ?? "";
-  if (isRegistryPath(filePath)) return;
+  let filePath = "";
+  if (input.tool_name && SHELL_TOOLS.has(input.tool_name)) {
+    const changed = changedPathsOutsideRegistry();
+    if (changed.length === 0) return;
+    filePath = changed.length === 1 ? changed[0] : `${changed[0]} and ${changed.length - 1} more`;
+  } else {
+    if (input.tool_name && !EDIT_TOOLS.has(input.tool_name)) return;
+    filePath = input.tool_input?.file_path ?? input.tool_input?.notebook_path ?? "";
+    if (isRegistryPath(filePath)) return;
+    filePath = filePath ? path.relative(REPO_ROOT, path.resolve(REPO_ROOT, filePath)) : "";
+  }
 
   const registryRoot = locateRegistry();
   if (registryRoot) refreshRegistry(registryRoot);
@@ -223,12 +265,11 @@ function main() {
   const key = [result.verdict, result.id ?? "", result.status ?? ""].join(":");
   if (!shouldReport(key)) return;
 
-  const relative = filePath ? path.relative(REPO_ROOT, path.resolve(REPO_ROOT, filePath)) : "";
   process.stdout.write(
     `${JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PostToolUse",
-        additionalContext: message(result, relative),
+        additionalContext: message(result, filePath),
       },
     })}\n`,
   );
@@ -245,7 +286,9 @@ if (require.main === module) {
 module.exports = {
   EDIT_TOOLS,
   REPORT_INTERVAL_MS,
+  changedPathsOutsideRegistry,
   evaluate,
+  gitPath,
   isRegistryPath,
   locateRegistry,
   message,

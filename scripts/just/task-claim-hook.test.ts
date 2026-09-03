@@ -5,22 +5,29 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as hook from "./task-claim-hook.cjs";
 
-const { evaluate, isRegistryPath, locateRegistry, message, shouldReport, taskStatusOnMain } =
-  hook as unknown as {
-    evaluate: (input: {
-      marker: string | null;
-      registryRoot: string | null;
-      statusOf: (id: string) => string | null;
-    }) => { verdict: string; id?: string; status?: string };
-    isRegistryPath: (filePath: string, repoRoot?: string) => boolean;
-    locateRegistry: (repoRoot: string, env: Record<string, string>) => string | null;
-    message: (
-      result: { verdict: string; id?: string; status?: string },
-      filePath: string,
-    ) => string;
-    shouldReport: (key: string, statePath: string, now: number) => boolean;
-    taskStatusOnMain: (registryRoot: string, id: string) => string | null;
-  };
+const {
+  changedPathsOutsideRegistry,
+  evaluate,
+  gitPath,
+  isRegistryPath,
+  locateRegistry,
+  message,
+  shouldReport,
+  taskStatusOnMain,
+} = hook as unknown as {
+  changedPathsOutsideRegistry: (repoRoot: string) => string[];
+  gitPath: (name: string, repoRoot: string) => string;
+  evaluate: (input: {
+    marker: string | null;
+    registryRoot: string | null;
+    statusOf: (id: string) => string | null;
+  }) => { verdict: string; id?: string; status?: string };
+  isRegistryPath: (filePath: string, repoRoot?: string) => boolean;
+  locateRegistry: (repoRoot: string, env: Record<string, string>) => string | null;
+  message: (result: { verdict: string; id?: string; status?: string }, filePath: string) => string;
+  shouldReport: (key: string, statePath: string, now: number) => boolean;
+  taskStatusOnMain: (registryRoot: string, id: string) => string | null;
+};
 
 const HOOK = path.join(__dirname, "task-claim-hook.cjs");
 const ORBIT_ROOT = path.resolve(__dirname, "..", "..");
@@ -240,10 +247,49 @@ describe("the hook itself", () => {
     expect(
       runHook(
         code,
-        { tool_name: "Bash", tool_input: { command: "ls" } },
+        { tool_name: "Read", tool_input: { file_path: "src/x.ts" } },
         { ORBIT_TASKS_REGISTRY: registry },
       ),
     ).toBe("");
+  });
+
+  it("after a shell command, speaks only when the tree now differs outside the registry", () => {
+    const { registry, code } = fixture([]);
+    const env = { ORBIT_TASKS_REGISTRY: registry };
+    const bash = { tool_name: "Bash", tool_input: { command: "whatever ran" } };
+    fs.mkdirSync(path.join(code, "docs", "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(code, "docs", "tasks", "T-1-x.md"), "registry edit\n");
+
+    // Nothing outside docs/tasks has changed: a command that only recorded stays silent.
+    expect(runHook(code, bash, env)).toBe("");
+    expect(changedPathsOutsideRegistry(code)).toEqual([]);
+
+    fs.writeFileSync(path.join(code, "src", "x.ts"), "sed -i wrote this\n");
+    expect(changedPathsOutsideRegistry(code)).toEqual(["src/x.ts"]);
+    expect(runHook(code, bash, env)).toContain("src/x.ts");
+  });
+
+  it("keeps its marker and state inside a linked worktree, where .git is a file", () => {
+    const { registry, code } = fixture([{ id: "T-260902-jxe", status: "in-progress" }]);
+    fs.writeFileSync(path.join(code, "README.md"), "x\n");
+    git(code, "add", "-A");
+    git(code, "commit", "-q", "-m", "init");
+    const worktree = path.join(path.dirname(code), "orbit-wt");
+    git(code, "worktree", "add", "-q", "-b", "feature", worktree);
+    fs.mkdirSync(path.join(worktree, "src"), { recursive: true });
+    expect(fs.statSync(path.join(worktree, ".git")).isFile()).toBe(true);
+
+    const marker = gitPath("current-task", worktree);
+    expect(marker).not.toBe(path.join(worktree, ".git", "current-task"));
+    fs.writeFileSync(marker, "T-260902-jxe\n");
+
+    expect(runHook(worktree, edit(worktree, "src/x.ts"), { ORBIT_TASKS_REGISTRY: registry })).toBe(
+      "",
+    );
+    // The main checkout has no marker of its own, so the same edit there is unclaimed.
+    expect(runHook(code, edit(code, "src/x.ts"), { ORBIT_TASKS_REGISTRY: registry })).toContain(
+      "No claimed task",
+    );
   });
 
   it("is registered beside the size hook on every file edit", () => {
@@ -255,5 +301,10 @@ describe("the hook itself", () => {
     );
 
     expect(entry?.matcher).toBe("Edit|Write|NotebookEdit");
+    // And after shell commands, which are the other way a file changes.
+    const shell = settings.hooks.PostToolUse.find(
+      (e) => e.matcher === "Bash" && e.hooks.some((h) => h.command.includes("task-claim-hook.cjs")),
+    );
+    expect(shell).toBeDefined();
   });
 });
