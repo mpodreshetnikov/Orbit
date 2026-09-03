@@ -483,3 +483,21 @@ describe("a run the person asked for", () => {
     expect(harness.openedTabs).toEqual([]);
   });
 });
+
+describe("the sweep's own tabs", () => {
+  it("are known to it while open, and not after", async () => {
+    let ownedDuringRun: boolean | null = null;
+    const harness = createHarness({
+      runImport: vi.fn(async () => {
+        ownedDuringRun = harness.sweep.ownsTab(77);
+        return undefined;
+      }),
+    });
+
+    expect(harness.sweep.ownsTab(77)).toBe(false);
+    await harness.sweep.run("alarm");
+
+    expect(ownedDuringRun).toBe(true);
+    expect(harness.sweep.ownsTab(77)).toBe(false);
+  });
+});

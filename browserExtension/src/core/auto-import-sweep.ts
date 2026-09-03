@@ -70,6 +70,13 @@ export function isCredentialRefusal(error: unknown): boolean {
 
 export interface AutoImportSweep {
   run: (trigger: AutoImportTrigger, options?: AutoImportRunOptions) => Promise<void>;
+  /**
+   * Whether a tab is one this sweep opened and has not yet closed. A page finishing its load
+   * in such a tab is not a visit: it is the sweep's own doing, and counting it scheduled
+   * another sweep a minute later -- which, with a run request held past a failed attempt,
+   * meant a failed attempt at the bank every minute for as long as the request lived.
+   */
+  ownsTab: (tabId: number) => boolean;
 }
 
 export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSweep {
@@ -94,6 +101,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
    */
   const pending = new Set<string>();
   let pendingAll = false;
+  const ownedTabs = new Set<number>();
 
   /**
    * Runs one source in a tab opened for the purpose.
@@ -119,6 +127,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
 
     const tabId = await deps.openTab(source.targetUrl);
     if (tabId === null) return;
+    ownedTabs.add(tabId);
 
     try {
       if (!(await deps.waitForTabComplete(tabId))) {
@@ -165,10 +174,12 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       // The session field is cleared by the run itself, which is the only party that knows
       // whether the session still there is its own or one a person has just started.
       await deps.closeTab(tabId);
+      ownedTabs.delete(tabId);
     }
   }
 
   return {
+    ownsTab: (tabId) => ownedTabs.has(tabId),
     async run(trigger, options = {}) {
       if (inFlight) {
         if (options.sourceId) pending.add(options.sourceId);

@@ -1,0 +1,101 @@
+import type { GrantStore } from "./grant-store.js";
+import type { AutoRunStore } from "./auto-run-store.js";
+import type { AttentionStore } from "./attention-store.js";
+import { buildAttentionStatus } from "./attention-status.js";
+import { shouldOpenAttentionPage } from "./attention-policy.js";
+
+/**
+ * Counts the sources that have gone quiet, shows the count on the icon, and -- when allowed
+ * to -- opens the attention page for a person to act on.
+ *
+ * One refresh at a time. The browser's start and the alarm after it can land together, and two
+ * refreshes reading the same "never opened" would both pass the once-a-day check and open two
+ * pages; queued, the second reads what the first recorded. Kept free of `chrome.*` so that,
+ * and the once-a-day limit, can be tested directly.
+ */
+
+/** Where the app lists what needs a person: opened by the extension when a source goes stale. */
+export const ATTENTION_PAGE_PATH = "/money/import/attention";
+
+export function buildAttentionPageUrl(appOrigin: string): string | null {
+  try {
+    return new URL(ATTENTION_PAGE_PATH, appOrigin).toString();
+  } catch {
+    return null;
+  }
+}
+
+export interface AttentionRefresherDeps {
+  grantStore: GrantStore;
+  autoRunStore: AutoRunStore;
+  attentionStore: AttentionStore;
+  /** The sources an unattended run can visit. */
+  listSourceIds: () => string[];
+  setBadge: (staleCount: number) => Promise<void>;
+  openPage: (url: string) => Promise<void>;
+  now: () => number;
+  onInfo: (event: string, attrs: Record<string, unknown>) => void;
+  onWarning: (event: string, attrs: Record<string, unknown>) => void;
+}
+
+export interface AttentionRefresher {
+  /**
+   * Opening the page is offered only from the start and the alarm. A page that opened itself a
+   * minute after the person pressed Update, on the visit sweep their sign-in caused, would be
+   * the extension nagging about the thing they are in the middle of fixing.
+   */
+  refresh(reason: string, options: { mayOpenPage: boolean }): Promise<void>;
+}
+
+export function createAttentionRefresher(deps: AttentionRefresherDeps): AttentionRefresher {
+  let chain: Promise<void> = Promise.resolve();
+
+  async function run(reason: string, options: { mayOpenPage: boolean }): Promise<void> {
+    try {
+      const grant = await deps.grantStore.getGrant();
+      const attention = await deps.attentionStore.getState();
+      const nowMs = deps.now();
+      const status = await buildAttentionStatus({
+        grant,
+        knownSources: deps.listSourceIds(),
+        autoRunStore: deps.autoRunStore,
+        attention,
+        nowMs,
+      });
+      await deps.setBadge(status.stale_count);
+      if (!options.mayOpenPage || !grant) return;
+      if (
+        !shouldOpenAttentionPage({
+          staleCount: status.stale_count,
+          lastOpenedAtMs: attention.lastOpenedAtMs,
+          nowMs,
+        })
+      ) {
+        return;
+      }
+      const url = buildAttentionPageUrl(grant.app_origin);
+      if (!url) return;
+      // Recorded before the tab exists: a page that fails to open is not retried on the next
+      // refresh either, which is the cheaper mistake -- the badge still says what is stale.
+      await deps.attentionStore.markPageOpened(nowMs);
+      await deps.openPage(url);
+      deps.onInfo("money_import_attention_page_opened", {
+        reason,
+        stale_count: status.stale_count,
+      });
+    } catch (error) {
+      deps.onWarning("money_import_attention_check_failed", {
+        reason,
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    refresh(reason, options) {
+      const next = chain.then(() => run(reason, options));
+      chain = next;
+      return next;
+    },
+  };
+}
