@@ -10,7 +10,12 @@ import { CheckCircle2, FileSpreadsheet, HelpCircle, LinkIcon, Plus, Upload } fro
 import { useUIStore } from "@/stores/ui-store";
 import { useMoneyAccounts, useCreateMoneyAccount, useMoneyCardsByAccountIds } from "@/hooks";
 import { getConnectors } from "@/lib/import/connector-types";
-import { MoneyImportGrants } from "@/components/money";
+import {
+  MoneyImportAutoStatus,
+  MoneyImportGrants,
+  readExtensionAutoStatus,
+  type ExtensionAutoStatus,
+} from "@/components/money";
 import {
   isExtensionOutdated,
   normalizeExtensionRelease,
@@ -411,6 +416,10 @@ export default function MoneyImportPage() {
   const [defaultAccountId, setDefaultAccountId] = useState<string>("");
 
   const [extensionActive, setExtensionActive] = useState<boolean | null>(null);
+  const [extensionAutoStatus, setExtensionAutoStatus] = useState<{
+    state: "loading" | "inactive" | "unavailable" | "ready";
+    status: ExtensionAutoStatus | null;
+  }>({ state: "loading", status: null });
   const [extensionStatusMessage, setExtensionStatusMessage] = useState<string | null>(null);
   const [installedExtensionId, setInstalledExtensionId] = useState<string | null>(null);
   const [installedExtensionVersion, setInstalledExtensionVersion] = useState<string | null>(null);
@@ -855,6 +864,62 @@ export default function MoneyImportPage() {
     }
   }, [shouldUsePublishedExtensionFlow]);
 
+  const requestExtensionAutoStatus = useCallback(async (): Promise<ExtensionAutoStatus | null> => {
+    return await new Promise<ExtensionAutoStatus | null>((resolve) => {
+      // The bridge echoes this, so a reply to an earlier request -- a Re-check while the
+      // post-grant refresh is still pending -- cannot answer this one with older state.
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        resolve(null);
+      }, EXTENSION_PING_TIMEOUT_MS);
+
+      const onMessage = (event: MessageEvent) => {
+        const data = event.data as Record<string, unknown> | null;
+        if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
+        if (data.type !== "MONEY_IMPORT_AUTO_STATUS") return;
+        if (data.request_id !== requestId) return;
+
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        resolve(readExtensionAutoStatus(data));
+      };
+
+      window.addEventListener("message", onMessage);
+      window.postMessage(
+        {
+          source: EXTENSION_WEBAPP_SOURCE,
+          type: "MONEY_IMPORT_GET_AUTO_STATUS",
+          request_id: requestId,
+          ts: Date.now(),
+        },
+        "*",
+      );
+    });
+  }, []);
+
+  // The extension's own account of what it will do on its own. Asked on its own ping rather
+  // than the connector's, because the grants panel above it is shown whatever source is
+  // selected -- and "nothing happens" is a question people bring to this screen first.
+  const refreshExtensionAutoStatus = useCallback(async () => {
+    setExtensionAutoStatus({ state: "loading", status: null });
+    const pingResult = await pingExtension();
+    if (!pingResult.active) {
+      setExtensionAutoStatus({ state: "inactive", status: null });
+      return;
+    }
+    // The ping succeeded, so the extension is there; a status it cannot give (an older
+    // version, a slow service-worker wake) is "unavailable", not "not installed".
+    const status = await requestExtensionAutoStatus();
+    setExtensionAutoStatus(
+      status ? { state: "ready", status } : { state: "unavailable", status: null },
+    );
+  }, [pingExtension, requestExtensionAutoStatus]);
+
+  useEffect(() => {
+    void refreshExtensionAutoStatus();
+  }, [refreshExtensionAutoStatus]);
+
   const checkExtension = useCallback(async () => {
     setExtensionActive(null);
     setInstalledExtensionId(null);
@@ -864,7 +929,8 @@ export default function MoneyImportPage() {
     setInstalledExtensionId(pingResult.extensionId);
     setInstalledExtensionVersion(pingResult.extensionVersion);
     setExtensionStatusMessage(null);
-  }, [pingExtension]);
+    void refreshExtensionAutoStatus();
+  }, [pingExtension, refreshExtensionAutoStatus]);
 
   useEffect(() => {
     if (!isExtensionConnector) return;
@@ -1000,6 +1066,26 @@ export default function MoneyImportPage() {
       });
     },
     [],
+  );
+
+  // A key the extension just took changes what the status card should say.
+  const sendGrantToExtensionAndRefresh = useCallback(
+    async (grant: { token: string; personId: string; allowedSources: string[] }) => {
+      const delivered = await sendGrantToExtension(grant);
+      if (delivered) void refreshExtensionAutoStatus();
+      return delivered;
+    },
+    [refreshExtensionAutoStatus, sendGrantToExtension],
+  );
+
+  const extensionSourceLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        connectors
+          .filter((connector) => connector.kind !== "file")
+          .map((connector) => [connector.sourceId, resolveConnectorSourceLabel(t, connector)]),
+      ) as Record<string, string>,
+    [connectors, t],
   );
 
   const sendSessionToExtension = useCallback(
@@ -1213,7 +1299,16 @@ export default function MoneyImportPage() {
         t={t}
         personId={selectedPersonId}
         availableSources={extensionConnectorOptions}
-        onSendToExtension={sendGrantToExtension}
+        onSendToExtension={sendGrantToExtensionAndRefresh}
+      />
+
+      <MoneyImportAutoStatus
+        t={t}
+        state={extensionAutoStatus.state}
+        status={extensionAutoStatus.status}
+        selectedPersonId={selectedPersonId}
+        sourceLabels={extensionSourceLabels}
+        onRefresh={() => void refreshExtensionAutoStatus()}
       />
 
       <Card>

@@ -136,4 +136,39 @@ describe("content-bridge", () => {
     expect(runtimeSendMessage).not.toHaveBeenCalled();
     expect(windowPostMessage).not.toHaveBeenCalled();
   });
+
+  it("relays the auto-import status request and answers with what came back", () => {
+    const runtimeSendMessage = vi.fn((_message, callback) => {
+      callback?.({
+        ok: true,
+        grant: { person_id: "person-1", allowed_sources: ["tbank_web"], received_at: "x" },
+        sources: [{ source_id: "tbank_web", next_run: { kind: "now" } }],
+      });
+    });
+    const windowPostMessage = vi.fn();
+    const bridge = createContentBridge({ runtimeSendMessage, windowPostMessage });
+
+    bridge.handleWindowMessage(
+      new MessageEvent("message", {
+        source: window,
+        data: { source: "orbit-webapp", type: "MONEY_IMPORT_GET_AUTO_STATUS", request_id: "r-7" },
+      }),
+    );
+
+    expect(runtimeSendMessage).toHaveBeenCalledWith(
+      { type: "MONEY_IMPORT_GET_AUTO_STATUS" },
+      expect.any(Function),
+    );
+    expect(windowPostMessage).toHaveBeenCalledWith(
+      {
+        source: "orbit-extension",
+        type: "MONEY_IMPORT_AUTO_STATUS",
+        request_id: "r-7",
+        ok: true,
+        grant: { person_id: "person-1", allowed_sources: ["tbank_web"], received_at: "x" },
+        sources: [{ source_id: "tbank_web", next_run: { kind: "now" } }],
+      },
+      "*",
+    );
+  });
 });

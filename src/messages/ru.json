@@ -684,7 +684,22 @@
     "importReportBatchIdMissing": "Не указан идентификатор партии",
     "importReportBatchNotFound": "Партия не найдена",
     "importReportLoadFailed": "Не удалось загрузить",
-    "importReportLineItemUntitled": "Позиция"
+    "importReportLineItemUntitled": "Позиция",
+    "importAutoStatusTitle": "Автоимпорт в расширении",
+    "importAutoStatusExtensionInactive": "Расширение не ответило. Для автоимпорта оно должно быть установлено и включено в этом браузере.",
+    "importAutoStatusNoGrant": "У расширения нет ключа. Выпустите его выше и отправьте в расширение.",
+    "importAutoStatusGrantHeld": "Ключ получен {date}. Источники: {sources}",
+    "importAutoStatusNeverRan": "Автозапусков ещё не было. Откройте {source} — через минуту тишины расширение запустит импорт само.",
+    "importAutoStatusScheduled": "Запуск запланирован на {time}.",
+    "importAutoStatusLastOk": "Последний автозапуск {date} прошёл успешно.",
+    "importAutoStatusLastFailed": "Последний автозапуск {date} не удался: {error}",
+    "importAutoStatusNextAfter": "Следующая попытка не раньше {next}.",
+    "importAutoStatusStopped": "Остановлен после {count} неудач подряд. Успешный ручной импорт или обновление расширения возобновят его.",
+    "importAutoStatusUnavailable": "Расширение ответило, но не сообщило свой статус. Возможно, его нужно обновить.",
+    "importAutoStatusGrantOtherPerson": "У расширения ключ другого человека, получен {date}. Выпустите ключ для этого человека выше и отправьте в расширение.",
+    "importAutoStatusLastManualOk": "Последний импорт {date} был запущен вручную и прошёл успешно.",
+    "importAutoStatusEligibleNow": "Может запуститься сейчас: при ближайшем визите в банк или по периодической проверке расширения.",
+    "importAutoStatusLastOkUnknownOrigin": "Последний импорт {date} прошёл успешно."
   },
   "records": {
     "title": "Медицинские записи",

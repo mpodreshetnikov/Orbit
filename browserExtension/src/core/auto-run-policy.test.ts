@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createInitialAutoRunState,
   DEFAULT_AUTO_RUN_COOLDOWN_MS,
+  describeAutoRunEligibility,
   nextAutoRunState,
   shouldAutoRun,
 } from "./auto-run-policy";
@@ -58,12 +59,81 @@ describe("shouldAutoRun", () => {
 describe("nextAutoRunState", () => {
   it("counts consecutive failures and clears them on success", () => {
     let state = nextAutoRunState(null, NOW, "error");
-    expect(state).toEqual({ lastRunAtMs: NOW, lastResult: "error", consecutiveFailures: 1 });
+    expect(state).toEqual({
+      lastRunAtMs: NOW,
+      lastResult: "error",
+      consecutiveFailures: 1,
+      lastError: null,
+      lastRunOrigin: "auto",
+    });
 
     state = nextAutoRunState(state, NOW + 1, "error");
     expect(state.consecutiveFailures).toBe(2);
 
     state = nextAutoRunState(state, NOW + 2, "ok");
-    expect(state).toEqual({ lastRunAtMs: NOW + 2, lastResult: "ok", consecutiveFailures: 0 });
+    expect(state).toEqual({
+      lastRunAtMs: NOW + 2,
+      lastResult: "ok",
+      consecutiveFailures: 0,
+      lastError: null,
+      lastRunOrigin: "auto",
+    });
+  });
+});
+
+describe("describeAutoRunEligibility", () => {
+  // The import page shows this; it must say what shouldAutoRun will decide.
+  it("agrees with shouldAutoRun in every state", () => {
+    const cases = [
+      null,
+      createInitialAutoRunState(),
+      { lastRunAtMs: NOW - 60_000, lastResult: "ok" as const, consecutiveFailures: 0 },
+      { lastRunAtMs: NOW - 60_000, lastResult: "error" as const, consecutiveFailures: 1 },
+      { lastRunAtMs: NOW - 60_000, lastResult: "error" as const, consecutiveFailures: 3 },
+    ];
+    for (const state of cases) {
+      for (const at of [
+        NOW,
+        NOW + DEFAULT_AUTO_RUN_COOLDOWN_MS,
+        NOW + 10 * DEFAULT_AUTO_RUN_COOLDOWN_MS,
+      ]) {
+        const eligibilityAt = describeAutoRunEligibility(state, at);
+        expect(shouldAutoRun(state, at)).toBe(eligibilityAt.kind === "now");
+        // "after" is only ever a moment still ahead.
+        if (eligibilityAt.kind === "after") expect(eligibilityAt.atMs).toBeGreaterThan(at);
+      }
+    }
+  });
+
+  it("names the moment a failed run may be retried", () => {
+    const twoFailures = { lastRunAtMs: NOW, lastResult: "error" as const, consecutiveFailures: 2 };
+    expect(describeAutoRunEligibility(twoFailures, NOW)).toEqual({
+      kind: "after",
+      atMs: NOW + 2 * DEFAULT_AUTO_RUN_COOLDOWN_MS,
+    });
+    // Once that moment has passed it is "now", not a receding timestamp.
+    expect(describeAutoRunEligibility(twoFailures, NOW + 2 * DEFAULT_AUTO_RUN_COOLDOWN_MS)).toEqual(
+      { kind: "now" },
+    );
+  });
+});
+
+describe("nextAutoRunState", () => {
+  it("keeps what the failed attempt said, and drops it on success", () => {
+    const failed = nextAutoRunState(
+      null,
+      NOW,
+      "error",
+      "T-Bank did not stay on the operations page",
+    );
+    expect(failed.lastError).toBe("T-Bank did not stay on the operations page");
+    // A failure without a message keeps the previous one rather than forgetting it.
+    expect(nextAutoRunState(failed, NOW + 1, "error").lastError).toBe(failed.lastError);
+    expect(nextAutoRunState(failed, NOW + 2, "ok").lastError).toBeNull();
+  });
+
+  it("remembers who started the run", () => {
+    expect(nextAutoRunState(null, NOW, "ok", null, "manual").lastRunOrigin).toBe("manual");
+    expect(nextAutoRunState(null, NOW, "ok").lastRunOrigin).toBe("auto");
   });
 });
