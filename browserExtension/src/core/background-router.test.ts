@@ -934,6 +934,7 @@ describe("background-router", () => {
       const state = {
         staleAfterMs: initial?.staleAfterMs ?? DAY,
         lastOpenedAtMs: initial?.lastOpenedAtMs ?? null,
+        lastStartedAtMs: null as number | null,
         runRequests: { ...(initial?.runRequests ?? {}) },
       };
       return {
@@ -945,6 +946,9 @@ describe("background-router", () => {
         }),
         markPageOpened: vi.fn(async (nowMs: number) => {
           state.lastOpenedAtMs = nowMs;
+        }),
+        markBrowserStarted: vi.fn(async (nowMs: number) => {
+          state.lastStartedAtMs = nowMs;
         }),
         requestRun: vi.fn(
           async (scope: { sourceId: string; payerPersonId: string }, nowMs: number) => {
