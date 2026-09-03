@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as retry from "./supabase-cli-retry.cjs";
 
-const { runWithRetry, isRetryable, MAX_ATTEMPTS } = retry as {
+const { runWithRetry, isRetryable, launchSpec, MAX_ATTEMPTS } = retry as {
+  launchSpec: (
+    args: string[],
+    options: { platform: string; env: Record<string, string>; npxBin?: string },
+  ) => { command: string; args: string[] };
   runWithRetry: (input: {
     args: string[];
     run: (args: string[], attempt: number) => Promise<{ status: number; combined: string }>;
@@ -119,5 +123,24 @@ describe("supabase CLI retry", () => {
 
     expect(calls).toBe(1);
     expect(result).toEqual({ status: 0, attempts: 1 });
+  });
+
+  it("launches npx through the command interpreter on Windows, where Node cannot spawn a .cmd", () => {
+    const args = ["supabase", "start"];
+
+    expect(launchSpec(args, { platform: "linux", env: {}, npxBin: "/usr/bin/npx" })).toEqual({
+      command: "/usr/bin/npx",
+      args,
+    });
+    expect(
+      launchSpec(args, {
+        platform: "win32",
+        env: { ComSpec: "C:\\W\\cmd.exe" },
+        npxBin: "npx.cmd",
+      }),
+    ).toEqual({ command: "C:\\W\\cmd.exe", args: ["/d", "/s", "/c", "npx.cmd", ...args] });
+    expect(launchSpec(args, { platform: "win32", env: {}, npxBin: "npx.cmd" }).command).toBe(
+      "cmd.exe",
+    );
   });
 });

@@ -42,6 +42,8 @@
  */
 
 const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 /** The edge-runtime readiness failure. */
 const READINESS_502 = /Error status 502/;
@@ -54,9 +56,31 @@ const MAX_ATTEMPTS = 3;
 /** Long enough for a runtime that was still booting to have finished. */
 const BACKOFF_MS = [5000, 15000];
 
-function runCommand(command, args, { onChunk }) {
+/** The npx beside the Node running this, so the CLI is the lockfile's; on Windows the `.cmd`. */
+function resolveNpxBin(platform = process.platform, execPath = process.execPath) {
+  const nodeDir = path.dirname(execPath);
+  const name = platform === "win32" ? "npx.cmd" : "npx";
+  const beside = path.join(nodeDir, name);
+  return fs.existsSync(beside) ? beside : name;
+}
+
+/**
+ * What to spawn. Node cannot launch a `.cmd` without a shell, so on Windows npx goes through the
+ * command interpreter -- the same path `dev-ready-local.cjs` and `run-e2e.cjs` take. Pure, so the
+ * Windows branch can be tested from anywhere.
+ */
+function launchSpec(args, { platform = process.platform, env = process.env, npxBin } = {}) {
+  const bin = npxBin ?? resolveNpxBin(platform);
+  if (platform === "win32") {
+    return { command: env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", bin, ...args] };
+  }
+  return { command: bin, args };
+}
+
+function runCommand(args, { onChunk }) {
+  const { command, args: spawnArgs } = launchSpec(args);
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"] });
+    const child = spawn(command, spawnArgs, { stdio: ["inherit", "pipe", "pipe"] });
     let combined = "";
 
     const forward = (stream, sink) => {
@@ -134,7 +158,7 @@ async function main(argv) {
 
   const { status } = await runWithRetry({
     args,
-    run: (cliArgs) => runCommand("npx", ["supabase", ...cliArgs], {}),
+    run: (cliArgs) => runCommand(["supabase", ...cliArgs], {}),
   });
   return status;
 }
@@ -148,4 +172,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { isRetryable, runWithRetry, MAX_ATTEMPTS, BACKOFF_MS };
+module.exports = { isRetryable, launchSpec, runWithRetry, MAX_ATTEMPTS, BACKOFF_MS };
