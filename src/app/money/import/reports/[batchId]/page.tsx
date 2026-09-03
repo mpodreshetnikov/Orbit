@@ -37,6 +37,15 @@ const VIRTUAL_OVERSCAN = 6;
 const VIRTUAL_ROW_THRESHOLD = 40;
 const REPORT_GRID_COLUMNS = "grid-cols-[160px_110px_140px_120px_180px_minmax(300px,1fr)_120px]";
 
+/** The history screen translates the same enum; the report's summary line did not. */
+const BATCH_STATUS_KEYS: Record<string, string> = {
+  pending: "money.importBatchStatusPending",
+  running: "money.importBatchStatusRunning",
+  completed: "money.importBatchStatusCompleted",
+  failed: "money.importBatchStatusFailed",
+  discarded: "money.importBatchStatusDiscarded",
+};
+
 function normalizeId(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -264,7 +273,7 @@ export default function MoneyImportReportPage() {
 
   useEffect(() => {
     if (!batchId) {
-      setError("Batch id is missing");
+      setError(t("money.importReportBatchIdMissing"));
       setLoading(false);
       return;
     }
@@ -284,7 +293,7 @@ export default function MoneyImportReportPage() {
 
       if (batchError || !batchData) {
         if (!cancelled) {
-          setError(batchError?.message ?? "Batch not found");
+          setError(batchError?.message ?? t("money.importReportBatchNotFound"));
           setLoading(false);
         }
         return;
@@ -320,7 +329,7 @@ export default function MoneyImportReportPage() {
           setError(
             brandResolutionsResponse.error?.message ??
               brandsResponse.error?.message ??
-              "Load failed",
+              t("money.importReportLoadFailed"),
           );
           setLoading(false);
         }
@@ -374,7 +383,9 @@ export default function MoneyImportReportPage() {
         if (accountsResponse.error || cardsResponse.error) {
           if (!cancelled) {
             setError(
-              accountsResponse.error?.message ?? cardsResponse.error?.message ?? "Load failed",
+              accountsResponse.error?.message ??
+                cardsResponse.error?.message ??
+                t("money.importReportLoadFailed"),
             );
             setLoading(false);
           }
@@ -397,7 +408,7 @@ export default function MoneyImportReportPage() {
           const accountId = normalizeId((account as { id?: unknown }).id);
           if (!accountId) return;
           const label = normalizeId((account as { account_label?: unknown }).account_label);
-          nextAccountNameById[accountId] = label ?? "Account";
+          nextAccountNameById[accountId] = label ?? t("money.account");
         });
 
         const nextCardNameById: Record<string, string> = {};
@@ -424,7 +435,7 @@ export default function MoneyImportReportPage() {
               cardId,
               cardLabel,
               currentAccountId,
-              currentAccountLabel: nextAccountNameById[currentAccountId] ?? "Account",
+              currentAccountLabel: nextAccountNameById[currentAccountId] ?? t("money.account"),
               targetAccountId: currentAccountId,
             } satisfies CardMappingOption;
           })
@@ -446,7 +457,7 @@ export default function MoneyImportReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [batchId, refreshTick]);
+  }, [batchId, refreshTick, t]);
 
   useEffect(() => {
     const node = listRef.current;
@@ -603,13 +614,18 @@ export default function MoneyImportReportPage() {
     }));
   };
 
+  const batchStatusLabel = useMemo(() => {
+    const key = batch?.status ? BATCH_STATUS_KEYS[batch.status] : undefined;
+    return key ? t(key) : (batch?.status ?? "");
+  }, [batch?.status, t]);
+
   const accountLabelById = useMemo(() => {
     const map: Record<string, string> = {};
     sourceAccounts.forEach((account) => {
-      map[account.id] = normalizeId(account.account_label) ?? "Account";
+      map[account.id] = normalizeId(account.account_label) ?? t("money.account");
     });
     return map;
-  }, [sourceAccounts]);
+  }, [sourceAccounts, t]);
 
   const batchMeta = useMemo(() => asRecord(batch?.meta), [batch?.meta]);
   const rangeSelectionMeta = useMemo(() => asRecord(batchMeta.range_selection_meta), [batchMeta]);
@@ -830,7 +846,7 @@ export default function MoneyImportReportPage() {
         <CardContent className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
           <div>{t("money.importReportSummaryBatch", { value: batch.id })}</div>
           <div>{t("money.importReportSummarySource", { value: batch.source })}</div>
-          <div>{t("money.importReportSummaryStatus", { value: batch.status })}</div>
+          <div>{t("money.importReportSummaryStatus", { value: batchStatusLabel })}</div>
           <div>{t("money.importReportSummaryParsedRows", { value: parsedRowCount })}</div>
           <div>
             {t("money.importReportSummarySelectedRange", {
@@ -1384,7 +1400,7 @@ export default function MoneyImportReportPage() {
                               const lineTitle =
                                 typeof linePayload.title === "string" && linePayload.title.trim()
                                   ? linePayload.title.trim()
-                                  : "Line item";
+                                  : t("money.importReportLineItemUntitled");
                               const lineComment =
                                 typeof linePayload.comment === "string" &&
                                 linePayload.comment.trim()

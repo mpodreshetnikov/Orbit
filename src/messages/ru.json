@@ -680,7 +680,11 @@
     "importReportLineItemsCount": "Позиции ({count})",
     "importReportLineNumber": "Позиция {number}",
     "importReportTransactionPayloadTitle": "Данные операции: {name}",
-    "importReportLinePayloadTitle": "Данные позиции: {name}"
+    "importReportLinePayloadTitle": "Данные позиции: {name}",
+    "importReportBatchIdMissing": "Не указан идентификатор партии",
+    "importReportBatchNotFound": "Партия не найдена",
+    "importReportLoadFailed": "Не удалось загрузить",
+    "importReportLineItemUntitled": "Позиция"
   },
   "records": {
     "title": "Медицинские записи",

@@ -21,30 +21,34 @@ const ROOT = join(__dirname, "..");
 const SCANNED_DIRS = ["app", "components"];
 
 /**
- * Known debt. Keep alphabetical. A file listed here that no longer has hardcoded copy fails the
- * test until it is removed.
+ * Known debt, as a count of hits per file. Keep alphabetical. A file whose count goes up has
+ * gained hardcoded copy and fails; one whose count goes down asks for its number to be lowered,
+ * so the list cannot go stale. Zero is not a valid entry: remove the file instead.
  */
-const FILES_WITH_KNOWN_HARDCODED_COPY = new Set<string>([
-  "app/health/measurements/[code]/page.tsx",
-  "app/health/observations/[obsCode]/page.tsx",
-  "app/money/accounts/page.tsx",
-  "app/money/transactions/[id]/page.tsx",
-  "app/oauth/authorize/page.tsx",
-  "app/settings/notifications-debug/page.tsx",
-  "app/settings/page.tsx",
-  "components/catalogs/body-site-edit-dialog.tsx",
-  "components/catalogs/finding-type-edit-dialog.tsx",
-  "components/catalogs/measurement-catalog-edit-dialog.tsx",
-  "components/catalogs/observation-edit-dialog.tsx",
-  "components/layout/scroll-to-top.tsx",
-  "components/oauth/consent-form.tsx",
-  "components/records/attachment-preview.tsx",
-  "components/records/camera-capture.tsx",
-  "components/records/record-card.tsx",
-  "components/records/record-detail.tsx",
-  "components/ui/dialog.tsx",
-  "components/ui/sheet.tsx",
-]);
+const KNOWN_HARDCODED_COPY_BASELINE: Record<string, number> = {
+  "app/health/measurements/[code]/page.tsx": 1,
+  "app/health/observations/[obsCode]/page.tsx": 2,
+  "app/money/accounts/page.tsx": 1,
+  "app/money/transactions/[id]/page.tsx": 1,
+  "app/oauth/authorize/page.tsx": 2,
+  "app/settings/notifications-debug/page.tsx": 4,
+  "app/settings/page.tsx": 5,
+  "components/auth/login-form.tsx": 1,
+  "components/catalogs/body-site-edit-dialog.tsx": 1,
+  "components/catalogs/finding-type-edit-dialog.tsx": 1,
+  "components/catalogs/measurement-catalog-edit-dialog.tsx": 1,
+  "components/catalogs/observation-edit-dialog.tsx": 1,
+  "components/layout/scroll-to-top.tsx": 1,
+  "components/oauth/consent-form.tsx": 8,
+  "components/records/add-record-wizard.tsx": 2,
+  "components/records/attachment-preview.tsx": 1,
+  "components/records/camera-capture.tsx": 1,
+  "components/records/file-dropzone.tsx": 2,
+  "components/records/record-card.tsx": 1,
+  "components/records/record-detail.tsx": 1,
+  "components/ui/dialog.tsx": 1,
+  "components/ui/sheet.tsx": 1,
+};
 
 /** Attributes whose string value is read by a person or a screen reader. */
 const COPY_ATTRIBUTES = new Set([
@@ -65,7 +69,7 @@ function looksLikeCopy(raw: string): boolean {
 
 export interface HardcodedCopyHit {
   line: number;
-  kind: "text" | "attribute" | "expression" | "toast";
+  kind: "text" | "attribute" | "expression" | "sink";
   text: string;
 }
 
@@ -88,12 +92,18 @@ function stringishText(node: Stringish): string {
 }
 
 /**
- * A toast is read by a person as surely as a heading is. Its argument is the one call
- * argument treated as copy; `t("...")`, `cn("...")` and `format(x, "...")` are the callee's.
+ * Some calls are read by a person as surely as a heading is: a toast, a state setter whose
+ * value ends up rendered (`setError("Batch not found")` shows as `{error}`), and an Error a
+ * component throws for its own handler to display. Their string arguments are copy;
+ * `t("...")`, `cn("...")` and `format(x, "...")` remain the callee's business.
  */
-function isToastArgument(node: ts.Node): boolean {
+function isCopySinkArgument(node: ts.Node): boolean {
   let current: ts.Node = node;
-  while (current.parent && !ts.isCallExpression(current.parent)) {
+  while (
+    current.parent &&
+    !ts.isCallExpression(current.parent) &&
+    !ts.isNewExpression(current.parent)
+  ) {
     if (
       ts.isJsxExpression(current.parent) ||
       ts.isPropertyAssignment(current.parent) ||
@@ -104,10 +114,11 @@ function isToastArgument(node: ts.Node): boolean {
     current = current.parent;
   }
   const call = current.parent;
-  if (!call || !ts.isCallExpression(call) || !call.arguments.includes(current as ts.Expression)) {
-    return false;
-  }
-  return /^toast(\.\w+)?$/.test(call.expression.getText());
+  if (!call || (!ts.isCallExpression(call) && !ts.isNewExpression(call))) return false;
+  if (!call.arguments?.includes(current as ts.Expression)) return false;
+  const callee = call.expression.getText();
+  if (ts.isNewExpression(call)) return callee === "Error";
+  return /^toast(\.\w+)?$/.test(callee) || /^set[A-Z]\w*$/.test(callee);
 }
 
 function enclosingJsxExpression(node: ts.Node): ts.JsxExpression | null {
@@ -166,8 +177,8 @@ export function findHardcodedCopy(source: string, fileName = "file.tsx"): Hardco
     } else if (isStringish(node)) {
       const text = stringishText(node);
       if (looksLikeCopy(text)) {
-        if (isToastArgument(node)) {
-          hits.push({ line: lineOf(node), kind: "toast", text });
+        if (isCopySinkArgument(node)) {
+          hits.push({ line: lineOf(node), kind: "sink", text });
         } else {
           const expression = enclosingJsxExpression(node);
           // `{cond ? "Show rows" : "Hide rows"}` as a child is copy; the same inside
@@ -208,6 +219,8 @@ describe("findHardcodedCopy", () => {
           <button onClick={() => toast.success(\`Card merged. Updated \${n} transactions.\`)}>
             {\`Line items (\${lines.length})\`}
           </button>
+          <button onClick={() => setError("Batch not found")}>{label}</button>
+          <button onClick={() => { throw new Error("Import context is unavailable."); }} />
         </div>
       );
     `);
@@ -220,6 +233,8 @@ describe("findHardcodedCopy", () => {
       "Custom",
       "Card merged. Updated transactions.",
       "Line items ( )",
+      "Batch not found",
+      "Import context is unavailable.",
     ]);
   });
 
@@ -234,6 +249,7 @@ describe("findHardcodedCopy", () => {
           <em>{" "}</em>
           {busy && <Loader className="h-4 w-4 animate-spin mr-2" />}
           <option value="create_new">{label}</option>
+          <button onClick={() => { setMode("compact"); setOpen(true); }} />
         </div>
       );
     `);
@@ -248,28 +264,30 @@ describe("app copy goes through the message catalogue", () => {
     expect(files.length).toBeGreaterThan(50);
   });
 
-  it("finds no hardcoded copy outside the files already known to carry it", () => {
-    const offenders: string[] = [];
-    const cleaned: string[] = [];
+  it("finds no hardcoded copy beyond the baseline, and no baseline that is too high", () => {
+    const grown: string[] = [];
+    const shrunk: string[] = [];
     for (const file of files) {
       const name = relative(ROOT, file);
       const hits = findHardcodedCopy(readFileSync(file, "utf8"), file);
-      const known = FILES_WITH_KNOWN_HARDCODED_COPY.has(name);
-      if (hits.length > 0 && !known) {
-        offenders.push(
-          `${name}\n${hits.map((hit) => `    ${hit.line}: ${JSON.stringify(hit.text)}`).join("\n")}`,
+      const allowed = KNOWN_HARDCODED_COPY_BASELINE[name] ?? 0;
+      if (hits.length > allowed) {
+        grown.push(
+          `${name} (${hits.length} > ${allowed})\n${hits
+            .map((hit) => `    ${hit.line}: ${JSON.stringify(hit.text)}`)
+            .join("\n")}`,
         );
       }
-      if (hits.length === 0 && known) cleaned.push(name);
+      if (hits.length < allowed) shrunk.push(`${name}: ${hits.length}`);
     }
     expect(
-      offenders,
+      grown,
       "Copy written straight into JSX; route it through the message catalogue (t(...)):\n" +
-        offenders.join("\n"),
+        grown.join("\n"),
     ).toEqual([]);
     expect(
-      cleaned,
-      "These files no longer carry hardcoded copy; remove them from FILES_WITH_KNOWN_HARDCODED_COPY:",
+      shrunk,
+      "These files carry less hardcoded copy than the baseline says; lower the numbers (remove at zero):",
     ).toEqual([]);
   });
 });

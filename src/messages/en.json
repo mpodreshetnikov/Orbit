@@ -680,7 +680,11 @@
     "importReportLineItemsCount": "Line items ({count})",
     "importReportLineNumber": "Line {number}",
     "importReportTransactionPayloadTitle": "Transaction payload: {name}",
-    "importReportLinePayloadTitle": "Line payload: {name}"
+    "importReportLinePayloadTitle": "Line payload: {name}",
+    "importReportBatchIdMissing": "Batch id is missing",
+    "importReportBatchNotFound": "Batch not found",
+    "importReportLoadFailed": "Load failed",
+    "importReportLineItemUntitled": "Line item"
   },
   "records": {
     "title": "Medical Records",

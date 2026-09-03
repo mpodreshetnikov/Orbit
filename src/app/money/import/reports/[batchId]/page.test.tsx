@@ -38,10 +38,14 @@ let brandsResult: { data: unknown; error: { message: string } | null } = {
 };
 const rpcMock = vi.fn();
 
+// The key, plus any values, so "Line items (1)" is distinguishable from "Line items (2)".
+// One function for the whole test, as next-intl's is stable for a locale: a fresh `t` on every
+// render would re-run every effect that depends on it.
+const translate = (key: string, values?: Record<string, string | number>) =>
+  values ? `${key} ${Object.values(values).join(" ")}` : key;
+
 vi.mock("next-intl", () => ({
-  // The key, plus any values, so "Line items (1)" is distinguishable from "Line items (2)".
-  useTranslations: () => (key: string, values?: Record<string, string | number>) =>
-    values ? `${key} ${Object.values(values).join(" ")}` : key,
+  useTranslations: () => translate,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -254,7 +258,7 @@ describe("MoneyImportReportPage", () => {
     paramsState = {};
     render(<MoneyImportReportPage />);
 
-    expect(await screen.findByText("Batch id is missing")).toBeInTheDocument();
+    expect(await screen.findByText("money.importReportBatchIdMissing")).toBeInTheDocument();
   });
 
   it("shows batch fetch error and rows fetch error states", async () => {
