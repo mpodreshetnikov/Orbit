@@ -104,6 +104,8 @@ describe("createAutoImportSweep", () => {
       lastRunAtMs: NOW,
       lastResult: "ok",
       consecutiveFailures: 0,
+      lastError: null,
+      lastRunOrigin: "auto",
     });
   });
 
@@ -230,6 +232,7 @@ describe("createAutoImportSweep", () => {
 
     expect(runImport).toHaveBeenCalledTimes(2);
     expect(harness.states["tbank::person-1"].lastResult).toBe("error");
+    expect(harness.states["tbank::person-1"].lastError).toBe("signed out");
     expect(harness.states["alfabank::person-1"].lastResult).toBe("ok");
   });
 

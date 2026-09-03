@@ -684,7 +684,22 @@
     "importReportBatchIdMissing": "Batch id is missing",
     "importReportBatchNotFound": "Batch not found",
     "importReportLoadFailed": "Load failed",
-    "importReportLineItemUntitled": "Line item"
+    "importReportLineItemUntitled": "Line item",
+    "importAutoStatusTitle": "Automatic import in the extension",
+    "importAutoStatusExtensionInactive": "The extension did not answer. Automatic import needs it installed and enabled in this browser.",
+    "importAutoStatusNoGrant": "The extension holds no key. Issue one above and send it to the extension.",
+    "importAutoStatusGrantHeld": "Key received {date}. Sources: {sources}",
+    "importAutoStatusNeverRan": "No automatic run yet. Open {source}, and after a minute of quiet the extension starts one on its own.",
+    "importAutoStatusScheduled": "A run is scheduled for {time}.",
+    "importAutoStatusLastOk": "Last automatic run {date} succeeded.",
+    "importAutoStatusLastFailed": "Last automatic run {date} failed: {error}",
+    "importAutoStatusNextAfter": "Next attempt not before {next}.",
+    "importAutoStatusStopped": "Stopped after {count} failed attempts in a row. A successful manual import or an extension update resumes it.",
+    "importAutoStatusUnavailable": "The extension answered but did not report its status. It may need updating.",
+    "importAutoStatusGrantOtherPerson": "The extension holds a key for another person, received {date}. Issue one for this person above and send it to the extension.",
+    "importAutoStatusLastManualOk": "Last import {date} was started by hand and succeeded.",
+    "importAutoStatusEligibleNow": "May run now: the next visit to the bank, or the extension's own periodic check, starts it.",
+    "importAutoStatusLastOkUnknownOrigin": "Last import {date} succeeded."
   },
   "records": {
     "title": "Medical Records",

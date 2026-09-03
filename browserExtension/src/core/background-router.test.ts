@@ -34,7 +34,9 @@ describe("background-router", () => {
         nowIso: vi.fn(() => "2026-01-01T00:00:00.000Z"),
       },
       autoRunStore: {
-        getState: vi.fn(async () => createInitialAutoRunState()),
+        getState: vi.fn(async (_scope: { sourceId: string; payerPersonId: string }) =>
+          createInitialAutoRunState(),
+        ),
         setState: vi.fn(async () => {}),
         forgiveFailures: vi.fn(async () => 0),
       },
@@ -113,6 +115,81 @@ describe("background-router", () => {
       routeBackgroundMessage({ type: "MONEY_IMPORT_CLEAR_GRANT" }, deps),
     ).resolves.toEqual({ ok: true });
     expect(deps.grantStore.setGrant).toHaveBeenCalledWith(null);
+  });
+
+  it("reports what the extension will do on its own, without the token", async () => {
+    const deps = createDeps();
+    await expect(
+      routeBackgroundMessage({ type: "MONEY_IMPORT_GET_AUTO_STATUS" }, deps),
+    ).resolves.toEqual({ ok: true, grant: null, sources: [] });
+
+    deps.grantStore.getGrant.mockResolvedValue({
+      token: "secret",
+      person_id: "person-1",
+      allowed_sources: ["tbank_web", "alfa_web", "retired_web"],
+      function_url: "https://example.test/functions/v1/money-import",
+      app_origin: "https://app.example.test",
+      received_at: "2026-09-03T05:00:00.000Z",
+    });
+    const failedAt = Date.parse("2026-09-03T05:02:00.000Z");
+    deps.autoRunStore.getState.mockImplementation(async (scope: { sourceId: string }) =>
+      scope.sourceId === "tbank_web"
+        ? {
+            lastRunAtMs: failedAt,
+            lastResult: "error" as const,
+            consecutiveFailures: 1,
+            lastError: "T-Bank did not stay on the operations page",
+            lastRunOrigin: "auto" as const,
+          }
+        : createInitialAutoRunState(),
+    );
+    const status = await routeBackgroundMessage(
+      { type: "MONEY_IMPORT_GET_AUTO_STATUS" },
+      {
+        ...deps,
+        now: () => failedAt + 60_000,
+        listAutoImportSources: () => ["tbank_web", "alfa_web"],
+        // T-Bank's visit alarm fires inside its cooldown, so the policy will turn it away;
+        // Alfa's is a run.
+        listScheduledSweeps: async () => [
+          { sourceId: "tbank_web", atMs: failedAt + 60_000 },
+          { sourceId: "alfa_web", atMs: failedAt + 60_000 },
+        ],
+      },
+    );
+
+    expect(JSON.stringify(status)).not.toContain("secret");
+    expect(status).toEqual({
+      ok: true,
+      grant: {
+        person_id: "person-1",
+        allowed_sources: ["tbank_web", "alfa_web", "retired_web"],
+        received_at: "2026-09-03T05:00:00.000Z",
+      },
+      sources: [
+        {
+          source_id: "tbank_web",
+          last_run_at: "2026-09-03T05:02:00.000Z",
+          last_result: "error",
+          consecutive_failures: 1,
+          last_error: "T-Bank did not stay on the operations page",
+          last_run_origin: "auto",
+          // One failure: the ordinary twenty-hour cooldown, not yet doubled.
+          next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
+          scheduled_at: null,
+        },
+        {
+          source_id: "alfa_web",
+          last_run_at: null,
+          last_result: null,
+          consecutive_failures: 0,
+          last_error: null,
+          last_run_origin: null,
+          next_run: { kind: "now" },
+          scheduled_at: "2026-09-03T05:03:00.000Z",
+        },
+      ],
+    });
   });
 
   it("handles ping + unsupported message", async () => {
@@ -761,7 +838,11 @@ describe("background-router", () => {
 
     expect(deps.autoRunStore.setState).toHaveBeenCalledWith(
       { sourceId: "tbank", payerPersonId: "person-1" },
-      expect.objectContaining({ lastResult: "ok", consecutiveFailures: 0 }),
+      expect.objectContaining({
+        lastResult: "ok",
+        consecutiveFailures: 0,
+        lastRunOrigin: "manual",
+      }),
     );
   });
 

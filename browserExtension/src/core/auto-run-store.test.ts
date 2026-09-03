@@ -24,10 +24,31 @@ describe("auto-run-store", () => {
       lastRunAtMs: 10,
       lastResult: "ok",
       consecutiveFailures: 0,
+      lastError: null,
     });
     expect(await store.getState({ ...tbank, payerPersonId: "person-2" })).toEqual(
       createInitialAutoRunState(),
     );
+  });
+
+  it("keeps the last error's text, and reads states written before it existed", async () => {
+    const storage = createStorage();
+    const store = createAutoRunStore(storage);
+    const scope = { sourceId: "tbank_web", payerPersonId: "person-1" };
+    await store.setState(scope, {
+      lastRunAtMs: 10,
+      lastResult: "error",
+      consecutiveFailures: 1,
+      lastError: "T-Bank did not stay on the operations page",
+    });
+    expect((await store.getState(scope)).lastError).toBe(
+      "T-Bank did not stay on the operations page",
+    );
+
+    storage.values.money_import_auto_state = {
+      "tbank_web::person-1": { lastRunAtMs: 10, lastResult: "error", consecutiveFailures: 1 },
+    };
+    expect((await store.getState(scope)).lastError).toBeNull();
   });
 
   it("forgives the scopes that failed and leaves the ones that succeeded alone", async () => {
@@ -46,6 +67,7 @@ describe("auto-run-store", () => {
       lastRunAtMs: 20,
       lastResult: "ok",
       consecutiveFailures: 0,
+      lastError: null,
     });
   });
 
