@@ -4,7 +4,7 @@ import * as retry from "./supabase-cli-retry.cjs";
 const { runWithRetry, isRetryable, launchSpec, MAX_ATTEMPTS } = retry as unknown as {
   launchSpec: (
     args: string[],
-    options: { platform: string; env: Record<string, string>; npxBin?: string },
+    options: { platform: string; npxBin?: string },
   ) => { command: string; args: string[] };
   runWithRetry: (input: {
     args: string[];
@@ -125,22 +125,18 @@ describe("supabase CLI retry", () => {
     expect(result).toEqual({ status: 0, attempts: 1 });
   });
 
-  it("launches npx through the command interpreter on Windows, where Node cannot spawn a .cmd", () => {
+  it("launches npx through cmd.exe on Windows, where Node cannot spawn a .cmd", () => {
     const args = ["supabase", "start"];
 
-    expect(launchSpec(args, { platform: "linux", env: {}, npxBin: "/usr/bin/npx" })).toEqual({
+    expect(launchSpec(args, { platform: "linux", npxBin: "/usr/bin/npx" })).toEqual({
       command: "/usr/bin/npx",
       args,
     });
-    expect(
-      launchSpec(args, {
-        platform: "win32",
-        env: { ComSpec: "C:\\W\\cmd.exe" },
-        npxBin: "npx.cmd",
-      }),
-    ).toEqual({ command: "C:\\W\\cmd.exe", args: ["/d", "/s", "/c", "npx.cmd", ...args] });
-    expect(launchSpec(args, { platform: "win32", env: {}, npxBin: "npx.cmd" }).command).toBe(
-      "cmd.exe",
-    );
+    // The interpreter is named, not read from the environment: the command line is not built
+    // from anything a caller's shell variables could change.
+    expect(launchSpec(args, { platform: "win32", npxBin: "npx.cmd" })).toEqual({
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", "npx.cmd", ...args],
+    });
   });
 });

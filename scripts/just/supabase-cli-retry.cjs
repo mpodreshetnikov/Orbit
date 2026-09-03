@@ -65,14 +65,15 @@ function resolveNpxBin(platform = process.platform, execPath = process.execPath)
 }
 
 /**
- * What to spawn. Node cannot launch a `.cmd` without a shell, so on Windows npx goes through the
- * command interpreter -- the same path `dev-ready-local.cjs` and `run-e2e.cjs` take. Pure, so the
- * Windows branch can be tested from anywhere.
+ * What to spawn. Node cannot launch a `.cmd` without a shell, so on Windows npx goes through
+ * `cmd.exe` -- the interpreter itself, found on PATH, rather than whatever `ComSpec` names: the
+ * command line here must not be assembled from environment values. Pure, so the Windows branch can
+ * be tested from anywhere.
  */
-function launchSpec(args, { platform = process.platform, env = process.env, npxBin } = {}) {
+function launchSpec(args, { platform = process.platform, npxBin } = {}) {
   const bin = npxBin ?? resolveNpxBin(platform);
   if (platform === "win32") {
-    return { command: env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", bin, ...args] };
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", bin, ...args] };
   }
   return { command: bin, args };
 }
