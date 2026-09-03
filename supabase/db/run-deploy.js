@@ -42,12 +42,22 @@ const DEPLOY_SQL = path.join(dbDir, "deploy.sql");
 const SESSION_SETTINGS = ["SET lock_timeout = '750ms';"];
 
 // The phases, in the order deploy.sql applies them. A test asserts that.
+//
+// `unit` is what a failure leaves behind, which the failure report has to say honestly:
+//   transaction  the file is one BEGIN/COMMIT, so a failure rolls the whole phase back;
+//   file         the phase is a list of `\i` files, each its own transaction, applied here one
+//                psql invocation at a time so that the report can count the files that committed
+//                before the one that failed -- a policy phase that loses its last retry halfway
+//                is partially deployed, and saying "not applied" about it would misdirect the
+//                recovery;
+//   statement    autocommit, so every statement before the failing one is committed and a re-run
+//                converges.
 const PHASES = [
-  { name: "Phase 1: Types + Functions", file: "01_types_functions.sql" },
-  { name: "Phase 2: Triggers", file: "02_triggers.sql" },
-  { name: "Phase 3: Policies", file: "03_policies.sql" },
-  { name: "Phase 4: Cron Jobs", file: "04_cron.sql" },
-  { name: "Phase 5: Version stamp", file: "_version.sql" },
+  { name: "Phase 1: Types + Functions", file: "01_types_functions.sql", unit: "transaction" },
+  { name: "Phase 2: Triggers", file: "02_triggers.sql", unit: "transaction" },
+  { name: "Phase 3: Policies", file: "03_policies.sql", unit: "file" },
+  { name: "Phase 4: Cron Jobs", file: "04_cron.sql", unit: "statement" },
+  { name: "Phase 5: Version stamp", file: "_version.sql", unit: "statement" },
 ];
 
 const MAX_ATTEMPTS = 3;
@@ -106,13 +116,26 @@ function getDatabaseUrlFromArgs(argv) {
  * because the production connection goes through the Supabase pooler, which does not have to
  * forward startup options.
  */
-function buildPsqlArgs({ connectionString, gitSha, phaseFile }) {
+function buildPsqlArgs({ connectionString, gitSha, phaseFile, singleTransaction = false }) {
   const args = [connectionString, "-v", "ON_ERROR_STOP=1", "-v", `GIT_SHA=${gitSha}`];
   for (const setting of SESSION_SETTINGS) {
     args.push("-c", setting);
   }
+  // A policy file applied on its own gets the BEGIN/COMMIT that 03_policies.sql wraps it in
+  // when the phase is applied as one file; psql's flag does exactly that around all of -c/-f.
+  if (singleTransaction) {
+    args.push("--single-transaction");
+  }
   args.push("-f", phaseFile);
   return args;
+}
+
+/** The files a `file`-unit phase applies, one transaction each: its `\i` lines, in order. */
+function phaseUnits(phase) {
+  if (phase.unit !== "file") {
+    return [phase.file];
+  }
+  return parsePhaseFilesFromDeploySql(fs.readFileSync(path.join(dbDir, phase.file), "utf8"));
 }
 
 // Synchronous, because the phase loop is: nothing else may run against the database while the
@@ -121,8 +144,8 @@ function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function runPhase({ phase, connectionString, gitSha }) {
-  const args = buildPsqlArgs({ connectionString, gitSha, phaseFile: phase.file });
+function runPsql({ connectionString, gitSha, phaseFile, singleTransaction }) {
+  const args = buildPsqlArgs({ connectionString, gitSha, phaseFile, singleTransaction });
   // stderr is captured so a failure can be classified; stdout still streams so the phase's own
   // \echo output appears while it runs.
   const result = spawnSync("psql", args, {
@@ -146,33 +169,112 @@ function runPhase({ phase, connectionString, gitSha }) {
   return { code: result.status ?? 1, stderr };
 }
 
-function reportFailure({ phase, phaseIndex, attempts, stderr, gitSha }) {
-  const applied = PHASES.slice(0, phaseIndex).map((entry) => entry.name);
-  const notApplied = PHASES.slice(phaseIndex + 1).map((entry) => entry.name);
+/**
+ * Applies one unit of a phase with the bounded retry, and says how many attempts it took.
+ */
+function applyWithRetry({ label, connectionString, gitSha, phaseFile, singleTransaction }) {
+  let last = { code: 1, stderr: "" };
+  let attempts = 0;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    attempts = attempt;
+    last = runPsql({ connectionString, gitSha, phaseFile, singleTransaction });
+    if (last.code === 0) {
+      break;
+    }
+    if (!isRetryableFailure(last.stderr) || attempt === MAX_ATTEMPTS) {
+      break;
+    }
+    console.error(
+      `${label}: lost a lock to another session (attempt ${attempt} of ${MAX_ATTEMPTS}); retrying in ${RETRY_DELAY_MS / 1000}s.`,
+    );
+    sleep(RETRY_DELAY_MS);
+  }
+  return { ...last, attempts };
+}
 
-  console.error("");
-  console.error("==========================================");
-  console.error(`DEPLOY FAILED in ${phase.name}`);
-  console.error("==========================================");
-  console.error(`Attempts:    ${attempts}`);
-  console.error(`Applied:     ${applied.length ? applied.join(", ") : "none"}`);
-  console.error(`Not applied: ${[phase.name, ...notApplied].join(", ")}`);
-  console.error("");
-  console.error(
+/**
+ * Applies a phase unit by unit. On failure, `applied` names the units that committed before the
+ * failing one, which for a `file` phase is the honest count of what production now has.
+ */
+function runPhase({ phase, connectionString, gitSha }) {
+  const units = phaseUnits(phase);
+  const applied = [];
+  for (const unit of units) {
+    const result = applyWithRetry({
+      label: units.length > 1 ? `${phase.name} (${unit})` : phase.name,
+      connectionString,
+      gitSha,
+      phaseFile: unit,
+      singleTransaction: phase.unit === "file",
+    });
+    if (result.code !== 0) {
+      return { ...result, applied, failedUnit: unit, units };
+    }
+    applied.push(unit);
+  }
+  return { code: 0, stderr: "", attempts: 1, applied, failedUnit: null, units };
+}
+
+/**
+ * The failure report, as lines. What it says about the failed phase depends on the phase's unit,
+ * because that is what decides what production is left with: a rolled-back transaction leaves
+ * nothing; a file phase leaves every file that committed before the failing one; an autocommit
+ * phase leaves every statement before the failing one.
+ */
+function failureReport({ phase, phaseIndex, attempts, stderr, gitSha, applied = [], failedUnit }) {
+  const before = PHASES.slice(0, phaseIndex).map((entry) => entry.name);
+  const after = PHASES.slice(phaseIndex + 1).map((entry) => entry.name);
+  const lines = [];
+
+  lines.push("");
+  lines.push("==========================================");
+  lines.push(`DEPLOY FAILED in ${phase.name}`);
+  lines.push("==========================================");
+  lines.push(
+    `Attempts:    ${attempts}${failedUnit && failedUnit !== phase.file ? ` (on ${failedUnit})` : ""}`,
+  );
+  lines.push(`Applied:     ${before.length ? before.join(", ") : "none"}`);
+
+  if (phase.unit === "file") {
+    const total = phaseUnits(phase).length;
+    const last = applied.length ? applied[applied.length - 1] : null;
+    lines.push(
+      `Partially applied: ${phase.name} -- ${applied.length} of ${total} files committed` +
+        (last ? `, up to ${last}` : "") +
+        `; ${failedUnit} failed, and it and the ${total - applied.length - 1} files after it are not applied.`,
+    );
+  } else if (phase.unit === "statement") {
+    lines.push(
+      `Partially applied: ${phase.name} -- it runs in autocommit, so every statement before the failing one is committed; a re-run converges.`,
+    );
+  } else {
+    lines.push(`Rolled back:   ${phase.name} -- one transaction, so nothing of it is applied.`);
+  }
+
+  lines.push(`Not applied: ${after.length ? after.join(", ") : "none"}`);
+  lines.push("");
+  lines.push(
     `The database is NOT at ${gitSha || "the checked-out commit"}. The version stamp did not run,`,
   );
-  console.error(
+  lines.push(
     "so public.db_deploy_log still records the previous deploy -- read it, not this run, for",
   );
-  console.error("what production is actually running.");
+  lines.push("what production is actually running.");
   if (isRetryableFailure(stderr)) {
-    console.error("");
-    console.error(
+    lines.push("");
+    lines.push(
       "The failure is lock contention, so a re-run with the field clear is likely to succeed:",
     );
-    console.error("every phase is idempotent and re-applies from the top.");
+    lines.push("every phase is idempotent and re-applies from the top.");
   }
-  console.error("==========================================");
+  lines.push("==========================================");
+  return lines;
+}
+
+function reportFailure(input) {
+  for (const line of failureReport(input)) {
+    console.error(line);
+  }
 }
 
 function main() {
@@ -203,26 +305,18 @@ function main() {
     console.log("");
     console.log(`=== ${phase.name} ===`);
 
-    let last = { code: 1, stderr: "" };
-    let attempts = 0;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-      attempts = attempt;
-      last = runPhase({ phase, connectionString, gitSha });
-      if (last.code === 0) {
-        break;
-      }
-      if (!isRetryableFailure(last.stderr) || attempt === MAX_ATTEMPTS) {
-        break;
-      }
-      console.error(
-        `${phase.name}: lost a lock to another session (attempt ${attempt} of ${MAX_ATTEMPTS}); retrying in ${RETRY_DELAY_MS / 1000}s.`,
-      );
-      sleep(RETRY_DELAY_MS);
-    }
-
-    if (last.code !== 0) {
-      reportFailure({ phase, phaseIndex, attempts, stderr: last.stderr, gitSha });
-      process.exit(last.code);
+    const result = runPhase({ phase, connectionString, gitSha });
+    if (result.code !== 0) {
+      reportFailure({
+        phase,
+        phaseIndex,
+        attempts: result.attempts,
+        stderr: result.stderr,
+        gitSha,
+        applied: result.applied,
+        failedUnit: result.failedUnit,
+      });
+      process.exit(result.code);
     }
   }
 
@@ -242,9 +336,11 @@ module.exports = {
   PHASES,
   SESSION_SETTINGS,
   buildPsqlArgs,
+  failureReport,
   getDatabaseUrlFromArgs,
   isRetryableFailure,
   parsePhaseFilesFromDeploySql,
   parseSessionSettingsFromDeploySql,
+  phaseUnits,
   readDeploySql: () => fs.readFileSync(DEPLOY_SQL, "utf8"),
 };

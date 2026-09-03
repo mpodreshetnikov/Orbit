@@ -116,20 +116,53 @@ describe("production deploy serialisation", () => {
       // The condition has to sit on the step that mutates production, not merely somewhere in the
       // job: a guard on a neighbouring step leaves the deploy itself unconditional.
       expect(mutationStep).toHaveLength(1);
-      expect(mutationStep[0]).toMatch(/if: steps\.tip\.outputs\.superseded != 'true'/);
+      expect(mutationStep[0]).toMatch(/if: steps\.tip\.outputs\.deploy_sha != ''/);
     },
   );
 
-  it("decides superseded by comparing against this run's own commit", () => {
+  it("builds the Vercel artifacts after the check, so a verified tip is what gets built", () => {
+    // When the check checks out the tip in place of a superseded commit, a build done before it
+    // would alias the superseded commit's build under the tip's name.
+    const block = jobBlock("deploy-vercel-production");
+    const checkAt = block.indexOf("uses: ./.github/actions/production-tip-check");
+    const buildAt = block.search(/vercel build --prod/);
+
+    expect(buildAt).toBeGreaterThan(-1);
+    expect(checkAt).toBeLessThan(buildAt);
+  });
+
+  it.each(["deploy-supabase", "deploy-vercel-production"])(
+    "grants %s actions:read, which the check needs to read the tip's own run",
+    (jobId) => {
+      const block = jobBlock(jobId);
+      const permissions = /^ {4}permissions:\n((?: {6}.*\n)+)/m.exec(block);
+
+      expect(permissions, `${jobId} declares no permissions`).not.toBeNull();
+      expect(permissions![1]).toMatch(/^ {6}actions: read$/m);
+    },
+  );
+
+  it("deploys by commit order: its own commit, the verified tip, or nothing", () => {
     const action = readFileSync(
       join(__dirname, "..", "..", ".github", "actions", "production-tip-check", "action.yml"),
       { encoding: "utf8" },
     );
 
     expect(action).toMatch(/git fetch --depth=1 origin/);
-    expect(action).toMatch(/\$\{\{ github\.sha \}\}/);
     expect(action).toMatch(/superseded=true/);
     expect(action).toMatch(/superseded=false/);
+    // The three outcomes the mutating step is gated on.
+    expect(action).toMatch(/deploy_sha=\$\{RUN_SHA\}/);
+    expect(action).toMatch(/deploy_sha=\$\{tip\}/);
+    expect(action).toMatch(/echo "deploy_sha=" >>/);
+    // The tip is deployed only when its own push run has passed the gates, read from the API
+    // rather than assumed, and from a checkout of the tip rather than of the superseded commit.
+    expect(action).toMatch(
+      /actions\/workflows\/\$\{WORKFLOW\}\/runs\?head_sha=\$\{tip\}&event=push/,
+    );
+    expect(action).toMatch(/conclusion == "success"/);
+    expect(action).toMatch(/git checkout --quiet --detach "\$tip"/);
+    expect(action).toMatch(/default: Quality Gates,Secret Scan/);
     // Standing down is a success: a superseded commit has nothing to deploy that the commit
     // replacing it will not deploy, so failing here would be noise on every burst of merges.
     expect(action).not.toMatch(/^\s*exit 1\s*$/m);

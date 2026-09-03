@@ -1,24 +1,38 @@
 name: Production tip check
 description: >-
-  Report whether the commit this run was started for is still the tip of the default branch, so a
-  production mutation can stand down when a newer commit has already superseded it.
+  Decide which commit this production job deploys: its own, while it is still the tip of the
+  default branch; the tip itself, when a newer commit has superseded this run and that commit's own
+  run has already passed its gates; or nothing, when the tip is not yet verified.
 
 # Why this exists, and why the concurrency groups on the production deploy jobs are not enough.
 #
 # A `concurrency` group gives mutual exclusion: two production deploys never run at once. It does
-# not give ordering. A job joins its group when its `needs` finish, and `quality-gates` takes
-# minutes longer for a DB-impacting commit than for a docs-only one, so a push made first can
-# reach the group second and mutate production last. The result is the failure the groups were
-# added for -- production left on an older commit than `main`, every job green -- reached through
-# arrival order instead of through overlap. Codex review on Orbit#73, T-260902-60d.
+# not give ordering, and it does not preserve the newest commit. Two consequences, both found by
+# review on Orbit#73 (T-260902-60d):
 #
-# So each production mutation asks this immediately before it runs, and skips itself when the
-# answer is "superseded". Together with the group that is enough: a newer run cannot have finished
-# earlier, because the group held it, so the last deploy to succeed is the newest commit.
+#   1. A job joins its group when its `needs` finish, and `quality-gates` takes minutes longer for
+#      a DB-impacting commit than for a docs-only one, so a push made first can reach the group
+#      second and mutate production last -- production left on an older commit than `main`, every
+#      job green.
+#   2. The group holds one running and one pending job, and the pending slot is taken by the newest
+#      *arrival*, not the newest commit. An older, slower run arriving after a newer pending one
+#      replaces it; the newer run's deploy is cancelled and never happens.
 #
-# Standing down is a success, not a failure. A superseded commit has nothing to deploy that the
-# commit which replaced it will not deploy, so a red run here would be noise on every burst of
-# merges. Failing to *determine* the tip is the opposite: it fails the job rather than mutating
+# So each production job asks this immediately before it mutates anything, and deploys by commit
+# order rather than arrival order:
+#
+#   - its own commit, when `main` is still at it;
+#   - the tip of `main`, when `main` has moved on and the tip's own run of this workflow has
+#     already passed the gates named in `gates` -- the run that would have deployed it may have
+#     been the cancelled pending one, and this run is the last arrival, so it deploys the tip in
+#     its place, from a checkout of the tip;
+#   - nothing, when the tip's own run has not passed its gates (yet, or at all): that run deploys
+#     the tip when it reaches this step, and if a newer arrival displaces it in turn, the newer
+#     arrival deploys the tip by the rule above.
+#
+# The invariant: the last arrival in a group is never cancelled, and the last arrival deploys the
+# verified tip. Standing down is a success -- a red run here would be noise on every burst. Failing
+# to *determine* the tip or the gate results is the opposite: it fails the job rather than mutating
 # production on an unverified assumption.
 
 inputs:
@@ -26,6 +40,18 @@ inputs:
     description: Branch whose tip the run is checked against.
     required: false
     default: main
+  workflow:
+    description: Workflow file whose push run on the tip must have passed the gates.
+    required: false
+    default: main.yml
+  gates:
+    description: Comma-separated job names that must have concluded success on the tip's own run.
+    required: false
+    default: Quality Gates,Secret Scan
+  token:
+    description: A token granted `actions:read` on the repository.
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   superseded:
@@ -34,32 +60,89 @@ outputs:
   tip:
     description: The commit the branch is currently at.
     value: ${{ steps.check.outputs.tip }}
+  deploy_sha:
+    description: >-
+      The commit checked out and to be deployed: this run's own, or the verified tip. Empty when
+      the job must stand down, so the mutating step is gated on `!= ''`.
+    value: ${{ steps.check.outputs.deploy_sha }}
 
 runs:
   using: composite
   steps:
     - id: check
       shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.branch }}
+        WORKFLOW: ${{ inputs.workflow }}
+        GATES: ${{ inputs.gates }}
+        RUN_SHA: ${{ github.sha }}
+        REPO: ${{ github.repository }}
+        API_URL: ${{ github.api_url }}
       run: |
         set -euo pipefail
-        git fetch --depth=1 origin "${{ inputs.branch }}"
+        git fetch --depth=1 origin "$BRANCH"
         tip="$(git rev-parse FETCH_HEAD)"
         echo "tip=${tip}" >> "$GITHUB_OUTPUT"
 
-        if [[ "${tip}" == "${{ github.sha }}" ]]; then
+        if [[ "$tip" == "$RUN_SHA" ]]; then
           echo "superseded=false" >> "$GITHUB_OUTPUT"
-          echo "${{ inputs.branch }} is at ${tip}, the commit this run deploys." >> "$GITHUB_STEP_SUMMARY"
+          echo "deploy_sha=${RUN_SHA}" >> "$GITHUB_OUTPUT"
+          echo "${BRANCH} is at ${tip}, the commit this run deploys." >> "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
 
         echo "superseded=true" >> "$GITHUB_OUTPUT"
-        {
-          echo "### Skipped: superseded commit"
-          echo
-          echo "This run deploys \`${{ github.sha }}\`, but \`${{ inputs.branch }}\` is now at \`${tip}\`."
-          echo "Production is not mutated: the run for \`${tip}\` deploys everything this one would have."
-          echo
-          echo "Re-running an older run reaches this too, and deliberately -- putting production back"
-          echo "on \`${{ inputs.branch }}\` means re-running the newest run, not an older one."
-        } >> "$GITHUB_STEP_SUMMARY"
-        echo "::notice title=Superseded commit::${{ inputs.branch }} is at ${tip}; not deploying ${{ github.sha }}."
+
+        # Has the tip's own push run of this workflow passed its gates? Read from the API rather
+        # than assumed: the tip may have been pushed seconds ago and still be in quality-gates, or
+        # have failed them, and neither may be deployed by anyone. A failed request fails this
+        # step on purpose (curl -f under set -e).
+        api() {
+          curl -fsS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API_URL}/repos/${REPO}/$1"
+        }
+        runs_json="$(api "actions/workflows/${WORKFLOW}/runs?head_sha=${tip}&event=push&per_page=10")"
+        run_id="$(jq -r --arg branch "$BRANCH" \
+          '[.workflow_runs[] | select(.head_branch == $branch)] | sort_by(.run_number) | last | .id // empty' \
+          <<<"$runs_json")"
+
+        verified=false
+        if [[ -n "$run_id" ]]; then
+          jobs_json="$(api "actions/runs/${run_id}/jobs?per_page=100")"
+          verified="$(jq -r --arg gates "$GATES" '
+            ($gates | split(",") | map(gsub("^\\s+|\\s+$"; ""))) as $need
+            | [.jobs[] | {name, conclusion}] as $jobs
+            | all($need[]; . as $name | any($jobs[]; .name == $name and .conclusion == "success"))' \
+            <<<"$jobs_json")"
+        fi
+
+        if [[ "$verified" == "true" ]]; then
+          git checkout --quiet --detach "$tip"
+          echo "deploy_sha=${tip}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deploying the tip of ${BRANCH} in place of a superseded commit"
+            echo
+            echo "This run was started for \`${RUN_SHA}\`, but \`${BRANCH}\` is now at \`${tip}\`, whose own"
+            echo "run (${run_id}) has passed: ${GATES}. Its deploy may have been the pending job this run"
+            echo "displaced, so this run deploys \`${tip}\` from a checkout of it instead of standing down."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Deploying the tip::${BRANCH} is at ${tip}; deploying it in place of superseded ${RUN_SHA}."
+        else
+          echo "deploy_sha=" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Skipped: superseded commit"
+            echo
+            echo "This run was started for \`${RUN_SHA}\`, but \`${BRANCH}\` is now at \`${tip}\`, and the tip's"
+            echo "own run has not passed ${GATES} (run: ${run_id:-none found yet})."
+            echo "Production is not mutated: the tip is deployed by its own run once it passes, or by the"
+            echo "next arrival here after that."
+            echo
+            echo "Re-running an older run reaches this too, and deliberately -- putting production back"
+            echo "on \`${BRANCH}\` means re-running the newest run, not an older one."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Superseded commit::${BRANCH} is at ${tip}, not yet verified; not deploying ${RUN_SHA}."
+        fi

@@ -390,6 +390,10 @@ jobs:
     concurrency:
       group: deploy-vercel-production
       cancel-in-progress: false
+    # actions: read is for the tip check below, which reads the tip's own run and jobs.
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -397,26 +401,31 @@ jobs:
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
+      # The concurrency group above serialises these deploys but neither orders them nor keeps the
+      # newest one: a job joins the queue when its `needs` finish, and the single pending slot goes
+      # to the newest arrival, so an older push can arrive after a newer one, displace it, and be
+      # the only one left to run. So the run decides here, by commit order, which commit it deploys
+      # -- its own while it is the tip of `main`, the verified tip when it has been superseded --
+      # and checks that commit out, so the build below is of what gets aliased. Nothing further
+      # runs when there is nothing to deploy.
+      - name: Decide which commit this run deploys
+        id: tip
+        uses: ./.github/actions/production-tip-check
       - uses: actions/setup-node@v4
+        if: steps.tip.outputs.deploy_sha != ''
         with:
           node-version: 22
       - name: Install Vercel CLI
+        if: steps.tip.outputs.deploy_sha != ''
         run: npm install --global vercel@latest
       - name: Pull Vercel Project Settings
+        if: steps.tip.outputs.deploy_sha != ''
         run: vercel pull --yes --environment=production --token="${VERCEL_TOKEN}"
       - name: Build Production Artifacts
+        if: steps.tip.outputs.deploy_sha != ''
         run: vercel build --prod --token="${VERCEL_TOKEN}"
-      # The concurrency group above serialises these deploys but does not order them. A job joins
-      # the queue when its `needs` finish, and `quality-gates` takes minutes longer for a
-      # DB-impacting commit than for a docs-only one, so an older push can arrive at the group
-      # after a newer one and alias production last. That is the same stale-alias failure the
-      # group was added for, reached through arrival order instead of through overlap, so the run
-      # checks it is still the tip of `main` immediately before it mutates production.
-      - name: Check this commit is still the tip of main
-        id: tip
-        uses: ./.github/actions/production-tip-check
       - name: Deploy Production
-        if: steps.tip.outputs.superseded != 'true'
+        if: steps.tip.outputs.deploy_sha != ''
         run: vercel deploy --prebuilt --prod --token="${VERCEL_TOKEN}"
 
   deploy-supabase:
@@ -443,6 +452,10 @@ jobs:
     concurrency:
       group: deploy-supabase-production
       cancel-in-progress: false
+    # actions: read is for the tip check below, which reads the tip's own run and jobs.
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -450,15 +463,19 @@ jobs:
       DATABASE_URL: postgresql://postgres.${{ vars.SUPABASE_PROJECT_REF }}:${{ secrets.SUPABASE_DB_PASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
     steps:
       - uses: actions/checkout@v4
+      # Same reason as the Vercel job: the group serialises these deploys without ordering them or
+      # keeping the newest, so a push that reached `quality-gates` first can reach the deploy queue
+      # second and apply its migrations, functions, policies and version stamp over a newer
+      # commit's -- or displace the newer commit's pending deploy altogether. The check decides
+      # which commit to deploy and checks it out, so the version stamp records what was applied.
+      - name: Decide which commit this run deploys
+        id: tip
+        uses: ./.github/actions/production-tip-check
       - uses: supabase/setup-cli@v1
+        if: steps.tip.outputs.deploy_sha != ''
         with:
           version: latest
       - uses: taiki-e/install-action@just
-      # Same reason as the Vercel job: the group serialises these deploys without ordering them,
-      # so a push that reached `quality-gates` first can reach the deploy queue second and apply
-      # its migrations, functions, policies and version stamp over a newer commit's.
-      - name: Check this commit is still the tip of main
-        id: tip
-        uses: ./.github/actions/production-tip-check
-      - if: steps.tip.outputs.superseded != 'true'
+        if: steps.tip.outputs.deploy_sha != ''
+      - if: steps.tip.outputs.deploy_sha != ''
         run: just ci-deploy-supabase
