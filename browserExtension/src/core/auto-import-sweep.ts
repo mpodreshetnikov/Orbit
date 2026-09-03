@@ -39,6 +39,15 @@ export interface AutoImportSweepDeps {
 
 export type AutoImportTrigger = "visit" | "alarm";
 
+export interface AutoImportRunOptions {
+  /**
+   * Restrict the sweep to one source. A visit to a bank is evidence that *that* bank's session
+   * is live and says nothing about any other -- so a visit sweeps the bank that was visited, and
+   * only the alarm sweeps everything. Without this, opening T-Bank opened Alfa-Bank too.
+   */
+  sourceId?: string;
+}
+
 /**
  * Whether the server refused the credential itself, rather than failing for any other reason.
  *
@@ -51,7 +60,7 @@ export function isCredentialRefusal(error: unknown): boolean {
 }
 
 export interface AutoImportSweep {
-  run: (trigger: AutoImportTrigger) => Promise<void>;
+  run: (trigger: AutoImportTrigger, options?: AutoImportRunOptions) => Promise<void>;
 }
 
 export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSweep {
@@ -64,6 +73,18 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
    * navigation is one of the triggers.
    */
   let inFlight = false;
+
+  /**
+   * Sources asked for while a sweep was busy. A visit to one bank a minute after a visit to
+   * another lands its alarm mid-sweep; dropping it there meant that bank waited for the next
+   * visit or the three-hour alarm, where before the scoping it would have been taken in the
+   * same pass. Queued instead, and drained by the sweep that is running -- or, if that sweep
+   * stood down for a manual run, by the next one to start. Held in memory like `inFlight`: a
+   * worker teardown loses both, and the alarm that would have queued the source has already
+   * fired, so the periodic alarm is the backstop either way.
+   */
+  const pending = new Set<string>();
+  let pendingAll = false;
 
   /**
    * Runs one source in a tab opened for the purpose.
@@ -133,26 +154,55 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
   }
 
   return {
-    async run(trigger) {
-      if (inFlight) return;
+    async run(trigger, options = {}) {
+      if (inFlight) {
+        if (options.sourceId) pending.add(options.sourceId);
+        else pendingAll = true;
+        return;
+      }
       inFlight = true;
 
       try {
-        const grant = await deps.grantStore.getGrant();
-        // No grant means automatic import was never turned on, or has been revoked. Revoking is
-        // the off switch, and it has to work here as well as at the server.
-        if (!grant) return;
+        // This call's own scope, plus whatever was queued while a sweep was busy. `undefined`
+        // means every source the grant covers.
+        let sourceIds: Set<string> | undefined = options.sourceId
+          ? new Set([options.sourceId])
+          : undefined;
 
-        // A run the person started owns the session field and the bank's rate limits; a second
-        // one racing it would cost them both.
-        if (await deps.sessionStore.getSession()) return;
+        do {
+          if (pendingAll) sourceIds = undefined;
+          else if (sourceIds) for (const id of pending) sourceIds.add(id);
+          pending.clear();
+          pendingAll = false;
 
-        for (const source of deps.listSources()) {
-          // `parseIncomingGrant` refuses a grant that names no sources, so an empty list cannot
-          // reach here -- and reading one as "every source" would be the wrong way to be wrong.
-          if (!grant.allowed_sources.includes(source.sourceId)) continue;
-          await runSource(source, grant);
-        }
+          const grant = await deps.grantStore.getGrant();
+          // No grant means automatic import was never turned on, or has been revoked. Revoking
+          // is the off switch, and it has to work here as well as at the server. Nothing queued
+          // survives it: there is no credential to run with.
+          if (!grant) return;
+
+          // A run the person started owns the session field and the bank's rate limits; a
+          // second one racing it would cost them both. For a visit this check is also what the
+          // grace period exists for: the sweep is deferred a minute after the page loads so that
+          // a person who opened their bank to import by hand has started by the time this runs,
+          // and is found here. What was asked for is kept for the next sweep, not dropped.
+          if (await deps.sessionStore.getSession()) {
+            if (sourceIds) for (const id of sourceIds) pending.add(id);
+            else pendingAll = true;
+            return;
+          }
+
+          for (const source of deps.listSources()) {
+            if (sourceIds && !sourceIds.has(source.sourceId)) continue;
+            // `parseIncomingGrant` refuses a grant that names no sources, so an empty list cannot
+            // reach here -- and reading one as "every source" would be the wrong way to be wrong.
+            if (!grant.allowed_sources.includes(source.sourceId)) continue;
+            await runSource(source, grant);
+          }
+
+          // Anything queued during this pass is taken now rather than left for hours.
+          sourceIds = new Set();
+        } while (pendingAll || pending.size > 0);
       } catch (error) {
         deps.onWarning("money_import_auto_sweep_failed", {
           trigger,

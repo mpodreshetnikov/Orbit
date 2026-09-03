@@ -290,4 +290,137 @@ describe("createAutoImportSweep", () => {
       ),
     ).toBe(true);
   });
+
+  it("sweeps only the bank that was visited", async () => {
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+    });
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    // Opening T-Bank says T-Bank's session is live. It says nothing about Alfa-Bank, and the
+    // first live run opened both -- which is what this pins down.
+    expect(harness.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
+    expect(harness.states["alfabank::person-1"]).toBeUndefined();
+  });
+
+  it("sweeps every covered bank on the alarm", async () => {
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+    });
+    await harness.sweep.run("alarm");
+
+    expect(harness.openedTabs).toHaveLength(2);
+  });
+
+  it("opens nothing for a visit to a bank the grant does not cover", async () => {
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+    });
+    await harness.sweep.run("visit", { sourceId: "alfabank" });
+
+    expect(harness.openedTabs).toEqual([]);
+  });
+
+  it("takes a bank visited during another bank's sweep once that sweep is done", async () => {
+    let releaseFirst: () => void = () => {};
+    const runImport = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<undefined>((resolve) => {
+            releaseFirst = () => resolve(undefined);
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+      runImport,
+    });
+
+    const first = harness.sweep.run("visit", { sourceId: "tbank" });
+    await vi.waitFor(() => expect(runImport).toHaveBeenCalledTimes(1));
+    // The second bank's alarm fires while the first is still importing. Before the sweep was
+    // scoped, one pass covered both; dropping this call here would have left Alfa-Bank for the
+    // next visit or the periodic alarm, hours away.
+    await harness.sweep.run("visit", { sourceId: "alfabank" });
+    expect(harness.openedTabs).toHaveLength(1);
+
+    releaseFirst();
+    await first;
+    expect(harness.openedTabs).toEqual([
+      "https://www.tbank.ru/mybank/operations/",
+      "https://web.alfabank.ru/",
+    ]);
+    expect(runImport).toHaveBeenCalledTimes(2);
+  });
+
+  it("widens to every bank when the alarm fires during a scoped sweep", async () => {
+    let releaseFirst: () => void = () => {};
+    const runImport = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<undefined>((resolve) => {
+            releaseFirst = () => resolve(undefined);
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+      runImport,
+    });
+
+    const first = harness.sweep.run("visit", { sourceId: "tbank" });
+    await vi.waitFor(() => expect(runImport).toHaveBeenCalledTimes(1));
+    await harness.sweep.run("alarm");
+    releaseFirst();
+    await first;
+
+    // T-Bank is on cooldown from the pass that just finished; Alfa-Bank is what the alarm adds.
+    expect(harness.openedTabs).toEqual([
+      "https://www.tbank.ru/mybank/operations/",
+      "https://web.alfabank.ru/",
+    ]);
+  });
+
+  it("keeps a queued bank for the next sweep when a manual run makes this one stand down", async () => {
+    const harness = createHarness({
+      grant: createGrant({ allowed_sources: ["tbank", "alfabank"] }),
+      sources: () => [
+        { sourceId: "tbank", targetUrl: "https://www.tbank.ru/mybank/operations/" },
+        { sourceId: "alfabank", targetUrl: "https://web.alfabank.ru/" },
+      ],
+    });
+    await harness.deps.sessionStore.setSession({ session_id: "manual-1" });
+    await harness.sweep.run("visit", { sourceId: "alfabank" });
+    expect(harness.openedTabs).toEqual([]);
+
+    // The manual run ends; the next sweep, scoped to T-Bank, still owes Alfa-Bank.
+    await harness.deps.sessionStore.setSession(null);
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    expect(harness.openedTabs.sort()).toEqual([
+      "https://web.alfabank.ru/",
+      "https://www.tbank.ru/mybank/operations/",
+    ]);
+  });
 });
