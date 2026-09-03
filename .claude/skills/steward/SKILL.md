@@ -42,7 +42,8 @@ waiting:
 
 Confidence is a claim about evidence, not a mood. If the merge condition "state what would break and
 how you would see it" cannot be answered in one sentence naming a check, a query, a log, a dashboard
-or a screen, the session is not sure — buy the review.
+or a screen, the session is not sure. `docs/QUALITY.md` owns what follows from that, and what follows
+is not a review.
 
 ## Stop when the bar is met
 
