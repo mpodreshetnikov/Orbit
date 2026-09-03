@@ -23,13 +23,34 @@ const READINESS_502 = [
   "Error status 502: An invalid response was received from the upstream server",
 ].join("\n");
 
+// Deploy run 33750939385, attempt 1, 2026-09-03: the restart after the seed loses its own port.
+const RESTART_PORT_COLLISION = [
+  "Applying migration 20260902060000_default_grant_issuer_to_auth_uid.sql...",
+  "Seeding data from supabase/seed.sql...",
+  "Starting containers...",
+  "Stopping containers...",
+  'failed to start docker container "supabase_inbucket_orbit": Error response from daemon: ' +
+    "failed to set up container networking: driver failed programming external connectivity on " +
+    "endpoint supabase_inbucket_orbit (63734ad5): failed to bind host port for " +
+    "0.0.0.0:54324:172.18.0.7:8025/tcp: address already in use",
+  "Error: failed to start containers: 7c7a4f47",
+].join("\n");
+
 describe("supabase CLI retry", () => {
-  it("recognises the readiness failure and nothing that looks like our own", () => {
+  it("recognises the restart failures and nothing that looks like our own", () => {
     expect(isRetryable(READINESS_502)).toBe(true);
+    expect(isRetryable(RESTART_PORT_COLLISION)).toBe(true);
     // The failures that must never be retried: retrying a broken migration would turn a clear
     // error into a slow one, three times over, which is how a real defect gets read as flake.
     expect(isRetryable('ERROR: syntax error at or near "creat"')).toBe(false);
+    // A port collision before any migration ran is a developer's own stack still up.
     expect(isRetryable("failed to bind host port 54322: address already in use")).toBe(false);
+    expect(
+      isRetryable(
+        "Starting containers...\nfailed to bind host port for 0.0.0.0:54322:172.18.0.2:5432/tcp: " +
+          "address already in use\nSeeding data from supabase/seed.sql...",
+      ),
+    ).toBe(false);
     expect(isRetryable("Error status 500: internal error")).toBe(false);
     expect(isRetryable('relation "money_transactions" already exists')).toBe(false);
   });
