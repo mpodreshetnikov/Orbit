@@ -62,8 +62,23 @@ export interface ConditionRecord {
   confidence: number | null;
   is_llm_extracted: boolean;
   is_user_verified: boolean;
+  /**
+   * The analyte whose value justified a proposed closure, or null on any other mention.
+   *
+   * Kept so the claim stays checkable after extraction: the person reviewing the record can
+   * correct, unapply or delete the very observation the proposal rests on, and a closure that
+   * cites a measurement no longer standing must not be confirmed by approving the record.
+   */
+  supporting_obs_code: string | null;
+  /**
+   * Whether a person has ruled on this mention. `is_user_verified` cannot carry it: `false`
+   * already means "created and nobody has looked", so it cannot also mean "a person said no".
+   */
+  review_decision: ConditionReviewDecision;
   created_at: string;
 }
+
+export type ConditionReviewDecision = "pending" | "confirmed" | "dismissed";
 
 // Extended type with condition details (from get_record_conditions function)
 export interface ConditionRecordWithDetails extends ConditionRecord {
@@ -97,6 +112,7 @@ export interface UpdateConditionRecordInput {
   status_in_record?: ConditionStatus;
   source_anchor?: string | null;
   is_user_verified?: boolean;
+  review_decision?: ConditionReviewDecision;
   /** Correcting a proposal before it is materialised. */
   proposed_name?: string | null;
   proposed_icd_code?: string | null;

@@ -148,6 +148,18 @@ function foldHomoglyphs(value: string): string {
   return value.replace(/[авекмнорстух]/g, (char) => latin[cyrillic.indexOf(char)] ?? char);
 }
 
+/**
+ * Fold a free-text clinical name the way every match in this module folds it.
+ *
+ * Exported so that matching done elsewhere — the condition matcher in `resolution.ts` — folds
+ * identically rather than approximately. A second, private copy would drift, and the drift would
+ * show up as a condition that stops matching its analyte for reasons nobody can see: `Витамин В12`
+ * with a Cyrillic В and `Витамин B12` with a Latin B look the same and share almost no characters.
+ */
+export function foldForMatch(value: string): string {
+  return foldHomoglyphs(normalize(value));
+}
+
 function tokensOf(normalized: string): string[] {
   return normalized.split(" ").filter((token) => token.length > 0);
 }

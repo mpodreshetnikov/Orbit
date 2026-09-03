@@ -9,9 +9,9 @@ vi.mock("esbuild", () => ({
   build: buildMock,
 }));
 
-import { buildSourcePageWidgetInpageBundle } from "./esbuild-widget";
+import { buildClassicScriptBundles, EXTENSION_CLASSIC_SCRIPTS } from "./esbuild-widget";
 
-describe("extension esbuild widget bundling", () => {
+describe("extension classic script bundling", () => {
   const rootDir = path.join("repo-root");
   const extensionDir = path.join(rootDir, "browserExtension");
   const distDir = path.join(extensionDir, "dist");
@@ -28,9 +28,8 @@ describe("extension esbuild widget bundling", () => {
   });
 
   it("bundles the in-page widget through the esbuild API with browser settings", async () => {
-    await buildSourcePageWidgetInpageBundle({ extensionDir, distDir });
+    await buildClassicScriptBundles({ extensionDir, distDir });
 
-    expect(buildMock).toHaveBeenCalledTimes(1);
     expect(buildMock).toHaveBeenCalledWith({
       bundle: true,
       entryPoints: [path.join(extensionDir, "src", "source-page-widget-inpage.ts")],
@@ -39,5 +38,25 @@ describe("extension esbuild widget bundling", () => {
       platform: "browser",
       target: ["es2020"],
     });
+  });
+
+  it("bundles the content script the same way", async () => {
+    await buildClassicScriptBundles({ extensionDir, distDir });
+
+    // Without this the content script ships as tsc's module output, whose top-level import is a
+    // syntax error in a classic script -- so it never runs and the app cannot see the extension.
+    expect(buildMock).toHaveBeenCalledWith({
+      bundle: true,
+      entryPoints: [path.join(extensionDir, "src", "content-script.ts")],
+      format: "iife",
+      outfile: path.join(distDir, "content-script.js"),
+      platform: "browser",
+      target: ["es2020"],
+    });
+  });
+
+  it("builds every declared classic script and nothing else", async () => {
+    await buildClassicScriptBundles({ extensionDir, distDir });
+    expect(buildMock).toHaveBeenCalledTimes(EXTENSION_CLASSIC_SCRIPTS.length);
   });
 });

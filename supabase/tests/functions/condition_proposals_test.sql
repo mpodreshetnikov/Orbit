@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(9);
+SELECT plan(13);
 
 -- Provenance on the condition itself. Existing rows must read as "not LLM, already reviewed", so
 -- that a later cleanup of unverified LLM rows can never sweep up data that predates this path.
@@ -115,6 +115,48 @@ SELECT is(
   ),
   'J45',
   'a proposal shows the code the document gave it'
+);
+
+-- What a proposed closure rests on, and whether anyone ruled on it. Both have to survive the
+-- reader, or the review screen can neither name the measurement nor tell a rejection from a
+-- proposal nobody has opened.
+SELECT has_column(
+  'public',
+  'condition_records',
+  'supporting_obs_code',
+  'a mention records the analyte a proposed closure rests on'
+);
+SELECT col_default_is(
+  'public',
+  'condition_records',
+  'review_decision',
+  'pending',
+  'a mention nobody has ruled on reads as pending'
+);
+
+-- The three states must stay three: a fourth would let a closure be recorded as reviewed in a way
+-- the promotion counts do not understand.
+SELECT throws_ok(
+  $$INSERT INTO public.condition_records (record_id, status_in_record, proposed_name, review_decision)
+    VALUES (
+      '99999999-2222-0000-0000-000000000000'::uuid,
+      'resolved',
+      'Bronchitis',
+      'maybe'
+    )$$,
+  '23514',
+  NULL,
+  'review_decision accepts only pending, confirmed and dismissed'
+);
+
+SELECT is(
+  (
+    SELECT review_decision
+    FROM public.get_record_conditions('99999999-2222-0000-0000-000000000000'::uuid)
+    WHERE condition_name = 'Asthma'
+  ),
+  'pending',
+  'the reader reports the review decision it stored'
 );
 
 SELECT * FROM finish();

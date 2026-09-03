@@ -189,8 +189,10 @@ export type Database = {
           proposed_icd_code: string | null
           proposed_name: string | null
           record_id: string
+          review_decision: string
           source_anchor: string | null
           status_in_record: string
+          supporting_obs_code: string | null
         }
         Insert: {
           condition_id?: string | null
@@ -202,8 +204,10 @@ export type Database = {
           proposed_icd_code?: string | null
           proposed_name?: string | null
           record_id: string
+          review_decision?: string
           source_anchor?: string | null
           status_in_record: string
+          supporting_obs_code?: string | null
         }
         Update: {
           condition_id?: string | null
@@ -215,8 +219,10 @@ export type Database = {
           proposed_icd_code?: string | null
           proposed_name?: string | null
           record_id?: string
+          review_decision?: string
           source_anchor?: string | null
           status_in_record?: string
+          supporting_obs_code?: string | null
         }
         Relationships: [
           {
@@ -353,6 +359,185 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      mcp_oauth_authorization_codes: {
+        Row: {
+          auth_user_id: string
+          client_id: string
+          code_challenge: string
+          code_challenge_method: string
+          code_hash: string
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          issued_grant_id: string | null
+          redirect_uri: string
+          resource: string | null
+          scope: string
+          user_email: string
+        }
+        Insert: {
+          auth_user_id: string
+          client_id: string
+          code_challenge: string
+          code_challenge_method?: string
+          code_hash: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          issued_grant_id?: string | null
+          redirect_uri: string
+          resource?: string | null
+          scope: string
+          user_email: string
+        }
+        Update: {
+          auth_user_id?: string
+          client_id?: string
+          code_challenge?: string
+          code_challenge_method?: string
+          code_hash?: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          issued_grant_id?: string | null
+          redirect_uri?: string
+          resource?: string | null
+          scope?: string
+          user_email?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_oauth_authorization_codes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "mcp_oauth_clients"
+            referencedColumns: ["client_id"]
+          },
+        ]
+      }
+      mcp_oauth_clients: {
+        Row: {
+          client_id: string
+          client_name: string | null
+          client_uri: string | null
+          created_at: string
+          disabled_at: string | null
+          grant_types: string[]
+          id: string
+          logo_uri: string | null
+          policy_uri: string | null
+          redirect_uris: string[]
+          response_types: string[]
+          scope: string
+          software_id: string | null
+          software_version: string | null
+          token_endpoint_auth_method: string
+          tos_uri: string | null
+        }
+        Insert: {
+          client_id: string
+          client_name?: string | null
+          client_uri?: string | null
+          created_at?: string
+          disabled_at?: string | null
+          grant_types?: string[]
+          id?: string
+          logo_uri?: string | null
+          policy_uri?: string | null
+          redirect_uris: string[]
+          response_types?: string[]
+          scope?: string
+          software_id?: string | null
+          software_version?: string | null
+          token_endpoint_auth_method?: string
+          tos_uri?: string | null
+        }
+        Update: {
+          client_id?: string
+          client_name?: string | null
+          client_uri?: string | null
+          created_at?: string
+          disabled_at?: string | null
+          grant_types?: string[]
+          id?: string
+          logo_uri?: string | null
+          policy_uri?: string | null
+          redirect_uris?: string[]
+          response_types?: string[]
+          scope?: string
+          software_id?: string | null
+          software_version?: string | null
+          token_endpoint_auth_method?: string
+          tos_uri?: string | null
+        }
+        Relationships: []
+      }
+      mcp_oauth_grants: {
+        Row: {
+          access_token_expires_at: string
+          access_token_hash: string
+          auth_user_id: string
+          client_id: string
+          created_at: string
+          id: string
+          last_used_at: string | null
+          refresh_token_expires_at: string | null
+          refresh_token_hash: string | null
+          revoked_at: string | null
+          rotated_from: string | null
+          scope: string
+          user_email: string
+        }
+        Insert: {
+          access_token_expires_at: string
+          access_token_hash: string
+          auth_user_id: string
+          client_id: string
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          refresh_token_expires_at?: string | null
+          refresh_token_hash?: string | null
+          revoked_at?: string | null
+          rotated_from?: string | null
+          scope: string
+          user_email: string
+        }
+        Update: {
+          access_token_expires_at?: string
+          access_token_hash?: string
+          auth_user_id?: string
+          client_id?: string
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          refresh_token_expires_at?: string | null
+          refresh_token_hash?: string | null
+          revoked_at?: string | null
+          rotated_from?: string | null
+          scope?: string
+          user_email?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_oauth_grants_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "mcp_oauth_clients"
+            referencedColumns: ["client_id"]
+          },
+          {
+            foreignKeyName: "mcp_oauth_grants_rotated_from_fkey"
+            columns: ["rotated_from"]
+            isOneToOne: false
+            referencedRelation: "mcp_oauth_grants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       measurement_catalog: {
         Row: {
@@ -782,6 +967,54 @@ export type Database = {
           },
         ]
       }
+      money_budget_targets: {
+        Row: {
+          category_id: string
+          created_at: string
+          currency: string
+          id: string
+          month_start: string
+          person_id: string
+          target_amount: number
+          updated_at: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          currency: string
+          id?: string
+          month_start: string
+          person_id: string
+          target_amount: number
+          updated_at?: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          currency?: string
+          id?: string
+          month_start?: string
+          person_id?: string
+          target_amount?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_budget_targets_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "money_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_budget_targets_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       money_cards: {
         Row: {
           account_id: string
@@ -1113,6 +1346,33 @@ export type Database = {
           },
         ]
       }
+      money_fx_rates: {
+        Row: {
+          base_currency: string
+          created_at: string
+          quote_currency: string
+          rate: number
+          rate_date: string
+          updated_at: string
+        }
+        Insert: {
+          base_currency: string
+          created_at?: string
+          quote_currency: string
+          rate: number
+          rate_date: string
+          updated_at?: string
+        }
+        Update: {
+          base_currency?: string
+          created_at?: string
+          quote_currency?: string
+          rate?: number
+          rate_date?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       money_import_batch_brand_resolutions: {
         Row: {
           base_color: string | null
@@ -1347,12 +1607,63 @@ export type Database = {
           },
         ]
       }
+      money_import_grants: {
+        Row: {
+          allowed_sources: string[]
+          created_at: string
+          created_by_auth_user_id: string
+          expires_at: string | null
+          id: string
+          label: string
+          last_used_at: string | null
+          person_id: string
+          revoked_at: string | null
+          token_hash: string
+          updated_at: string
+        }
+        Insert: {
+          allowed_sources?: string[]
+          created_at?: string
+          created_by_auth_user_id?: string
+          expires_at?: string | null
+          id?: string
+          label: string
+          last_used_at?: string | null
+          person_id: string
+          revoked_at?: string | null
+          token_hash: string
+          updated_at?: string
+        }
+        Update: {
+          allowed_sources?: string[]
+          created_at?: string
+          created_by_auth_user_id?: string
+          expires_at?: string | null
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          person_id?: string
+          revoked_at?: string | null
+          token_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_import_grants_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       money_import_sessions: {
         Row: {
           batch_id: string | null
           created_at: string
           created_by_auth_user_id: string
           expires_at: string
+          grant_id: string | null
           id: string
           meta: Json | null
           payer_person_id: string
@@ -1369,6 +1680,7 @@ export type Database = {
           created_at?: string
           created_by_auth_user_id: string
           expires_at: string
+          grant_id?: string | null
           id?: string
           meta?: Json | null
           payer_person_id: string
@@ -1385,6 +1697,7 @@ export type Database = {
           created_at?: string
           created_by_auth_user_id?: string
           expires_at?: string
+          grant_id?: string | null
           id?: string
           meta?: Json | null
           payer_person_id?: string
@@ -1402,6 +1715,13 @@ export type Database = {
             columns: ["batch_id"]
             isOneToOne: false
             referencedRelation: "money_import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "money_import_sessions_grant_id_fkey"
+            columns: ["grant_id"]
+            isOneToOne: false
+            referencedRelation: "money_import_grants"
             referencedColumns: ["id"]
           },
           {
@@ -1806,6 +2126,41 @@ export type Database = {
           {
             foreignKeyName: "money_transactions_payer_person_id_fkey"
             columns: ["payer_person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_transfer_self_aliases: {
+        Row: {
+          alias: string
+          created_at: string
+          id: string
+          normalized_alias: string
+          person_id: string
+          updated_at: string
+        }
+        Insert: {
+          alias: string
+          created_at?: string
+          id?: string
+          normalized_alias: string
+          person_id: string
+          updated_at?: string
+        }
+        Update: {
+          alias?: string
+          created_at?: string
+          id?: string
+          normalized_alias?: string
+          person_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_transfer_self_aliases_person_id_fkey"
+            columns: ["person_id"]
             isOneToOne: false
             referencedRelation: "persons"
             referencedColumns: ["id"]
@@ -2528,8 +2883,10 @@ export type Database = {
           is_proposal: boolean
           is_user_verified: boolean
           record_id: string
+          review_decision: string
           source_anchor: string
           status_in_record: string
+          supporting_obs_code: string
         }[]
       }
       get_record_findings: {
@@ -2646,6 +3003,29 @@ export type Database = {
         }
         Returns: boolean
       }
+      money_get_budget_report: {
+        Args: {
+          p_month_start?: string
+          p_person_id: string
+          p_report_currency?: string
+        }
+        Returns: {
+          actual_expense: number
+          actual_income: number
+          actual_net: number
+          category_rows: Json
+          fx_status: Json
+          net_variance: number
+          report_currency: string
+          report_month_end: string
+          report_month_start: string
+          root_category_rows: Json
+          target_expense: number
+          target_income: number
+          target_net: number
+          trend_points: Json
+        }[]
+      }
       money_get_category_rule_context: {
         Args: { p_line_item_id: string; p_person_id?: string }
         Returns: Json
@@ -2708,6 +3088,16 @@ export type Database = {
           transfer_group_id: string
         }[]
       }
+      money_normalize_transfer_text: {
+        Args: { p_text: string }
+        Returns: string
+      }
+      money_person_self_transfer_variants: {
+        Args: { p_person_id: string }
+        Returns: {
+          normalized_alias: string
+        }[]
+      }
       money_preview_category_rule_pipeline: {
         Args: {
           p_line_item_id: string
@@ -2724,6 +3114,18 @@ export type Database = {
           resulting_card_id: string
         }[]
       }
+      money_resolve_fx_rate: {
+        Args: {
+          p_rate_date: string
+          p_source_currency: string
+          p_target_currency: string
+        }
+        Returns: {
+          effective_rate_date: string
+          is_exact: boolean
+          rate: number
+        }[]
+      }
       money_run_category_rule_pipeline_internal: {
         Args: {
           p_force_overwrite_locked?: boolean
@@ -2737,6 +3139,25 @@ export type Database = {
       }
       money_seed_canonical_categories: { Args: never; Returns: undefined }
       money_seed_category_rule_mappings: { Args: never; Returns: undefined }
+      money_transaction_feed_summary: {
+        Args: {
+          p_account_ids?: string[]
+          p_amount_sign?: string
+          p_category_ids?: string[]
+          p_from?: string
+          p_payer_person_id: string
+          p_search?: string
+          p_statuses?: Database["public"]["Enums"]["money_transaction_status"][]
+          p_to?: string
+          p_transaction_types?: Database["public"]["Enums"]["money_transaction_type"][]
+          p_transfer_filter?: string
+        }
+        Returns: {
+          total_count: number
+          total_negative_amount: number
+          total_positive_amount: number
+        }[]
+      }
       money_upsert_transactions_batch: {
         Args: { p_batch_id: string; p_payer_person_id: string; p_rows: Json }
         Returns: Json
@@ -2757,6 +3178,7 @@ export type Database = {
           refill_digests_created: number
         }[]
       }
+      run_money_fx_sync_http: { Args: never; Returns: undefined }
       run_notifications_cron_http: { Args: never; Returns: undefined }
       search_medical_records: {
         Args: {

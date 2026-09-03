@@ -53,11 +53,16 @@ export const RECONCILE_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["condition_id", "reason", "source_anchor", "confidence"],
+        required: ["condition_id", "supporting_obs_code", "reason", "source_anchor", "confidence"],
         properties: {
           condition_id: {
             type: "string",
             description: "Must be one of the supplied existing condition ids.",
+          },
+          supporting_obs_code: {
+            type: ["string", "null"],
+            description:
+              "The catalogue code of the observation whose value establishes this resolution, or null when no measurement does.",
           },
           reason: { type: "string" },
           source_anchor: { type: "string" },
@@ -98,12 +103,20 @@ function buildExtractedSummary(extracted: ExtractResult, recordDate: string | nu
   // extraction already committed to, and must not be able to introduce document content.
   return JSON.stringify({
     record_date: recordDate,
+    // The anchor travels with the observation for the same reason it travels with a finding: a
+    // resolution has to cite the document, and this stage cannot see the document. Without it the
+    // only way to fill `source_anchor` for a lab-driven closure is to compose one out of the code,
+    // the value and the unit — which is what the model did, and what a reviewer was then shown as
+    // a quotation from their own medical record. Extraction verifies each anchor against the
+    // document text and drops the observation when it cannot be found, so this is the one string
+    // here that is known to appear in the document verbatim.
     observations: extracted.observations.map((item) => ({
       name: item.obs_name,
       code: item.obs_code,
       value: item.value,
       unit: item.unit,
       status: item.status,
+      anchor: item.source_anchor ?? null,
     })),
     findings: extracted.findings.map((item) => ({
       code: item.finding_code,
@@ -183,11 +196,68 @@ export async function runReconcileStage(
       "Report which existing findings this document shows to have resolved, which existing conditions it shows to have resolved, and which scheduled checkups it completes.",
       "Only reference ids that appear in the patient record below. Never invent an id.",
       "Only report a resolution when the extracted entities positively support it. Absence of a mention is not evidence of resolution.",
-      "asserted_absences is the exception, and the only one: it lists findings this document explicitly states are NOT present. An existing finding matched by an asserted absence of the same finding at the same site has been shown to have resolved — that is what 'Конкременты: нет' means about a stone already on the record.",
+      "For findings, asserted_absences is the only thing that positively supports a resolution: it lists findings this document explicitly states are NOT present. An existing finding matched by an asserted absence of the same finding at the same site has been shown to have resolved — that is what 'Конкременты: нет' means about a stone already on the record.",
       "An absence asserted for a whole organ covers its parts: no stones in the kidneys means no stone in the right kidney, so site_code 'kidney' resolves an existing finding on 'kidney_right'. The reverse does not hold — an absence asserted for one part says nothing about another part, and an absence in a different organ says nothing at all. When the sides are named separately and only one is clear, resolve only that one.",
+      "For conditions, a measurement is the other thing that positively supports one. A condition whose definition IS a specific substance being deficient has resolved when that exact substance is measured in this document and is inside its reference range. Set supporting_obs_code to the code of the observation you relied on. A resolution without it will be discarded.",
+      "Three things are not that, and they are what this rule is most often mistaken for. A condition that is managed rather than cured — an in-range value under treatment shows control, not resolution, so treated hypothyroidism is not resolved by a normal TSH and controlled diabetes is not resolved by a normal HbA1c. A condition diagnosed by imaging or histology — a blood test cannot exclude what a scan or a biopsy established, so normal liver enzymes do not resolve fatty liver disease. And a condition whose defining measurement is simply not in this document — silence is not evidence, and an in-range value for some other analyte is not evidence about this condition.",
+      "source_anchor must be copied verbatim from the anchor field of the entity you relied on. Every observation, finding and asserted absence carries one, and each was checked against the document text. Never assemble an anchor out of a code, a value and a unit: it is shown to a person as what their document says, and a sentence their document does not contain is not that.",
       "When nothing matches, return empty arrays. Empty is the correct and expected answer in most cases.",
     ],
     schema: RECONCILE_SCHEMA,
+    // One worked example, and every entity in it is absent from the evaluation corpus on purpose.
+    // Built from case 001's own conditions it would teach the model to recall this prompt rather
+    // than to read the document, and the corpus would report a success it had not earned. The
+    // corpus holds a biochemistry and lipid panel, a renal ultrasound and a gastrointestinal
+    // biopsy; this is a thyroid and vitamin panel, and it carries the whole distinction in one
+    // pair -- the deficiency defined by its measurement closes, the treated condition whose
+    // measurement is normal *because* it is treated does not.
+    examples: [
+      {
+        input: JSON.stringify({
+          extracted: {
+            observations: [
+              {
+                code: "vitamin_d_25oh",
+                value: "48",
+                unit: "ng/mL",
+                status: "normal",
+                anchor: "25-ОН витамин D — 48 нг/мл (норма 30–100)",
+              },
+              {
+                code: "tsh",
+                value: "2.1",
+                unit: "мЕд/л",
+                status: "normal",
+                anchor: "ТТГ — 2.1 мЕд/л",
+              },
+            ],
+          },
+          patient: {
+            existing_conditions: [
+              { id: "cond-a", name: "Дефицит витамина D", code: "E55.9", status: "active" },
+              { id: "cond-b", name: "Гипотиреоз", code: "E03.9", status: "active" },
+            ],
+          },
+        }),
+        output: {
+          findings_to_resolve: [],
+          conditions_to_resolve: [
+            {
+              condition_id: "cond-a",
+              supporting_obs_code: "vitamin_d_25oh",
+              reason:
+                "The deficiency is the statement that this substance is low, and it is measured here inside its range.",
+              // Copied character for character from that observation's anchor, not rebuilt from
+              // its code and value. This is the half of the example that is easiest to imitate
+              // loosely and the most damaging to get wrong.
+              source_anchor: "25-ОН витамин D — 48 нг/мл (норма 30–100)",
+              confidence: 0.9,
+            },
+          ],
+          checkups_to_complete: [],
+        },
+      },
+    ],
     variable: [
       {
         label: "EXTRACTED_ENTITIES",
@@ -235,6 +305,7 @@ export async function runReconcileStage(
     }
     conditionsToResolve.push({
       condition_id: conditionId,
+      supporting_obs_code: asNullableString(obj.supporting_obs_code),
       reason: asString(obj.reason, ""),
       source_anchor: asString(obj.source_anchor, ""),
       confidence: asNumber(obj.confidence) ?? 0,

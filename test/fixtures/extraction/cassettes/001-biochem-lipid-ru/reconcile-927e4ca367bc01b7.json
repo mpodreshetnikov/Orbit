@@ -1,0 +1,50 @@
+{
+  "request_hash": "927e4ca367bc01b7",
+  "stage": "reconcile",
+  "model": "openai/gpt-5.2:nitro",
+  "response": {
+    "id": "gen-1788336994-qkhrVLAk5aQFaX04CRXd",
+    "object": "chat.completion",
+    "created": 1788336994,
+    "model": "openai/gpt-5.2",
+    "provider": "OpenAI",
+    "system_fingerprint": null,
+    "service_tier": "priority",
+    "choices": [
+      {
+        "index": 0,
+        "logprobs": null,
+        "finish_reason": "stop",
+        "native_finish_reason": "completed",
+        "message": {
+          "role": "assistant",
+          "content": "{\"findings_to_resolve\":[],\"conditions_to_resolve\":[{\"condition_id\":\"00000000-0000-4000-9000-000000000001\",\"supporting_obs_code\":\"vitamin_b12\",\"reason\":\"Vitamin B12 is measured in this document and is within the provided reference range, which supports resolution of a B12 deficiency condition.\",\"source_anchor\":\"Витамин В12\\t704.00\\tпг/мл\\t187.00–883.00\",\"confidence\":0.9}],\"checkups_to_complete\":[{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000001\",\"reason\":\"Document contains a detailed lipid panel (total cholesterol, LDL-C, HDL-C, triglycerides, etc.).\",\"suggested_done_at\":\"2026-03-06\"},{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000003\",\"reason\":\"Total cholesterol is reported in the document.\",\"suggested_done_at\":\"2026-03-06\"},{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000005\",\"reason\":\"ALT, AST, bilirubin, and GGT are all reported in the document.\",\"suggested_done_at\":\"2026-03-06\"},{\"checkup_item_id\":\"00000000-0000-4000-8000-000000000006\",\"reason\":\"Vitamin B12 is reported in the document.\",\"suggested_done_at\":\"2026-03-06\"}]}",
+          "refusal": null
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 3573,
+      "completion_tokens": 552,
+      "total_tokens": 4125,
+      "cost": 0.027681885,
+      "is_byok": false,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.0279615,
+        "upstream_inference_prompt_cost": 0.0125055,
+        "upstream_inference_completions_cost": 0.015456
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 222,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    }
+  }
+}
