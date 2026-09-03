@@ -26,11 +26,20 @@ const { execSync, spawnSync } = require("child_process");
 const dbDir = path.resolve(__dirname);
 const DEPLOY_SQL = path.join(dbDir, "deploy.sql");
 
-// Lock behaviour for every phase. lock_timeout sits below deadlock_timeout on purpose: the deploy
-// gives a contended lock up itself, quickly and with a named error, rather than waiting long
-// enough for the deadlock detector to choose a victim at an arbitrary point. deploy.sql sets the
-// same two values for a manual single-shot run, and a test asserts the two stay identical.
-const SESSION_SETTINGS = ["SET lock_timeout = '2s';", "SET deadlock_timeout = '5s';"];
+// Lock behaviour for every phase: the deploy gives a contended lock up itself, quickly and with a
+// named error, rather than waiting long enough for the deadlock detector to choose a victim at an
+// arbitrary point.
+//
+// It gets there by ducking under deadlock_timeout rather than by raising it. deadlock_timeout is
+// a superuser-only parameter (`context = 'superuser'` in pg_settings) and the deploy connects as
+// `postgres`, which is not a superuser on Supabase, so setting it fails outright and takes the
+// phase down with it under ON_ERROR_STOP. Its default is 1000ms, so a lock_timeout below that
+// expires first and the deploy loses on its own terms. lock_timeout itself is `context = 'user'`
+// and needs no privilege.
+//
+// deploy.sql sets the same values for a manual single-shot run, and a test asserts the two stay
+// identical and that neither touches a parameter the deploy role cannot set.
+const SESSION_SETTINGS = ["SET lock_timeout = '750ms';"];
 
 // The phases, in the order deploy.sql applies them. A test asserts that.
 const PHASES = [

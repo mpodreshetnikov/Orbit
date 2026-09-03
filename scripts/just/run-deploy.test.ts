@@ -46,17 +46,41 @@ describe("run-deploy phase plan", () => {
     expect(SESSION_SETTINGS).toEqual(parseSessionSettingsFromDeploySql(readDeploySql()));
   });
 
-  it("keeps lock_timeout below deadlock_timeout so the deploy gives the lock up itself", () => {
-    const seconds = (setting: string) => Number(/= '(\d+)s'/.exec(setting)?.[1]);
+  it("keeps lock_timeout under the 1s deadlock_timeout default, so the deploy loses first", () => {
+    // The deploy has to give a contended lock up before any deadlock detector runs, or it goes on
+    // being chosen as the victim at an arbitrary point in the phase. It cannot get there by
+    // raising deadlock_timeout -- see the next test -- so it ducks under the default instead.
+    const POSTGRES_DEADLOCK_TIMEOUT_MS = 1000;
     const lockTimeout = SESSION_SETTINGS.find((setting) => setting.includes("lock_timeout"));
-    const deadlockTimeout = SESSION_SETTINGS.find((setting) =>
-      setting.includes("deadlock_timeout"),
-    );
 
     expect(lockTimeout).toBeDefined();
-    expect(deadlockTimeout).toBeDefined();
-    expect(seconds(lockTimeout!)).toBeGreaterThan(0);
-    expect(seconds(lockTimeout!)).toBeLessThan(seconds(deadlockTimeout!));
+    const ms = /= '(\d+)(ms|s)'/.exec(lockTimeout!);
+    expect(ms, `unparseable lock_timeout: ${lockTimeout}`).not.toBeNull();
+    const value = Number(ms![1]) * (ms![2] === "s" ? 1000 : 1);
+
+    expect(value).toBeGreaterThan(0);
+    expect(value).toBeLessThan(POSTGRES_DEADLOCK_TIMEOUT_MS);
+  });
+
+  it("sets no parameter the deploy role is not allowed to set", () => {
+    // The deploy connects as `postgres`, which is not a superuser on Supabase (rolsuper = false),
+    // and psql runs with ON_ERROR_STOP, so a SET the role may not perform does not degrade: it
+    // fails the phase outright and the deploy stops there. deadlock_timeout is the one that bit --
+    // it reads as the natural partner to lock_timeout and is `context = 'superuser'` in
+    // pg_settings, so every deploy would have died on the first phase.
+    const SUPERUSER_ONLY = [
+      "deadlock_timeout",
+      "log_min_duration_statement",
+      "log_statement",
+      "session_replication_role",
+      "zero_damaged_pages",
+    ];
+
+    for (const setting of SESSION_SETTINGS) {
+      for (const parameter of SUPERUSER_ONLY) {
+        expect(setting, `${parameter} cannot be set by the deploy role`).not.toContain(parameter);
+      }
+    }
   });
 
   it("stamps the version last, so a failed phase cannot leave the log claiming this sha", () => {

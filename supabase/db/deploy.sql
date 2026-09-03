@@ -15,14 +15,17 @@
 --   4. Cron Jobs (no transaction - pg_cron is finicky)
 --   5. Version stamp
 
--- Lock behaviour for the whole deploy session. lock_timeout is deliberately *below*
--- deadlock_timeout: a deploy that cannot get a lock then gives it up itself, quickly and with a
--- named error, instead of waiting long enough for the deadlock detector to pick a victim at an
--- arbitrary point -- which on 2026-09-01 and 2026-09-02 was repeatedly the deploy, halfway
--- through the policy phase (T-260902-60d). The counterpart session may still detect the deadlock
--- first on its own timer; either way the wait is bounded and the loss is one file wide.
-SET lock_timeout = '2s';
-SET deadlock_timeout = '5s';
+-- Lock behaviour for the whole deploy session. A deploy that cannot get a lock gives it up itself,
+-- quickly and with a named error, instead of waiting long enough for the deadlock detector to pick
+-- a victim at an arbitrary point -- which on 2026-09-01 and 2026-09-02 was repeatedly the deploy,
+-- halfway through the policy phase (T-260902-60d).
+--
+-- 750ms is deliberately below deadlock_timeout's 1000ms default. Raising deadlock_timeout instead
+-- would read better and does not work: it is a superuser-only parameter and the deploy connects as
+-- `postgres`, which is not a superuser on Supabase, so the SET fails and ON_ERROR_STOP takes the
+-- phase with it. The counterpart session may still detect the deadlock first on its own timer;
+-- either way the wait is bounded and the loss is one file wide.
+SET lock_timeout = '750ms';
 
 \echo '=========================================='
 \echo 'Supabase DB Code Deploy'
