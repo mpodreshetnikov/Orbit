@@ -1,4 +1,0 @@
-interface:
-  display_name: "PR Review Follow-Through"
-  short_description: "Finish a pull request and stop watching it"
-  default_prompt: "Use $pr-review-follow-through to decide whether this pull request is handed off, and to stop re-checking it once it is."
