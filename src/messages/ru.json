@@ -684,7 +684,18 @@
     "importReportBatchIdMissing": "Не указан идентификатор партии",
     "importReportBatchNotFound": "Партия не найдена",
     "importReportLoadFailed": "Не удалось загрузить",
-    "importReportLineItemUntitled": "Позиция"
+    "importReportLineItemUntitled": "Позиция",
+    "importAutoStatusTitle": "Автоимпорт в расширении",
+    "importAutoStatusExtensionInactive": "Расширение не ответило. Для автоимпорта оно должно быть установлено и включено в этом браузере.",
+    "importAutoStatusNoGrant": "У расширения нет ключа. Выпустите его выше и отправьте в расширение.",
+    "importAutoStatusGrantHeld": "Ключ получен {date}. Источники: {sources}",
+    "importAutoStatusNeverRan": "Автозапусков ещё не было. Откройте {source} — через минуту тишины расширение запустит импорт само.",
+    "importAutoStatusScheduled": "Запуск запланирован на {time}.",
+    "importAutoStatusLastOk": "Последний автозапуск {date} прошёл успешно.",
+    "importAutoStatusLastFailed": "Последний автозапуск {date} не удался: {error}",
+    "importAutoStatusNextAfter": "Следующая попытка не раньше {next}.",
+    "importAutoStatusNextVisit": "Следующая попытка — при ближайшем визите в банк.",
+    "importAutoStatusStopped": "Остановлен после {count} неудач подряд. Успешный ручной импорт или обновление расширения возобновят его."
   },
   "records": {
     "title": "Медицинские записи",

@@ -8,7 +8,7 @@ import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
 import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
 import type { AutoRunStore } from "./auto-run-store.js";
-import { nextAutoRunState } from "./auto-run-policy.js";
+import { describeAutoRunEligibility, nextAutoRunState } from "./auto-run-policy.js";
 
 export interface BackgroundMessage {
   type: string;
@@ -50,6 +50,26 @@ export interface BackgroundRouterDeps {
   autoRunStore?: AutoRunStore;
   importRunnerDeps: BackgroundImportRunnerDeps;
   debugStore: ImportDebugStore;
+  /** The sources an unattended run can visit; what the status reports on. */
+  listAutoImportSources?: () => string[];
+  /** Visit-triggered sweeps waiting on their minute of quiet, by source. */
+  listScheduledSweeps?: () => Promise<Array<{ sourceId: string; atMs: number }>>;
+  now?: () => number;
+}
+
+/**
+ * What the extension will do on its own, as the import page shows it. The page is the only
+ * place a person can look when "nothing happens" -- and without this, nothing happening was
+ * indistinguishable from a missing key, a backoff after a failure, or a sweep still waiting.
+ */
+export interface AutoImportStatusSource {
+  source_id: string;
+  last_run_at: string | null;
+  last_result: "ok" | "error" | null;
+  consecutive_failures: number;
+  last_error: string | null;
+  next_run: { kind: "now" } | { kind: "after"; at: string } | { kind: "stopped" };
+  scheduled_at: string | null;
 }
 
 export interface BackgroundRouterContext {
@@ -323,6 +343,49 @@ export async function routeBackgroundMessage(
   if (message.type === "MONEY_IMPORT_CLEAR_GRANT") {
     await deps.grantStore.setGrant(null);
     return { ok: true };
+  }
+
+  if (message.type === "MONEY_IMPORT_GET_AUTO_STATUS") {
+    const grant = await deps.grantStore.getGrant();
+    const scheduled = deps.listScheduledSweeps ? await deps.listScheduledSweeps() : [];
+    const sources: AutoImportStatusSource[] = [];
+    if (grant && deps.autoRunStore) {
+      const known = new Set(deps.listAutoImportSources?.() ?? grant.allowed_sources);
+      for (const sourceId of grant.allowed_sources) {
+        if (!known.has(sourceId)) continue;
+        const state = await deps.autoRunStore.getState({
+          sourceId,
+          payerPersonId: grant.person_id,
+        });
+        const eligibility = describeAutoRunEligibility(state);
+        const pending = scheduled.find((entry) => entry.sourceId === sourceId);
+        sources.push({
+          source_id: sourceId,
+          last_run_at:
+            state.lastRunAtMs === null ? null : new Date(state.lastRunAtMs).toISOString(),
+          last_result: state.lastResult,
+          consecutive_failures: state.consecutiveFailures,
+          last_error: state.lastError ?? null,
+          next_run:
+            eligibility.kind === "after"
+              ? { kind: "after", at: new Date(eligibility.atMs).toISOString() }
+              : { kind: eligibility.kind },
+          scheduled_at: pending ? new Date(pending.atMs).toISOString() : null,
+        });
+      }
+    }
+    // The token stays here, as with MONEY_IMPORT_GET_GRANT.
+    return {
+      ok: true,
+      grant: grant
+        ? {
+            person_id: grant.person_id,
+            allowed_sources: grant.allowed_sources,
+            received_at: grant.received_at,
+          }
+        : null,
+      sources,
+    };
   }
 
   if (message.type === "MONEY_IMPORT_START_SESSION") {

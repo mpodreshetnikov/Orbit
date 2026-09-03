@@ -78,6 +78,25 @@ export function createContentBridge(deps: ContentBridgeDeps) {
       return;
     }
 
+    if (data.type === "MONEY_IMPORT_GET_AUTO_STATUS") {
+      deps.runtimeSendMessage(
+        { type: "MONEY_IMPORT_GET_AUTO_STATUS" },
+        (response: Record<string, unknown> | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_AUTO_STATUS",
+              ok: Boolean(response?.ok),
+              grant: response?.grant ?? null,
+              sources: Array.isArray(response?.sources) ? response.sources : [],
+            },
+            "*",
+          );
+        },
+      );
+      return;
+    }
+
     if (data.type === "MONEY_IMPORT_START_SESSION") {
       deps.runtimeSendMessage(
         {

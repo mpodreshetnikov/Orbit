@@ -13,7 +13,18 @@ export interface AutoRunState {
   lastRunAtMs: number | null;
   lastResult: "ok" | "error" | null;
   consecutiveFailures: number;
+  /**
+   * What the last failed attempt said, so the import page can show it. Null after a success.
+   * Optional because states written before it existed have no such field.
+   */
+  lastError?: string | null;
 }
+
+/** When the next unattended run may start, as the import page tells it. */
+export type AutoRunEligibility =
+  | { kind: "now" }
+  | { kind: "after"; atMs: number }
+  | { kind: "stopped" };
 
 export interface AutoRunOptions {
   cooldownMs?: number;
@@ -31,19 +42,22 @@ export const DEFAULT_AUTO_RUN_COOLDOWN_MS = 20 * 60 * 60 * 1000;
 export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
 
 export function createInitialAutoRunState(): AutoRunState {
-  return { lastRunAtMs: null, lastResult: null, consecutiveFailures: 0 };
+  return { lastRunAtMs: null, lastResult: null, consecutiveFailures: 0, lastError: null };
 }
 
-export function shouldAutoRun(
+/**
+ * One reading of the state for both the sweep and the import page, so what the page says the
+ * extension will do is what the sweep decides.
+ */
+export function describeAutoRunEligibility(
   state: AutoRunState | null,
-  nowMs: number,
   options: AutoRunOptions = {},
-): boolean {
+): AutoRunEligibility {
   const cooldownMs = options.cooldownMs ?? DEFAULT_AUTO_RUN_COOLDOWN_MS;
   const maxConsecutiveFailures = options.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES;
 
-  if (!state || state.lastRunAtMs === null) return true;
-  if (state.consecutiveFailures >= maxConsecutiveFailures) return false;
+  if (!state || state.lastRunAtMs === null) return { kind: "now" };
+  if (state.consecutiveFailures >= maxConsecutiveFailures) return { kind: "stopped" };
 
   // Each failure doubles the wait, so a signed-out session costs one attempt, then one every
   // two days, then nothing until a manual run clears the count.
@@ -51,18 +65,31 @@ export function shouldAutoRun(
   const effectiveCooldownMs =
     state.lastResult === "error" ? cooldownMs * backoffFactor : cooldownMs;
 
-  return nowMs - state.lastRunAtMs >= effectiveCooldownMs;
+  return { kind: "after", atMs: state.lastRunAtMs + effectiveCooldownMs };
+}
+
+export function shouldAutoRun(
+  state: AutoRunState | null,
+  nowMs: number,
+  options: AutoRunOptions = {},
+): boolean {
+  const eligibility = describeAutoRunEligibility(state, options);
+  if (eligibility.kind === "now") return true;
+  if (eligibility.kind === "stopped") return false;
+  return nowMs >= eligibility.atMs;
 }
 
 export function nextAutoRunState(
   state: AutoRunState | null,
   nowMs: number,
   result: "ok" | "error",
+  error: string | null = null,
 ): AutoRunState {
   const previousFailures = state?.consecutiveFailures ?? 0;
   return {
     lastRunAtMs: nowMs,
     lastResult: result,
     consecutiveFailures: result === "ok" ? 0 : previousFailures + 1,
+    lastError: result === "ok" ? null : (error ?? state?.lastError ?? null),
   };
 }
