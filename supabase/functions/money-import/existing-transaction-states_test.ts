@@ -2,7 +2,11 @@
 import { assertEquals } from "std/assert/assert-equals";
 import { assertJsonResponse } from "../_shared/testing/response.ts";
 import { getExistingTransactionStatesAction } from "./existing-transaction-states.ts";
-import type { ExistingTransactionStateResult, UserAuthContext } from "./types.ts";
+import type {
+  ExistingTransactionStateResult,
+  SessionAuthContext,
+  UserAuthContext,
+} from "./types.ts";
 
 const auth: UserAuthContext = {
   mode: "user",
@@ -164,7 +168,9 @@ Deno.test("getExistingTransactionStatesAction returns repository states", async 
     event: "money_import_get_existing_transaction_states_completed",
     attrs: {
       source: "tbank",
+      auth_mode: "user",
       user_id: "user-1",
+      session_id: null,
       candidate_count: 2,
       fulfilled_count: 1,
     },
@@ -202,3 +208,65 @@ Deno.test("getExistingTransactionStatesAction works without telemetry", async ()
 
   assertEquals(payload.states, states);
 });
+
+Deno.test(
+  "getExistingTransactionStatesAction answers a session about its own import only",
+  async () => {
+    // A run nobody started asks on its session token. The body may name any source and payer; the
+    // session's own are what the repository is asked about.
+    const sessionAuth: SessionAuthContext = {
+      mode: "session",
+      token: "session-token",
+      session: {
+        id: "session-1",
+        source: "tbank_web",
+        payer_person_id: "person-session",
+        status: "running",
+        revoked_at: null,
+        expires_at: "2999-01-01T00:00:00.000Z",
+      },
+    };
+    let repositoryCall: { source: string; payerPersonId: string } | undefined;
+
+    const payload = await assertJsonResponse<{ states: unknown[] }>(
+      await getExistingTransactionStatesAction(
+        {
+          source: "alfa_web",
+          payer_person_id: "person-somebody-else",
+          candidates: [{ external_id: "ext-1" }],
+        },
+        sessionAuth,
+        {
+          repository: {
+            getExistingTransactionStates: async (source: string, payerPersonId: string) => {
+              repositoryCall = { source, payerPersonId };
+              return [];
+            },
+          } as never,
+          telemetry: createTelemetryMock() as never,
+        },
+      ),
+      200,
+    );
+
+    assertEquals(payload.states, []);
+    assertEquals(repositoryCall, { source: "tbank_web", payerPersonId: "person-session" });
+
+    // A session past its time answers nothing, the way every other session action refuses it.
+    const expired = await assertJsonResponse<{ error: string }>(
+      await getExistingTransactionStatesAction(
+        { candidates: [] },
+        {
+          ...sessionAuth,
+          session: { ...sessionAuth.session, expires_at: "2000-01-01T00:00:00.000Z" },
+        },
+        {
+          repository: { getExistingTransactionStates: async () => [] } as never,
+          telemetry: createTelemetryMock() as never,
+        },
+      ),
+      401,
+    );
+    assertEquals(expired.error, "Import session expired or revoked");
+  },
+);

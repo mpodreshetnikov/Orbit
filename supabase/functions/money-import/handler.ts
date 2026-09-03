@@ -16,7 +16,7 @@ import {
   getImportContextAction,
   sessionStatusAction,
 } from "./session-actions.ts";
-import type { GrantAuthContext, UserAuthContext } from "./types.ts";
+import type { GrantAuthContext, SessionAuthContext, UserAuthContext } from "./types.ts";
 
 export interface MoneyImportHandlerDeps extends MoneyImportDeps {}
 
@@ -126,10 +126,11 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
         const actionSpan = telemetry.startSpan(
           "edge.money_import.action.get_existing_transaction_states",
         );
+        // A session token may ask; the action pins the question to the session's own import.
         const auth = (await resolveAuth(req, authDeps, {
           allowUser: true,
-          allowSession: false,
-        })) as UserAuthContext;
+          allowSession: true,
+        })) as UserAuthContext | SessionAuthContext;
         const response = await getExistingTransactionStatesAction(body, auth, {
           ...deps,
           telemetry,
