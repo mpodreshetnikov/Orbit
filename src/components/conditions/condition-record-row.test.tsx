@@ -91,3 +91,107 @@ describe("ConditionRecordRow", () => {
     expect(screen.queryByRole("button", { name: "conditions.edit" })).not.toBeInTheDocument();
   });
 });
+
+describe("a closure nobody has confirmed", () => {
+  const pendingClosure = {
+    status_in_record: "resolved",
+    is_llm_extracted: true,
+    is_user_verified: false,
+  };
+
+  it("says it is waiting rather than rendering as a settled resolution", () => {
+    render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({ ...pendingClosure, condition_current_status: "active" })}
+      />,
+    );
+
+    // Without this the row reads "Active → Resolved, status change" on a condition whose own
+    // header still says active: the record contradicting itself with nothing to say which is true.
+    expect(screen.getByText("conditions.awaitingReview")).toBeInTheDocument();
+    expect(screen.getByText("(conditions.proposedChange)")).toBeInTheDocument();
+    expect(screen.queryByText("(conditions.statusChange)")).not.toBeInTheDocument();
+  });
+
+  it("says nothing extra once a person has confirmed it", () => {
+    render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({
+          ...pendingClosure,
+          is_user_verified: true,
+          condition_current_status: "active",
+        })}
+      />,
+    );
+
+    expect(screen.queryByText("conditions.awaitingReview")).not.toBeInTheDocument();
+    expect(screen.getByText("(conditions.statusChange)")).toBeInTheDocument();
+  });
+
+  it("leaves a closure a person wrote themselves alone", () => {
+    // Not machine-authored, so it was never suppressed and never needed confirming.
+    render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({
+          ...pendingClosure,
+          is_llm_extracted: false,
+          condition_current_status: "active",
+        })}
+      />,
+    );
+
+    expect(screen.queryByText("conditions.awaitingReview")).not.toBeInTheDocument();
+  });
+
+  it("leaves an unverified mention that is not a closure alone", () => {
+    // `active` and `suspected` apply unreviewed by design: they are how conditions reach the chart.
+    render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({
+          ...pendingClosure,
+          status_in_record: "active",
+          condition_current_status: "resolved",
+        })}
+      />,
+    );
+
+    expect(screen.queryByText("conditions.awaitingReview")).not.toBeInTheDocument();
+    expect(screen.getByText("(conditions.statusChange)")).toBeInTheDocument();
+  });
+  it("offers dismissal instead of delete, so rejecting cannot destroy the row", async () => {
+    // The dismissal is the negative label the promotion rule counts. Leaving delete beside it
+    // would keep the destructive path one click from the reviewer who means "no".
+    const onDelete = vi.fn();
+    const onDismiss = vi.fn();
+    const { container } = render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({ ...pendingClosure, condition_current_status: "active" })}
+        onDelete={onDelete}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    expect(container.querySelector("button.text-destructive")).toBeNull();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "conditions.dismissClosure" }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("keeps delete on a mention that is not a proposed closure", async () => {
+    const onDelete = vi.fn();
+    const { container } = render(
+      <ConditionRecordRow
+        conditionRecord={makeRecord({ ...pendingClosure, is_user_verified: true })}
+        onDelete={onDelete}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    await userEvent
+      .setup()
+      .click(container.querySelector("button.text-destructive") as HTMLButtonElement);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
