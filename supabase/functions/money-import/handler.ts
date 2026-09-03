@@ -1,6 +1,6 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createEdgeRequestContext, createEdgeTelemetry } from "../_shared/observability.ts";
-import { resolveAuth } from "./auth.ts";
+import { type MoneyImportAuthDeps, resolveAuth } from "./auth.ts";
 import { applyRowsAction } from "./apply-rows.ts";
 import { applyBatchAction, applyPendingBatch } from "./apply-batch.ts";
 import { createDefaultMoneyImportDeps, type MoneyImportDeps } from "./deps.ts";
@@ -32,6 +32,18 @@ function isUnauthorizedError(message: string): boolean {
 }
 
 export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
+  // One set of auth dependencies for every action, so a session minted by a grant is re-checked
+  // against that grant on every call -- not only on the actions somebody remembered to wire.
+  // `resolveAuth` fails closed without the grant lookup, so an action that built its own,
+  // shorter set would refuse every unattended session rather than wave one through.
+  const authDeps: MoneyImportAuthDeps = {
+    authenticateAllowedUser: deps.repository.authenticateAllowedUser,
+    getSessionByToken: deps.repository.getSessionByToken,
+    getGrantById: deps.repository.getGrantById,
+    isAuthUserAllowed: deps.repository.isAuthUserAllowed,
+    now: () => (deps.now ?? (() => new Date()))().getTime(),
+  };
+
   return async function handleMoneyImportRequest(req: Request): Promise<Response> {
     const context = createEdgeRequestContext(req, "money-import");
     const telemetry = createEdgeTelemetry(context);
@@ -85,13 +97,7 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
         // session token this hands back.
         const auth = (await resolveAuth(
           req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            getGrantByToken: deps.repository.getGrantByToken,
-            isAuthUserAllowed: deps.repository.isAuthUserAllowed,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
+          { ...authDeps, getGrantByToken: deps.repository.getGrantByToken },
           { allowUser: true, allowSession: false, allowGrant: true },
         )) as UserAuthContext | GrantAuthContext;
         const response = await createSessionAction(body, auth, {
@@ -108,19 +114,11 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "get_import_context") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.get_import_context");
-        const auth = (await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
-        const response = await getImportContextAction(body, auth, {
-          ...deps,
-          telemetry,
-        });
+        const auth = (await resolveAuth(req, authDeps, {
+          allowUser: true,
+          allowSession: false,
+        })) as UserAuthContext;
+        const response = await getImportContextAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -133,15 +131,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
         const actionSpan = telemetry.startSpan(
           "edge.money_import.action.get_existing_transaction_states",
         );
-        const auth = (await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
+        const auth = (await resolveAuth(req, authDeps, {
+          allowUser: true,
+          allowSession: false,
+        })) as UserAuthContext;
         const response = await getExistingTransactionStatesAction(body, auth, {
           ...deps,
           telemetry,
@@ -156,19 +149,11 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "session_status") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.session_status");
-        const auth = (await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
-        const response = await sessionStatusAction(body, auth, {
-          ...deps,
-          telemetry,
-        });
+        const auth = (await resolveAuth(req, authDeps, {
+          allowUser: true,
+          allowSession: false,
+        })) as UserAuthContext;
+        const response = await sessionStatusAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -179,19 +164,8 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "apply_rows") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.apply_rows");
-        const auth = await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: true },
-        );
-        const response = await applyRowsAction(body, auth, {
-          ...deps,
-          telemetry,
-        });
+        const auth = await resolveAuth(req, authDeps, { allowUser: true, allowSession: true });
+        const response = await applyRowsAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -202,15 +176,7 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "preview_rows") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.preview_rows");
-        const auth = await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: true },
-        );
+        const auth = await resolveAuth(req, authDeps, { allowUser: true, allowSession: true });
         const response = await previewRowsAction(body, auth, {
           ...deps,
           telemetry,
@@ -226,19 +192,11 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "apply_batch") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.apply_batch");
-        const auth = (await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
-        const response = await applyBatchAction(body, auth, {
-          ...deps,
-          telemetry,
-        });
+        const auth = (await resolveAuth(req, authDeps, {
+          allowUser: true,
+          allowSession: false,
+        })) as UserAuthContext;
+        const response = await applyBatchAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -249,19 +207,11 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "discard_batch") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.discard_batch");
-        const auth = (await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
-        const response = await discardBatchAction(body, auth, {
-          ...deps,
-          telemetry,
-        });
+        const auth = (await resolveAuth(req, authDeps, {
+          allowUser: true,
+          allowSession: false,
+        })) as UserAuthContext;
+        const response = await discardBatchAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",
@@ -272,15 +222,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "update_brand_resolution") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.update_brand_resolution");
-        const auth = (await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
+        const auth = (await resolveAuth(req, authDeps, {
+          allowUser: true,
+          allowSession: false,
+        })) as UserAuthContext;
         const response = await updateBrandResolutionAction(body, auth, {
           repository: deps.repository,
         });
@@ -294,15 +239,10 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "remap_preview_card") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.remap_preview_card");
-        const auth = (await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: false },
-        )) as UserAuthContext;
+        const auth = (await resolveAuth(req, authDeps, {
+          allowUser: true,
+          allowSession: false,
+        })) as UserAuthContext;
         const response = await remapPreviewCardAction(body, auth, {
           repository: deps.repository,
         });
@@ -316,19 +256,8 @@ export function createMoneyImportHandler(deps: MoneyImportHandlerDeps) {
 
       if (action === "complete_session") {
         const actionSpan = telemetry.startSpan("edge.money_import.action.complete_session");
-        const auth = await resolveAuth(
-          req,
-          {
-            authenticateAllowedUser: deps.repository.authenticateAllowedUser,
-            getSessionByToken: deps.repository.getSessionByToken,
-            now: () => (deps.now ?? (() => new Date()))().getTime(),
-          },
-          { allowUser: true, allowSession: true },
-        );
-        const response = await completeSessionAction(body, auth, {
-          ...deps,
-          telemetry,
-        });
+        const auth = await resolveAuth(req, authDeps, { allowUser: true, allowSession: true });
+        const response = await completeSessionAction(body, auth, { ...deps, telemetry });
         await actionSpan.end({ status: "ok" });
         await requestSpan.end({
           status: response.status >= 400 ? "error" : "ok",

@@ -613,3 +613,47 @@ Deno.test(
     assertEquals(state.session?.status, "running");
   },
 );
+
+Deno.test(
+  "previewRowsAction keeps the strategy and the unattended mark through a preview reset",
+  async () => {
+    // The first chunk replaces the batch meta so counters start over. What was decided at
+    // create_session -- how receipts were parsed, and that nobody started this run -- is not a
+    // counter: the history screen reads the one, and the run's end reads the other.
+    const { repository, state } = createRepositoryMock({
+      batch: {
+        id: "batch-1",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: {
+          parse_strategy: "full",
+          unattended: true,
+          range_selection_meta: { selection_mode: "preset", preset_key: "1y" },
+          preview_progress_percent: 40,
+        },
+      },
+    });
+
+    await assertJsonResponse(
+      await previewRowsAction(
+        {
+          batch_id: "batch-1",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "kept-1" })],
+        },
+        userAuth,
+        { repository },
+      ),
+      200,
+    );
+
+    const meta = state.batch?.meta as Record<string, unknown>;
+    assertEquals(meta.parse_strategy, "full");
+    assertEquals(meta.unattended, true);
+    assertEquals((meta.range_selection_meta as Record<string, unknown>).preset_key, "1y");
+  },
+);

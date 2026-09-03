@@ -21,6 +21,13 @@ export const DEFAULT_SESSION_TTL_MINUTES = 15;
  * same expired token. Four hours covers the year-long history a person can ask for.
  */
 export const FULL_STRATEGY_SESSION_TTL_MINUTES = 240;
+/**
+ * The sources whose connector actually runs the full strategy. Alfa's connector parses receipts
+ * the one way it knows whatever the session says, so a session that states `full` for it would
+ * earn a four-hour write token for a fifteen-minute run. The time is paid for by a slow parse,
+ * and only where one happens.
+ */
+export const FULL_STRATEGY_SOURCES: ReadonlySet<string> = new Set(["tbank_web"]);
 type ParseStrategy = "fast" | "full";
 
 interface SessionActionDeps {
@@ -124,7 +131,7 @@ export async function createSessionAction(
   // Decided here from the strategy the session states, not requested by the client: a caller
   // cannot ask for a long-lived token, only for a slow parse, which is what earns the time.
   const sessionTtlMinutes =
-    parseStrategy === "full"
+    parseStrategy === "full" && FULL_STRATEGY_SOURCES.has(source)
       ? Math.max(baseTtlMinutes, FULL_STRATEGY_SESSION_TTL_MINUTES)
       : baseTtlMinutes;
   const expiresAt = new Date(now.getTime() + sessionTtlMinutes * 60 * 1000).toISOString();
@@ -139,6 +146,10 @@ export async function createSessionAction(
     source,
     payer_person_id: payerPersonId,
     created_by_auth_user_id: createdByAuthUserId,
+    // The credential that minted this session, so every later request on the session token
+    // can ask whether that credential is still live. Without it, revoking the grant left the
+    // sessions it had already opened importing to the end of their TTL. See `resolveAuth`.
+    grant_id: grant ? (normalizeText(grant.id) ?? null) : null,
     status: "created",
     window_from: windowFrom,
     window_to: windowTo,
