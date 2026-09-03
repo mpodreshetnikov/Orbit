@@ -100,9 +100,14 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      # Pinned, not `latest`: resolving `latest` is an anonymous call to the GitHub API, whose
+      # per-IP limit is shared by every hosted runner, and run 317 lost its database deploy to
+      # `rate limit exceeded` there. A pinned version downloads the release archive directly.
+      # The value is package.json's `supabase` devDependency; a test holds the two together
+      # (T-260903-ut8).
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.116.0
       - uses: taiki-e/install-action@just
       - name: Install dependencies
         run: npm ci
@@ -409,8 +414,13 @@ jobs:
       DATABASE_URL: postgresql://postgres.${{ vars.SUPABASE_PROJECT_REF }}:${{ secrets.SUPABASE_DB_PASS }}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
     steps:
       - uses: actions/checkout@v4
+      # Pinned, not `latest`: resolving `latest` is an anonymous call to the GitHub API, whose
+      # per-IP limit is shared by every hosted runner, and run 317 lost its database deploy to
+      # `rate limit exceeded` there. A pinned version downloads the release archive directly.
+      # The value is package.json's `supabase` devDependency; a test holds the two together
+      # (T-260903-ut8).
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.116.0
       - uses: taiki-e/install-action@just
       - run: just ci-deploy-supabase
