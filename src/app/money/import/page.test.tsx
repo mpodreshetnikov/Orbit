@@ -14,7 +14,9 @@ const hookMocks = vi.hoisted(() => ({
 }));
 
 const i18nMocks = vi.hoisted(() => ({
-  t: (key: string): string => key,
+  // The key, plus any values, so "Line items (1)" is distinguishable from "Line items (2)".
+  t: (key: string, values?: Record<string, string | number>): string =>
+    values ? `${key} ${Object.values(values).join(" ")}` : key,
 }));
 
 const routerMock = {
@@ -231,8 +233,8 @@ describe("MoneyImportPage", () => {
     const file = new File(["date,amount"], "bank.csv", { type: "text/csv" });
     fireEvent.change(fileInput, { target: { files: [file] } });
 
-    expect(await screen.findByText("money.importNoSourceAccounts")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "money.importCreateSourceAccount" }));
+    expect(await screen.findByText(/^money\.importNoSourceAccounts/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^money\.importCreateSourceAccount/ }));
 
     await waitFor(() => {
       expect(createAccountMutateAsync).toHaveBeenCalledWith({
@@ -488,7 +490,7 @@ describe("MoneyImportPage", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: /TBank extension/ }));
-    expect(await screen.findByText("Import history range")).toBeInTheDocument();
+    expect(await screen.findByText("money.importRangeTitle")).toBeInTheDocument();
     const startImportButton = await screen.findByRole("button", {
       name: "money.importStartImport",
     });
@@ -584,10 +586,9 @@ describe("MoneyImportPage", () => {
       const user = userEvent.setup();
 
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
-      expect(await screen.findByRole("button", { name: "Full" })).toHaveAttribute(
-        "data-state",
-        "on",
-      );
+      expect(
+        await screen.findByRole("button", { name: "money.importStrategyFull" }),
+      ).toHaveAttribute("data-state", "on");
       await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
 
       await waitFor(() => {
@@ -669,7 +670,7 @@ describe("MoneyImportPage", () => {
       const user = userEvent.setup();
 
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
-      await user.click(await screen.findByRole("button", { name: "Fast" }));
+      await user.click(await screen.findByRole("button", { name: "money.importStrategyFast" }));
       await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
 
       await waitFor(() => {
@@ -743,7 +744,7 @@ describe("MoneyImportPage", () => {
       const user = userEvent.setup();
 
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
-      expect(await screen.findByText("Import history range")).toBeInTheDocument();
+      expect(await screen.findByText("money.importRangeTitle")).toBeInTheDocument();
       await user.click(await screen.findByRole("button", { name: "money.importStartImport" }));
 
       await waitFor(() => {
@@ -821,7 +822,7 @@ describe("MoneyImportPage", () => {
       const user = userEvent.setup();
 
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
-      await user.click(await screen.findByRole("button", { name: "Custom" }));
+      await user.click(await screen.findByRole("button", { name: "money.importRangeCustom" }));
 
       // datetime-local inputs are local time. The page serialises them with
       // `new Date(value).toISOString()`, so the expected UTC below is derived
@@ -830,10 +831,10 @@ describe("MoneyImportPage", () => {
       const customFromLocal = "2026-02-01T10:00";
       const customToLocal = "2026-02-15T21:30";
 
-      await user.clear(screen.getByLabelText("From"));
-      await user.type(screen.getByLabelText("From"), customFromLocal);
-      await user.clear(screen.getByLabelText("To"));
-      await user.type(screen.getByLabelText("To"), customToLocal);
+      await user.clear(screen.getByLabelText("money.importRangeFrom"));
+      await user.type(screen.getByLabelText("money.importRangeFrom"), customFromLocal);
+      await user.clear(screen.getByLabelText("money.importRangeTo"));
+      await user.type(screen.getByLabelText("money.importRangeTo"), customToLocal);
 
       const startImportButton = await screen.findByRole("button", {
         name: "money.importStartImport",
@@ -884,7 +885,7 @@ describe("MoneyImportPage", () => {
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
       await user.click(
-        await screen.findByRole("button", { name: "money.importCreateSourceAccount" }),
+        await screen.findByRole("button", { name: /^money\.importCreateSourceAccount/ }),
       );
 
       await waitFor(() => {
@@ -926,7 +927,7 @@ describe("MoneyImportPage", () => {
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: /Alfa Bank Web/ }));
       await user.click(
-        await screen.findByRole("button", { name: "money.importCreateSourceAccount" }),
+        await screen.findByRole("button", { name: /^money\.importCreateSourceAccount/ }),
       );
 
       await waitFor(() => {
@@ -969,7 +970,7 @@ describe("MoneyImportPage", () => {
       await user.click(screen.getByRole("button", { name: /TBank extension/ }));
       const startButton = await screen.findByRole("button", { name: "money.importStartImport" });
       expect(startButton).toBeDisabled();
-      expect(await screen.findByText("money.importNoSourceAccounts")).toBeInTheDocument();
+      expect(await screen.findByText(/^money\.importNoSourceAccounts/)).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       await user.click(startButton);
