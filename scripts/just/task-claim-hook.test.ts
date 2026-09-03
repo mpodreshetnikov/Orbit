@@ -10,6 +10,7 @@ const {
   evaluate,
   gitPath,
   preSnapshotPath,
+  statePathFor,
   writePreSnapshot,
   isRegistryPath,
   locateRegistry,
@@ -19,7 +20,8 @@ const {
 } = hook as unknown as {
   changedPathsOutsideRegistry: (repoRoot: string, snapshot?: unknown) => string[];
   writePreSnapshot: (repoRoot: string, snapshotPath?: string) => unknown;
-  preSnapshotPath: (sessionId: string, repoRoot: string) => string;
+  preSnapshotPath: (key: string, repoRoot: string) => string;
+  statePathFor: (sessionId: string, repoRoot: string) => string;
   gitPath: (name: string, repoRoot: string) => string;
   evaluate: (input: {
     marker: string | null;
@@ -95,6 +97,15 @@ function runHook(
   return result.stdout.trim()
     ? (JSON.parse(result.stdout).hookSpecificOutput.additionalContext as string)
     : "";
+}
+
+function runHookRaw(code: string, input: unknown, env: Record<string, string> = {}) {
+  const result = spawnSync(process.execPath, [HOOK], {
+    encoding: "utf8",
+    input: JSON.stringify(input),
+    env: { ...process.env, TASK_CLAIM_HOOK_REPO_ROOT: code, ORBIT_TASKS_REGISTRY: "", ...env },
+  });
+  return result.stdout.trim() ? JSON.parse(result.stdout).hookSpecificOutput : null;
 }
 
 const edit = (code: string, file: string) => ({
@@ -312,25 +323,92 @@ describe("the hook itself", () => {
     expect(changedPathsOutsideRegistry(code, snapshot)).toEqual(["src/old.ts"]);
   });
 
-  it("keeps one snapshot per session, so concurrent sessions do not consume each other's", () => {
+  it("keeps one snapshot per tool invocation, so overlapping commands do not consume each other's", () => {
     const { registry, code } = fixture([]);
     const env = { ORBIT_TASKS_REGISTRY: registry };
-    const bashFor = (session: string) => ({
-      session_id: session,
+    const bashFor = (toolUse: string) => ({
+      session_id: "one-session",
+      tool_use_id: toolUse,
       tool_name: "Bash",
       tool_input: { command: "x" },
     });
 
-    expect(preSnapshotPath("s-1", code)).not.toBe(preSnapshotPath("s-2", code));
-    runHook(code, bashFor("s-1"), env, ["--pre"]);
-    fs.writeFileSync(path.join(code, "src", "one.ts"), "session one wrote\n");
+    expect(preSnapshotPath("t-1", code)).not.toBe(preSnapshotPath("t-2", code));
+    runHook(code, bashFor("t-1"), env, ["--pre"]);
+    fs.writeFileSync(path.join(code, "src", "one.ts"), "the slow command wrote\n");
     git(code, "add", "-A");
     git(code, "commit", "-q", "-m", "one");
-    // Session two starts after session one committed; its snapshot must not hide one's commit.
-    runHook(code, bashFor("s-2"), env, ["--pre"]);
+    // A fast command in the same session starts and finishes while the slow one is still running.
+    runHook(code, bashFor("t-2"), env, ["--pre"]);
+    expect(runHook(code, bashFor("t-2"), env)).toBe("");
 
-    expect(runHook(code, bashFor("s-1"), env)).toContain("src/one.ts");
-    expect(fs.existsSync(preSnapshotPath("s-2", code))).toBe(true);
+    // The slow command's own snapshot is still there, and its commit is reported.
+    expect(runHook(code, bashFor("t-1"), env)).toContain("src/one.ts");
+  });
+
+  it("sees a change committed and then reverted inside one command", () => {
+    const { registry, code } = fixture([]);
+    const env = { ORBIT_TASKS_REGISTRY: registry };
+    const bash = { tool_use_id: "t-r", tool_name: "Bash", tool_input: { command: "x" } };
+    fs.writeFileSync(path.join(code, "README.md"), "x\n");
+    git(code, "add", "-A");
+    git(code, "commit", "-q", "-m", "init");
+
+    runHook(code, bash, env, ["--pre"]);
+    fs.writeFileSync(path.join(code, "src", "flip.ts"), "changed\n");
+    git(code, "add", "-A");
+    git(code, "commit", "-q", "-m", "change");
+    git(code, "revert", "--no-edit", "HEAD");
+    // The end trees are identical; the two commits are not.
+    expect(git(code, "diff", "--name-only", "HEAD~2..HEAD")).toBe("");
+
+    expect(runHook(code, bash, env)).toContain("src/flip.ts");
+  });
+
+  it("hashes a dirty file whose name git would quote, so a second edit to it is seen", () => {
+    const { code } = fixture([]);
+    const name = path.join("src", "\u0434\u0430\u043d\u043d\u044b\u0435 with space.ts");
+    fs.writeFileSync(path.join(code, name), "first\n");
+    const snapshot = writePreSnapshot(code) as { status: Record<string, string> };
+    expect(snapshot.status[name.split(path.sep).join("/")]).toMatch(/^\?\?:[0-9a-f]{40}/);
+
+    fs.writeFileSync(path.join(code, name), "second\n");
+    expect(changedPathsOutsideRegistry(code, snapshot)).toEqual([name.split(path.sep).join("/")]);
+  });
+
+  it("throttles per session, so a second session hears its own first warning", () => {
+    const { registry, code } = fixture([]);
+    const env = { ORBIT_TASKS_REGISTRY: registry };
+    const editFrom = (session: string) => ({
+      session_id: session,
+      ...edit(code, "src/app/page.tsx"),
+    });
+
+    expect(statePathFor("a", code)).not.toBe(statePathFor("b", code));
+    expect(runHook(code, editFrom("a"), env)).toContain("No claimed task");
+    expect(runHook(code, editFrom("a"), env)).toBe("");
+    expect(runHook(code, editFrom("b"), env)).toContain("No claimed task");
+  });
+
+  it("names the event it answers, so a failure hook's output is read rather than rejected", () => {
+    const { registry, code } = fixture([]);
+    const env = { ORBIT_TASKS_REGISTRY: registry };
+    fs.writeFileSync(path.join(code, "src", "x.ts"), "written before the command failed\n");
+
+    const output = runHookRaw(
+      code,
+      {
+        hook_event_name: "PostToolUseFailure",
+        session_id: "f",
+        tool_use_id: "t-f",
+        tool_name: "Bash",
+        tool_input: { command: "x" },
+      },
+      env,
+    ) as { hookEventName: string; additionalContext: string };
+
+    expect(output.hookEventName).toBe("PostToolUseFailure");
+    expect(output.additionalContext).toContain("src/x.ts");
   });
 
   it("keeps its marker and state inside a linked worktree, where .git is a file", () => {

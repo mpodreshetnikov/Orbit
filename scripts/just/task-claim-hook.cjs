@@ -73,14 +73,26 @@ function gitPath(name, repoRoot = REPO_ROOT) {
 const MARKER_PATH = gitPath("current-task");
 const STATE_PATH = gitPath("task-claim-hook-state");
 const FETCH_STAMP_PATH = gitPath("task-claim-hook-fetched");
-/** One snapshot per session, so concurrent sessions in one worktree keep their own before/after. */
-function preSnapshotPath(sessionId, repoRoot = REPO_ROOT) {
-  const suffix = sessionId
-    ? `-${String(sessionId)
-        .replace(/[^A-Za-z0-9_-]/g, "_")
-        .slice(0, 64)}`
-    : "";
+function safeKey(value) {
+  return String(value ?? "")
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .slice(0, 64);
+}
+
+/**
+ * One snapshot per tool invocation, so overlapping commands -- in one session or across sessions
+ * sharing a worktree -- keep their own before/after. The invocation id is what Claude Code hands
+ * both halves of a hook pair; the session id is the fallback when it is absent.
+ */
+function preSnapshotPath(key, repoRoot = REPO_ROOT) {
+  const suffix = key ? `-${safeKey(key)}` : "";
   return gitPath(`task-claim-hook-pre${suffix}`, repoRoot);
+}
+
+/** The report throttle is per session too: a second session's first warning is its own to hear. */
+function statePathFor(sessionId, repoRoot = REPO_ROOT) {
+  const suffix = sessionId ? `-${safeKey(sessionId)}` : "";
+  return gitPath(`task-claim-hook-state${suffix}`, repoRoot);
 }
 
 /** Registry files are the one place an edit needs no claim: recording is how a claim is made. */
@@ -236,15 +248,22 @@ function shouldReport(key, statePath = STATE_PATH, now = Date.now()) {
  * Renames count as their new name.
  */
 function statusOutsideRegistry(repoRoot = REPO_ROOT) {
-  const result = git(repoRoot, ["status", "--porcelain", "--untracked-files=all", "--", "."]);
+  // -z: NUL-delimited, paths verbatim (no C-quoting of non-ASCII or special bytes). A rename or
+  // copy entry is followed by the original path as its own token, which is skipped.
+  const result = git(repoRoot, ["status", "--porcelain", "-z", "--untracked-files=all", "--", "."]);
   const entries = new Map();
   if (result.status !== 0) return entries;
+  const tokens = result.stdout.split("\0");
   const files = [];
-  for (const line of result.stdout.split("\n").filter(Boolean)) {
-    const file = line.slice(3).trim().replace(/^"|"$/g, "").split(" -> ").pop();
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token.length < 4) continue;
+    const code = token.slice(0, 2);
+    const file = token.slice(3);
+    if (code[0] === "R" || code[0] === "C" || code[1] === "R" || code[1] === "C") i += 1;
     if (!isRegistryPath(file, repoRoot)) {
       files.push(file);
-      entries.set(file, line.slice(0, 2));
+      entries.set(file, code);
     }
   }
   if (files.length > 0) {
@@ -311,9 +330,11 @@ function changedPathsOutsideRegistry(repoRoot = REPO_ROOT, snapshot = null) {
   }
   const head = headSha(repoRoot);
   if (snapshot.head && head && snapshot.head !== head) {
-    const diff = git(repoRoot, ["diff", "--name-only", `${snapshot.head}..${head}`]);
-    if (diff.status === 0) {
-      for (const file of diff.stdout.split("\n").filter(Boolean)) {
+    // Every path any commit in the range touched, not the difference between the two end trees: a
+    // change committed and then reverted inside one command still put two commits in history.
+    const log = git(repoRoot, ["log", "--name-only", "--format=", `${snapshot.head}..${head}`]);
+    if (log.status === 0) {
+      for (const file of log.stdout.split("\n").filter(Boolean)) {
         if (!isRegistryPath(file, repoRoot)) changed.add(file);
       }
     }
@@ -338,7 +359,7 @@ function readInput() {
 
 function main() {
   const input = readInput();
-  const snapshotPath = preSnapshotPath(input.session_id ?? "");
+  const snapshotPath = preSnapshotPath(input.tool_use_id ?? input.session_id ?? "");
   if (process.argv.includes("--pre")) {
     if (!input.tool_name || SHELL_TOOLS.has(input.tool_name))
       writePreSnapshot(REPO_ROOT, snapshotPath);
@@ -367,14 +388,17 @@ function main() {
   if (result.verdict === "claimed") return;
 
   const key = [result.verdict, result.id ?? "", result.status ?? ""].join(":");
-  if (!shouldReport(key)) return;
+  if (!shouldReport(key, statePathFor(input.session_id ?? ""))) return;
 
+  // The output names the event it answers; a PostToolUseFailure hook that said PostToolUse would
+  // be rejected rather than read.
+  const hookEventName =
+    typeof input.hook_event_name === "string" && input.hook_event_name
+      ? input.hook_event_name
+      : "PostToolUse";
   process.stdout.write(
     `${JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: message(result, filePath),
-      },
+      hookSpecificOutput: { hookEventName, additionalContext: message(result, filePath) },
     })}\n`,
   );
 }
@@ -395,6 +419,7 @@ module.exports = {
   gitPath,
   preSnapshotPath,
   readPreSnapshot,
+  statePathFor,
   writePreSnapshot,
   isRegistryPath,
   locateRegistry,
