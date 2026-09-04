@@ -595,7 +595,9 @@ export async function routeBackgroundMessage(
     if (activeSessionId) {
       // Written to the stored session, so that a later worker -- this one killed mid-run --
       // can tell a session whose run died from one still waiting for a person to start it.
-      await deps.markRunStarted?.(activeSessionId);
+      // Best-effort: a mark that could not be written costs that one detection, not the run,
+      // and must not leave the registry holding a session no run is on.
+      await deps.markRunStarted?.(activeSessionId).catch(() => undefined);
       activeImportRunStateBySessionId.set(
         activeSessionId,
         buildActiveRunSnapshot({

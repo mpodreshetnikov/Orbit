@@ -717,6 +717,136 @@ describe("tbank-web connector", () => {
     expect(result.rows[0]?.line_items).toHaveLength(1);
   });
 
+  function reportedExtraction(operationId: string) {
+    return {
+      method: "api",
+      operation_records: [
+        {
+          operation: {
+            id: operationId,
+            operationTime: { milliseconds: 1772680882000 },
+            type: "Debit",
+            status: "OK",
+            amount: { value: 100, currency: { strCode: "RUB" } },
+            accountAmount: { value: 100, currency: { strCode: "RUB" } },
+            description: "Cafe",
+          },
+          operationDetail: { payload: { id: `${operationId}-detail` } },
+          shoppingReceipt: null,
+        },
+      ],
+      window_to: "2026-03-05T12:00:00.000Z",
+      parsed_through_at: "2026-02-01T00:00:00.000Z",
+      parsed_transactions_count: 1,
+    };
+  }
+
+  /** A browser whose page can report by message: the worker's own listeners are what it needs. */
+  function installReportingChrome(executeScript: ReturnType<typeof vi.fn>) {
+    const messageListeners: Array<(message: unknown, sender: unknown) => void> = [];
+    const removedListeners: Array<(tabId: number) => void> = [];
+    const removeMessageListener = vi.fn();
+    const removeRemovedListener = vi.fn();
+    (globalThis as { chrome: Record<string, unknown> }).chrome = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn((listener: (message: unknown, sender: unknown) => void) => {
+            messageListeners.push(listener);
+          }),
+          removeListener: removeMessageListener,
+        },
+      },
+      tabs: {
+        query: vi
+          .fn()
+          .mockResolvedValue([{ id: 77, url: "https://www.tbank.ru/mybank/operations/" }]),
+        get: vi.fn().mockResolvedValue({
+          id: 77,
+          url: "https://www.tbank.ru/mybank/operations/",
+          status: "complete",
+        }),
+        update: vi.fn(),
+        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+        onRemoved: {
+          addListener: vi.fn((listener: (tabId: number) => void) => {
+            removedListeners.push(listener);
+          }),
+          removeListener: removeRemovedListener,
+        },
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+    return { messageListeners, removedListeners, removeMessageListener, removeRemovedListener };
+  }
+
+  it("answers the executeScript call at once and takes the extraction the page reports", async () => {
+    // Chrome ends a worker whose single API call is open past five minutes; a month with
+    // receipts died inside executeScript that way (2026-09-04). The page now answers "started"
+    // and reports by message when done.
+    const executeScript = vi.fn();
+    const browser = installReportingChrome(executeScript);
+    executeScript.mockImplementation(
+      async (injection: { args?: Array<{ reportToken?: string }> }) => {
+        const token = injection.args?.[0]?.reportToken;
+        expect(typeof token).toBe("string");
+        setTimeout(() => {
+          for (const listener of browser.messageListeners) {
+            listener(
+              {
+                type: "MONEY_IMPORT_PAGE_EXTRACTION",
+                report_token: token,
+                ok: true,
+                result: reportedExtraction("op-reported"),
+              },
+              { tab: { id: 77 } },
+            );
+          }
+        }, 0);
+        return [{ result: { started: true, report_token: token } }];
+      },
+    );
+
+    const result = await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+      session: {
+        default_account_id: "acc-1",
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      },
+    });
+
+    expect(executeScript).toHaveBeenCalledOnce();
+    expect(result.parsedTransactionsCount).toBe(1);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.amount).toBe(-100);
+    // The wait takes its listeners down with it.
+    expect(browser.removeMessageListener).toHaveBeenCalledOnce();
+    expect(browser.removeRemovedListener).toHaveBeenCalledOnce();
+  });
+
+  it("gives up on a page whose tab closes before it reports, after the usual retries", async () => {
+    const executeScript = vi.fn();
+    const browser = installReportingChrome(executeScript);
+    executeScript.mockImplementation(
+      async (injection: { args?: Array<{ reportToken?: string }> }) => {
+        const token = injection.args?.[0]?.reportToken;
+        setTimeout(() => {
+          for (const listener of browser.removedListeners) listener(77);
+        }, 0);
+        return [{ result: { started: true, report_token: token } }];
+      },
+    );
+
+    await expect(
+      connector.parse({
+        source: "tbank_web",
+        windowFrom: "2026-02-01T00:00:00.000Z",
+        session: { default_account_id: "acc-1" },
+      }),
+    ).rejects.toThrow("Unable to extract operations from current page");
+    expect(executeScript).toHaveBeenCalledTimes(2);
+  });
+
   it("recognises the versioned operations page the bank redirects to", () => {
     // Recorded 2026-09-03: navigating to /mybank/operations/ lands here, and an exact match
     // made every run -- manual and unattended -- fail with "did not stay on the operations page".

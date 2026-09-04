@@ -17,13 +17,25 @@ export type StoredSessionVerdict = "idle" | "running" | "expired" | "orphan";
 /** Set on the stored session when a run begins on it, so a later worker can tell an orphan. */
 export const RUN_STARTED_AT_KEY = "run_started_at_ms";
 
+/**
+ * `expires_at` is the server's clock and this is the client's. A clock ahead by the session's
+ * whole TTL would otherwise clear a session the server still takes, on the first read, and
+ * fail the import with "no active session". Half an hour covers any clock a browser can sign
+ * in with; an idle session left behind is cleared that much later, which nothing waits on.
+ */
+export const CLOCK_SKEW_ALLOWANCE_MS = 30 * 60 * 1000;
+
 export function judgeStoredSession(
   session: Record<string, unknown>,
   input: { nowMs: number; runActive: boolean },
 ): StoredSessionVerdict {
-  const expiresAtMs = toEpochMs(session.expires_at);
-  if (expiresAtMs !== null && expiresAtMs <= input.nowMs) return "expired";
+  // A run in this worker holds the session whatever the clock says: if the server has stopped
+  // taking the token, the run learns that from the server and ends the way a run ends.
   if (input.runActive) return "running";
+  const expiresAtMs = toEpochMs(session.expires_at);
+  if (expiresAtMs !== null && expiresAtMs + CLOCK_SKEW_ALLOWANCE_MS <= input.nowMs) {
+    return "expired";
+  }
   if (typeof session[RUN_STARTED_AT_KEY] === "number") return "orphan";
   return "idle";
 }

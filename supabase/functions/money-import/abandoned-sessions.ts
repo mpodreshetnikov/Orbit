@@ -68,14 +68,10 @@ export async function closeAbandonedSessions(
     const batchId = normalizeText(session.batch_id);
     const expiredAt = toIsoOrNull(session.expires_at) ?? nowIso;
     try {
-      await deps.repository.updateImportSession(sessionId, {
-        status: "failed",
-        revoked_at: nowIso,
-        updated_at: nowIso,
-        meta: withFailureReason(session.meta),
-      });
-      result.sessions += 1;
-
+      // The batch first, the session after. The scan finds a session by its open status, so a
+      // session closed ahead of a batch update that failed would take the batch out of every
+      // later scan, still running; closed in this order, a failure leaves the session open and
+      // the next scan takes both again.
       let batchClosed = false;
       if (batchId) {
         const batch = await deps.repository.getImportBatch(batchId);
@@ -90,6 +86,13 @@ export async function closeAbandonedSessions(
           batchClosed = true;
         }
       }
+      await deps.repository.updateImportSession(sessionId, {
+        status: "failed",
+        revoked_at: nowIso,
+        updated_at: nowIso,
+        meta: withFailureReason(session.meta),
+      });
+      result.sessions += 1;
       deps.telemetry?.info("money_import_abandoned_session_closed", {
         session_id: sessionId,
         batch_id: batchId,

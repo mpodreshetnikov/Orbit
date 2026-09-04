@@ -165,31 +165,40 @@ Deno.test(
   },
 );
 
-Deno.test("closeAbandonedSessions closes the rest when one session refuses", async () => {
-  const { deps, recorded } = createHarness({
-    expired: [
-      { id: "session-stubborn", batch_id: "batch-1", expires_at: "2026-09-03T09:00:00.000Z" },
-      { id: "session-plain", batch_id: "batch-2", expires_at: "2026-09-03T09:10:00.000Z" },
-    ],
-    batches: {
-      "batch-1": { id: "batch-1", status: "running" },
-      "batch-2": { id: "batch-2", status: "running" },
-    },
-    failSessionUpdate: "session-stubborn",
-  });
+Deno.test(
+  "closeAbandonedSessions closes the rest when one session refuses, and its batch first",
+  async () => {
+    const { deps, recorded } = createHarness({
+      expired: [
+        { id: "session-stubborn", batch_id: "batch-1", expires_at: "2026-09-03T09:00:00.000Z" },
+        { id: "session-plain", batch_id: "batch-2", expires_at: "2026-09-03T09:10:00.000Z" },
+      ],
+      batches: {
+        "batch-1": { id: "batch-1", status: "running" },
+        "batch-2": { id: "batch-2", status: "running" },
+      },
+      failSessionUpdate: "session-stubborn",
+    });
 
-  const result = await closeAbandonedSessions(deps, scope);
+    const result = await closeAbandonedSessions(deps, scope);
 
-  assertEquals(result, { sessions: 1, batches: 1 });
-  assertEquals(
-    recorded.batchUpdates.map((update) => update.batchId),
-    ["batch-2"],
-  );
-  assertEquals(
-    recorded.events.map((event) => [event.level, event.message]),
-    [
-      ["warn", "money_import_abandoned_session_close_failed"],
-      ["info", "money_import_abandoned_session_closed"],
-    ],
-  );
-});
+    // The stubborn session stays open, so the next scan takes it again; its batch is closed
+    // already, and a closed batch is not closed twice.
+    assertEquals(result, { sessions: 1, batches: 2 });
+    assertEquals(
+      recorded.batchUpdates.map((update) => update.batchId),
+      ["batch-1", "batch-2"],
+    );
+    assertEquals(
+      recorded.sessionUpdates.map((update) => update.sessionId),
+      ["session-plain"],
+    );
+    assertEquals(
+      recorded.events.map((event) => [event.level, event.message]),
+      [
+        ["warn", "money_import_abandoned_session_close_failed"],
+        ["info", "money_import_abandoned_session_closed"],
+      ],
+    );
+  },
+);

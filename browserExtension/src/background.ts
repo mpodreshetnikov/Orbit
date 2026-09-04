@@ -553,12 +553,15 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
-  // A run is answered at once and reports through its broadcasts. Chrome ends a service worker
-  // whose single request is still open after five minutes, and a run with receipts takes
-  // longer than that: the answer that waited for the result was the run's own death
-  // (2026-09-03). The router still validates first; a refusal reaches the widget as the error
-  // broadcast in the catch below, the same way a failure later in the run does.
-  const answersAtOnce = message.type === "MONEY_IMPORT_RUN";
+  // A run from the widget on the bank page is answered at once and reports through its
+  // broadcasts. Chrome ends a service worker whose single request is still open after five
+  // minutes, and a run with receipts takes longer than that: the answer that waited for the
+  // result was the run's own death (2026-09-03). The router still validates first; a refusal
+  // reaches the widget as the error broadcast in the catch below, the same way a failure later
+  // in the run does. The popup reads the result from the answer itself, so its runs -- a
+  // diagnostic surface, closed with its window -- keep the answer that waits.
+  const answersAtOnce =
+    message.type === "MONEY_IMPORT_RUN" && message.origin === "source_page_overlay";
   if (answersAtOnce) sendResponse({ ok: true, accepted: true });
   void (async () => {
     try {

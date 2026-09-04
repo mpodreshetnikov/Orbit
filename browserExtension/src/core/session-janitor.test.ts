@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSessionStore } from "./session-store.js";
-import { createSessionJanitor, judgeStoredSession, RUN_STARTED_AT_KEY } from "./session-janitor.js";
+import {
+  CLOCK_SKEW_ALLOWANCE_MS,
+  createSessionJanitor,
+  judgeStoredSession,
+  RUN_STARTED_AT_KEY,
+} from "./session-janitor.js";
 
 const NOW = Date.parse("2026-09-04T06:00:00.000Z");
 
@@ -27,13 +32,28 @@ describe("judgeStoredSession", () => {
         { nowMs: NOW, runActive: false },
       ),
     ).toBe("orphan");
-    // Past its expiry nothing else matters, not even a run that thinks it holds it.
+    expect(
+      judgeStoredSession(
+        { session_id: "s1", expires_at: "2026-09-03T09:38:16.275Z", [RUN_STARTED_AT_KEY]: 1 },
+        { nowMs: NOW, runActive: false },
+      ),
+    ).toBe("expired");
+    // A run in this worker holds the session whatever the clock says.
     expect(
       judgeStoredSession(
         { session_id: "s1", expires_at: "2026-09-03T09:38:16.275Z", [RUN_STARTED_AT_KEY]: 1 },
         { nowMs: NOW, runActive: true },
       ),
-    ).toBe("expired");
+    ).toBe("running");
+    // The server's clock and this one need not agree: a session past its expiry by less than
+    // the allowance is still the server's to refuse, not this worker's to clear.
+    const skewedMs = NOW - CLOCK_SKEW_ALLOWANCE_MS + 60_000;
+    expect(
+      judgeStoredSession(
+        { session_id: "s1", expires_at: new Date(skewedMs).toISOString() },
+        { nowMs: NOW, runActive: false },
+      ),
+    ).toBe("idle");
     // No expiry stated: the server's word is unknown, so only the run decides.
     expect(judgeStoredSession({ session_id: "s1" }, { nowMs: NOW, runActive: false })).toBe("idle");
   });
