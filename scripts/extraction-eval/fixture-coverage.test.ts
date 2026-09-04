@@ -93,6 +93,7 @@ describe("fixture coverage", () => {
     // scorer cannot tell "no expectation" from "expected nothing", so the corpus has to.
     const fixtures = await loadFixtures();
     const missing: string[] = [];
+    const seen = new Set<string>();
 
     for (const { caseId, snapshot } of fixtures) {
       for (const collection of COLLECTIONS) {
@@ -101,10 +102,25 @@ describe("fixture coverage", () => {
         rows.forEach((row, index) => {
           if (!row || typeof row !== "object") return;
           for (const field of SCORED_FIELDS[collection as string]) {
-            if (field in row) continue;
+            if (field in row) {
+              seen.add(`${collection}[].${field}`);
+              continue;
+            }
             missing.push(`${caseId}/expected.json → ${collection}[${index}].${field}`);
           }
         });
+      }
+    }
+
+    // A check that only walks rows is satisfied by a corpus with no rows. Delete case 001's one
+    // `conditions_to_resolve` entry and the loop above visits nothing, `missing` stays empty, and
+    // the corpus passes having lost every expectation about the citation and the gate — the exact
+    // silence this file exists to break, rebuilt one level up. So the fields have to be *met*, not
+    // merely not-missing.
+    for (const collection of COLLECTIONS) {
+      for (const field of SCORED_FIELDS[collection as string]) {
+        if (seen.has(`${collection}[].${field}`)) continue;
+        missing.push(`no case anywhere carries a row for ${collection}[].${field}`);
       }
     }
 

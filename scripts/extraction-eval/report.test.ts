@@ -206,6 +206,30 @@ describe("renderVariance", () => {
     );
     expect(variance).toContain("condition resolution gate_rejection");
   });
+
+  it("omits a resolution field no run compared, rather than calling it stable at 100%", () => {
+    // `ratio` returns 1 for 0/0, so an aggregate over cases with no matched resolution carries
+    // `accuracy: 1` beside `total: 0`. The field table renders that as a dash; this table would
+    // have printed `100.0% | stable` for a dimension nothing ever compared.
+    const empty = aggregate([scoreCase("002", snapshot(), snapshot(), [])]);
+    const variance = renderVariance([empty, empty]);
+    expect(variance).toContain("Variance across 2 runs");
+    expect(variance).not.toContain("condition resolution");
+  });
+
+  it("says how many runs compared a resolution field when not all of them did", () => {
+    const withRow = aggregate([
+      scoreCase(
+        "001",
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] }),
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] }),
+        [],
+      ),
+    ]);
+    const without = aggregate([scoreCase("002", snapshot(), snapshot(), [])]);
+    const variance = renderVariance([withRow, without]);
+    expect(variance).toContain("condition resolution supporting_obs_code (1 of 2 runs)");
+  });
 });
 
 describe("cost reporting", () => {

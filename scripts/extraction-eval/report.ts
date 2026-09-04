@@ -98,19 +98,26 @@ export function renderVariance(runs: Aggregate[]): string {
         // cites a different analyte on one of them -- or cites one production's gate then rejects --
         // is stable on `conditions_to_resolve` and unstable on whether the closure happens at all.
         // Only the last pass is rendered in full, so without these rows that swing leaves no trace.
-        ...RESOLUTION_FIELDS.map((field) =>
-          varianceRow(
-            {
-              dimension: `condition resolution ${String(field)}`,
-              values: runs.map(
-                (a) =>
-                  a.conditionResolutionFields.find((entry) => entry.field === String(field))
-                    ?.accuracy ?? 0,
-              ),
-            },
-            (value) => pct(value),
-          ),
-        ),
+        //
+        // Only runs that actually compared the field are read. `ratio` returns 1 for 0/0, so an
+        // aggregate over cases with no matched resolution carries `accuracy: 1` beside `total: 0` --
+        // which the field table renders as an honest dash and this table would have printed as
+        // `100.0% stable`. A dimension nothing compared must not read as a dimension that agreed.
+        ...RESOLUTION_FIELDS.flatMap((field) => {
+          const compared = runs
+            .flatMap((a) => a.conditionResolutionFields.filter((e) => e.field === String(field)))
+            .filter((entry) => entry.total > 0);
+          if (compared.length === 0) return [];
+          const label =
+            compared.length === runs.length
+              ? `condition resolution ${String(field)}`
+              : `condition resolution ${String(field)} (${compared.length} of ${runs.length} runs)`;
+          return [
+            varianceRow({ dimension: label, values: compared.map((e) => e.accuracy) }, (value) =>
+              pct(value),
+            ),
+          ];
+        }),
       ],
     ),
   );
@@ -299,6 +306,21 @@ export function renderMarkdown(summary: RunSummary): string {
     lines.push("");
   } else {
     lines.push("> No wrongful resolutions.");
+    lines.push("");
+  }
+
+  // Beneath the harm number and deliberately not inside it. These closed nothing -- production's
+  // gate refused them, so no chart moved -- but the model still proposed ending a live entry, and a
+  // run whose rejections climb is a run getting worse behind a floor that happens to hold.
+  if (agg.rejectedProposals.length > 0) {
+    lines.push(
+      `> ${agg.rejectedProposals.length} proposal(s) production's gate refused, so they closed ` +
+        `nothing. Not harm — but the model proposed them.`,
+    );
+    lines.push("");
+    for (const proposal of agg.rejectedProposals) {
+      lines.push(`> - condition \`${proposal.conditionId}\` — \`${proposal.reason}\``);
+    }
     lines.push("");
   }
 

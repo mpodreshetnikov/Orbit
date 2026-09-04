@@ -202,12 +202,11 @@ describe("scoreCase", () => {
     ).toMatchObject({ correct: 0, total: 1 });
   });
 
-  it("catches a resolution production would drop while both other scores read clean", () => {
+  it("does not credit a resolution production's gate refused", () => {
     // The finding this test exists for: citation right, condition right, nothing written. The gate
     // reads the staged observations, whose codes the model assigned; the snapshot's have been
-    // through catalogue resolution. Where those disagree the run looks perfect and applies nothing,
-    // which is precisely the report `conditions_to_resolve` was giving before the citation was
-    // scored -- one level further in.
+    // through catalogue resolution. Where those disagree the closure the corpus expects did not
+    // happen -- so it is a recall miss, not a true positive, and the field score says why.
     const expected = snapshot({
       conditions_to_resolve: [resolution("cond-b12", "vitamin_b12", null)],
     });
@@ -215,10 +214,10 @@ describe("scoreCase", () => {
       conditions_to_resolve: [resolution("cond-b12", "vitamin_b12", "observationAbsent")],
     });
     const score = scoreCase("case", expected, actual, []);
-    expect(score.conditionsToResolve).toMatchObject({ tp: 1, fp: 0, fn: 0 });
-    expect(
-      score.conditionResolutionFields.find((f) => f.field === "supporting_obs_code"),
-    ).toMatchObject({ correct: 1, total: 1 });
+    expect(score.conditionsToResolve).toMatchObject({ tp: 0, fp: 0, fn: 1 });
+    expect(score.rejectedProposals).toEqual([
+      { conditionId: "cond-b12", reason: "observationAbsent" },
+    ]);
     const gate = score.conditionResolutionFields.find((f) => f.field === "gate_rejection");
     expect(gate).toMatchObject({ correct: 0, total: 1 });
     expect(gate?.mismatches[0]).toMatchObject({
@@ -226,6 +225,40 @@ describe("scoreCase", () => {
       expected: null,
       actual: "observationAbsent",
     });
+  });
+
+  it("does not call a gate-refused proposal a wrongful resolution", () => {
+    // The headline number is harm, and a refused proposal is not harm: production never inserts the
+    // row, so no live condition goes quiet. Counting it there said a chart changed when none did.
+    // It is still the model proposing to end an entry, so it is listed rather than dropped.
+    const score = scoreCase(
+      "case",
+      snapshot(),
+      snapshot({
+        conditions_to_resolve: [
+          resolution("cond-dyslipidaemia", "vitamin_b12", "analyteConditionMismatch"),
+        ],
+      }),
+      [],
+    );
+    expect(score.conditionsToResolve).toMatchObject({ tp: 0, fp: 0, fn: 0 });
+    expect(aggregate([score]).wrongfulResolutions).toBe(0);
+    expect(aggregate([score]).rejectedProposals).toEqual([
+      { conditionId: "cond-dyslipidaemia", reason: "analyteConditionMismatch" },
+    ]);
+  });
+
+  it("still counts an accepted resolution nobody expected as wrongful", () => {
+    // The other side of the same rule: the gate is a floor, not the discriminator. A well-formed
+    // proposal it accepts does close a live condition, and that is the number to look at first.
+    const score = scoreCase(
+      "case",
+      snapshot(),
+      snapshot({ conditions_to_resolve: [resolution("cond-nafld", "alt", null)] }),
+      [],
+    );
+    expect(score.conditionsToResolve).toMatchObject({ tp: 0, fp: 1, fn: 0 });
+    expect(aggregate([score]).wrongfulResolutions).toBe(1);
   });
 
   it("does not charge the citation against a resolution the model never proposed", () => {

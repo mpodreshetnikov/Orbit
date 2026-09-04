@@ -129,6 +129,14 @@ export interface CaseScore {
   conditionsToResolve: SetScore;
   /** Per-field accuracy over the resolutions both sides name — today, the cited analyte. */
   conditionResolutionFields: FieldAccuracy[];
+  /**
+   * Proposals production's gate refused, which is why they are not in the set score above.
+   *
+   * Kept and printed rather than discarded: the gate catching a wrongful proposal means no chart
+   * changed, and it also means the model tried. A run whose gate rejections climb is a run getting
+   * worse behind a floor that happens to hold.
+   */
+  rejectedProposals: { conditionId: string; reason: string }[];
   checkupsToComplete: SetScore;
   checkupDate: FieldAccuracy;
 }
@@ -382,6 +390,11 @@ function resolutionKey(item: ExpectedResolution): KeyedItem {
   return { key: item.condition_id, label: item.condition_id };
 }
 
+/** Would production write this proposal? Only an accepted one can change a chart. */
+function isAccepted(item: ExpectedResolution): boolean {
+  return item.gate_rejection === null || item.gate_rejection === undefined;
+}
+
 /**
  * Finding resolutions have no id, so they are keyed by the row they would actually close.
  *
@@ -509,10 +522,20 @@ export function scoreCase(
       actual.findings_to_resolve.map((item) => findingResolutionKey(item, existingFindings)),
     ),
     // Ids are opaque and already exact — no folding, and the label is the id itself.
+    //
+    // Scored over the resolutions production would *write*, which is why the gate verdict has to
+    // exist before this can be right. A proposal `checkLabResolution` rejects closes nothing: the
+    // row is never inserted, no chart changes, and counting it as a wrongful resolution says a live
+    // condition went quiet when nothing did. It is still a model error worth seeing, so it is
+    // listed as `rejectedProposals` rather than dropped — the harm number and the model's mistakes
+    // are two different questions and this collection used to answer them with one number.
     conditionsToResolve: scoreSet(
-      expected.conditions_to_resolve.map(resolutionKey),
-      actual.conditions_to_resolve.map(resolutionKey),
+      expected.conditions_to_resolve.filter(isAccepted).map(resolutionKey),
+      actual.conditions_to_resolve.filter(isAccepted).map(resolutionKey),
     ),
+    rejectedProposals: actual.conditions_to_resolve
+      .filter((item) => !isAccepted(item))
+      .map((item) => ({ conditionId: item.condition_id, reason: String(item.gate_rejection) })),
     conditionResolutionFields: scoreFields(
       expected.conditions_to_resolve,
       actual.conditions_to_resolve,
@@ -548,6 +571,8 @@ export interface Aggregate {
   findingFields: FieldAccuracy[];
   conditionFields: FieldAccuracy[];
   conditionResolutionFields: FieldAccuracy[];
+  /** Every proposal production's gate refused, across the run. Not harm; still a signal. */
+  rejectedProposals: { conditionId: string; reason: string }[];
   /**
    * Wrongful closures across the whole run — findings and conditions both. The number to look at
    * first. A wrongfully closed finding is the same class of harm as a wrongfully closed condition:
@@ -615,6 +640,7 @@ export function aggregate(scores: CaseScore[]): Aggregate {
       (s) => s.conditionResolutionFields,
       RESOLUTION_FIELDS.map(String),
     ),
+    rejectedProposals: scores.flatMap((s) => s.rejectedProposals),
     wrongfulResolutions: conditionsToResolve.fp + findingsToResolve.fp,
   };
 }
