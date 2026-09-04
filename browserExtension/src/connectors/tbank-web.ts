@@ -1,5 +1,6 @@
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
+import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
 import type {
   Connector,
   ConnectorParseInput,
@@ -11,6 +12,18 @@ const OPERATIONS_PAGE_URL = "https://www.tbank.ru/mybank/operations/";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_DAYS = 30;
 const EXTRACTION_ATTEMPTS = 2;
+/** The message the in-page extractor reports its outcome with; see `runPageExtraction`. */
+const PAGE_EXTRACTION_MESSAGE = "MONEY_IMPORT_PAGE_EXTRACTION";
+/** How long a page may take to report when its session states no expiry. */
+const DEFAULT_EXTRACTION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+/** The deadline passed with no report: terminal, not one attempt among the retries. */
+class ExtractionDeadlineError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExtractionDeadlineError";
+  }
+}
 const DEFAULT_RECEIPT_PARSE_STRATEGY: ConnectorParseStrategy = "fast";
 const FULL_RECEIPT_BASE_PAUSE_MS = 4000;
 const FULL_RECEIPT_RESPONSE_OVERHEAD_MS = 750;
@@ -47,6 +60,12 @@ interface PageOperationRecord {
   shoppingReceipt: JsonMap | null;
   shoppingReceiptMeta: ShoppingReceiptEnrichmentMeta | null;
   trancheOffers: JsonMap | null;
+}
+
+/** What the in-page extractor answers when asked to report by message instead. */
+interface PageExtractionStart {
+  started: true;
+  report_token: string;
 }
 
 interface PageExtraction {
@@ -669,6 +688,7 @@ const connector: Connector = {
       typeof session?.source === "string" ? session.source : "tbank_web",
       typeof session?.payer_person_id === "string" ? session.payer_person_id : null,
       parseStrategy,
+      resolveExtractionDeadlineMs(session),
     );
     if (extraction.blocked_reason) {
       throw formatDiagnosticError(extraction.blocked_reason, {
@@ -871,6 +891,7 @@ async function extractOperationsWithRetry(
   sourceId: string | null,
   payerPersonId: string | null,
   parseStrategy: ConnectorParseStrategy,
+  deadlineMs: number,
 ): Promise<PageExtraction> {
   const attemptDetails: Array<Record<string, unknown>> = [];
 
@@ -886,19 +907,18 @@ async function extractOperationsWithRetry(
     }
 
     try {
-      const injected = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: extractOperationsInPage,
-        args: [{ windowFromIso, windowToIso, sessionId, sourceId, payerPersonId, parseStrategy }],
-      });
-      const extraction = injected?.[0]?.result as PageExtraction | undefined;
+      const extraction = await runPageExtraction(
+        tabId,
+        { windowFromIso, windowToIso, sessionId, sourceId, payerPersonId, parseStrategy },
+        deadlineMs,
+      );
       if (extraction) {
         return extraction;
       }
 
       attemptDetails.push({
         attempt,
-        result_count: Array.isArray(injected) ? injected.length : 0,
+        result_count: 0,
         tab_url: currentTab?.url ?? null,
         tab_status: currentTab?.status ?? null,
       });
@@ -909,6 +929,15 @@ async function extractOperationsWithRetry(
         tab_url: currentTab?.url ?? null,
         tab_status: currentTab?.status ?? null,
       });
+      // The session is over; a second parse would run for nobody, beside the first one still
+      // winding down in the page.
+      if (error instanceof ExtractionDeadlineError) {
+        throw formatDiagnosticError(error.message, {
+          tab_url: currentTab?.url ?? null,
+          tab_status: currentTab?.status ?? null,
+          execute_script_attempts: attemptDetails,
+        });
+      }
     }
 
     if (attempt < EXTRACTION_ATTEMPTS) {
@@ -922,6 +951,170 @@ async function extractOperationsWithRetry(
     tab_status: finalTab?.status ?? null,
     execute_script_attempts: attemptDetails,
   });
+}
+
+/**
+ * How long the page may take to report: until the session it works for is over, which is when
+ * the upload would be refused anyway. `expires_at` is the server's clock and this is the
+ * device's, so the same allowance the session janitor gives is given here; a device ahead by
+ * that much would otherwise stop waiting after a minute for a token the server still takes.
+ */
+function resolveExtractionDeadlineMs(session: Record<string, unknown> | undefined): number {
+  const expiresAt = toIsoString(session?.expires_at);
+  const expiresAtMs = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+  if (Number.isFinite(expiresAtMs)) return expiresAtMs + CLOCK_SKEW_ALLOWANCE_MS;
+  return Date.now() + DEFAULT_EXTRACTION_TIMEOUT_MS;
+}
+
+/** Marks the token in the page, where the parse checks it at every pause. */
+async function cancelPageExtraction(tabId: number, reportToken: string): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (token: string) => {
+        const page = globalThis as { __orbitMoneyImportCancelled?: Set<string> };
+        (page.__orbitMoneyImportCancelled ??= new Set<string>()).add(token);
+      },
+      args: [reportToken],
+    });
+  } catch {
+    // The page is gone, and its task with it.
+  }
+}
+
+function isPageExtractionStart(value: unknown): value is PageExtractionStart {
+  const candidate = asObject(value);
+  return (
+    candidate !== null &&
+    candidate.started === true &&
+    typeof candidate.report_token === "string" &&
+    candidate.report_token.length > 0
+  );
+}
+
+/**
+ * Runs the in-page extractor and waits for what it reports.
+ *
+ * The extractor is asked to return at once and report by message: `executeScript` is one
+ * extension API call, and Chrome ends a service worker whose single call is still open after
+ * five minutes. A full parse, with its pauses for the bank's rate limit, ran inside that call
+ * and died there with its session left running (2026-09-03, 2026-09-04). The wait here is a
+ * promise in a worker kept alive for the run, which no five-minute rule applies to. An
+ * extractor that answers within the call -- a test double, an older page -- is taken at its
+ * word. Resolves undefined when the page answered nothing, as before.
+ */
+async function runPageExtraction(
+  tabId: number,
+  args: {
+    windowFromIso: string;
+    windowToIso: string | null;
+    sessionId: string | null;
+    sourceId: string | null;
+    payerPersonId: string | null;
+    parseStrategy: ConnectorParseStrategy;
+  },
+  deadlineMs: number,
+): Promise<PageExtraction | undefined> {
+  const runtime = globalThis.chrome?.runtime;
+  const tabs = globalThis.chrome?.tabs;
+  // Absent in a test double or an older browser: then the call is awaited, as before.
+  const messageEvents = runtime?.onMessage ?? null;
+  const tabEvents = tabs?.onRemoved ?? null;
+  const loadEvents = tabs?.onUpdated ?? null;
+  const reportToken =
+    messageEvents && tabEvents && loadEvents
+      ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+      : null;
+
+  let settled = false;
+  let resolveReport: (extraction: PageExtraction) => void = () => undefined;
+  let rejectReport: (error: Error) => void = () => undefined;
+  const reported = new Promise<PageExtraction>((resolve, reject) => {
+    resolveReport = (extraction) => {
+      settled = true;
+      resolve(extraction);
+    };
+    rejectReport = (error) => {
+      settled = true;
+      reject(error);
+    };
+  });
+  // A report that arrives after the timeout won the race must not surface as unhandled.
+  void reported.catch(() => undefined);
+
+  const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
+    const payload = asObject(message);
+    if (!payload) return;
+    if (payload.type !== PAGE_EXTRACTION_MESSAGE || payload.report_token !== reportToken) return;
+    if (typeof sender?.tab?.id === "number" && sender.tab.id !== tabId) return;
+    if (payload.ok === true) {
+      resolveReport(payload.result as PageExtraction);
+      return;
+    }
+    rejectReport(
+      new Error(
+        typeof payload.error_message === "string" && payload.error_message
+          ? payload.error_message
+          : "T-Bank extraction failed in the page",
+      ),
+    );
+  };
+  const onRemoved = (removedTabId: number) => {
+    if (removedTabId !== tabId) return;
+    rejectReport(new Error("T-Bank tab was closed before the extraction finished"));
+  };
+  // A document load ends the page the extractor runs in, and with it any report; the tab
+  // itself stays. The bank's own in-page navigation changes the URL without a load and is
+  // left alone.
+  const onUpdated = (updatedTabId: number, changeInfo: { status?: string }) => {
+    if (updatedTabId !== tabId || changeInfo.status !== "loading") return;
+    rejectReport(new Error("T-Bank tab navigated before the extraction finished"));
+  };
+  if (reportToken && messageEvents && tabEvents && loadEvents) {
+    messageEvents.addListener(onMessage);
+    tabEvents.addListener(onRemoved);
+    loadEvents.addListener(onUpdated);
+  }
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: extractOperationsInPage,
+      args: [reportToken ? { ...args, reportToken } : args],
+    });
+    const first = injected?.[0]?.result as PageExtraction | PageExtractionStart | undefined;
+    if (!first) return undefined;
+    if (!isPageExtractionStart(first)) return first;
+    if (!reportToken) return undefined;
+
+    const timeoutMs = Math.max(60_000, deadlineMs - Date.now());
+    return await Promise.race([
+      reported,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          if (settled) return;
+          timedOut = true;
+          reject(
+            new ExtractionDeadlineError(
+              "T-Bank extraction did not report back before its session ended",
+            ),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    // Nobody is listening any more; the page's task is told so, or it would fetch on to the
+    // end of the window for a report that is thrown away.
+    if (timedOut && reportToken) await cancelPageExtraction(tabId, reportToken);
+    if (reportToken && messageEvents && tabEvents && loadEvents) {
+      messageEvents.removeListener(onMessage);
+      tabEvents.removeListener(onRemoved);
+      loadEvents.removeListener(onUpdated);
+    }
+  }
 }
 
 function findLatestResourceUrlByPath(
@@ -951,7 +1144,49 @@ function extractOperationsInPage(input: {
   sourceId?: string | null;
   payerPersonId?: string | null;
   parseStrategy?: ConnectorParseStrategy | null;
-}): Promise<PageExtraction> {
+  reportToken?: string | null;
+  cancelToken?: string | null;
+}): Promise<PageExtraction> | PageExtractionStart {
+  const reportToken =
+    typeof input.reportToken === "string" && input.reportToken ? input.reportToken : null;
+  // The worker that stopped waiting for this parse tells the page so by marking the token;
+  // the parse checks the mark at every pause and stops, rather than fetching on for nobody.
+  const cancelToken =
+    typeof input.cancelToken === "string" && input.cancelToken ? input.cancelToken : null;
+  if (reportToken) {
+    // Chrome ends an extension service worker whose single API call is still open after five
+    // minutes, and executeScript is one call. The parse below, with its pauses for the bank's
+    // rate limit, used to run inside that call -- a month with receipts died at five minutes,
+    // its session left running (2026-09-03, 2026-09-04). Asked to report, this returns at once
+    // and the parse goes on in this page, telling the worker what it found by message. The
+    // function calls itself for the parse: serialized for injection it is a named function
+    // expression, and the name stays bound inside.
+    const report = (payload: Record<string, unknown>) => {
+      try {
+        const sent: unknown = globalThis.chrome?.runtime?.sendMessage?.({
+          type: "MONEY_IMPORT_PAGE_EXTRACTION",
+          report_token: reportToken,
+          ...payload,
+        });
+        if (typeof (sent as { catch?: unknown } | null | undefined)?.catch === "function") {
+          (sent as Promise<unknown>).catch(() => undefined);
+        }
+      } catch {
+        // The worker that asked is gone; there is nobody to tell.
+      }
+    };
+    void Promise.resolve(
+      extractOperationsInPage({ ...input, reportToken: null, cancelToken: reportToken }),
+    ).then(
+      (result) => report({ ok: true, result }),
+      (error: unknown) =>
+        report({
+          ok: false,
+          error_message: error instanceof Error ? error.message : String(error),
+        }),
+    );
+    return { started: true, report_token: reportToken };
+  }
   const fullReceiptBasePauseMs = 4000;
   const receiptParseStrategy =
     input.parseStrategy === "fast" || input.parseStrategy === "full" ? input.parseStrategy : "fast";
@@ -1660,10 +1895,19 @@ function extractOperationsInPage(input: {
     }
   }
 
+  function isCancelled(): boolean {
+    if (!cancelToken) return false;
+    const marks = (globalThis as { __orbitMoneyImportCancelled?: Set<string> })
+      .__orbitMoneyImportCancelled;
+    return Boolean(marks?.has(cancelToken));
+  }
+
   function waitMs(delayMs: number): Promise<void> {
+    const cancelled = () => new Error("T-Bank extraction cancelled by the worker");
+    if (isCancelled()) return Promise.reject(cancelled());
     if (delayMs <= 0) return Promise.resolve();
-    return new Promise((resolve) => {
-      setTimeout(resolve, delayMs);
+    return new Promise((resolve, reject) => {
+      setTimeout(() => (isCancelled() ? reject(cancelled()) : resolve()), delayMs);
     });
   }
 
