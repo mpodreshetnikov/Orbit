@@ -32,6 +32,8 @@ function createHarness(
     debugPerWindow?: Array<Record<string, unknown> | undefined>;
     throwOnWindowIndex?: number;
     storage?: Record<string, unknown>;
+    /** What the connector says it can do; T-Bank's shape unless a test says otherwise. */
+    connectorParseStrategies?: Array<"fast" | "full">;
   } = {},
 ) {
   const createdWindows: Array<{ from: unknown; to: unknown }> = [];
@@ -40,6 +42,7 @@ function createHarness(
 
   const connector = {
     sourceId: "tbank",
+    parseStrategies: options.connectorParseStrategies ?? ["fast", "full"],
     parse: vi.fn().mockImplementation(async () => {
       const index = windowIndex;
       windowIndex += 1;
@@ -134,6 +137,50 @@ describe("runScheduledImport", () => {
     );
     expect(result.incremental).not.toBeNull();
     expect(result.backfill).not.toBeNull();
+  });
+
+  it("asks for the full receipt strategy and marks the batch as unattended", async () => {
+    const harness = createHarness();
+    await runScheduledImport(INPUT, harness.deps);
+
+    const createCalls = harness.callEdge.mock.calls.filter(
+      (call) => (call[2] as Record<string, unknown>).action === "create_session",
+    );
+    expect(createCalls.length).toBeGreaterThan(0);
+    for (const call of createCalls) {
+      // The batch keeps this meta as sent, so the history screen can tell these imports apart.
+      expect((call[2] as Record<string, unknown>).meta).toEqual({
+        parse_strategy: "full",
+        unattended: true,
+      });
+    }
+    // The connector reads the strategy from the session; a server that does not echo it must
+    // not leave the run on the fast one.
+    const sessions = harness.connector.parse.mock.calls.map(
+      (call) => (call[0] as { session?: Record<string, unknown> }).session,
+    );
+    expect(sessions.length).toBeGreaterThan(0);
+    for (const session of sessions) expect(session?.parse_strategy).toBe("full");
+  });
+
+  it("does not ask for the full strategy from a connector that has only one", async () => {
+    // Alfa's shape. The server pays a full parse with a four-hour session token; a connector
+    // that parses the one way regardless must not collect one.
+    const harness = createHarness({ connectorParseStrategies: ["fast"] });
+    await runScheduledImport(INPUT, harness.deps);
+
+    const createCalls = harness.callEdge.mock.calls.filter(
+      (call) => (call[2] as Record<string, unknown>).action === "create_session",
+    );
+    expect(createCalls.length).toBeGreaterThan(0);
+    for (const call of createCalls) {
+      expect((call[2] as Record<string, unknown>).meta).toEqual({ unattended: true });
+    }
+    const sessions = harness.connector.parse.mock.calls.map(
+      (call) => (call[0] as { session?: Record<string, unknown> }).session,
+    );
+    expect(sessions.length).toBeGreaterThan(0);
+    for (const session of sessions) expect(session?.parse_strategy).toBeUndefined();
   });
 
   it("spends the grant only on create_session and works on session tokens after that", async () => {

@@ -114,5 +114,11 @@ export interface ConnectorParseOutput {
 export interface Connector {
   sourceId: string;
   displayName?: string;
+  /**
+   * The receipt strategies this connector tells apart. One that lists a single strategy (or
+   * none) parses the one way it knows whatever the session says -- so a run nobody is watching
+   * asks for the slow, complete one only where asking changes the parse.
+   */
+  parseStrategies?: readonly ConnectorParseStrategy[];
   parse: (input: ConnectorParseInput) => Promise<ConnectorParseOutput>;
 }

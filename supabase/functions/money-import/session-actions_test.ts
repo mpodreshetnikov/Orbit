@@ -100,6 +100,63 @@ Deno.test("createSessionAction validates required source and payer_person_id", a
   assertEquals(payload.error, "source and payer_person_id are required");
 });
 
+Deno.test("createSessionAction gives a session the time its receipt strategy needs", async () => {
+  const deps = {
+    now: () => new Date("2026-01-01T10:00:00.000Z"),
+    sessionTtlMinutes: 30,
+  };
+
+  // Fast, or no strategy stated: the configured base.
+  const fast = createRepositoryMock();
+  const fastPayload = await assertJsonResponse<{ ttl_minutes: number; expires_at: string }>(
+    await createSessionAction(
+      { source: "tbank_web", payer_person_id: "person-1", meta: { parse_strategy: "fast" } },
+      userAuth,
+      { repository: fast.repository, ...deps },
+    ),
+    200,
+  );
+  assertEquals(fastPayload.ttl_minutes, 30);
+  assertEquals(fastPayload.expires_at, "2026-01-01T10:30:00.000Z");
+
+  // Full: about eight seconds a receipt, and preview_rows only after the whole parse. Fifteen
+  // minutes lost every such run of a month or more.
+  const full = createRepositoryMock();
+  const fullPayload = await assertJsonResponse<{ ttl_minutes: number; expires_at: string }>(
+    await createSessionAction(
+      {
+        source: "tbank_web",
+        payer_person_id: "person-1",
+        meta: { parse_strategy: "full", unattended: true },
+      },
+      userAuth,
+      { repository: full.repository, ...deps },
+    ),
+    200,
+  );
+  assertEquals(fullPayload.ttl_minutes, 240);
+  assertEquals(fullPayload.expires_at, "2026-01-01T14:00:00.000Z");
+  assertEquals(
+    full.state.createdSessionPayloads[0]?.expires_at as string | undefined,
+    "2026-01-01T14:00:00.000Z",
+  );
+
+  // Full for a source whose connector does not run it earns nothing: Alfa parses receipts the
+  // one way it knows whatever the session says, and a four-hour token for a fifteen-minute run
+  // is exposure for nothing.
+  const alfa = createRepositoryMock();
+  const alfaPayload = await assertJsonResponse<{ ttl_minutes: number; expires_at: string }>(
+    await createSessionAction(
+      { source: "alfa_web", payer_person_id: "person-1", meta: { parse_strategy: "full" } },
+      userAuth,
+      { repository: alfa.repository, ...deps },
+    ),
+    200,
+  );
+  assertEquals(alfaPayload.ttl_minutes, 30);
+  assertEquals(alfaPayload.expires_at, "2026-01-01T10:30:00.000Z");
+});
+
 Deno.test("createSessionAction creates session and batch and returns token payload", async () => {
   const { repository, state } = createRepositoryMock({
     lastImportedAt: "2026-01-01T00:00:00.000Z",
@@ -132,7 +189,8 @@ Deno.test("createSessionAction creates session and batch and returns token paylo
 
   assertEquals(payload.session_id, "session-1");
   assertEquals(payload.batch_id, "batch-1");
-  assertEquals(payload.ttl_minutes, 30);
+  // The full strategy earns the long session; the configured base is only a floor.
+  assertEquals(payload.ttl_minutes, 240);
   assertEquals(payload.last_imported_at, "2026-01-01T00:00:00.000Z");
   assertEquals(payload.parse_strategy, "full");
   assertEquals(typeof payload.session_token, "string");
@@ -140,6 +198,8 @@ Deno.test("createSessionAction creates session and batch and returns token paylo
   assertEquals(state.createdSessionPayloads.length, 1);
   assertEquals(state.createdBatchPayloads.length, 1);
   assertEquals(state.sessionUpdates.length, 1);
+  // A session a person opened has no grant to answer to.
+  assertEquals(state.createdSessionPayloads[0]?.grant_id, null);
   assertEquals(
     (state.createdSessionPayloads[0]?.meta as Record<string, unknown> | undefined)?.parse_strategy,
     "full",
@@ -351,6 +411,29 @@ Deno.test("completeSessionAction validates ownership for user auth", async () =>
   assertEquals(payload.error, "Session not found");
 });
 
+Deno.test("completeSessionAction does not fail a batch that has already been applied", async () => {
+  const { repository, state } = createRepositoryMock({
+    sessionForUser: { id: "session-1", batch_id: "batch-1" },
+    batchById: { id: "batch-1", status: "completed" },
+  });
+
+  await assertJsonResponse(
+    await completeSessionAction({ session_id: "session-1", status: "failed" }, userAuth, {
+      repository,
+      now: () => new Date("2026-01-01T10:00:00.000Z"),
+    }),
+    200,
+  );
+
+  // The session is closed as asked; the batch keeps its result and only gains a timestamp.
+  const batchUpdates = state.batchUpdates.map((update) => update.patch);
+  assertEquals(
+    batchUpdates.some((patch) => patch.status === "failed"),
+    false,
+  );
+  assertEquals(batchUpdates.at(-1)?.completed_at, "2026-01-01T10:00:00.000Z");
+});
+
 Deno.test("completeSessionAction updates session and leaves pending batch untouched", async () => {
   const { repository, state } = createRepositoryMock({
     sessionForUser: {
@@ -505,6 +588,9 @@ Deno.test("createSessionAction starts a session from a grant", async () => {
   assertEquals(payload.payer_person_id, "person-grant");
   assertEquals(state.createdSessionPayloads[0]?.payer_person_id, "person-grant");
   assertEquals(state.createdSessionPayloads[0]?.created_by_auth_user_id, "user-grant");
+  // The session remembers which grant minted it, so revoking that grant reaches the session:
+  // `resolveAuth` re-checks the grant on every request that carries the session token.
+  assertEquals(state.createdSessionPayloads[0]?.grant_id, "grant-1");
   assertEquals(markedGrants, [{ grantId: "grant-1", usedAtIso: "2026-08-23T10:00:00.000Z" }]);
 });
 

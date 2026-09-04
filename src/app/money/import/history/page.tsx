@@ -20,10 +20,25 @@ function formatDateTime(value: string | null): string {
   return format(parsed, "dd.MM.yyyy HH:mm");
 }
 
-function getImportTypeLabel(importType: string, t: ReturnType<typeof useTranslations>): string {
+function getImportTypeLabel(
+  importType: string,
+  meta: Record<string, unknown> | null | undefined,
+  t: ReturnType<typeof useTranslations>,
+): string {
+  // An unattended run is a web export nobody started; the extension marks the batch.
+  if (meta?.unattended === true) return t("money.importHistoryImportTypeUnattended");
   if (importType === "file") return t("money.importHistoryImportTypeFile");
   if (importType === "web_export") return t("money.importHistoryImportTypeWebExport");
   return importType;
+}
+
+/** The window an import covered, so two batches from one unattended visit read as two windows. */
+function formatWindow(windowFrom: string | null | undefined, windowTo: string | null | undefined) {
+  if (!windowFrom || !windowTo) return null;
+  const from = new Date(windowFrom);
+  const to = new Date(windowTo);
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime())) return null;
+  return `${format(from, "dd.MM.yyyy")} – ${format(to, "dd.MM.yyyy")}`;
 }
 
 function BatchStatusBadge({
@@ -188,7 +203,14 @@ export default function MoneyImportHistoryPage() {
                     <div className="text-xs">{batch.id}</div>
                   </td>
                   <td className="px-4 py-3">{batch.source}</td>
-                  <td className="px-4 py-3">{getImportTypeLabel(batch.import_type, t)}</td>
+                  <td className="px-4 py-3">
+                    <div>{getImportTypeLabel(batch.import_type, batch.meta, t)}</div>
+                    {formatWindow(batch.window_from, batch.window_to) && (
+                      <div className="text-xs text-muted-foreground">
+                        {formatWindow(batch.window_from, batch.window_to)}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <BatchStatusBadge status={batch.status} t={t} />
                   </td>

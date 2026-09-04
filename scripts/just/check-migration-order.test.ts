@@ -1,12 +1,26 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as checkMigrationOrder from "./check-migration-order.cjs";
 
-const { evaluateMigrationOrder, parseAllowlist, parseArgs, versionOf } = checkMigrationOrder;
+const {
+  evaluateMigrationOrder,
+  misorderedInTree,
+  parseAllowlist,
+  parseArgs,
+  parseLandingOrder,
+  versionOf,
+} = checkMigrationOrder;
 
 const BASE = ["20260802120000_a.sql", "20260809120000_b.sql"];
+const ALLOWED_FILE = "20260807120000_late.sql";
 const RATIONALE = "catalogue rows only; disjoint from every later migration";
+const DIGEST = "3f7a1c9d40b28e55";
+const DIGESTS = { [ALLOWED_FILE]: `${DIGEST}0123456789abcdef` };
+
+/** @param entries offenders or standing entries, which carry the version they land after */
+const names = (entries: { file: string }[]) => entries.map((entry) => entry.file);
 
 describe("migration order evaluation", () => {
   it("passes when an added migration sorts after everything on the base branch", () => {
@@ -23,10 +37,11 @@ describe("migration order evaluation", () => {
   it("flags the real case: a migration merged below one production already carries", () => {
     const result = evaluateMigrationOrder({
       baseFiles: BASE,
-      headFiles: [...BASE, "20260807120000_late.sql"],
+      headFiles: [...BASE, ALLOWED_FILE],
     });
 
-    expect(result.offenders).toEqual(["20260807120000_late.sql"]);
+    expect(names(result.offenders)).toEqual([ALLOWED_FILE]);
+    expect(result.offenders[0].landsAfter).toBe("20260809120000");
   });
 
   it("flags a new file that reuses a timestamp the base already carries", () => {
@@ -53,7 +68,7 @@ describe("migration order evaluation", () => {
     const result = evaluateMigrationOrder({
       baseFiles: BASE,
       headFiles: [...BASE, "20260809120000_duplicate.sql"],
-      allowlist: [{ version: "20260809120000", rationale: RATIONALE }],
+      allowlist: [{ file: "20260809120000_duplicate.sql", rationale: RATIONALE }],
     });
 
     expect(result.duplicates).toEqual(["20260809120000_duplicate.sql"]);
@@ -95,29 +110,39 @@ describe("migration order evaluation", () => {
     expect(result.offenders).toEqual([]);
   });
 
-  it("exempts an allowlisted version but still reports it as out of order", () => {
+  it("exempts an allowlisted file but still reports it as out of order", () => {
     const result = evaluateMigrationOrder({
       baseFiles: BASE,
-      headFiles: [...BASE, "20260807120000_late.sql"],
-      allowlist: [{ version: "20260807120000", rationale: RATIONALE }],
+      headFiles: [...BASE, ALLOWED_FILE],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: DIGESTS,
     });
 
     expect(result.offenders).toEqual([]);
-    expect(result.allowed).toEqual(["20260807120000_late.sql"]);
+    expect(result.allowed).toEqual([ALLOWED_FILE]);
+    expect(result.staleExemptions).toEqual([]);
+  });
+
+  it("does not let an exemption cover a different file that reuses the version", () => {
+    const replacement = "20260807120000_something_else.sql";
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: [...BASE, replacement],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: DIGESTS,
+    });
+
+    expect(names(result.offenders)).toEqual([replacement]);
+    expect(result.allowed).toEqual([]);
   });
 
   it("flags every offender, not just the first", () => {
     const result = evaluateMigrationOrder({
       baseFiles: BASE,
-      headFiles: [
-        ...BASE,
-        "20260807120000_late.sql",
-        "20260101000000_older.sql",
-        "20260901000000_fine.sql",
-      ],
+      headFiles: [...BASE, ALLOWED_FILE, "20260101000000_older.sql", "20260901000000_fine.sql"],
     });
 
-    expect(result.offenders).toEqual(["20260101000000_older.sql", "20260807120000_late.sql"]);
+    expect(names(result.offenders)).toEqual(["20260101000000_older.sql", ALLOWED_FILE]);
   });
 
   it("cannot judge order with no base migrations, and says so rather than flagging", () => {
@@ -135,6 +160,249 @@ describe("migration order evaluation", () => {
 
     expect(result.duplicates).toEqual(["20260101000000_a.sql", "20260101000000_b.sql"]);
   });
+
+  it("says whether the whole tree was judged or only the additions", () => {
+    const added = evaluateMigrationOrder({ baseFiles: BASE, headFiles: BASE });
+    const whole = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: BASE,
+      landingOrder: [BASE],
+    });
+
+    expect(added.treeChecked).toBe(false);
+    expect(whole.treeChecked).toBe(true);
+  });
+});
+
+describe("an exemption is pinned to the SQL it was written about", () => {
+  it("stops applying when the file is edited in place, and says the exemption expired", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: [...BASE, ALLOWED_FILE],
+      headFiles: [...BASE, ALLOWED_FILE],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: { [ALLOWED_FILE]: "ffffffffffffffff0000000000000000" },
+      landingOrder: [BASE, [ALLOWED_FILE]],
+    });
+
+    expect(result.staleExemptions).toEqual([
+      {
+        file: ALLOWED_FILE,
+        recorded: DIGEST,
+        actual: "ffffffffffffffff0000000000000000",
+      },
+    ]);
+    expect(names(result.standing)).toEqual([ALLOWED_FILE]);
+    expect(result.allowed).toEqual([]);
+  });
+
+  it("matches on a prefix, so a short digest in the entry is enough", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: [...BASE, ALLOWED_FILE],
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: DIGESTS,
+    });
+
+    expect(result.allowed).toEqual([ALLOWED_FILE]);
+  });
+
+  it("says nothing about an entry whose file has left the tree", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: BASE,
+      headFiles: BASE,
+      allowlist: [{ file: ALLOWED_FILE, digest: DIGEST, rationale: RATIONALE }],
+      digests: {},
+    });
+
+    expect(result.staleExemptions).toEqual([]);
+  });
+});
+
+describe("the whole tree, not only what the branch adds", () => {
+  // The 2026-09-02 shape: a misordered file lands, and every push after it is no longer an
+  // addition. An added-only check goes quiet, the deploy proceeds, and production applies the
+  // migration out of order. See T-260902-1ui.
+  const LANDED_OUT_OF_ORDER = [
+    ["20260802120000_a.sql"],
+    ["20260902060000_newer.sql"],
+    ["20260901150000_landed_late.sql"],
+  ];
+  const TREE = LANDED_OUT_OF_ORDER.flat();
+
+  it("fails a branch that leaves a misordered migration untouched", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: TREE,
+      headFiles: [...TREE, "20260903000000_unrelated.sql"],
+      landingOrder: LANDED_OUT_OF_ORDER,
+    });
+
+    expect(result.added).toEqual(["20260903000000_unrelated.sql"]);
+    expect(result.offenders).toEqual([]);
+    expect(names(result.standing)).toEqual(["20260901150000_landed_late.sql"]);
+    expect(result.standing[0].landsAfter).toBe("20260902060000");
+  });
+
+  it("passes that same branch once the misordered file is recorded", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: TREE,
+      headFiles: [...TREE, "20260903000000_unrelated.sql"],
+      landingOrder: LANDED_OUT_OF_ORDER,
+      allowlist: [{ file: "20260901150000_landed_late.sql", rationale: RATIONALE }],
+    });
+
+    expect(result.standing).toEqual([]);
+    expect(result.allowed).toEqual(["20260901150000_landed_late.sql"]);
+  });
+
+  it("passes that same branch once the misordered file is renamed away", () => {
+    const renamed = TREE.filter((file) => !file.startsWith("20260901150000")).concat(
+      "20260903010000_landed_late.sql",
+    );
+    const result = evaluateMigrationOrder({
+      baseFiles: TREE,
+      headFiles: renamed,
+      landingOrder: LANDED_OUT_OF_ORDER,
+    });
+
+    expect(result.standing).toEqual([]);
+    expect(result.offenders).toEqual([]);
+  });
+
+  it("reports a migration the branch adds as its own, not as one standing in the tree", () => {
+    const result = evaluateMigrationOrder({
+      baseFiles: ["20260802120000_a.sql", "20260902060000_newer.sql"],
+      headFiles: ["20260802120000_a.sql", "20260902060000_newer.sql", "20260901150000_mine.sql"],
+      landingOrder: [["20260802120000_a.sql"], ["20260902060000_newer.sql"]],
+    });
+
+    expect(names(result.offenders)).toEqual(["20260901150000_mine.sql"]);
+    expect(result.standing).toEqual([]);
+  });
+});
+
+describe("landing order", () => {
+  it("does not order migrations that landed in the same commit against each other", () => {
+    expect(
+      misorderedInTree({
+        headFiles: ["20260902000000_b.sql", "20260901000000_a.sql"],
+        landingOrder: [["20260902000000_b.sql", "20260901000000_a.sql"]],
+      }),
+    ).toEqual([]);
+  });
+
+  it("flags a version that lands after a later one already did", () => {
+    expect(
+      misorderedInTree({
+        headFiles: ["20260902000000_b.sql", "20260901000000_a.sql"],
+        landingOrder: [["20260902000000_b.sql"], ["20260901000000_a.sql"]],
+      }),
+    ).toEqual([{ file: "20260901000000_a.sql", landsAfter: "20260902000000" }]);
+  });
+
+  it("ignores a migration that has since been renamed or deleted out of the tree", () => {
+    expect(
+      misorderedInTree({
+        headFiles: ["20260902000000_b.sql"],
+        landingOrder: [["20260902000000_b.sql"], ["20260901000000_a.sql"]],
+      }),
+    ).toEqual([]);
+  });
+
+  it("holds this change's own migrations back to the pending batch, however they were committed", () => {
+    // A branch that committed a newer migration and then an older one. History says they landed
+    // apart; the merge commit brings them in together, to be applied in filename order.
+    expect(
+      misorderedInTree({
+        headFiles: [
+          "20260902000000_base.sql",
+          "20260904000000_newer.sql",
+          "20260903000000_older.sql",
+        ],
+        landingOrder: [
+          ["20260902000000_base.sql"],
+          ["20260904000000_newer.sql"],
+          ["20260903000000_older.sql"],
+        ],
+        pending: ["20260904000000_newer.sql", "20260903000000_older.sql"],
+      }),
+    ).toEqual([]);
+  });
+
+  it("still judges this change's migrations against what the base already has", () => {
+    expect(
+      misorderedInTree({
+        headFiles: ["20260902000000_base.sql", "20260901000000_mine.sql"],
+        landingOrder: [["20260902000000_base.sql"]],
+        pending: ["20260901000000_mine.sql"],
+      }),
+    ).toEqual([{ file: "20260901000000_mine.sql", landsAfter: "20260902000000" }]);
+  });
+
+  it("puts a file that has not landed yet last, where merging would put it", () => {
+    expect(
+      misorderedInTree({
+        headFiles: ["20260902000000_b.sql", "20260901000000_uncommitted.sql"],
+        landingOrder: [["20260902000000_b.sql"]],
+      }),
+    ).toEqual([{ file: "20260901000000_uncommitted.sql", landsAfter: "20260902000000" }]);
+  });
+
+  it("reads one batch per commit out of the git log output", () => {
+    const output = [
+      "commit aaa",
+      "",
+      "supabase/migrations/20260101000000_a.sql",
+      "supabase/migrations/20260102000000_b.sql",
+      "",
+      "commit bbb",
+      "",
+      "supabase/migrations/20260103000000_c.sql",
+      "",
+    ].join("\n");
+
+    expect(parseLandingOrder(output)).toEqual([
+      ["20260101000000_a.sql", "20260102000000_b.sql"],
+      ["20260103000000_c.sql"],
+    ]);
+  });
+
+  it("drops commits that touched the directory without adding a migration", () => {
+    const output = [
+      "commit aaa",
+      "",
+      "supabase/migrations/.out-of-order-allowlist",
+      "",
+      "commit bbb",
+      "",
+      "supabase/migrations/20260103000000_c.sql",
+    ].join("\n");
+
+    expect(parseLandingOrder(output)).toEqual([["20260103000000_c.sql"]]);
+  });
+
+  it("reads no batches out of empty output", () => {
+    expect(parseLandingOrder("")).toEqual([]);
+    expect(parseLandingOrder(undefined)).toEqual([]);
+  });
+});
+
+describe("landing order read from this repository", () => {
+  // A rename to a later timestamp is the remedy this gate recommends, and under git's rename
+  // detection it lands as an `R` rather than an `A`. If detection is ever left on, every renamed
+  // migration disappears from the landing order, is treated as arriving today, and is reported as
+  // out of order -- which is what the gate tells people to do to fix the problem. That regression
+  // is invisible in a fixture, so it is checked against real history.
+  const shallow = fs.existsSync(path.join(__dirname, "..", "..", ".git", "shallow"));
+
+  it.skipIf(shallow)("accounts for every migration in the tree, renamed ones included", () => {
+    const landed = new Set((checkMigrationOrder.readLandingOrder() ?? []).flat());
+    const missing = checkMigrationOrder
+      .readHeadMigrations()
+      .filter((file: string) => versionOf(file))
+      .filter((file: string) => !landed.has(file));
+
+    expect(missing).toEqual([]);
+  });
 });
 
 describe("migration filename parsing", () => {
@@ -150,24 +418,54 @@ describe("migration filename parsing", () => {
 });
 
 describe("allowlist parsing", () => {
-  it("reads a version and the rationale that justifies it", () => {
-    expect(parseAllowlist(`20260807120000 # ${RATIONALE}`)).toEqual([
-      { version: "20260807120000", rationale: RATIONALE },
-    ]);
+  const ENTRY = `${ALLOWED_FILE} ${DIGEST} # ${RATIONALE}`;
+  const PARSED = {
+    file: ALLOWED_FILE,
+    version: "20260807120000",
+    digest: DIGEST,
+    rationale: RATIONALE,
+  };
+
+  it("reads a filename, a digest of its contents, and the rationale that justifies it", () => {
+    expect(parseAllowlist(ENTRY)).toEqual([PARSED]);
   });
 
-  it("rejects a bare version, so the exemption cannot skip its rationale", () => {
-    expect(() => parseAllowlist("20260807120000")).toThrow("Malformed allowlist entry");
+  it("rejects a bare version, which would also exempt a file that reuses it", () => {
+    expect(() => parseAllowlist(`20260807120000 ${DIGEST} # ${RATIONALE}`)).toThrow(
+      "Malformed allowlist entry",
+    );
+  });
+
+  it("rejects an entry with no digest, which would survive an edit in place", () => {
+    expect(() => parseAllowlist(`${ALLOWED_FILE} # ${RATIONALE}`)).toThrow(
+      "Malformed allowlist entry",
+    );
+  });
+
+  it("rejects a digest too short to identify the contents", () => {
+    expect(() => parseAllowlist(`${ALLOWED_FILE} 3f7a1c9d # ${RATIONALE}`)).toThrow(
+      "Malformed allowlist entry",
+    );
+  });
+
+  it("rejects a filename that is not a timestamped migration", () => {
+    expect(() => parseAllowlist(`notes.sql ${DIGEST} # ${RATIONALE}`)).toThrow(
+      "Malformed allowlist entry",
+    );
+  });
+
+  it("rejects an entry with no rationale", () => {
+    expect(() => parseAllowlist(`${ALLOWED_FILE} ${DIGEST}`)).toThrow("Malformed allowlist entry");
   });
 
   it("rejects an entry whose rationale is empty", () => {
-    expect(() => parseAllowlist("20260807120000 #   ")).toThrow("Malformed allowlist entry");
+    expect(() => parseAllowlist(`${ALLOWED_FILE} ${DIGEST} #   `)).toThrow(
+      "Malformed allowlist entry",
+    );
   });
 
   it("keeps whole-line comments and blank lines out of the entries", () => {
-    expect(
-      parseAllowlist(["# how to use this file", "", `20260807120000 # ${RATIONALE}`].join("\n")),
-    ).toEqual([{ version: "20260807120000", rationale: RATIONALE }]);
+    expect(parseAllowlist(["# how to use this file", "", ENTRY].join("\n"))).toEqual([PARSED]);
   });
 
   it("treats a missing or empty file as no exemptions", () => {

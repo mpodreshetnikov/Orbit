@@ -218,7 +218,7 @@ Supabase function-specific checks:
 - run `types` (or `quality-typecheck-supabase-functions`) for `deno check` failures.
 - if Deno fails on unresolved URL imports, confirm `supabase/functions/deno.json` imports are valid and cache is fresh (`deno cache` can help diagnose).
 - if function requests fail with `worker boot error` and `Unsupported lockfile version`, run `functions-lock-refresh` from `AGENTS.md`, then rerun `functions-lock-check` and `types`.
-- prefer `npm:` specifiers over CDN URLs when adding a third-party dependency to `supabase/functions/deno.json`. `supabase functions deploy` bundles every function on every deploy, so a CDN outage fails the whole deploy — including the migration and `supabase/db/deploy.sql` steps that run after it — and a retry cannot resume past it. `npm:` resolves through the npm registry, which the toolchain already depends on.
+- prefer `npm:` specifiers over CDN URLs when adding a third-party dependency to `supabase/functions/deno.json`. `supabase functions deploy` bundles every function on every deploy, so a CDN outage fails the deploy at its last step, after the migrations and `supabase/db/deploy.sql` have already been applied, and production runs the old functions against the new schema until a retry gets through. `npm:` resolves through the npm registry, which the toolchain already depends on.
 
 ## Money Import Issues
 

@@ -8,6 +8,21 @@
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/pr-size-hook.cjs\"",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/task-claim-hook.cjs\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/task-claim-hook.cjs\"",
+            "timeout": 15
           }
         ]
       }
@@ -20,6 +35,30 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/caveman-hook.cjs\"",
             "timeout": 10,
             "statusMessage": "Enabling caveman mode"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/task-claim-hook.cjs\" --pre",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/just/task-claim-hook.cjs\"",
+            "timeout": 15
           }
         ]
       }
