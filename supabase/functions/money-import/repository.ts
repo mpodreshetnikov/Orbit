@@ -128,6 +128,16 @@ export interface MoneyImportRepository {
     userId: string,
   ): Promise<Record<string, unknown> | null>;
   getImportSessionById(sessionId: string): Promise<Record<string, unknown> | null>;
+  /**
+   * Sessions of this source and payer past their `expires_at` that no completion ever reached:
+   * neither revoked nor finished. Oldest first and a bounded page; the caller closes them, so
+   * whatever is left over is taken next time.
+   */
+  listExpiredOpenSessions?(
+    source: string,
+    payerPersonId: string,
+    nowIso: string,
+  ): Promise<Record<string, unknown>[]>;
   updateImportSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   createImportBatch(payload: Record<string, unknown>): Promise<string>;
   getImportBatch(batchId: string): Promise<Record<string, unknown> | null>;
@@ -517,6 +527,26 @@ export function createSupabaseMoneyImportRepository(
 
     if (error || !data) return null;
     return data as Record<string, unknown>;
+  }
+
+  async function listExpiredOpenSessions(
+    source: string,
+    payerPersonId: string,
+    nowIso: string,
+  ): Promise<Record<string, unknown>[]> {
+    const { data, error } = await getAdminClient()
+      .from("money_import_sessions")
+      .select("*")
+      .eq("source", source)
+      .eq("payer_person_id", payerPersonId)
+      .in("status", ["created", "running"])
+      .is("revoked_at", null)
+      .lt("expires_at", nowIso)
+      .order("created_at", { ascending: true })
+      .limit(20);
+
+    if (error) throw new Error(error.message);
+    return (data ?? []) as Record<string, unknown>[];
   }
 
   async function updateImportSession(
@@ -1899,6 +1929,7 @@ export function createSupabaseMoneyImportRepository(
     createImportSession,
     getImportSessionForUser,
     getImportSessionById,
+    listExpiredOpenSessions,
     updateImportSession,
     createImportBatch,
     getImportBatch,

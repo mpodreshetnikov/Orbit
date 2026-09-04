@@ -2115,3 +2115,47 @@ Deno.test("exactIgnoringCase tolerates exactly the padding SQL trim removes", ()
     false,
   );
 });
+
+Deno.test(
+  "repository listExpiredOpenSessions asks for this scope's open sessions past their expiry",
+  async () => {
+    const calls: Array<[string, unknown, unknown?]> = [];
+    const chain: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "in", "is", "lt", "order"]) {
+      chain[method] = (...args: unknown[]) => {
+        calls.push([method, args[0], args[1]]);
+        return chain;
+      };
+    }
+    chain.limit = async (count: number) => {
+      calls.push(["limit", count]);
+      return { data: [{ id: "session-dead" }], error: null };
+    };
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          assertEquals(table, "money_import_sessions");
+          return chain;
+        },
+      },
+    });
+
+    const sessions = await repository.listExpiredOpenSessions!(
+      "tbank_web",
+      "person-1",
+      "2026-09-04T06:00:00.000Z",
+    );
+
+    assertEquals(sessions, [{ id: "session-dead" }]);
+    assertEquals(calls, [
+      ["select", "*", undefined],
+      ["eq", "source", "tbank_web"],
+      ["eq", "payer_person_id", "person-1"],
+      ["in", "status", ["created", "running"]],
+      ["is", "revoked_at", null],
+      ["lt", "expires_at", "2026-09-04T06:00:00.000Z"],
+      ["order", "created_at", { ascending: true }],
+      ["limit", 20],
+    ]);
+  },
+);

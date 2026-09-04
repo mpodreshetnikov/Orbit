@@ -4,6 +4,7 @@ import { createImportDebugStore } from "./import-debug.js";
 import { routeBackgroundMessage } from "./background-router.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { createInitialAutoRunState } from "./auto-run-policy.js";
+import { activeImportRuns } from "./active-runs.js";
 
 describe("background-router", () => {
   /**
@@ -344,6 +345,60 @@ describe("background-router", () => {
     });
 
     await expect(runPromise).resolves.toMatchObject({ ok: true });
+  });
+
+  it("registers the run for as long as the session field is held, and marks the session started", async () => {
+    const deps = createDeps();
+    const markRunStarted = vi.fn(async () => undefined);
+    const parseDeferred = createDeferred<{
+      rows: Array<{ id: number }>;
+      windowTo: string;
+      parsedThroughAt: string;
+      parsedTransactionsCount: number;
+    }>();
+    deps.importRunnerDeps.getConnector.mockReturnValue({
+      sourceId: "tbank_web",
+      parse: vi.fn().mockReturnValue(parseDeferred.promise),
+    });
+    deps.importRunnerDeps.callEdge = vi
+      .fn()
+      .mockResolvedValueOnce({ batch_id: "batch-2" })
+      .mockResolvedValueOnce({ ok: true });
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+    });
+
+    const runPromise = routeBackgroundMessage(
+      { type: "MONEY_IMPORT_RUN" },
+      { ...deps, markRunStarted },
+    );
+    await Promise.resolve();
+
+    // A worker restarted mid-run finds the mark on the stored session and knows the run died.
+    expect(markRunStarted).toHaveBeenCalledWith("session-1");
+    expect(activeImportRuns.has("session-1")).toBe(true);
+    await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
+      "Import already running for session session-1",
+    );
+
+    parseDeferred.resolve({
+      rows: [{ id: 1 }],
+      windowTo: "2026-02-20T00:00:00.000Z",
+      parsedThroughAt: "2026-02-19T00:00:00.000Z",
+      parsedTransactionsCount: 1,
+    });
+    await expect(runPromise).resolves.toMatchObject({ ok: true });
+
+    // The field is cleared before the registry lets go, so no reader sees a held session
+    // with no run behind it.
+    expect(activeImportRuns.has("session-1")).toBe(false);
+    const clearedAt = deps.sessionStore.setSession.mock.invocationCallOrder[0];
+    expect(deps.sessionStore.setSession).toHaveBeenCalledWith(null);
+    expect(typeof clearedAt).toBe("number");
   });
 
   it("fails run when session is missing", async () => {

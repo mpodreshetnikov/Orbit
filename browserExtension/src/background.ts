@@ -12,7 +12,10 @@ import { createAutoRunStore } from "./core/auto-run-store.js";
 import { createAutoImportSweep } from "./core/auto-import-sweep.js";
 import { createAttentionStore } from "./core/attention-store.js";
 import { createAttentionRefresher, type RefreshOptions } from "./core/attention-refresh.js";
-import { runScheduledImport } from "./core/import-runner.js";
+import { runScheduledImport, tryCompleteSessionAsFailed } from "./core/import-runner.js";
+import { activeImportRuns } from "./core/active-runs.js";
+import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
+import { createSessionJanitor } from "./core/session-janitor.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
@@ -305,7 +308,19 @@ function extractErrorDiagnostics(error: unknown): Record<string, unknown> | null
   };
 }
 
-const sessionStore = createSessionStore(chrome.storage.local);
+const storedSessions = createSessionStore(chrome.storage.local);
+// Every reader below goes through the janitor: a stored session whose run died with an earlier
+// worker, or whose expiry has passed, is closed and cleared on the way out rather than taken
+// for a person importing right now -- which is what stood the sweep down and kept the
+// attention page shut for a day (2026-09-03).
+const sessionJanitor = createSessionJanitor({
+  store: storedSessions,
+  isRunActive: (sessionId) => activeImportRuns.has(sessionId),
+  completeAsFailed: (session) => tryCompleteSessionAsFailed(session, callEdge),
+  now: Date.now,
+  onInfo: (event, attrs) => telemetry.info(event, attrs),
+});
+const sessionStore = sessionJanitor.store;
 const grantStore = createGrantStore(chrome.storage.local);
 const backfillStore = createBackfillStore(chrome.storage.local);
 const autoRunStore = createAutoRunStore(chrome.storage.local);
@@ -316,6 +331,11 @@ telemetry.info("extension_background_initialized", {
   dev_hot_reload: DEV_HOT_RELOAD,
   app_origin_pattern_count: Array.isArray(APP_ORIGIN_PATTERNS) ? APP_ORIGIN_PATTERNS.length : 0,
 });
+// A worker that has just started holds no runs: whatever the store says was running is over.
+void sessionJanitor.reconcile("boot");
+// The bank's rate limit is paid in timers, and timers alone let Chrome end the worker after
+// thirty seconds. While a run is registered, a cheap API call every twenty keeps it here.
+keepWorkerAliveDuringRuns(activeImportRuns, { ping: () => chrome.runtime.getPlatformInfo() });
 
 const AUTO_IMPORT_ALARM = "money-import-auto";
 /**
@@ -533,12 +553,20 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
+  // A run is answered at once and reports through its broadcasts. Chrome ends a service worker
+  // whose single request is still open after five minutes, and a run with receipts takes
+  // longer than that: the answer that waited for the result was the run's own death
+  // (2026-09-03). The router still validates first; a refusal reaches the widget as the error
+  // broadcast in the catch below, the same way a failure later in the run does.
+  const answersAtOnce = message.type === "MONEY_IMPORT_RUN";
+  if (answersAtOnce) sendResponse({ ok: true, accepted: true });
   void (async () => {
     try {
       const response = await routeBackgroundMessage(
         message,
         {
           sessionStore,
+          markRunStarted: (sessionId) => sessionJanitor.markRunStarted(sessionId),
           grantStore,
           autoRunStore,
           debugStore,
@@ -607,7 +635,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         await refreshAttention("message", { mayOpenPage: false });
       }
 
-      sendResponse(response);
+      if (!answersAtOnce) sendResponse(response);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Unknown extension error";
       const diagnostics = extractErrorDiagnostics(error);
@@ -636,7 +664,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
           diagnostics,
         });
       }
-      sendResponse({ ok: false, error: messageText, diagnostics });
+      if (!answersAtOnce) sendResponse({ ok: false, error: messageText, diagnostics });
     }
   })();
 

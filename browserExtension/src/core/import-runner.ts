@@ -11,6 +11,8 @@ import {
 } from "./backfill-scheduler.js";
 import type { BackfillStore } from "./backfill-store.js";
 import type { SessionStore } from "./session-store.js";
+import { activeImportRuns } from "./active-runs.js";
+import { RUN_STARTED_AT_KEY } from "./session-janitor.js";
 
 export interface ImportRunnerDeps {
   getConnector: (sourceId: string) => Connector | null;
@@ -620,6 +622,9 @@ export async function runScheduledImport(
       // doing -- including a manual import in progress -- and onto a report for a run they never
       // asked for. The flag rides on the session so every message the run broadcasts carries it.
       unattended: true,
+      // The run begins the moment this is stored. A later worker finding it stored with no run
+      // of its own knows the run died, and closes it; see `createSessionJanitor`.
+      [RUN_STARTED_AT_KEY]: input.nowMs,
     };
     // Checked immediately before the write, not once at the start of the sweep: the app can
     // store a session at any moment, and overwriting one costs the person their import. The
@@ -629,6 +634,8 @@ export async function runScheduledImport(
       await tryCompleteSessionAsFailed(session, deps.callEdge);
       throw new Error("A session started by the person is in progress");
     }
+    const sessionId = typeof session.session_id === "string" ? session.session_id : "";
+    if (sessionId) activeImportRuns.begin(sessionId);
 
     try {
       const result = await runImportSession(session, window.windowFromIso, deps, windowDebug);
@@ -640,7 +647,10 @@ export async function runScheduledImport(
       await tryCompleteSessionAsFailed(session, deps.callEdge);
       throw error;
     } finally {
+      // The field first, the registry after: a store still holding the session once the
+      // registry has let it go reads as a run that died.
       await clearOwnSession(deps.sessionStore, session);
+      if (sessionId) activeImportRuns.end(sessionId);
     }
   };
 

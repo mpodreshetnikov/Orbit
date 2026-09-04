@@ -11,6 +11,7 @@ import type { MoneyImportRepository } from "./repository.ts";
 import type { AuthContext, UserAuthContext } from "./types.ts";
 
 interface SessionRepoState {
+  scans: Array<{ source: string; payerPersonId: string }>;
   createdSessionPayloads: Record<string, unknown>[];
   createdBatchPayloads: Record<string, unknown>[];
   sessionUpdates: Array<{ sessionId: string; patch: Record<string, unknown> }>;
@@ -22,9 +23,11 @@ function createRepositoryMock(
     sessionForUser?: Record<string, unknown> | null;
     batchById?: Record<string, unknown> | null;
     lastImportedAt?: string | null;
+    expiredOpenSessions?: Record<string, unknown>[];
   } = {},
 ): { repository: MoneyImportRepository; state: SessionRepoState } {
   const state: SessionRepoState = {
+    scans: [],
     createdSessionPayloads: [],
     createdBatchPayloads: [],
     sessionUpdates: [],
@@ -45,6 +48,10 @@ function createRepositoryMock(
     },
     getImportSessionForUser: async () => options.sessionForUser ?? null,
     getImportSessionById: async () => options.sessionForUser ?? null,
+    listExpiredOpenSessions: async (source, payerPersonId) => {
+      state.scans.push({ source, payerPersonId });
+      return options.expiredOpenSessions ?? [];
+    },
     updateImportSession: async (sessionId, patch) => {
       state.sessionUpdates.push({ sessionId, patch });
     },
@@ -605,4 +612,66 @@ Deno.test("createSessionAction refuses a source outside the grant", async () => 
   assertEquals(await assertJsonResponse(response, 403), {
     error: "Source is not allowed for this grant",
   });
+});
+
+Deno.test(
+  "createSessionAction closes what this scope left running before opening a new session",
+  async () => {
+    const { repository, state } = createRepositoryMock({
+      expiredOpenSessions: [
+        { id: "session-dead", batch_id: "batch-dead", expires_at: "2026-01-01T09:38:16.000Z" },
+      ],
+      batchById: { id: "batch-dead", status: "running" },
+    });
+
+    await assertJsonResponse(
+      await createSessionAction({ source: "tbank_web", payer_person_id: "person-1" }, userAuth, {
+        repository,
+        now: () => new Date("2026-01-01T10:00:00.000Z"),
+      }),
+      200,
+    );
+
+    assertEquals(state.scans, [{ source: "tbank_web", payerPersonId: "person-1" }]);
+    // The dead session is closed first; the new session's own update comes after it.
+    assertEquals(
+      state.sessionUpdates.map((update) => [update.sessionId, update.patch.status]),
+      [
+        ["session-dead", "failed"],
+        ["session-1", "running"],
+      ],
+    );
+    assertEquals(state.batchUpdates, [
+      {
+        batchId: "batch-dead",
+        patch: {
+          status: "failed",
+          completed_at: "2026-01-01T09:38:16.000Z",
+          meta: { failure_reason: "session_expired" },
+        },
+      },
+    ]);
+  },
+);
+
+Deno.test("getImportContextAction closes what this scope left running", async () => {
+  const { repository, state } = createRepositoryMock({
+    expiredOpenSessions: [
+      { id: "session-dead", batch_id: null, expires_at: "2026-03-01T00:00:00.000Z" },
+    ],
+  });
+
+  await assertJsonResponse(
+    await getImportContextAction({ source: "tbank_web", payer_person_id: "person-1" }, userAuth, {
+      repository,
+      now: () => new Date("2026-03-08T00:00:00.000Z"),
+    }),
+    200,
+  );
+
+  assertEquals(state.scans, [{ source: "tbank_web", payerPersonId: "person-1" }]);
+  assertEquals(
+    state.sessionUpdates.map((update) => [update.sessionId, update.patch.status]),
+    [["session-dead", "failed"]],
+  );
 });
