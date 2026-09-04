@@ -86,9 +86,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (current === "--record") parsed.record = true;
     else if (current === "--case" && argv[index + 1]) parsed.cases.push(argv[++index]);
     else if (current === "--model" && argv[index + 1]) parsed.model = argv[++index];
-    else if (current in STAGE_FLAGS && argv[index + 1])
-      parsed.stageModels[STAGE_FLAGS[current as keyof typeof STAGE_FLAGS]] = argv[++index];
-    else if (current === "--out" && argv[index + 1]) parsed.outDir = path.resolve(argv[++index]);
+    else if (current in STAGE_FLAGS) {
+      const value = argv[index + 1];
+      // Refuse rather than shrug. A bare truthiness check would take the next option as the model
+      // name — `--model-extract --case 002` would pin the model to "--case", swallow the token and
+      // lose the case filter with it — and the first sign of that is a live run paying for the
+      // whole corpus against a model id that cannot exist. The stage flags are only ever used with
+      // --live, so a silent misparse here is measured in dollars.
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error(`${current} needs a model id, e.g. ${current} google/gemini-2.5-flash.`);
+      }
+      parsed.stageModels[STAGE_FLAGS[current as keyof typeof STAGE_FLAGS]] = value;
+      index += 1;
+    } else if (current === "--out" && argv[index + 1]) parsed.outDir = path.resolve(argv[++index]);
     else if (current === "--fail-under" && argv[index + 1])
       parsed.failUnder = Number(argv[++index]);
     else if (current === "--repeat" && argv[index + 1]) parsed.repeat = Number(argv[++index]);

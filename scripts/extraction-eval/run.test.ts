@@ -77,10 +77,20 @@ describe("parseArgs", () => {
     expect(parsed.stageModels).toEqual({ extract: "google/gemini-2.5-flash" });
   });
 
-  it("ignores a stage flag with no value after it", () => {
-    // Consistent with every other valued flag here: a trailing `--model-extract` takes nothing
-    // rather than swallowing the next flag as its value.
-    expect(parseArgs(args("--live", "--model-extract")).stageModels).toEqual({});
+  it("refuses a stage flag with no value after it", () => {
+    expect(() => parseArgs(args("--live", "--model-extract"))).toThrow(/needs a model id/);
+  });
+
+  it("refuses to take the next option as a model id", () => {
+    // The failure this prevents is expensive, not cosmetic: taking `--case` as the model would
+    // also swallow the token, so the case filter vanishes and a live run pays for the whole
+    // corpus against a model id that cannot exist.
+    expect(() => parseArgs(args("--live", "--model-extract", "--case", "002"))).toThrow(
+      /needs a model id/,
+    );
+    expect(() => parseArgs(args("--live", "--model-classify", "--live"))).toThrow(
+      /needs a model id/,
+    );
   });
 });
 
