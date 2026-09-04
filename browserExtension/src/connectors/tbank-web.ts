@@ -16,6 +16,14 @@ const EXTRACTION_ATTEMPTS = 2;
 const PAGE_EXTRACTION_MESSAGE = "MONEY_IMPORT_PAGE_EXTRACTION";
 /** How long a page may take to report when its session states no expiry. */
 const DEFAULT_EXTRACTION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+/** The deadline passed with no report: terminal, not one attempt among the retries. */
+class ExtractionDeadlineError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExtractionDeadlineError";
+  }
+}
 const DEFAULT_RECEIPT_PARSE_STRATEGY: ConnectorParseStrategy = "fast";
 const FULL_RECEIPT_BASE_PAUSE_MS = 4000;
 const FULL_RECEIPT_RESPONSE_OVERHEAD_MS = 750;
@@ -921,6 +929,15 @@ async function extractOperationsWithRetry(
         tab_url: currentTab?.url ?? null,
         tab_status: currentTab?.status ?? null,
       });
+      // The session is over; a second parse would run for nobody, beside the first one still
+      // winding down in the page.
+      if (error instanceof ExtractionDeadlineError) {
+        throw formatDiagnosticError(error.message, {
+          tab_url: currentTab?.url ?? null,
+          tab_status: currentTab?.status ?? null,
+          execute_script_attempts: attemptDetails,
+        });
+      }
     }
 
     if (attempt < EXTRACTION_ATTEMPTS) {
@@ -947,6 +964,22 @@ function resolveExtractionDeadlineMs(session: Record<string, unknown> | undefine
   const expiresAtMs = expiresAt ? Date.parse(expiresAt) : Number.NaN;
   if (Number.isFinite(expiresAtMs)) return expiresAtMs + CLOCK_SKEW_ALLOWANCE_MS;
   return Date.now() + DEFAULT_EXTRACTION_TIMEOUT_MS;
+}
+
+/** Marks the token in the page, where the parse checks it at every pause. */
+async function cancelPageExtraction(tabId: number, reportToken: string): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (token: string) => {
+        const page = globalThis as { __orbitMoneyImportCancelled?: Set<string> };
+        (page.__orbitMoneyImportCancelled ??= new Set<string>()).add(token);
+      },
+      args: [reportToken],
+    });
+  } catch {
+    // The page is gone, and its task with it.
+  }
 }
 
 function isPageExtractionStart(value: unknown): value is PageExtractionStart {
@@ -1044,6 +1077,7 @@ async function runPageExtraction(
   }
 
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId },
@@ -1061,12 +1095,20 @@ async function runPageExtraction(
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           if (settled) return;
-          reject(new Error("T-Bank extraction did not report back before its session ended"));
+          timedOut = true;
+          reject(
+            new ExtractionDeadlineError(
+              "T-Bank extraction did not report back before its session ended",
+            ),
+          );
         }, timeoutMs);
       }),
     ]);
   } finally {
     if (timer !== null) clearTimeout(timer);
+    // Nobody is listening any more; the page's task is told so, or it would fetch on to the
+    // end of the window for a report that is thrown away.
+    if (timedOut && reportToken) await cancelPageExtraction(tabId, reportToken);
     if (reportToken && messageEvents && tabEvents && loadEvents) {
       messageEvents.removeListener(onMessage);
       tabEvents.removeListener(onRemoved);
@@ -1103,9 +1145,14 @@ function extractOperationsInPage(input: {
   payerPersonId?: string | null;
   parseStrategy?: ConnectorParseStrategy | null;
   reportToken?: string | null;
+  cancelToken?: string | null;
 }): Promise<PageExtraction> | PageExtractionStart {
   const reportToken =
     typeof input.reportToken === "string" && input.reportToken ? input.reportToken : null;
+  // The worker that stopped waiting for this parse tells the page so by marking the token;
+  // the parse checks the mark at every pause and stops, rather than fetching on for nobody.
+  const cancelToken =
+    typeof input.cancelToken === "string" && input.cancelToken ? input.cancelToken : null;
   if (reportToken) {
     // Chrome ends an extension service worker whose single API call is still open after five
     // minutes, and executeScript is one call. The parse below, with its pauses for the bank's
@@ -1128,7 +1175,9 @@ function extractOperationsInPage(input: {
         // The worker that asked is gone; there is nobody to tell.
       }
     };
-    void Promise.resolve(extractOperationsInPage({ ...input, reportToken: null })).then(
+    void Promise.resolve(
+      extractOperationsInPage({ ...input, reportToken: null, cancelToken: reportToken }),
+    ).then(
       (result) => report({ ok: true, result }),
       (error: unknown) =>
         report({
@@ -1846,10 +1895,19 @@ function extractOperationsInPage(input: {
     }
   }
 
+  function isCancelled(): boolean {
+    if (!cancelToken) return false;
+    const marks = (globalThis as { __orbitMoneyImportCancelled?: Set<string> })
+      .__orbitMoneyImportCancelled;
+    return Boolean(marks?.has(cancelToken));
+  }
+
   function waitMs(delayMs: number): Promise<void> {
+    const cancelled = () => new Error("T-Bank extraction cancelled by the worker");
+    if (isCancelled()) return Promise.reject(cancelled());
     if (delayMs <= 0) return Promise.resolve();
-    return new Promise((resolve) => {
-      setTimeout(resolve, delayMs);
+    return new Promise((resolve, reject) => {
+      setTimeout(() => (isCancelled() ? reject(cancelled()) : resolve()), delayMs);
     });
   }
 

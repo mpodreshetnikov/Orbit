@@ -906,6 +906,45 @@ describe("tbank-web connector", () => {
     expect(result.rows).toHaveLength(1);
   });
 
+  it("stops at the deadline: no second attempt, and the page is told to stop", async () => {
+    vi.useFakeTimers();
+    try {
+      const executeScript = vi.fn();
+      installReportingChrome(executeScript);
+      executeScript.mockImplementation(
+        async (injection: { args?: Array<{ reportToken?: string } | string> }) => {
+          const first = injection.args?.[0];
+          if (typeof first === "string") return [{ result: undefined }];
+          return [{ result: { started: true, report_token: first?.reportToken } }];
+        },
+      );
+
+      const parse = connector.parse({
+        source: "tbank_web",
+        windowFrom: "2026-02-01T00:00:00.000Z",
+        // A session long over: the wait is the floor of a minute, then the deadline.
+        session: {
+          default_account_id: "acc-1",
+          expires_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        },
+      });
+      const outcome = parse.then(
+        () => "resolved",
+        (error: Error) => error.message,
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(await outcome).toContain("did not report back before its session ended");
+      // One parse, then the mark in the page -- not a second parse.
+      expect(executeScript).toHaveBeenCalledTimes(2);
+      const token = (executeScript.mock.calls[0]?.[0] as { args: Array<{ reportToken: string }> })
+        .args[0].reportToken;
+      expect((executeScript.mock.calls[1]?.[0] as { args: unknown[] }).args).toEqual([token]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("recognises the versioned operations page the bank redirects to", () => {
     // Recorded 2026-09-03: navigating to /mybank/operations/ lands here, and an exact match
     // made every run -- manual and unattended -- fail with "did not stay on the operations page".
