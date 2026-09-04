@@ -184,7 +184,13 @@ export function createOpenRouterOcrClient(
                     ],
                   },
                 ],
-                temperature: 0,
+                // No `temperature`. The gpt-5.x family this pipeline defaults to does not
+                // advertise it, and `require_parameters` below is all-or-nothing: asking for a
+                // parameter no endpoint declares leaves OpenRouter with nothing to route to and
+                // the call fails with a bare 404, indistinguishable from a model that does not
+                // exist. `health-structure/stages/client.ts` documents the same trap and omits it
+                // for the same reason. Nothing is lost — a provider that took `temperature: 0`
+                // ignored it anyway, and the JSON schema is what actually constrains the answer.
                 // A page that overran its budget gets a larger one, otherwise the retry
                 // reproduces the same truncation at the same point.
                 max_tokens: baseMaxTokens * Math.pow(2, attempt),

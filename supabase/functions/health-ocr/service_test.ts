@@ -256,18 +256,19 @@ Deno.test("runHealthOcrService marks failed when OCR extraction fails for every 
 /**
  * The failures the record used to describe identically.
  *
- * Each names a different next move -- fix the key, point at a model that exists, wait,
+ * Each names a different next move -- fix the key, fix the routing configuration, wait,
  * re-photograph the page -- so a record that cannot tell them apart sends the user to the wrong
  * one.
  */
 Deno.test("runHealthOcrService distinguishes the cause of a failed transcription", async () => {
   const cases: Array<{ error: unknown; cause: string }> = [
     { error: new OcrProviderError("OpenRouter API error: 401", 401), cause: "provider_auth" },
-    // 404 is the model id naming nothing, which is neither the key nor the body and is the one
-    // failure that is never about this document -- it fails every document until it is changed.
+    // 404 is OpenRouter having no endpoint to route to -- an unserved model id, or a parameter
+    // no endpoint advertises. Neither the key nor the body, and never about this document: it
+    // fails every document until the configuration changes.
     {
       error: new OcrProviderError("OpenRouter API error: 404", 404),
-      cause: "provider_model_missing",
+      cause: "provider_no_endpoint",
     },
     { error: new OcrProviderError("OpenRouter API error: 400", 400), cause: "provider_rejected" },
     { error: new RetryableLlmError("OpenRouter API error: 429"), cause: "provider_unavailable" },
