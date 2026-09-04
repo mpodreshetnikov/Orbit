@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as checkPrSize from "./check-pr-size.cjs";
@@ -8,6 +10,7 @@ const {
   formatFailure,
   formatWarning,
   globToRegExp,
+  isPushToDefaultBranch,
   isReviewable,
   parseAllowlist,
   parseArgs,
@@ -37,6 +40,18 @@ function evaluate(
     limit: options.limit,
     warnAt: options.warnAt,
   });
+}
+
+/**
+ * The environment the script is spawned with: the runner's own, minus what Actions says about
+ * the event it is running for. On a push to main the script steps aside (#96); these tests are
+ * about what it measures, and must measure the same wherever they run.
+ */
+function scriptEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.GITHUB_EVENT_NAME;
+  delete env.GITHUB_REF;
+  return { ...env, ...overrides };
 }
 
 describe("change size evaluation", () => {
@@ -148,6 +163,28 @@ describe("change size evaluation", () => {
     });
 
     expect(result.branchExemption).toBeUndefined();
+  });
+
+  it("steps aside on a push to main and nowhere else", () => {
+    // A merge commit on main, measured against the commit before it, is the whole pull request
+    // once more -- with no branch name for its allowlist entry to match. The gate has already
+    // had its say on the pull request; main carries what was merged. Decided from the event
+    // Actions reports, not from a branch name: a pull request from a fork may call its head
+    // branch `main`, and must be measured like any other.
+    expect(
+      isPushToDefaultBranch({ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main" }),
+    ).toBe(true);
+    expect(
+      isPushToDefaultBranch({
+        GITHUB_EVENT_NAME: "pull_request",
+        GITHUB_REF: "refs/pull/96/merge",
+        PR_SIZE_BRANCH: "main",
+      }),
+    ).toBe(false);
+    expect(
+      isPushToDefaultBranch({ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/feature/x" }),
+    ).toBe(false);
+    expect(isPushToDefaultBranch({})).toBe(false);
   });
 
   it("claims no branch exemption when the checkout names no branch", () => {
@@ -343,13 +380,106 @@ describe("allowlist parsing", () => {
   });
 });
 
+describe("the base a pull request run measures against", () => {
+  const script = path.join(__dirname, "check-pr-size.cjs");
+  const workflow = readFileSync(
+    path.join(__dirname, "..", "..", ".github", "workflows", "main.yml"),
+    "utf8",
+  );
+
+  it("is the first parent of the merge ref, not the base sha the event recorded", () => {
+    // refs/pull/N/merge is a merge of the head into the base branch as it stands when the run is
+    // created; HEAD^1 is that base tip. github.event.pull_request.base.sha is the base when the
+    // event fired, and the tree contains everything merged since -- T-260902-h3e.
+    expect(workflow).toMatch(
+      /PR_SIZE_BASE: \$\{\{ github\.event_name == 'pull_request' && 'HEAD\^1' \|\| github\.event\.before \}\}/,
+    );
+    expect(workflow).toMatch(
+      /MIGRATION_ORDER_BASE: \$\{\{ github\.event_name == 'pull_request' && 'HEAD\^1' \|\| github\.event\.before \}\}/,
+    );
+    expect(workflow).not.toMatch(/PR_SIZE_BASE: .*pull_request\.base\.sha/);
+  });
+
+  /** A repository shaped like a pull request run's checkout: the branch merged into a base that
+   * moved on after the pull request was opened. Returns the base sha the event would have carried. */
+  function buildMergeRefRepository(dir: string) {
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    const write = (name: string, lines: number) =>
+      writeFileSync(
+        path.join(dir, name),
+        Array.from({ length: lines }, (_, i) => `${name} ${i}`).join("\n") + "\n",
+      );
+
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "t@example.com");
+    git("config", "user.name", "t");
+    write("base.ts", 5);
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    const eventBaseSha = git("rev-parse", "HEAD");
+
+    git("switch", "-q", "-c", "feature");
+    write("feature.ts", 10);
+    git("add", ".");
+    git("commit", "-q", "-m", "the branch's own change");
+
+    git("switch", "-q", "main");
+    write("other.ts", 100);
+    git("add", ".");
+    git("commit", "-q", "-m", "somebody else's pull request, merged meanwhile");
+
+    // What actions/checkout checks out for a pull_request event.
+    git("merge", "-q", "--no-ff", "-m", "refs/pull/1/merge", "feature");
+    return eventBaseSha;
+  }
+
+  function measure(dir: string, base: string) {
+    const result = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: scriptEnv({
+        PR_SIZE_REPO_ROOT: dir,
+        PR_SIZE_BASE: base,
+        PR_SIZE_BRANCH: "pr-size-merge-ref-fixture",
+      }),
+    });
+    expect(result.status, result.stderr).toBe(0);
+    return `${result.stdout}${result.stderr}`;
+  }
+
+  it("charges the branch for its own lines only when measured from the merge ref's first parent", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "pr-size-merge-ref-"));
+    try {
+      const eventBaseSha = buildMergeRefRepository(dir);
+
+      expect(measure(dir, "HEAD^1")).toContain("10 reviewable line(s) added across 1 file(s)");
+      // The defect, kept as the counter-example: against the event's base sha the branch is
+      // charged for the 100 lines somebody else merged while it waited.
+      expect(measure(dir, eventBaseSha)).toContain("110 reviewable line(s) added across 2 file(s)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("base ref resolution", () => {
   const script = path.join(__dirname, "check-pr-size.cjs");
 
   function runScript(args: string[], env: Record<string, string> = {}) {
     return spawnSync(process.execPath, [script, ...args], {
       encoding: "utf8",
-      env: { ...process.env, PR_SIZE_BASE: "", PR_SIZE_BRANCH: "", ...env },
+      // A named branch rather than "": empty makes the script fall back to the checkout's real
+      // branch, so these tests would report on whichever branch happens to run them -- and pass or
+      // fail depending on whether that branch is in `.large-change-allowlist`. This name is not,
+      // and never should be, so what they measure is the base resolution they are about.
+      env: scriptEnv({
+        PR_SIZE_BASE: "",
+        PR_SIZE_BRANCH: "pr-size-base-resolution-fixture",
+        ...env,
+      }),
     });
   }
 
@@ -374,6 +504,22 @@ describe("base ref resolution", () => {
     expect(result.status, result.stderr).toBeLessThan(2);
     return `${result.stdout}${result.stderr}`;
   }
+
+  it("steps aside on CI's push to main, and measures a pull request whatever its branch is called", () => {
+    // The deploy of #96 itself failed here: the tests inherited the runner's environment, and on
+    // the push to main every one of them was told the gate had stepped aside.
+    const skipped = runScript([], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main" });
+    expect(skipped.status, skipped.stderr).toBe(0);
+    expect(skipped.stdout).toContain("PR size check skipped");
+
+    const measured = runScript([], {
+      GITHUB_EVENT_NAME: "pull_request",
+      GITHUB_REF: "refs/pull/1/merge",
+      PR_SIZE_BRANCH: "main",
+    });
+    expect(measured.status, measured.stderr).toBeLessThan(2);
+    expect(`${measured.stdout}${measured.stderr}`).not.toContain("PR size check skipped");
+  });
 
   it("checks against the base it was given", () => {
     expect(resolvedAgainst(runScript([], { PR_SIZE_BASE: "origin/main" }))).toContain(

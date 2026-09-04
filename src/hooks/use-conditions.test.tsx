@@ -857,3 +857,140 @@ describe("use-conditions", () => {
     });
   });
 });
+
+describe("verifying a lab-driven closure", () => {
+  beforeEach(() => {
+    createClientMock.mockReset();
+  });
+
+  /** The row the guard reads, plus the observations the record holds. */
+  function stubFor(mention: Record<string, unknown>, observations: Record<string, unknown>[]) {
+    const conditionRecordsBuilder = createQueryBuilder({
+      data: { id: "cr-1", record_id: "record-1", condition_id: "cond-1" },
+      error: null,
+    });
+    vi.mocked(conditionRecordsBuilder.single).mockResolvedValue({ data: mention, error: null });
+    vi.mocked(conditionRecordsBuilder.maybeSingle).mockResolvedValue({
+      data: { status_in_record: "resolved" },
+      error: null,
+    });
+    const observationsBuilder = createQueryBuilder({ data: observations, error: null });
+    const conditionsBuilder = createQueryBuilder({ data: conditionRow(), error: null });
+
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "condition_records") return conditionRecordsBuilder;
+        if (table === "record_observations") return observationsBuilder;
+        return conditionsBuilder;
+      }),
+    });
+    return { conditionRecordsBuilder, observationsBuilder, conditionsBuilder };
+  }
+
+  const closure = {
+    status_in_record: "resolved",
+    supporting_obs_code: "vitamin_b12",
+    record_id: "record-1",
+  };
+
+  function observation(overrides: Record<string, unknown> = {}) {
+    return {
+      obs_code: "vitamin_b12",
+      is_applied: true,
+      value_numeric: 704,
+      value_canonical: null,
+      ref_range_low: 187,
+      ref_range_high: 883,
+      ref_range_low_canonical: null,
+      ref_range_high_canonical: null,
+      status: "normal",
+      ...overrides,
+    };
+  }
+
+  it("refuses when the cited measurement no longer supports it, whatever path asked", async () => {
+    // The review found a third path with no guard of its own: the mention's editor writes
+    // `is_user_verified: true` directly. The check lives at the mutation so that path cannot
+    // route around it, and neither can the next one.
+    const { conditionRecordsBuilder } = stubFor(closure, [
+      observation({ value_numeric: 120, status: "low" }),
+    ]);
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await expect(
+      result.current.mutateAsync({
+        id: "cr-1",
+        updates: { status_in_record: "resolved", source_anchor: "x", is_user_verified: true },
+      }),
+    ).rejects.toThrow();
+
+    expect(conditionRecordsBuilder.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the cited measurement is gone from the record", async () => {
+    const { conditionRecordsBuilder } = stubFor(closure, []);
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await expect(
+      result.current.mutateAsync({ id: "cr-1", updates: { is_user_verified: true } }),
+    ).rejects.toThrow();
+    expect(conditionRecordsBuilder.update).not.toHaveBeenCalled();
+  });
+
+  it("verifies when the evidence still stands", async () => {
+    const { conditionRecordsBuilder } = stubFor(closure, [observation()]);
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "cr-1", updates: { is_user_verified: true } });
+    });
+
+    expect(conditionRecordsBuilder.update).toHaveBeenCalledWith({
+      is_user_verified: true,
+      review_decision: "confirmed",
+    });
+  });
+
+  it("does not read observations for a mention that cites none", async () => {
+    // Ordinary mentions must not pay for the guard, and an unverifiable-by-construction row is
+    // not the thing it protects.
+    const { observationsBuilder, conditionRecordsBuilder } = stubFor(
+      { status_in_record: "active", supporting_obs_code: null, record_id: "record-1" },
+      [],
+    );
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "cr-1", updates: { is_user_verified: true } });
+    });
+
+    expect(observationsBuilder.select).not.toHaveBeenCalled();
+    expect(conditionRecordsBuilder.update).toHaveBeenCalled();
+  });
+
+  it("does not run at all when nothing is being verified", async () => {
+    // A dismissal writes no verification, so it must not be made to justify one.
+    const { conditionRecordsBuilder, observationsBuilder } = stubFor(closure, []);
+
+    const { useUpdateConditionRecord } = await import("./use-conditions");
+    const { result } = renderHookWithQueryClient(() => useUpdateConditionRecord());
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "cr-1",
+        updates: { review_decision: "dismissed" },
+      });
+    });
+
+    expect(observationsBuilder.select).not.toHaveBeenCalled();
+    expect(conditionRecordsBuilder.update).toHaveBeenCalledWith({ review_decision: "dismissed" });
+  });
+});

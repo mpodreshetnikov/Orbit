@@ -10,6 +10,8 @@ import type {
 } from "@/types";
 import type { FindingHistorySummary, ObservationHistorySummary } from "./record-detail";
 
+const ruleOnClosureMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+
 const hookMocks = vi.hoisted(() => ({
   useMedicalRecord: vi.fn(),
   useSoftDeleteRecord: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/hooks", () => ({
+  useRuleOnProposedClosure: () => ({ ruleOnClosure: ruleOnClosureMock, rulingOnId: null }),
   useMedicalRecord: (...args: unknown[]) => hookMocks.useMedicalRecord(...args),
   useSoftDeleteRecord: (...args: unknown[]) => hookMocks.useSoftDeleteRecord(...args),
   useRestoreRecord: (...args: unknown[]) => hookMocks.useRestoreRecord(...args),

@@ -127,6 +127,16 @@ export interface CaseScore {
   conditionFields: FieldAccuracy[];
   findingsToResolve: SetScore;
   conditionsToResolve: SetScore;
+  /** Per-field accuracy over the resolutions both sides name — today, the cited analyte. */
+  conditionResolutionFields: FieldAccuracy[];
+  /**
+   * Proposals production's gate refused, which is why they are not in the set score above.
+   *
+   * Kept and printed rather than discarded: the gate catching a wrongful proposal means no chart
+   * changed, and it also means the model tried. A run whose gate rejections climb is a run getting
+   * worse behind a floor that happens to hold.
+   */
+  rejectedProposals: { conditionId: string; reason: string }[];
   checkupsToComplete: SetScore;
   checkupDate: FieldAccuracy;
 }
@@ -227,6 +237,28 @@ export const FINDING_FIELDS: (keyof ExpectedFinding)[] = [
 export const CONDITION_FIELDS: (keyof ExpectedCondition)[] = ["icd_code", "status"];
 
 /**
+ * A condition resolution's scored fields — the first this collection has had.
+ *
+ * `conditions_to_resolve` was matched on `condition_id` alone and scored on nothing, which made it
+ * blind to the one thing that decides whether a resolution survives: the analyte it cites.
+ * `checkLabResolution` discards a resolution whose `supporting_obs_code` is missing, uncovered by
+ * the table, or unrelated to the condition, so a run could report `conditions_to_resolve` at 100%
+ * while production applied none of them. Scoring the citation closes that gap, and it is the
+ * field-level counterpart of the set score rather than a replacement for it: the set says the right
+ * condition was named, this says it was named on the right evidence.
+ *
+ * `gate_rejection` is the third question, and it is not implied by the first two. Scoring the
+ * citation compares the model's string to the fixture's; it does not ask production. The gate reads
+ * the staged observations, the snapshot's have been through catalogue resolution, and where those
+ * disagree a resolution is right on both scores and dropped in production. So the harness runs
+ * `checkLabResolution` itself and scores its verdict — see `pipeline.ts:gateOutcome`.
+ */
+export const RESOLUTION_FIELDS: (keyof ExpectedResolution)[] = [
+  "supporting_obs_code",
+  "gate_rejection",
+];
+
+/**
  * Every key a fixture may carry, per collection, and why it is legitimate.
  *
  * Exported so `fixture-coverage.test.ts` can check the corpus against what this file actually
@@ -243,7 +275,7 @@ export const SCORED_FIELDS: Record<string, readonly string[]> = {
   findings: FINDING_FIELDS.map(String),
   conditions: CONDITION_FIELDS.map(String),
   findings_to_resolve: [],
-  conditions_to_resolve: [],
+  conditions_to_resolve: RESOLUTION_FIELDS.map(String),
   checkups_to_complete: ["suggested_done_at"],
 };
 
@@ -356,6 +388,11 @@ function checkupKey(item: ExpectedCheckup): KeyedItem {
 
 function resolutionKey(item: ExpectedResolution): KeyedItem {
   return { key: item.condition_id, label: item.condition_id };
+}
+
+/** Would production write this proposal? Only an accepted one can change a chart. */
+function isAccepted(item: ExpectedResolution): boolean {
+  return item.gate_rejection === null || item.gate_rejection === undefined;
 }
 
 /**
@@ -485,9 +522,26 @@ export function scoreCase(
       actual.findings_to_resolve.map((item) => findingResolutionKey(item, existingFindings)),
     ),
     // Ids are opaque and already exact — no folding, and the label is the id itself.
+    //
+    // Scored over the resolutions production would *write*, which is why the gate verdict has to
+    // exist before this can be right. A proposal `checkLabResolution` rejects closes nothing: the
+    // row is never inserted, no chart changes, and counting it as a wrongful resolution says a live
+    // condition went quiet when nothing did. It is still a model error worth seeing, so it is
+    // listed as `rejectedProposals` rather than dropped — the harm number and the model's mistakes
+    // are two different questions and this collection used to answer them with one number.
     conditionsToResolve: scoreSet(
-      expected.conditions_to_resolve.map(resolutionKey),
-      actual.conditions_to_resolve.map(resolutionKey),
+      expected.conditions_to_resolve.filter(isAccepted).map(resolutionKey),
+      actual.conditions_to_resolve.filter(isAccepted).map(resolutionKey),
+    ),
+    rejectedProposals: actual.conditions_to_resolve
+      .filter((item) => !isAccepted(item))
+      .map((item) => ({ conditionId: item.condition_id, reason: String(item.gate_rejection) })),
+    conditionResolutionFields: scoreFields(
+      expected.conditions_to_resolve,
+      actual.conditions_to_resolve,
+      (row) => resolutionKey(row).key,
+      (row) => resolutionKey(row).label,
+      RESOLUTION_FIELDS,
     ),
     checkupsToComplete: scoreSet(
       expected.checkups_to_complete.map(checkupKey),
@@ -516,6 +570,9 @@ export interface Aggregate {
   observationFields: FieldAccuracy[];
   findingFields: FieldAccuracy[];
   conditionFields: FieldAccuracy[];
+  conditionResolutionFields: FieldAccuracy[];
+  /** Every proposal production's gate refused, across the run. Not harm; still a signal. */
+  rejectedProposals: { conditionId: string; reason: string }[];
   /**
    * Wrongful closures across the whole run — findings and conditions both. The number to look at
    * first. A wrongfully closed finding is the same class of harm as a wrongfully closed condition:
@@ -578,6 +635,12 @@ export function aggregate(scores: CaseScore[]): Aggregate {
     observationFields: fields,
     findingFields: sumFields(scores, (s) => s.findingFields, FINDING_FIELDS.map(String)),
     conditionFields: sumFields(scores, (s) => s.conditionFields, CONDITION_FIELDS.map(String)),
+    conditionResolutionFields: sumFields(
+      scores,
+      (s) => s.conditionResolutionFields,
+      RESOLUTION_FIELDS.map(String),
+    ),
+    rejectedProposals: scores.flatMap((s) => s.rejectedProposals),
     wrongfulResolutions: conditionsToResolve.fp + findingsToResolve.fp,
   };
 }

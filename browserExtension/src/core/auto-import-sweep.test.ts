@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAutoImportSweep, type AutoImportSweepDeps } from "./auto-import-sweep";
-import { createInitialAutoRunState, type AutoRunState } from "./auto-run-policy";
+import { createInitialAutoRunState, nextAutoRunState, type AutoRunState } from "./auto-run-policy";
 import type { StoredImportGrant } from "./grant-store";
 
 const NOW = Date.parse("2026-08-23T12:00:00.000Z");
@@ -106,6 +106,7 @@ describe("createAutoImportSweep", () => {
       consecutiveFailures: 0,
       lastError: null,
       lastRunOrigin: "auto",
+      lastOkAtMs: NOW,
     });
   });
 
@@ -426,5 +427,162 @@ describe("createAutoImportSweep", () => {
       "https://web.alfabank.ru/",
       "https://www.tbank.ru/mybank/operations/",
     ]);
+  });
+});
+
+describe("a run the person asked for", () => {
+  const stopped: AutoRunState = {
+    lastRunAtMs: NOW - 60_000,
+    lastResult: "error",
+    consecutiveFailures: 3,
+    lastError: "tbank did not stay on the operations page",
+  };
+
+  it("runs past the cooldown and the stop after failures, and clears the request on success", async () => {
+    const cleared: string[] = [];
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async (scope) => scope.sourceId === "tbank";
+    harness.deps.clearRunRequest = async (scope) => {
+      cleared.push(scope.sourceId);
+    };
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(0);
+    expect(cleared).toEqual(["tbank"]);
+  });
+
+  it("keeps the request when the attempt fails, for the visit after the person has signed in", async () => {
+    const cleared: string[] = [];
+    const harness = createHarness({
+      states: { "tbank::person-1": stopped },
+      runImport: vi.fn(async () => {
+        throw new Error("tbank did not stay on the operations page");
+      }),
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async (scope) => {
+      cleared.push(scope.sourceId);
+    };
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toHaveLength(1);
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(4);
+    expect(cleared).toEqual([]);
+  });
+
+  it("is honoured by the visit it sent the person on, not by the alarm", async () => {
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => true;
+
+    // The alarm in the hour after Update would try before the person had signed in.
+    await harness.sweep.run("alarm");
+    expect(harness.openedTabs).toEqual([]);
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    expect(harness.openedTabs).toHaveLength(1);
+  });
+
+  it("reports a successful run as successful even when the request will not clear", async () => {
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {
+      throw new Error("storage is full");
+    };
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
+    expect(harness.states["tbank::person-1"].consecutiveFailures).toBe(0);
+    expect(harness.warnings.map((warning) => warning.event)).toEqual([
+      "money_import_run_request_clear_failed",
+    ]);
+  });
+
+  it("keeps its trigger when queued behind the alarm", async () => {
+    // Update pressed, the person signs in, and their visit lands while the alarm's sweep is
+    // still running: the visit is drained as a visit, so the request it carries is honoured.
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => true;
+
+    const alarm = harness.sweep.run("alarm");
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    await alarm;
+
+    expect(harness.openedTabs).toHaveLength(1);
+    expect(harness.states["tbank::person-1"].lastResult).toBe("ok");
+  });
+
+  it("is settled by a success the alarm brought, so the visit after does not run twice", async () => {
+    const cleared: string[] = [];
+    // An eligible source: the alarm runs it on its own merits, with a request still live.
+    const harness = createHarness();
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async (scope) => {
+      cleared.push(scope.sourceId);
+    };
+
+    await harness.sweep.run("alarm");
+
+    expect(harness.openedTabs).toHaveLength(1);
+    expect(cleared).toEqual(["tbank"]);
+  });
+
+  it("changes nothing for a source nobody asked about", async () => {
+    const harness = createHarness({ states: { "tbank::person-1": stopped } });
+    harness.deps.isRunRequested = async () => false;
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toEqual([]);
+  });
+});
+
+describe("the sweep's own tabs", () => {
+  it("are known to it while open, and not after", async () => {
+    let ownedDuringRun: boolean | null = null;
+    const harness = createHarness({
+      runImport: vi.fn(async () => {
+        ownedDuringRun = harness.sweep.ownsTab(77);
+        return undefined;
+      }),
+    });
+
+    expect(harness.sweep.ownsTab(77)).toBe(false);
+    await harness.sweep.run("alarm");
+
+    expect(ownedDuringRun).toBe(true);
+    expect(harness.sweep.ownsTab(77)).toBe(false);
+  });
+});
+
+describe("a success recorded while the sweep runs", () => {
+  it("survives the sweep's own failure", async () => {
+    // A manual import of the same source finishes while the unattended one is still going,
+    // and records its success; the unattended one then fails. Its failure is written over
+    // the state as it is now, so the success stays on record.
+    const manualOkAt = NOW - 1;
+    const harness = createHarness({
+      runImport: vi.fn(async () => {
+        harness.states["tbank::person-1"] = nextAutoRunState(
+          null,
+          manualOkAt,
+          "ok",
+          null,
+          "manual",
+        );
+        throw new Error("tbank did not stay on the operations page");
+      }),
+    });
+
+    await harness.sweep.run("alarm");
+
+    const state = harness.states["tbank::person-1"];
+    expect(state.lastResult).toBe("error");
+    expect(state.consecutiveFailures).toBe(1);
+    expect(state.lastOkAtMs).toBe(manualOkAt);
   });
 });

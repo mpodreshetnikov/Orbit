@@ -114,7 +114,10 @@ function createRepositoryMock(
       has_only_synthetic_line_items: false,
       has_real_line_items: false,
     }),
-    insertOrResolveTransaction: async () => ({ transactionId: "unused", inserted: true }),
+    insertOrResolveTransaction: async () => ({
+      transactionId: "unused",
+      inserted: true,
+    }),
     insertLineItemIfNew: async () => ({ lineItemId: "unused", inserted: true }),
     insertReportRow: async (payload) => {
       state.reportRows.push(payload);
@@ -195,6 +198,251 @@ Deno.test(
     assertEquals(state.deletedBatchBrandResolutionsCount, 1);
     assertEquals(state.batch?.status, "pending");
     assertEquals(state.batch?.parsed_transactions_count, 1);
+  },
+);
+
+Deno.test(
+  "previewRowsAction applies a batch the extension marked unattended, once it is complete",
+  async () => {
+    const applied: string[] = [];
+    const applyPendingBatch = async (batchId: string) => {
+      applied.push(batchId);
+      return new Response(JSON.stringify({ batch_id: batchId }), {
+        status: 200,
+      });
+    };
+
+    // A person's batch: pending, waiting for their "Apply".
+    const manual = createRepositoryMock({
+      batch: {
+        id: "batch-manual",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { parse_strategy: "fast" },
+      },
+    });
+    const manualPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-manual",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "m-1" })],
+        },
+        userAuth,
+        { repository: manual.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(manualPayload.auto_applied, false);
+    assertEquals(applied, []);
+    assertEquals(manual.state.batch?.status, "pending");
+
+    // The extension's batch: nobody started it, so nobody would come back to apply it.
+    const unattended = createRepositoryMock({
+      batch: {
+        id: "batch-auto",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { parse_strategy: "full", unattended: true },
+      },
+    });
+    const autoPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-auto",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "a-1" })],
+        },
+        userAuth,
+        { repository: unattended.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(autoPayload.auto_applied, true);
+    assertEquals(applied, ["batch-auto"]);
+
+    // Not before the last chunk: the batch is not whole yet.
+    const chunked = createRepositoryMock({
+      batch: {
+        id: "batch-chunked",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const chunkPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-chunked",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "c-1" })],
+          chunk_index: 0,
+          chunk_count: 2,
+          row_offset: 0,
+          total_row_count: 2,
+          is_final_chunk: false,
+        },
+        userAuth,
+        { repository: chunked.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(chunkPayload.auto_applied, false);
+    assertEquals(applied, ["batch-auto"]);
+
+    // A preview with a row error is what a person is for: the batch stays pending, unapplied.
+    const withErrors = createRepositoryMock({
+      batch: {
+        id: "batch-errors",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const errorsPayload = await assertJsonResponse<{
+      auto_applied: boolean;
+      error_count: number;
+    }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-errors",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "e-1" }), txRow({ posted_at: "not-a-date" })],
+        },
+        userAuth,
+        { repository: withErrors.repository, applyPendingBatch },
+      ),
+      200,
+    );
+    assertEquals(errorsPayload.error_count, 1);
+    assertEquals(errorsPayload.auto_applied, false);
+    assertEquals(applied, ["batch-auto"]);
+    assertEquals(withErrors.state.batch?.status, "pending");
+
+    // An apply whose own rows error is still an applied batch; the count is reported.
+    const rowErrors = createRepositoryMock({
+      batch: {
+        id: "batch-row-errors",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const rowErrorsPayload = await assertJsonResponse<{
+      auto_applied: boolean;
+      auto_apply_error_count: number | null;
+    }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-row-errors",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "r-1" })],
+        },
+        userAuth,
+        {
+          repository: rowErrors.repository,
+          applyPendingBatch: async () =>
+            new Response(JSON.stringify({ inserted: 0, skipped: 0, error_count: 2 }), {
+              status: 200,
+            }),
+        },
+      ),
+      200,
+    );
+    assertEquals(rowErrorsPayload.auto_applied, true);
+    assertEquals(rowErrorsPayload.auto_apply_error_count, 2);
+
+    // An apply that throws has already discarded the preview: the batch is failed and the
+    // request fails with it, so the extension leaves the window for the next run.
+    const throwing = createRepositoryMock({
+      batch: {
+        id: "batch-throwing",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const thrownPayload = await assertJsonResponse<{ error: string }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-throwing",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "t-1" })],
+        },
+        userAuth,
+        {
+          repository: throwing.repository,
+          applyPendingBatch: async () => {
+            throw new Error("database went away");
+          },
+        },
+      ),
+      500,
+    );
+    assertEquals(thrownPayload.error, "Batch apply failed");
+    assertEquals(throwing.state.batch?.status, "failed");
+    assertEquals(
+      (throwing.state.batch?.meta as Record<string, unknown>).auto_apply_error,
+      "database went away",
+    );
+
+    // An apply refused before it touched anything leaves the batch pending for a person.
+    const failing = createRepositoryMock({
+      batch: {
+        id: "batch-failing",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: { unattended: true },
+      },
+    });
+    const failingPayload = await assertJsonResponse<{ auto_applied: boolean }>(
+      await previewRowsAction(
+        {
+          batch_id: "batch-failing",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "f-1" })],
+        },
+        userAuth,
+        {
+          repository: failing.repository,
+          applyPendingBatch: async () =>
+            new Response(JSON.stringify({ error: "Batch payer is missing" }), {
+              status: 400,
+            }),
+        },
+      ),
+      200,
+    );
+    assertEquals(failingPayload.auto_applied, false);
+    assertEquals(failing.state.batch?.status, "pending");
   },
 );
 
@@ -363,5 +611,49 @@ Deno.test(
       [0, 1, 2],
     );
     assertEquals(state.session?.status, "running");
+  },
+);
+
+Deno.test(
+  "previewRowsAction keeps the strategy and the unattended mark through a preview reset",
+  async () => {
+    // The first chunk replaces the batch meta so counters start over. What was decided at
+    // create_session -- how receipts were parsed, and that nobody started this run -- is not a
+    // counter: the history screen reads the one, and the run's end reads the other.
+    const { repository, state } = createRepositoryMock({
+      batch: {
+        id: "batch-1",
+        status: "running",
+        parsed_transactions_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        meta: {
+          parse_strategy: "full",
+          unattended: true,
+          range_selection_meta: { selection_mode: "preset", preset_key: "1y" },
+          preview_progress_percent: 40,
+        },
+      },
+    });
+
+    await assertJsonResponse(
+      await previewRowsAction(
+        {
+          batch_id: "batch-1",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          rows: [txRow({ external_id: "kept-1" })],
+        },
+        userAuth,
+        { repository },
+      ),
+      200,
+    );
+
+    const meta = state.batch?.meta as Record<string, unknown>;
+    assertEquals(meta.parse_strategy, "full");
+    assertEquals(meta.unattended, true);
+    assertEquals((meta.range_selection_meta as Record<string, unknown>).preset_key, "1y");
   },
 );

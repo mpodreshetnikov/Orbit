@@ -18,6 +18,7 @@ export * from "./use-body-site-catalog";
 export * from "./use-record-findings";
 export * from "./use-finding-history";
 export * from "./use-conditions";
+export * from "./use-rule-on-closure";
 export * from "./use-checkups";
 export * from "./use-regimens";
 export * from "./use-user-preferences";

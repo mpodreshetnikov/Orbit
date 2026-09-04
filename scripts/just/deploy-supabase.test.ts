@@ -14,17 +14,31 @@ function stepsFor() {
 }
 
 describe("deploy-supabase step composition", () => {
-  it("deploys functions, then migrations, then the SQL entrypoint", () => {
+  it("applies migrations, then the SQL entrypoint, and deploys functions last", () => {
+    // The schema moves before the code that writes to it: an additive migration paired with a
+    // function that uses the new column has no window in which the function runs against the old
+    // schema. The reverse order left exactly that window (T-260902-r9c).
     const steps = stepsFor();
 
     expect(steps).toHaveLength(3);
-    expect(steps[0].args.slice(0, 3)).toEqual(["supabase", "functions", "deploy"]);
-    expect(steps[1].args.slice(0, 3)).toEqual(["supabase", "db", "push"]);
-    expect(steps[2].args).toEqual(["supabase/db/run-deploy.js"]);
+    expect(steps[0].args.slice(0, 3)).toEqual(["supabase", "db", "push"]);
+    expect(steps[1].args).toEqual(["supabase/db/run-deploy.js"]);
+    expect(steps[2].args.slice(0, 3)).toEqual(["supabase", "functions", "deploy"]);
+  });
+
+  it("names the direction the chosen order leaves unprotected, next to the order", () => {
+    // Whoever next edits buildSteps must see that swapping the steps back reopens the additive
+    // window, and that a destructive migration is unsafe in both orders without a two-step change.
+    const source = readFileSync(join(__dirname, "deploy-supabase.cjs"), "utf8");
+    const comment = source.slice(0, source.indexOf("function buildSteps"));
+
+    expect(comment).toMatch(/schema moves before the functions/);
+    expect(comment).toMatch(/removes or renames/);
+    expect(comment).toMatch(/tolerates both shapes/);
   });
 
   it("pushes migrations with --include-all so an out-of-order file cannot wedge the deploy", () => {
-    const push = stepsFor()[1];
+    const push = stepsFor()[0];
 
     expect(push.args).toContain("--include-all");
     expect(push.args).toContain("--yes");
@@ -32,13 +46,13 @@ describe("deploy-supabase step composition", () => {
   });
 
   it("targets the project ref when deploying functions", () => {
-    const functionsDeploy = stepsFor()[0];
+    const functionsDeploy = stepsFor()[2];
 
     expect(functionsDeploy.args).toEqual(expect.arrayContaining(["--project-ref", PROJECT_REF]));
   });
 
   it("passes the database URL to run-deploy.js through the environment, not argv", () => {
-    const sqlDeploy = stepsFor()[2];
+    const sqlDeploy = stepsFor()[1];
 
     expect(sqlDeploy.env).toEqual({ DATABASE_URL });
     expect(sqlDeploy.args).not.toContain(DATABASE_URL);

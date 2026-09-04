@@ -132,3 +132,46 @@ describe("record extraction helpers", () => {
     await expect(fn(stub.client, "r-1")).rejects.toThrow(message);
   });
 });
+
+describe("getRecordConditions and pending closures", () => {
+  function mention(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "cr-1",
+      condition_id: "cond-1",
+      status_in_record: "resolved",
+      is_llm_extracted: true,
+      is_user_verified: false,
+      ...overrides,
+    };
+  }
+
+  it("marks a suppressed closure at the source, so every reader of a record gets it", async () => {
+    // get_condition was given this treatment first and get_medical_record — the "show me this
+    // report" path, and the more common one — was left returning the RPC rows untouched.
+    const stub = createSupabaseStub({}, { get_record_conditions: { data: [mention()] } });
+
+    const rows = await getRecordConditions(stub.client, "r-1");
+
+    expect(rows[0].awaiting_confirmation).toBe(true);
+    expect(String(rows[0].not_applied_reason)).toContain("NOT changed");
+  });
+
+  it("leaves mentions that nobody is waiting on unmarked", async () => {
+    const stub = createSupabaseStub(
+      {},
+      {
+        get_record_conditions: {
+          data: [
+            mention({ id: "confirmed", is_user_verified: true }),
+            mention({ id: "by-hand", is_llm_extracted: false }),
+            mention({ id: "not-a-closure", status_in_record: "active" }),
+          ],
+        },
+      },
+    );
+
+    const rows = await getRecordConditions(stub.client, "r-1");
+
+    expect(rows.map((r) => r.awaiting_confirmation)).toEqual([false, false, false]);
+  });
+});

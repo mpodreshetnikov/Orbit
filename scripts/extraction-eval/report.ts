@@ -1,5 +1,6 @@
 /** Rendering only — pure, so the shape of a report can be asserted without running an eval. */
 import type { StageSpend } from "./cassette.ts";
+import { RESOLUTION_FIELDS } from "./score.ts";
 import type { Aggregate, CaseScore, FieldAccuracy, SetScore } from "./score.ts";
 import type { CaseDiagnostics } from "./types.ts";
 
@@ -110,6 +111,30 @@ export function renderVariance(runs: Aggregate[]): string {
           },
           (value) => value.toFixed(1),
         ),
+        // The set metrics above cannot see this. A run that names the same condition every pass but
+        // cites a different analyte on one of them -- or cites one production's gate then rejects --
+        // is stable on `conditions_to_resolve` and unstable on whether the closure happens at all.
+        // Only the last pass is rendered in full, so without these rows that swing leaves no trace.
+        //
+        // Only runs that actually compared the field are read. `ratio` returns 1 for 0/0, so an
+        // aggregate over cases with no matched resolution carries `accuracy: 1` beside `total: 0` --
+        // which the field table renders as an honest dash and this table would have printed as
+        // `100.0% stable`. A dimension nothing compared must not read as a dimension that agreed.
+        ...RESOLUTION_FIELDS.flatMap((field) => {
+          const compared = runs
+            .flatMap((a) => a.conditionResolutionFields.filter((e) => e.field === String(field)))
+            .filter((entry) => entry.total > 0);
+          if (compared.length === 0) return [];
+          const label =
+            compared.length === runs.length
+              ? `condition resolution ${String(field)}`
+              : `condition resolution ${String(field)} (${compared.length} of ${runs.length} runs)`;
+          return [
+            varianceRow({ dimension: label, values: compared.map((e) => e.accuracy) }, (value) =>
+              pct(value),
+            ),
+          ];
+        }),
       ],
     ),
   );
@@ -383,6 +408,21 @@ export function renderMarkdown(summary: RunSummary): string {
     lines.push("");
   }
 
+  // Beneath the harm number and deliberately not inside it. These closed nothing -- production's
+  // gate refused them, so no chart moved -- but the model still proposed ending a live entry, and a
+  // run whose rejections climb is a run getting worse behind a floor that happens to hold.
+  if (agg.rejectedProposals.length > 0) {
+    lines.push(
+      `> ${agg.rejectedProposals.length} proposal(s) production's gate refused, so they closed ` +
+        `nothing. Not harm — but the model proposed them.`,
+    );
+    lines.push("");
+    for (const proposal of agg.rejectedProposals) {
+      lines.push(`> - condition \`${proposal.conditionId}\` — \`${proposal.reason}\``);
+    }
+    lines.push("");
+  }
+
   lines.push("## Aggregate");
   lines.push("");
   lines.push(costLine(summary.cases, summary.mode));
@@ -407,6 +447,16 @@ export function renderMarkdown(summary: RunSummary): string {
   lines.push(...fieldSection("Observation fields", "observation", agg.observationFields));
   lines.push(...fieldSection("Finding fields", "finding", agg.findingFields));
   lines.push(...fieldSection("Condition fields", "condition", agg.conditionFields));
+  // Printed beside the set score rather than folded into it: the set says the right condition was
+  // named, this says it was named on evidence the production gate accepts. A run can be perfect on
+  // the first and apply nothing.
+  lines.push(
+    ...fieldSection(
+      "Condition resolution fields",
+      "condition resolution",
+      agg.conditionResolutionFields,
+    ),
+  );
 
   lines.push("## Cases");
   lines.push("");

@@ -25,6 +25,8 @@ describe("auto-run-store", () => {
       lastResult: "ok",
       consecutiveFailures: 0,
       lastError: null,
+      // Written before the field existed: the run succeeded, so that is the last success.
+      lastOkAtMs: 10,
     });
     expect(await store.getState({ ...tbank, payerPersonId: "person-2" })).toEqual(
       createInitialAutoRunState(),
@@ -68,7 +70,24 @@ describe("auto-run-store", () => {
       lastResult: "ok",
       consecutiveFailures: 0,
       lastError: null,
+      lastOkAtMs: 20,
     });
+  });
+
+  it("keeps the last success of a scope it forgives", async () => {
+    const store = createAutoRunStore(createStorage());
+    const scope = { sourceId: "tbank_web", payerPersonId: "person-1" };
+    await store.setState(scope, {
+      lastRunAtMs: 30,
+      lastResult: "error",
+      consecutiveFailures: 2,
+      lastOkAtMs: 10,
+    });
+
+    expect(await store.forgiveFailures()).toBe(1);
+
+    // The failures are gone, the answer to "how long has this been stale" is not.
+    expect(await store.getState(scope)).toEqual({ ...createInitialAutoRunState(), lastOkAtMs: 10 });
   });
 
   it("changes nothing, and says so, when nothing failed", async () => {

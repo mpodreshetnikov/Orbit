@@ -130,8 +130,15 @@ export function registerRecordTools(server: McpToolServer): void {
         delete record.ocr_text;
       }
 
+      const awaitingHere = conditions.filter(
+        (mention) => (mention as { awaiting_confirmation?: boolean }).awaiting_confirmation,
+      ).length;
+
       return ok(
-        `${record.title as string} (${record.record_type as string}${record.record_date ? `, ${record.record_date as string}` : ""}): ${observations.length} observation(s), ${findings.length} finding(s), ${conditions.length} diagnosis mention(s).`,
+        `${record.title as string} (${record.record_type as string}${record.record_date ? `, ${record.record_date as string}` : ""}): ${observations.length} observation(s), ${findings.length} finding(s), ${conditions.length} diagnosis mention(s).` +
+          (awaitingHere > 0
+            ? ` ${awaitingHere} of those mention(s) propose closing a condition and are not confirmed — they have NOT changed any condition's status.`
+            : ""),
         { record, observations, findings, conditions },
       );
     }),
@@ -272,8 +279,18 @@ export function registerRecordTools(server: McpToolServer): void {
         return fail(`No diagnosis with id ${args.condition_id}.`);
       }
 
+      // A closure waiting on a person is named in the summary, not only in the rows. The summary
+      // is what gets read; a mention that says "resolved" while the condition says "active" is
+      // otherwise reconciled by guessing, and the guess that a condition ended is the harmful one.
+      const awaiting = detail.mentions.filter(
+        (mention) => (mention as { awaiting_confirmation?: boolean }).awaiting_confirmation,
+      ).length;
+
       return ok(
-        `${detail.condition.name}${detail.condition.code ? ` (${detail.condition.code})` : ""} — ${detail.condition.current_status}. ${detail.mentions.length} record mention(s), ${detail.checkups.length} linked checkup(s).`,
+        `${detail.condition.name}${detail.condition.code ? ` (${detail.condition.code})` : ""} — ${detail.condition.current_status}. ${detail.mentions.length} record mention(s), ${detail.checkups.length} linked checkup(s).` +
+          (awaiting > 0
+            ? ` ${awaiting} mention(s) propose closing this condition but are not confirmed and have NOT changed its status — it is still ${detail.condition.current_status}.`
+            : ""),
         detail as unknown as Record<string, unknown>,
       );
     }),

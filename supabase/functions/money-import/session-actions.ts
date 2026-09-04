@@ -13,6 +13,21 @@ import type { AuthContext, GrantAuthContext, UserAuthContext } from "./types.ts"
 import type { MoneyImportRepository } from "./repository.ts";
 
 export const DEFAULT_SESSION_TTL_MINUTES = 15;
+/**
+ * The full receipt strategy pays the bank's rate limit with time -- roughly eight seconds a
+ * receipt, twenty minutes for a month of them -- and the extension calls preview_rows only
+ * once the parse is done. A session that expired at fifteen minutes lost every such run:
+ * the rows never reached the server, and the attempt to mark the session failed used the
+ * same expired token. Four hours covers the year-long history a person can ask for.
+ */
+export const FULL_STRATEGY_SESSION_TTL_MINUTES = 240;
+/**
+ * The sources whose connector actually runs the full strategy. Alfa's connector parses receipts
+ * the one way it knows whatever the session says, so a session that states `full` for it would
+ * earn a four-hour write token for a fifteen-minute run. The time is paid for by a slow parse,
+ * and only where one happens.
+ */
+export const FULL_STRATEGY_SOURCES: ReadonlySet<string> = new Set(["tbank_web"]);
 type ParseStrategy = "fast" | "full";
 
 interface SessionActionDeps {
@@ -111,20 +126,30 @@ export async function createSessionAction(
     auth.mode === "grant" ? (normalizeText(auth.grant.created_by_auth_user_id) ?? "") : auth.userId;
 
   const now = (deps.now ?? (() => new Date()))();
-  const sessionTtlMinutes = deps.sessionTtlMinutes ?? DEFAULT_SESSION_TTL_MINUTES;
+  const parseStrategy = readParseStrategy(body.meta);
+  const baseTtlMinutes = deps.sessionTtlMinutes ?? DEFAULT_SESSION_TTL_MINUTES;
+  // Decided here from the strategy the session states, not requested by the client: a caller
+  // cannot ask for a long-lived token, only for a slow parse, which is what earns the time.
+  const sessionTtlMinutes =
+    parseStrategy === "full" && FULL_STRATEGY_SOURCES.has(source)
+      ? Math.max(baseTtlMinutes, FULL_STRATEGY_SESSION_TTL_MINUTES)
+      : baseTtlMinutes;
   const expiresAt = new Date(now.getTime() + sessionTtlMinutes * 60 * 1000).toISOString();
 
   const token = randomSessionToken();
   const tokenHash = await sha256Hex(token);
   const windowFrom = toIsoOrNull(body.window_from);
   const windowTo = toIsoOrNull(body.window_to);
-  const parseStrategy = readParseStrategy(body.meta);
 
   const session = await deps.repository.createImportSession({
     token_hash: tokenHash,
     source,
     payer_person_id: payerPersonId,
     created_by_auth_user_id: createdByAuthUserId,
+    // The credential that minted this session, so every later request on the session token
+    // can ask whether that credential is still live. Without it, revoking the grant left the
+    // sessions it had already opened importing to the end of their TTL. See `resolveAuth`.
+    grant_id: grant ? (normalizeText(grant.id) ?? null) : null,
     status: "created",
     window_from: windowFrom,
     window_to: windowTo,
@@ -317,7 +342,10 @@ export async function completeSessionAction(
       const currentBatchStatus = normalizeText(batch.status);
       const batchPatch: Record<string, unknown> = {};
 
-      if (batchStatus === "failed") {
+      // A batch that has been applied stays applied. The extension completes a session as
+      // failed whenever the last request failed, and with an unattended batch applied on the
+      // server the last request can fail after the apply.
+      if (batchStatus === "failed" && currentBatchStatus !== "completed") {
         batchPatch.status = "failed";
         batchPatch.completed_at = nowIso;
       } else if (currentBatchStatus === "completed") {

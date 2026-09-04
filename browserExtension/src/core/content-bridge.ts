@@ -33,6 +33,8 @@ export function createContentBridge(deps: ContentBridgeDeps) {
       session?: unknown;
       grant?: unknown;
       request_id?: unknown;
+      source_id?: unknown;
+      stale_after_ms?: unknown;
     };
     if (!data || data.source !== WEBAPP_SOURCE) return;
 
@@ -95,6 +97,74 @@ export function createContentBridge(deps: ContentBridgeDeps) {
               ok: Boolean(response?.ok),
               grant: response?.grant ?? null,
               sources: Array.isArray(response?.sources) ? response.sources : [],
+            },
+            "*",
+          );
+        },
+      );
+      return;
+    }
+
+    // The attention page's three requests, each answered with the runtime's reply and the
+    // request id echoed, for the same reason as the status above.
+    if (data.type === "MONEY_IMPORT_GET_ATTENTION") {
+      const requestId = typeof data.request_id === "string" ? data.request_id : null;
+      deps.runtimeSendMessage(
+        { type: "MONEY_IMPORT_GET_ATTENTION" },
+        (response: Record<string, unknown> | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_ATTENTION",
+              request_id: requestId,
+              ok: Boolean(response?.ok),
+              grant: response?.grant ?? null,
+              stale_after_ms:
+                typeof response?.stale_after_ms === "number" ? response.stale_after_ms : null,
+              stale_count: typeof response?.stale_count === "number" ? response.stale_count : 0,
+              sources: Array.isArray(response?.sources) ? response.sources : [],
+            },
+            "*",
+          );
+        },
+      );
+      return;
+    }
+
+    if (data.type === "MONEY_IMPORT_REQUEST_RUN") {
+      const requestId = typeof data.request_id === "string" ? data.request_id : null;
+      deps.runtimeSendMessage(
+        { type: "MONEY_IMPORT_REQUEST_RUN", source_id: data.source_id },
+        (response: Record<string, unknown> | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_RUN_REQUEST_ACK",
+              request_id: requestId,
+              ok: Boolean(response?.ok),
+              error: typeof response?.error === "string" ? response.error : null,
+              source_id: typeof response?.source_id === "string" ? response.source_id : null,
+            },
+            "*",
+          );
+        },
+      );
+      return;
+    }
+
+    if (data.type === "MONEY_IMPORT_SET_ATTENTION_SETTINGS") {
+      const requestId = typeof data.request_id === "string" ? data.request_id : null;
+      deps.runtimeSendMessage(
+        { type: "MONEY_IMPORT_SET_ATTENTION_SETTINGS", stale_after_ms: data.stale_after_ms },
+        (response: Record<string, unknown> | undefined) => {
+          deps.windowPostMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: "MONEY_IMPORT_ATTENTION_SETTINGS_ACK",
+              request_id: requestId,
+              ok: Boolean(response?.ok),
+              stale_after_ms:
+                typeof response?.stale_after_ms === "number" ? response.stale_after_ms : null,
             },
             "*",
           );

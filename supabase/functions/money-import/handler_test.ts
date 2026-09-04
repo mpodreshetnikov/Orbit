@@ -761,3 +761,151 @@ Deno.test("money-import handler does not accept a grant for a later action", asy
   );
   assertEquals(payload.error, "Unauthorized");
 });
+
+function sessionTokenRequest(action: string, body: Record<string, unknown>): Request {
+  return new Request("http://localhost/functions/v1/money-import", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer session-token",
+    },
+    body: JSON.stringify({ action, ...body }),
+  });
+}
+
+const GRANT_MINTED_SESSION_ROW = {
+  id: "session-1",
+  batch_id: "batch-1",
+  source: "tbank_web",
+  payer_person_id: "person-1",
+  status: "running",
+  revoked_at: null,
+  expires_at: "2999-01-01T00:00:00.000Z",
+  grant_id: "grant-1",
+};
+
+Deno.test(
+  "money-import handler stops a grant-minted session once its grant is revoked",
+  async () => {
+    // The session is untouched: not revoked, not expired, running. Only the grant that minted it
+    // has been revoked -- and on every action that takes a session token, that is enough. The
+    // session's own TTL is hours now; "revoked" cannot mean "keeps writing until then".
+    const revoked = createMoneyImportHandler({
+      repository: createRepositoryMock({
+        sessionByToken: GRANT_MINTED_SESSION_ROW,
+        grantByToken: { ...LIVE_GRANT_ROW, revoked_at: "2026-08-01T00:00:00.000Z" },
+      }),
+    });
+    for (const action of ["preview_rows", "apply_rows", "complete_session"]) {
+      const payload = await assertJsonResponse<{ error: string }>(
+        await revoked(sessionTokenRequest(action, { session_id: "session-1", rows: [] })),
+        401,
+      );
+      assertEquals(payload.error, "Unauthorized", action);
+    }
+
+    // The same session under a live grant goes through: the re-check is a check, not a refusal.
+    const live = createMoneyImportHandler({
+      repository: createRepositoryMock({
+        sessionByToken: GRANT_MINTED_SESSION_ROW,
+        grantByToken: LIVE_GRANT_ROW,
+      }),
+    });
+    const response = await live(
+      sessionTokenRequest("complete_session", { session_id: "session-1", status: "completed" }),
+    );
+    const body = await response.json();
+    assertEquals(response.status !== 401, true, JSON.stringify(body));
+  },
+);
+
+Deno.test("money-import handler lets a session token run the receipt preflight", async () => {
+  // Before this, the action took user tokens only. A grant-backed run has none, so its preflight
+  // came back 401, read as "nothing exists", and every receipt was fetched again.
+  let askedFor: { source: string; payerPersonId: string } | undefined;
+  const handler = createMoneyImportHandler({
+    repository: {
+      ...createRepositoryMock(),
+      getExistingTransactionStates: async (source: string, payerPersonId: string) => {
+        askedFor = { source, payerPersonId };
+        return [];
+      },
+    },
+  });
+
+  const payload = await assertJsonResponse<{ states: unknown[] }>(
+    await handler(
+      sessionTokenRequest("get_existing_transaction_states", {
+        source: "alfa_web",
+        payer_person_id: "person-somebody-else",
+        candidates: [{ external_id: "ext-1" }],
+      }),
+    ),
+    200,
+  );
+  assertEquals(payload.states, []);
+  // The session's own import, whatever the body named.
+  assertEquals(askedFor, { source: "tbank_web", payerPersonId: "person-1" });
+});
+
+Deno.test(
+  "money-import handler applies an unattended batch on its final preview chunk",
+  async () => {
+    // The wiring, not the action. `previewRowsAction` applies through a dependency it is handed,
+    // and the handler is the one place in production that hands it one; a unit test with an
+    // injected dependency cannot see that line missing. A run nobody started sends its rows on the
+    // session token, and when the batch carries the extension's mark, the same request ends with
+    // the batch applied.
+    let batchStatus = "running";
+    let batchMeta: Record<string, unknown> | null = { parse_strategy: "full", unattended: true };
+    const handler = createMoneyImportHandler({
+      repository: {
+        ...createRepositoryMock({
+          sessionByToken: {
+            id: "session-1",
+            batch_id: "batch-1",
+            source: "tbank_web",
+            payer_person_id: "person-1",
+            status: "running",
+            revoked_at: null,
+            expires_at: "2999-01-01T00:00:00.000Z",
+            meta: { parse_strategy: "full", unattended: true },
+          },
+        }),
+        getImportBatch: async () => ({
+          id: "batch-1",
+          payer_person_id: "person-1",
+          source: "tbank_web",
+          import_type: "file",
+          parsed_transactions_count: 0,
+          inserted_count: 0,
+          skipped_count: 0,
+          error_count: 0,
+          parsed_through_at: null,
+          status: batchStatus,
+          meta: batchMeta,
+        }),
+        updateImportBatch: async (_batchId, patch) => {
+          if (typeof patch.status === "string") batchStatus = patch.status;
+          if (patch.meta !== undefined) batchMeta = patch.meta as Record<string, unknown> | null;
+        },
+      },
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    const payload = await assertJsonResponse<{ inserted: number; auto_applied: boolean }>(
+      await handler(
+        sessionTokenRequest("preview_rows", {
+          rows: [
+            { posted_at: "2026-01-01T00:00:00.000Z", amount: 10, transaction_type: "expense" },
+          ],
+        }),
+      ),
+      200,
+    );
+    assertEquals(payload.inserted, 1);
+    assertEquals(payload.auto_applied, true);
+    // Nobody pressed Apply; the batch is applied all the same.
+    assertEquals(batchStatus, "completed");
+  },
+);
