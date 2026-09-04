@@ -10,6 +10,7 @@ import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
 import type { AutoRunStore } from "./auto-run-store.js";
 import { describeAutoRunEligibility, nextAutoRunState, shouldAutoRun } from "./auto-run-policy.js";
 import type { AttentionStore } from "./attention-store.js";
+import { activeImportRuns } from "./active-runs.js";
 import { buildAttentionStatus } from "./attention-status.js";
 
 export interface BackgroundMessage {
@@ -46,6 +47,8 @@ type BackgroundImportRunnerDeps = ImportRunnerDeps & {
 
 export interface BackgroundRouterDeps {
   sessionStore: SessionStore;
+  /** Marks the stored session as running; see `createSessionJanitor`. */
+  markRunStarted?: (sessionId: string) => Promise<void>;
   grantStore: GrantStore;
   /**
    * Optional so the router stays usable without it, but when it is wired a manual run is the
@@ -90,7 +93,6 @@ export interface BackgroundRouterContext {
   senderOrigin?: string | null;
 }
 
-const activeImportRunsBySessionId = new Set<string>();
 /**
  * The extension's own version, asked of the runtime rather than imported.
  *
@@ -587,11 +589,15 @@ export async function routeBackgroundMessage(
       throw new Error("No active import session");
     }
     const activeSessionId = typeof session.session_id === "string" ? session.session_id.trim() : "";
-    if (activeSessionId && activeImportRunsBySessionId.has(activeSessionId)) {
+    if (activeSessionId && !activeImportRuns.begin(activeSessionId)) {
       throw new Error(`Import already running for session ${activeSessionId}`);
     }
     if (activeSessionId) {
-      activeImportRunsBySessionId.add(activeSessionId);
+      // Written to the stored session, so that a later worker -- this one killed mid-run --
+      // can tell a session whose run died from one still waiting for a person to start it.
+      // Best-effort: a mark that could not be written costs that one detection, not the run,
+      // and must not leave the registry holding a session no run is on.
+      await deps.markRunStarted?.(activeSessionId).catch(() => undefined);
       activeImportRunStateBySessionId.set(
         activeSessionId,
         buildActiveRunSnapshot({
@@ -752,7 +758,9 @@ export async function routeBackgroundMessage(
       throw error;
     } finally {
       if (activeSessionId) {
-        activeImportRunsBySessionId.delete(activeSessionId);
+        // After the session field is cleared above, never before: a registry that no longer
+        // holds the session while the store still does reads as a run that died.
+        activeImportRuns.end(activeSessionId);
         activeImportRunStateBySessionId.delete(activeSessionId);
       }
     }

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runScheduledImport } from "./import-runner.js";
+import { activeImportRuns } from "./active-runs.js";
+import { RUN_STARTED_AT_KEY } from "./session-janitor.js";
 import { createBackfillStore } from "./backfill-store.js";
 import {
   DEFAULT_BACKFILL_HORIZON_MONTHS,
@@ -370,6 +372,37 @@ describe("runScheduledImport", () => {
 
     await runScheduledImport(INPUT, harness.deps);
     expect(harness.getSession()).toBeNull();
+  });
+
+  it("holds its session in the run registry, marked as started, until the field is cleared", async () => {
+    const seen: Array<{ sessionId: unknown; registered: boolean; startedAt: unknown }> = [];
+    const harness = createHarness();
+    harness.connector.parse.mockImplementation(async () => {
+      const session = harness.getSession();
+      seen.push({
+        sessionId: session?.session_id,
+        registered: activeImportRuns.has(String(session?.session_id)),
+        startedAt: session?.[RUN_STARTED_AT_KEY],
+      });
+      return {
+        rows: [{ id: seen.length }],
+        windowTo: new Date(NOW).toISOString(),
+        parsedThroughAt: new Date(NOW).toISOString(),
+        parsedTransactionsCount: 1,
+      };
+    });
+
+    await runScheduledImport(INPUT, harness.deps);
+
+    // While the window runs, the stored session says a run began on it and the registry
+    // holds it; a worker that restarts in between has both facts to judge an orphan by.
+    expect(seen).toEqual([
+      { sessionId: "session-1", registered: true, startedAt: NOW },
+      { sessionId: "session-2", registered: true, startedAt: NOW },
+    ]);
+    expect(harness.getSession()).toBeNull();
+    expect(activeImportRuns.has("session-1")).toBe(false);
+    expect(activeImportRuns.has("session-2")).toBe(false);
   });
 
   it("bounds the history slice at both ends", async () => {
