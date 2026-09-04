@@ -220,8 +220,15 @@ evidence for it, is `T-260903-oy7` in the task registry:
 These are edge-function secrets, so they are set in the Supabase dashboard under
 Edge Functions -> Secrets, or with `supabase secrets set NAME=value --project-ref <ref>`. Setting
 them requires a Supabase access token; they are not part of the repository and no CI job sets them.
-Run `just test-extraction` after changing one — the report's **Cost by stage** table is what says
-whether a stage's share justifies moving it.
+**Changing one of these is not verified by `just test-extraction` today.** That command replays
+recorded cassettes by default, and even with `--live` the eval sends a single `--model` as one
+`defaultModel` for all three stages — it has no per-stage flag, so its output is no evidence about a
+stage override you just changed. The report's **Cost by stage** table tells you each stage's share
+of the bill, which is what says whether moving a stage is worth anything; it does not tell you the
+override took effect. Per-stage pinning for the eval is added by
+[`#83`](https://github.com/mpodreshetnikov/Orbit/pull/83); until that lands, confirm a changed stage
+model from the function's own logs — see `T-260903-aha` for reporting which model actually served a
+call.
 
 ## Lint And Typecheck Gate Issues
 

@@ -326,3 +326,41 @@ describe("renderMarkdown cost by stage", () => {
     );
   });
 });
+
+describe("renderMarkdown cost by stage across passes", () => {
+  const one = (cost: number) => ({
+    caseId: "001",
+    stageSpend: [
+      { stage: "extract", calls: 1, promptTokens: 1, completionTokens: 1, costUsd: cost },
+    ],
+  });
+
+  // `cases` is only the pass rendered in full, but every pass was paid for and the `## Cost`
+  // section totals them all. A per-stage table covering one third of a --repeat 3 run would
+  // contradict it.
+  it("totals spend from every pass, not just the rendered one", () => {
+    const rendered = renderMarkdown(
+      summary({ cases: [one(1)], spendCases: [one(1), one(1), one(1)], passCount: 3 }),
+    );
+    expect(rendered).toContain("$3.0000");
+    expect(rendered).toContain("across 3 passes");
+  });
+
+  it("falls back to the rendered pass when no pass set is given", () => {
+    expect(renderMarkdown(summary({ cases: [one(2)] }))).toContain("$2.0000");
+  });
+
+  // A replay's dollars are the recording's, and the no-cases-scored guard can return before the
+  // aggregate cost line that would otherwise say so.
+  it("labels replayed costs as recording costs", () => {
+    const rendered = renderMarkdown(summary({ cases: [one(1)], mode: "replay" }));
+    expect(rendered).toContain("Cost by stage (to record these cassettes)");
+    expect(rendered).toContain("Replaying is free");
+  });
+
+  it("says a live run measured itself", () => {
+    expect(renderMarkdown(summary({ cases: [one(1)], mode: "live" }))).toContain(
+      "Measured on this run",
+    );
+  });
+});

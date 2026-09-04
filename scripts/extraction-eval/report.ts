@@ -21,6 +21,16 @@ export interface RunSummary {
   mode: string;
   generatedAt: string;
   cases: CaseResult[];
+  /**
+   * Every case of every pass, where `cases` is only the pass rendered in full.
+   *
+   * Spend and scores are summarised over different sets on a `--repeat` run, deliberately: one
+   * pass is rendered because showing N sets of scores would be unreadable, but all N were paid
+   * for. Defaults to `cases` when absent, which is correct for a single pass.
+   */
+  spendCases?: CaseResult[];
+  /** How many passes ran, so the cost table can say what it is totalling. */
+  passCount?: number;
   aggregate: Aggregate;
 }
 
@@ -242,15 +252,24 @@ export function stageTotals(cases: CaseResult[]): StageSpend[] {
  * The share is omitted, rather than guessed, when any stage is unpriced: a percentage of a total
  * that is missing one of its parts is a wrong number wearing a precise format.
  */
-function stageCostSection(cases: CaseResult[]): string {
+function stageCostSection(cases: CaseResult[], mode: string, passCount: number): string {
   const stages = stageTotals(cases);
   if (stages.length === 0) return "";
+  // A replayed cassette carries the price of the call that recorded it. The aggregate cost line
+  // says so, but the no-cases-scored guard can return before that line is ever reached, which
+  // would leave these the report's only dollar figures with nothing marking them as historical.
+  const replayed = mode === "replay";
+  const scope = passCount > 1 ? ` across ${passCount} passes` : "";
   const priced = stages.every((entry) => typeof entry.costUsd === "number");
   const total = priced ? stages.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0) : null;
   const share = (cost: number | null): string =>
     total !== null && total > 0 && cost !== null ? `${((cost / total) * 100).toFixed(1)}%` : "—";
   return [
-    "## Cost by stage",
+    replayed ? "## Cost by stage (to record these cassettes)" : "## Cost by stage",
+    "",
+    replayed
+      ? `> Replaying is free. These are the prices of the calls that **recorded** the cassettes${scope}, not of this run.`
+      : `> Measured on this run${scope}.`,
     "",
     "| stage | calls | prompt | completion | cost | share |",
     "|---|---|---|---|---|---|",
@@ -308,7 +327,11 @@ export function renderMarkdown(summary: RunSummary): string {
   // crashed still paid for the stages that ran before the crash, and that is exactly when the
   // question "what did this cost me" is hardest to answer from anywhere else — a case that fails is
   // reported unpriced by `costUsd`, so without this the money simply disappears from the report.
-  const byStage = stageCostSection(summary.cases);
+  const byStage = stageCostSection(
+    summary.spendCases ?? summary.cases,
+    summary.mode,
+    summary.passCount ?? 1,
+  );
   if (byStage) lines.push(byStage);
 
   // An empty set scores as perfect by convention, which is right per-category and catastrophic in

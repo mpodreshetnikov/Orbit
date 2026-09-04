@@ -172,6 +172,16 @@ export interface CassetteFetch {
   flush: (options?: { prune?: boolean }) => Promise<void>;
   misses: () => string[];
   /**
+   * Resolve once every request this cassette has started has finished recording its usage.
+   *
+   * `runStagedParse` runs classify and extract under `Promise.all`, which rejects the moment either
+   * one does — without cancelling or awaiting its sibling. A failed case therefore reaches its
+   * handler while the other stage's request is still in flight, and reading `stageSpend()` there
+   * would miss spend the account was still charged for. That is precisely the case the per-stage
+   * table exists to account for, so the snapshot waits for the stragglers first.
+   */
+  settled: () => Promise<void>;
+  /**
    * What each stage spent, in the order the stages first ran.
    *
    * On a replay this is the price of the calls that *recorded* the cassettes, exactly as the
@@ -195,6 +205,8 @@ export async function createCassetteFetch(options: {
   // alphabetically — classify, extract, reconcile reads as the pipeline; classify, extract,
   // reconcile happens to as well, but a renamed stage should not silently reorder the table.
   const spend = new Map<string, StageSpend>();
+  // Every request started, settled or not. Awaited by `settled()` before spend is read.
+  const inFlight = new Set<Promise<unknown>>();
 
   function record(stage: string, payload: unknown): void {
     let entry = spend.get(stage);
@@ -205,7 +217,16 @@ export async function createCassetteFetch(options: {
     addUsage(entry, usageOf(payload));
   }
 
-  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+  const fetchFn = ((url: string | URL | Request, init?: RequestInit) => {
+    const pending = handle(url, init);
+    inFlight.add(pending);
+    // Settled rather than resolved: a rejected request still has to stop being in flight, and its
+    // rejection is the caller's to handle, not this bookkeeping's.
+    void pending.catch(() => {}).finally(() => inFlight.delete(pending));
+    return pending;
+  }) as unknown as typeof fetch;
+
+  async function handle(url: string | URL | Request, init?: RequestInit): Promise<Response> {
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     const key = cassetteKey(body);
     const stage = inferStage(body);
@@ -244,10 +265,17 @@ export async function createCassetteFetch(options: {
       }
     }
     return response;
-  }) as unknown as typeof fetch;
+  }
 
   return {
     fetchFn,
+    settled: async () => {
+      // A stage can start a retry as an earlier request settles, so drain until the set is empty
+      // rather than awaiting one snapshot of it.
+      while (inFlight.size > 0) {
+        await Promise.allSettled([...inFlight]);
+      }
+    },
     misses: () => misses,
     stageSpend: () => [...spend.values()].map((entry) => ({ ...entry })),
     flush: async (options?: { prune?: boolean }) => {

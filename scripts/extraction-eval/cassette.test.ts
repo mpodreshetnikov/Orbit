@@ -326,3 +326,56 @@ describe("stageSpend", () => {
     ]);
   });
 });
+
+describe("settled", () => {
+  // `runStagedParse` runs classify and extract under Promise.all, which rejects the moment either
+  // does, without awaiting its sibling. Reading spend at that point misses a charge the account
+  // still incurred — on exactly the failed case the per-stage table exists to account for.
+  it("waits for a request still in flight when a sibling has already settled", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slowThenFast = (async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      const content = String((body.messages as { content?: unknown }[])?.[0]?.content ?? "");
+      if (content.includes("describe it as a whole")) await gate;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "{}" } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.5 },
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const cassette = await createCassetteFetch({
+      dir: await tempDir(),
+      mode: "live",
+      liveFetch: slowThenFast,
+    });
+    const slow = cassette.fetchFn(
+      "https://openrouter.test",
+      post({ model: "m", messages: [{ role: "user", content: "describe it as a whole" }] }),
+    );
+    await cassette.fetchFn("https://openrouter.test", post(REQUEST));
+
+    // The fast sibling is done; the slow one is not. Without `settled` the snapshot here would
+    // hold only the sibling's charge.
+    expect(cassette.stageSpend()).toHaveLength(1);
+    release();
+    await cassette.settled();
+    await slow;
+    expect(
+      cassette
+        .stageSpend()
+        .map((entry) => entry.stage)
+        .sort(),
+    ).toEqual(["classify", "extract"]);
+  });
+
+  it("resolves immediately when nothing is in flight", async () => {
+    const cassette = await createCassetteFetch({ dir: await tempDir(), mode: "replay" });
+    await expect(cassette.settled()).resolves.toBeUndefined();
+  });
+});
