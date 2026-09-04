@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { formatCost, renderMarkdown, renderVariance, totalCost, type RunSummary } from "./report";
 import { aggregate, scoreCase } from "./score";
-import type { CaseSnapshot } from "./types";
+import type { CaseSnapshot, ExpectedResolution } from "./types";
+
+/** A proposed closure with both scored fields spelled out — see the note in `score.test.ts`. */
+function resolution(
+  conditionId: string,
+  supportingObsCode: string | null = null,
+  gateRejection: string | null = null,
+): ExpectedResolution {
+  return {
+    condition_id: conditionId,
+    supporting_obs_code: supportingObsCode,
+    gate_rejection: gateRejection,
+  };
+}
 
 function snapshot(overrides: Partial<CaseSnapshot> = {}): CaseSnapshot {
   return {
@@ -60,7 +73,7 @@ describe("renderMarkdown", () => {
     const score = scoreCase(
       "001",
       snapshot(),
-      snapshot({ conditions_to_resolve: [{ condition_id: "cond-gastritis" }] }),
+      snapshot({ conditions_to_resolve: [resolution("cond-gastritis")] }),
       [],
     );
     const markdown = renderMarkdown(
@@ -161,6 +174,61 @@ describe("renderVariance", () => {
     expect(variance).toContain("observations fn");
     // The individual runs are printed, not just a summary — the point is to show the disagreement.
     expect(variance).toMatch(/observations fn \| 0\.5 \| 0\.0 – 1\.0 \| 0\.0, 1\.0/);
+  });
+
+  it("shows a citation that moved between runs the set score reads as stable", () => {
+    // The same condition every pass, cited differently on one of them. `conditions_to_resolve` is
+    // identical across both runs and says `stable`; only the field rows show that whether the
+    // closure happens at all was not. Only the last pass is rendered in full, so without these
+    // rows the swing leaves no trace anywhere in the report.
+    const expected = snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] });
+    const cited = aggregate([
+      scoreCase(
+        "001",
+        expected,
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] }),
+        [],
+      ),
+    ]);
+    const miscited = aggregate([
+      scoreCase(
+        "001",
+        expected,
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "ferritin")] }),
+        [],
+      ),
+    ]);
+
+    const variance = renderVariance([cited, miscited]);
+    expect(variance).toMatch(/conditions_to_resolve f1 \| 100\.0% \| stable/);
+    expect(variance).toMatch(
+      /condition resolution supporting_obs_code \| 50\.0% \| 0\.0% – 100\.0%/,
+    );
+    expect(variance).toContain("condition resolution gate_rejection");
+  });
+
+  it("omits a resolution field no run compared, rather than calling it stable at 100%", () => {
+    // `ratio` returns 1 for 0/0, so an aggregate over cases with no matched resolution carries
+    // `accuracy: 1` beside `total: 0`. The field table renders that as a dash; this table would
+    // have printed `100.0% | stable` for a dimension nothing ever compared.
+    const empty = aggregate([scoreCase("002", snapshot(), snapshot(), [])]);
+    const variance = renderVariance([empty, empty]);
+    expect(variance).toContain("Variance across 2 runs");
+    expect(variance).not.toContain("condition resolution");
+  });
+
+  it("says how many runs compared a resolution field when not all of them did", () => {
+    const withRow = aggregate([
+      scoreCase(
+        "001",
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] }),
+        snapshot({ conditions_to_resolve: [resolution("cond-b12", "vitamin_b12")] }),
+        [],
+      ),
+    ]);
+    const without = aggregate([scoreCase("002", snapshot(), snapshot(), [])]);
+    const variance = renderVariance([withRow, without]);
+    expect(variance).toContain("condition resolution supporting_obs_code (1 of 2 runs)");
   });
 });
 
