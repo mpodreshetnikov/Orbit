@@ -1,5 +1,6 @@
 import { registerConnector } from "./registry.js";
 import { isPathUnder } from "../core/page-url.js";
+import { CLOCK_SKEW_ALLOWANCE_MS } from "../core/session-janitor.js";
 import type {
   Connector,
   ConnectorParseInput,
@@ -937,13 +938,14 @@ async function extractOperationsWithRetry(
 
 /**
  * How long the page may take to report: until the session it works for is over, which is when
- * the upload would be refused anyway. A minute at least, so a session already near its end
- * still gets its answer rather than a timeout racing the parse.
+ * the upload would be refused anyway. `expires_at` is the server's clock and this is the
+ * device's, so the same allowance the session janitor gives is given here; a device ahead by
+ * that much would otherwise stop waiting after a minute for a token the server still takes.
  */
 function resolveExtractionDeadlineMs(session: Record<string, unknown> | undefined): number {
   const expiresAt = toIsoString(session?.expires_at);
   const expiresAtMs = expiresAt ? Date.parse(expiresAt) : Number.NaN;
-  if (Number.isFinite(expiresAtMs)) return expiresAtMs + 60_000;
+  if (Number.isFinite(expiresAtMs)) return expiresAtMs + CLOCK_SKEW_ALLOWANCE_MS;
   return Date.now() + DEFAULT_EXTRACTION_TIMEOUT_MS;
 }
 
@@ -985,8 +987,9 @@ async function runPageExtraction(
   // Absent in a test double or an older browser: then the call is awaited, as before.
   const messageEvents = runtime?.onMessage ?? null;
   const tabEvents = tabs?.onRemoved ?? null;
+  const loadEvents = tabs?.onUpdated ?? null;
   const reportToken =
-    messageEvents && tabEvents
+    messageEvents && tabEvents && loadEvents
       ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
       : null;
 
@@ -1027,9 +1030,17 @@ async function runPageExtraction(
     if (removedTabId !== tabId) return;
     rejectReport(new Error("T-Bank tab was closed before the extraction finished"));
   };
-  if (reportToken && messageEvents && tabEvents) {
+  // A document load ends the page the extractor runs in, and with it any report; the tab
+  // itself stays. The bank's own in-page navigation changes the URL without a load and is
+  // left alone.
+  const onUpdated = (updatedTabId: number, changeInfo: { status?: string }) => {
+    if (updatedTabId !== tabId || changeInfo.status !== "loading") return;
+    rejectReport(new Error("T-Bank tab navigated before the extraction finished"));
+  };
+  if (reportToken && messageEvents && tabEvents && loadEvents) {
     messageEvents.addListener(onMessage);
     tabEvents.addListener(onRemoved);
+    loadEvents.addListener(onUpdated);
   }
 
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1056,9 +1067,10 @@ async function runPageExtraction(
     ]);
   } finally {
     if (timer !== null) clearTimeout(timer);
-    if (reportToken && messageEvents && tabEvents) {
+    if (reportToken && messageEvents && tabEvents && loadEvents) {
       messageEvents.removeListener(onMessage);
       tabEvents.removeListener(onRemoved);
+      loadEvents.removeListener(onUpdated);
     }
   }
 }

@@ -5,18 +5,21 @@ import type { MoneyImportRepository } from "./repository.ts";
 
 interface Recorded {
   scans: Array<{ source: string; payerPersonId: string; nowIso: string }>;
-  sessionUpdates: Array<{ sessionId: string; patch: Record<string, unknown> }>;
-  batchUpdates: Array<{ batchId: string; patch: Record<string, unknown> }>;
+  sessionCloses: Array<{ sessionId: string; nowIso: string; patch: Record<string, unknown> }>;
+  batchCloses: Array<{ batchId: string; patch: Record<string, unknown> }>;
   events: Array<{ level: string; message: string; attrs?: Record<string, unknown> }>;
 }
 
 function createHarness(options: {
   expired?: Record<string, unknown>[] | (() => Promise<Record<string, unknown>[]>);
+  /** Batch rows by id; the status decides whether a conditional close finds the row open. */
   batches?: Record<string, Record<string, unknown>>;
-  failSessionUpdate?: string;
+  /** Whether the conditional session close still finds the row open and expired. */
+  sessionStillOpen?: (sessionId: string) => boolean;
+  failSessionClose?: string;
   withoutScan?: boolean;
 }) {
-  const recorded: Recorded = { scans: [], sessionUpdates: [], batchUpdates: [], events: [] };
+  const recorded: Recorded = { scans: [], sessionCloses: [], batchCloses: [], events: [] };
   const repository = {
     ...(options.withoutScan
       ? {}
@@ -31,13 +34,20 @@ function createHarness(options: {
             return typeof expired === "function" ? await expired() : expired;
           },
         }),
-    updateImportSession: async (sessionId: string, patch: Record<string, unknown>) => {
-      if (options.failSessionUpdate === sessionId) throw new Error("storage said no");
-      recorded.sessionUpdates.push({ sessionId, patch });
-    },
     getImportBatch: async (batchId: string) => options.batches?.[batchId] ?? null,
-    updateImportBatch: async (batchId: string, patch: Record<string, unknown>) => {
-      recorded.batchUpdates.push({ batchId, patch });
+    closeOpenBatch: async (batchId: string, patch: Record<string, unknown>) => {
+      recorded.batchCloses.push({ batchId, patch });
+      const status = options.batches?.[batchId]?.status;
+      return status === "running" || status === "created";
+    },
+    closeExpiredOpenSession: async (
+      sessionId: string,
+      nowIso: string,
+      patch: Record<string, unknown>,
+    ) => {
+      if (options.failSessionClose === sessionId) throw new Error("storage said no");
+      recorded.sessionCloses.push({ sessionId, nowIso, patch });
+      return options.sessionStillOpen?.(sessionId) ?? true;
     },
   } as unknown as MoneyImportRepository;
   const telemetry = {
@@ -78,24 +88,25 @@ Deno.test(
     assertEquals(recorded.scans, [
       { source: "tbank_web", payerPersonId: "person-1", nowIso: "2026-09-04T06:00:00.000Z" },
     ]);
-    assertEquals(recorded.sessionUpdates, [
-      {
-        sessionId: "session-dead",
-        patch: {
-          status: "failed",
-          revoked_at: "2026-09-04T06:00:00.000Z",
-          updated_at: "2026-09-04T06:00:00.000Z",
-          meta: { parse_strategy: "full", failure_reason: SESSION_EXPIRED_REASON },
-        },
-      },
-    ]);
     // The batch ended when its session did, not when somebody noticed.
-    assertEquals(recorded.batchUpdates, [
+    assertEquals(recorded.batchCloses, [
       {
         batchId: "batch-dead",
         patch: {
           status: "failed",
           completed_at: "2026-09-03T09:38:16.275Z",
+          meta: { parse_strategy: "full", failure_reason: SESSION_EXPIRED_REASON },
+        },
+      },
+    ]);
+    assertEquals(recorded.sessionCloses, [
+      {
+        sessionId: "session-dead",
+        nowIso: "2026-09-04T06:00:00.000Z",
+        patch: {
+          status: "failed",
+          revoked_at: "2026-09-04T06:00:00.000Z",
+          updated_at: "2026-09-04T06:00:00.000Z",
           meta: { parse_strategy: "full", failure_reason: SESSION_EXPIRED_REASON },
         },
       },
@@ -132,16 +143,41 @@ Deno.test(
 
     const result = await closeAbandonedSessions(deps, scope);
 
+    // The conditional write finds neither batch open, so neither counts as closed.
     assertEquals(result, { sessions: 3, batches: 0 });
     assertEquals(
-      recorded.sessionUpdates.map((update) => [update.sessionId, update.patch.status]),
+      recorded.sessionCloses.map((close) => [close.sessionId, close.patch.status]),
       [
         ["session-preview", "failed"],
         ["session-applied", "failed"],
         ["session-bare", "failed"],
       ],
     );
-    assertEquals(recorded.batchUpdates, []);
+    assertEquals(
+      recorded.events.map((event) => event.attrs?.batch_closed),
+      [false, false, false],
+    );
+  },
+);
+
+Deno.test(
+  "closeAbandonedSessions does not count a session that completed while it looked",
+  async () => {
+    // A request that passed auth just before the expiry finished the import between the scan and
+    // the write: the conditional close finds the row completed, and the scan says nothing.
+    const { deps, recorded } = createHarness({
+      expired: [
+        { id: "session-racing", batch_id: "batch-racing", expires_at: "2026-09-04T05:59:59.000Z" },
+      ],
+      batches: { "batch-racing": { id: "batch-racing", status: "completed" } },
+      sessionStillOpen: () => false,
+    });
+
+    const result = await closeAbandonedSessions(deps, scope);
+
+    assertEquals(result, { sessions: 0, batches: 0 });
+    assertEquals(recorded.sessionCloses.length, 1);
+    assertEquals(recorded.events, []);
   },
 );
 
@@ -150,7 +186,7 @@ Deno.test(
   async () => {
     const without = createHarness({ withoutScan: true });
     assertEquals(await closeAbandonedSessions(without.deps, scope), { sessions: 0, batches: 0 });
-    assertEquals(without.recorded.sessionUpdates, []);
+    assertEquals(without.recorded.sessionCloses, []);
 
     const failing = createHarness({
       expired: async () => {
@@ -177,20 +213,20 @@ Deno.test(
         "batch-1": { id: "batch-1", status: "running" },
         "batch-2": { id: "batch-2", status: "running" },
       },
-      failSessionUpdate: "session-stubborn",
+      failSessionClose: "session-stubborn",
     });
 
     const result = await closeAbandonedSessions(deps, scope);
 
     // The stubborn session stays open, so the next scan takes it again; its batch is closed
-    // already, and a closed batch is not closed twice.
+    // already, and a conditional close will not close it twice.
     assertEquals(result, { sessions: 1, batches: 2 });
     assertEquals(
-      recorded.batchUpdates.map((update) => update.batchId),
+      recorded.batchCloses.map((close) => close.batchId),
       ["batch-1", "batch-2"],
     );
     assertEquals(
-      recorded.sessionUpdates.map((update) => update.sessionId),
+      recorded.sessionCloses.map((close) => close.sessionId),
       ["session-plain"],
     );
     assertEquals(

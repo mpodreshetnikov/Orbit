@@ -648,9 +648,14 @@ export async function runScheduledImport(
       throw error;
     } finally {
       // The field first, the registry after: a store still holding the session once the
-      // registry has let it go reads as a run that died.
-      await clearOwnSession(deps.sessionStore, session);
-      if (sessionId) activeImportRuns.end(sessionId);
+      // registry has let it go reads as a run that died. The registry is released whatever
+      // the store did: a session it kept holding would refuse every later run as "already
+      // running" and keep the worker awake for nothing.
+      try {
+        await clearOwnSession(deps.sessionStore, session);
+      } finally {
+        if (sessionId) activeImportRuns.end(sessionId);
+      }
     }
   };
 

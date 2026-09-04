@@ -5,13 +5,6 @@ import type { MoneyImportRepository } from "./repository.ts";
 /** Written into `meta.failure_reason` of a session, and of its batch, closed for having expired. */
 export const SESSION_EXPIRED_REASON = "session_expired";
 
-/**
- * Batch statuses a dead session takes down with it. `pending` is a preview waiting for a person
- * to apply or discard it and outlives its session; `completed`, `failed` and `discarded` are
- * already final.
- */
-const OPEN_BATCH_STATUSES: ReadonlySet<string> = new Set(["created", "running"]);
-
 export interface CloseAbandonedSessionsDeps {
   repository: MoneyImportRepository;
   now?: () => Date;
@@ -47,8 +40,12 @@ export async function closeAbandonedSessions(
   scope: AbandonedSessionScope,
 ): Promise<CloseAbandonedSessionsResult> {
   const result: CloseAbandonedSessionsResult = { sessions: 0, batches: 0 };
-  const listExpired = deps.repository.listExpiredOpenSessions;
-  if (!listExpired) return result;
+  const {
+    listExpiredOpenSessions: listExpired,
+    closeExpiredOpenSession,
+    closeOpenBatch,
+  } = deps.repository;
+  if (!listExpired || !closeExpiredOpenSession || !closeOpenBatch) return result;
 
   const nowIso = (deps.now ?? (() => new Date()))().toISOString();
   let expired: Record<string, unknown>[];
@@ -68,30 +65,34 @@ export async function closeAbandonedSessions(
     const batchId = normalizeText(session.batch_id);
     const expiredAt = toIsoOrNull(session.expires_at) ?? nowIso;
     try {
+      // Every write is conditional on the row still being open (and the session still past
+      // its expiry): a request that passed auth just before the expiry may be completing this
+      // very session, and its word -- completed -- must not be overwritten by a scan that saw
+      // the row open a moment earlier. A `pending` preview is not open in this sense: it waits
+      // for a person and outlives its session.
+      //
       // The batch first, the session after. The scan finds a session by its open status, so a
-      // session closed ahead of a batch update that failed would take the batch out of every
-      // later scan, still running; closed in this order, a failure leaves the session open and
-      // the next scan takes both again.
+      // session closed ahead of a batch write that failed would take the batch out of every
+      // later scan, still running; in this order a failure leaves the session open and the
+      // next scan takes both again.
       let batchClosed = false;
       if (batchId) {
         const batch = await deps.repository.getImportBatch(batchId);
-        if (batch && OPEN_BATCH_STATUSES.has(normalizeText(batch.status) ?? "")) {
-          await deps.repository.updateImportBatch(batchId, {
-            status: "failed",
-            // The run ended when its session did, not when somebody noticed.
-            completed_at: expiredAt,
-            meta: withFailureReason(batch.meta),
-          });
-          result.batches += 1;
-          batchClosed = true;
-        }
+        batchClosed = await closeOpenBatch(batchId, {
+          status: "failed",
+          // The run ended when its session did, not when somebody noticed.
+          completed_at: expiredAt,
+          meta: withFailureReason(batch?.meta),
+        });
+        if (batchClosed) result.batches += 1;
       }
-      await deps.repository.updateImportSession(sessionId, {
+      const sessionClosed = await closeExpiredOpenSession(sessionId, nowIso, {
         status: "failed",
         revoked_at: nowIso,
         updated_at: nowIso,
         meta: withFailureReason(session.meta),
       });
+      if (!sessionClosed) continue;
       result.sessions += 1;
       deps.telemetry?.info("money_import_abandoned_session_closed", {
         session_id: sessionId,

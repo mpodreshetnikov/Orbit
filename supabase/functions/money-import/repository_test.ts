@@ -2159,3 +2159,54 @@ Deno.test(
     ]);
   },
 );
+
+Deno.test("repository closes a session and a batch only while they are still open", async () => {
+  const sessionCalls: Array<[string, unknown, unknown?]> = [];
+  const batchCalls: Array<[string, unknown, unknown?]> = [];
+  const chainFor = (calls: Array<[string, unknown, unknown?]>, matched: boolean) => {
+    const chain: Record<string, unknown> = {};
+    for (const method of ["update", "eq", "in", "is", "lt"]) {
+      chain[method] = (...args: unknown[]) => {
+        calls.push([method, args[0], args[1]]);
+        return chain;
+      };
+    }
+    chain.select = async (columns: string) => {
+      calls.push(["select", columns]);
+      return { data: matched ? [{ id: "x" }] : [], error: null };
+    };
+    return chain;
+  };
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) =>
+        table === "money_import_sessions"
+          ? chainFor(sessionCalls, true)
+          : chainFor(batchCalls, false),
+    },
+  });
+
+  const sessionClosed = await repository.closeExpiredOpenSession!(
+    "session-dead",
+    "2026-09-04T06:00:00.000Z",
+    { status: "failed" },
+  );
+  const batchClosed = await repository.closeOpenBatch!("batch-dead", { status: "failed" });
+
+  assertEquals(sessionClosed, true);
+  assertEquals(batchClosed, false);
+  assertEquals(sessionCalls, [
+    ["update", { status: "failed" }, undefined],
+    ["eq", "id", "session-dead"],
+    ["in", "status", ["created", "running"]],
+    ["is", "revoked_at", null],
+    ["lt", "expires_at", "2026-09-04T06:00:00.000Z"],
+    ["select", "id"],
+  ]);
+  assertEquals(batchCalls, [
+    ["update", { status: "failed" }, undefined],
+    ["eq", "id", "batch-dead"],
+    ["in", "status", ["created", "running"]],
+    ["select", "id"],
+  ]);
+});

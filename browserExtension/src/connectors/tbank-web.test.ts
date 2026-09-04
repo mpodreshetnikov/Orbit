@@ -745,6 +745,9 @@ describe("tbank-web connector", () => {
   function installReportingChrome(executeScript: ReturnType<typeof vi.fn>) {
     const messageListeners: Array<(message: unknown, sender: unknown) => void> = [];
     const removedListeners: Array<(tabId: number) => void> = [];
+    const updatedListeners: Array<
+      (tabId: number, changeInfo: { status?: string; url?: string }) => void
+    > = [];
     const removeMessageListener = vi.fn();
     const removeRemovedListener = vi.fn();
     (globalThis as { chrome: Record<string, unknown> }).chrome = {
@@ -766,7 +769,14 @@ describe("tbank-web connector", () => {
           status: "complete",
         }),
         update: vi.fn(),
-        onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+        onUpdated: {
+          addListener: vi.fn(
+            (listener: (tabId: number, changeInfo: { status?: string; url?: string }) => void) => {
+              updatedListeners.push(listener);
+            },
+          ),
+          removeListener: vi.fn(),
+        },
         onRemoved: {
           addListener: vi.fn((listener: (tabId: number) => void) => {
             removedListeners.push(listener);
@@ -776,7 +786,13 @@ describe("tbank-web connector", () => {
       },
       scripting: { executeScript },
     } as unknown as typeof chrome;
-    return { messageListeners, removedListeners, removeMessageListener, removeRemovedListener };
+    return {
+      messageListeners,
+      removedListeners,
+      updatedListeners,
+      removeMessageListener,
+      removeRemovedListener,
+    };
   }
 
   it("answers the executeScript call at once and takes the extraction the page reports", async () => {
@@ -845,6 +861,49 @@ describe("tbank-web connector", () => {
       }),
     ).rejects.toThrow("Unable to extract operations from current page");
     expect(executeScript).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up on a page that loads anew before it reports, and ignores in-page navigation", async () => {
+    const executeScript = vi.fn();
+    const browser = installReportingChrome(executeScript);
+    let attempt = 0;
+    executeScript.mockImplementation(
+      async (injection: { args?: Array<{ reportToken?: string }> }) => {
+        const token = injection.args?.[0]?.reportToken;
+        attempt += 1;
+        setTimeout(() => {
+          // The bank's own routing: a URL change without a load, which is not the page's end.
+          for (const listener of browser.updatedListeners)
+            listener(77, { url: "https://www.tbank.ru/mybank/operations/v8/?x=1" });
+          if (attempt === 1) {
+            for (const listener of browser.updatedListeners) listener(77, { status: "loading" });
+            return;
+          }
+          for (const listener of browser.messageListeners) {
+            listener(
+              {
+                type: "MONEY_IMPORT_PAGE_EXTRACTION",
+                report_token: token,
+                ok: true,
+                result: reportedExtraction("op-after-reload"),
+              },
+              { tab: { id: 77 } },
+            );
+          }
+        }, 0);
+        return [{ result: { started: true, report_token: token } }];
+      },
+    );
+
+    const result = await connector.parse({
+      source: "tbank_web",
+      windowFrom: "2026-02-01T00:00:00.000Z",
+      session: { default_account_id: "acc-1" },
+    });
+
+    // The first attempt ended with the load; the second, on the page that came back, reported.
+    expect(executeScript).toHaveBeenCalledTimes(2);
+    expect(result.rows).toHaveLength(1);
   });
 
   it("recognises the versioned operations page the bank redirects to", () => {

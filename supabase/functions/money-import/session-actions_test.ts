@@ -52,6 +52,14 @@ function createRepositoryMock(
       state.scans.push({ source, payerPersonId });
       return options.expiredOpenSessions ?? [];
     },
+    closeExpiredOpenSession: async (sessionId, _nowIso, patch) => {
+      state.sessionUpdates.push({ sessionId, patch });
+      return true;
+    },
+    closeOpenBatch: async (batchId, patch) => {
+      state.batchUpdates.push({ batchId, patch });
+      return true;
+    },
     updateImportSession: async (sessionId, patch) => {
       state.sessionUpdates.push({ sessionId, patch });
     },
