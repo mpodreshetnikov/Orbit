@@ -12,13 +12,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  onBridgeStale,
   probeExtension,
   probeExtensionUntilHeard,
   reloadPage,
   requestExtensionAttention,
   requestExtensionRun,
   setExtensionStaleAfter,
-  STARTUP_PROBE_DELAYS_MS,
+  STARTUP_PROBE_OFFSETS_MS,
   STARTUP_PROBE_TIMEOUT_MS,
   type ExtensionAttention,
   type ExtensionAttentionSource,
@@ -50,10 +51,12 @@ function claimStaleReload(): boolean {
   try {
     if (window.sessionStorage.getItem(STALE_RELOAD_KEY)) return false;
     window.sessionStorage.setItem(STALE_RELOAD_KEY, "1");
+    return true;
   } catch {
-    // No storage to remember by: reloading once more is the worse of two harmless outcomes.
+    // Nowhere to remember the reload by, so none is made: a page that reloads itself with no
+    // memory of having done so reloads forever. The button is offered instead.
+    return false;
   }
-  return true;
 }
 
 function releaseStaleReload(): void {
@@ -117,6 +120,23 @@ export default function MoneyImportAttentionPage() {
   const hadAnswer = useRef(false);
   const selectedPersonId = useUIStore((store) => store.selectedPersonId);
 
+  // The extension updated under this page and the script in this tab is the old one. A
+  // reload gets the new script; once, so a page that stays stale is shown, not spun.
+  const goStale = useCallback(() => {
+    refreshGeneration.current += 1;
+    if (claimStaleReload()) {
+      reloadPage();
+      return;
+    }
+    setState("stale");
+    setAttention(null);
+    setRefreshing(false);
+  }, []);
+
+  // Whichever request draws the notice: after the first answer a refresh probes only once,
+  // and a bridge that dies between that probe and the attention request answers the request.
+  useEffect(() => onBridgeStale(() => goStale()), [goStale]);
+
   const refresh = useCallback(async () => {
     const generation = ++refreshGeneration.current;
     setRefreshing(true);
@@ -126,17 +146,10 @@ export default function MoneyImportAttentionPage() {
       // After an answer one probe is enough, and a miss is treated below.
       const verdict = hadAnswer.current
         ? await probeExtension()
-        : await probeExtensionUntilHeard(STARTUP_PROBE_DELAYS_MS, STARTUP_PROBE_TIMEOUT_MS);
+        : await probeExtensionUntilHeard(STARTUP_PROBE_OFFSETS_MS, STARTUP_PROBE_TIMEOUT_MS);
       if (generation !== refreshGeneration.current) return;
       if (verdict === "stale") {
-        // The extension updated under this page and the script in this tab is the old one.
-        // A reload gets the new script; once, so a page that stays stale is shown, not spun.
-        if (claimStaleReload()) {
-          reloadPage();
-          return;
-        }
-        setState("stale");
-        setAttention(null);
+        goStale();
         return;
       }
       if (verdict === "silent") {
@@ -185,7 +198,7 @@ export default function MoneyImportAttentionPage() {
     } finally {
       if (generation === refreshGeneration.current) setRefreshing(false);
     }
-  }, []);
+  }, [goStale]);
 
   useEffect(() => {
     void refresh();

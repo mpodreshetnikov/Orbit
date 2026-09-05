@@ -294,7 +294,13 @@ describe("attention page requests", () => {
       throw new Error("Extension context invalidated.");
     });
     const windowPostMessage = vi.fn();
-    const bridge = createContentBridge({ runtimeSendMessage, windowPostMessage, nowMs: () => 5 });
+    const onWarning = vi.fn();
+    const bridge = createContentBridge({
+      runtimeSendMessage,
+      windowPostMessage,
+      nowMs: () => 5,
+      onWarning,
+    });
 
     expect(() =>
       bridge.handleWindowMessage(
@@ -305,6 +311,11 @@ describe("attention page requests", () => {
       ),
     ).not.toThrow();
 
+    // Said before it is handled: the page shows no reason.
+    expect(onWarning).toHaveBeenCalledWith("money_import_bridge_send_failed", {
+      message_type: "MONEY_IMPORT_PING",
+      error_message: "Extension context invalidated.",
+    });
     expect(windowPostMessage).toHaveBeenCalledWith(
       {
         source: "orbit-extension",

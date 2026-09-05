@@ -20,6 +20,8 @@ export interface ContentBridgeDeps {
   runtimeSendMessage: RuntimeSendMessage;
   windowPostMessage: WindowPostMessage;
   nowMs?: () => number;
+  /** A structured warning; the console in a content script, which has no extension to relay to. */
+  onWarning?: (event: string, attrs: Record<string, unknown>) => void;
 }
 
 export function createContentBridge(deps: ContentBridgeDeps) {
@@ -41,6 +43,13 @@ export function createContentBridge(deps: ContentBridgeDeps) {
     try {
       deps.runtimeSendMessage(message, callback);
     } catch (error) {
+      // Said before it is handled: the page shows no reason, and a throw that is not the
+      // invalidated context -- a payload the runtime cannot serialize, an API that is gone --
+      // would otherwise vanish into the same notice.
+      deps.onWarning?.("money_import_bridge_send_failed", {
+        message_type: typeof message.type === "string" ? message.type : null,
+        error_message: error instanceof Error ? error.message : String(error),
+      });
       deps.windowPostMessage(
         {
           source: BRIDGE_SOURCE,
