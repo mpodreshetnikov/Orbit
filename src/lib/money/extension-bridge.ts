@@ -19,19 +19,27 @@ function newRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function pingExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<boolean> {
+/**
+ * What one ping learns. `alive`: the extension answered. `stale`: the content script in this
+ * tab is from before an extension update and has no extension behind it any more; only a
+ * reload of the page gets the script the new version injects. `silent`: no answer at all --
+ * no extension, or one still waking up.
+ */
+export type ExtensionProbe = "alive" | "stale" | "silent";
+
+export function probeExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<ExtensionProbe> {
   return new Promise((resolve) => {
-    const timeout = window.setTimeout(() => {
+    const finish = (verdict: ExtensionProbe) => {
+      window.clearTimeout(timeout);
       window.removeEventListener("message", onMessage);
-      resolve(false);
-    }, timeoutMs);
+      resolve(verdict);
+    };
+    const timeout = window.setTimeout(() => finish("silent"), timeoutMs);
     const onMessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
-      if (data.type !== "MONEY_IMPORT_PONG") return;
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", onMessage);
-      resolve(true);
+      if (data.type === "MONEY_IMPORT_PONG") finish("alive");
+      else if (data.type === "MONEY_IMPORT_BRIDGE_STALE") finish("stale");
     };
     window.addEventListener("message", onMessage);
     window.postMessage(
@@ -39,6 +47,40 @@ export function pingExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<bool
       "*",
     );
   });
+}
+
+export async function pingExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<boolean> {
+  return (await probeExtension(timeoutMs)) === "alive";
+}
+
+/**
+ * The first conversation on a page the extension opened itself is patient. At the browser's
+ * start the content script is injected after the page's first render, and the service worker
+ * that answers may still be waking: the page's first ping went unanswered and it said the
+ * extension was not installed (2026-09-04). Eight probes over about twelve seconds; a page that
+ * has heard the extension once needs only one probe after that.
+ */
+export const STARTUP_PROBE_DELAYS_MS: readonly number[] = [
+  0, 300, 700, 1000, 1500, 2000, 3000, 3500,
+];
+export const STARTUP_PROBE_TIMEOUT_MS = PING_TIMEOUT_MS;
+
+export async function probeExtensionUntilHeard(
+  delaysMs: readonly number[] = STARTUP_PROBE_DELAYS_MS,
+  timeoutMs: number = STARTUP_PROBE_TIMEOUT_MS,
+): Promise<ExtensionProbe> {
+  let verdict: ExtensionProbe = "silent";
+  for (const delayMs of delaysMs) {
+    if (delayMs > 0) await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    verdict = await probeExtension(timeoutMs);
+    if (verdict !== "silent") return verdict;
+  }
+  return verdict;
+}
+
+/** Separate so a test can stand in for it; jsdom has no navigation. */
+export function reloadPage(): void {
+  window.location.reload();
 }
 
 /** Sends one request and resolves with the reply that echoes its id, or null on timeout. */
