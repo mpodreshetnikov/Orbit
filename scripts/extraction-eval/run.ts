@@ -128,6 +128,7 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
       // Only a case that ran end to end has exercised every request it needs, so only then is the
       // recorded set complete enough to prune against.
       let completed = false;
+      let result: CaseResult;
       try {
         const { snapshot, diagnostics } = await runCasePipeline(
           evalCase.ocrText,
@@ -138,7 +139,7 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
             model: args.model,
           },
         );
-        results.push({
+        result = {
           caseId: evalCase.id,
           score: scoreCase(
             evalCase.id,
@@ -147,16 +148,21 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
             evalCase.context.existingFindings,
           ),
           diagnostics,
-        });
+        };
         completed = true;
         process.stdout.write(`[extraction-eval] ${label}${evalCase.id}: scored\n`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        results.push({ caseId: evalCase.id, error: message });
+        result = { caseId: evalCase.id, error: message };
         process.stderr.write(`[extraction-eval] ${label}${evalCase.id}: FAILED — ${message}\n`);
       } finally {
+        // Before the spend snapshot, not after: a case that failed at classify may still have an
+        // extract request in flight, and its charge belongs on this case.
+        await cassette.settled();
         await cassette.flush({ prune: completed });
       }
+      result.stageSpend = cassette.stageSpend();
+      results.push(result);
     }
     return results;
   }
@@ -169,12 +175,18 @@ export async function runCli(argv: string[] = process.argv): Promise<number> {
   }
 
   const results = passes[passes.length - 1];
+  // Spend is totalled over every pass, unlike the scores: `results` is the last pass because that
+  // is the one rendered in full, but N passes were paid for and the `## Cost` table below already
+  // reports all N. A per-stage table covering one third of a `--repeat 3` run would contradict it.
+  const spendCases = passes.flat();
   const scored = results.flatMap((result) => (result.score ? [result.score] : []));
   const summary: RunSummary = {
     model: args.model,
     mode,
     generatedAt: args.generatedAt,
     cases: results,
+    spendCases,
+    passCount: passes.length,
     aggregate: aggregate(scored),
   };
 
