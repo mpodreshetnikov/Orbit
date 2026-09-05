@@ -293,7 +293,9 @@ Deno.test(
     assertEquals(responseFormat.json_schema.strict, true);
     assertEquals((body.provider as { require_parameters: boolean }).require_parameters, true);
     // Transcription is not a task with a creative dimension.
-    assertEquals(body.temperature, 0);
+    // Must not be sent: gpt-5.x endpoints do not advertise `temperature`, and with
+    // `require_parameters` that leaves OpenRouter no endpoint to route to — a bare 404.
+    assertEquals("temperature" in body, false);
   },
 );
 

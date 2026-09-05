@@ -27,6 +27,20 @@ export const NO_PROVIDER_RESPONSE_MESSAGE = "No response from OpenRouter";
 export type OcrFailureCause =
   /** The transcription service rejected our credentials. A configuration problem, not a document. */
   | "provider_auth"
+  /**
+   * The service found no endpoint able to take the request as configured.
+   *
+   * OpenRouter answers 404 for two configuration faults that look identical from here: a model id
+   * that names nothing it serves, and — because `require_parameters` is all-or-nothing — a
+   * request asking for a parameter no endpoint for that model advertises. Both are "nothing to
+   * route to", neither is about the document, and the response does not say which. So the cause
+   * names the routing failure rather than guessing at the model, and the remedy is to look at the
+   * configured id *and* the request options.
+   *
+   * Separated from `provider_rejected`, which is the service refusing a request it could route.
+   * Never per-document: seeing it once means every document is failing.
+   */
+  | "provider_no_endpoint"
   /** The service refused the request itself — an unsupported parameter, a body it would not take. */
   | "provider_rejected"
   /** Rate limited, unavailable, timed out, or answered with something unusable. Worth retrying. */
@@ -53,6 +67,7 @@ export type OcrFailureCause =
  */
 const CAUSE_PRECEDENCE: OcrFailureCause[] = [
   "provider_auth",
+  "provider_no_endpoint",
   "provider_rejected",
   "unsupported_media",
   "attachment_unavailable",
@@ -115,6 +130,12 @@ export function classifyOcrError(error: unknown): OcrFailureCause {
   if (error instanceof UnsupportedOcrMediaError) return "unsupported_media";
   if (error instanceof OcrProviderError) {
     if (error.status === 401 || error.status === 403) return "provider_auth";
+    // 404 from the completions endpoint never means "route not found" in the HTTP sense — the
+    // path is fixed. It means OpenRouter had no endpoint to send this to: an unserved model id,
+    // or a parameter no endpoint for that model advertises while `require_parameters` is on.
+    // Reported as itself because it is the one provider failure no retry and no better
+    // photograph can fix — the configuration has to change.
+    if (error.status === 404) return "provider_no_endpoint";
     return "provider_rejected";
   }
   if (error instanceof Error && error.name === "RetryableLlmError") return "provider_unavailable";
@@ -139,6 +160,7 @@ export function dominantCause(causes: OcrFailureCause[]): OcrFailureCause {
 
 const CAUSE_SUMMARIES: Record<OcrFailureCause, string> = {
   provider_auth: "the transcription service rejected this deployment's credentials",
+  provider_no_endpoint: "the transcription service could not route the request as configured",
   provider_rejected: "the transcription service refused the request",
   provider_unavailable: "the transcription service was unavailable",
   unsupported_media: "the file type cannot be transcribed",

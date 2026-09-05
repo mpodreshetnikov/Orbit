@@ -1,7 +1,7 @@
 {
-  "request_hash": "15fcccb49b87c00b",
+  "request_hash": "e30cce6284e76bf9",
   "stage": "reconcile",
-  "model": "openai/gpt-5.2:nitro",
+  "model": "openai/gpt-5.2",
   "response": {
     "id": "gen-1788337028-G6ny4981IVmXO3tytWaQ",
     "object": "chat.completion",
