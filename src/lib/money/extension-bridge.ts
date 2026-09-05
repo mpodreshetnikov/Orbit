@@ -19,19 +19,27 @@ function newRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function pingExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<boolean> {
+/**
+ * What one ping learns. `alive`: the extension answered. `stale`: the content script in this
+ * tab is from before an extension update and has no extension behind it any more; only a
+ * reload of the page gets the script the new version injects. `silent`: no answer at all --
+ * no extension, or one still waking up.
+ */
+export type ExtensionProbe = "alive" | "stale" | "silent";
+
+export function probeExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<ExtensionProbe> {
   return new Promise((resolve) => {
-    const timeout = window.setTimeout(() => {
+    const finish = (verdict: ExtensionProbe) => {
+      window.clearTimeout(timeout);
       window.removeEventListener("message", onMessage);
-      resolve(false);
-    }, timeoutMs);
+      resolve(verdict);
+    };
+    const timeout = window.setTimeout(() => finish("silent"), timeoutMs);
     const onMessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
-      if (data.type !== "MONEY_IMPORT_PONG") return;
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", onMessage);
-      resolve(true);
+      if (data.type === "MONEY_IMPORT_PONG") finish("alive");
+      else if (data.type === "MONEY_IMPORT_BRIDGE_STALE") finish("stale");
     };
     window.addEventListener("message", onMessage);
     window.postMessage(
@@ -41,7 +49,66 @@ export function pingExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<bool
   });
 }
 
-/** Sends one request and resolves with the reply that echoes its id, or null on timeout. */
+export async function pingExtension(timeoutMs: number = PING_TIMEOUT_MS): Promise<boolean> {
+  return (await probeExtension(timeoutMs)) === "alive";
+}
+
+/**
+ * The first conversation on a page the extension opened itself is patient. At the browser's
+ * start the content script is injected after the page's first render, and the service worker
+ * that answers may still be waking: the page's first ping went unanswered and it said the
+ * extension was not installed (2026-09-04). Eight probes, each sent at its offset from the
+ * first, the last answered or given up on by about twelve seconds; a page that has heard the
+ * extension once needs only one probe after that.
+ */
+export const STARTUP_PROBE_OFFSETS_MS: readonly number[] = [
+  0, 300, 1000, 2000, 3500, 5500, 8500, 11500,
+];
+export const STARTUP_PROBE_TIMEOUT_MS = PING_TIMEOUT_MS;
+
+export async function probeExtensionUntilHeard(
+  offsetsMs: readonly number[] = STARTUP_PROBE_OFFSETS_MS,
+  timeoutMs: number = STARTUP_PROBE_TIMEOUT_MS,
+): Promise<ExtensionProbe> {
+  const startedAtMs = Date.now();
+  let verdict: ExtensionProbe = "silent";
+  for (const offsetMs of offsetsMs) {
+    // Offsets from one start rather than delays between probes: a probe's own timeout does not
+    // push the ones after it, so the whole conversation ends when the last offset says.
+    const waitMs = startedAtMs + offsetMs - Date.now();
+    if (waitMs > 0) await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+    verdict = await probeExtension(timeoutMs);
+    if (verdict !== "silent") return verdict;
+  }
+  return verdict;
+}
+
+/**
+ * Hears every stale notice the bridge posts, whichever request drew it: a page that has
+ * heard the extension once probes only once per refresh, and a stale answer to an attention
+ * or settings request would otherwise end as a timeout nobody could tell from a slow wake.
+ * Returns the unsubscribe.
+ */
+export function onBridgeStale(listener: (reason: string | null) => void): () => void {
+  const onMessage = (event: MessageEvent) => {
+    const data = event.data as Record<string, unknown> | null;
+    if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
+    if (data.type !== "MONEY_IMPORT_BRIDGE_STALE") return;
+    listener(typeof data.reason === "string" ? data.reason : null);
+  };
+  window.addEventListener("message", onMessage);
+  return () => window.removeEventListener("message", onMessage);
+}
+
+/** Separate so a test can stand in for it; jsdom has no navigation. */
+export function reloadPage(): void {
+  window.location.reload();
+}
+
+/**
+ * Sends one request and resolves with the reply that echoes its id, or null on timeout -- or
+ * null at once when the bridge answers that it is stale, which `onBridgeStale` hears as well.
+ */
 export function requestFromExtension<T>(input: {
   type: string;
   replyType: string;
@@ -51,17 +118,21 @@ export function requestFromExtension<T>(input: {
 }): Promise<T | null> {
   return new Promise((resolve) => {
     const requestId = newRequestId();
-    const timeout = window.setTimeout(() => {
+    const finish = (value: T | null) => {
+      window.clearTimeout(timeout);
       window.removeEventListener("message", onMessage);
-      resolve(null);
-    }, input.timeoutMs ?? REQUEST_TIMEOUT_MS);
+      resolve(value);
+    };
+    const timeout = window.setTimeout(() => finish(null), input.timeoutMs ?? REQUEST_TIMEOUT_MS);
     const onMessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
+      if (data.type === "MONEY_IMPORT_BRIDGE_STALE") {
+        finish(null);
+        return;
+      }
       if (data.type !== input.replyType || data.request_id !== requestId) return;
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", onMessage);
-      resolve(input.read(data));
+      finish(input.read(data));
     };
     window.addEventListener("message", onMessage);
     window.postMessage(

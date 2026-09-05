@@ -2,6 +2,19 @@ import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportAttentionPage from "./page";
+import { reloadPage } from "@/lib/money/extension-bridge";
+
+// The startup probes are patient by design -- about twelve seconds of real time -- and a test
+// cannot wait that long for silence; the schedule is shortened, and the reload stood in for.
+vi.mock("@/lib/money/extension-bridge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/money/extension-bridge")>();
+  return {
+    ...actual,
+    STARTUP_PROBE_OFFSETS_MS: [0, 80, 160],
+    STARTUP_PROBE_TIMEOUT_MS: 60,
+    reloadPage: vi.fn(),
+  };
+});
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -24,6 +37,10 @@ type Reply = Record<string, unknown>;
  */
 function installExtension(options: {
   answersPing: boolean;
+  /** The content script of a version the extension has since updated away from. */
+  bridgeStale?: boolean;
+  /** The bridge dies between the ping and the attention request. */
+  attentionStale?: boolean;
   /** One answer per ping, in order; the last one repeats. Overrides `answersPing` when set. */
   pingReplies?: boolean[];
   /** Per attention request, a promise its reply waits for; `null` = reply at once. */
@@ -50,12 +67,20 @@ function installExtension(options: {
       );
     };
     if (data.type === "MONEY_IMPORT_PING") {
+      if (options.bridgeStale) {
+        reply({ type: "MONEY_IMPORT_BRIDGE_STALE", reason: "Extension context invalidated." });
+        return;
+      }
       const replies = options.pingReplies;
       const answers = replies
         ? replies[Math.min(pingCalls, replies.length - 1)]
         : options.answersPing;
       pingCalls += 1;
       if (answers) reply({ type: "MONEY_IMPORT_PONG" });
+      return;
+    }
+    if (data.type === "MONEY_IMPORT_GET_ATTENTION" && options.attentionStale) {
+      reply({ type: "MONEY_IMPORT_BRIDGE_STALE", reason: "Extension context invalidated." });
       return;
     }
     if (data.type === "MONEY_IMPORT_GET_ATTENTION" && options.attention !== undefined) {
@@ -108,6 +133,8 @@ describe("MoneyImportAttentionPage", () => {
   beforeEach(() => {
     vi.useRealTimers();
     selectedPersonIdState = "person-1";
+    window.sessionStorage.clear();
+    vi.mocked(reloadPage).mockClear();
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -121,6 +148,51 @@ describe("MoneyImportAttentionPage", () => {
       { timeout: 3000 },
     );
     expect(screen.queryByTestId("money-import-attention-settings")).toBeNull();
+  });
+
+  it("keeps probing through the first silent pings at the browser's start", async () => {
+    installExtension({
+      answersPing: true,
+      pingReplies: [false, false, true],
+      attention: STALE_ATTENTION,
+    });
+    render(<MoneyImportAttentionPage />);
+
+    expect(await screen.findByTestId("money-import-attention-tbank_web")).toBeTruthy();
+  });
+
+  it("reloads itself once when the bridge says the extension updated under it, then says so", async () => {
+    installExtension({ answersPing: true, bridgeStale: true });
+    const beforeReload = render(<MoneyImportAttentionPage />);
+
+    await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+    // The reload is remembered for the tab, so a page still stale after it is shown the way
+    // out rather than reloaded into a loop. (The reload itself is stood in for; the page that
+    // asked for it goes, and the one that comes back is rendered anew.)
+    beforeReload.unmount();
+    render(<MoneyImportAttentionPage />);
+    expect(await screen.findByTestId("money-import-attention-stale")).toBeTruthy();
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText("money.importAttentionReload"));
+    expect(reloadPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("hears a bridge that dies after the ping, on the request that drew the notice", async () => {
+    installExtension({ answersPing: true, attentionStale: true });
+    render(<MoneyImportAttentionPage />);
+
+    await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+  });
+
+  it("offers the reload instead of making it when there is nowhere to remember one", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage is blocked");
+    });
+    installExtension({ answersPing: true, bridgeStale: true });
+    render(<MoneyImportAttentionPage />);
+
+    expect(await screen.findByTestId("money-import-attention-stale")).toBeTruthy();
+    expect(reloadPage).not.toHaveBeenCalled();
   });
 
   it("lists a stale source by its bank name and asks the extension to open the bank on Update", async () => {

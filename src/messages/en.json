@@ -719,6 +719,8 @@
     "importAttentionThresholdSaved": "Saved: {days} d.",
     "importAttentionBadgeHint": "The number on the extension's icon is how many sources are stale. When there are any, the extension opens this page once per browser session — at the start, or at the first check after it — and at most once a day.",
     "importAttentionRefreshMissed": "The extension did not answer the last request; what is shown is its previous answer, and the page keeps asking.",
+    "importAttentionBridgeStale": "The extension has updated since this page was opened; the page needs a reload to reach it.",
+    "importAttentionReload": "Reload page",
     "importHistoryImportTypeUnattended": "Automatic (extension)"
   },
   "records": {

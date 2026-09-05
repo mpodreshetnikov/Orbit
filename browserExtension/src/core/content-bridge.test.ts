@@ -287,4 +287,43 @@ describe("attention page requests", () => {
       "*",
     );
   });
+
+  it("tells the page the bridge is dead when the runtime throws, instead of throwing", () => {
+    // What a content script does after the extension updated under its tab.
+    const runtimeSendMessage = vi.fn(() => {
+      throw new Error("Extension context invalidated.");
+    });
+    const windowPostMessage = vi.fn();
+    const onWarning = vi.fn();
+    const bridge = createContentBridge({
+      runtimeSendMessage,
+      windowPostMessage,
+      nowMs: () => 5,
+      onWarning,
+    });
+
+    expect(() =>
+      bridge.handleWindowMessage(
+        new MessageEvent("message", {
+          source: window,
+          data: { source: "orbit-webapp", type: "MONEY_IMPORT_PING" },
+        }),
+      ),
+    ).not.toThrow();
+
+    // Said before it is handled: the page shows no reason.
+    expect(onWarning).toHaveBeenCalledWith("money_import_bridge_send_failed", {
+      message_type: "MONEY_IMPORT_PING",
+      error_message: "Extension context invalidated.",
+    });
+    expect(windowPostMessage).toHaveBeenCalledWith(
+      {
+        source: "orbit-extension",
+        type: "MONEY_IMPORT_BRIDGE_STALE",
+        ts: 5,
+        reason: "Extension context invalidated.",
+      },
+      "*",
+    );
+  });
 });

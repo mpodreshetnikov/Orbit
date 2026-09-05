@@ -20,10 +20,47 @@ export interface ContentBridgeDeps {
   runtimeSendMessage: RuntimeSendMessage;
   windowPostMessage: WindowPostMessage;
   nowMs?: () => number;
+  /** A structured warning; the console in a content script, which has no extension to relay to. */
+  onWarning?: (event: string, attrs: Record<string, unknown>) => void;
 }
 
 export function createContentBridge(deps: ContentBridgeDeps) {
   const nowMs = deps.nowMs ?? (() => Date.now());
+
+  /**
+   * Sends to the extension, or tells the page that this bridge is dead.
+   *
+   * After the extension updates, a content script injected before the update keeps running in
+   * its tab with no extension behind it: every runtime call throws "Extension context
+   * invalidated" (2026-09-05, the attention page open through an update). The page cannot tell
+   * that from an extension that is not installed -- both are silence -- so it is told outright,
+   * and can reload itself to get the script the new version injects.
+   */
+  function sendToRuntime(
+    message: Record<string, unknown>,
+    callback?: Parameters<RuntimeSendMessage>[1],
+  ): void {
+    try {
+      deps.runtimeSendMessage(message, callback);
+    } catch (error) {
+      // Said before it is handled: the page shows no reason, and a throw that is not the
+      // invalidated context -- a payload the runtime cannot serialize, an API that is gone --
+      // would otherwise vanish into the same notice.
+      deps.onWarning?.("money_import_bridge_send_failed", {
+        message_type: typeof message.type === "string" ? message.type : null,
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+      deps.windowPostMessage(
+        {
+          source: BRIDGE_SOURCE,
+          type: "MONEY_IMPORT_BRIDGE_STALE",
+          ts: nowMs(),
+          reason: error instanceof Error ? error.message : String(error),
+        },
+        "*",
+      );
+    }
+  }
 
   function handleWindowMessage(event: MessageEvent): void {
     if (event.source !== window) return;
@@ -39,7 +76,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
     if (!data || data.source !== WEBAPP_SOURCE) return;
 
     if (data.type === "MONEY_IMPORT_PING") {
-      deps.runtimeSendMessage({ type: "MONEY_IMPORT_PING" }, (response) => {
+      sendToRuntime({ type: "MONEY_IMPORT_PING" }, (response) => {
         deps.windowPostMessage(
           {
             source: BRIDGE_SOURCE,
@@ -59,7 +96,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
     }
 
     if (data.type === "MONEY_IMPORT_SET_GRANT") {
-      deps.runtimeSendMessage(
+      sendToRuntime(
         {
           type: "MONEY_IMPORT_SET_GRANT",
           grant: data.grant as Record<string, unknown>,
@@ -86,7 +123,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
       // flight -- a Re-check while the post-grant refresh is pending -- would otherwise both
       // take the first reply, and the newer one would show the state from before the grant.
       const requestId = typeof data.request_id === "string" ? data.request_id : null;
-      deps.runtimeSendMessage(
+      sendToRuntime(
         { type: "MONEY_IMPORT_GET_AUTO_STATUS" },
         (response: Record<string, unknown> | undefined) => {
           deps.windowPostMessage(
@@ -109,7 +146,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
     // request id echoed, for the same reason as the status above.
     if (data.type === "MONEY_IMPORT_GET_ATTENTION") {
       const requestId = typeof data.request_id === "string" ? data.request_id : null;
-      deps.runtimeSendMessage(
+      sendToRuntime(
         { type: "MONEY_IMPORT_GET_ATTENTION" },
         (response: Record<string, unknown> | undefined) => {
           deps.windowPostMessage(
@@ -133,7 +170,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
 
     if (data.type === "MONEY_IMPORT_REQUEST_RUN") {
       const requestId = typeof data.request_id === "string" ? data.request_id : null;
-      deps.runtimeSendMessage(
+      sendToRuntime(
         { type: "MONEY_IMPORT_REQUEST_RUN", source_id: data.source_id },
         (response: Record<string, unknown> | undefined) => {
           deps.windowPostMessage(
@@ -154,7 +191,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
 
     if (data.type === "MONEY_IMPORT_SET_ATTENTION_SETTINGS") {
       const requestId = typeof data.request_id === "string" ? data.request_id : null;
-      deps.runtimeSendMessage(
+      sendToRuntime(
         { type: "MONEY_IMPORT_SET_ATTENTION_SETTINGS", stale_after_ms: data.stale_after_ms },
         (response: Record<string, unknown> | undefined) => {
           deps.windowPostMessage(
@@ -174,7 +211,7 @@ export function createContentBridge(deps: ContentBridgeDeps) {
     }
 
     if (data.type === "MONEY_IMPORT_START_SESSION") {
-      deps.runtimeSendMessage(
+      sendToRuntime(
         {
           type: "MONEY_IMPORT_START_SESSION",
           session: data.session as Record<string, unknown>,
