@@ -16,6 +16,7 @@ import { runScheduledImport, tryCompleteSessionAsFailed } from "./core/import-ru
 import { activeImportRuns } from "./core/active-runs.js";
 import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
+import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
@@ -351,12 +352,6 @@ const AUTO_IMPORT_ALARM = "money-import-auto";
  */
 const VISIT_SWEEP_ALARM_PREFIX = "money-import-visit:";
 const VISIT_SWEEP_DELAY_MINUTES = 1;
-/**
- * How often the alarm asks whether anything is due. The cooldown decides whether a run actually
- * happens, so this only has to be short enough that a machine awake for a few hours a day still
- * gets asked.
- */
-const AUTO_IMPORT_ALARM_PERIOD_MINUTES = 180;
 const AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS = 30_000;
 const AUTO_IMPORT_TAB_POLL_INTERVAL_MS = 500;
 
@@ -489,13 +484,28 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
  * on every startup means a three-hour alarm on a busy machine is reset long before it ever
  * fires, and the fallback that exists for people who do not visit their bank never runs.
  */
+/**
+ * Arms the periodic sweep when it is not armed: minutes from now, then every period. The
+ * cooldown decides whether a run actually happens, so the alarm only has to ask, and soon.
+ * See `sweepAlarmSchedule` for why the first ask is not a period away.
+ */
 async function ensureAutoImportAlarm(): Promise<void> {
   if (!chrome.alarms?.create) return;
   const existing = await chrome.alarms.get(AUTO_IMPORT_ALARM).catch(() => null);
   if (existing) return;
-  await chrome.alarms.create(AUTO_IMPORT_ALARM, {
-    periodInMinutes: AUTO_IMPORT_ALARM_PERIOD_MINUTES,
-  });
+  await chrome.alarms.create(AUTO_IMPORT_ALARM, sweepAlarmSchedule());
+}
+
+/**
+ * At the browser's start, an alarm due hours away is brought forward: this is the moment the
+ * person is at the machine and the banks' cookies are as live as they will be. Creating an
+ * alarm by an existing name replaces it, so the period is kept and the schedule restarts.
+ */
+async function rearmAutoImportAlarmAtStart(): Promise<void> {
+  if (!chrome.alarms?.create) return;
+  const existing = await chrome.alarms.get(AUTO_IMPORT_ALARM).catch(() => null);
+  if (!needsRearmAtStart(existing, Date.now())) return;
+  await chrome.alarms.create(AUTO_IMPORT_ALARM, sweepAlarmSchedule());
 }
 
 /**
@@ -514,11 +524,14 @@ chrome.runtime.onInstalled?.addListener((details) => {
   });
   // The badge does not survive an update; the count it showed still holds.
   void refreshAttention("install", { mayOpenPage: false });
+  // A new version has reason to run soon, forgiven failures or not.
+  void rearmAutoImportAlarmAtStart();
 });
 
 // The browser's start is the one moment a page opening by itself reads as a reminder rather
 // than an interruption, and the badge has to be drawn again in any case.
 chrome.runtime.onStartup?.addListener(() => {
+  void rearmAutoImportAlarmAtStart();
   void attentionStore
     .markBrowserStarted(Date.now())
     .then(() => refreshAttention("startup", { mayOpenPage: true }));
