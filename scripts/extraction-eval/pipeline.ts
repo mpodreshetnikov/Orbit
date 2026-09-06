@@ -34,6 +34,13 @@ export interface RunOptions {
   fetchFn: typeof fetch;
   apiKey: string;
   model: string;
+  /**
+   * Per-stage overrides, each falling back to `model`. Passed straight through to
+   * `runStagedParse`, which resolves every stage as `models?.<stage> ?? defaultModel` — the same
+   * resolution production performs from the `OPENROUTER_HEALTH_STAGE_*_MODEL` variables, so a
+   * mixed configuration can be measured here exactly as it would be deployed.
+   */
+  stageModels?: { classify?: string; extract?: string; reconcile?: string };
   timeoutMs?: number;
 }
 
@@ -76,6 +83,7 @@ export async function runCasePipeline(
     fetchFn: options.fetchFn,
     apiKey: options.apiKey,
     defaultModel: options.model,
+    models: options.stageModels,
     timeoutMs: options.timeoutMs,
     // Determinism: no real backoff waits, no jitter, and one attempt so a transport failure is
     // reported rather than silently retried into a different sampled answer.
