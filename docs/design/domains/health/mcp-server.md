@@ -196,11 +196,17 @@ Conventions that matter:
   That per-unit strength is now decided rather than hypothetical: `ADR-260907-cvj` records strength
   in `dose_definition.unit_strength` — what one unit contains — and derives the per-intake total from
   the amount beside it, leaving `active` as a legacy field read only for unmigrated rows. When it
-  lands, this withholding narrows to its honest case, a course with no strength recorded at all: a
-  figure that scales with its own amount cannot be stranded by a slot override, an amount edit or a
-  `log_dose` correction, so there is nothing left to detect. Both counterexamples above disappear
-  rather than being caught. The renderer keeps the withholding until the migration has run, because
-  a row that still carries only `active` is exactly as unverifiable as it was.
+  lands, this withholding narrows to its honest case: no strength recorded on the row being rendered.
+  A figure that scales with its own amount cannot be stranded by a slot override, an amount edit or a
+  `log_dose` correction, so there is nothing left to detect, and both counterexamples above disappear
+  rather than being caught.
+
+  The condition is the row, not the course, and it stays that way after the migration. An event that
+  carries only `active` is exactly as unverifiable as it was, whatever its regimen now holds —
+  filling it in from the course's current `unit_strength` would rewrite history, which is the same
+  mistake in the other direction. So the renderer withholds whenever the regimen or event in front of
+  it has no `unit_strength`, and the migration is what shrinks that set rather than what ends the
+  rule.
 
   A dose is dated by `actual_at`, not `scheduled_at`, and its resolution timestamp is labelled by
   what happened. The two columns are written equal by the generator and separated by `snooze_dose`,

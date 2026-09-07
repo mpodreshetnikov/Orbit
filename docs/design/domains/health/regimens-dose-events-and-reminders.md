@@ -37,8 +37,11 @@ every write path added from now on owes it.
 - `unit_strength` — what **one** unit contains: `[{Сертралин, 100, milligram}]`. This is the quantity
   that stays still, and it is the field a strength is recorded in. The per-intake total is
   `intake.amount × unit_strength[i].amount`, computed where it is needed and stored nowhere as an
-  independent fact. Where the intake unit is itself a mass (`milligram`, `gram`) it is omitted: the
-  amount already is the strength.
+  independent fact. It is omitted only where the dosage form **is** the active ingredient — a powder
+  dosed in milligrams — because there the amount already is the strength. A mass unit alone does not
+  establish that: a 5 g application of 1% hydrocortisone is 10 mg of ingredient per gram of cream,
+  and a compounded powder can carry several ingredients at once. Keying the omission on the unit
+  would make both unrepresentable and unmigratable.
 - `active` — **legacy**: the same ingredients as a per-intake total. Read for rows not yet migrated,
   written by nothing new, removed once the migration in `T-260829-1my` has run. A reader finding both
   prefers `unit_strength`.
@@ -53,8 +56,15 @@ nothing records how many units the 100 mg was for. Per-unit strength is invarian
 those operations, which is why the generator needs no change: a slot's own amount multiplies a
 strength that does not depend on it.
 
-An event snapshots the `unit_strength` it was generated from, so a past intake says what was planned
-at the time while the course says what is planned now, and neither is reconstructed from the other.
+An event snapshots the `unit_strength` it was generated from, so a past intake carries the strength
+that was in force at the time while the course carries what is in force now, and neither is
+reconstructed from the other.
+
+`planned_intake` is not wholly a plan, though, and adherence or audit code must not read it as one:
+`update_dose_event_resolution_details` and the MCP `log_dose` correction path both overwrite
+`planned_intake.intake.amount` with the amount actually taken, so a 1-pill event corrected to 0.5
+reads 0.5 and the original plan is gone. Only `unit_strength` is a generation snapshot; the amount
+beside it may have been amended to the actual intake.
 
 Reasoning and the rejected alternatives: `ADR-260907-cvj` in the task registry.
 
@@ -104,10 +114,15 @@ Reasoning and the rejected alternatives: `ADR-260907-cvj` in the task registry.
 
 ## Known Gaps And Next Refactor Targets
 
-- `unit_strength` is decided but not yet migrated: stored rows still carry `active`, and four write
-  paths (`medication-form.tsx`, `use-regimens.ts`, `regimen-mappers.ts`, the MCP `logDose` insert)
-  still write it empty, so the medication form cannot capture a strength at all. Tracked in
-  `T-260829-1my`.
+- `unit_strength` is decided but not yet migrated: stored rows still carry `active`, and every write
+  path still writes it empty — `medication-form.tsx`, `addOneTimeDoseToRegimen` in `use-regimens.ts`,
+  and the MCP `logDose` insert — so the medication form cannot capture a strength at all. The guarded
+  boundary is `plannedIntakeSchema` in `src/lib/mcp/schemas/regimen.ts`, which today admits only
+  `intake` and `active` and is what `add_medication` and `update_medication` parse
+  `dose_definition` through: until it accepts `unit_strength`, no MCP caller can submit one and an
+  `update_medication` keeps replacing a migrated definition with one that has none. (`rowToDoseEvent`
+  in `regimen-mappers.ts` writes `active: []` too, but only into an in-memory fallback for a fetched
+  row; it persists nothing.) Tracked in `T-260829-1my`.
 - Continue reducing size of medication dashboard/form and regimen hook modules.
 - Improve explicit test coverage for edge cases around timezone and retry paths.
 
