@@ -579,7 +579,16 @@ function unattendedParseStrategy(connector: Connector | null): ConnectorParseStr
 
 export async function runScheduledImport(
   input: ScheduledImportInput,
-  deps: ImportRunnerDeps & { backfillStore: BackfillStore; sessionStore: SessionStore },
+  deps: ImportRunnerDeps & {
+    backfillStore: BackfillStore;
+    sessionStore: SessionStore;
+    /**
+     * Called with each window's session once it is claimed and on the board, before the
+     * connector starts. The widget in the run's tab is put there from here: the tab finished
+     * loading before the session existed, so no page event of its own would bring it.
+     */
+    onWindowStarted?: (session: Record<string, unknown>) => Promise<void>;
+  },
   debug?: ImportRunnerDebugConfig,
 ): Promise<ScheduledImportOutcome> {
   const token = input.credentials.grantToken ?? input.credentials.userAccessToken ?? "";
@@ -633,8 +642,10 @@ export async function runScheduledImport(
       // asked for. The flag rides on the session so every message the run broadcasts carries it.
       unattended: true,
       // Who asked, for the widget in the bank tab: the sweep's own tab says so, a tab the
-      // person opened from the attention page says whose request it is serving.
+      // person opened from the attention page says whose request it is serving -- and which
+      // tab that is, so the widget there speaks as the run's and elsewhere as an onlooker's.
       run_origin: origin,
+      run_tab_id: input.tabId,
       // The run begins the moment this is stored. A later worker finding it stored with no run
       // of its own knows the run died, and closes it; see `createSessionJanitor`.
       [RUN_STARTED_AT_KEY]: input.nowMs,
@@ -662,6 +673,8 @@ export async function runScheduledImport(
         batch_id: typeof created.batch_id === "string" ? created.batch_id : null,
       });
     }
+    // Best-effort: a widget that could not be shown costs nothing the run needs.
+    await deps.onWindowStarted?.(session).catch(() => undefined);
     // Every broadcast the window makes is read into the board on its way out, so a page
     // that asks mid-run is told where the run is rather than only that it exists.
     const windowDeps: typeof deps = sessionId

@@ -282,6 +282,8 @@ describe("background-router", () => {
       ok: true,
       session: { source: "tbank_web" },
       active_run: null,
+      is_run_tab: false,
+      pending_request: null,
     });
   });
 
@@ -338,6 +340,8 @@ describe("background-router", () => {
         progress_percent: 2,
         batch_id: "batch-1",
       }),
+      is_run_tab: false,
+      pending_request: null,
     });
 
     parseDeferred.resolve({
@@ -1017,10 +1021,17 @@ describe("background-router", () => {
         lastOpenedAtMs: initial?.lastOpenedAtMs ?? null,
         lastStartedAtMs: null as number | null,
         runRequests: { ...(initial?.runRequests ?? {}) },
+        requestTabs: {} as Record<string, number>,
       };
+      const key = (scope: { sourceId: string; payerPersonId: string }) =>
+        `${scope.sourceId}::${scope.payerPersonId}`;
       return {
         state,
-        getState: vi.fn(async () => ({ ...state, runRequests: { ...state.runRequests } })),
+        getState: vi.fn(async () => ({
+          ...state,
+          runRequests: { ...state.runRequests },
+          requestTabs: { ...state.requestTabs },
+        })),
         setStaleAfterMs: vi.fn(async (value: unknown) => {
           state.staleAfterMs = typeof value === "number" ? value : DAY;
           return state.staleAfterMs;
@@ -1032,16 +1043,31 @@ describe("background-router", () => {
           state.lastStartedAtMs = nowMs;
         }),
         requestRun: vi.fn(
-          async (scope: { sourceId: string; payerPersonId: string }, nowMs: number) => {
-            state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`] = nowMs;
+          async (
+            scope: { sourceId: string; payerPersonId: string },
+            nowMs: number,
+            tabId: number | null = null,
+          ) => {
+            state.runRequests[key(scope)] = nowMs;
+            if (tabId !== null) state.requestTabs[key(scope)] = tabId;
           },
         ),
         isRunRequested: vi.fn(
           async (scope: { sourceId: string; payerPersonId: string }) =>
-            `${scope.sourceId}::${scope.payerPersonId}` in state.runRequests,
+            key(scope) in state.runRequests,
         ),
+        getRequestedTab: vi.fn(async (scope: { sourceId: string; payerPersonId: string }) =>
+          key(scope) in state.runRequests ? (state.requestTabs[key(scope)] ?? null) : null,
+        ),
+        findRequestForTab: vi.fn(async (tabId: number) => {
+          const found = Object.entries(state.requestTabs).find(([, id]) => id === tabId);
+          if (!found || !(found[0] in state.runRequests)) return null;
+          const [sourceId, payerPersonId] = found[0].split("::");
+          return { sourceId, payerPersonId };
+        }),
         clearRunRequest: vi.fn(async (scope: { sourceId: string; payerPersonId: string }) => {
-          delete state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`];
+          delete state.runRequests[key(scope)];
+          delete state.requestTabs[key(scope)];
         }),
       };
     }
@@ -1093,6 +1119,48 @@ describe("background-router", () => {
       await expect(
         routeBackgroundMessage({ type: "MONEY_IMPORT_GET_ATTENTION" }, createDeps()),
       ).resolves.toEqual({ ok: false, error: "Attention is not available" });
+    });
+
+    it("tells the widget whether its tab is the run's, and what a requested tab waits for", async () => {
+      const deps = createDeps();
+      const attentionStore = createAttentionStore();
+      await attentionStore.requestRun(
+        { sourceId: "tbank_web", payerPersonId: "person-1" },
+        NOW,
+        42,
+      );
+      const routerDeps = { ...deps, attentionStore, now: () => NOW + 1000 };
+
+      // Before the run: the tab Update opened is told what it is waiting for; another is not.
+      deps.sessionStore.getSession.mockResolvedValue(null);
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 42,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: false, pending_request: { source_id: "tbank_web" } });
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 43,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: false, pending_request: null });
+
+      // During the run: the tab it works in is the run's own; any other is an onlooker.
+      deps.sessionStore.getSession.mockResolvedValue({
+        session_id: "session-1",
+        source: "tbank_web",
+        run_origin: "requested",
+        run_tab_id: 42,
+      });
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 42,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: true, pending_request: null });
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 43,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: false, pending_request: null });
     });
 
     it("tells the page about the run in flight for its source, and the last attempt", async () => {
@@ -1187,6 +1255,8 @@ describe("background-router", () => {
       });
       expect(opened).toEqual(["https://www.tbank.ru/mybank/operations/"]);
       expect(attentionStore.state.runRequests).toEqual({ "tbank_web::person-1": NOW });
+      // The tab goes with the request: the run it lets start works in it.
+      expect(attentionStore.state.requestTabs).toEqual({ "tbank_web::person-1": 42 });
       // The attempt history is not touched: nothing has succeeded yet.
       expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
 

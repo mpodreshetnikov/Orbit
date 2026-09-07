@@ -459,6 +459,53 @@ describe("runScheduledImport", () => {
     expect(liveRuns.list()).toEqual([]);
   });
 
+  it("tells the widget whose run it is and which tab it works in", async () => {
+    const harness = createHarness();
+    const seen: Array<Record<string, unknown>> = [];
+    harness.connector.parse.mockImplementation(async () => {
+      const session = harness.getSession();
+      seen.push({ run_origin: session?.run_origin, run_tab_id: session?.run_tab_id });
+      return {
+        rows: [],
+        windowTo: new Date(NOW).toISOString(),
+        parsedThroughAt: new Date(NOW).toISOString(),
+        parsedTransactionsCount: 0,
+      };
+    });
+
+    await runScheduledImport({ ...INPUT, origin: "requested" }, harness.deps);
+    expect(seen).toEqual([
+      { run_origin: "requested", run_tab_id: 42 },
+      { run_origin: "requested", run_tab_id: 42 },
+    ]);
+  });
+
+  it("announces each window's session once it is claimed, before the connector starts", async () => {
+    const harness = createHarness();
+    const order: string[] = [];
+    harness.connector.parse.mockImplementation(async () => {
+      order.push("parse");
+      return {
+        rows: [],
+        windowTo: new Date(NOW).toISOString(),
+        parsedThroughAt: new Date(NOW).toISOString(),
+        parsedTransactionsCount: 0,
+      };
+    });
+    const onWindowStarted = vi.fn(async (session: Record<string, unknown>) => {
+      order.push(`started:${String(session.session_id)}`);
+    });
+
+    await runScheduledImport(INPUT, { ...harness.deps, onWindowStarted });
+
+    expect(order).toEqual(["started:session-1", "parse", "started:session-2", "parse"]);
+    expect(onWindowStarted.mock.calls[0]?.[0]).toMatchObject({
+      session_id: "session-1",
+      run_tab_id: 42,
+      show_source_page_widget: false,
+    });
+  });
+
   it("reads the window's own broadcasts into its board record", async () => {
     const harness = createHarness();
     let progressSeen: Record<string, unknown> | null = null;

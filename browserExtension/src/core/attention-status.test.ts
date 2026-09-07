@@ -46,6 +46,7 @@ describe("buildAttentionStatus", () => {
         lastOpenedAtMs: null,
         lastStartedAtMs: null,
         runRequests: { "alfa_web::person-1": NOW },
+        requestTabs: {},
       },
       nowMs: NOW,
     });
@@ -133,6 +134,7 @@ describe("buildAttentionStatus", () => {
         lastOpenedAtMs: null,
         lastStartedAtMs: null,
         runRequests: {},
+        requestTabs: {},
       },
       nowMs: NOW,
       liveRuns,
@@ -198,6 +200,7 @@ describe("buildAttentionStatus", () => {
         lastOpenedAtMs: null,
         lastStartedAtMs: null,
         runRequests: {},
+        requestTabs: {},
       },
       nowMs: NOW,
       liveRuns,
@@ -224,6 +227,7 @@ describe("buildAttentionStatus", () => {
         lastOpenedAtMs: null,
         lastStartedAtMs: null,
         runRequests: {},
+        requestTabs: {},
       },
       nowMs: NOW,
     });
