@@ -133,6 +133,9 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
     const requestLive = (await deps.isRunRequested?.(scope, nowMs)) ?? false;
     const requested = trigger === "visit" && requestLive;
     if (!requested && !shouldAutoRun(state, nowMs)) return;
+    // Whose run this is, on the record as well as on the page: a run the request let start is
+    // the person's, and the history must not call it automatic once it is over.
+    const origin = requested ? "requested" : "auto";
 
     const tabId = await deps.openTab(source.targetUrl);
     if (tabId === null) return;
@@ -148,7 +151,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
         sourceId: source.sourceId,
         tabId,
         nowMs,
-        origin: requested ? "requested" : "auto",
+        origin,
       });
 
       // A history slice can fail while the catch-up window succeeds. That is not a failed run --
@@ -165,7 +168,7 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       // succeeded meanwhile must not have its success overwritten by this one's outcome.
       await deps.autoRunStore.setState(
         scope,
-        nextAutoRunState(await deps.autoRunStore.getState(scope), nowMs, "ok"),
+        nextAutoRunState(await deps.autoRunStore.getState(scope), nowMs, "ok", null, origin),
       );
       succeeded = true;
     } catch (error) {
@@ -179,7 +182,13 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       });
       await deps.autoRunStore.setState(
         scope,
-        nextAutoRunState(await deps.autoRunStore.getState(scope), nowMs, "error", errorMessage),
+        nextAutoRunState(
+          await deps.autoRunStore.getState(scope),
+          nowMs,
+          "error",
+          errorMessage,
+          origin,
+        ),
       );
 
       // Revoking a grant happens in the app and reaches the database, not this extension -- so

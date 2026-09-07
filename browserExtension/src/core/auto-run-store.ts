@@ -1,5 +1,10 @@
 import type { LocalStorageLike } from "./session-store.js";
-import { createInitialAutoRunState, type AutoRunState } from "./auto-run-policy.js";
+import {
+  createInitialAutoRunState,
+  type AutoRunAttempt,
+  type AutoRunOrigin,
+  type AutoRunState,
+} from "./auto-run-policy.js";
 
 const AUTO_RUN_STORAGE_KEY = "money_import_auto_state";
 
@@ -34,9 +39,27 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+function readOrigin(value: unknown): AutoRunOrigin | null {
+  return value === "auto" || value === "manual" || value === "requested" ? value : null;
+}
+
+function readAttempt(value: unknown): AutoRunAttempt | null {
+  const record = asRecord(value);
+  const origin = readOrigin(record.origin);
+  if (typeof record.atMs !== "number" || !Number.isFinite(record.atMs) || !origin) return null;
+  if (record.result !== "ok" && record.result !== "error") return null;
+  return {
+    atMs: record.atMs,
+    result: record.result,
+    error: typeof record.error === "string" ? record.error : null,
+    origin,
+  };
+}
+
 function readState(value: unknown): AutoRunState | null {
   const record = asRecord(value);
   if (!("lastRunAtMs" in record)) return null;
+  const lastRunOrigin = readOrigin(record.lastRunOrigin);
   return {
     lastRunAtMs: typeof record.lastRunAtMs === "number" ? record.lastRunAtMs : null,
     lastResult:
@@ -44,9 +67,8 @@ function readState(value: unknown): AutoRunState | null {
     consecutiveFailures:
       typeof record.consecutiveFailures === "number" ? record.consecutiveFailures : 0,
     lastError: typeof record.lastError === "string" ? record.lastError : null,
-    ...(record.lastRunOrigin === "auto" || record.lastRunOrigin === "manual"
-      ? { lastRunOrigin: record.lastRunOrigin }
-      : {}),
+    ...(lastRunOrigin ? { lastRunOrigin } : {}),
+    lastAttempt: readAttempt(record.lastAttempt),
     lastOkAtMs:
       typeof record.lastOkAtMs === "number"
         ? record.lastOkAtMs

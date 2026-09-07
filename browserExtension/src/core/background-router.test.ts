@@ -960,8 +960,18 @@ describe("background-router", () => {
     );
   });
 
-  it("leaves the automatic backoff alone when a run fails", async () => {
+  it("records a failed manual run as the last attempt and leaves the backoff alone", async () => {
     const deps = createDeps();
+    const before = {
+      lastRunAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      lastResult: "ok" as const,
+      consecutiveFailures: 0,
+      lastError: null,
+      lastRunOrigin: "auto" as const,
+      lastOkAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      lastAttempt: null,
+    };
+    deps.autoRunStore.getState = vi.fn(async () => before);
     deps.importRunnerDeps.getConnector.mockReturnValue({
       sourceId: "tbank",
       parse: vi.fn().mockRejectedValue(new Error("still signed out")),
@@ -969,6 +979,7 @@ describe("background-router", () => {
     deps.importRunnerDeps.callEdge = vi.fn().mockResolvedValue({ ok: true });
     deps.sessionStore.getSession.mockResolvedValue({
       source: "tbank",
+      payer_person_id: "person-1",
       session_id: "session-1",
       batch_id: "batch-1",
       function_url: "https://example.com/fn",
@@ -978,7 +989,19 @@ describe("background-router", () => {
     await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
       "still signed out",
     );
-    expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
+    // The page will show this attempt and its reason; the sweep's schedule is untouched.
+    expect(deps.autoRunStore.setState).toHaveBeenCalledWith(
+      { sourceId: "tbank", payerPersonId: "person-1" },
+      {
+        ...before,
+        lastAttempt: {
+          atMs: expect.any(Number),
+          result: "error",
+          error: "still signed out",
+          origin: "manual",
+        },
+      },
+    );
   });
   describe("attention", () => {
     const NOW = Date.parse("2026-09-03T12:00:00.000Z");

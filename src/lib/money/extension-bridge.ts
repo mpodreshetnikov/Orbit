@@ -169,7 +169,7 @@ export interface ExtensionLastAttempt {
   at: string;
   result: "ok" | "error";
   error: string | null;
-  origin: "auto" | "manual" | null;
+  origin: "auto" | "manual" | "requested" | null;
 }
 
 export type ExtensionNextRun =
@@ -236,7 +236,7 @@ function readLastAttempt(value: unknown): ExtensionLastAttempt | null {
     at: record.at,
     result: record.result,
     error: asString(record.error),
-    origin: origin === "auto" || origin === "manual" ? origin : null,
+    origin: origin === "auto" || origin === "manual" || origin === "requested" ? origin : null,
   };
 }
 

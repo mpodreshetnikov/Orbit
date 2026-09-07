@@ -8,7 +8,13 @@ import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
 import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
 import type { AutoRunStore } from "./auto-run-store.js";
-import { describeAutoRunEligibility, nextAutoRunState, shouldAutoRun } from "./auto-run-policy.js";
+import {
+  describeAutoRunEligibility,
+  nextAutoRunState,
+  shouldAutoRun,
+  withFailedAttempt,
+  type AutoRunOrigin,
+} from "./auto-run-policy.js";
 import type { AttentionStore } from "./attention-store.js";
 import { activeImportRuns } from "./active-runs.js";
 import {
@@ -86,7 +92,7 @@ export interface AutoImportStatusSource {
   last_result: "ok" | "error" | null;
   consecutive_failures: number;
   last_error: string | null;
-  last_run_origin: "auto" | "manual" | null;
+  last_run_origin: AutoRunOrigin | null;
   next_run: { kind: "now" } | { kind: "after"; at: string } | { kind: "stopped" };
   /** A visit-triggered sweep waiting on its minute, and only one the policy will let run. */
   scheduled_at: string | null;
@@ -250,18 +256,23 @@ function resolveEdgeAuthToken(session: Record<string, unknown>): string | null {
   return sessionToken || null;
 }
 
+function scopeOfSession(
+  session: Record<string, unknown>,
+): { sourceId: string; payerPersonId: string } | null {
+  const sourceId = typeof session.source === "string" ? session.source.trim() : "";
+  const payerPersonId =
+    typeof session.payer_person_id === "string" ? session.payer_person_id.trim() : "";
+  return sourceId && payerPersonId ? { sourceId, payerPersonId } : null;
+}
+
 async function resetAutoRunBackoff(
   deps: BackgroundRouterDeps,
   session: Record<string, unknown>,
 ): Promise<void> {
-  if (!deps.autoRunStore) return;
-  const sourceId = typeof session.source === "string" ? session.source.trim() : "";
-  const payerPersonId =
-    typeof session.payer_person_id === "string" ? session.payer_person_id.trim() : "";
-  if (!sourceId || !payerPersonId) return;
+  const scope = scopeOfSession(session);
+  if (!deps.autoRunStore || !scope) return;
 
   try {
-    const scope = { sourceId, payerPersonId };
     const autoState = await deps.autoRunStore.getState(scope);
     // The backoff is cleared and the cooldown bought as by an automatic run; the origin is
     // kept so the import page does not report this as one.
@@ -272,6 +283,30 @@ async function resetAutoRunBackoff(
   } catch {
     // Swallowed on purpose: see the call site. The worst case is that automatic import stays
     // backed off a while longer, which the next successful manual run clears.
+  }
+}
+
+/**
+ * A run the person started and that failed is the last attempt on record, for the attention
+ * page to show with its reason. The backoff is left alone: the person's own attempt says
+ * nothing the sweep should act on, and a manual failure must not put automatic import to
+ * sleep. Best-effort, as the reset above: bookkeeping does not get to change how the run ended.
+ */
+async function recordManualFailure(
+  deps: BackgroundRouterDeps,
+  session: Record<string, unknown>,
+  error: string,
+): Promise<void> {
+  const scope = scopeOfSession(session);
+  if (!deps.autoRunStore || !scope) return;
+  try {
+    const autoState = await deps.autoRunStore.getState(scope);
+    await deps.autoRunStore.setState(
+      scope,
+      withFailedAttempt(autoState, Date.now(), error, "manual"),
+    );
+  } catch {
+    // See above.
   }
 }
 
@@ -669,6 +704,7 @@ export async function routeBackgroundMessage(
       const diagnostics = extractErrorDiagnostics(error);
       if (!message.debug?.parse_only) {
         await tryCompleteSessionAsFailed(session, deps.importRunnerDeps.callEdge);
+        await recordManualFailure(deps, session, messageText);
       }
       await deps.sessionStore.setSession(null);
       if (run) {

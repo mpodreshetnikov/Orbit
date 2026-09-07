@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   createInitialAutoRunState,
+  lastAttemptOf,
+  withFailedAttempt,
   DEFAULT_AUTO_RUN_COOLDOWN_MS,
   describeAutoRunEligibility,
   nextAutoRunState,
@@ -66,6 +68,7 @@ describe("nextAutoRunState", () => {
       lastError: null,
       lastRunOrigin: "auto",
       lastOkAtMs: null,
+      lastAttempt: { atMs: NOW, result: "error", error: null, origin: "auto" },
     });
 
     state = nextAutoRunState(state, NOW + 1, "error");
@@ -79,6 +82,7 @@ describe("nextAutoRunState", () => {
       lastError: null,
       lastRunOrigin: "auto",
       lastOkAtMs: NOW + 2,
+      lastAttempt: { atMs: NOW + 2, result: "ok", error: null, origin: "auto" },
     });
 
     // The success stays on record through the failures that follow it.
@@ -141,5 +145,34 @@ describe("nextAutoRunState", () => {
   it("remembers who started the run", () => {
     expect(nextAutoRunState(null, NOW, "ok", null, "manual").lastRunOrigin).toBe("manual");
     expect(nextAutoRunState(null, NOW, "ok").lastRunOrigin).toBe("auto");
+    expect(nextAutoRunState(null, NOW, "ok", null, "requested").lastRunOrigin).toBe("requested");
+  });
+
+  it("records a failed manual attempt without touching the backoff", () => {
+    const after = nextAutoRunState(null, NOW, "ok");
+    const failed = withFailedAttempt(after, NOW + 1, "bank signed out", "manual");
+    expect(failed).toEqual({
+      ...after,
+      lastAttempt: { atMs: NOW + 1, result: "error", error: "bank signed out", origin: "manual" },
+    });
+    expect(describeAutoRunEligibility(failed, NOW + 2)).toEqual(
+      describeAutoRunEligibility(after, NOW + 2),
+    );
+    expect(lastAttemptOf(failed)).toEqual(failed.lastAttempt);
+  });
+
+  it("reads the last attempt of a state written before the field existed", () => {
+    expect(lastAttemptOf(null)).toBeNull();
+    expect(
+      lastAttemptOf({
+        lastRunAtMs: NOW,
+        lastResult: "error",
+        consecutiveFailures: 1,
+        lastError: "signed out",
+      }),
+    ).toEqual({ atMs: NOW, result: "error", error: "signed out", origin: "auto" });
+    expect(
+      lastAttemptOf({ lastRunAtMs: null, lastResult: null, consecutiveFailures: 0 }),
+    ).toBeNull();
   });
 });
