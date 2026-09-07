@@ -229,12 +229,21 @@ against 4 of 6 on `google/gemini-2.5-flash`. Moving it to the cheap model saves 
 document and buys back that failure mode. If you are here to cut the bill, `extract` carries ~76% of
 it and `reconcile` ~18%.
 
-**Changing a stage model is not verified by `just test-extraction` today.** That command replays
-recorded cassettes by default, and even with `--live` the eval sends a single `--model` as one
-`defaultModel` for all three stages, so its output is no evidence about a stage override. Per-stage
-pinning for the eval is added by [`#83`](https://github.com/mpodreshetnikov/Orbit/pull/83); until
-that lands, confirm a changed stage model from the function's own logs — see `T-260903-aha` for
-reporting which model actually served a call.
+How to check a change took effect, and what cannot be checked:
+
+- **Changing a default in the tree** — `deps_test.ts` reads the model off each stage's own outbound
+  request, keyed by that stage's JSON schema name, and fails if a stage carries the shared model or
+  if `reconcile` shares `extract`'s. Run `test-unit-functions`; that is the evidence.
+- **Setting an override secret** — **nothing in production reports it today.** `callStageJson` puts
+  `ctx.model` in the request and discards the `model` the provider answers with, and
+  `health-structure` logs only stage-rejection counts, so there is no log line, span attribute or
+  query that says which model served a call. `T-260903-aha` is the open task for that; until it
+  lands, an override is trusted rather than confirmed, which is one more reason the default belongs
+  in the tree where a test can see it.
+- **`test-extraction` does not answer either question.** It replays recorded cassettes by default,
+  and even live it sends a single model as one `defaultModel` for all three stages, so its output is
+  no evidence about a per-stage choice. Per-stage pinning for it is added by
+  [`#83`](https://github.com/mpodreshetnikov/Orbit/pull/83).
 
 ## Lint And Typecheck Gate Issues
 
