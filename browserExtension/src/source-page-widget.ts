@@ -79,6 +79,11 @@ interface WidgetState {
   isRunTab: boolean;
   /** A run the person asked for, not yet begun: the source it is for. */
   pendingRequest: { source_id: string } | null;
+  /**
+   * The sweep's run has ended, windows and all. A window's own "done" is not that: the next
+   * window follows in the same tab, and the tab is protected until the last one is through.
+   */
+  finished: boolean;
   running: boolean;
   error: string | null;
   progressPercent: number;
@@ -93,8 +98,14 @@ interface WidgetState {
 
 const ROOT_ID = "orbit-money-import-widget-root";
 const KEEPALIVE_PING_MS = 20_000;
-/** An onlooker's tab hears no broadcasts; it asks the worker this often instead. */
-const ONLOOKER_REFRESH_MS = 5_000;
+/** A tab of a sweep's run asks the worker this often, to learn of a run that ended silently. */
+const UNATTENDED_REFRESH_MS = 5_000;
+/**
+ * Answers with no session before the widget of a sweep's run stands down. Between two windows
+ * of one run the session is cleared and set again within a second; one empty answer is that
+ * moment, three in a row is a run that died with its worker.
+ */
+const EMPTY_ANSWERS_BEFORE_STANDING_DOWN = 3;
 
 function resolveMode(state: WidgetState): WidgetMode {
   const origin = readMessageText(state.session ?? {}, "run_origin");
@@ -421,10 +432,12 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   let renderIntervalId: number | null = null;
   let keepAliveIntervalId: number | null = null;
   let keepAlivePort: ReturnType<SourcePageWidgetDeps["runtimeConnect"]> | null = null;
+  let emptyAnswers = 0;
   let state: WidgetState = {
     session: null,
     isRunTab: false,
     pendingRequest: null,
+    finished: false,
     running: false,
     error: null,
     progressPercent: 0,
@@ -457,23 +470,20 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     elements.sessionText.textContent = `${widgetText(locale, "session")}: ${sessionId}`;
     elements.sessionText.style.display = mode === "waiting" ? "none" : "block";
 
-    if (mode === "waiting") {
-      elements.statusText.textContent = widgetText(locale, "statusWaitingSignIn");
-    } else if (mode === "other_tab") {
+    if (mode === "other_tab") {
       elements.statusText.textContent = widgetText(locale, "statusOtherTab");
-    } else if (mode === "run_tab" && state.running) {
-      elements.statusText.textContent = widgetText(
-        locale,
-        origin === "requested" ? "statusOwnTabRequested" : "statusOwnTabAuto",
-      );
-    } else if (state.error) {
+    } else if (mode !== "manual" && state.finished && state.error) {
       elements.statusText.textContent = widgetText(locale, "statusFailed");
-    } else if (mode === "run_tab" && state.batchId) {
+    } else if (mode !== "manual" && state.finished) {
+      // A tab that was waiting has no session to name an origin; only a request waits.
       elements.statusText.textContent = widgetText(
         locale,
-        origin === "requested" ? "statusDoneRequested" : "statusDoneAuto",
+        origin === "auto" ? "statusDoneAuto" : "statusDoneRequested",
       );
+    } else if (mode === "waiting") {
+      elements.statusText.textContent = widgetText(locale, "statusWaitingSignIn");
     } else if (mode === "run_tab") {
+      // Whatever a window said of itself: the tab is the run's until the run says it is over.
       elements.statusText.textContent = widgetText(
         locale,
         origin === "requested" ? "statusOwnTabRequested" : "statusOwnTabAuto",
@@ -575,17 +585,34 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   const applySession = (session: WidgetSession | null, extras: WidgetSessionExtras = {}) => {
     const pendingRequest = readPendingRequest(extras.pending_request);
     if (!shouldShowMoneyImportSourcePageWidget(session)) {
+      // The tab of a sweep's run that has said nothing of its end: an empty answer may be the
+      // moment between two windows, so the widget stands down only after a few in a row.
+      if (state.session && resolveMode(state) !== "manual" && !state.finished && !pendingRequest) {
+        emptyAnswers += 1;
+        if (emptyAnswers < EMPTY_ANSWERS_BEFORE_STANDING_DOWN) return;
+      }
       // No session, but a request the person made from the attention page that has not run
-      // yet: the widget stays, and says what to do. Otherwise there is nothing to show.
+      // yet: the widget stays, and says what to do. A run that has told this tab how it ended
+      // keeps its last word on the page. Otherwise there is nothing to show.
       state = { ...state, session: null, isRunTab: false, pendingRequest };
-      if (!pendingRequest && mounted) {
+      if (!pendingRequest && !state.finished && mounted) {
         unmount();
         return;
       }
       render();
       return;
     }
-    state = { ...state, session, isRunTab: extras.is_run_tab === true, pendingRequest: null };
+    emptyAnswers = 0;
+    const sameRun = session !== null && state.session?.session_id === session.session_id;
+    state = {
+      ...state,
+      session,
+      isRunTab: extras.is_run_tab === true,
+      pendingRequest: null,
+      // A new session is a new run, or the next window of one: what the last one said of its
+      // end no longer holds.
+      finished: sameRun ? state.finished : false,
+    };
     render();
   };
 
@@ -670,14 +697,34 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     }
 
     if (type === "MONEY_IMPORT_DONE") {
+      // A sweep's window is done; the run is not, until it says so. The tab stays protected.
+      const unattended = resolveMode(state) !== "manual";
       state = {
         ...state,
-        running: false,
+        running: unattended ? state.running : false,
         error: null,
         phase: readMessageText(message, "phase") ?? "completed",
         progressPercent: 100,
         batchId: readMessageText(message, "batch_id"),
         estimatedRemainingMs: 0,
+      };
+      render();
+      return;
+    }
+
+    if (type === "MONEY_IMPORT_RUN_FINISHED") {
+      const ok = message.ok === true;
+      state = {
+        ...state,
+        finished: true,
+        running: false,
+        error: ok
+          ? null
+          : (readMessageText(message, "error") ??
+            widgetText(resolveWidgetLocale(state.session, navigator.language), "statusFailed")),
+        phase: ok ? "completed" : state.phase,
+        progressPercent: ok ? 100 : state.progressPercent,
+        estimatedRemainingMs: ok ? 0 : state.estimatedRemainingMs,
       };
       render();
       return;
@@ -771,11 +818,13 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     renderIntervalId = window.setInterval(() => {
       ticks += 1;
       render();
-      // An onlooker's tab and a waiting tab hear no broadcasts: they ask instead.
-      const mode = resolveMode(state);
+      // An onlooker's tab and a waiting tab hear no broadcasts, and the run's own tab would
+      // wait forever on a run that died with its worker: each asks the worker instead, until
+      // the run has said how it ended.
       if (
-        (mode === "other_tab" || mode === "waiting") &&
-        ticks % (ONLOOKER_REFRESH_MS / 1000) === 0
+        resolveMode(state) !== "manual" &&
+        !state.finished &&
+        ticks % (UNATTENDED_REFRESH_MS / 1000) === 0
       ) {
         requestSession();
       }

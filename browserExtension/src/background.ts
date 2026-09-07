@@ -442,34 +442,53 @@ const autoImportSweep = createAutoImportSweep({
     if (!tab || !matchesMoneyImportSourcePageUrl(scope.sourceId, tab.url)) return null;
     return tabId;
   },
-  runImport: async ({ grant, sourceId, tabId, nowMs, origin }) =>
-    await runScheduledImport(
-      {
-        sourceId,
-        payerPersonId: grant.person_id,
-        nowMs,
-        origin,
-        functionUrl: grant.function_url,
-        credentials: { grantToken: grant.token },
-        appOrigin: grant.app_origin || null,
-        // The widget in the run's tab says whose run it is and asks not to close the tab; in
-        // the person's other bank tabs it says a run is on elsewhere.
-        showSourcePageWidget: true,
-        tabId,
-      },
-      {
-        getConnector,
-        callEdge,
-        // The run's own tab hears its progress as the app does; the widget there follows it.
-        broadcastToAppTabs: async (message) => {
-          await broadcastToAppTabs(message);
-          await broadcastToSourceTab(tabId, message);
+  runImport: async ({ grant, sourceId, tabId, nowMs, origin }) => {
+    // The run's tab is told how the whole run ended, windows and all: a window's own "done"
+    // is not the end of the run, and a run that throws broadcasts nothing of its own.
+    const finish = async (result: { ok: boolean; error?: string }) => {
+      await broadcastToSourceTab(tabId, { type: "MONEY_IMPORT_RUN_FINISHED", ...result });
+    };
+    let outcome;
+    try {
+      outcome = await runScheduledImport(
+        {
+          sourceId,
+          payerPersonId: grant.person_id,
+          nowMs,
+          origin,
+          functionUrl: grant.function_url,
+          credentials: { grantToken: grant.token },
+          appOrigin: grant.app_origin || null,
+          // The widget in the run's tab says whose run it is and asks not to close the tab; in
+          // the person's other bank tabs it says a run is on elsewhere.
+          showSourcePageWidget: true,
+          tabId,
         },
-        nowIso: () => new Date().toISOString(),
-        backfillStore,
-        sessionStore,
-      },
-    ),
+        {
+          getConnector,
+          callEdge,
+          // The run's own tab hears its progress as the app does; the widget there follows it.
+          broadcastToAppTabs: async (message) => {
+            await broadcastToAppTabs(message);
+            await broadcastToSourceTab(tabId, message);
+          },
+          nowIso: () => new Date().toISOString(),
+          backfillStore,
+          sessionStore,
+          // The tab was loaded before the session existed, so the widget is put there now.
+          onWindowStarted: async (session) => {
+            const current = await chrome.tabs.get(tabId).catch(() => null);
+            await syncSourcePageWidgetForSession(session, { tabId, tabUrl: current?.url });
+          },
+        },
+      );
+    } catch (error) {
+      await finish({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+    await finish({ ok: true });
+    return outcome;
+  },
   now: () => Date.now(),
   onWarning: (event, attrs) => telemetry.warn(event, attrs),
 });
@@ -482,10 +501,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!isComplete && !hasNavigated) return;
 
   void (async () => {
-    // A load in a tab the sweep opened is the sweep's own doing, not a person's visit.
-    if (autoImportSweep.ownsTab(tabId)) return;
     const session = await sessionStore.getSession();
     if (!session) {
+      // A load in a tab the sweep opened is the sweep's own doing, not a person's visit; with
+      // a run on, the load is the connector moving through the bank, and the widget is put
+      // back on the page it moved to (below), as in any other tab of that bank.
+      if (autoImportSweep.ownsTab(tabId)) return;
       // A finished load on a bank page is the one moment the extension knows the person's bank
       // session is live. It is a signal only -- for that bank, not for every bank the grant
       // covers -- and the sweep it schedules works in a tab of its own.

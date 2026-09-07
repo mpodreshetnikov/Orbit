@@ -464,16 +464,105 @@ describe("source-page-widget", () => {
     expect(runButton.style.display).toBe("none");
     expect(askedBeforeUnload()).toBe(true);
 
+    // A window's "done" is not the run's: the next window follows in this tab.
     widget.handleRuntimeMessage({
       type: "MONEY_IMPORT_DONE",
       batch_id: "batch-9",
       phase: "review_ready",
       progress_percent: 100,
     });
+    expect(getShadowText()).toContain("The extension opened this tab");
+    expect(askedBeforeUnload()).toBe(true);
+
+    widget.handleRuntimeMessage({ type: "MONEY_IMPORT_RUN_FINISHED", ok: true });
     expect(getShadowText()).toContain("this tab will close by itself");
     expect(askedBeforeUnload()).toBe(false);
 
     widget.unmount();
+    expect(askedBeforeUnload()).toBe(false);
+  });
+
+  it("says a sweep's run failed, with its reason, and stops asking about the tab", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: { ...AUTO_SESSION, run_origin: "requested" },
+      is_run_tab: true,
+      active_run: { running: true, phase: "parse_loading_operations_page", progress_percent: 10 },
+    });
+    widget.mount();
+    expect(askedBeforeUnload()).toBe(true);
+
+    widget.handleRuntimeMessage({
+      type: "MONEY_IMPORT_RUN_FINISHED",
+      ok: false,
+      error: "T-Bank session is not authorized",
+    });
+    expect(getShadowText()).toContain("Import failed");
+    expect(getShadowText()).toContain("T-Bank session is not authorized");
+    expect(askedBeforeUnload()).toBe(false);
+  });
+
+  it("tells a waiting tab that the run it waited for failed before it began", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: null,
+      active_run: null,
+      is_run_tab: false,
+      pending_request: { source_id: "tbank_web" },
+    });
+    widget.mount();
+    expect(getShadowText()).toContain("Sign in to the bank");
+
+    widget.handleRuntimeMessage({
+      type: "MONEY_IMPORT_RUN_FINISHED",
+      ok: false,
+      error: "Edge request failed (create_session) status 500",
+    });
+    expect(getShadowText()).toContain("Import failed");
+    expect(getShadowText()).toContain("create_session");
+  });
+
+  it("stays through the moment between two windows, and stands down on a run that died", () => {
+    vi.useFakeTimers();
+    const reply: { current: Record<string, unknown> } = {
+      current: { ok: true, session: AUTO_SESSION, is_run_tab: true, active_run: { running: true } },
+    };
+    const runtimeSendMessage = vi.fn(
+      (
+        message: Record<string, unknown>,
+        callback?: (response: Record<string, unknown> | undefined) => void,
+      ) => {
+        callback?.(message.type === "MONEY_IMPORT_GET_SESSION" ? reply.current : { ok: true });
+      },
+    );
+    const widget = createSourcePageWidget({
+      runtimeSendMessage,
+      addRuntimeListener: vi.fn(),
+      removeRuntimeListener: vi.fn(),
+    });
+    widget.mount();
+    expect(document.getElementById("orbit-money-import-widget-root")).not.toBeNull();
+
+    // The first window is over and the second not yet claimed: the session field is empty.
+    reply.current = { ok: true, session: null, active_run: null, is_run_tab: false };
+    vi.advanceTimersByTime(5_000);
+    expect(document.getElementById("orbit-money-import-widget-root")).not.toBeNull();
+    expect(askedBeforeUnload()).toBe(true);
+
+    // The second window: the widget goes on as the run's own.
+    reply.current = {
+      ok: true,
+      session: { ...AUTO_SESSION, session_id: "session-auto-2" },
+      is_run_tab: true,
+      active_run: { running: true },
+    };
+    vi.advanceTimersByTime(5_000);
+    expect(getShadowText()).toContain("session-auto-2");
+
+    // Three empty answers in a row: the run died with its worker, nothing more is coming.
+    reply.current = { ok: true, session: null, active_run: null, is_run_tab: false };
+    vi.advanceTimersByTime(15_000);
+    expect(document.getElementById("orbit-money-import-widget-root")).toBeNull();
     expect(askedBeforeUnload()).toBe(false);
   });
 
@@ -490,6 +579,10 @@ describe("source-page-widget", () => {
     expect(askedBeforeUnload()).toBe(true);
 
     widget.handleRuntimeMessage({ type: "MONEY_IMPORT_DONE", batch_id: "batch-9" });
+    expect(getShadowText()).toContain("The import you asked for is running in this tab");
+    expect(askedBeforeUnload()).toBe(true);
+
+    widget.handleRuntimeMessage({ type: "MONEY_IMPORT_RUN_FINISHED", ok: true });
     expect(getShadowText()).toContain("You can close this tab");
     expect(askedBeforeUnload()).toBe(false);
   });
@@ -537,12 +630,12 @@ describe("source-page-widget", () => {
     expect(askedBeforeUnload()).toBe(true);
   });
 
-  it("asks the worker again every few seconds while it is only looking on", () => {
+  it("asks the worker again every few seconds during a sweep's run, until the run has ended", () => {
     vi.useFakeTimers();
     const { widget, runtimeSendMessage } = createUnattendedHarness({
       ok: true,
       session: AUTO_SESSION,
-      is_run_tab: false,
+      is_run_tab: true,
       active_run: { running: true },
     });
     widget.mount();
@@ -554,6 +647,10 @@ describe("source-page-widget", () => {
     vi.advanceTimersByTime(5_000);
     expect(asked()).toBe(2);
     vi.advanceTimersByTime(5_000);
+    expect(asked()).toBe(3);
+
+    widget.handleRuntimeMessage({ type: "MONEY_IMPORT_RUN_FINISHED", ok: true });
+    vi.advanceTimersByTime(10_000);
     expect(asked()).toBe(3);
     widget.unmount();
   });
