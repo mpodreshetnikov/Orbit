@@ -107,6 +107,7 @@ describe("createAutoImportSweep", () => {
       lastError: null,
       lastRunOrigin: "auto",
       lastOkAtMs: NOW,
+      lastAttempt: { atMs: NOW, result: "ok", error: null, origin: "auto" },
     });
   });
 
@@ -158,6 +159,33 @@ describe("createAutoImportSweep", () => {
     expect(harness.deps.runImport).toHaveBeenCalledWith(
       expect.objectContaining({ sourceId: "tbank", origin: "requested" }),
     );
+    // On the record as well: once the live entry is gone, the history still says whose run.
+    expect(harness.states["tbank::person-1"]).toMatchObject({
+      lastRunOrigin: "requested",
+      lastAttempt: { result: "ok", origin: "requested" },
+    });
+  });
+
+  it("keeps the requested origin on a run that failed", async () => {
+    const harness = createHarness({
+      states: { "tbank::person-1": nextAutoRunState(null, NOW - 60_000, "ok") },
+      runImport: vi.fn(async () => {
+        throw new Error("T-Bank session is not authorized");
+      }),
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {};
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    expect(harness.states["tbank::person-1"]).toMatchObject({
+      lastResult: "error",
+      lastRunOrigin: "requested",
+      lastAttempt: {
+        result: "error",
+        error: "T-Bank session is not authorized",
+        origin: "requested",
+      },
+    });
   });
 
   it("closes its tab and clears the session when the run throws", async () => {

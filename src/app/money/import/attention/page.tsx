@@ -39,8 +39,6 @@ import {
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** While a requested run is waiting on a sign-in, the page asks again this often to see it land. */
-const PENDING_REFRESH_MS = 20_000;
 
 type Translate = ReturnType<typeof useTranslations>;
 type PageState = "loading" | "inactive" | "stale" | "unavailable" | "ready";
@@ -286,24 +284,18 @@ export default function MoneyImportAttentionPage() {
   const pendingRun =
     (attention?.sources.some((source) => source.run_requested) ?? false) ||
     Object.values(requests).some((request) => request.kind === "sent");
-  useEffect(() => {
-    if (state !== "ready" || !pendingRun) return;
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, PENDING_REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [state, pendingRun, refresh]);
-
   // A run in flight is watched closely: the person was told nothing happens, and this is the
-  // page that shows it happening. The asking stops with the run.
+  // page that shows it happening. A request still waiting on a sign-in is watched as closely,
+  // or the run it starts a minute after could begin and end between two slower looks and never
+  // be seen in flight. The asking stops with the run and the request.
   const liveRun = attention?.sources.some((source) => source.live_run?.running) ?? false;
   useEffect(() => {
-    if (state !== "ready" || !liveRun) return;
+    if (state !== "ready" || (!liveRun && !pendingRun)) return;
     const timer = window.setInterval(() => {
       void refresh();
     }, LIVE_RUN_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [state, liveRun, refresh]);
+  }, [state, liveRun, pendingRun, refresh]);
 
   const handleUpdate = useCallback(
     async (sourceId: string) => {
@@ -439,7 +431,7 @@ export default function MoneyImportAttentionPage() {
                   <p className={source.stale ? "text-destructive" : "text-muted-foreground"}>
                     {describeFreshness(source, t)}
                   </p>
-                  {source.live_run && (
+                  {source.live_run?.running && (
                     <p
                       className="font-medium"
                       data-testid={`money-import-attention-live-${source.source_id}`}
@@ -459,10 +451,10 @@ export default function MoneyImportAttentionPage() {
                       {describeLastAttempt(source.last_attempt, t)}
                     </p>
                   )}
-                  {!source.live_run && source.next_run.kind === "stopped" && (
+                  {!source.live_run?.running && source.next_run.kind === "stopped" && (
                     <p className="text-muted-foreground">{t("money.importAttentionAutoStopped")}</p>
                   )}
-                  {!source.live_run && source.next_run.kind === "after" && (
+                  {!source.live_run?.running && source.next_run.kind === "after" && (
                     <p className="text-muted-foreground">
                       {t("money.importAttentionNextAfter", {
                         date: formatMoment(source.next_run.at),

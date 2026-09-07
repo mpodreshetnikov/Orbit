@@ -301,14 +301,15 @@ describe("MoneyImportAttentionPage", () => {
     render(<MoneyImportAttentionPage />);
     await screen.findByText("money.importAttentionRequested");
 
-    // The unanswered refresh: the list stays, a note says the answer is the previous one.
-    await vi.advanceTimersByTimeAsync(20_000 + 3_000);
+    // The unanswered refresh: the list stays, a note says the answer is the previous one. The
+    // note appears once the request has waited out its own timeout.
+    await vi.advanceTimersByTimeAsync(3_000 + 2_500 + 300);
     await waitFor(() => expect(screen.getByTestId("money-import-attention-missed")).toBeTruthy());
     expect(screen.getByTestId("money-import-attention-tbank_web")).toBeTruthy();
     expect(screen.getByText("money.importAttentionRequested")).toBeTruthy();
 
     // Still asking: the next answer says the run finished, and "requested" goes away.
-    await vi.advanceTimersByTimeAsync(20_000 + 3_000);
+    await vi.advanceTimersByTimeAsync(3_000 + 300);
     await waitFor(() => expect(screen.queryByText("money.importAttentionRequested")).toBeNull());
     expect(screen.queryByTestId("money-import-attention-missed")).toBeNull();
     expect(extension.attentionCalls()).toBeGreaterThanOrEqual(3);
@@ -342,11 +343,11 @@ describe("MoneyImportAttentionPage", () => {
     render(<MoneyImportAttentionPage />);
     await screen.findByText("money.importAttentionRequested");
 
-    await vi.advanceTimersByTimeAsync(20_000 + 1_000);
+    await vi.advanceTimersByTimeAsync(3_000 + 300);
     await waitFor(() => expect(screen.getByTestId("money-import-attention-missed")).toBeTruthy());
     expect(screen.getByTestId("money-import-attention-tbank_web")).toBeTruthy();
 
-    await vi.advanceTimersByTimeAsync(20_000 + 1_000);
+    await vi.advanceTimersByTimeAsync(3_000 + 300);
     await waitFor(() => expect(screen.queryByText("money.importAttentionRequested")).toBeNull());
     vi.useRealTimers();
   });
@@ -390,7 +391,20 @@ describe("MoneyImportAttentionPage", () => {
           ...source,
           stale: false,
           last_ok_at: "2026-09-07T15:03:00.000Z",
-          live_run: null,
+          // Done, and still on the board for a moment: not a run in progress.
+          live_run: {
+            origin: "requested",
+            window_kind: "incremental",
+            window_from: "2026-09-04T00:00:00.000Z",
+            window_to: "2026-09-07T15:00:00.000Z",
+            started_at: "2026-09-07T15:00:00.000Z",
+            running: false,
+            phase: "review_ready",
+            progress_percent: 100,
+            parsed_transactions_count: 12,
+            batch_id: "batch-1",
+            error: null,
+          },
           last_attempt: {
             at: "2026-09-07T15:03:00.000Z",
             result: "ok",

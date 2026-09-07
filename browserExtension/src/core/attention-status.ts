@@ -2,12 +2,19 @@ import type { AutoRunStore } from "./auto-run-store.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { requestKey, type AttentionState } from "./attention-store.js";
 import { describeSourceFreshness, isRunRequestLive } from "./attention-policy.js";
-import { describeAutoRunEligibility, type AutoRunState } from "./auto-run-policy.js";
+import {
+  describeAutoRunEligibility,
+  lastAttemptOf,
+  type AutoRunOrigin,
+  type AutoRunState,
+} from "./auto-run-policy.js";
 import type { LiveRun, RunBoard, RunOrigin, RunWindowKind } from "./run-board.js";
 
 /**
  * A run in flight, as a page may show it. A projection of the board's record: the tab id and
- * the estimates the widget needs stay behind, and nothing here is a credential.
+ * the estimates the widget needs stay behind, and nothing here is a credential. Only a run
+ * still running is one: a record that has seen its done or error broadcast and waits for the
+ * runner to take it off the board is finished, and the page must not call it in progress.
  */
 export interface AttentionLiveRun {
   origin: RunOrigin;
@@ -28,7 +35,7 @@ export interface AttentionLastAttempt {
   at: string;
   result: "ok" | "error";
   error: string | null;
-  origin: "auto" | "manual" | null;
+  origin: AutoRunOrigin | null;
 }
 
 export type AttentionNextRun =
@@ -37,7 +44,7 @@ export type AttentionNextRun =
   | { kind: "stopped" };
 
 export function describeLiveRun(run: LiveRun | null): AttentionLiveRun | null {
-  if (!run) return null;
+  if (!run || !run.running) return null;
   return {
     origin: run.origin,
     window_kind: run.window_kind,
@@ -54,12 +61,13 @@ export function describeLiveRun(run: LiveRun | null): AttentionLiveRun | null {
 }
 
 export function describeLastAttempt(state: AutoRunState): AttentionLastAttempt | null {
-  if (state.lastRunAtMs === null || state.lastResult === null) return null;
+  const attempt = lastAttemptOf(state);
+  if (!attempt) return null;
   return {
-    at: new Date(state.lastRunAtMs).toISOString(),
-    result: state.lastResult,
-    error: state.lastResult === "error" ? (state.lastError ?? null) : null,
-    origin: state.lastRunOrigin ?? null,
+    at: new Date(attempt.atMs).toISOString(),
+    result: attempt.result,
+    error: attempt.error,
+    origin: attempt.origin,
   };
 }
 

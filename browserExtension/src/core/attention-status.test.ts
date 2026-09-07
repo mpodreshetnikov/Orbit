@@ -5,6 +5,7 @@ import {
   createInitialAutoRunState,
   DEFAULT_AUTO_RUN_COOLDOWN_MS,
   nextAutoRunState,
+  withFailedAttempt,
   type AutoRunState,
 } from "./auto-run-policy";
 import type { StoredImportGrant } from "./grant-store";
@@ -165,6 +166,54 @@ describe("buildAttentionStatus", () => {
     expect(status.sources[0].live_run).not.toHaveProperty("tab_id");
     expect(status.sources[0].live_run).not.toHaveProperty("estimated_remaining_ms");
     expect(status.sources[1]).toMatchObject({ source_id: "alfa_web", live_run: null });
+  });
+
+  it("does not call a finished run in progress, and shows a failed manual run as the last attempt", async () => {
+    const liveRuns = createRunBoard({ now: () => NOW });
+    liveRuns.start({
+      session_id: "session-1",
+      source_id: "tbank_web",
+      payer_person_id: "person-1",
+      origin: "auto",
+      window_kind: "incremental",
+      window_from: null,
+      window_to: null,
+      tab_id: null,
+    });
+    // Done, and not yet taken off the board by the runner's cleanup.
+    liveRuns.observe("session-1", { type: "MONEY_IMPORT_DONE", batch_id: "batch-1" });
+
+    const status = await buildAttentionStatus({
+      grant: GRANT,
+      knownSources: ["tbank_web"],
+      autoRunStore: autoRunStore({
+        // An automatic success, then a manual run that failed: the failure is the last attempt.
+        "tbank_web::person-1": withFailedAttempt(
+          nextAutoRunState(null, NOW - 2 * HOUR_MS, "ok"),
+          NOW - HOUR_MS,
+          "still signed out",
+          "manual",
+        ),
+      }),
+      attention: {
+        staleAfterMs: DAY_MS,
+        lastOpenedAtMs: null,
+        lastStartedAtMs: null,
+        runRequests: {},
+      },
+      nowMs: NOW,
+      liveRuns,
+    });
+
+    expect(status.sources[0]).toMatchObject({
+      live_run: null,
+      last_attempt: {
+        at: new Date(NOW - HOUR_MS).toISOString(),
+        result: "error",
+        error: "still signed out",
+        origin: "manual",
+      },
+    });
   });
 
   it("reports nothing without a grant", async () => {
