@@ -459,6 +459,27 @@ describe("runScheduledImport", () => {
     expect(liveRuns.list()).toEqual([]);
   });
 
+  it("tells the widget whose run it is and which tab it works in", async () => {
+    const harness = createHarness();
+    const seen: Array<Record<string, unknown>> = [];
+    harness.connector.parse.mockImplementation(async () => {
+      const session = harness.getSession();
+      seen.push({ run_origin: session?.run_origin, run_tab_id: session?.run_tab_id });
+      return {
+        rows: [],
+        windowTo: new Date(NOW).toISOString(),
+        parsedThroughAt: new Date(NOW).toISOString(),
+        parsedTransactionsCount: 0,
+      };
+    });
+
+    await runScheduledImport({ ...INPUT, origin: "requested" }, harness.deps);
+    expect(seen).toEqual([
+      { run_origin: "requested", run_tab_id: 42 },
+      { run_origin: "requested", run_tab_id: 42 },
+    ]);
+  });
+
   it("reads the window's own broadcasts into its board record", async () => {
     const harness = createHarness();
     let progressSeen: Record<string, unknown> | null = null;

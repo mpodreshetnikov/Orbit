@@ -410,6 +410,154 @@ describe("source-page-widget", () => {
     expect(runButton?.disabled).toBe(true);
   });
 
+  function createUnattendedHarness(reply: Record<string, unknown>) {
+    const runtimeSendMessage = vi.fn(
+      (
+        message: Record<string, unknown>,
+        callback?: (response: Record<string, unknown> | undefined) => void,
+      ) => {
+        if (message.type === "MONEY_IMPORT_GET_SESSION") {
+          callback?.(reply);
+          return;
+        }
+        callback?.({ ok: true });
+      },
+    );
+    const widget = createSourcePageWidget({
+      runtimeSendMessage,
+      addRuntimeListener: vi.fn(),
+      removeRuntimeListener: vi.fn(),
+    });
+    return { widget, runtimeSendMessage };
+  }
+
+  function askedBeforeUnload(): boolean {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  const AUTO_SESSION = {
+    session_id: "session-auto",
+    source: "tbank_web",
+    app_origin: "http://localhost:3000",
+    show_source_page_widget: true,
+    run_origin: "auto",
+    run_tab_id: 42,
+  };
+
+  it("speaks as the run's own in the tab it works in, and asks before that tab closes", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: AUTO_SESSION,
+      is_run_tab: true,
+      active_run: { running: true, phase: "parse_fetching_ranges", progress_percent: 20 },
+    });
+    widget.mount();
+
+    expect(getShadowText()).toContain("The extension opened this tab");
+    expect(getShadowText()).toContain("20%");
+    const runButton = getWidgetShadowRoot().querySelector(
+      '[data-testid="money-import-overlay-run-button"]',
+    ) as HTMLButtonElement;
+    // Nobody starts or retries a run from here.
+    expect(runButton.style.display).toBe("none");
+    expect(askedBeforeUnload()).toBe(true);
+
+    widget.handleRuntimeMessage({
+      type: "MONEY_IMPORT_DONE",
+      batch_id: "batch-9",
+      phase: "review_ready",
+      progress_percent: 100,
+    });
+    expect(getShadowText()).toContain("this tab will close by itself");
+    expect(askedBeforeUnload()).toBe(false);
+
+    widget.unmount();
+    expect(askedBeforeUnload()).toBe(false);
+  });
+
+  it("speaks for the person's request in the tab they opened, and leaves the tab to them after", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: { ...AUTO_SESSION, run_origin: "requested" },
+      is_run_tab: true,
+      active_run: { running: true, phase: "starting", progress_percent: 2 },
+    });
+    widget.mount();
+
+    expect(getShadowText()).toContain("The import you asked for is running in this tab");
+    expect(askedBeforeUnload()).toBe(true);
+
+    widget.handleRuntimeMessage({ type: "MONEY_IMPORT_DONE", batch_id: "batch-9" });
+    expect(getShadowText()).toContain("You can close this tab");
+    expect(askedBeforeUnload()).toBe(false);
+  });
+
+  it("only says a run is on elsewhere in another tab of the bank", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: AUTO_SESSION,
+      is_run_tab: false,
+      active_run: { running: true, phase: "parse_fetching_ranges", progress_percent: 20 },
+    });
+    widget.mount();
+
+    expect(getShadowText()).toContain("An import is running in another tab");
+    expect(getShadowText()).not.toContain("The extension opened this tab");
+    // Closing an onlooker's tab costs the run nothing, so it is not asked about.
+    expect(askedBeforeUnload()).toBe(false);
+  });
+
+  it("tells a person who pressed Update to sign in and wait, until their run begins", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: null,
+      active_run: null,
+      is_run_tab: false,
+      pending_request: { source_id: "tbank_web" },
+    });
+    widget.mount();
+
+    expect(document.getElementById("orbit-money-import-widget-root")).not.toBeNull();
+    expect(getShadowText()).toContain("Sign in to the bank");
+    expect(askedBeforeUnload()).toBe(false);
+
+    widget.handleRuntimeMessage({
+      type: "MONEY_IMPORT_SESSION_UPDATED",
+      session: { ...AUTO_SESSION, run_origin: "requested" },
+      is_run_tab: true,
+    });
+    widget.handleRuntimeMessage({
+      type: "MONEY_IMPORT_PROGRESS",
+      phase: "starting",
+      progress_percent: 2,
+    });
+    expect(getShadowText()).toContain("The import you asked for is running in this tab");
+    expect(askedBeforeUnload()).toBe(true);
+  });
+
+  it("asks the worker again every few seconds while it is only looking on", () => {
+    vi.useFakeTimers();
+    const { widget, runtimeSendMessage } = createUnattendedHarness({
+      ok: true,
+      session: AUTO_SESSION,
+      is_run_tab: false,
+      active_run: { running: true },
+    });
+    widget.mount();
+    const asked = () =>
+      runtimeSendMessage.mock.calls.filter((call) => call[0].type === "MONEY_IMPORT_GET_SESSION")
+        .length;
+    expect(asked()).toBe(1);
+
+    vi.advanceTimersByTime(5_000);
+    expect(asked()).toBe(2);
+    vi.advanceTimersByTime(5_000);
+    expect(asked()).toBe(3);
+    widget.unmount();
+  });
+
   it("removes itself when no webapp-started source-page session is active", () => {
     const runtimeSendMessage = vi.fn(
       (

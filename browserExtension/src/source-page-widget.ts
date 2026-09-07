@@ -28,6 +28,23 @@ type WidgetSession = Record<string, unknown> & {
   source?: string;
   app_origin?: string;
   show_source_page_widget?: boolean;
+  /** Set on a session the sweep runs: whose run it is. Absent on a session a person started. */
+  run_origin?: string;
+};
+
+/**
+ * What the widget is for in this tab. A person's own import (`manual`) is the widget as it was:
+ * a Run button and the progress after it. A run the sweep started shows differently: in the tab
+ * the run works in (`run_tab`) it says whose run this is and asks the person not to close the
+ * tab; in any other tab of the same bank (`other_tab`) it only says a run is on elsewhere. Before
+ * a requested run has begun, the tab Update opened shows `waiting`: sign in, and wait.
+ */
+type WidgetMode = "manual" | "run_tab" | "other_tab" | "waiting";
+
+/** What the worker says besides the session: which tab this is, and what it is waiting for. */
+type WidgetSessionExtras = {
+  is_run_tab?: unknown;
+  pending_request?: unknown;
 };
 
 type WidgetActiveRun = Record<string, unknown> & {
@@ -49,6 +66,7 @@ interface WidgetElements {
   estimateText: HTMLDivElement;
   progressText: HTMLSpanElement;
   progressTrack: HTMLDivElement;
+  progressWrap: HTMLDivElement;
   runButton: HTMLButtonElement;
   retryButton: HTMLButtonElement;
   errorText: HTMLDivElement;
@@ -57,6 +75,10 @@ interface WidgetElements {
 
 interface WidgetState {
   session: WidgetSession | null;
+  /** This tab is the one the session's run works in. */
+  isRunTab: boolean;
+  /** A run the person asked for, not yet begun: the source it is for. */
+  pendingRequest: { source_id: string } | null;
   running: boolean;
   error: string | null;
   progressPercent: number;
@@ -71,6 +93,23 @@ interface WidgetState {
 
 const ROOT_ID = "orbit-money-import-widget-root";
 const KEEPALIVE_PING_MS = 20_000;
+/** An onlooker's tab hears no broadcasts; it asks the worker this often instead. */
+const ONLOOKER_REFRESH_MS = 5_000;
+
+function resolveMode(state: WidgetState): WidgetMode {
+  const origin = readMessageText(state.session ?? {}, "run_origin");
+  if (state.session && (origin === "auto" || origin === "requested")) {
+    return state.isRunTab ? "run_tab" : "other_tab";
+  }
+  if (state.session) return "manual";
+  return "waiting";
+}
+
+function readPendingRequest(value: unknown): { source_id: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const sourceId = readMessageText(value as Record<string, unknown>, "source_id");
+  return sourceId ? { source_id: sourceId } : null;
+}
 
 function clampProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -330,6 +369,7 @@ function createElements(): WidgetElements {
     estimateText,
     progressText,
     progressTrack: progressFill,
+    progressWrap,
     runButton,
     retryButton,
     errorText,
@@ -383,6 +423,8 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   let keepAlivePort: ReturnType<SourcePageWidgetDeps["runtimeConnect"]> | null = null;
   let state: WidgetState = {
     session: null,
+    isRunTab: false,
+    pendingRequest: null,
     running: false,
     error: null,
     progressPercent: 0,
@@ -401,18 +443,43 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     // Resolved on every render rather than once: the session, and with it the language the
     // app is showing, can arrive after the widget is already on the page.
     const locale = resolveWidgetLocale(state.session, navigator.language);
-    elements.title.textContent = widgetText(locale, "title");
+    const mode = resolveMode(state);
+    const origin = readMessageText(state.session ?? {}, "run_origin");
+    elements.title.textContent = widgetText(
+      locale,
+      mode === "manual" ? "title" : "titleUnattended",
+    );
     elements.progressLabelText.textContent = `${widgetText(locale, "progress")} `;
     elements.retryButton.textContent = widgetText(locale, "retry");
 
     const sessionId =
       readMessageText(state.session ?? {}, "session_id") ?? widgetText(locale, "noActiveSession");
     elements.sessionText.textContent = `${widgetText(locale, "session")}: ${sessionId}`;
+    elements.sessionText.style.display = mode === "waiting" ? "none" : "block";
 
-    if (state.running) {
-      elements.statusText.textContent = widgetText(locale, "statusRunning");
+    if (mode === "waiting") {
+      elements.statusText.textContent = widgetText(locale, "statusWaitingSignIn");
+    } else if (mode === "other_tab") {
+      elements.statusText.textContent = widgetText(locale, "statusOtherTab");
+    } else if (mode === "run_tab" && state.running) {
+      elements.statusText.textContent = widgetText(
+        locale,
+        origin === "requested" ? "statusOwnTabRequested" : "statusOwnTabAuto",
+      );
     } else if (state.error) {
       elements.statusText.textContent = widgetText(locale, "statusFailed");
+    } else if (mode === "run_tab" && state.batchId) {
+      elements.statusText.textContent = widgetText(
+        locale,
+        origin === "requested" ? "statusDoneRequested" : "statusDoneAuto",
+      );
+    } else if (mode === "run_tab") {
+      elements.statusText.textContent = widgetText(
+        locale,
+        origin === "requested" ? "statusOwnTabRequested" : "statusOwnTabAuto",
+      );
+    } else if (state.running) {
+      elements.statusText.textContent = widgetText(locale, "statusRunning");
     } else if (state.batchId && state.phase === "review_ready") {
       elements.statusText.textContent = widgetText(locale, "statusReviewReady");
     } else if (state.batchId) {
@@ -439,7 +506,11 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     const phaseText = widgetPhaseLabel(locale, state.phase);
     elements.progressText.textContent = `${phaseText} ${state.progressPercent}%`;
     elements.progressTrack.style.width = `${state.progressPercent}%`;
+    elements.progressWrap.style.display = mode === "waiting" ? "none" : "block";
+    elements.parsedCountText.style.display = mode === "waiting" ? "none" : "block";
 
+    // A run nobody started here is not a run anybody starts or retries from here.
+    elements.runButton.style.display = mode === "manual" ? "" : "none";
     elements.runButton.disabled = state.running;
     elements.runButton.textContent = state.running
       ? widgetText(locale, "running")
@@ -448,7 +519,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     if (state.error) {
       elements.errorText.style.display = "block";
       elements.errorText.textContent = state.error;
-      elements.retryButton.style.display = "inline-flex";
+      elements.retryButton.style.display = mode === "manual" ? "inline-flex" : "none";
     } else {
       elements.errorText.style.display = "none";
       elements.errorText.textContent = "";
@@ -501,18 +572,20 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     );
   };
 
-  const applySession = (session: WidgetSession | null) => {
+  const applySession = (session: WidgetSession | null, extras: WidgetSessionExtras = {}) => {
+    const pendingRequest = readPendingRequest(extras.pending_request);
     if (!shouldShowMoneyImportSourcePageWidget(session)) {
-      state = {
-        ...state,
-        session: null,
-      };
-      if (mounted) {
+      // No session, but a request the person made from the attention page that has not run
+      // yet: the widget stays, and says what to do. Otherwise there is nothing to show.
+      state = { ...state, session: null, isRunTab: false, pendingRequest };
+      if (!pendingRequest && mounted) {
         unmount();
+        return;
       }
+      render();
       return;
     }
-    state = { ...state, session };
+    state = { ...state, session, isRunTab: extras.is_run_tab === true, pendingRequest: null };
     render();
   };
 
@@ -557,7 +630,10 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
         message.session && typeof message.session === "object"
           ? (message.session as WidgetSession)
           : null;
-      applySession(nextSession);
+      applySession(nextSession, {
+        is_run_tab: message.is_run_tab,
+        pending_request: message.pending_request,
+      });
       return;
     }
 
@@ -629,7 +705,10 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
           response?.session && typeof response.session === "object"
             ? (response.session as WidgetSession)
             : null;
-        applySession(nextSession);
+        applySession(nextSession, {
+          is_run_tab: response?.is_run_tab,
+          pending_request: response?.pending_request,
+        });
         const activeRun =
           response?.active_run && typeof response.active_run === "object"
             ? (response.active_run as WidgetActiveRun)
@@ -662,6 +741,17 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     keepAlivePort = null;
   };
 
+  /**
+   * The tab a run works in is asked about before it closes, while the run is on. The browser
+   * shows the question only in a tab the person has touched -- the sweep's own tab has never
+   * been touched and closes silently, which is what its own closing needs.
+   */
+  const onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (!state.running || resolveMode(state) !== "run_tab") return;
+    event.preventDefault();
+    event.returnValue = "";
+  };
+
   const mount = () => {
     if (mounted) {
       render();
@@ -672,12 +762,23 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     document.body.appendChild(elements.host);
     elements.runButton.addEventListener("click", startImport);
     elements.retryButton.addEventListener("click", startImport);
+    window.addEventListener("beforeunload", onBeforeUnload);
 
     runtimeListener = (message) => handleRuntimeMessage(message);
     deps.addRuntimeListener(runtimeListener);
     startKeepAlive();
+    let ticks = 0;
     renderIntervalId = window.setInterval(() => {
+      ticks += 1;
       render();
+      // An onlooker's tab and a waiting tab hear no broadcasts: they ask instead.
+      const mode = resolveMode(state);
+      if (
+        (mode === "other_tab" || mode === "waiting") &&
+        ticks % (ONLOOKER_REFRESH_MS / 1000) === 0
+      ) {
+        requestSession();
+      }
     }, 1000);
     mounted = true;
     requestSession();
@@ -686,6 +787,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
 
   const unmount = () => {
     if (!mounted) return;
+    window.removeEventListener("beforeunload", onBeforeUnload);
     if (runtimeListener) {
       deps.removeRuntimeListener(runtimeListener);
     }

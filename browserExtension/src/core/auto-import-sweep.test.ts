@@ -110,6 +110,42 @@ describe("createAutoImportSweep", () => {
     });
   });
 
+  it("runs the import the person asked for in the tab Update opened, and leaves that tab open", async () => {
+    const harness = createHarness({
+      states: { "tbank::person-1": nextAutoRunState(null, NOW - 60_000, "ok") },
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {};
+    harness.deps.findRequestedTab = async (scope) => (scope.sourceId === "tbank" ? 91 : null);
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toEqual([]);
+    expect(harness.closedTabs).toEqual([]);
+    expect(harness.deps.runImport).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "tbank", tabId: 91, origin: "requested" }),
+    );
+    // The person's tab is not the sweep's: a load in it is still their visit.
+    expect(harness.sweep.ownsTab(91)).toBe(false);
+  });
+
+  it("falls back to a tab of its own when the requested tab is gone or has moved on", async () => {
+    const harness = createHarness({
+      states: { "tbank::person-1": nextAutoRunState(null, NOW - 60_000, "ok") },
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {};
+    harness.deps.findRequestedTab = async () => null;
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+
+    expect(harness.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
+    expect(harness.closedTabs).toEqual([77]);
+    expect(harness.deps.runImport).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 77, origin: "requested" }),
+    );
+  });
+
   it("names the run the person's when their request is what let it start", async () => {
     const harness = createHarness({
       // Inside the cooldown: only the request lets the visit run.

@@ -227,6 +227,10 @@ function toTrimmedString(value: unknown): string | null {
   return trimmed || null;
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function resolveRuntimeExtensionId(): string | null {
   const runtimeId = toTrimmedString(chrome.runtime.id);
   if (runtimeId) return runtimeId;
@@ -436,9 +440,11 @@ export async function routeBackgroundMessage(
       };
     }
     if (tabId === null) return { ok: false, error: "Could not open the bank" };
+    // The tab is remembered with the request: the run it lets start goes on in that tab.
     await deps.attentionStore.requestRun(
       { sourceId, payerPersonId: grant.person_id },
       deps.now?.() ?? Date.now(),
+      tabId,
     );
     return { ok: true, source_id: sourceId, target_url: targetUrl, tab_id: tabId };
   }
@@ -457,10 +463,22 @@ export async function routeBackgroundMessage(
   if (message.type === "MONEY_IMPORT_GET_SESSION") {
     const session = await deps.sessionStore.getSession();
     const sessionId = toTrimmedString(session?.session_id);
+    const senderTabId = resolveSenderTabId(context);
+    const runTabId = toFiniteNumber(session?.run_tab_id);
+    // A tab Update opened, before its run has begun: the widget there tells the person to sign
+    // in and wait, where before it showed nothing and the bank simply sat there.
+    const pending =
+      !session && senderTabId !== null && deps.attentionStore
+        ? await deps.attentionStore.findRequestForTab(senderTabId, deps.now?.() ?? Date.now())
+        : null;
     return {
       ok: true,
       session,
       active_run: sessionId ? liveRuns.get(sessionId) : null,
+      // Whether the asking tab is the one the run works in: the widget there speaks as the
+      // run's own, in any other bank tab as an onlooker's.
+      is_run_tab: runTabId !== null && runTabId === senderTabId,
+      pending_request: pending ? { source_id: pending.sourceId } : null,
     };
   }
 

@@ -46,6 +46,12 @@ export interface AutoImportSweepDeps {
    */
   isRunRequested?: (scope: AutoRunScope, nowMs: number) => Promise<boolean>;
   clearRunRequest?: (scope: AutoRunScope) => Promise<void>;
+  /**
+   * The tab Update opened for a live request, when it is still there and still on the bank.
+   * The person is looking at that tab, so the run they asked for goes on in it; a tab gone or
+   * moved on means a tab of the sweep's own, as for any other run.
+   */
+  findRequestedTab?: (scope: AutoRunScope, nowMs: number) => Promise<number | null>;
 }
 
 export type AutoImportTrigger = "visit" | "alarm";
@@ -111,12 +117,14 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
   /**
    * Runs one source in a tab opened for the purpose.
    *
-   * The tab is always this code's own, never one the person opened, and that is the point of the
+   * The tab is this code's own, never one the person opened, and that is the point of the
    * shape. The connector navigates whatever tab it is given to the operations page and then
    * clicks through operations to make the receipt requests fire; doing that to the tab someone
    * is reading would take their bank out from under them, and could interrupt a half-filled
-   * transfer. A second background tab shares the same cookies, so it is just as authorised and
-   * costs nobody their place.
+   * transfer. A second tab shares the same cookies, so it is just as authorised and costs
+   * nobody their place. The one exception is the tab Update opened on the person's request:
+   * they opened it for this, the widget in it says what is happening, and a second copy of the
+   * bank appearing beside it read as the extension acting behind their back (2026-09-04).
    */
   async function runSource(
     source: AutoImportSourceTarget,
@@ -134,9 +142,11 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
     const requested = trigger === "visit" && requestLive;
     if (!requested && !shouldAutoRun(state, nowMs)) return;
 
-    const tabId = await deps.openTab(source.targetUrl);
+    const requestedTab = requested ? ((await deps.findRequestedTab?.(scope, nowMs)) ?? null) : null;
+    const tabId = requestedTab ?? (await deps.openTab(source.targetUrl));
     if (tabId === null) return;
-    ownedTabs.add(tabId);
+    const ownTab = requestedTab === null;
+    if (ownTab) ownedTabs.add(tabId);
     let succeeded = false;
 
     try {
@@ -192,10 +202,13 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       }
     } finally {
       // However the attempt ended: a tab left open is a bank page the person never asked for.
-      // The session field is cleared by the run itself, which is the only party that knows
+      // The tab they opened themselves stays, with the widget saying how the run ended. The
+      // session field is cleared by the run itself, which is the only party that knows
       // whether the session still there is its own or one a person has just started.
-      await deps.closeTab(tabId);
-      ownedTabs.delete(tabId);
+      if (ownTab) {
+        await deps.closeTab(tabId);
+        ownedTabs.delete(tabId);
+      }
     }
 
     // Bookkeeping after the outcome is settled, and unable to unsettle it: a request that

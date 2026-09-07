@@ -633,8 +633,10 @@ export async function runScheduledImport(
       // asked for. The flag rides on the session so every message the run broadcasts carries it.
       unattended: true,
       // Who asked, for the widget in the bank tab: the sweep's own tab says so, a tab the
-      // person opened from the attention page says whose request it is serving.
+      // person opened from the attention page says whose request it is serving -- and which
+      // tab that is, so the widget there speaks as the run's and elsewhere as an onlooker's.
       run_origin: origin,
+      run_tab_id: input.tabId,
       // The run begins the moment this is stored. A later worker finding it stored with no run
       // of its own knows the run died, and closes it; see `createSessionJanitor`.
       [RUN_STARTED_AT_KEY]: input.nowMs,
