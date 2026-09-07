@@ -200,6 +200,7 @@ describe("buildAttentionStatus", () => {
         lastOpenedAtMs: null,
         lastStartedAtMs: null,
         runRequests: {},
+        requestTabs: {},
       },
       nowMs: NOW,
       liveRuns,
