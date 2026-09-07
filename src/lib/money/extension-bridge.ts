@@ -65,6 +65,8 @@ export const STARTUP_PROBE_OFFSETS_MS: readonly number[] = [
   0, 300, 1000, 2000, 3500, 5500, 8500, 11500,
 ];
 export const STARTUP_PROBE_TIMEOUT_MS = PING_TIMEOUT_MS;
+/** While a run is in flight, the attention page asks again this often to show it moving. */
+export const LIVE_RUN_REFRESH_MS = 3000;
 
 export async function probeExtensionUntilHeard(
   offsetsMs: readonly number[] = STARTUP_PROBE_OFFSETS_MS,
@@ -148,6 +150,33 @@ export function requestFromExtension<T>(input: {
   });
 }
 
+/** A run in flight for a source, as the extension's board describes it. */
+export interface ExtensionLiveRun {
+  origin: "auto" | "requested" | "manual";
+  window_kind: "incremental" | "backfill" | "manual";
+  window_from: string | null;
+  window_to: string | null;
+  started_at: string;
+  running: boolean;
+  phase: string | null;
+  progress_percent: number;
+  parsed_transactions_count: number | null;
+  batch_id: string | null;
+  error: string | null;
+}
+
+export interface ExtensionLastAttempt {
+  at: string;
+  result: "ok" | "error";
+  error: string | null;
+  origin: "auto" | "manual" | null;
+}
+
+export type ExtensionNextRun =
+  | { kind: "now" }
+  | { kind: "after"; at: string }
+  | { kind: "stopped" };
+
 export interface ExtensionAttentionSource {
   source_id: string;
   last_ok_at: string | null;
@@ -155,6 +184,9 @@ export interface ExtensionAttentionSource {
   stale: boolean;
   stale_for_ms: number;
   run_requested: boolean;
+  live_run: ExtensionLiveRun | null;
+  last_attempt: ExtensionLastAttempt | null;
+  next_run: ExtensionNextRun;
 }
 
 export interface ExtensionAttention {
@@ -166,6 +198,55 @@ export interface ExtensionAttention {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readLiveRun(value: unknown): ExtensionLiveRun | null {
+  const record = asRecord(value);
+  if (!record || typeof record.started_at !== "string") return null;
+  const origin = record.origin;
+  const windowKind = record.window_kind;
+  return {
+    origin: origin === "auto" || origin === "requested" ? origin : "manual",
+    window_kind: windowKind === "incremental" || windowKind === "backfill" ? windowKind : "manual",
+    window_from: asString(record.window_from),
+    window_to: asString(record.window_to),
+    started_at: record.started_at,
+    running: record.running !== false,
+    phase: asString(record.phase),
+    progress_percent: typeof record.progress_percent === "number" ? record.progress_percent : 0,
+    parsed_transactions_count:
+      typeof record.parsed_transactions_count === "number"
+        ? record.parsed_transactions_count
+        : null,
+    batch_id: asString(record.batch_id),
+    error: asString(record.error),
+  };
+}
+
+function readLastAttempt(value: unknown): ExtensionLastAttempt | null {
+  const record = asRecord(value);
+  if (!record || typeof record.at !== "string") return null;
+  if (record.result !== "ok" && record.result !== "error") return null;
+  const origin = record.origin;
+  return {
+    at: record.at,
+    result: record.result,
+    error: asString(record.error),
+    origin: origin === "auto" || origin === "manual" ? origin : null,
+  };
+}
+
+function readNextRun(value: unknown): ExtensionNextRun {
+  const record = asRecord(value);
+  if (record?.kind === "after" && typeof record.at === "string") {
+    return { kind: "after", at: record.at };
+  }
+  if (record?.kind === "stopped") return { kind: "stopped" };
+  return { kind: "now" };
 }
 
 export function readExtensionAttention(data: Record<string, unknown>): ExtensionAttention | null {
@@ -195,6 +276,9 @@ export function readExtensionAttention(data: Record<string, unknown>): Extension
       stale: record.stale === true,
       stale_for_ms: typeof record.stale_for_ms === "number" ? record.stale_for_ms : 0,
       run_requested: record.run_requested === true,
+      live_run: readLiveRun(record.live_run),
+      last_attempt: readLastAttempt(record.last_attempt),
+      next_run: readNextRun(record.next_run),
     }));
   return {
     grant,

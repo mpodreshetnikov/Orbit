@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  LIVE_RUN_REFRESH_MS,
   onBridgeStale,
   probeExtension,
   probeExtensionUntilHeard,
@@ -23,6 +24,8 @@ import {
   STARTUP_PROBE_TIMEOUT_MS,
   type ExtensionAttention,
   type ExtensionAttentionSource,
+  type ExtensionLastAttempt,
+  type ExtensionLiveRun,
 } from "@/lib/money/extension-bridge";
 
 /**
@@ -99,6 +102,80 @@ function describeFreshness(source: ExtensionAttentionSource, t: Translate): stri
 
 function thresholdDaysOf(staleAfterMs: number): number {
   return Math.max(1, Math.round(staleAfterMs / DAY_MS));
+}
+
+function formatDay(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return format(parsed, "dd.MM.yyyy");
+}
+
+/**
+ * The phases a run reports, named for a person. The list is the connector's vocabulary; a
+ * phase the list does not know is shown as its own name, so a new one is readable before it is
+ * translated.
+ */
+const KNOWN_PHASES = new Set([
+  "starting",
+  "parse_preparing_tab",
+  "parse_loading_operations_page",
+  "parse_loading_history_page",
+  "parse_extracting_page_data",
+  "parse_discovering_endpoints",
+  "parse_fetching_ranges",
+  "parse_enriching_operations",
+  "parse_using_dom_fallback",
+  "parse_dom_rows_ready",
+  "parse_mapping_rows",
+  "parse_completed",
+  "preview_rows_started",
+  "complete_session_started",
+  "parse_only_completed",
+  "review_ready",
+  "completed",
+]);
+
+function phaseLabel(phase: string | null, t: Translate): string {
+  if (!phase) return t("money.importPhase.starting");
+  if (KNOWN_PHASES.has(phase)) return t(`money.importPhase.${phase}`);
+  return phase.replace(/_/g, " ");
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/** One line for a run in flight: whose it is, which window, where it has got to. */
+function describeLiveRun(run: ExtensionLiveRun, t: Translate): string {
+  const origin = t(`money.importAttentionLiveOrigin${capitalize(run.origin)}`);
+  const window =
+    run.window_from && run.window_to
+      ? t(`money.importAttentionWindow${capitalize(run.window_kind)}`, {
+          from: formatDay(run.window_from),
+          to: formatDay(run.window_to),
+        })
+      : t("money.importAttentionWindowUnknown");
+  const count =
+    run.parsed_transactions_count === null
+      ? ""
+      : t("money.importAttentionLiveRunCount", { count: run.parsed_transactions_count });
+  return t("money.importAttentionLiveRun", {
+    origin,
+    window,
+    phase: phaseLabel(run.phase, t),
+    percent: Math.round(run.progress_percent),
+    count,
+  });
+}
+
+function describeLastAttempt(attempt: ExtensionLastAttempt, t: Translate): string {
+  if (attempt.result === "ok") {
+    return t("money.importAttentionLastAttemptOk", { date: formatMoment(attempt.at) });
+  }
+  return t("money.importAttentionLastAttemptFailed", {
+    date: formatMoment(attempt.at),
+    error: attempt.error ?? "-",
+  });
 }
 
 export default function MoneyImportAttentionPage() {
@@ -216,6 +293,17 @@ export default function MoneyImportAttentionPage() {
     }, PENDING_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [state, pendingRun, refresh]);
+
+  // A run in flight is watched closely: the person was told nothing happens, and this is the
+  // page that shows it happening. The asking stops with the run.
+  const liveRun = attention?.sources.some((source) => source.live_run?.running) ?? false;
+  useEffect(() => {
+    if (state !== "ready" || !liveRun) return;
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, LIVE_RUN_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [state, liveRun, refresh]);
 
   const handleUpdate = useCallback(
     async (sourceId: string) => {
@@ -351,6 +439,36 @@ export default function MoneyImportAttentionPage() {
                   <p className={source.stale ? "text-destructive" : "text-muted-foreground"}>
                     {describeFreshness(source, t)}
                   </p>
+                  {source.live_run && (
+                    <p
+                      className="font-medium"
+                      data-testid={`money-import-attention-live-${source.source_id}`}
+                    >
+                      {describeLiveRun(source.live_run, t)}
+                    </p>
+                  )}
+                  {source.last_attempt && (
+                    <p
+                      className={
+                        source.last_attempt.result === "error"
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      }
+                      data-testid={`money-import-attention-last-${source.source_id}`}
+                    >
+                      {describeLastAttempt(source.last_attempt, t)}
+                    </p>
+                  )}
+                  {!source.live_run && source.next_run.kind === "stopped" && (
+                    <p className="text-muted-foreground">{t("money.importAttentionAutoStopped")}</p>
+                  )}
+                  {!source.live_run && source.next_run.kind === "after" && (
+                    <p className="text-muted-foreground">
+                      {t("money.importAttentionNextAfter", {
+                        date: formatMoment(source.next_run.at),
+                      })}
+                    </p>
+                  )}
                   {requested && (
                     <p className="text-muted-foreground">{t("money.importAttentionRequested")}</p>
                   )}

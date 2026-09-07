@@ -32,6 +32,8 @@ export interface AutoImportSweepDeps {
     sourceId: string;
     tabId: number;
     nowMs: number;
+    /** Whose run the pages should call it: the sweep's own, or the person's request. */
+    origin: "auto" | "requested";
   }) => Promise<{ backfillError?: { message: string } } | undefined>;
   now: () => number;
   onWarning: (event: string, attrs: Record<string, unknown>) => void;
@@ -141,7 +143,13 @@ export function createAutoImportSweep(deps: AutoImportSweepDeps): AutoImportSwee
       if (!(await deps.waitForTabComplete(tabId))) {
         throw new Error(`${source.sourceId} did not finish loading`);
       }
-      const outcome = await deps.runImport({ grant, sourceId: source.sourceId, tabId, nowMs });
+      const outcome = await deps.runImport({
+        grant,
+        sourceId: source.sourceId,
+        tabId,
+        nowMs,
+        origin: requested ? "requested" : "auto",
+      });
 
       // A history slice can fail while the catch-up window succeeds. That is not a failed run --
       // the cursor holds and the slice is taken again -- but it must not be silent either, or a

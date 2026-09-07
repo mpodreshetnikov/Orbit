@@ -2,6 +2,73 @@ import type { AutoRunStore } from "./auto-run-store.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { requestKey, type AttentionState } from "./attention-store.js";
 import { describeSourceFreshness, isRunRequestLive } from "./attention-policy.js";
+import { describeAutoRunEligibility, type AutoRunState } from "./auto-run-policy.js";
+import type { LiveRun, RunBoard, RunOrigin, RunWindowKind } from "./run-board.js";
+
+/**
+ * A run in flight, as a page may show it. A projection of the board's record: the tab id and
+ * the estimates the widget needs stay behind, and nothing here is a credential.
+ */
+export interface AttentionLiveRun {
+  origin: RunOrigin;
+  window_kind: RunWindowKind;
+  window_from: string | null;
+  window_to: string | null;
+  started_at: string;
+  running: boolean;
+  phase: string | null;
+  progress_percent: number;
+  parsed_transactions_count: number | null;
+  batch_id: string | null;
+  error: string | null;
+}
+
+/** The last attempt on record for a source: when, how it ended, and what it said. */
+export interface AttentionLastAttempt {
+  at: string;
+  result: "ok" | "error";
+  error: string | null;
+  origin: "auto" | "manual" | null;
+}
+
+export type AttentionNextRun =
+  | { kind: "now" }
+  | { kind: "after"; at: string }
+  | { kind: "stopped" };
+
+export function describeLiveRun(run: LiveRun | null): AttentionLiveRun | null {
+  if (!run) return null;
+  return {
+    origin: run.origin,
+    window_kind: run.window_kind,
+    window_from: run.window_from,
+    window_to: run.window_to,
+    started_at: run.started_at,
+    running: run.running,
+    phase: run.phase,
+    progress_percent: run.progress_percent,
+    parsed_transactions_count: run.parsed_transactions_count,
+    batch_id: run.batch_id,
+    error: run.error,
+  };
+}
+
+export function describeLastAttempt(state: AutoRunState): AttentionLastAttempt | null {
+  if (state.lastRunAtMs === null || state.lastResult === null) return null;
+  return {
+    at: new Date(state.lastRunAtMs).toISOString(),
+    result: state.lastResult,
+    error: state.lastResult === "error" ? (state.lastError ?? null) : null,
+    origin: state.lastRunOrigin ?? null,
+  };
+}
+
+export function describeNextRun(state: AutoRunState, nowMs: number): AttentionNextRun {
+  const eligibility = describeAutoRunEligibility(state, nowMs);
+  return eligibility.kind === "after"
+    ? { kind: "after", at: new Date(eligibility.atMs).toISOString() }
+    : { kind: eligibility.kind };
+}
 
 /**
  * What the attention page shows and the badge counts: per covered source, when it last
@@ -17,6 +84,12 @@ export interface AttentionSourceStatus {
   stale_for_ms: number;
   /** A run the person asked for is still waiting on their visit to the bank. */
   run_requested: boolean;
+  /** The run reading this source right now, if any. */
+  live_run: AttentionLiveRun | null;
+  /** The last attempt of any kind, automatic or a person's. Null before the first. */
+  last_attempt: AttentionLastAttempt | null;
+  /** When the sweep may next run this source on its own. */
+  next_run: AttentionNextRun;
 }
 
 export interface AttentionStatus {
@@ -32,6 +105,8 @@ export async function buildAttentionStatus(input: {
   autoRunStore: AutoRunStore;
   attention: AttentionState;
   nowMs: number;
+  /** The runs in flight; without it no source reports one. */
+  liveRuns?: Pick<RunBoard, "findBySource">;
 }): Promise<AttentionStatus> {
   const sources: AttentionSourceStatus[] = [];
   if (input.grant) {
@@ -59,6 +134,11 @@ export async function buildAttentionStatus(input: {
           input.attention.runRequests[requestKey(scope)],
           input.nowMs,
         ),
+        live_run: describeLiveRun(
+          input.liveRuns?.findBySource(sourceId, input.grant.person_id) ?? null,
+        ),
+        last_attempt: describeLastAttempt(state),
+        next_run: describeNextRun(state, input.nowMs),
       });
     }
   }

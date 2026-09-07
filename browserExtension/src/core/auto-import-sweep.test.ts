@@ -98,7 +98,7 @@ describe("createAutoImportSweep", () => {
     expect(harness.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
     expect(harness.closedTabs).toEqual([77]);
     expect(harness.deps.runImport).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceId: "tbank", tabId: 77 }),
+      expect.objectContaining({ sourceId: "tbank", tabId: 77, origin: "auto" }),
     );
     expect(harness.states["tbank::person-1"]).toEqual({
       lastRunAtMs: NOW,
@@ -108,6 +108,20 @@ describe("createAutoImportSweep", () => {
       lastRunOrigin: "auto",
       lastOkAtMs: NOW,
     });
+  });
+
+  it("names the run the person's when their request is what let it start", async () => {
+    const harness = createHarness({
+      // Inside the cooldown: only the request lets the visit run.
+      states: { "tbank::person-1": nextAutoRunState(null, NOW - 60_000, "ok") },
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {};
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    expect(harness.deps.runImport).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "tbank", origin: "requested" }),
+    );
   });
 
   it("closes its tab and clears the session when the run throws", async () => {

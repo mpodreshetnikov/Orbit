@@ -351,6 +351,98 @@ describe("MoneyImportAttentionPage", () => {
     vi.useRealTimers();
   });
 
+  it("shows the run in flight and the last attempt, and keeps asking while it runs", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const source = (STALE_ATTENTION.sources as Reply[])[0];
+    const live: Reply = {
+      ...STALE_ATTENTION,
+      sources: [
+        {
+          ...source,
+          live_run: {
+            origin: "requested",
+            window_kind: "incremental",
+            window_from: "2026-09-04T00:00:00.000Z",
+            window_to: "2026-09-07T15:00:00.000Z",
+            started_at: "2026-09-07T15:00:00.000Z",
+            running: true,
+            phase: "parse_enriching_operations",
+            progress_percent: 42.4,
+            parsed_transactions_count: 12,
+            batch_id: null,
+            error: null,
+          },
+          last_attempt: {
+            at: "2026-09-07T14:52:00.000Z",
+            result: "error",
+            error: "T-Bank did not stay on the operations page",
+            origin: "auto",
+          },
+          next_run: { kind: "after", at: "2026-09-08T10:52:00.000Z" },
+        },
+      ],
+    };
+    const finished: Reply = {
+      ...STALE_ATTENTION,
+      stale_count: 0,
+      sources: [
+        {
+          ...source,
+          stale: false,
+          last_ok_at: "2026-09-07T15:03:00.000Z",
+          live_run: null,
+          last_attempt: {
+            at: "2026-09-07T15:03:00.000Z",
+            result: "ok",
+            error: null,
+            origin: "auto",
+          },
+          next_run: { kind: "after", at: "2026-09-08T11:03:00.000Z" },
+        },
+      ],
+    };
+    const extension = installExtension({
+      answersPing: true,
+      attention: [live, live, finished],
+    });
+    render(<MoneyImportAttentionPage />);
+
+    const liveLine = await screen.findByTestId("money-import-attention-live-tbank_web");
+    const prefix = "money.importAttentionLiveRun:";
+    expect(liveLine.textContent?.startsWith(prefix)).toBe(true);
+    expect(JSON.parse(liveLine.textContent!.slice(prefix.length))).toEqual({
+      origin: "money.importAttentionLiveOriginRequested",
+      window: 'money.importAttentionWindowIncremental:{"from":"04.09.2026","to":"07.09.2026"}',
+      phase: "money.importPhase.parse_enriching_operations",
+      percent: 42,
+      count: 'money.importAttentionLiveRunCount:{"count":12}',
+    });
+    expect(screen.getByTestId("money-import-attention-last-tbank_web").textContent).toBe(
+      'money.importAttentionLastAttemptFailed:{"date":"07.09.2026 14:52","error":"T-Bank did not stay on the operations page"}',
+    );
+    // The next-run line waits: a run in flight is the answer to "when".
+    expect(screen.queryByText(/importAttentionNextAfter/)).toBeNull();
+    expect(extension.attentionCalls()).toBe(1);
+
+    // Every few seconds while the run is in flight; the run ends, the asking ends.
+    await vi.advanceTimersByTimeAsync(3_000 + 200);
+    await waitFor(() => expect(extension.attentionCalls()).toBe(2));
+    await vi.advanceTimersByTimeAsync(3_000 + 200);
+    await waitFor(() => expect(extension.attentionCalls()).toBe(3));
+    await waitFor(() =>
+      expect(screen.queryByTestId("money-import-attention-live-tbank_web")).toBeNull(),
+    );
+    expect(screen.getByTestId("money-import-attention-last-tbank_web").textContent).toBe(
+      'money.importAttentionLastAttemptOk:{"date":"07.09.2026 15:03"}',
+    );
+    expect(
+      screen.getByText('money.importAttentionNextAfter:{"date":"08.09.2026 11:03"}'),
+    ).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(3_000 + 200);
+    expect(extension.attentionCalls()).toBe(3);
+    vi.useRealTimers();
+  });
+
   it("shows the newest answer when an older refresh lands last", async () => {
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((resolve) => {
