@@ -9,6 +9,7 @@ import {
 } from "./repository.ts";
 import type { HealthStructureParseContext } from "./service.ts";
 import { emptyLlmUsage } from "../_shared/llm-usage.ts";
+import { DEFAULT_HEALTH_STAGE_MODELS } from "../_shared/health-stage-models.ts";
 import type { StructuredParseOutcome } from "./types.ts";
 
 export type HealthStructureParserMode = "openrouter" | "e2e_stub";
@@ -63,13 +64,21 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const openRouterModel =
     Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? "openai/gpt-5.2:nitro";
-  // Per-stage overrides. Extraction is accuracy-critical and deserves the strongest model;
-  // classification and reconciliation are cheaper jobs and can be pointed at a smaller one.
-  // Each falls back to the shared default so an unset environment keeps working.
+  // Per-stage models. The variable wins where it is set; where it is not, the floor is the
+  // measured configuration named in `_shared/health-stage-models.ts`, which is also where the
+  // evidence for each stage lives — including why reconcile is held on the more expensive model
+  // on purpose. These used to be `?? undefined`, which let an unset variable fall through to
+  // `defaultModel` and run every stage on the same model with nothing recording that it had
+  // happened.
   const stageModels = {
-    classify: Deno.env.get("OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL") ?? undefined,
-    extract: Deno.env.get("OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL") ?? undefined,
-    reconcile: Deno.env.get("OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL") ?? undefined,
+    classify:
+      Deno.env.get("OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL") ??
+      DEFAULT_HEALTH_STAGE_MODELS.classify,
+    extract:
+      Deno.env.get("OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL") ?? DEFAULT_HEALTH_STAGE_MODELS.extract,
+    reconcile:
+      Deno.env.get("OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL") ??
+      DEFAULT_HEALTH_STAGE_MODELS.reconcile,
   };
   // The staged pipeline is the default. Set to "monolithic" to fall back to the single-call
   // parser during rollout.

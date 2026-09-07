@@ -204,6 +204,38 @@ Checks:
 - Confirm attachment exists in `medical-attachments` bucket.
 - Check function logs for auth failures, timeout, or model/provider errors.
 
+### Which Model Each Structuring Stage Runs
+
+`health-structure` runs three stages and each takes its own model. **The models are chosen in the
+tree, not in a console:** `supabase/functions/_shared/health-stage-models.ts` names all three, and
+the evidence for each — from `T-260903-oy7` in the task registry — is in the comment beside them.
+Change one there, in a pull request, so the reasoning changes with it.
+
+| stage       | default                   | override                                  |
+| ----------- | ------------------------- | ----------------------------------------- |
+| `classify`  | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL`  |
+| `extract`   | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL`   |
+| `reconcile` | `openai/gpt-5.2`          | `OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL` |
+
+The variables still win where they are set, so a deployment can move one stage for a one-off
+experiment without shipping code. They are edge-function secrets — Supabase dashboard under Edge
+Functions -> Secrets, or `supabase secrets set NAME=value --project-ref <ref>`. Setting one is the
+exception now, not the way the choice is made: an unset variable no longer means "whatever the
+shared model happens to be", it means the measured default above.
+
+Reconcile is on the more expensive model on purpose. It is the stage that closes a patient's
+conditions, and across fourteen measured passes 1 of 8 wrongfully resolved on `openai/gpt-5.2`
+against 4 of 6 on `google/gemini-2.5-flash`. Moving it to the cheap model saves about $0.013 a
+document and buys back that failure mode. If you are here to cut the bill, `extract` carries ~76% of
+it and `reconcile` ~18%.
+
+**Changing a stage model is not verified by `just test-extraction` today.** That command replays
+recorded cassettes by default, and even with `--live` the eval sends a single `--model` as one
+`defaultModel` for all three stages, so its output is no evidence about a stage override. Per-stage
+pinning for the eval is added by [`#83`](https://github.com/mpodreshetnikov/Orbit/pull/83); until
+that lands, confirm a changed stage model from the function's own logs — see `T-260903-aha` for
+reporting which model actually served a call.
+
 ## Lint And Typecheck Gate Issues
 
 Quality gate commands:
