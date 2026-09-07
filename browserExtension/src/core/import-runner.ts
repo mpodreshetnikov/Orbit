@@ -13,6 +13,7 @@ import type { BackfillStore } from "./backfill-store.js";
 import type { SessionStore } from "./session-store.js";
 import { activeImportRuns } from "./active-runs.js";
 import { RUN_STARTED_AT_KEY } from "./session-janitor.js";
+import { liveRuns, type RunWindowKind } from "./run-board.js";
 
 export interface ImportRunnerDeps {
   getConnector: (sourceId: string) => Connector | null;
@@ -465,6 +466,11 @@ export interface ScheduledImportInput {
   appOrigin?: string | null;
   showSourcePageWidget?: boolean;
   /**
+   * Whose run this is, as the pages will say it: the sweep's own, or one a person asked for
+   * from the attention page. The run itself is the same either way.
+   */
+  origin?: "auto" | "requested";
+  /**
    * The bank tab to work in. Required, and not merely helpful: given no tab the connector falls
    * back to the active tab of the last focused window, which during an unattended sweep is
    * whatever the person happens to be reading -- and it is then rejected for not being a bank
@@ -585,8 +591,12 @@ export async function runScheduledImport(
   // after it is spent: the first live run lost 45 of 177 that way.
   const parseStrategy = unattendedParseStrategy(deps.getConnector(input.sourceId));
   const parseStrategyFields = parseStrategy ? { parse_strategy: parseStrategy } : {};
+  const origin = input.origin ?? "auto";
 
-  const runWindow = async (window: BackfillSlice): Promise<ScheduledImportRunResult> => {
+  const runWindow = async (
+    window: BackfillSlice,
+    kind: RunWindowKind,
+  ): Promise<ScheduledImportRunResult> => {
     const created = await deps.callEdge(input.functionUrl, token, {
       action: "create_session",
       source: input.sourceId,
@@ -622,6 +632,9 @@ export async function runScheduledImport(
       // doing -- including a manual import in progress -- and onto a report for a run they never
       // asked for. The flag rides on the session so every message the run broadcasts carries it.
       unattended: true,
+      // Who asked, for the widget in the bank tab: the sweep's own tab says so, a tab the
+      // person opened from the attention page says whose request it is serving.
+      run_origin: origin,
       // The run begins the moment this is stored. A later worker finding it stored with no run
       // of its own knows the run died, and closes it; see `createSessionJanitor`.
       [RUN_STARTED_AT_KEY]: input.nowMs,
@@ -635,10 +648,34 @@ export async function runScheduledImport(
       throw new Error("A session started by the person is in progress");
     }
     const sessionId = typeof session.session_id === "string" ? session.session_id : "";
-    if (sessionId) activeImportRuns.begin(sessionId);
+    if (sessionId) {
+      activeImportRuns.begin(sessionId);
+      liveRuns.start({
+        session_id: sessionId,
+        source_id: input.sourceId,
+        payer_person_id: input.payerPersonId,
+        origin,
+        window_kind: kind,
+        window_from: window.windowFromIso,
+        window_to: window.windowToIso,
+        tab_id: input.tabId,
+        batch_id: typeof created.batch_id === "string" ? created.batch_id : null,
+      });
+    }
+    // Every broadcast the window makes is read into the board on its way out, so a page
+    // that asks mid-run is told where the run is rather than only that it exists.
+    const windowDeps: typeof deps = sessionId
+      ? {
+          ...deps,
+          broadcastToAppTabs: async (message) => {
+            liveRuns.observe(sessionId, message);
+            await deps.broadcastToAppTabs(message);
+          },
+        }
+      : deps;
 
     try {
-      const result = await runImportSession(session, window.windowFromIso, deps, windowDebug);
+      const result = await runImportSession(session, window.windowFromIso, windowDeps, windowDebug);
       return { window, result };
     } catch (error) {
       // Same duty the manual path takes: a run that dies mid-window leaves a session the server
@@ -654,7 +691,10 @@ export async function runScheduledImport(
       try {
         await clearOwnSession(deps.sessionStore, session);
       } finally {
-        if (sessionId) activeImportRuns.end(sessionId);
+        if (sessionId) {
+          activeImportRuns.end(sessionId);
+          liveRuns.end(sessionId);
+        }
       }
     }
   };
@@ -662,7 +702,7 @@ export async function runScheduledImport(
   const scope = { sourceId: input.sourceId, payerPersonId: input.payerPersonId };
   const state = await deps.backfillStore.getState(scope);
 
-  const incremental = await runWindow(planIncrementalWindow(state, input.nowMs));
+  const incremental = await runWindow(planIncrementalWindow(state, input.nowMs), "incremental");
   // Recorded only once the window has actually landed, so a failed run leaves the next one
   // reaching just as far back rather than skipping what it never read.
   await deps.backfillStore.setState(scope, { ...state, lastIncrementalToMs: input.nowMs });
@@ -681,7 +721,7 @@ export async function runScheduledImport(
 
   let backfill: ScheduledImportRunResult;
   try {
-    backfill = await runWindow(planned.slice);
+    backfill = await runWindow(planned.slice, "backfill");
   } catch (error) {
     // A failed history slice must not cost the catch-up window that already succeeded, and must
     // not move the cursor: the same slice is simply taken again next time. It is reported rather

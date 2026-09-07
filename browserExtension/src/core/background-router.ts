@@ -8,10 +8,21 @@ import type { ImportDebugStore } from "./import-debug.js";
 import type { SessionStore } from "./session-store.js";
 import { parseIncomingGrant, type GrantStore } from "./grant-store.js";
 import type { AutoRunStore } from "./auto-run-store.js";
-import { describeAutoRunEligibility, nextAutoRunState, shouldAutoRun } from "./auto-run-policy.js";
+import {
+  describeAutoRunEligibility,
+  nextAutoRunState,
+  shouldAutoRun,
+  withFailedAttempt,
+  type AutoRunOrigin,
+} from "./auto-run-policy.js";
 import type { AttentionStore } from "./attention-store.js";
 import { activeImportRuns } from "./active-runs.js";
-import { buildAttentionStatus } from "./attention-status.js";
+import {
+  buildAttentionStatus,
+  describeLiveRun,
+  type AttentionLiveRun,
+} from "./attention-status.js";
+import { liveRuns } from "./run-board.js";
 
 export interface BackgroundMessage {
   type: string;
@@ -81,10 +92,12 @@ export interface AutoImportStatusSource {
   last_result: "ok" | "error" | null;
   consecutive_failures: number;
   last_error: string | null;
-  last_run_origin: "auto" | "manual" | null;
+  last_run_origin: AutoRunOrigin | null;
   next_run: { kind: "now" } | { kind: "after"; at: string } | { kind: "stopped" };
   /** A visit-triggered sweep waiting on its minute, and only one the policy will let run. */
   scheduled_at: string | null;
+  /** The run reading this source right now, if any. */
+  live_run: AttentionLiveRun | null;
 }
 
 export interface BackgroundRouterContext {
@@ -116,21 +129,6 @@ function resolveExtensionVersion(): string {
     return "0.0.0";
   }
 }
-type ActiveImportRunSnapshot = {
-  running: boolean;
-  phase: string | null;
-  progress_percent: number;
-  parsed_transactions_count: number | null;
-  estimated_total_ms: number | null;
-  estimated_remaining_ms: number | null;
-  estimated_receipt_request_count: number | null;
-  estimate_updated_at: string | null;
-  batch_id: string | null;
-  error: string | null;
-};
-
-const activeImportRunStateBySessionId = new Map<string, ActiveImportRunSnapshot>();
-
 function resolveFunctionTarget(functionUrl: unknown): {
   function_url_present: boolean;
   function_url_valid: boolean;
@@ -258,55 +256,23 @@ function resolveEdgeAuthToken(session: Record<string, unknown>): string | null {
   return sessionToken || null;
 }
 
-function buildActiveRunSnapshot(
-  payload: Record<string, unknown>,
-  current?: ActiveImportRunSnapshot,
-): ActiveImportRunSnapshot {
-  return {
-    running: typeof payload.running === "boolean" ? payload.running : (current?.running ?? false),
-    phase: toTrimmedString(payload.phase) ?? current?.phase ?? null,
-    progress_percent:
-      typeof payload.progress_percent === "number" && Number.isFinite(payload.progress_percent)
-        ? payload.progress_percent
-        : (current?.progress_percent ?? 0),
-    parsed_transactions_count:
-      typeof payload.parsed_transactions_count === "number" &&
-      Number.isFinite(payload.parsed_transactions_count)
-        ? payload.parsed_transactions_count
-        : (current?.parsed_transactions_count ?? null),
-    estimated_total_ms:
-      typeof payload.estimated_total_ms === "number" && Number.isFinite(payload.estimated_total_ms)
-        ? payload.estimated_total_ms
-        : (current?.estimated_total_ms ?? null),
-    estimated_remaining_ms:
-      typeof payload.estimated_remaining_ms === "number" &&
-      Number.isFinite(payload.estimated_remaining_ms)
-        ? payload.estimated_remaining_ms
-        : (current?.estimated_remaining_ms ?? null),
-    estimated_receipt_request_count:
-      typeof payload.estimated_receipt_request_count === "number" &&
-      Number.isFinite(payload.estimated_receipt_request_count)
-        ? payload.estimated_receipt_request_count
-        : (current?.estimated_receipt_request_count ?? null),
-    estimate_updated_at:
-      toTrimmedString(payload.estimate_updated_at) ?? current?.estimate_updated_at ?? null,
-    batch_id: toTrimmedString(payload.batch_id) ?? current?.batch_id ?? null,
-    error: toTrimmedString(payload.error) ?? current?.error ?? null,
-  };
+function scopeOfSession(
+  session: Record<string, unknown>,
+): { sourceId: string; payerPersonId: string } | null {
+  const sourceId = typeof session.source === "string" ? session.source.trim() : "";
+  const payerPersonId =
+    typeof session.payer_person_id === "string" ? session.payer_person_id.trim() : "";
+  return sourceId && payerPersonId ? { sourceId, payerPersonId } : null;
 }
 
 async function resetAutoRunBackoff(
   deps: BackgroundRouterDeps,
   session: Record<string, unknown>,
 ): Promise<void> {
-  if (!deps.autoRunStore) return;
-  const sourceId = typeof session.source === "string" ? session.source.trim() : "";
-  const payerPersonId =
-    typeof session.payer_person_id === "string" ? session.payer_person_id.trim() : "";
-  if (!sourceId || !payerPersonId) return;
+  const scope = scopeOfSession(session);
+  if (!deps.autoRunStore || !scope) return;
 
   try {
-    const scope = { sourceId, payerPersonId };
     const autoState = await deps.autoRunStore.getState(scope);
     // The backoff is cleared and the cooldown bought as by an automatic run; the origin is
     // kept so the import page does not report this as one.
@@ -317,6 +283,30 @@ async function resetAutoRunBackoff(
   } catch {
     // Swallowed on purpose: see the call site. The worst case is that automatic import stays
     // backed off a while longer, which the next successful manual run clears.
+  }
+}
+
+/**
+ * A run the person started and that failed is the last attempt on record, for the attention
+ * page to show with its reason. The backoff is left alone: the person's own attempt says
+ * nothing the sweep should act on, and a manual failure must not put automatic import to
+ * sleep. Best-effort, as the reset above: bookkeeping does not get to change how the run ended.
+ */
+async function recordManualFailure(
+  deps: BackgroundRouterDeps,
+  session: Record<string, unknown>,
+  error: string,
+): Promise<void> {
+  const scope = scopeOfSession(session);
+  if (!deps.autoRunStore || !scope) return;
+  try {
+    const autoState = await deps.autoRunStore.getState(scope);
+    await deps.autoRunStore.setState(
+      scope,
+      withFailedAttempt(autoState, Date.now(), error, "manual"),
+    );
+  } catch {
+    // See above.
   }
 }
 
@@ -411,6 +401,7 @@ export async function routeBackgroundMessage(
               ? { kind: "after", at: new Date(eligibility.atMs).toISOString() }
               : { kind: eligibility.kind },
           scheduled_at: pending ? new Date(pending.atMs).toISOString() : null,
+          live_run: describeLiveRun(liveRuns.findBySource(sourceId, grant.person_id)),
         });
       }
     }
@@ -439,6 +430,7 @@ export async function routeBackgroundMessage(
       autoRunStore: deps.autoRunStore,
       attention: await deps.attentionStore.getState(),
       nowMs: deps.now?.() ?? Date.now(),
+      liveRuns,
     });
     // The token stays here, as with MONEY_IMPORT_GET_GRANT.
     return {
@@ -503,7 +495,7 @@ export async function routeBackgroundMessage(
     return {
       ok: true,
       session,
-      active_run: sessionId ? (activeImportRunStateBySessionId.get(sessionId) ?? null) : null,
+      active_run: sessionId ? liveRuns.get(sessionId) : null,
     };
   }
 
@@ -533,18 +525,7 @@ export async function routeBackgroundMessage(
     if (typeof message.batch_id === "string") payload.batch_id = message.batch_id;
 
     const sessionId = toTrimmedString(message.session_id);
-    if (sessionId) {
-      activeImportRunStateBySessionId.set(
-        sessionId,
-        buildActiveRunSnapshot(
-          {
-            ...payload,
-            running: true,
-          },
-          activeImportRunStateBySessionId.get(sessionId),
-        ),
-      );
-    }
+    if (sessionId) liveRuns.observe(sessionId, { ...payload, running: true });
 
     await deps.importRunnerDeps.broadcastToAppTabs(payload);
     const senderTabId = resolveSenderTabId(context);
@@ -592,50 +573,34 @@ export async function routeBackgroundMessage(
     if (activeSessionId && !activeImportRuns.begin(activeSessionId)) {
       throw new Error(`Import already running for session ${activeSessionId}`);
     }
+    const senderTabId = resolveSenderTabId(context);
     if (activeSessionId) {
       // Written to the stored session, so that a later worker -- this one killed mid-run --
       // can tell a session whose run died from one still waiting for a person to start it.
       // Best-effort: a mark that could not be written costs that one detection, not the run,
       // and must not leave the registry holding a session no run is on.
       await deps.markRunStarted?.(activeSessionId).catch(() => undefined);
-      activeImportRunStateBySessionId.set(
-        activeSessionId,
-        buildActiveRunSnapshot({
-          running: true,
-          phase: "starting",
-          progress_percent: 2,
-          parsed_transactions_count: null,
-          estimated_total_ms: null,
-          estimated_remaining_ms: null,
-          estimated_receipt_request_count: null,
-          estimate_updated_at: null,
-          batch_id: session.batch_id,
-          error: null,
-        }),
-      );
+      liveRuns.start({
+        session_id: activeSessionId,
+        source_id: toTrimmedString(session.source),
+        payer_person_id: toTrimmedString(session.payer_person_id),
+        origin: "manual",
+        window_kind: "manual",
+        window_from:
+          toTrimmedString(message.windowFrom) ??
+          toTrimmedString(session.window_from) ??
+          toTrimmedString(session.last_imported_at),
+        window_to: toTrimmedString(session.window_to),
+        tab_id: senderTabId,
+        batch_id: toTrimmedString(session.batch_id),
+      });
+      liveRuns.observe(activeSessionId, { running: true, phase: "starting", progress_percent: 2 });
     }
-    const senderTabId = resolveSenderTabId(context);
     const shouldBroadcastToSourceTab =
       message.origin === "source_page_overlay" && senderTabId !== null;
 
     const broadcastToRelevantTabs = async (payload: Record<string, unknown>) => {
-      if (activeSessionId) {
-        activeImportRunStateBySessionId.set(
-          activeSessionId,
-          buildActiveRunSnapshot(
-            {
-              ...payload,
-              running:
-                payload.type === "MONEY_IMPORT_ERROR"
-                  ? false
-                  : payload.type === "MONEY_IMPORT_DONE"
-                    ? false
-                    : true,
-            },
-            activeImportRunStateBySessionId.get(activeSessionId),
-          ),
-        );
-      }
+      if (activeSessionId) liveRuns.observe(activeSessionId, payload);
       await deps.importRunnerDeps.broadcastToAppTabs(payload);
       if (!shouldBroadcastToSourceTab || !deps.importRunnerDeps.broadcastToSourceTab) {
         return;
@@ -739,6 +704,7 @@ export async function routeBackgroundMessage(
       const diagnostics = extractErrorDiagnostics(error);
       if (!message.debug?.parse_only) {
         await tryCompleteSessionAsFailed(session, deps.importRunnerDeps.callEdge);
+        await recordManualFailure(deps, session, messageText);
       }
       await deps.sessionStore.setSession(null);
       if (run) {
@@ -761,7 +727,7 @@ export async function routeBackgroundMessage(
         // After the session field is cleared above, never before: a registry that no longer
         // holds the session while the store still does reads as a run that died.
         activeImportRuns.end(activeSessionId);
-        activeImportRunStateBySessionId.delete(activeSessionId);
+        liveRuns.end(activeSessionId);
       }
     }
   }

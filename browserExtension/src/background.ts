@@ -419,12 +419,13 @@ const autoImportSweep = createAutoImportSweep({
   closeTab: async (tabId) => {
     await chrome.tabs.remove(tabId).catch(() => {});
   },
-  runImport: async ({ grant, sourceId, tabId, nowMs }) =>
+  runImport: async ({ grant, sourceId, tabId, nowMs, origin }) =>
     await runScheduledImport(
       {
         sourceId,
         payerPersonId: grant.person_id,
         nowMs,
+        origin,
         functionUrl: grant.function_url,
         credentials: { grantToken: grant.token },
         appOrigin: grant.app_origin || null,

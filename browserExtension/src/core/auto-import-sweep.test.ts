@@ -98,7 +98,7 @@ describe("createAutoImportSweep", () => {
     expect(harness.openedTabs).toEqual(["https://www.tbank.ru/mybank/operations/"]);
     expect(harness.closedTabs).toEqual([77]);
     expect(harness.deps.runImport).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceId: "tbank", tabId: 77 }),
+      expect.objectContaining({ sourceId: "tbank", tabId: 77, origin: "auto" }),
     );
     expect(harness.states["tbank::person-1"]).toEqual({
       lastRunAtMs: NOW,
@@ -107,6 +107,48 @@ describe("createAutoImportSweep", () => {
       lastError: null,
       lastRunOrigin: "auto",
       lastOkAtMs: NOW,
+      lastAttempt: { atMs: NOW, result: "ok", error: null, origin: "auto" },
+    });
+  });
+
+  it("names the run the person's when their request is what let it start", async () => {
+    const harness = createHarness({
+      // Inside the cooldown: only the request lets the visit run.
+      states: { "tbank::person-1": nextAutoRunState(null, NOW - 60_000, "ok") },
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {};
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    expect(harness.deps.runImport).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "tbank", origin: "requested" }),
+    );
+    // On the record as well: once the live entry is gone, the history still says whose run.
+    expect(harness.states["tbank::person-1"]).toMatchObject({
+      lastRunOrigin: "requested",
+      lastAttempt: { result: "ok", origin: "requested" },
+    });
+  });
+
+  it("keeps the requested origin on a run that failed", async () => {
+    const harness = createHarness({
+      states: { "tbank::person-1": nextAutoRunState(null, NOW - 60_000, "ok") },
+      runImport: vi.fn(async () => {
+        throw new Error("T-Bank session is not authorized");
+      }),
+    });
+    harness.deps.isRunRequested = async () => true;
+    harness.deps.clearRunRequest = async () => {};
+
+    await harness.sweep.run("visit", { sourceId: "tbank" });
+    expect(harness.states["tbank::person-1"]).toMatchObject({
+      lastResult: "error",
+      lastRunOrigin: "requested",
+      lastAttempt: {
+        result: "error",
+        error: "T-Bank session is not authorized",
+        origin: "requested",
+      },
     });
   });
 

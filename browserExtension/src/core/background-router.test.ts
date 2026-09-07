@@ -5,6 +5,7 @@ import { routeBackgroundMessage } from "./background-router.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { createInitialAutoRunState } from "./auto-run-policy.js";
 import { activeImportRuns } from "./active-runs.js";
+import { liveRuns } from "./run-board.js";
 
 describe("background-router", () => {
   /**
@@ -231,6 +232,7 @@ describe("background-router", () => {
           // One failure: the ordinary twenty-hour cooldown, not yet doubled.
           next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
           scheduled_at: null,
+          live_run: null,
         },
         {
           source_id: "alfa_web",
@@ -241,6 +243,7 @@ describe("background-router", () => {
           last_run_origin: null,
           next_run: { kind: "now" },
           scheduled_at: "2026-09-03T05:03:00.000Z",
+          live_run: null,
         },
       ],
     });
@@ -957,8 +960,18 @@ describe("background-router", () => {
     );
   });
 
-  it("leaves the automatic backoff alone when a run fails", async () => {
+  it("records a failed manual run as the last attempt and leaves the backoff alone", async () => {
     const deps = createDeps();
+    const before = {
+      lastRunAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      lastResult: "ok" as const,
+      consecutiveFailures: 0,
+      lastError: null,
+      lastRunOrigin: "auto" as const,
+      lastOkAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      lastAttempt: null,
+    };
+    deps.autoRunStore.getState = vi.fn(async () => before);
     deps.importRunnerDeps.getConnector.mockReturnValue({
       sourceId: "tbank",
       parse: vi.fn().mockRejectedValue(new Error("still signed out")),
@@ -966,6 +979,7 @@ describe("background-router", () => {
     deps.importRunnerDeps.callEdge = vi.fn().mockResolvedValue({ ok: true });
     deps.sessionStore.getSession.mockResolvedValue({
       source: "tbank",
+      payer_person_id: "person-1",
       session_id: "session-1",
       batch_id: "batch-1",
       function_url: "https://example.com/fn",
@@ -975,7 +989,19 @@ describe("background-router", () => {
     await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
       "still signed out",
     );
-    expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
+    // The page will show this attempt and its reason; the sweep's schedule is untouched.
+    expect(deps.autoRunStore.setState).toHaveBeenCalledWith(
+      { sourceId: "tbank", payerPersonId: "person-1" },
+      {
+        ...before,
+        lastAttempt: {
+          atMs: expect.any(Number),
+          result: "error",
+          error: "still signed out",
+          origin: "manual",
+        },
+      },
+    );
   });
   describe("attention", () => {
     const NOW = Date.parse("2026-09-03T12:00:00.000Z");
@@ -1067,6 +1093,68 @@ describe("background-router", () => {
       await expect(
         routeBackgroundMessage({ type: "MONEY_IMPORT_GET_ATTENTION" }, createDeps()),
       ).resolves.toEqual({ ok: false, error: "Attention is not available" });
+    });
+
+    it("tells the page about the run in flight for its source, and the last attempt", async () => {
+      const deps = createDeps();
+      deps.grantStore.getGrant.mockResolvedValue(createGrant());
+      const failedAt = NOW - 60 * 60 * 1000;
+      deps.autoRunStore.getState.mockResolvedValue({
+        lastRunAtMs: failedAt,
+        lastResult: "error",
+        consecutiveFailures: 1,
+        lastError: "T-Bank session is not authorized",
+        lastRunOrigin: "auto",
+        lastOkAtMs: null,
+      });
+      liveRuns.start({
+        session_id: "session-live",
+        source_id: "tbank_web",
+        payer_person_id: "person-1",
+        origin: "auto",
+        window_kind: "backfill",
+        window_from: "2026-08-01T00:00:00.000Z",
+        window_to: "2026-09-01T00:00:00.000Z",
+        tab_id: 5,
+      });
+      liveRuns.observe("session-live", {
+        type: "MONEY_IMPORT_PROGRESS",
+        phase: "parse_fetching_ranges",
+        progress_percent: 20,
+      });
+      try {
+        const reply = (await routeBackgroundMessage(
+          { type: "MONEY_IMPORT_GET_ATTENTION" },
+          {
+            ...deps,
+            attentionStore: createAttentionStore(),
+            listAutoImportSources: () => ["tbank_web"],
+            now: () => NOW,
+          },
+        )) as Record<string, unknown>;
+
+        expect((reply.sources as Array<Record<string, unknown>>)[0]).toMatchObject({
+          source_id: "tbank_web",
+          live_run: {
+            origin: "auto",
+            window_kind: "backfill",
+            window_from: "2026-08-01T00:00:00.000Z",
+            window_to: "2026-09-01T00:00:00.000Z",
+            running: true,
+            phase: "parse_fetching_ranges",
+            progress_percent: 20,
+          },
+          last_attempt: {
+            at: new Date(failedAt).toISOString(),
+            result: "error",
+            error: "T-Bank session is not authorized",
+            origin: "auto",
+          },
+          next_run: { kind: "after", at: expect.any(String) },
+        });
+      } finally {
+        liveRuns.end("session-live");
+      }
     });
 
     it("opens the bank in front of the person and remembers the request, for a covered source only", async () => {
