@@ -193,6 +193,15 @@ Conventions that matter:
   per-unit strength exists, withholding the figure is the difference between reporting the record
   and inventing a dose.
 
+  That per-unit strength is now decided rather than hypothetical: `ADR-260907-cvj` records strength
+  in `dose_definition.unit_strength` — what one unit contains — and derives the per-intake total from
+  the amount beside it, leaving `active` as a legacy field read only for unmigrated rows. When it
+  lands, this withholding narrows to its honest case, a course with no strength recorded at all: a
+  figure that scales with its own amount cannot be stranded by a slot override, an amount edit or a
+  `log_dose` correction, so there is nothing left to detect. Both counterexamples above disappear
+  rather than being caught. The renderer keeps the withholding until the migration has run, because
+  a row that still carries only `active` is exactly as unverifiable as it was.
+
   A dose is dated by `actual_at`, not `scheduled_at`, and its resolution timestamp is labelled by
   what happened. The two columns are written equal by the generator and separated by `snooze_dose`,
   which moves `actual_at` alone — and that is the time the reminder query fires on and the dashboard
