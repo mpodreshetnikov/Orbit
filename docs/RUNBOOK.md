@@ -220,15 +220,20 @@ evidence for it, is `T-260903-oy7` in the task registry:
 These are edge-function secrets, so they are set in the Supabase dashboard under
 Edge Functions -> Secrets, or with `supabase secrets set NAME=value --project-ref <ref>`. Setting
 them requires a Supabase access token; they are not part of the repository and no CI job sets them.
-**Changing one of these is not verified by `just test-extraction` today.** That command replays
-recorded cassettes by default, and even with `--live` the eval sends a single `--model` as one
-`defaultModel` for all three stages — it has no per-stage flag, so its output is no evidence about a
-stage override you just changed. The report's **Cost by stage** table tells you each stage's share
-of the bill, which is what says whether moving a stage is worth anything; it does not tell you the
-override took effect. Per-stage pinning for the eval is added by
-[`#83`](https://github.com/mpodreshetnikov/Orbit/pull/83); until that lands, confirm a changed stage
-model from the function's own logs — see `T-260903-aha` for reporting which model actually served a
-call.
+To measure a stage configuration before deploying it, pin the stages in a live eval — a plain
+`just test-extraction` replays recorded cassettes and is no evidence about any model:
+
+```
+just test-extraction --live --model-classify google/gemini-2.5-flash \
+  --model-extract google/gemini-2.5-flash --model-reconcile openai/gpt-5.2
+```
+
+The same pins are exposed as `model_classify`, `model_extract` and `model_reconcile` inputs on the
+`Extraction Eval` workflow. The report's **Cost by stage** table gives each stage's share of the
+bill, which is what says whether moving a stage is worth anything.
+
+That measures a configuration; it does not confirm the deployed secret took effect. For that, read
+which model actually served the call from the function's own logs — see `T-260903-aha`.
 
 ## Lint And Typecheck Gate Issues
 
