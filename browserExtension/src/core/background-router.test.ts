@@ -5,6 +5,7 @@ import { routeBackgroundMessage } from "./background-router.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { createInitialAutoRunState } from "./auto-run-policy.js";
 import { activeImportRuns } from "./active-runs.js";
+import { liveRuns } from "./run-board.js";
 
 describe("background-router", () => {
   /**
@@ -231,6 +232,7 @@ describe("background-router", () => {
           // One failure: the ordinary twenty-hour cooldown, not yet doubled.
           next_run: { kind: "after", at: "2026-09-04T01:02:00.000Z" },
           scheduled_at: null,
+          live_run: null,
         },
         {
           source_id: "alfa_web",
@@ -241,6 +243,7 @@ describe("background-router", () => {
           last_run_origin: null,
           next_run: { kind: "now" },
           scheduled_at: "2026-09-03T05:03:00.000Z",
+          live_run: null,
         },
       ],
     });
@@ -279,6 +282,8 @@ describe("background-router", () => {
       ok: true,
       session: { source: "tbank_web" },
       active_run: null,
+      is_run_tab: false,
+      pending_request: null,
     });
   });
 
@@ -335,6 +340,8 @@ describe("background-router", () => {
         progress_percent: 2,
         batch_id: "batch-1",
       }),
+      is_run_tab: false,
+      pending_request: null,
     });
 
     parseDeferred.resolve({
@@ -957,8 +964,18 @@ describe("background-router", () => {
     );
   });
 
-  it("leaves the automatic backoff alone when a run fails", async () => {
+  it("records a failed manual run as the last attempt and leaves the backoff alone", async () => {
     const deps = createDeps();
+    const before = {
+      lastRunAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      lastResult: "ok" as const,
+      consecutiveFailures: 0,
+      lastError: null,
+      lastRunOrigin: "auto" as const,
+      lastOkAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+      lastAttempt: null,
+    };
+    deps.autoRunStore.getState = vi.fn(async () => before);
     deps.importRunnerDeps.getConnector.mockReturnValue({
       sourceId: "tbank",
       parse: vi.fn().mockRejectedValue(new Error("still signed out")),
@@ -966,6 +983,7 @@ describe("background-router", () => {
     deps.importRunnerDeps.callEdge = vi.fn().mockResolvedValue({ ok: true });
     deps.sessionStore.getSession.mockResolvedValue({
       source: "tbank",
+      payer_person_id: "person-1",
       session_id: "session-1",
       batch_id: "batch-1",
       function_url: "https://example.com/fn",
@@ -975,7 +993,19 @@ describe("background-router", () => {
     await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
       "still signed out",
     );
-    expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
+    // The page will show this attempt and its reason; the sweep's schedule is untouched.
+    expect(deps.autoRunStore.setState).toHaveBeenCalledWith(
+      { sourceId: "tbank", payerPersonId: "person-1" },
+      {
+        ...before,
+        lastAttempt: {
+          atMs: expect.any(Number),
+          result: "error",
+          error: "still signed out",
+          origin: "manual",
+        },
+      },
+    );
   });
   describe("attention", () => {
     const NOW = Date.parse("2026-09-03T12:00:00.000Z");
@@ -991,10 +1021,17 @@ describe("background-router", () => {
         lastOpenedAtMs: initial?.lastOpenedAtMs ?? null,
         lastStartedAtMs: null as number | null,
         runRequests: { ...(initial?.runRequests ?? {}) },
+        requestTabs: {} as Record<string, number>,
       };
+      const key = (scope: { sourceId: string; payerPersonId: string }) =>
+        `${scope.sourceId}::${scope.payerPersonId}`;
       return {
         state,
-        getState: vi.fn(async () => ({ ...state, runRequests: { ...state.runRequests } })),
+        getState: vi.fn(async () => ({
+          ...state,
+          runRequests: { ...state.runRequests },
+          requestTabs: { ...state.requestTabs },
+        })),
         setStaleAfterMs: vi.fn(async (value: unknown) => {
           state.staleAfterMs = typeof value === "number" ? value : DAY;
           return state.staleAfterMs;
@@ -1006,16 +1043,31 @@ describe("background-router", () => {
           state.lastStartedAtMs = nowMs;
         }),
         requestRun: vi.fn(
-          async (scope: { sourceId: string; payerPersonId: string }, nowMs: number) => {
-            state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`] = nowMs;
+          async (
+            scope: { sourceId: string; payerPersonId: string },
+            nowMs: number,
+            tabId: number | null = null,
+          ) => {
+            state.runRequests[key(scope)] = nowMs;
+            if (tabId !== null) state.requestTabs[key(scope)] = tabId;
           },
         ),
         isRunRequested: vi.fn(
           async (scope: { sourceId: string; payerPersonId: string }) =>
-            `${scope.sourceId}::${scope.payerPersonId}` in state.runRequests,
+            key(scope) in state.runRequests,
         ),
+        getRequestedTab: vi.fn(async (scope: { sourceId: string; payerPersonId: string }) =>
+          key(scope) in state.runRequests ? (state.requestTabs[key(scope)] ?? null) : null,
+        ),
+        findRequestForTab: vi.fn(async (tabId: number) => {
+          const found = Object.entries(state.requestTabs).find(([, id]) => id === tabId);
+          if (!found || !(found[0] in state.runRequests)) return null;
+          const [sourceId, payerPersonId] = found[0].split("::");
+          return { sourceId, payerPersonId };
+        }),
         clearRunRequest: vi.fn(async (scope: { sourceId: string; payerPersonId: string }) => {
-          delete state.runRequests[`${scope.sourceId}::${scope.payerPersonId}`];
+          delete state.runRequests[key(scope)];
+          delete state.requestTabs[key(scope)];
         }),
       };
     }
@@ -1069,6 +1121,110 @@ describe("background-router", () => {
       ).resolves.toEqual({ ok: false, error: "Attention is not available" });
     });
 
+    it("tells the widget whether its tab is the run's, and what a requested tab waits for", async () => {
+      const deps = createDeps();
+      const attentionStore = createAttentionStore();
+      await attentionStore.requestRun(
+        { sourceId: "tbank_web", payerPersonId: "person-1" },
+        NOW,
+        42,
+      );
+      const routerDeps = { ...deps, attentionStore, now: () => NOW + 1000 };
+
+      // Before the run: the tab Update opened is told what it is waiting for; another is not.
+      deps.sessionStore.getSession.mockResolvedValue(null);
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 42,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: false, pending_request: { source_id: "tbank_web" } });
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 43,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: false, pending_request: null });
+
+      // During the run: the tab it works in is the run's own; any other is an onlooker.
+      deps.sessionStore.getSession.mockResolvedValue({
+        session_id: "session-1",
+        source: "tbank_web",
+        run_origin: "requested",
+        run_tab_id: 42,
+      });
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 42,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: true, pending_request: null });
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, routerDeps, {
+          senderTabId: 43,
+        }),
+      ).resolves.toMatchObject({ is_run_tab: false, pending_request: null });
+    });
+
+    it("tells the page about the run in flight for its source, and the last attempt", async () => {
+      const deps = createDeps();
+      deps.grantStore.getGrant.mockResolvedValue(createGrant());
+      const failedAt = NOW - 60 * 60 * 1000;
+      deps.autoRunStore.getState.mockResolvedValue({
+        lastRunAtMs: failedAt,
+        lastResult: "error",
+        consecutiveFailures: 1,
+        lastError: "T-Bank session is not authorized",
+        lastRunOrigin: "auto",
+        lastOkAtMs: null,
+      });
+      liveRuns.start({
+        session_id: "session-live",
+        source_id: "tbank_web",
+        payer_person_id: "person-1",
+        origin: "auto",
+        window_kind: "backfill",
+        window_from: "2026-08-01T00:00:00.000Z",
+        window_to: "2026-09-01T00:00:00.000Z",
+        tab_id: 5,
+      });
+      liveRuns.observe("session-live", {
+        type: "MONEY_IMPORT_PROGRESS",
+        phase: "parse_fetching_ranges",
+        progress_percent: 20,
+      });
+      try {
+        const reply = (await routeBackgroundMessage(
+          { type: "MONEY_IMPORT_GET_ATTENTION" },
+          {
+            ...deps,
+            attentionStore: createAttentionStore(),
+            listAutoImportSources: () => ["tbank_web"],
+            now: () => NOW,
+          },
+        )) as Record<string, unknown>;
+
+        expect((reply.sources as Array<Record<string, unknown>>)[0]).toMatchObject({
+          source_id: "tbank_web",
+          live_run: {
+            origin: "auto",
+            window_kind: "backfill",
+            window_from: "2026-08-01T00:00:00.000Z",
+            window_to: "2026-09-01T00:00:00.000Z",
+            running: true,
+            phase: "parse_fetching_ranges",
+            progress_percent: 20,
+          },
+          last_attempt: {
+            at: new Date(failedAt).toISOString(),
+            result: "error",
+            error: "T-Bank session is not authorized",
+            origin: "auto",
+          },
+          next_run: { kind: "after", at: expect.any(String) },
+        });
+      } finally {
+        liveRuns.end("session-live");
+      }
+    });
+
     it("opens the bank in front of the person and remembers the request, for a covered source only", async () => {
       const deps = createDeps();
       deps.grantStore.getGrant.mockResolvedValue(createGrant());
@@ -1099,6 +1255,8 @@ describe("background-router", () => {
       });
       expect(opened).toEqual(["https://www.tbank.ru/mybank/operations/"]);
       expect(attentionStore.state.runRequests).toEqual({ "tbank_web::person-1": NOW });
+      // The tab goes with the request: the run it lets start works in it.
+      expect(attentionStore.state.requestTabs).toEqual({ "tbank_web::person-1": 42 });
       // The attempt history is not touched: nothing has succeeded yet.
       expect(deps.autoRunStore.setState).not.toHaveBeenCalled();
 

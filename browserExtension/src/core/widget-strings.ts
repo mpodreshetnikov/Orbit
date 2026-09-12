@@ -35,7 +35,14 @@ export type WidgetStringKey =
   | "fullModeWaiting"
   | "fullModePending"
   | "phaseIdle"
-  | "runtimeUnavailable";
+  | "runtimeUnavailable"
+  | "titleUnattended"
+  | "statusOwnTabAuto"
+  | "statusOwnTabRequested"
+  | "statusOtherTab"
+  | "statusWaitingSignIn"
+  | "statusDoneAuto"
+  | "statusDoneRequested";
 
 const STRINGS: Record<WidgetLocale, Record<WidgetStringKey, string>> = {
   en: {
@@ -61,6 +68,16 @@ const STRINGS: Record<WidgetLocale, Record<WidgetStringKey, string>> = {
       "Full mode ETA appears after the bank counts transactions in the selected range",
     phaseIdle: "Idle",
     runtimeUnavailable: "Extension runtime is unavailable",
+    titleUnattended: "Orbit is importing",
+    statusOwnTabAuto:
+      "The extension opened this tab to import your transactions. It will close by itself; please do not close it.",
+    statusOwnTabRequested:
+      "The import you asked for is running in this tab. Please keep it open until it finishes.",
+    statusOtherTab: "An import is running in another tab.",
+    statusWaitingSignIn:
+      "Sign in to the bank. The import starts by itself about a minute after; please keep this tab open.",
+    statusDoneAuto: "Import finished; this tab will close by itself.",
+    statusDoneRequested: "Import finished. You can close this tab.",
   },
   ru: {
     title: "Импорт операций",
@@ -84,6 +101,16 @@ const STRINGS: Record<WidgetLocale, Record<WidgetStringKey, string>> = {
     fullModePending: "Оценка времени появится, когда банк посчитает операции за выбранный период",
     phaseIdle: "Ожидание",
     runtimeUnavailable: "Расширение недоступно",
+    titleUnattended: "Orbit выгружает операции",
+    statusOwnTabAuto:
+      "Эту вкладку открыло расширение, чтобы выгрузить операции. Она закроется сама; пожалуйста, не закрывайте её.",
+    statusOwnTabRequested:
+      "Выгрузка по вашему запросу идёт в этой вкладке. Не закрывайте её, пока она не завершится.",
+    statusOtherTab: "Выгрузка идёт в другой вкладке.",
+    statusWaitingSignIn:
+      "Войдите в банк. Выгрузка начнётся сама примерно через минуту после входа; эту вкладку не закрывайте.",
+    statusDoneAuto: "Выгрузка завершена, вкладка закроется сама.",
+    statusDoneRequested: "Выгрузка завершена. Вкладку можно закрыть.",
   },
 };
 

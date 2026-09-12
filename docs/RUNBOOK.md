@@ -211,39 +211,50 @@ tree, not in a console:** `supabase/functions/_shared/health-stage-models.ts` na
 the evidence for each — from `T-260903-oy7` in the task registry — is in the comment beside them.
 Change one there, in a pull request, so the reasoning changes with it.
 
-| stage       | default                   | override                                  |
-| ----------- | ------------------------- | ----------------------------------------- |
-| `classify`  | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL`  |
-| `extract`   | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL`   |
-| `reconcile` | `openai/gpt-5.2`          | `OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL` |
+| stage       | default                   | override variable                         | share of the bill |
+| ----------- | ------------------------- | ----------------------------------------- | ----------------- |
+| `classify`  | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL`  | ~7%               |
+| `extract`   | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL`   | ~76%              |
+| `reconcile` | `openai/gpt-5.2`          | `OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL` | ~18%              |
 
-The variables still win where they are set, so a deployment can move one stage for a one-off
-experiment without shipping code. They are edge-function secrets — Supabase dashboard under Edge
-Functions -> Secrets, or `supabase secrets set NAME=value --project-ref <ref>`. Setting one is the
-exception now, not the way the choice is made: an unset variable no longer means "whatever the
-shared model happens to be", it means the measured default above.
+Classify shows no measured quality gradient at all — every model tried scored 100% on `record_type`
+and `record_date` — so it is chosen on price. Extract is the one dimension the corpus has signal on
+and it favours gemini: observations F1 100.0 stable over four live passes against 90.3-100.0 for
+`openai/gpt-5.2`, at roughly a third of the price. It is also where the money is.
 
 Reconcile is on the more expensive model on purpose. It is the stage that closes a patient's
 conditions, and across fourteen measured passes 1 of 8 wrongfully resolved on `openai/gpt-5.2`
-against 4 of 6 on `google/gemini-2.5-flash`. Moving it to the cheap model saves about $0.013 a
-document and buys back that failure mode. If you are here to cut the bill, `extract` carries ~76% of
-it and `reconcile` ~18%.
+against 4 of 6 on `google/gemini-2.5-flash`; grouping the same passes by `extract` separates
+nothing, so the defect follows reconcile. Moving it to the cheap model saves about $0.013 a document
+and buys back that failure mode. Do not take that saving on cost grounds.
 
-How to check a change took effect, and what cannot be checked:
+The variables still win where they are set, so a deployment can move one stage for a one-off
+experiment without shipping code. They are edge-function secrets — Supabase dashboard under Edge
+Functions -> Secrets, or `supabase secrets set NAME=value --project-ref <ref>`, which needs a
+Supabase access token; no CI job sets them. Setting one is the exception now, not the way the choice
+is made: an unset variable no longer means "whatever the shared model happens to be", it means the
+measured default above.
 
-- **Changing a default in the tree** — `deps_test.ts` reads the model off each stage's own outbound
+How to check a change, and the one thing that cannot be checked:
+
+- **A default changed in the tree** — `deps_test.ts` reads the model off each stage's own outbound
   request, keyed by that stage's JSON schema name, and fails if a stage carries the shared model or
   if `reconcile` shares `extract`'s. Run `test-unit-functions`; that is the evidence.
-- **Setting an override secret** — **nothing in production reports it today.** `callStageJson` puts
+- **A configuration measured before deploying it** — pin the stages in a live eval, as below. A
+  plain `test-extraction` replays recorded cassettes and is no evidence about any model. The same
+  pins are `model_classify`, `model_extract` and `model_reconcile` inputs on the `Extraction Eval`
+  workflow, and the report's **Cost by stage** table gives each stage's share of the bill.
+- **Which model actually served a call — nothing reports it today.** `callStageJson` puts
   `ctx.model` in the request and discards the `model` the provider answers with, and
-  `health-structure` logs only stage-rejection counts, so there is no log line, span attribute or
-  query that says which model served a call. `T-260903-aha` is the open task for that; until it
-  lands, an override is trusted rather than confirmed, which is one more reason the default belongs
-  in the tree where a test can see it.
-- **`test-extraction` does not answer either question.** It replays recorded cassettes by default,
-  and even live it sends a single model as one `defaultModel` for all three stages, so its output is
-  no evidence about a per-stage choice. Per-stage pinning for it is added by
-  [`#83`](https://github.com/mpodreshetnikov/Orbit/pull/83).
+  `health-structure` logs only stage-rejection counts, so no log line, span attribute or query says
+  it. The eval below measures a configuration; it does not confirm a deployed secret took effect.
+  `T-260903-aha` is the open task for that; until it lands an override is trusted rather than
+  confirmed, which is one more reason the default belongs in the tree where a test can see it.
+
+```
+just test-extraction --live --model-classify google/gemini-2.5-flash \
+  --model-extract google/gemini-2.5-flash --model-reconcile openai/gpt-5.2
+```
 
 ## Lint And Typecheck Gate Issues
 
