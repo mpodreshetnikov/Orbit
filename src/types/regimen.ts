@@ -212,10 +212,113 @@ export function getEffectiveStatus(
   return regimen.status;
 }
 
+export type MedIngredient = { name: string; amount: number; unit: string };
+
 export type PlannedIntake = {
   intake?: { amount: number; unit: string };
-  active?: { name: string; amount: number; unit: string }[];
+  /**
+   * What **one** unit of the dosage form contains: 100 mg in one tablet, whatever
+   * the course's amount is or later becomes. The per-intake total is derived from
+   * it and the amount beside it, and is stored nowhere (`ADR-260907-cvj`).
+   *
+   * Omitted only where the dosage form *is* the active ingredient -- a powder
+   * dosed in milligrams. A mass intake unit alone does not establish that: 5 g of
+   * 1% hydrocortisone is 10 mg per gram of cream.
+   */
+  unit_strength?: MedIngredient[];
+  /**
+   * @deprecated The per-intake total, which nothing rescales when an amount
+   * moves. Read for rows not yet migrated, written by nothing new. Prefer
+   * `unit_strength`; `resolveIntakeStrength` applies that preference.
+   */
+  active?: MedIngredient[];
 };
+
+/**
+ * What one intake delivers, and whether that can be trusted for the amount it
+ * sits beside.
+ *
+ * `perUnit` is the whole difference. A figure derived from `unit_strength`
+ * scales with the amount on its own row, so a slot override, an edited course
+ * or a corrected intake cannot strand it. A legacy `active` total was recorded
+ * for some number of units the row does not name, so a caller has to decide
+ * whether it still applies -- which is what the MCP renderer's withholding rule
+ * does, and why it fires only when `perUnit` is false.
+ */
+export type ResolvedStrength = { ingredients: MedIngredient[]; perUnit: boolean };
+
+/** Entries that survived a jsonb column with no shape constraint. */
+function namedIngredients(value: unknown): MedIngredient[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (one): one is MedIngredient =>
+      one != null &&
+      typeof one === "object" &&
+      typeof (one as MedIngredient).name === "string" &&
+      typeof (one as MedIngredient).amount === "number" &&
+      Number.isFinite((one as MedIngredient).amount),
+  );
+}
+
+/**
+ * Binary floating point does not close over the multiplication this derivation
+ * needs: three 0.1 mg units come out as 0.30000000000000004, and a dose is a
+ * number people repeat to a doctor. Twelve significant digits is far beyond any
+ * real strength and well inside the error this introduces.
+ */
+function roundAmount(value: number): number {
+  return Number.parseFloat(value.toPrecision(12));
+}
+
+/**
+ * The `planned_intake` a newly created dose event carries, snapshotting the
+ * course's per-unit strength beside the amount actually being recorded.
+ *
+ * The legacy `active` total is deliberately not copied. It was recorded for the
+ * course's amount, and this event may carry another -- a one-off dose, a
+ * corrected intake -- so copying it is precisely how a total comes to describe
+ * a number of units nothing on the row names (`ADR-260907-cvj`). The empty array
+ * keeps the shape every reader already expects; `unit_strength` is what carries
+ * the strength, and it scales with whatever amount sits beside it.
+ */
+export function plannedIntakeFor(
+  regimen: { dose_definition?: PlannedIntake | null } | null | undefined,
+  amount: number,
+  unit: string,
+): PlannedIntake {
+  const perUnit = namedIngredients(regimen?.dose_definition?.unit_strength);
+  const planned: PlannedIntake = { intake: { amount, unit }, active: [] };
+  if (perUnit.length > 0) planned.unit_strength = perUnit;
+  return planned;
+}
+
+/**
+ * The ingredients one intake delivers, preferring the per-unit record over the
+ * legacy total wherever both are present.
+ *
+ * Returns `null` when the row records no strength at all -- the honest case the
+ * MCP renderer withholds on, as against the unverifiable one it also withholds
+ * on today.
+ */
+export function resolveIntakeStrength(
+  planned: PlannedIntake | null | undefined,
+): ResolvedStrength | null {
+  const perUnit = namedIngredients(planned?.unit_strength);
+  const amount = planned?.intake?.amount;
+  if (perUnit.length > 0 && typeof amount === "number" && Number.isFinite(amount)) {
+    return {
+      ingredients: perUnit.map((one) => ({ ...one, amount: roundAmount(one.amount * amount) })),
+      perUnit: true,
+    };
+  }
+
+  // A `unit_strength` with no amount to scale it by is not a per-intake figure
+  // and must not be printed as one. It falls through to the legacy total, which
+  // at least was recorded as one.
+  const legacy = namedIngredients(planned?.active);
+  if (legacy.length > 0) return { ingredients: legacy, perUnit: false };
+  return null;
+}
 
 export type RegimenInventory = {
   enabled?: boolean;

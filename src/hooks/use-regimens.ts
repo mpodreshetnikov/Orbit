@@ -21,6 +21,7 @@ import type {
   MedSchedule,
   PlannedIntake,
 } from "@/types/regimen";
+import { plannedIntakeFor } from "@/types/regimen";
 import type { Database, Json } from "@/types/database";
 
 type MedRegimenInsert = Database["public"]["Tables"]["med_regimens"]["Insert"];
@@ -428,10 +429,21 @@ export interface AddOneTimeDoseToRegimenInput {
 
 async function addOneTimeDoseToRegimen(input: AddOneTimeDoseToRegimenInput): Promise<void> {
   const supabase = createClient();
-  const plannedIntake: PlannedIntake = {
-    intake: { amount: input.amount, unit: input.unit },
-    active: [],
-  };
+  // The strength is read from the course this dose is being attached to rather
+  // than passed in, so the event snapshots what a unit contained at the moment
+  // it was created and no caller can hand it a stale figure (`ADR-260907-cvj`).
+  // A course that records none, or a read that fails, simply yields an event
+  // with no strength -- which is what happens today for every one of them.
+  const { data: regimenRow } = await supabase
+    .from("med_regimens")
+    .select("dose_definition")
+    .eq("id", input.regimen_id)
+    .maybeSingle();
+  const plannedIntake = plannedIntakeFor(
+    regimenRow as { dose_definition?: PlannedIntake | null } | null,
+    input.amount,
+    input.unit,
+  );
   const eventPayload: MedDoseEventInsert = {
     person_id: input.person_id,
     regimen_id: input.regimen_id,

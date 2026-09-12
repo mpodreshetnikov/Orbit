@@ -1,7 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { rowToDoseEvent, rowToInventoryTransaction, rowToRegimen } from "@/lib/regimen-mappers";
-import { getEffectiveStatus, getPlannedIntakeAmount, type PlannedIntake } from "@/types/regimen";
+import {
+  getEffectiveStatus,
+  getPlannedIntakeAmount,
+  plannedIntakeFor,
+  type PlannedIntake,
+} from "@/types/regimen";
 import type { MedDoseEvent, MedRegimen, MedSchedule, RegimenInventory } from "@/types/regimen";
 
 /**
@@ -896,7 +901,13 @@ export async function logDose(
         regimen_id: regimen.id,
         scheduled_at: params.at,
         actual_at: params.at,
-        planned_intake: { intake: { amount, unit }, active: [] },
+        // The event snapshots the course's per-unit strength, exactly as the
+        // generator's events do, so this intake says what a unit contained when
+        // it was taken rather than borrowing whatever the course says later
+        // (`ADR-260907-cvj`). Nothing derived is stored: the milligrams this
+        // intake delivers come from this amount times that strength, so a caller
+        // correcting the amount cannot strand a figure here.
+        planned_intake: plannedIntakeFor(regimen, amount, unit),
         status: "scheduled",
       } as never)
       .select("*")

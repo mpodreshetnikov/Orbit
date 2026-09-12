@@ -328,10 +328,30 @@ export function MedicationForm({
     return "";
   };
 
-  const buildDoseDefinition = (amount: number): PlannedIntake => ({
-    intake: { amount, unit },
-    active: [],
-  });
+  /**
+   * The form has no field for a strength yet, so an edit must not be the thing
+   * that destroys one recorded elsewhere -- over the connector, or by hand. It
+   * rebuilt `dose_definition` from its own inputs alone, which silently emptied
+   * the ingredients of every course anyone opened and saved, even when the save
+   * changed only a reminder time.
+   *
+   * The two fields carry over differently, and the difference is the model's
+   * (`ADR-260907-cvj`). `unit_strength` is what one unit contains, so it is
+   * invariant under an amount change and carries over unconditionally. The
+   * legacy `active` is the total for the whole intake with nothing recording
+   * how many units that was, so it survives only while the amount does not
+   * move; once it does, the figure is for some other number of units and is
+   * dropped rather than quietly reattached to the new one.
+   */
+  const buildDoseDefinition = (amount: number): PlannedIntake => {
+    const existing = initial?.dose_definition;
+    const definition: PlannedIntake = { intake: { amount, unit }, active: [] };
+    if (existing?.unit_strength?.length) definition.unit_strength = existing.unit_strength;
+    if (existing?.active?.length && existing.intake?.amount === amount) {
+      definition.active = existing.active;
+    }
+    return definition;
+  };
 
   const buildInventory = (): RegimenInventory | null =>
     inventoryEnabled

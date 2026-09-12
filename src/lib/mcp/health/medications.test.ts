@@ -628,6 +628,54 @@ describe("logDose", () => {
     expect(result.planned).toBe(false);
   });
 
+  it("snapshots the course's per-unit strength onto the event it inserts", async () => {
+    // The event has to carry the strength that was in force when the intake
+    // happened, not borrow whatever the course says whenever it is next read:
+    // editing the course later must not rewrite what a past dose delivered.
+    const stub = stubFor({
+      dose_definition: {
+        intake: { amount: 1, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+      },
+    });
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+      amount: 2,
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "insert") as [[Record<string, unknown>]];
+    expect(values.planned_intake).toEqual({
+      intake: { amount: 2, unit: "pill" },
+      active: [],
+      unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+    });
+  });
+
+  it("never copies a legacy per-intake total onto an event of another amount", async () => {
+    // 50 mg was the total for the course's one pill. Copied onto this two-pill
+    // intake it would read as 50 mg for two, which is the defect the per-unit
+    // model exists to remove -- and it would be us writing it.
+    const stub = stubFor({
+      dose_definition: {
+        intake: { amount: 1, unit: "pill" },
+        active: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+      },
+    });
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+      amount: 2,
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "insert") as [[Record<string, unknown>]];
+    expect(values.planned_intake).toEqual({ intake: { amount: 2, unit: "pill" }, active: [] });
+  });
+
   it("resolves the dose already planned for that minute instead of inserting a second one", async () => {
     const stub = stubFor(
       {},

@@ -31,7 +31,7 @@ import {
 } from "../schemas/common";
 import { withPerson, withUserClient } from "../tool-context";
 import { fail, ok, summarizePage } from "../tool-result";
-import { getCourseWindow } from "@/types/regimen";
+import { getCourseWindow, resolveIntakeStrength } from "@/types/regimen";
 import type { MedDuration, MedSchedule, PlannedIntake } from "@/types/regimen";
 import type { McpToolServer } from "./types";
 
@@ -86,12 +86,12 @@ function describeIntake(
 
   // `planned_intake` and `dose_definition` are jsonb with no shape constraint,
   // and every row of every listing passes through here. A legacy or imported
-  // row whose `active` is not an array must not throw and take down the reply
-  // for the medications around it, so the shape is checked rather than trusted.
-  const active = Array.isArray(planned?.active) ? planned.active : [];
-  const named = active.filter(
-    (one) => one && typeof one === "object" && one.name != null && one.amount != null,
-  );
+  // row whose ingredients are not an array must not throw and take down the
+  // reply for the medications around it, so `resolveIntakeStrength` checks the
+  // shape rather than trusting it. It also applies the model's reading rule:
+  // where a row carries both, the per-unit record wins over the legacy total.
+  const resolved = resolveIntakeStrength(planned);
+  const named = resolved?.ingredients ?? [];
   // Bounded for the same reason notes are: a combination product can carry a
   // long list, an imported row can carry a longer one, and a page holds up to a
   // hundred rows. `structuredContent` keeps the whole array.
@@ -111,6 +111,11 @@ function describeIntake(
     ingredients.push(`…${named.length - ingredients.length} more`);
   }
 
+  // Everything below is about the legacy shape only. A figure derived from
+  // `unit_strength` was computed from the amount on this very row, so none of
+  // the three traps can reach it: it is what this amount delivers by
+  // construction (`ADR-260907-cvj`).
+  //
   // `active` is milligrams per intake with nothing recording what one unit
   // contains, and nothing rescales it: the generator copies it while
   // overriding a slot's amount, and `logDose` keeps it when a caller corrects
@@ -136,6 +141,7 @@ function describeIntake(
   const courseAmount = course?.intake?.amount;
   const unverifiable =
     ingredients.length > 0 &&
+    resolved?.perUnit !== true &&
     courseAmount != null &&
     intake?.amount != null &&
     (courseAmount !== intake.amount || overridesAmount(courseSchedule, courseAmount));
@@ -199,9 +205,16 @@ function describeSchedule(
   // amounts disagree. Saying so once per schedule keeps the two surfaces
   // consistent instead of letting a reader carry the base strength onto an
   // overridden slot.
+  // A per-unit strength is correct for every slot by construction, so this
+  // warning must not fire on one: the slot's own amount is what multiplies it.
+  // The note is about the legacy shape only, which is why it asks
+  // `resolveIntakeStrength` rather than reading `active` -- a migrated course
+  // keeps `active` until the column goes, and warning off that stale copy would
+  // contradict the correct figure printed beside it.
   const overrideNote = () => {
     const base = dose?.intake?.amount;
-    const hasStrength = Array.isArray(dose?.active) && dose.active.length > 0;
+    const resolved = resolveIntakeStrength(dose);
+    const hasStrength = resolved != null && resolved.perUnit === false;
     const amounts = scheduleAmounts(schedule);
     if (!hasStrength || base == null || amounts.length === 0) return "";
     return amounts.some((amount) => amount != null && amount !== base)
@@ -248,7 +261,9 @@ function describeSchedule(
         `${typeof schedule.interval?.every === "number" && !Number.isInteger(schedule.interval.every) ? " — not generated: the interval must be a whole number of hours" : ""}` +
         `${typeof schedule.amount === "number" && schedule.amount > 0 ? ` (${schedule.amount}${unitText(dose?.intake?.unit) ? ` ${unitText(dose?.intake?.unit)}` : ""} per intake)` : ""}` +
         // A scalar override is the same claim as a per-slot one, so it earns the
-        // same warning: the generator replaces the amount and copies `active`.
+        // same warning: the generator replaces the amount and copies the legacy
+        // total. It says nothing on a course recording a per-unit strength,
+        // which the override cannot strand.
         `${overrideNote()}`
       );
     case "interval_days": {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getCourseWindow, getEffectiveStatus } from "./regimen";
+import {
+  getCourseWindow,
+  getEffectiveStatus,
+  plannedIntakeFor,
+  resolveIntakeStrength,
+} from "./regimen";
 import type { MedDuration, MedRegimenStatus } from "./regimen";
 
 function regimen(
@@ -201,5 +206,125 @@ describe("getCourseWindow", () => {
 
   it("leaves a for_days course unbounded when it has no start date", () => {
     expect(getCourseWindow({ type: "for_days", days: 4 })).toEqual({ start: null, end: null });
+  });
+});
+
+describe("resolveIntakeStrength", () => {
+  const perTablet = [{ name: "Сертралин", amount: 100, unit: "milligram" }];
+
+  it("derives the per-intake total from the amount on the row", () => {
+    expect(
+      resolveIntakeStrength({ intake: { amount: 1.5, unit: "pill" }, unit_strength: perTablet }),
+    ).toEqual({
+      ingredients: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+      perUnit: true,
+    });
+  });
+
+  it("prefers the per-unit record over a legacy total on a row carrying both", () => {
+    // The rule the model states for rows the migration has reached while the
+    // column is still there. The stale total is deliberately the wrong answer.
+    const resolved = resolveIntakeStrength({
+      intake: { amount: 2, unit: "pill" },
+      unit_strength: perTablet,
+      active: [{ name: "Сертралин", amount: 75, unit: "milligram" }],
+    });
+    expect(resolved).toEqual({
+      ingredients: [{ name: "Сертралин", amount: 200, unit: "milligram" }],
+      perUnit: true,
+    });
+  });
+
+  it("falls back to the legacy total, and says it is not per unit", () => {
+    expect(
+      resolveIntakeStrength({
+        intake: { amount: 2, unit: "pill" },
+        active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+      }),
+    ).toEqual({
+      ingredients: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+      perUnit: false,
+    });
+  });
+
+  it("does not print a per-unit figure as a total when there is no amount to scale it by", () => {
+    // Half-derived is worse than withheld: 100 would read as what the intake
+    // delivers while being what one unit contains.
+    expect(resolveIntakeStrength({ unit_strength: perTablet })).toBeNull();
+    expect(
+      resolveIntakeStrength({
+        unit_strength: perTablet,
+        active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+      }),
+    ).toEqual({
+      ingredients: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+      perUnit: false,
+    });
+  });
+
+  it("rounds the derivation instead of handing binary floating point to a reader", () => {
+    // 3 x 0.1 is 0.30000000000000004 in IEEE 754, and this figure is one a
+    // person repeats to a doctor.
+    expect(
+      resolveIntakeStrength({
+        intake: { amount: 3, unit: "milligram" },
+        unit_strength: [{ name: "Колхицин", amount: 0.1, unit: "milligram" }],
+      })?.ingredients[0].amount,
+    ).toBe(0.3);
+  });
+
+  it("survives a jsonb column that carries something else entirely", () => {
+    expect(
+      resolveIntakeStrength({ intake: { amount: 1, unit: "pill" }, active: "150 мг" as never }),
+    ).toBeNull();
+    expect(
+      resolveIntakeStrength({
+        intake: { amount: 1, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: "100" as never, unit: "milligram" }],
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when the row records no strength at all", () => {
+    expect(resolveIntakeStrength({ intake: { amount: 1, unit: "pill" }, active: [] })).toBeNull();
+    expect(resolveIntakeStrength(null)).toBeNull();
+  });
+});
+
+describe("plannedIntakeFor", () => {
+  const course = {
+    dose_definition: {
+      intake: { amount: 1, unit: "pill" },
+      unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+      active: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+    },
+  };
+
+  it("snapshots the course's per-unit strength beside the amount being recorded", () => {
+    expect(plannedIntakeFor(course, 2, "pill")).toEqual({
+      intake: { amount: 2, unit: "pill" },
+      active: [],
+      unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+    });
+  });
+
+  it("never copies the legacy total, which was recorded for another amount", () => {
+    // 50 mg was the total for one pill. Copied onto a two-pill event it would
+    // be the exact defect the per-unit model exists to remove, written by us.
+    expect(plannedIntakeFor(course, 2, "pill").active).toEqual([]);
+    expect(resolveIntakeStrength(plannedIntakeFor(course, 2, "pill"))).toEqual({
+      ingredients: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      perUnit: true,
+    });
+  });
+
+  it("records no strength for a course that has none", () => {
+    expect(
+      plannedIntakeFor({ dose_definition: { intake: { amount: 1, unit: "pill" } } }, 1, "pill"),
+    ).toEqual({ intake: { amount: 1, unit: "pill" }, active: [] });
+    expect(plannedIntakeFor(null, 1, "pill")).toEqual({
+      intake: { amount: 1, unit: "pill" },
+      active: [],
+    });
   });
 });

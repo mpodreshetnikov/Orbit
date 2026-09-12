@@ -28,9 +28,10 @@ Define scheduling, event generation, intake resolution, and reminder-delivery de
 
 `med_regimens.dose_definition` (typed `PlannedIntake`, `src/types/regimen.ts`) holds what one intake
 delivers, and `med_dose_events.planned_intake` holds the copy each generated event was created from.
-The strength half below is decided rather than shipped — `unit_strength` is `ADR-260907-cvj` and is
-not in the tree yet, which is the gap listed under **Known Gaps** — and it is written here because
-every write path added from now on owes it.
+`unit_strength` is `ADR-260907-cvj`. The model, the write paths and the MCP renderer carry it; what
+is still missing is the app's capture field and the migration of stored rows, both listed under
+**Known Gaps**. So a row that has one is read and written correctly today, and most rows do not have
+one yet.
 
 - `intake` — how much of the dosage form is taken: `1.5 pill`. This is the quantity that moves
   during a titration.
@@ -114,15 +115,16 @@ Reasoning and the rejected alternatives: `ADR-260907-cvj` in the task registry.
 
 ## Known Gaps And Next Refactor Targets
 
-- `unit_strength` is decided but not yet migrated: stored rows still carry `active`, and every write
-  path still writes it empty — `medication-form.tsx`, `addOneTimeDoseToRegimen` in `use-regimens.ts`,
-  and the MCP `logDose` insert — so the medication form cannot capture a strength at all. The guarded
-  boundary is `plannedIntakeSchema` in `src/lib/mcp/schemas/regimen.ts`, which today admits only
-  `intake` and `active` and is what `add_medication` and `update_medication` parse
-  `dose_definition` through: until it accepts `unit_strength`, no MCP caller can submit one and an
-  `update_medication` keeps replacing a migrated definition with one that has none. (`rowToDoseEvent`
-  in `regimen-mappers.ts` writes `active: []` too, but only into an in-memory fallback for a fetched
-  row; it persists nothing.) Tracked in `T-260829-1my`.
+- **The medication form cannot capture a strength.** It has no field for one, so today only an MCP
+  client can record it, through `plannedIntakeSchema` in `src/lib/mcp/schemas/regimen.ts`. The form
+  does carry an existing one through an edit rather than emptying it, which it used to do on every
+  save; a legacy `active` total is carried only while the amount does not move, since it cannot be
+  rescaled. Tracked in `T-260829-1my`.
+- **Stored rows are not migrated.** Almost every row still records a per-intake `active` and no
+  `unit_strength`, so the MCP renderer's withholding rule still fires on them. The migration is
+  `unit_strength = active.amount ÷ intake.amount`, exact wherever the amount is positive, on
+  `med_regimens.dose_definition` and `med_dose_events.planned_intake`; `T-260829-1my` gates it behind
+  promotion to `depth: execplan`. `active` is removed only after it has run.
 - Continue reducing size of medication dashboard/form and regimen hook modules.
 - Improve explicit test coverage for edge cases around timezone and retry paths.
 
