@@ -502,15 +502,27 @@ describe("createRegimen / updateRegimen", () => {
       },
       updated_at: "t1",
     };
+    const migratedRow = {
+      intake: { amount: 1.5, unit: "pill" },
+      unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+    };
 
     const cleared = createSupabaseStub({
-      med_regimens: [{ data: storedRow }, { data: regimen() }],
+      med_regimens: [
+        // A migrated row, still carrying the legacy total beside the per-unit
+        // figure. Clearing has to clear: leaving `active` behind would have
+        // `resolveIntakeStrength` fall straight back to it and keep rendering
+        // the strength the caller just deleted.
+        { data: { ...storedRow, dose_definition: migratedRow } },
+        { data: regimen() },
+      ],
     });
     await updateRegimen(cleared.client, "r-1", {
       dose_definition: { intake: { amount: 1.5, unit: "pill" }, unit_strength: [] },
     });
-    expect(cleared.argsFor("med_regimens", "update")[0][0]).toMatchObject({
-      dose_definition: { unit_strength: [] },
+    expect(cleared.argsFor("med_regimens", "update")[0][0]).toEqual({
+      dose_definition: { intake: { amount: 1.5, unit: "pill" }, unit_strength: [], active: [] },
     });
 
     // A per-pill figure is not a per-ml one, and carrying it would have the

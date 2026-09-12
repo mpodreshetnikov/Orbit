@@ -286,7 +286,16 @@ export function plannedIntakeFor(
   amount: number,
   unit: string,
 ): PlannedIntake {
-  return withCarriedStrength(regimen?.dose_definition, { amount, unit });
+  // Only the per-unit half is inherited. `withCarriedStrength` keeps a legacy
+  // total whose amount still matches, which is right when a course is being
+  // edited and stays the same record -- and wrong here, where a new event is
+  // being made out of a course's figures. The total would be about the course
+  // and travel as though it were about the event, and a later correction is
+  // enough to make it lie: log 1 pill / 50 mg, titrate the course to 2 pills
+  // (which drops the course's own total), then correct the event to 2 pills.
+  // The correction rewrites only `intake.amount`, so the copy survives, both
+  // amounts now read 2, and the renderer reports 50 mg as verified.
+  return { ...withCarriedStrength(regimen?.dose_definition, { amount, unit }), active: [] };
 }
 
 /**

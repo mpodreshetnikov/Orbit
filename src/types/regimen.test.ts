@@ -309,6 +309,34 @@ describe("plannedIntakeFor", () => {
     });
   });
 
+  it("never copies the legacy total even when the amount matches exactly", () => {
+    // The normal logging case, and the one that used to slip through. A total
+    // copied here is about the course, not about this event, and a later
+    // correction makes it lie: titrate the course to 2 pills (its own total is
+    // dropped), then correct this event to 2 pills. The correction rewrites
+    // `intake.amount` alone, so the copy survives, both amounts read 2, and the
+    // renderer reports the course's old 50 mg as verified.
+    const event = plannedIntakeFor(course, 1, "pill");
+    expect(event.active).toEqual([]);
+    expect(resolveIntakeStrength({ ...event, intake: { amount: 2, unit: "pill" } })).toEqual({
+      ingredients: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      perUnit: true,
+    });
+  });
+
+  it("records nothing at all for a legacy course, rather than its total", () => {
+    const legacyOnly = {
+      dose_definition: {
+        intake: { amount: 1, unit: "pill" },
+        active: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+      },
+    };
+    expect(plannedIntakeFor(legacyOnly, 1, "pill")).toEqual({
+      intake: { amount: 1, unit: "pill" },
+      active: [],
+    });
+  });
+
   it("never copies the legacy total, which was recorded for another amount", () => {
     // 50 mg was the total for one pill. Copied onto a two-pill event it would
     // be the exact defect the per-unit model exists to remove, written by us.

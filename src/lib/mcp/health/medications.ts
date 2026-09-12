@@ -467,12 +467,21 @@ export async function updateRegimen(
       }
       if (mergesDoseDefinition) {
         const supplied = values.dose_definition as PlannedIntake;
-        write.dose_definition = {
+        const merged: PlannedIntake = {
           ...withCarriedStrength(row.dose_definition, supplied.intake!),
-          // Whatever the caller stated explicitly wins over what was carried,
-          // including an empty array, which is how a strength is cleared.
+          // Whatever the caller stated explicitly wins over what was carried.
           ...supplied,
         };
+        // Clearing has to clear. `unit_strength: []` on a migrated row would
+        // otherwise leave the carried legacy total behind, and
+        // `resolveIntakeStrength` falls straight back to it -- so the figure
+        // the caller just deleted would keep being rendered. A caller that
+        // means to keep a legacy total while dropping the per-unit one says so
+        // by passing `active` as well.
+        if (Array.isArray(supplied.unit_strength) && supplied.unit_strength.length === 0) {
+          merged.active = supplied.active ?? [];
+        }
+        write.dose_definition = merged;
       }
     }
 
