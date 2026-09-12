@@ -2,6 +2,19 @@ import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportAttentionPage from "./page";
+import { reloadPage } from "@/lib/money/extension-bridge";
+
+// The startup probes are patient by design -- about twelve seconds of real time -- and a test
+// cannot wait that long for silence; the schedule is shortened, and the reload stood in for.
+vi.mock("@/lib/money/extension-bridge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/money/extension-bridge")>();
+  return {
+    ...actual,
+    STARTUP_PROBE_OFFSETS_MS: [0, 80, 160],
+    STARTUP_PROBE_TIMEOUT_MS: 60,
+    reloadPage: vi.fn(),
+  };
+});
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -24,6 +37,10 @@ type Reply = Record<string, unknown>;
  */
 function installExtension(options: {
   answersPing: boolean;
+  /** The content script of a version the extension has since updated away from. */
+  bridgeStale?: boolean;
+  /** The bridge dies between the ping and the attention request. */
+  attentionStale?: boolean;
   /** One answer per ping, in order; the last one repeats. Overrides `answersPing` when set. */
   pingReplies?: boolean[];
   /** Per attention request, a promise its reply waits for; `null` = reply at once. */
@@ -50,12 +67,20 @@ function installExtension(options: {
       );
     };
     if (data.type === "MONEY_IMPORT_PING") {
+      if (options.bridgeStale) {
+        reply({ type: "MONEY_IMPORT_BRIDGE_STALE", reason: "Extension context invalidated." });
+        return;
+      }
       const replies = options.pingReplies;
       const answers = replies
         ? replies[Math.min(pingCalls, replies.length - 1)]
         : options.answersPing;
       pingCalls += 1;
       if (answers) reply({ type: "MONEY_IMPORT_PONG" });
+      return;
+    }
+    if (data.type === "MONEY_IMPORT_GET_ATTENTION" && options.attentionStale) {
+      reply({ type: "MONEY_IMPORT_BRIDGE_STALE", reason: "Extension context invalidated." });
       return;
     }
     if (data.type === "MONEY_IMPORT_GET_ATTENTION" && options.attention !== undefined) {
@@ -108,6 +133,8 @@ describe("MoneyImportAttentionPage", () => {
   beforeEach(() => {
     vi.useRealTimers();
     selectedPersonIdState = "person-1";
+    window.sessionStorage.clear();
+    vi.mocked(reloadPage).mockClear();
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -121,6 +148,51 @@ describe("MoneyImportAttentionPage", () => {
       { timeout: 3000 },
     );
     expect(screen.queryByTestId("money-import-attention-settings")).toBeNull();
+  });
+
+  it("keeps probing through the first silent pings at the browser's start", async () => {
+    installExtension({
+      answersPing: true,
+      pingReplies: [false, false, true],
+      attention: STALE_ATTENTION,
+    });
+    render(<MoneyImportAttentionPage />);
+
+    expect(await screen.findByTestId("money-import-attention-tbank_web")).toBeTruthy();
+  });
+
+  it("reloads itself once when the bridge says the extension updated under it, then says so", async () => {
+    installExtension({ answersPing: true, bridgeStale: true });
+    const beforeReload = render(<MoneyImportAttentionPage />);
+
+    await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+    // The reload is remembered for the tab, so a page still stale after it is shown the way
+    // out rather than reloaded into a loop. (The reload itself is stood in for; the page that
+    // asked for it goes, and the one that comes back is rendered anew.)
+    beforeReload.unmount();
+    render(<MoneyImportAttentionPage />);
+    expect(await screen.findByTestId("money-import-attention-stale")).toBeTruthy();
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText("money.importAttentionReload"));
+    expect(reloadPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("hears a bridge that dies after the ping, on the request that drew the notice", async () => {
+    installExtension({ answersPing: true, attentionStale: true });
+    render(<MoneyImportAttentionPage />);
+
+    await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+  });
+
+  it("offers the reload instead of making it when there is nowhere to remember one", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage is blocked");
+    });
+    installExtension({ answersPing: true, bridgeStale: true });
+    render(<MoneyImportAttentionPage />);
+
+    expect(await screen.findByTestId("money-import-attention-stale")).toBeTruthy();
+    expect(reloadPage).not.toHaveBeenCalled();
   });
 
   it("lists a stale source by its bank name and asks the extension to open the bank on Update", async () => {
@@ -229,14 +301,15 @@ describe("MoneyImportAttentionPage", () => {
     render(<MoneyImportAttentionPage />);
     await screen.findByText("money.importAttentionRequested");
 
-    // The unanswered refresh: the list stays, a note says the answer is the previous one.
-    await vi.advanceTimersByTimeAsync(20_000 + 3_000);
+    // The unanswered refresh: the list stays, a note says the answer is the previous one. The
+    // note appears once the request has waited out its own timeout.
+    await vi.advanceTimersByTimeAsync(3_000 + 2_500 + 300);
     await waitFor(() => expect(screen.getByTestId("money-import-attention-missed")).toBeTruthy());
     expect(screen.getByTestId("money-import-attention-tbank_web")).toBeTruthy();
     expect(screen.getByText("money.importAttentionRequested")).toBeTruthy();
 
     // Still asking: the next answer says the run finished, and "requested" goes away.
-    await vi.advanceTimersByTimeAsync(20_000 + 3_000);
+    await vi.advanceTimersByTimeAsync(3_000 + 300);
     await waitFor(() => expect(screen.queryByText("money.importAttentionRequested")).toBeNull());
     expect(screen.queryByTestId("money-import-attention-missed")).toBeNull();
     expect(extension.attentionCalls()).toBeGreaterThanOrEqual(3);
@@ -270,12 +343,117 @@ describe("MoneyImportAttentionPage", () => {
     render(<MoneyImportAttentionPage />);
     await screen.findByText("money.importAttentionRequested");
 
-    await vi.advanceTimersByTimeAsync(20_000 + 1_000);
+    await vi.advanceTimersByTimeAsync(3_000 + 300);
     await waitFor(() => expect(screen.getByTestId("money-import-attention-missed")).toBeTruthy());
     expect(screen.getByTestId("money-import-attention-tbank_web")).toBeTruthy();
 
-    await vi.advanceTimersByTimeAsync(20_000 + 1_000);
+    await vi.advanceTimersByTimeAsync(3_000 + 300);
     await waitFor(() => expect(screen.queryByText("money.importAttentionRequested")).toBeNull());
+    vi.useRealTimers();
+  });
+
+  it("shows the run in flight and the last attempt, and keeps asking while it runs", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const source = (STALE_ATTENTION.sources as Reply[])[0];
+    const live: Reply = {
+      ...STALE_ATTENTION,
+      sources: [
+        {
+          ...source,
+          live_run: {
+            origin: "requested",
+            window_kind: "incremental",
+            window_from: "2026-09-04T00:00:00.000Z",
+            window_to: "2026-09-07T15:00:00.000Z",
+            started_at: "2026-09-07T15:00:00.000Z",
+            running: true,
+            phase: "parse_enriching_operations",
+            progress_percent: 42.4,
+            parsed_transactions_count: 12,
+            batch_id: null,
+            error: null,
+          },
+          last_attempt: {
+            at: "2026-09-07T14:52:00.000Z",
+            result: "error",
+            error: "T-Bank did not stay on the operations page",
+            origin: "auto",
+          },
+          next_run: { kind: "after", at: "2026-09-08T10:52:00.000Z" },
+        },
+      ],
+    };
+    const finished: Reply = {
+      ...STALE_ATTENTION,
+      stale_count: 0,
+      sources: [
+        {
+          ...source,
+          stale: false,
+          last_ok_at: "2026-09-07T15:03:00.000Z",
+          // Done, and still on the board for a moment: not a run in progress.
+          live_run: {
+            origin: "requested",
+            window_kind: "incremental",
+            window_from: "2026-09-04T00:00:00.000Z",
+            window_to: "2026-09-07T15:00:00.000Z",
+            started_at: "2026-09-07T15:00:00.000Z",
+            running: false,
+            phase: "review_ready",
+            progress_percent: 100,
+            parsed_transactions_count: 12,
+            batch_id: "batch-1",
+            error: null,
+          },
+          last_attempt: {
+            at: "2026-09-07T15:03:00.000Z",
+            result: "ok",
+            error: null,
+            origin: "auto",
+          },
+          next_run: { kind: "after", at: "2026-09-08T11:03:00.000Z" },
+        },
+      ],
+    };
+    const extension = installExtension({
+      answersPing: true,
+      attention: [live, live, finished],
+    });
+    render(<MoneyImportAttentionPage />);
+
+    const liveLine = await screen.findByTestId("money-import-attention-live-tbank_web");
+    const prefix = "money.importAttentionLiveRun:";
+    expect(liveLine.textContent?.startsWith(prefix)).toBe(true);
+    expect(JSON.parse(liveLine.textContent!.slice(prefix.length))).toEqual({
+      origin: "money.importAttentionLiveOriginRequested",
+      window: 'money.importAttentionWindowIncremental:{"from":"04.09.2026","to":"07.09.2026"}',
+      phase: "money.importPhase.parse_enriching_operations",
+      percent: 42,
+      count: 'money.importAttentionLiveRunCount:{"count":12}',
+    });
+    expect(screen.getByTestId("money-import-attention-last-tbank_web").textContent).toBe(
+      'money.importAttentionLastAttemptFailed:{"date":"07.09.2026 14:52","error":"T-Bank did not stay on the operations page"}',
+    );
+    // The next-run line waits: a run in flight is the answer to "when".
+    expect(screen.queryByText(/importAttentionNextAfter/)).toBeNull();
+    expect(extension.attentionCalls()).toBe(1);
+
+    // Every few seconds while the run is in flight; the run ends, the asking ends.
+    await vi.advanceTimersByTimeAsync(3_000 + 200);
+    await waitFor(() => expect(extension.attentionCalls()).toBe(2));
+    await vi.advanceTimersByTimeAsync(3_000 + 200);
+    await waitFor(() => expect(extension.attentionCalls()).toBe(3));
+    await waitFor(() =>
+      expect(screen.queryByTestId("money-import-attention-live-tbank_web")).toBeNull(),
+    );
+    expect(screen.getByTestId("money-import-attention-last-tbank_web").textContent).toBe(
+      'money.importAttentionLastAttemptOk:{"date":"07.09.2026 15:03"}',
+    );
+    expect(
+      screen.getByText('money.importAttentionNextAfter:{"date":"08.09.2026 11:03"}'),
+    ).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(3_000 + 200);
+    expect(extension.attentionCalls()).toBe(3);
     vi.useRealTimers();
   });
 

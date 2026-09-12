@@ -128,6 +128,28 @@ export interface MoneyImportRepository {
     userId: string,
   ): Promise<Record<string, unknown> | null>;
   getImportSessionById(sessionId: string): Promise<Record<string, unknown> | null>;
+  /**
+   * Sessions of this source and payer past their `expires_at` that no completion ever reached:
+   * neither revoked nor finished. Oldest first and a bounded page; the caller closes them, so
+   * whatever is left over is taken next time.
+   */
+  listExpiredOpenSessions?(
+    source: string,
+    payerPersonId: string,
+    nowIso: string,
+  ): Promise<Record<string, unknown>[]>;
+  /**
+   * Writes the patch to the session only while it is still open and still past its expiry
+   * at `nowIso`; true when a row was written. A session completing under a request that
+   * passed auth just before the expiry must not be overwritten by a scan that saw it open.
+   */
+  closeExpiredOpenSession?(
+    sessionId: string,
+    nowIso: string,
+    patch: Record<string, unknown>,
+  ): Promise<boolean>;
+  /** Writes the patch to the batch only while it is still `created` or `running`; true when written. */
+  closeOpenBatch?(batchId: string, patch: Record<string, unknown>): Promise<boolean>;
   updateImportSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   createImportBatch(payload: Record<string, unknown>): Promise<string>;
   getImportBatch(batchId: string): Promise<Record<string, unknown> | null>;
@@ -517,6 +539,56 @@ export function createSupabaseMoneyImportRepository(
 
     if (error || !data) return null;
     return data as Record<string, unknown>;
+  }
+
+  async function listExpiredOpenSessions(
+    source: string,
+    payerPersonId: string,
+    nowIso: string,
+  ): Promise<Record<string, unknown>[]> {
+    const { data, error } = await getAdminClient()
+      .from("money_import_sessions")
+      .select("*")
+      .eq("source", source)
+      .eq("payer_person_id", payerPersonId)
+      .in("status", ["created", "running"])
+      .is("revoked_at", null)
+      .lt("expires_at", nowIso)
+      .order("created_at", { ascending: true })
+      .limit(20);
+
+    if (error) throw new Error(error.message);
+    return (data ?? []) as Record<string, unknown>[];
+  }
+
+  async function closeExpiredOpenSession(
+    sessionId: string,
+    nowIso: string,
+    patch: Record<string, unknown>,
+  ): Promise<boolean> {
+    const { data, error } = await getAdminClient()
+      .from("money_import_sessions")
+      .update(patch as Database["public"]["Tables"]["money_import_sessions"]["Update"])
+      .eq("id", sessionId)
+      .in("status", ["created", "running"])
+      .is("revoked_at", null)
+      .lt("expires_at", nowIso)
+      .select("id");
+
+    if (error) throw new Error(error.message);
+    return Array.isArray(data) && data.length > 0;
+  }
+
+  async function closeOpenBatch(batchId: string, patch: Record<string, unknown>): Promise<boolean> {
+    const { data, error } = await getAdminClient()
+      .from("money_import_batches")
+      .update(patch as Database["public"]["Tables"]["money_import_batches"]["Update"])
+      .eq("id", batchId)
+      .in("status", ["created", "running"])
+      .select("id");
+
+    if (error) throw new Error(error.message);
+    return Array.isArray(data) && data.length > 0;
   }
 
   async function updateImportSession(
@@ -1899,6 +1971,9 @@ export function createSupabaseMoneyImportRepository(
     createImportSession,
     getImportSessionForUser,
     getImportSessionById,
+    listExpiredOpenSessions,
+    closeExpiredOpenSession,
+    closeOpenBatch,
     updateImportSession,
     createImportBatch,
     getImportBatch,

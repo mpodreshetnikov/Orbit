@@ -2115,3 +2115,98 @@ Deno.test("exactIgnoringCase tolerates exactly the padding SQL trim removes", ()
     false,
   );
 });
+
+Deno.test(
+  "repository listExpiredOpenSessions asks for this scope's open sessions past their expiry",
+  async () => {
+    const calls: Array<[string, unknown, unknown?]> = [];
+    const chain: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "in", "is", "lt", "order"]) {
+      chain[method] = (...args: unknown[]) => {
+        calls.push([method, args[0], args[1]]);
+        return chain;
+      };
+    }
+    chain.limit = async (count: number) => {
+      calls.push(["limit", count]);
+      return { data: [{ id: "session-dead" }], error: null };
+    };
+    const repository = createRepositoryWithClients({
+      adminClient: {
+        from: (table: string) => {
+          assertEquals(table, "money_import_sessions");
+          return chain;
+        },
+      },
+    });
+
+    const sessions = await repository.listExpiredOpenSessions!(
+      "tbank_web",
+      "person-1",
+      "2026-09-04T06:00:00.000Z",
+    );
+
+    assertEquals(sessions, [{ id: "session-dead" }]);
+    assertEquals(calls, [
+      ["select", "*", undefined],
+      ["eq", "source", "tbank_web"],
+      ["eq", "payer_person_id", "person-1"],
+      ["in", "status", ["created", "running"]],
+      ["is", "revoked_at", null],
+      ["lt", "expires_at", "2026-09-04T06:00:00.000Z"],
+      ["order", "created_at", { ascending: true }],
+      ["limit", 20],
+    ]);
+  },
+);
+
+Deno.test("repository closes a session and a batch only while they are still open", async () => {
+  const sessionCalls: Array<[string, unknown, unknown?]> = [];
+  const batchCalls: Array<[string, unknown, unknown?]> = [];
+  const chainFor = (calls: Array<[string, unknown, unknown?]>, matched: boolean) => {
+    const chain: Record<string, unknown> = {};
+    for (const method of ["update", "eq", "in", "is", "lt"]) {
+      chain[method] = (...args: unknown[]) => {
+        calls.push([method, args[0], args[1]]);
+        return chain;
+      };
+    }
+    chain.select = async (columns: string) => {
+      calls.push(["select", columns]);
+      return { data: matched ? [{ id: "x" }] : [], error: null };
+    };
+    return chain;
+  };
+  const repository = createRepositoryWithClients({
+    adminClient: {
+      from: (table: string) =>
+        table === "money_import_sessions"
+          ? chainFor(sessionCalls, true)
+          : chainFor(batchCalls, false),
+    },
+  });
+
+  const sessionClosed = await repository.closeExpiredOpenSession!(
+    "session-dead",
+    "2026-09-04T06:00:00.000Z",
+    { status: "failed" },
+  );
+  const batchClosed = await repository.closeOpenBatch!("batch-dead", { status: "failed" });
+
+  assertEquals(sessionClosed, true);
+  assertEquals(batchClosed, false);
+  assertEquals(sessionCalls, [
+    ["update", { status: "failed" }, undefined],
+    ["eq", "id", "session-dead"],
+    ["in", "status", ["created", "running"]],
+    ["is", "revoked_at", null],
+    ["lt", "expires_at", "2026-09-04T06:00:00.000Z"],
+    ["select", "id"],
+  ]);
+  assertEquals(batchCalls, [
+    ["update", { status: "failed" }, undefined],
+    ["eq", "id", "batch-dead"],
+    ["in", "status", ["created", "running"]],
+    ["select", "id"],
+  ]);
+});

@@ -10,6 +10,7 @@ import {
 } from "./normalize.ts";
 import { buildImportContext, readRangeSelectionMeta } from "./range-window.ts";
 import type { AuthContext, GrantAuthContext, UserAuthContext } from "./types.ts";
+import { closeAbandonedSessions } from "./abandoned-sessions.ts";
 import type { MoneyImportRepository } from "./repository.ts";
 
 export const DEFAULT_SESSION_TTL_MINUTES = 15;
@@ -58,6 +59,10 @@ export async function getImportContextAction(
     });
     return jsonResponse({ error: "source and payer_person_id are required" }, 400);
   }
+
+  // The import screen is where a run that never ended would be seen as still running, so it is
+  // where such runs are closed: past its expiry with no completion, a session is over.
+  await closeAbandonedSessions(deps, { source, payerPersonId });
 
   const now = (deps.now ?? (() => new Date()))();
   const lastImportedAt = await deps.repository.findLastImportedAt(
@@ -121,6 +126,11 @@ export async function createSessionAction(
       return jsonResponse({ error: "Source is not allowed for this grant" }, 403);
     }
   }
+
+  // A new run for this scope is the other moment its dead predecessor gets closed: the sweep
+  // that opens a session every few hours is what keeps the history honest when nobody opens
+  // the import screen.
+  await closeAbandonedSessions(deps, { source, payerPersonId });
 
   const createdByAuthUserId =
     auth.mode === "grant" ? (normalizeText(auth.grant.created_by_auth_user_id) ?? "") : auth.userId;

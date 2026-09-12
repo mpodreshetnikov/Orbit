@@ -27,6 +27,7 @@ describe("attention-store", () => {
       lastOpenedAtMs: null,
       lastStartedAtMs: null,
       runRequests: {},
+      requestTabs: {},
     });
     expect(await store.setStaleAfterMs(3 * DAY_MS)).toBe(3 * DAY_MS);
     expect(await store.setStaleAfterMs(-5)).toBe(MIN_STALE_AFTER_MS);
@@ -65,7 +66,31 @@ describe("attention-store", () => {
       lastOpenedAtMs: null,
       lastStartedAtMs: null,
       runRequests: { "alfa_web::person-1": NOW },
+      requestTabs: {},
     });
+  });
+
+  it("remembers the tab Update opened with the request, and finds the request by it", async () => {
+    const store = createAttentionStore(createStorage());
+    await store.requestRun(TBANK, NOW, 42);
+    await store.requestRun(ALFA, NOW);
+
+    expect(await store.getRequestedTab(TBANK, NOW + HOUR_MS / 2)).toBe(42);
+    // A request without a tab is a request the visit sweep serves in a tab of its own.
+    expect(await store.getRequestedTab(ALFA, NOW)).toBeNull();
+    expect(await store.findRequestForTab(42, NOW + HOUR_MS / 2)).toEqual(TBANK);
+    expect(await store.findRequestForTab(43, NOW)).toBeNull();
+
+    // The tab goes with the request: an expired request names no tab, a cleared one neither.
+    expect(await store.getRequestedTab(TBANK, NOW + HOUR_MS)).toBeNull();
+    expect(await store.findRequestForTab(42, NOW + HOUR_MS)).toBeNull();
+    await store.clearRunRequest(TBANK);
+    expect((await store.getState()).requestTabs).toEqual({});
+
+    // Asked again without a tab, the old tab is not kept.
+    await store.requestRun(TBANK, NOW, 42);
+    await store.requestRun(TBANK, NOW + 1);
+    expect(await store.getRequestedTab(TBANK, NOW + 2)).toBeNull();
   });
 });
 
@@ -84,6 +109,7 @@ describe("attention-store under concurrent changes", () => {
       lastOpenedAtMs: null,
       lastStartedAtMs: null,
       runRequests: { "alfa_web::person-1": NOW + 1 },
+      requestTabs: {},
     });
   });
 });

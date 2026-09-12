@@ -27,6 +27,7 @@ describe("auto-run-store", () => {
       lastError: null,
       // Written before the field existed: the run succeeded, so that is the last success.
       lastOkAtMs: 10,
+      lastAttempt: null,
     });
     expect(await store.getState({ ...tbank, payerPersonId: "person-2" })).toEqual(
       createInitialAutoRunState(),
@@ -71,7 +72,35 @@ describe("auto-run-store", () => {
       consecutiveFailures: 0,
       lastError: null,
       lastOkAtMs: 20,
+      lastAttempt: null,
     });
+  });
+
+  it("keeps the last attempt and the requested origin, and drops a damaged attempt", async () => {
+    const storage = createStorage();
+    const store = createAutoRunStore(storage);
+    const scope = { sourceId: "tbank_web", payerPersonId: "person-1" };
+    await store.setState(scope, {
+      lastRunAtMs: 10,
+      lastResult: "ok",
+      consecutiveFailures: 0,
+      lastRunOrigin: "requested",
+      lastAttempt: { atMs: 12, result: "error", error: "signed out", origin: "manual" },
+    });
+    expect(await store.getState(scope)).toMatchObject({
+      lastRunOrigin: "requested",
+      lastAttempt: { atMs: 12, result: "error", error: "signed out", origin: "manual" },
+    });
+
+    storage.values.money_import_auto_state = {
+      "tbank_web::person-1": {
+        lastRunAtMs: 10,
+        lastResult: "ok",
+        consecutiveFailures: 0,
+        lastAttempt: { atMs: "soon", result: "ok", origin: "auto" },
+      },
+    };
+    expect((await store.getState(scope)).lastAttempt).toBeNull();
   });
 
   it("keeps the last success of a scope it forgives", async () => {
