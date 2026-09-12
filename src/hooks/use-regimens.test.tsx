@@ -323,6 +323,40 @@ describe("use-regimens", () => {
     });
   });
 
+  it("refuses to record a one-time dose when the course's strength cannot be read", async () => {
+    // The snapshot is the only record of what that intake delivered and nothing
+    // recovers it afterwards, so a failed read must not be told apart from a
+    // course with no strength. Failing is visible and the intake can be entered
+    // again; the silent version is permanent and reports success.
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const doseBuilder = createQueryBuilder({ data: { id: "dose-created" }, error: null });
+    createClientMock.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "med_dose_events") return doseBuilder;
+        return createQueryBuilder({ data: null, error: { message: "regimen read failed" } });
+      }),
+      rpc,
+    });
+
+    const { useAddOneTimeDoseToRegimen } = await import("./use-regimens");
+    const addOneTime = renderHookWithQueryClient(() => useAddOneTimeDoseToRegimen());
+
+    await act(async () => {
+      await expect(
+        addOneTime.result.current.mutateAsync({
+          person_id: "person-1",
+          regimen_id: "reg-1",
+          scheduled_at: "2026-01-01T08:00:00.000Z",
+          amount: 1,
+          unit: "pill",
+        }),
+      ).rejects.toThrow("regimen read failed");
+    });
+
+    expect(doseBuilder.insert).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("adds one-time dose and updates inventory", async () => {
     const doseBuilder = createQueryBuilder({
       data: { id: "dose-created" },

@@ -89,6 +89,18 @@ export const medicationUnitSchema = z
 
 export const plannedIntakeSchema = z.object({
   intake: z.object({ amount: positiveAmount, unit: medicationUnitSchema }),
+  unit_strength: z
+    .array(
+      z.object({
+        name: z.string(),
+        amount: positiveAmount,
+        unit: z.string(),
+      }),
+    )
+    .optional()
+    .describe(
+      "What ONE unit of the dosage form contains -- 100 milligram in one tablet, not what the whole intake delivers. Stays the same when the amount changes, so it survives a titration; the per-intake total is derived from it. Omit only where the form is the ingredient itself, such as a powder dosed in milligrams.",
+    ),
   active: z
     .array(
       z.object({
@@ -98,7 +110,9 @@ export const plannedIntakeSchema = z.object({
       }),
     )
     .optional()
-    .describe("Active ingredients, if known."),
+    .describe(
+      "Legacy: the ingredients the whole intake delivers. Nothing rescales this when an amount changes, so a reader cannot tell which amount it was recorded for. Prefer `unit_strength` for anything new.",
+    ),
 });
 
 export const regimenInventorySchema = z.object({

@@ -21,6 +21,7 @@ import type {
   MedSchedule,
   PlannedIntake,
 } from "@/types/regimen";
+import { plannedIntakeFor } from "@/types/regimen";
 import type { Database, Json } from "@/types/database";
 
 type MedRegimenInsert = Database["public"]["Tables"]["med_regimens"]["Insert"];
@@ -428,10 +429,26 @@ export interface AddOneTimeDoseToRegimenInput {
 
 async function addOneTimeDoseToRegimen(input: AddOneTimeDoseToRegimenInput): Promise<void> {
   const supabase = createClient();
-  const plannedIntake: PlannedIntake = {
-    intake: { amount: input.amount, unit: input.unit },
-    active: [],
-  };
+  // The strength is read from the course this dose is being attached to rather
+  // than passed in, so the event snapshots what a unit contained at the moment
+  // it was created and no caller can hand it a stale figure (`ADR-260907-cvj`).
+  //
+  // A failed read is not the same as a course with no strength, and must not
+  // become one: the snapshot is the only record of what that intake delivered,
+  // nothing recovers it afterwards, and the person would be told the dose was
+  // logged. Failing here is visible and the intake can be entered again, so it
+  // is the cheaper of the two.
+  const { data: regimenRow, error: regimenError } = await supabase
+    .from("med_regimens")
+    .select("dose_definition")
+    .eq("id", input.regimen_id)
+    .maybeSingle();
+  if (regimenError) throw new Error(regimenError.message);
+  const plannedIntake = plannedIntakeFor(
+    regimenRow as { dose_definition?: PlannedIntake | null } | null,
+    input.amount,
+    input.unit,
+  );
   const eventPayload: MedDoseEventInsert = {
     person_id: input.person_id,
     regimen_id: input.regimen_id,

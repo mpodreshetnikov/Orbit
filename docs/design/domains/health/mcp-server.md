@@ -193,10 +193,14 @@ Conventions that matter:
   per-unit strength exists, withholding the figure is the difference between reporting the record
   and inventing a dose.
 
-  That per-unit strength is now decided rather than hypothetical: `ADR-260907-cvj` records strength
-  in `dose_definition.unit_strength` — what one unit contains — and derives the per-intake total from
-  the amount beside it, leaving `active` as a legacy field read only for unmigrated rows. When it
-  lands, this withholding narrows to its honest case: no strength recorded on the row being rendered.
+  That per-unit strength now exists: `ADR-260907-cvj` records strength in
+  `dose_definition.unit_strength` — what one unit contains — and `resolveIntakeStrength`
+  (`src/types/regimen.ts`) derives the per-intake total from the amount beside it, preferring it over
+  `active` wherever a row carries both. `add_medication` and `update_medication` accept it, and
+  `log_dose` snapshots the course's onto each event it inserts. For a row that has one, this
+  withholding therefore no longer applies at all; for the rows that do not, everything above still
+  holds, which is almost all of them until the migration runs. The withholding narrows to its honest
+  case: no strength recorded on the row being rendered.
   A figure that scales with its own amount cannot be stranded by a slot override, an amount edit or a
   `log_dose` correction, so there is nothing left to detect, and both counterexamples above disappear
   rather than being caught.

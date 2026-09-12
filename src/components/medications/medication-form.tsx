@@ -46,7 +46,7 @@ import type {
   RegimenInventory,
   AddOneTimeToExistingPayload,
 } from "@/types/regimen";
-import { toPositiveAmount } from "@/types/regimen";
+import { toPositiveAmount, withCarriedStrength } from "@/types/regimen";
 
 interface MedicationFormPropsBase {
   mode: "create" | "edit";
@@ -328,10 +328,19 @@ export function MedicationForm({
     return "";
   };
 
-  const buildDoseDefinition = (amount: number): PlannedIntake => ({
-    intake: { amount, unit },
-    active: [],
-  });
+  /**
+   * The form has no field for a strength yet, so an edit must not be the thing
+   * that destroys one recorded elsewhere -- over the connector, or by hand. It
+   * rebuilt `dose_definition` from its own inputs alone, which silently emptied
+   * the ingredients of every course anyone opened and saved, even when the save
+   * changed only a reminder time.
+   *
+   * What carries over and what does not is `withCarriedStrength`, shared with
+   * the MCP update path so the rule is stated once: a strength belongs to the
+   * unit it was recorded for, and the legacy total additionally to the amount.
+   */
+  const buildDoseDefinition = (amount: number): PlannedIntake =>
+    withCarriedStrength(initial?.dose_definition, { amount, unit });
 
   const buildInventory = (): RegimenInventory | null =>
     inventoryEnabled
