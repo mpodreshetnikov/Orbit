@@ -526,6 +526,55 @@ describe("createRegimen / updateRegimen", () => {
     });
   });
 
+  it("takes the strength merge again when a concurrent write moves the row", async () => {
+    // Merging `dose_definition` made the version guard apply to a second class
+    // of update, so that class needs the same evidence the stock merge has: a
+    // write between the read and the write must cost a retry against what they
+    // left, not a silent overwrite and not an error.
+    const stub = createSupabaseStub({
+      med_regimens: [
+        {
+          data: {
+            inventory: null,
+            dose_definition: {
+              intake: { amount: 1, unit: "pill" },
+              unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+            },
+            updated_at: "t1",
+          },
+        },
+        // The guard matched nothing: somebody rewrote the course first, and
+        // recorded a different strength while they were there.
+        { data: null },
+        {
+          data: {
+            inventory: null,
+            dose_definition: {
+              intake: { amount: 1, unit: "pill" },
+              unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+            },
+            updated_at: "t2",
+          },
+        },
+        { data: regimen() },
+      ],
+    });
+
+    await updateRegimen(stub.client, "r-1", {
+      dose_definition: { intake: { amount: 2, unit: "pill" } },
+    });
+
+    const writes = stub.argsFor("med_regimens", "update");
+    expect(writes).toHaveLength(2);
+    // Their 100 mg, not the 50 mg this call first read.
+    expect(writes[1][0]).toMatchObject({
+      dose_definition: {
+        intake: { amount: 2, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      },
+    });
+  });
+
   it("merges again against what a concurrent write left", async () => {
     // A dose taken between the read and the write moves `current_amount`
     // through an RPC. Writing the merged object then carries the figure from
