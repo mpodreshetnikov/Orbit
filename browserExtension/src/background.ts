@@ -16,6 +16,7 @@ import { runScheduledImport, tryCompleteSessionAsFailed } from "./core/import-ru
 import { activeImportRuns } from "./core/active-runs.js";
 import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
+import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
@@ -64,9 +65,12 @@ async function sendSessionToSourcePageTab(
   tabId: number,
   session: Record<string, unknown> | null,
 ): Promise<void> {
+  const runTabId = session?.run_tab_id;
   await broadcastToSourceTab(tabId, {
     type: "MONEY_IMPORT_SESSION_UPDATED",
     session,
+    // The widget in the run's own tab speaks as the run's; any other bank tab is an onlooker.
+    is_run_tab: typeof runTabId === "number" && runTabId === tabId,
   });
 }
 
@@ -351,12 +355,6 @@ const AUTO_IMPORT_ALARM = "money-import-auto";
  */
 const VISIT_SWEEP_ALARM_PREFIX = "money-import-visit:";
 const VISIT_SWEEP_DELAY_MINUTES = 1;
-/**
- * How often the alarm asks whether anything is due. The cooldown decides whether a run actually
- * happens, so this only has to be short enough that a machine awake for a few hours a day still
- * gets asked.
- */
-const AUTO_IMPORT_ALARM_PERIOD_MINUTES = 180;
 const AUTO_IMPORT_TAB_LOAD_TIMEOUT_MS = 30_000;
 const AUTO_IMPORT_TAB_POLL_INTERVAL_MS = 500;
 
@@ -408,6 +406,19 @@ const autoImportSweep = createAutoImportSweep({
   isRunRequested: (scope, nowMs) => attentionStore.isRunRequested(scope, nowMs),
   clearRunRequest: (scope) => attentionStore.clearRunRequest(scope),
   openTab: async (url) => {
+    // Out of the person's sight: a minimized window of its own. A background tab in their
+    // window appeared in their tab strip and read as the bank opening by itself (2026-09-07);
+    // the owner's word is that only the app's own pages open in front of them. The window
+    // closes with its one tab when the run is done.
+    try {
+      const created = await chrome.windows.create({ url, state: "minimized" });
+      const tabId = created?.tabs?.[0]?.id;
+      if (typeof tabId === "number") return tabId;
+    } catch (error) {
+      telemetry.warn("money_import_auto_window_failed", {
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    }
     const created = await chrome.tabs.create({ url, active: false });
     return typeof created.id === "number" ? created.id : null;
   },
@@ -424,28 +435,60 @@ const autoImportSweep = createAutoImportSweep({
   closeTab: async (tabId) => {
     await chrome.tabs.remove(tabId).catch(() => {});
   },
-  runImport: async ({ grant, sourceId, tabId, nowMs }) =>
-    await runScheduledImport(
-      {
-        sourceId,
-        payerPersonId: grant.person_id,
-        nowMs,
-        functionUrl: grant.function_url,
-        credentials: { grantToken: grant.token },
-        appOrigin: grant.app_origin || null,
-        // Nobody is looking at this tab; the widget is for a run a person started.
-        showSourcePageWidget: false,
-        tabId,
-      },
-      {
-        getConnector,
-        callEdge,
-        broadcastToAppTabs,
-        nowIso: () => new Date().toISOString(),
-        backfillStore,
-        sessionStore,
-      },
-    ),
+  findRequestedTab: async (scope, nowMs) => {
+    const tabId = await attentionStore.getRequestedTab(scope, nowMs);
+    if (tabId === null) return null;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !matchesMoneyImportSourcePageUrl(scope.sourceId, tab.url)) return null;
+    return tabId;
+  },
+  runImport: async ({ grant, sourceId, tabId, nowMs, origin }) => {
+    // The run's tab is told how the whole run ended, windows and all: a window's own "done"
+    // is not the end of the run, and a run that throws broadcasts nothing of its own.
+    const finish = async (result: { ok: boolean; error?: string }) => {
+      await broadcastToSourceTab(tabId, { type: "MONEY_IMPORT_RUN_FINISHED", ...result });
+    };
+    let outcome;
+    try {
+      outcome = await runScheduledImport(
+        {
+          sourceId,
+          payerPersonId: grant.person_id,
+          nowMs,
+          origin,
+          functionUrl: grant.function_url,
+          credentials: { grantToken: grant.token },
+          appOrigin: grant.app_origin || null,
+          // The widget in the run's tab says whose run it is and asks not to close the tab; in
+          // the person's other bank tabs it says a run is on elsewhere.
+          showSourcePageWidget: true,
+          tabId,
+        },
+        {
+          getConnector,
+          callEdge,
+          // The run's own tab hears its progress as the app does; the widget there follows it.
+          broadcastToAppTabs: async (message) => {
+            await broadcastToAppTabs(message);
+            await broadcastToSourceTab(tabId, message);
+          },
+          nowIso: () => new Date().toISOString(),
+          backfillStore,
+          sessionStore,
+          // The tab was loaded before the session existed, so the widget is put there now.
+          onWindowStarted: async (session) => {
+            const current = await chrome.tabs.get(tabId).catch(() => null);
+            await syncSourcePageWidgetForSession(session, { tabId, tabUrl: current?.url });
+          },
+        },
+      );
+    } catch (error) {
+      await finish({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+    await finish({ ok: true });
+    return outcome;
+  },
   now: () => Date.now(),
   onWarning: (event, attrs) => telemetry.warn(event, attrs),
 });
@@ -458,10 +501,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!isComplete && !hasNavigated) return;
 
   void (async () => {
-    // A load in a tab the sweep opened is the sweep's own doing, not a person's visit.
-    if (autoImportSweep.ownsTab(tabId)) return;
     const session = await sessionStore.getSession();
     if (!session) {
+      // A load in a tab the sweep opened is the sweep's own doing, not a person's visit; with
+      // a run on, the load is the connector moving through the bank, and the widget is put
+      // back on the page it moved to (below), as in any other tab of that bank.
+      if (autoImportSweep.ownsTab(tabId)) return;
       // A finished load on a bank page is the one moment the extension knows the person's bank
       // session is live. It is a signal only -- for that bank, not for every bank the grant
       // covers -- and the sweep it schedules works in a tab of its own.
@@ -473,6 +518,14 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
           await chrome.alarms.create(`${VISIT_SWEEP_ALARM_PREFIX}${visited.sourceId}`, {
             delayInMinutes: VISIT_SWEEP_DELAY_MINUTES,
           });
+        }
+        // The tab Update opened, before its run has begun: the widget there tells the person
+        // to sign in and wait. It asks the worker what to show, so nothing more is sent.
+        if (visited) {
+          const request = await attentionStore.findRequestForTab(tabId, Date.now());
+          if (request && request.sourceId === visited.sourceId) {
+            await injectSourcePageWidget(tabId).catch(() => undefined);
+          }
         }
       }
       return;
@@ -489,13 +542,28 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
  * on every startup means a three-hour alarm on a busy machine is reset long before it ever
  * fires, and the fallback that exists for people who do not visit their bank never runs.
  */
+/**
+ * Arms the periodic sweep when it is not armed: minutes from now, then every period. The
+ * cooldown decides whether a run actually happens, so the alarm only has to ask, and soon.
+ * See `sweepAlarmSchedule` for why the first ask is not a period away.
+ */
 async function ensureAutoImportAlarm(): Promise<void> {
   if (!chrome.alarms?.create) return;
   const existing = await chrome.alarms.get(AUTO_IMPORT_ALARM).catch(() => null);
   if (existing) return;
-  await chrome.alarms.create(AUTO_IMPORT_ALARM, {
-    periodInMinutes: AUTO_IMPORT_ALARM_PERIOD_MINUTES,
-  });
+  await chrome.alarms.create(AUTO_IMPORT_ALARM, sweepAlarmSchedule());
+}
+
+/**
+ * At the browser's start, an alarm due hours away is brought forward: this is the moment the
+ * person is at the machine and the banks' cookies are as live as they will be. Creating an
+ * alarm by an existing name replaces it, so the period is kept and the schedule restarts.
+ */
+async function rearmAutoImportAlarmAtStart(): Promise<void> {
+  if (!chrome.alarms?.create) return;
+  const existing = await chrome.alarms.get(AUTO_IMPORT_ALARM).catch(() => null);
+  if (!needsRearmAtStart(existing, Date.now())) return;
+  await chrome.alarms.create(AUTO_IMPORT_ALARM, sweepAlarmSchedule());
 }
 
 /**
@@ -514,11 +582,14 @@ chrome.runtime.onInstalled?.addListener((details) => {
   });
   // The badge does not survive an update; the count it showed still holds.
   void refreshAttention("install", { mayOpenPage: false });
+  // A new version has reason to run soon, forgiven failures or not.
+  void rearmAutoImportAlarmAtStart();
 });
 
 // The browser's start is the one moment a page opening by itself reads as a reminder rather
 // than an interruption, and the badge has to be drawn again in any case.
 chrome.runtime.onStartup?.addListener(() => {
+  void rearmAutoImportAlarmAtStart();
   void attentionStore
     .markBrowserStarted(Date.now())
     .then(() => refreshAttention("startup", { mayOpenPage: true }));

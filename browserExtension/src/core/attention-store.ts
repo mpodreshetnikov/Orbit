@@ -16,6 +16,11 @@ export interface AttentionState {
    * the hour would have inherited the request and imported for them.
    */
   runRequests: Record<string, number>;
+  /**
+   * The bank tab Update opened for each request, by the same key. The run a request lets start
+   * works in that tab -- the person is looking at it -- rather than in one of the sweep's own.
+   */
+  requestTabs: Record<string, number>;
 }
 
 export function requestKey(scope: AutoRunScope): string {
@@ -28,8 +33,12 @@ export interface AttentionStore {
   setStaleAfterMs(value: unknown): Promise<number>;
   markPageOpened(nowMs: number): Promise<void>;
   markBrowserStarted(nowMs: number): Promise<void>;
-  requestRun(scope: AutoRunScope, nowMs: number): Promise<void>;
+  requestRun(scope: AutoRunScope, nowMs: number, tabId?: number | null): Promise<void>;
   isRunRequested(scope: AutoRunScope, nowMs: number): Promise<boolean>;
+  /** The tab a live request was opened in, or null when there is no live request or no tab. */
+  getRequestedTab(scope: AutoRunScope, nowMs: number): Promise<number | null>;
+  /** The live request whose tab this is, if any. */
+  findRequestForTab(tabId: number, nowMs: number): Promise<AutoRunScope | null>;
   clearRunRequest(scope: AutoRunScope): Promise<void>;
 }
 
@@ -43,6 +52,10 @@ function readState(value: unknown): AttentionState {
   for (const [sourceId, at] of Object.entries(asRecord(record.runRequests))) {
     if (typeof at === "number" && Number.isFinite(at)) requests[sourceId] = at;
   }
+  const tabs: Record<string, number> = {};
+  for (const [key, tabId] of Object.entries(asRecord(record.requestTabs))) {
+    if (typeof tabId === "number" && Number.isFinite(tabId)) tabs[key] = tabId;
+  }
   return {
     staleAfterMs: normalizeStaleAfterMs(record.staleAfterMs),
     lastOpenedAtMs:
@@ -54,7 +67,14 @@ function readState(value: unknown): AttentionState {
         ? record.lastStartedAtMs
         : null,
     runRequests: requests,
+    requestTabs: tabs,
   };
+}
+
+function scopeOfKey(key: string): AutoRunScope | null {
+  const separator = key.indexOf("::");
+  if (separator <= 0) return null;
+  return { sourceId: key.slice(0, separator), payerPersonId: key.slice(separator + 2) };
 }
 
 /**
@@ -101,21 +121,43 @@ export function createAttentionStore(storage: LocalStorageLike): AttentionStore 
     markBrowserStarted(nowMs) {
       return change((state) => write({ ...state, lastStartedAtMs: nowMs }));
     },
-    requestRun(scope, nowMs) {
-      return change((state) =>
-        write({ ...state, runRequests: { ...state.runRequests, [requestKey(scope)]: nowMs } }),
-      );
+    requestRun(scope, nowMs, tabId = null) {
+      return change((state) => {
+        const key = requestKey(scope);
+        const { [key]: _previousTab, ...otherTabs } = state.requestTabs;
+        return write({
+          ...state,
+          runRequests: { ...state.runRequests, [key]: nowMs },
+          requestTabs: typeof tabId === "number" ? { ...otherTabs, [key]: tabId } : otherTabs,
+        });
+      });
     },
     async isRunRequested(scope, nowMs) {
       const state = await read();
       return isRunRequestLive(state.runRequests[requestKey(scope)], nowMs);
     },
+    async getRequestedTab(scope, nowMs) {
+      const state = await read();
+      const key = requestKey(scope);
+      if (!isRunRequestLive(state.runRequests[key], nowMs)) return null;
+      return state.requestTabs[key] ?? null;
+    },
+    async findRequestForTab(tabId, nowMs) {
+      const state = await read();
+      for (const [key, requestTabId] of Object.entries(state.requestTabs)) {
+        if (requestTabId !== tabId) continue;
+        if (!isRunRequestLive(state.runRequests[key], nowMs)) continue;
+        return scopeOfKey(key);
+      }
+      return null;
+    },
     clearRunRequest(scope) {
       return change(async (state) => {
         const key = requestKey(scope);
-        if (!(key in state.runRequests)) return;
+        if (!(key in state.runRequests) && !(key in state.requestTabs)) return;
         const { [key]: _cleared, ...rest } = state.runRequests;
-        await write({ ...state, runRequests: rest });
+        const { [key]: _clearedTab, ...restTabs } = state.requestTabs;
+        await write({ ...state, runRequests: rest, requestTabs: restTabs });
       });
     },
   };

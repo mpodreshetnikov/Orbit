@@ -20,7 +20,8 @@ export interface ExtensionAutoStatusSource {
   last_result: "ok" | "error" | null;
   consecutive_failures: number;
   last_error: string | null;
-  last_run_origin: "auto" | "manual" | null;
+  /** `requested`: the sweep ran because the person asked from the attention page. */
+  last_run_origin: "auto" | "manual" | "requested" | null;
   next_run: { kind: "now" } | { kind: "after"; at: string } | { kind: "stopped" };
   scheduled_at: string | null;
 }
@@ -45,7 +46,7 @@ function readResult(value: unknown): ExtensionAutoStatusSource["last_result"] {
 }
 
 function readOrigin(value: unknown): ExtensionAutoStatusSource["last_run_origin"] {
-  return value === "auto" || value === "manual" ? value : null;
+  return value === "auto" || value === "manual" || value === "requested" ? value : null;
 }
 
 function readNextRun(value: unknown): ExtensionAutoStatusSource["next_run"] {

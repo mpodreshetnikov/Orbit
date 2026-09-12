@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runScheduledImport } from "./import-runner.js";
 import { activeImportRuns } from "./active-runs.js";
+import { liveRuns } from "./run-board.js";
 import { RUN_STARTED_AT_KEY } from "./session-janitor.js";
 import { createBackfillStore } from "./backfill-store.js";
 import {
@@ -403,6 +404,122 @@ describe("runScheduledImport", () => {
     expect(harness.getSession()).toBeNull();
     expect(activeImportRuns.has("session-1")).toBe(false);
     expect(activeImportRuns.has("session-2")).toBe(false);
+  });
+
+  it("puts each window on the run board while it runs, and takes it off after", async () => {
+    const seen: Array<Record<string, unknown> | null> = [];
+    const harness = createHarness();
+    harness.connector.parse.mockImplementation(async () => {
+      const run = liveRuns.findBySource("tbank", "person-1");
+      seen.push(
+        run
+          ? {
+              session_id: run.session_id,
+              origin: run.origin,
+              window_kind: run.window_kind,
+              window_from: run.window_from,
+              window_to: run.window_to,
+              tab_id: run.tab_id,
+              batch_id: run.batch_id,
+            }
+          : null,
+      );
+      return {
+        rows: [{ id: seen.length }],
+        windowTo: new Date(NOW).toISOString(),
+        parsedThroughAt: new Date(NOW).toISOString(),
+        parsedTransactionsCount: 1,
+      };
+    });
+
+    await runScheduledImport({ ...INPUT, origin: "requested" }, harness.deps);
+
+    expect(seen).toEqual([
+      {
+        session_id: "session-1",
+        origin: "requested",
+        window_kind: "incremental",
+        window_from: harness.createdWindows[0]?.from,
+        window_to: harness.createdWindows[0]?.to,
+        tab_id: 42,
+        batch_id: "batch-1",
+      },
+      {
+        session_id: "session-2",
+        origin: "requested",
+        window_kind: "backfill",
+        window_from: harness.createdWindows[1]?.from,
+        window_to: harness.createdWindows[1]?.to,
+        tab_id: 42,
+        batch_id: "batch-2",
+      },
+    ]);
+    // The broadcasts the window made were read into the board on the way out.
+    expect(liveRuns.findBySource("tbank")).toBeNull();
+    expect(liveRuns.list()).toEqual([]);
+  });
+
+  it("tells the widget whose run it is and which tab it works in", async () => {
+    const harness = createHarness();
+    const seen: Array<Record<string, unknown>> = [];
+    harness.connector.parse.mockImplementation(async () => {
+      const session = harness.getSession();
+      seen.push({ run_origin: session?.run_origin, run_tab_id: session?.run_tab_id });
+      return {
+        rows: [],
+        windowTo: new Date(NOW).toISOString(),
+        parsedThroughAt: new Date(NOW).toISOString(),
+        parsedTransactionsCount: 0,
+      };
+    });
+
+    await runScheduledImport({ ...INPUT, origin: "requested" }, harness.deps);
+    expect(seen).toEqual([
+      { run_origin: "requested", run_tab_id: 42 },
+      { run_origin: "requested", run_tab_id: 42 },
+    ]);
+  });
+
+  it("announces each window's session once it is claimed, before the connector starts", async () => {
+    const harness = createHarness();
+    const order: string[] = [];
+    harness.connector.parse.mockImplementation(async () => {
+      order.push("parse");
+      return {
+        rows: [],
+        windowTo: new Date(NOW).toISOString(),
+        parsedThroughAt: new Date(NOW).toISOString(),
+        parsedTransactionsCount: 0,
+      };
+    });
+    const onWindowStarted = vi.fn(async (session: Record<string, unknown>) => {
+      order.push(`started:${String(session.session_id)}`);
+    });
+
+    await runScheduledImport(INPUT, { ...harness.deps, onWindowStarted });
+
+    expect(order).toEqual(["started:session-1", "parse", "started:session-2", "parse"]);
+    expect(onWindowStarted.mock.calls[0]?.[0]).toMatchObject({
+      session_id: "session-1",
+      run_tab_id: 42,
+      show_source_page_widget: false,
+    });
+  });
+
+  it("reads the window's own broadcasts into its board record", async () => {
+    const harness = createHarness();
+    let progressSeen: Record<string, unknown> | null = null;
+    harness.deps.broadcastToAppTabs.mockImplementation(async (message: Record<string, unknown>) => {
+      if (message.type === "MONEY_IMPORT_PROGRESS" && message.phase === "parse_completed") {
+        const run = liveRuns.findBySource("tbank", "person-1");
+        progressSeen = run ? { phase: run.phase, progress_percent: run.progress_percent } : null;
+      }
+    });
+
+    await runScheduledImport(INPUT, harness.deps);
+    expect(progressSeen).toEqual({ phase: "parse_completed", progress_percent: 60 });
+    // Without a stated origin the run is the sweep's own.
+    expect(harness.getSession()).toBeNull();
   });
 
   it("bounds the history slice at both ends", async () => {

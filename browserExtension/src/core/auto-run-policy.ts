@@ -9,6 +9,25 @@
  * Kept free of `chrome.*` so the decisions can be tested directly.
  */
 
+/**
+ * Who started a run: the sweep on its own, the sweep on a person's request from the attention
+ * page, or a person by hand. A requested run is the person's doing, not an automatic one, and
+ * is named so wherever the last run is described.
+ */
+export type AutoRunOrigin = "auto" | "manual" | "requested";
+
+/**
+ * The last attempt of any kind, kept apart from the backoff fields: a failed manual run is
+ * recorded here for the page to show, without widening the automatic backoff -- the person's
+ * own attempt says nothing the sweep should act on.
+ */
+export interface AutoRunAttempt {
+  atMs: number;
+  result: "ok" | "error";
+  error: string | null;
+  origin: AutoRunOrigin;
+}
+
 export interface AutoRunState {
   lastRunAtMs: number | null;
   lastResult: "ok" | "error" | null;
@@ -22,7 +41,9 @@ export interface AutoRunState {
    * Who started the run the timestamp belongs to. A manual import resets the backoff and
    * buys the cooldown like an automatic one, but the page must not call it automatic.
    */
-  lastRunOrigin?: "auto" | "manual";
+  lastRunOrigin?: AutoRunOrigin;
+  /** The last attempt of any kind; see `AutoRunAttempt`. Optional: older states have none. */
+  lastAttempt?: AutoRunAttempt | null;
   /**
    * When the last successful run was, kept across the failures that follow it. `lastRunAtMs`
    * is the last attempt of any kind, so after one failed attempt it said nothing about how
@@ -60,6 +81,39 @@ export function createInitialAutoRunState(): AutoRunState {
     consecutiveFailures: 0,
     lastError: null,
     lastOkAtMs: null,
+    lastAttempt: null,
+  };
+}
+
+/**
+ * The last attempt on record. A state written before the field existed carries it in the
+ * backoff fields, which know nothing of a failed manual run that came after a success.
+ */
+export function lastAttemptOf(state: AutoRunState | null): AutoRunAttempt | null {
+  if (!state) return null;
+  if (state.lastAttempt) return state.lastAttempt;
+  if (state.lastRunAtMs === null || state.lastResult === null) return null;
+  return {
+    atMs: state.lastRunAtMs,
+    result: state.lastResult,
+    error: state.lastResult === "error" ? (state.lastError ?? null) : null,
+    origin: state.lastRunOrigin ?? "auto",
+  };
+}
+
+/**
+ * Records a failed attempt without touching the backoff: a person's own run that failed is
+ * shown as the last attempt, and the sweep's schedule is left as it was.
+ */
+export function withFailedAttempt(
+  state: AutoRunState | null,
+  nowMs: number,
+  error: string | null,
+  origin: AutoRunOrigin,
+): AutoRunState {
+  return {
+    ...(state ?? createInitialAutoRunState()),
+    lastAttempt: { atMs: nowMs, result: "error", error, origin },
   };
 }
 
@@ -113,15 +167,17 @@ export function nextAutoRunState(
   nowMs: number,
   result: "ok" | "error",
   error: string | null = null,
-  origin: "auto" | "manual" = "auto",
+  origin: AutoRunOrigin = "auto",
 ): AutoRunState {
   const previousFailures = state?.consecutiveFailures ?? 0;
+  const lastError = result === "ok" ? null : (error ?? state?.lastError ?? null);
   return {
     lastRunAtMs: nowMs,
     lastResult: result,
     consecutiveFailures: result === "ok" ? 0 : previousFailures + 1,
-    lastError: result === "ok" ? null : (error ?? state?.lastError ?? null),
+    lastError,
     lastRunOrigin: origin,
     lastOkAtMs: result === "ok" ? nowMs : lastOkAtMsOf(state),
+    lastAttempt: { atMs: nowMs, result, error: lastError, origin },
   };
 }

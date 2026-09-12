@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { MONEY_ACCOUNT_SOURCES } from "@/types";
 import { useUIStore } from "@/stores/ui-store";
@@ -12,12 +12,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  pingExtension,
+  LIVE_RUN_REFRESH_MS,
+  onBridgeStale,
+  probeExtension,
+  probeExtensionUntilHeard,
+  reloadPage,
   requestExtensionAttention,
   requestExtensionRun,
   setExtensionStaleAfter,
+  STARTUP_PROBE_OFFSETS_MS,
+  STARTUP_PROBE_TIMEOUT_MS,
   type ExtensionAttention,
   type ExtensionAttentionSource,
+  type ExtensionLastAttempt,
+  type ExtensionLiveRun,
 } from "@/lib/money/extension-bridge";
 
 /**
@@ -31,11 +39,34 @@ import {
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** While a requested run is waiting on a sign-in, the page asks again this often to see it land. */
-const PENDING_REFRESH_MS = 20_000;
 
 type Translate = ReturnType<typeof useTranslations>;
-type PageState = "loading" | "inactive" | "unavailable" | "ready";
+type PageState = "loading" | "inactive" | "stale" | "unavailable" | "ready";
+/**
+ * Set for the one reload this page does on its own when the bridge says the extension updated
+ * under it. A second stale answer after that reload is shown, not reloaded into again.
+ */
+const STALE_RELOAD_KEY = "money-import-attention:reloaded-for-stale-bridge";
+
+function claimStaleReload(): boolean {
+  try {
+    if (window.sessionStorage.getItem(STALE_RELOAD_KEY)) return false;
+    window.sessionStorage.setItem(STALE_RELOAD_KEY, "1");
+    return true;
+  } catch {
+    // Nowhere to remember the reload by, so none is made: a page that reloads itself with no
+    // memory of having done so reloads forever. The button is offered instead.
+    return false;
+  }
+}
+
+function releaseStaleReload(): void {
+  try {
+    window.sessionStorage.removeItem(STALE_RELOAD_KEY);
+  } catch {
+    // Nothing to release.
+  }
+}
 type RequestState = { kind: "sent" } | { kind: "failed"; error: string | null };
 
 function formatMoment(value: string): string {
@@ -71,6 +102,80 @@ function thresholdDaysOf(staleAfterMs: number): number {
   return Math.max(1, Math.round(staleAfterMs / DAY_MS));
 }
 
+function formatDay(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return format(parsed, "dd.MM.yyyy");
+}
+
+/**
+ * The phases a run reports, named for a person. The list is the connector's vocabulary; a
+ * phase the list does not know is shown as its own name, so a new one is readable before it is
+ * translated.
+ */
+const KNOWN_PHASES = new Set([
+  "starting",
+  "parse_preparing_tab",
+  "parse_loading_operations_page",
+  "parse_loading_history_page",
+  "parse_extracting_page_data",
+  "parse_discovering_endpoints",
+  "parse_fetching_ranges",
+  "parse_enriching_operations",
+  "parse_using_dom_fallback",
+  "parse_dom_rows_ready",
+  "parse_mapping_rows",
+  "parse_completed",
+  "preview_rows_started",
+  "complete_session_started",
+  "parse_only_completed",
+  "review_ready",
+  "completed",
+]);
+
+function phaseLabel(phase: string | null, t: Translate): string {
+  if (!phase) return t("money.importPhase.starting");
+  if (KNOWN_PHASES.has(phase)) return t(`money.importPhase.${phase}`);
+  return phase.replace(/_/g, " ");
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/** One line for a run in flight: whose it is, which window, where it has got to. */
+function describeLiveRun(run: ExtensionLiveRun, t: Translate): string {
+  const origin = t(`money.importAttentionLiveOrigin${capitalize(run.origin)}`);
+  const window =
+    run.window_from && run.window_to
+      ? t(`money.importAttentionWindow${capitalize(run.window_kind)}`, {
+          from: formatDay(run.window_from),
+          to: formatDay(run.window_to),
+        })
+      : t("money.importAttentionWindowUnknown");
+  const count =
+    run.parsed_transactions_count === null
+      ? ""
+      : t("money.importAttentionLiveRunCount", { count: run.parsed_transactions_count });
+  return t("money.importAttentionLiveRun", {
+    origin,
+    window,
+    phase: phaseLabel(run.phase, t),
+    percent: Math.round(run.progress_percent),
+    count,
+  });
+}
+
+function describeLastAttempt(attempt: ExtensionLastAttempt, t: Translate): string {
+  if (attempt.result === "ok") {
+    return t("money.importAttentionLastAttemptOk", { date: formatMoment(attempt.at) });
+  }
+  return t("money.importAttentionLastAttemptFailed", {
+    date: formatMoment(attempt.at),
+    error: attempt.error ?? "-",
+  });
+}
+
 export default function MoneyImportAttentionPage() {
   const t = useTranslations();
   const [state, setState] = useState<PageState>("loading");
@@ -81,6 +186,7 @@ export default function MoneyImportAttentionPage() {
   const [thresholdDays, setThresholdDays] = useState("1");
   const [thresholdNotice, setThresholdNotice] = useState<string | null>(null);
   const [thresholdSaving, setThresholdSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   // A value the person is typing is not overwritten by a refresh landing mid-keystroke.
   const thresholdTouched = useRef(false);
   // Only the newest refresh may write: two in flight answer in any order, and the older one
@@ -89,51 +195,85 @@ export default function MoneyImportAttentionPage() {
   const hadAnswer = useRef(false);
   const selectedPersonId = useUIStore((store) => store.selectedPersonId);
 
+  // The extension updated under this page and the script in this tab is the old one. A
+  // reload gets the new script; once, so a page that stays stale is shown, not spun.
+  const goStale = useCallback(() => {
+    refreshGeneration.current += 1;
+    if (claimStaleReload()) {
+      reloadPage();
+      return;
+    }
+    setState("stale");
+    setAttention(null);
+    setRefreshing(false);
+  }, []);
+
+  // Whichever request draws the notice: after the first answer a refresh probes only once,
+  // and a bridge that dies between that probe and the attention request answers the request.
+  useEffect(() => onBridgeStale(() => goStale()), [goStale]);
+
   const refresh = useCallback(async () => {
     const generation = ++refreshGeneration.current;
-    const alive = await pingExtension();
-    if (generation !== refreshGeneration.current) return;
-    if (!alive) {
-      // Before any answer, an unanswered ping is an extension that is not there. After one, it
-      // is a slow service-worker wake -- the ping's half-second is the shortest wait on this
-      // page -- and is treated like the missed answer below, so the asking goes on.
-      if (hadAnswer.current) {
-        setRefreshMissed(true);
+    setRefreshing(true);
+    try {
+      // Until the extension has answered once, the page is patient: at the browser's start the
+      // content script arrives after the first render and the service worker may be waking.
+      // After an answer one probe is enough, and a miss is treated below.
+      const verdict = hadAnswer.current
+        ? await probeExtension()
+        : await probeExtensionUntilHeard(STARTUP_PROBE_OFFSETS_MS, STARTUP_PROBE_TIMEOUT_MS);
+      if (generation !== refreshGeneration.current) return;
+      if (verdict === "stale") {
+        goStale();
         return;
       }
-      setState("inactive");
-      setAttention(null);
-      return;
+      if (verdict === "silent") {
+        // Before any answer, silence is an extension that is not there. After one, it is a
+        // slow service-worker wake and is treated like the missed answer below, so the asking
+        // goes on.
+        if (hadAnswer.current) {
+          setRefreshMissed(true);
+          return;
+        }
+        setState("inactive");
+        setAttention(null);
+        return;
+      }
+      releaseStaleReload();
+      // The ping answered, so the extension is there; a status it cannot give is an older
+      // version or a slow service-worker wake, not an absence.
+      const next = await requestExtensionAttention();
+      if (generation !== refreshGeneration.current) return;
+      if (!next) {
+        // One missed answer after a good one is a slow wake, not a lost extension: the last
+        // answer stays on the screen and the polling below keeps asking. Only a page that
+        // never got an answer says the extension cannot give one.
+        setRefreshMissed(true);
+        setState((current) => (current === "ready" ? current : "unavailable"));
+        return;
+      }
+      hadAnswer.current = true;
+      setRefreshMissed(false);
+      setAttention(next);
+      setState("ready");
+      // A request the extension no longer holds has settled -- the run succeeded, or the hour
+      // passed -- so the page stops telling the person to sign in for it.
+      setRequests((previous) => {
+        const settled = next.sources.filter(
+          (source) => !source.run_requested && previous[source.source_id]?.kind === "sent",
+        );
+        if (settled.length === 0) return previous;
+        const reconciled = { ...previous };
+        for (const source of settled) delete reconciled[source.source_id];
+        return reconciled;
+      });
+      if (!thresholdTouched.current) {
+        setThresholdDays(String(thresholdDaysOf(next.stale_after_ms)));
+      }
+    } finally {
+      if (generation === refreshGeneration.current) setRefreshing(false);
     }
-    // The ping answered, so the extension is there; a status it cannot give is an older
-    // version or a slow service-worker wake, not an absence.
-    const next = await requestExtensionAttention();
-    if (generation !== refreshGeneration.current) return;
-    if (!next) {
-      // One missed answer after a good one is a slow wake, not a lost extension: the last
-      // answer stays on the screen and the polling below keeps asking. Only a page that never
-      // got an answer says the extension cannot give one.
-      setRefreshMissed(true);
-      setState((current) => (current === "ready" ? current : "unavailable"));
-      return;
-    }
-    hadAnswer.current = true;
-    setRefreshMissed(false);
-    setAttention(next);
-    setState("ready");
-    // A request the extension no longer holds has settled -- the run succeeded, or the hour
-    // passed -- so the page stops telling the person to sign in for it.
-    setRequests((previous) => {
-      const settled = next.sources.filter(
-        (source) => !source.run_requested && previous[source.source_id]?.kind === "sent",
-      );
-      if (settled.length === 0) return previous;
-      const reconciled = { ...previous };
-      for (const source of settled) delete reconciled[source.source_id];
-      return reconciled;
-    });
-    if (!thresholdTouched.current) setThresholdDays(String(thresholdDaysOf(next.stale_after_ms)));
-  }, []);
+  }, [goStale]);
 
   useEffect(() => {
     void refresh();
@@ -144,13 +284,18 @@ export default function MoneyImportAttentionPage() {
   const pendingRun =
     (attention?.sources.some((source) => source.run_requested) ?? false) ||
     Object.values(requests).some((request) => request.kind === "sent");
+  // A run in flight is watched closely: the person was told nothing happens, and this is the
+  // page that shows it happening. A request still waiting on a sign-in is watched as closely,
+  // or the run it starts a minute after could begin and end between two slower looks and never
+  // be seen in flight. The asking stops with the run and the request.
+  const liveRun = attention?.sources.some((source) => source.live_run?.running) ?? false;
   useEffect(() => {
-    if (state !== "ready" || !pendingRun) return;
+    if (state !== "ready" || (!liveRun && !pendingRun)) return;
     const timer = window.setInterval(() => {
       void refresh();
-    }, PENDING_REFRESH_MS);
+    }, LIVE_RUN_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [state, pendingRun, refresh]);
+  }, [state, liveRun, pendingRun, refresh]);
 
   const handleUpdate = useCallback(
     async (sourceId: string) => {
@@ -216,6 +361,7 @@ export default function MoneyImportAttentionPage() {
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-base">{t("money.importAttentionSourcesTitle")}</CardTitle>
           <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>
+            {refreshing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {t("common.refresh")}
           </Button>
         </CardHeader>
@@ -225,6 +371,14 @@ export default function MoneyImportAttentionPage() {
           )}
           {state === "inactive" && (
             <p className="text-muted-foreground">{t("money.importAutoStatusExtensionInactive")}</p>
+          )}
+          {state === "stale" && (
+            <div className="space-y-2" data-testid="money-import-attention-stale">
+              <p className="text-muted-foreground">{t("money.importAttentionBridgeStale")}</p>
+              <Button type="button" size="sm" onClick={() => reloadPage()}>
+                {t("money.importAttentionReload")}
+              </Button>
+            </div>
           )}
           {state === "unavailable" && (
             <p className="text-muted-foreground">{t("money.importAutoStatusUnavailable")}</p>
@@ -277,6 +431,36 @@ export default function MoneyImportAttentionPage() {
                   <p className={source.stale ? "text-destructive" : "text-muted-foreground"}>
                     {describeFreshness(source, t)}
                   </p>
+                  {source.live_run?.running && (
+                    <p
+                      className="font-medium"
+                      data-testid={`money-import-attention-live-${source.source_id}`}
+                    >
+                      {describeLiveRun(source.live_run, t)}
+                    </p>
+                  )}
+                  {source.last_attempt && (
+                    <p
+                      className={
+                        source.last_attempt.result === "error"
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      }
+                      data-testid={`money-import-attention-last-${source.source_id}`}
+                    >
+                      {describeLastAttempt(source.last_attempt, t)}
+                    </p>
+                  )}
+                  {!source.live_run?.running && source.next_run.kind === "stopped" && (
+                    <p className="text-muted-foreground">{t("money.importAttentionAutoStopped")}</p>
+                  )}
+                  {!source.live_run?.running && source.next_run.kind === "after" && (
+                    <p className="text-muted-foreground">
+                      {t("money.importAttentionNextAfter", {
+                        date: formatMoment(source.next_run.at),
+                      })}
+                    </p>
+                  )}
                   {requested && (
                     <p className="text-muted-foreground">{t("money.importAttentionRequested")}</p>
                   )}
