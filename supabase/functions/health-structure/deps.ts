@@ -9,6 +9,7 @@ import {
 } from "./repository.ts";
 import type { HealthStructureParseContext } from "./service.ts";
 import { emptyLlmUsage } from "../_shared/llm-usage.ts";
+import { DEFAULT_OPENROUTER_MODEL } from "../_shared/llm-model.ts";
 import type { StructuredParseOutcome } from "./types.ts";
 
 export type HealthStructureParserMode = "openrouter" | "e2e_stub";
@@ -62,7 +63,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const openRouterModel =
-    Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? "openai/gpt-5.2:nitro";
+    Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? DEFAULT_OPENROUTER_MODEL;
   // Per-stage overrides. Extraction is accuracy-critical and deserves the strongest model;
   // classification and reconciliation are cheaper jobs and can be pointed at a smaller one.
   // Each falls back to the shared default so an unset environment keeps working.

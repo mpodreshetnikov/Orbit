@@ -1,5 +1,6 @@
 // deno-lint-ignore-file require-await
 import { assertEquals } from "std/assert/assert-equals";
+import { DEFAULT_OPENROUTER_MODEL } from "../_shared/llm-model.ts";
 import { callOpenRouterParse, parseStructuredFromLlmContent } from "./openrouter-parse.ts";
 import type { OpenRouterParseContext } from "./openrouter-parse.ts";
 
@@ -109,7 +110,7 @@ Deno.test("callOpenRouterParse sends request and parses string content", async (
   });
 
   assertEquals(structured.record_type, "visit");
-  assertEquals(asRecord(requestBody)?.model, "openai/gpt-5.2:nitro");
+  assertEquals(asRecord(requestBody)?.model, DEFAULT_OPENROUTER_MODEL);
   assertEquals(asRecord(requestBody)?.response_format, { type: "json_object" });
 });
 
