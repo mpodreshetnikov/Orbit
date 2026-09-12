@@ -204,6 +204,37 @@ Checks:
 - Confirm attachment exists in `medical-attachments` bucket.
 - Check function logs for auth failures, timeout, or model/provider errors.
 
+### Which Model Each Structuring Stage Runs
+
+`health-structure` runs three stages and each takes its own model, falling back to
+`OPENROUTER_HEALTH_STRUCTURE_MODEL` and then to `DEFAULT_OPENROUTER_MODEL` when unset
+(`supabase/functions/health-structure/deps.ts`). The intended production configuration, and the
+evidence for it, is `T-260903-oy7` in the task registry:
+
+| variable                                  | value                     | why                                                                                                                                                                                    |
+| ----------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL`  | `google/gemini-2.5-flash` | No measured quality gradient — every model scored 100% on `record_type` and `record_date` — so the stage is chosen on price. Carries ~7% of the bill.                                  |
+| `OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL`   | `google/gemini-2.5-flash` | Stable 100% observations F1 over four live passes against 90.3-100.0 for `openai/gpt-5.2`, at roughly a third of the price. Carries ~76% of the bill, so this is the one that matters. |
+| `OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL` | `openai/gpt-5.2`          | Deliberately **not** moved. This is the stage that closes conditions, and the cheaper candidates wrongfully resolved more often. Carries ~18% of the bill.                             |
+
+These are edge-function secrets, so they are set in the Supabase dashboard under
+Edge Functions -> Secrets, or with `supabase secrets set NAME=value --project-ref <ref>`. Setting
+them requires a Supabase access token; they are not part of the repository and no CI job sets them.
+To measure a stage configuration before deploying it, pin the stages in a live eval — a plain
+`just test-extraction` replays recorded cassettes and is no evidence about any model:
+
+```
+just test-extraction --live --model-classify google/gemini-2.5-flash \
+  --model-extract google/gemini-2.5-flash --model-reconcile openai/gpt-5.2
+```
+
+The same pins are exposed as `model_classify`, `model_extract` and `model_reconcile` inputs on the
+`Extraction Eval` workflow. The report's **Cost by stage** table gives each stage's share of the
+bill, which is what says whether moving a stage is worth anything.
+
+That measures a configuration; it does not confirm the deployed secret took effect. For that, read
+which model actually served the call from the function's own logs — see `T-260903-aha`.
+
 ## Lint And Typecheck Gate Issues
 
 Quality gate commands:

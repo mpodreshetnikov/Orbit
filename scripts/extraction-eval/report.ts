@@ -1,4 +1,5 @@
 /** Rendering only — pure, so the shape of a report can be asserted without running an eval. */
+import type { StageSpend } from "./cassette.ts";
 import { RESOLUTION_FIELDS } from "./score.ts";
 import type { Aggregate, CaseScore, FieldAccuracy, SetScore } from "./score.ts";
 import type { CaseDiagnostics } from "./types.ts";
@@ -7,6 +8,12 @@ export interface CaseResult {
   caseId: string;
   score?: CaseScore;
   diagnostics?: CaseDiagnostics;
+  /**
+   * Per-stage split of what this case spent. Present even when the case failed, because a case
+   * that died at reconcile still paid for classify and extract, and hiding that would understate
+   * the run.
+   */
+  stageSpend?: StageSpend[];
   error?: string;
 }
 
@@ -15,6 +22,16 @@ export interface RunSummary {
   mode: string;
   generatedAt: string;
   cases: CaseResult[];
+  /**
+   * Every case of every pass, where `cases` is only the pass rendered in full.
+   *
+   * Spend and scores are summarised over different sets on a `--repeat` run, deliberately: one
+   * pass is rendered because showing N sets of scores would be unreadable, but all N were paid
+   * for. Defaults to `cases` when absent, which is correct for a single pass.
+   */
+  spendCases?: CaseResult[];
+  /** How many passes ran, so the cost table can say what it is totalling. */
+  passCount?: number;
   aggregate: Aggregate;
 }
 
@@ -225,6 +242,77 @@ export function totalCost(cases: CaseResult[]): {
 }
 
 /**
+ * Roll the per-stage spend of every case into one table's worth of rows.
+ *
+ * This is what a per-stage model decision is actually read off. A stage's share of the bill is the
+ * number that says whether pointing it at a cheaper model is worth anything: moving the stage that
+ * carries 5% of the cost saves 5% of it at best, however much cheaper the model is.
+ *
+ * `costUsd` goes null for a stage as soon as one of its calls was unpriced, for the reason on
+ * `CaseDiagnostics.costUsd` — a partial total presented as a whole one understates the run.
+ */
+export function stageTotals(cases: CaseResult[]): StageSpend[] {
+  const totals = new Map<string, StageSpend>();
+  for (const result of cases) {
+    for (const entry of result.stageSpend ?? []) {
+      const current = totals.get(entry.stage);
+      if (!current) {
+        totals.set(entry.stage, { ...entry });
+        continue;
+      }
+      const merge = (a: number | null, b: number | null): number | null =>
+        a === null || b === null ? null : a + b;
+      current.calls += entry.calls;
+      current.promptTokens = merge(current.promptTokens, entry.promptTokens);
+      current.completionTokens = merge(current.completionTokens, entry.completionTokens);
+      current.costUsd = merge(current.costUsd, entry.costUsd);
+    }
+  }
+  return [...totals.values()];
+}
+
+/**
+ * The per-stage cost table, with each stage's share of the run.
+ *
+ * The share is omitted, rather than guessed, when any stage is unpriced: a percentage of a total
+ * that is missing one of its parts is a wrong number wearing a precise format.
+ */
+function stageCostSection(cases: CaseResult[], mode: string, passCount: number): string {
+  const stages = stageTotals(cases);
+  if (stages.length === 0) return "";
+  // A replayed cassette carries the price of the call that recorded it. The aggregate cost line
+  // says so, but the no-cases-scored guard can return before that line is ever reached, which
+  // would leave these the report's only dollar figures with nothing marking them as historical.
+  const replayed = mode === "replay";
+  const scope = passCount > 1 ? ` across ${passCount} passes` : "";
+  const priced = stages.every((entry) => typeof entry.costUsd === "number");
+  const total = priced ? stages.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0) : null;
+  const share = (cost: number | null): string =>
+    total !== null && total > 0 && cost !== null ? `${((cost / total) * 100).toFixed(1)}%` : "—";
+  return [
+    replayed ? "## Cost by stage (to record these cassettes)" : "## Cost by stage",
+    "",
+    replayed
+      ? `> Replaying is free. These are the prices of the calls that **recorded** the cassettes${scope}, not of this run.`
+      : `> Measured on this run${scope}.`,
+    "",
+    "| stage | calls | prompt | completion | cost | share |",
+    "|---|---|---|---|---|---|",
+    ...stages.map(
+      (entry) =>
+        `| \`${entry.stage}\` | ${entry.calls} | ${entry.promptTokens ?? "?"} | ` +
+        `${entry.completionTokens ?? "?"} | ${formatCost(entry.costUsd)} | ${share(entry.costUsd)} |`,
+    ),
+    `| **total** | ${stages.reduce((sum, entry) => sum + entry.calls, 0)} | | | ` +
+      `**${formatCost(total)}** | |`,
+    "",
+    "> Which stage is worth moving to a cheaper model is read off the share column, not off the",
+    "> model's price: a stage carrying 5% of the bill saves at most 5% however cheap it gets.",
+    "",
+  ].join("\n");
+}
+
+/**
  * What the run cost, and on a replay, whose cost it actually is.
  *
  * A replayed cassette carries the price of the call that *recorded* it, which is worth printing --
@@ -259,6 +347,17 @@ export function renderMarkdown(summary: RunSummary): string {
     `Model \`${summary.model}\` · mode \`${summary.mode}\` · ${agg.cases} scored, ${failed.length} failed · ${summary.generatedAt}`,
   );
   lines.push("");
+
+  // Ahead of the no-cases-scored guard below, because spend is not a score. A run where every case
+  // crashed still paid for the stages that ran before the crash, and that is exactly when the
+  // question "what did this cost me" is hardest to answer from anywhere else — a case that fails is
+  // reported unpriced by `costUsd`, so without this the money simply disappears from the report.
+  const byStage = stageCostSection(
+    summary.spendCases ?? summary.cases,
+    summary.mode,
+    summary.passCount ?? 1,
+  );
+  if (byStage) lines.push(byStage);
 
   // An empty set scores as perfect by convention, which is right per-category and catastrophic in
   // aggregate: a run where every case crashed would otherwise render as 100% across the board.

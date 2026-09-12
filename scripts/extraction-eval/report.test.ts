@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatCost, renderMarkdown, renderVariance, totalCost, type RunSummary } from "./report";
+import {
+  formatCost,
+  renderMarkdown,
+  renderVariance,
+  stageTotals,
+  totalCost,
+  type RunSummary,
+} from "./report";
 import { aggregate, scoreCase } from "./score";
 import type { CaseSnapshot, ExpectedResolution } from "./types";
 
@@ -297,5 +304,131 @@ describe("cost reporting", () => {
     );
     expect(markdown).toContain("to record");
     expect(markdown).toContain("replaying them is free");
+  });
+});
+
+describe("stageTotals", () => {
+  const spend = (stage: string, cost: number | null, calls = 1) => ({
+    stage,
+    calls,
+    promptTokens: 10,
+    completionTokens: 5,
+    costUsd: cost,
+  });
+
+  it("adds each stage across cases and keeps them apart", () => {
+    expect(
+      stageTotals([
+        { caseId: "a", stageSpend: [spend("classify", 0.1), spend("extract", 1)] },
+        { caseId: "b", stageSpend: [spend("classify", 0.2), spend("extract", 2)] },
+      ]),
+    ).toEqual([
+      {
+        stage: "classify",
+        calls: 2,
+        promptTokens: 20,
+        completionTokens: 10,
+        costUsd: 0.30000000000000004,
+      },
+      { stage: "extract", calls: 2, promptTokens: 20, completionTokens: 10, costUsd: 3 },
+    ]);
+  });
+
+  it("nulls a stage that was unpriced in any case", () => {
+    const totals = stageTotals([
+      { caseId: "a", stageSpend: [spend("extract", 1)] },
+      { caseId: "b", stageSpend: [spend("extract", null)] },
+    ]);
+    expect(totals[0]).toMatchObject({ calls: 2, costUsd: null });
+  });
+
+  // A case that died at reconcile still paid for classify and extract; dropping its spend would
+  // understate what the run cost.
+  it("counts the spend of a case that failed", () => {
+    expect(
+      stageTotals([{ caseId: "a", error: "boom", stageSpend: [spend("classify", 0.1)] }]),
+    ).toHaveLength(1);
+  });
+});
+
+describe("renderMarkdown cost by stage", () => {
+  it("prints each stage's share of the run", () => {
+    const rendered = renderMarkdown(
+      summary({
+        cases: [
+          {
+            caseId: "001",
+            stageSpend: [
+              { stage: "classify", calls: 1, promptTokens: 1, completionTokens: 1, costUsd: 1 },
+              { stage: "extract", calls: 1, promptTokens: 1, completionTokens: 1, costUsd: 3 },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(rendered).toContain("## Cost by stage");
+    expect(rendered).toContain("25.0%");
+    expect(rendered).toContain("75.0%");
+  });
+
+  it("omits the share rather than guessing when a stage is unpriced", () => {
+    const rendered = renderMarkdown(
+      summary({
+        cases: [
+          {
+            caseId: "001",
+            stageSpend: [
+              { stage: "classify", calls: 1, promptTokens: 1, completionTokens: 1, costUsd: null },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(rendered).toContain("## Cost by stage");
+    expect(rendered).not.toContain("100.0%");
+  });
+
+  it("is left out entirely when nothing reported a stage", () => {
+    expect(renderMarkdown(summary({ cases: [{ caseId: "001" }] }))).not.toContain(
+      "## Cost by stage",
+    );
+  });
+});
+
+describe("renderMarkdown cost by stage across passes", () => {
+  const one = (cost: number) => ({
+    caseId: "001",
+    stageSpend: [
+      { stage: "extract", calls: 1, promptTokens: 1, completionTokens: 1, costUsd: cost },
+    ],
+  });
+
+  // `cases` is only the pass rendered in full, but every pass was paid for and the `## Cost`
+  // section totals them all. A per-stage table covering one third of a --repeat 3 run would
+  // contradict it.
+  it("totals spend from every pass, not just the rendered one", () => {
+    const rendered = renderMarkdown(
+      summary({ cases: [one(1)], spendCases: [one(1), one(1), one(1)], passCount: 3 }),
+    );
+    expect(rendered).toContain("$3.0000");
+    expect(rendered).toContain("across 3 passes");
+  });
+
+  it("falls back to the rendered pass when no pass set is given", () => {
+    expect(renderMarkdown(summary({ cases: [one(2)] }))).toContain("$2.0000");
+  });
+
+  // A replay's dollars are the recording's, and the no-cases-scored guard can return before the
+  // aggregate cost line that would otherwise say so.
+  it("labels replayed costs as recording costs", () => {
+    const rendered = renderMarkdown(summary({ cases: [one(1)], mode: "replay" }));
+    expect(rendered).toContain("Cost by stage (to record these cassettes)");
+    expect(rendered).toContain("Replaying is free");
+  });
+
+  it("says a live run measured itself", () => {
+    expect(renderMarkdown(summary({ cases: [one(1)], mode: "live" }))).toContain(
+      "Measured on this run",
+    );
   });
 });
