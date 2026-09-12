@@ -286,8 +286,35 @@ export function plannedIntakeFor(
   amount: number,
   unit: string,
 ): PlannedIntake {
-  const perUnit = namedIngredients(regimen?.dose_definition?.unit_strength);
-  const planned: PlannedIntake = { intake: { amount, unit }, active: [] };
+  return withCarriedStrength(regimen?.dose_definition, { amount, unit });
+}
+
+/**
+ * The definition to store for an intake of `intake`, carrying forward whatever
+ * of `stored`'s strength still describes it.
+ *
+ * A strength is a statement about a unit, and neither field survives being
+ * moved to a different one: "100 mg per pill" says nothing about a millilitre,
+ * and reading it as one is how a per-ml course would come to render per-pill
+ * milligrams. So both are carried only while the unit is unchanged.
+ *
+ * They then part company on the amount, which is the model's whole point
+ * (`ADR-260907-cvj`). `unit_strength` does not depend on it and carries across
+ * a titration untouched. The legacy `active` is the total for one particular
+ * amount with nothing recording which, so once the amount moves the figure is
+ * for some other number of units, cannot be rescaled, and is dropped rather
+ * than quietly reattached.
+ */
+export function withCarriedStrength(
+  stored: PlannedIntake | null | undefined,
+  intake: { amount: number; unit: string },
+): PlannedIntake {
+  const sameUnit = stored?.intake?.unit === intake.unit;
+  const perUnit = sameUnit ? namedIngredients(stored?.unit_strength) : [];
+  const legacy =
+    sameUnit && stored?.intake?.amount === intake.amount ? namedIngredients(stored?.active) : [];
+
+  const planned: PlannedIntake = { intake, active: legacy };
   if (perUnit.length > 0) planned.unit_strength = perUnit;
   return planned;
 }

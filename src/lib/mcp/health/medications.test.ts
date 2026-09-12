@@ -460,6 +460,72 @@ describe("createRegimen / updateRegimen", () => {
     ]);
   });
 
+  it("keeps a stored strength through a titration that never mentions it", async () => {
+    // `dose_definition` is one jsonb column, so naming it replaces all of it.
+    // "Change the dose to 2 pills" is the natural call and says nothing about
+    // the strength, which would leave the course and every regenerated event
+    // without one.
+    const stub = createSupabaseStub({
+      med_regimens: [
+        {
+          data: {
+            inventory: null,
+            dose_definition: {
+              intake: { amount: 1.5, unit: "pill" },
+              unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+            },
+            updated_at: "t1",
+          },
+        },
+        { data: regimen() },
+      ],
+    });
+
+    await updateRegimen(stub.client, "r-1", {
+      dose_definition: { intake: { amount: 2, unit: "pill" } },
+    });
+
+    expect(stub.argsFor("med_regimens", "update")[0][0]).toMatchObject({
+      dose_definition: {
+        intake: { amount: 2, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      },
+    });
+  });
+
+  it("lets a caller clear a strength, and drops one the new unit cannot carry", async () => {
+    const storedRow = {
+      inventory: null,
+      dose_definition: {
+        intake: { amount: 1.5, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      },
+      updated_at: "t1",
+    };
+
+    const cleared = createSupabaseStub({
+      med_regimens: [{ data: storedRow }, { data: regimen() }],
+    });
+    await updateRegimen(cleared.client, "r-1", {
+      dose_definition: { intake: { amount: 1.5, unit: "pill" }, unit_strength: [] },
+    });
+    expect(cleared.argsFor("med_regimens", "update")[0][0]).toMatchObject({
+      dose_definition: { unit_strength: [] },
+    });
+
+    // A per-pill figure is not a per-ml one, and carrying it would have the
+    // renderer state milligrams per millilitre nobody recorded.
+    const reunited = createSupabaseStub({
+      med_regimens: [{ data: storedRow }, { data: regimen() }],
+    });
+    await updateRegimen(reunited.client, "r-1", {
+      dose_definition: { intake: { amount: 5, unit: "ml" } },
+    });
+    expect(reunited.argsFor("med_regimens", "update")[0][0]).toEqual({
+      dose_definition: { intake: { amount: 5, unit: "ml" }, active: [] },
+    });
+  });
+
   it("merges again against what a concurrent write left", async () => {
     // A dose taken between the read and the write moves `current_amount`
     // through an RPC. Writing the merged object then carries the figure from

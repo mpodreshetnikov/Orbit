@@ -46,7 +46,7 @@ import type {
   RegimenInventory,
   AddOneTimeToExistingPayload,
 } from "@/types/regimen";
-import { toPositiveAmount } from "@/types/regimen";
+import { toPositiveAmount, withCarriedStrength } from "@/types/regimen";
 
 interface MedicationFormPropsBase {
   mode: "create" | "edit";
@@ -335,23 +335,12 @@ export function MedicationForm({
    * the ingredients of every course anyone opened and saved, even when the save
    * changed only a reminder time.
    *
-   * The two fields carry over differently, and the difference is the model's
-   * (`ADR-260907-cvj`). `unit_strength` is what one unit contains, so it is
-   * invariant under an amount change and carries over unconditionally. The
-   * legacy `active` is the total for the whole intake with nothing recording
-   * how many units that was, so it survives only while the amount does not
-   * move; once it does, the figure is for some other number of units and is
-   * dropped rather than quietly reattached to the new one.
+   * What carries over and what does not is `withCarriedStrength`, shared with
+   * the MCP update path so the rule is stated once: a strength belongs to the
+   * unit it was recorded for, and the legacy total additionally to the amount.
    */
-  const buildDoseDefinition = (amount: number): PlannedIntake => {
-    const existing = initial?.dose_definition;
-    const definition: PlannedIntake = { intake: { amount, unit }, active: [] };
-    if (existing?.unit_strength?.length) definition.unit_strength = existing.unit_strength;
-    if (existing?.active?.length && existing.intake?.amount === amount) {
-      definition.active = existing.active;
-    }
-    return definition;
-  };
+  const buildDoseDefinition = (amount: number): PlannedIntake =>
+    withCarriedStrength(initial?.dose_definition, { amount, unit });
 
   const buildInventory = (): RegimenInventory | null =>
     inventoryEnabled

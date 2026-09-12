@@ -4,6 +4,7 @@ import {
   getEffectiveStatus,
   plannedIntakeFor,
   resolveIntakeStrength,
+  withCarriedStrength,
 } from "./regimen";
 import type { MedDuration, MedRegimenStatus } from "./regimen";
 
@@ -318,11 +319,63 @@ describe("plannedIntakeFor", () => {
     });
   });
 
+  it("refuses to snapshot a strength onto an intake in another unit", () => {
+    // The one-time dose path takes its unit from the form, not from the course
+    // it is being attached to, so a pill amount can arrive against a course
+    // measured in millilitres. Copying the per-ml strength there would
+    // permanently record it as per pill.
+    expect(plannedIntakeFor(course, 2, "ml")).toEqual({
+      intake: { amount: 2, unit: "ml" },
+      active: [],
+    });
+  });
+
   it("records no strength for a course that has none", () => {
     expect(
       plannedIntakeFor({ dose_definition: { intake: { amount: 1, unit: "pill" } } }, 1, "pill"),
     ).toEqual({ intake: { amount: 1, unit: "pill" }, active: [] });
     expect(plannedIntakeFor(null, 1, "pill")).toEqual({
+      intake: { amount: 1, unit: "pill" },
+      active: [],
+    });
+  });
+});
+
+describe("withCarriedStrength", () => {
+  const stored = {
+    intake: { amount: 1.5, unit: "pill" },
+    unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+    active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+  };
+
+  it("carries both forward when nothing about the intake moved", () => {
+    expect(withCarriedStrength(stored, { amount: 1.5, unit: "pill" })).toEqual(stored);
+  });
+
+  it("carries the per-unit figure across a titration and drops the legacy total", () => {
+    expect(withCarriedStrength(stored, { amount: 2, unit: "pill" })).toEqual({
+      intake: { amount: 2, unit: "pill" },
+      active: [],
+      unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+    });
+  });
+
+  it("drops both when the unit changes, however the amount behaves", () => {
+    // "100 mg per pill" says nothing about a millilitre. Carrying it would make
+    // the renderer state per-ml milligrams it was never told, which is worse
+    // than the course simply having no strength on file.
+    expect(withCarriedStrength(stored, { amount: 1.5, unit: "ml" })).toEqual({
+      intake: { amount: 1.5, unit: "ml" },
+      active: [],
+    });
+    expect(withCarriedStrength(stored, { amount: 5, unit: "ml" })).toEqual({
+      intake: { amount: 5, unit: "ml" },
+      active: [],
+    });
+  });
+
+  it("records nothing for a course that had nothing", () => {
+    expect(withCarriedStrength(null, { amount: 1, unit: "pill" })).toEqual({
       intake: { amount: 1, unit: "pill" },
       active: [],
     });

@@ -5,6 +5,7 @@ import {
   getEffectiveStatus,
   getPlannedIntakeAmount,
   plannedIntakeFor,
+  withCarriedStrength,
   type PlannedIntake,
 } from "@/types/regimen";
 import type { MedDoseEvent, MedRegimen, MedSchedule, RegimenInventory } from "@/types/regimen";
@@ -411,44 +412,68 @@ export async function updateRegimen(
   // rewriting it otherwise would turn every unrelated update into a stock
   // write.
   const mergesInventory = "inventory" in values;
+  // `dose_definition` is one jsonb column too, so an update naming it replaces
+  // the whole of it -- including a `unit_strength` the caller never mentioned.
+  // A titration is exactly that call: `dose_definition: { intake: { amount: 2,
+  // unit: "pill" } }` and nothing else, which would silently discard the
+  // strength and leave every regenerated event without one. So an omitted
+  // strength is carried forward from the stored row by the same rule the
+  // medication form follows. A caller that means to clear it says so with
+  // `unit_strength: []`; anything it states explicitly wins.
+  const mergesDoseDefinition =
+    "dose_definition" in values &&
+    typeof (values.dose_definition as PlannedIntake | null)?.intake?.unit === "string" &&
+    typeof (values.dose_definition as PlannedIntake | null)?.intake?.amount === "number";
+  const merges = mergesInventory || mergesDoseDefinition;
   // Three is generous for a race this narrow; a fourth collision is a caller
   // hammering the same course, and answering that with an error is better than
   // spinning.
-  const attempts = mergesInventory ? 3 : 1;
+  const attempts = merges ? 3 : 1;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     let write = values;
     let version: string | null = null;
 
-    if (mergesInventory) {
+    if (merges) {
       const { data: current, error: readError } = await supabase
         .from("med_regimens")
-        .select("inventory, updated_at")
+        .select("inventory, dose_definition, updated_at")
         .eq("id", regimenId)
         .is("deleted_at", null)
         .maybeSingle();
 
       // Failing here is the safe direction. Treating an unreadable row as an
       // empty one would store the supplied object alone, which is the very
-      // replacement this merge exists to prevent.
+      // replacement these merges exist to prevent.
       if (readError) {
-        throw new Error(
-          `Failed to read the medication's stock before updating it: ${readError.message}`,
-        );
+        throw new Error(`Failed to read the medication before updating it: ${readError.message}`);
       }
       if (!current) {
         throw new Error(`No medication with id ${regimenId}.`);
       }
 
-      const row = current as { inventory?: unknown; updated_at?: string | null };
+      const row = current as {
+        inventory?: unknown;
+        dose_definition?: PlannedIntake | null;
+        updated_at?: string | null;
+      };
       version = row.updated_at ?? null;
-      write = {
-        ...values,
-        inventory: inventoryToStore(
+      write = { ...values };
+      if (mergesInventory) {
+        write.inventory = inventoryToStore(
           row.inventory,
           values.inventory as RegimenInventory | null | undefined,
-        ),
-      };
+        );
+      }
+      if (mergesDoseDefinition) {
+        const supplied = values.dose_definition as PlannedIntake;
+        write.dose_definition = {
+          ...withCarriedStrength(row.dose_definition, supplied.intake!),
+          // Whatever the caller stated explicitly wins over what was carried,
+          // including an empty array, which is how a strength is cleared.
+          ...supplied,
+        };
+      }
     }
 
     let query = supabase
@@ -485,8 +510,8 @@ export async function updateRegimen(
           .maybeSingle();
         if (still) {
           throw new Error(
-            `The stock on medication ${regimenId} kept changing while this update was being ` +
-              `applied, so nothing was written. Read it back and try again.`,
+            `Medication ${regimenId} kept changing while this update was being applied, so ` +
+              `nothing was written. Read it back and try again.`,
           );
         }
       }
