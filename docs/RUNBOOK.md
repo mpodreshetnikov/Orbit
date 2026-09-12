@@ -206,34 +206,55 @@ Checks:
 
 ### Which Model Each Structuring Stage Runs
 
-`health-structure` runs three stages and each takes its own model, falling back to
-`OPENROUTER_HEALTH_STRUCTURE_MODEL` and then to `DEFAULT_OPENROUTER_MODEL` when unset
-(`supabase/functions/health-structure/deps.ts`). The intended production configuration, and the
-evidence for it, is `T-260903-oy7` in the task registry:
+`health-structure` runs three stages and each takes its own model. **The models are chosen in the
+tree, not in a console:** `supabase/functions/_shared/health-stage-models.ts` names all three, and
+the evidence for each — from `T-260903-oy7` in the task registry — is in the comment beside them.
+Change one there, in a pull request, so the reasoning changes with it.
 
-| variable                                  | value                     | why                                                                                                                                                                                    |
-| ----------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL`  | `google/gemini-2.5-flash` | No measured quality gradient — every model scored 100% on `record_type` and `record_date` — so the stage is chosen on price. Carries ~7% of the bill.                                  |
-| `OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL`   | `google/gemini-2.5-flash` | Stable 100% observations F1 over four live passes against 90.3-100.0 for `openai/gpt-5.2`, at roughly a third of the price. Carries ~76% of the bill, so this is the one that matters. |
-| `OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL` | `openai/gpt-5.2`          | Deliberately **not** moved. This is the stage that closes conditions, and the cheaper candidates wrongfully resolved more often. Carries ~18% of the bill.                             |
+| stage       | default                   | override variable                         | share of the bill |
+| ----------- | ------------------------- | ----------------------------------------- | ----------------- |
+| `classify`  | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL`  | ~7%               |
+| `extract`   | `google/gemini-2.5-flash` | `OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL`   | ~76%              |
+| `reconcile` | `openai/gpt-5.2`          | `OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL` | ~18%              |
 
-These are edge-function secrets, so they are set in the Supabase dashboard under
-Edge Functions -> Secrets, or with `supabase secrets set NAME=value --project-ref <ref>`. Setting
-them requires a Supabase access token; they are not part of the repository and no CI job sets them.
-To measure a stage configuration before deploying it, pin the stages in a live eval — a plain
-`just test-extraction` replays recorded cassettes and is no evidence about any model:
+Classify shows no measured quality gradient at all — every model tried scored 100% on `record_type`
+and `record_date` — so it is chosen on price. Extract is the one dimension the corpus has signal on
+and it favours gemini: observations F1 100.0 stable over four live passes against 90.3-100.0 for
+`openai/gpt-5.2`, at roughly a third of the price. It is also where the money is.
+
+Reconcile is on the more expensive model on purpose. It is the stage that closes a patient's
+conditions, and across fourteen measured passes 1 of 8 wrongfully resolved on `openai/gpt-5.2`
+against 4 of 6 on `google/gemini-2.5-flash`; grouping the same passes by `extract` separates
+nothing, so the defect follows reconcile. Moving it to the cheap model saves about $0.013 a document
+and buys back that failure mode. Do not take that saving on cost grounds.
+
+The variables still win where they are set, so a deployment can move one stage for a one-off
+experiment without shipping code. They are edge-function secrets — Supabase dashboard under Edge
+Functions -> Secrets, or `supabase secrets set NAME=value --project-ref <ref>`, which needs a
+Supabase access token; no CI job sets them. Setting one is the exception now, not the way the choice
+is made: an unset variable no longer means "whatever the shared model happens to be", it means the
+measured default above.
+
+How to check a change, and the one thing that cannot be checked:
+
+- **A default changed in the tree** — `deps_test.ts` reads the model off each stage's own outbound
+  request, keyed by that stage's JSON schema name, and fails if a stage carries the shared model or
+  if `reconcile` shares `extract`'s. Run `test-unit-functions`; that is the evidence.
+- **A configuration measured before deploying it** — pin the stages in a live eval, as below. A
+  plain `test-extraction` replays recorded cassettes and is no evidence about any model. The same
+  pins are `model_classify`, `model_extract` and `model_reconcile` inputs on the `Extraction Eval`
+  workflow, and the report's **Cost by stage** table gives each stage's share of the bill.
+- **Which model actually served a call — nothing reports it today.** `callStageJson` puts
+  `ctx.model` in the request and discards the `model` the provider answers with, and
+  `health-structure` logs only stage-rejection counts, so no log line, span attribute or query says
+  it. The eval below measures a configuration; it does not confirm a deployed secret took effect.
+  `T-260903-aha` is the open task for that; until it lands an override is trusted rather than
+  confirmed, which is one more reason the default belongs in the tree where a test can see it.
 
 ```
 just test-extraction --live --model-classify google/gemini-2.5-flash \
   --model-extract google/gemini-2.5-flash --model-reconcile openai/gpt-5.2
 ```
-
-The same pins are exposed as `model_classify`, `model_extract` and `model_reconcile` inputs on the
-`Extraction Eval` workflow. The report's **Cost by stage** table gives each stage's share of the
-bill, which is what says whether moving a stage is worth anything.
-
-That measures a configuration; it does not confirm the deployed secret took effect. For that, read
-which model actually served the call from the function's own logs — see `T-260903-aha`.
 
 ## Lint And Typecheck Gate Issues
 
