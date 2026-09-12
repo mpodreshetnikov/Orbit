@@ -20,6 +20,18 @@ on:
         description: "Model override, e.g. openai/gpt-5.2:nitro. Blank uses the pipeline default."
         type: string
         default: ""
+      model_classify:
+        description: "Model for the classify stage only. Blank inherits the model above."
+        type: string
+        default: ""
+      model_extract:
+        description: "Model for the extract stage only. Blank inherits the model above."
+        type: string
+        default: ""
+      model_reconcile:
+        description: "Model for the reconcile stage only. Blank inherits the model above."
+        type: string
+        default: ""
       cases:
         description: "Case filter, space separated (e.g. 001). Blank runs the whole corpus."
         type: string
@@ -63,6 +75,11 @@ jobs:
           if [[ "${{ inputs.mode }}" == "live" ]]; then ARGS="${ARGS} --live"; fi
           if [[ "${{ inputs.record }}" == "true" ]]; then ARGS="${ARGS} --record"; fi
           if [[ -n "${{ inputs.model }}" ]]; then ARGS="${ARGS} --model ${{ inputs.model }}"; fi
+          # Per stage, so a mixed configuration can be exercised from the Actions tab rather than
+          # only from a checkout. Each blank input leaves that stage inheriting --model.
+          if [[ -n "${{ inputs.model_classify }}" ]]; then ARGS="${ARGS} --model-classify ${{ inputs.model_classify }}"; fi
+          if [[ -n "${{ inputs.model_extract }}" ]]; then ARGS="${ARGS} --model-extract ${{ inputs.model_extract }}"; fi
+          if [[ -n "${{ inputs.model_reconcile }}" ]]; then ARGS="${ARGS} --model-reconcile ${{ inputs.model_reconcile }}"; fi
           for case_id in ${{ inputs.cases }}; do ARGS="${ARGS} --case ${case_id}"; done
           just test-extraction ${ARGS}
 
