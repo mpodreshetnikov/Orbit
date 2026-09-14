@@ -520,6 +520,8 @@ describe("source-page-widget", () => {
     });
     expect(getShadowText()).toContain("Import failed");
     expect(getShadowText()).toContain("create_session");
+    // Nothing more is coming to this tab; closing it costs nothing.
+    expect(askedBeforeUnload()).toBe(false);
   });
 
   it("stays through the moment between two windows, and stands down on a run that died", () => {
@@ -614,7 +616,9 @@ describe("source-page-widget", () => {
 
     expect(document.getElementById("orbit-money-import-widget-root")).not.toBeNull();
     expect(getShadowText()).toContain("Sign in to the bank");
-    expect(askedBeforeUnload()).toBe(false);
+    // The tab is asked about while it waits, too: closed in the minute after signing in, the
+    // run it waited for went elsewhere (2026-09-14).
+    expect(askedBeforeUnload()).toBe(true);
 
     widget.handleRuntimeMessage({
       type: "MONEY_IMPORT_SESSION_UPDATED",

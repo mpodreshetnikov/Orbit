@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  chooseReplacementTab,
+  shouldAdoptRequestTab,
   ATTENTION_PAGE_MIN_INTERVAL_MS,
   DAY_MS,
   DEFAULT_STALE_AFTER_MS,
@@ -102,5 +104,55 @@ describe("isRunRequestLive", () => {
     expect(isRunRequestLive(NOW - RUN_REQUEST_TTL_MS, NOW)).toBe(false);
     expect(isRunRequestLive(undefined, NOW)).toBe(false);
     expect(isRunRequestLive("yesterday", NOW)).toBe(false);
+  });
+});
+
+describe("shouldAdoptRequestTab", () => {
+  it("hands a live request the tab the person opened when the first is gone or has left the bank", () => {
+    expect(
+      shouldAdoptRequestTab({
+        requestLive: true,
+        boundTabId: 42,
+        boundTabOnBank: false,
+        tabId: 43,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAdoptRequestTab({
+        requestLive: true,
+        boundTabId: null,
+        boundTabOnBank: false,
+        tabId: 43,
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves a request with the tab it has while that tab is still on the bank", () => {
+    expect(
+      shouldAdoptRequestTab({ requestLive: true, boundTabId: 42, boundTabOnBank: true, tabId: 43 }),
+    ).toBe(false);
+  });
+
+  it("changes nothing for the request's own tab, or without a live request", () => {
+    expect(
+      shouldAdoptRequestTab({ requestLive: true, boundTabId: 42, boundTabOnBank: true, tabId: 42 }),
+    ).toBe(false);
+    expect(
+      shouldAdoptRequestTab({
+        requestLive: false,
+        boundTabId: null,
+        boundTabOnBank: false,
+        tabId: 43,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("chooseReplacementTab", () => {
+  it("takes the first of the person's tabs on the bank, never one of the sweep's own", () => {
+    const owned = new Set([7]);
+    expect(chooseReplacementTab([{ id: 7 }, { id: 8 }, { id: 9 }], (id) => owned.has(id))).toBe(8);
+    expect(chooseReplacementTab([{}, { id: 7 }], (id) => owned.has(id))).toBeNull();
+    expect(chooseReplacementTab([], () => false)).toBeNull();
   });
 });

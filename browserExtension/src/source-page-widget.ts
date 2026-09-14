@@ -789,12 +789,17 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   };
 
   /**
-   * The tab a run works in is asked about before it closes, while the run is on. The browser
-   * shows the question only in a tab the person has touched -- the sweep's own tab has never
-   * been touched and closes silently, which is what its own closing needs.
+   * The tab a run works in is asked about before it closes, while the run is on -- and the tab
+   * that waits for the run to begin, which the owner closed in the minute after signing in and
+   * was not asked (2026-09-14). The browser shows the question only in a tab the person has
+   * touched: the sweep's own tab has never been touched and closes silently, which is what its
+   * own closing needs.
    */
   const onBeforeUnload = (event: BeforeUnloadEvent) => {
-    if (!state.running || resolveMode(state) !== "run_tab") return;
+    const mode = resolveMode(state);
+    const guarded =
+      (mode === "run_tab" && state.running) || (mode === "waiting" && !state.finished);
+    if (!guarded) return;
     event.preventDefault();
     event.returnValue = "";
   };
