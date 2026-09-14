@@ -1,7 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { rowToDoseEvent, rowToInventoryTransaction, rowToRegimen } from "@/lib/regimen-mappers";
-import { getEffectiveStatus, getPlannedIntakeAmount, type PlannedIntake } from "@/types/regimen";
+import {
+  getEffectiveStatus,
+  getPlannedIntakeAmount,
+  plannedIntakeFor,
+  withCarriedStrength,
+  type PlannedIntake,
+} from "@/types/regimen";
 import type { MedDoseEvent, MedRegimen, MedSchedule, RegimenInventory } from "@/types/regimen";
 
 /**
@@ -406,44 +412,77 @@ export async function updateRegimen(
   // rewriting it otherwise would turn every unrelated update into a stock
   // write.
   const mergesInventory = "inventory" in values;
+  // `dose_definition` is one jsonb column too, so an update naming it replaces
+  // the whole of it -- including a `unit_strength` the caller never mentioned.
+  // A titration is exactly that call: `dose_definition: { intake: { amount: 2,
+  // unit: "pill" } }` and nothing else, which would silently discard the
+  // strength and leave every regenerated event without one. So an omitted
+  // strength is carried forward from the stored row by the same rule the
+  // medication form follows. A caller that means to clear it says so with
+  // `unit_strength: []`; anything it states explicitly wins.
+  const mergesDoseDefinition =
+    "dose_definition" in values &&
+    typeof (values.dose_definition as PlannedIntake | null)?.intake?.unit === "string" &&
+    typeof (values.dose_definition as PlannedIntake | null)?.intake?.amount === "number";
+  const merges = mergesInventory || mergesDoseDefinition;
   // Three is generous for a race this narrow; a fourth collision is a caller
   // hammering the same course, and answering that with an error is better than
   // spinning.
-  const attempts = mergesInventory ? 3 : 1;
+  const attempts = merges ? 3 : 1;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     let write = values;
     let version: string | null = null;
 
-    if (mergesInventory) {
+    if (merges) {
       const { data: current, error: readError } = await supabase
         .from("med_regimens")
-        .select("inventory, updated_at")
+        .select("inventory, dose_definition, updated_at")
         .eq("id", regimenId)
         .is("deleted_at", null)
         .maybeSingle();
 
       // Failing here is the safe direction. Treating an unreadable row as an
       // empty one would store the supplied object alone, which is the very
-      // replacement this merge exists to prevent.
+      // replacement these merges exist to prevent.
       if (readError) {
-        throw new Error(
-          `Failed to read the medication's stock before updating it: ${readError.message}`,
-        );
+        throw new Error(`Failed to read the medication before updating it: ${readError.message}`);
       }
       if (!current) {
         throw new Error(`No medication with id ${regimenId}.`);
       }
 
-      const row = current as { inventory?: unknown; updated_at?: string | null };
+      const row = current as {
+        inventory?: unknown;
+        dose_definition?: PlannedIntake | null;
+        updated_at?: string | null;
+      };
       version = row.updated_at ?? null;
-      write = {
-        ...values,
-        inventory: inventoryToStore(
+      write = { ...values };
+      if (mergesInventory) {
+        write.inventory = inventoryToStore(
           row.inventory,
           values.inventory as RegimenInventory | null | undefined,
-        ),
-      };
+        );
+      }
+      if (mergesDoseDefinition) {
+        const supplied = values.dose_definition as PlannedIntake;
+        const merged: PlannedIntake = {
+          ...withCarriedStrength(row.dose_definition, supplied.intake!),
+          // Whatever the caller stated explicitly wins over what was carried.
+          ...supplied,
+        };
+        // Clearing has to clear. `unit_strength: []` on a migrated row would
+        // otherwise leave the carried legacy total behind, and
+        // `resolveIntakeStrength` falls straight back to it -- so the figure
+        // the caller just deleted would keep being rendered. A caller that
+        // means to keep a legacy total while dropping the per-unit one says so
+        // by passing `active` as well.
+        if (Array.isArray(supplied.unit_strength) && supplied.unit_strength.length === 0) {
+          merged.active = supplied.active ?? [];
+        }
+        write.dose_definition = merged;
+      }
     }
 
     let query = supabase
@@ -480,8 +519,8 @@ export async function updateRegimen(
           .maybeSingle();
         if (still) {
           throw new Error(
-            `The stock on medication ${regimenId} kept changing while this update was being ` +
-              `applied, so nothing was written. Read it back and try again.`,
+            `Medication ${regimenId} kept changing while this update was being applied, so ` +
+              `nothing was written. Read it back and try again.`,
           );
         }
       }
@@ -896,7 +935,13 @@ export async function logDose(
         regimen_id: regimen.id,
         scheduled_at: params.at,
         actual_at: params.at,
-        planned_intake: { intake: { amount, unit }, active: [] },
+        // The event snapshots the course's per-unit strength, exactly as the
+        // generator's events do, so this intake says what a unit contained when
+        // it was taken rather than borrowing whatever the course says later
+        // (`ADR-260907-cvj`). Nothing derived is stored: the milligrams this
+        // intake delivers come from this amount times that strength, so a caller
+        // correcting the amount cannot strand a figure here.
+        planned_intake: plannedIntakeFor(regimen, amount, unit),
         status: "scheduled",
       } as never)
       .select("*")

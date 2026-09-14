@@ -29,8 +29,10 @@ import {
   type RunSummary,
 } from "./report.ts";
 import { aggregate, scoreCase } from "./score.ts";
-
-const DEFAULT_MODEL = "openai/gpt-5.2:nitro";
+// Reaches into supabase/functions, which runs on Deno, for the same reason `pipeline.ts` and
+// `score.ts` do: the eval has to call the model production calls, not a copy of its name that
+// drifts.
+import { DEFAULT_OPENROUTER_MODEL } from "../../supabase/functions/_shared/llm-model.ts";
 
 /**
  * The stages a model can be pinned to individually, and the flag that pins each.
@@ -72,7 +74,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       process.env.OPENROUTER_HEALTH_STRUCTURE_MODEL &&
       process.env.OPENROUTER_HEALTH_STRUCTURE_MODEL.length > 0
         ? process.env.OPENROUTER_HEALTH_STRUCTURE_MODEL
-        : DEFAULT_MODEL,
+        : DEFAULT_OPENROUTER_MODEL,
     stageModels: {},
     outDir: DEFAULT_OUT_DIR,
     failUnder: null,

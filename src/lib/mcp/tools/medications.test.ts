@@ -187,6 +187,40 @@ describe("list_medications", () => {
     expect(text).toContain("strength on file is for the 1.5 pill dose only");
   });
 
+  it("drops that warning on a course whose strength is recorded per unit", async () => {
+    // The warning is true of a per-intake total and false of a per-unit one,
+    // which every slot multiplies correctly. The course keeps a legacy `active`
+    // as a migrated row does, so reading that field instead of asking
+    // `resolveIntakeStrength` would still warn while the dose line beside it
+    // printed the right figure.
+    meds.listMedications.mockResolvedValue({
+      regimens: [
+        {
+          id: "r-1",
+          custom_name: "Золофт",
+          status: "active",
+          effective_status: "active",
+          dose_definition: {
+            intake: { amount: 1.5, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+            // Deliberately not 150: the derived figure and the stale total must
+            // not be able to pass this test for each other.
+            active: [{ name: "Сертралин", amount: 75, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00", "21:00"], amounts: [1.5, 0.5] },
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (await (await handlers()).get("list_medications")!({ ...PAGE }, ctx())).content[0]
+      .text;
+
+    expect(text).not.toContain("strength on file is for the");
+    expect(text).toContain("Сертралин 150 milligram");
+    expect(text).not.toContain("75 milligram");
+  });
+
   it("names only a bounded number of active ingredients", async () => {
     meds.listMedications.mockResolvedValue({
       regimens: [
@@ -988,6 +1022,108 @@ describe("list_medication_doses", () => {
 
     expect(text).toContain("Золофт, 2 pill (strength not recorded for this amount)");
     expect(text).not.toContain("100 milligram");
+  });
+
+  it("prints a strength derived per unit on the very amount that defeats the legacy total", async () => {
+    // The same row as the withholding test above, with the strength recorded
+    // per unit instead of per intake. 2 pills of a 1.5-pill course is exactly
+    // the case a per-intake total cannot survive -- and a per-unit one does not
+    // have to: 2 x 100 mg is what these two pills deliver, computed from the
+    // amount on this row rather than copied from a course that moved under it.
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: {
+            intake: { amount: 2, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+          medication_dose: {
+            intake: { amount: 1.5, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+          status: "taken",
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("Золофт, 2 pill (Сертралин 200 milligram)");
+    expect(text).not.toContain("strength not recorded");
+  });
+
+  it("keeps deriving a strength on a course whose slots override the amount", async () => {
+    // A slot override is the other trap that forces withholding on the legacy
+    // shape, and it cannot reach a per-unit figure either: the slot's own amount
+    // is the one multiplied.
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: {
+            intake: { amount: 2, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+          },
+          medication_dose: {
+            intake: { amount: 2, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+          },
+          medication_schedule: { mode: "daily_times", times: ["08:00", "20:00"], amounts: [1, 2] },
+          status: "taken",
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("Золофт, 2 pill (Сертралин 100 milligram)");
+    expect(text).not.toContain("strength not recorded");
+  });
+
+  it("prefers the per-unit record over a legacy total on a row carrying both", async () => {
+    // A migrated row keeps `active` until the column goes. The two disagree here
+    // on purpose: 1.5 x 100 mg is 150 mg, and the stale total says 75 mg. The
+    // reading rule has to be visible in the output, not just in the resolver.
+    meds.listMedicationDoses.mockResolvedValue({
+      doses: [
+        {
+          scheduled_at: "2026-06-15T08:00:00.000Z",
+          medication_name: "Золофт",
+          planned_intake: {
+            intake: { amount: 1.5, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+            active: [{ name: "Сертралин", amount: 75, unit: "milligram" }],
+          },
+          status: "taken",
+        },
+      ],
+      total: 1,
+    });
+
+    const text = (
+      await (await handlers()).get("list_medication_doses")!(
+        { ...PAGE, from: "2026-06-15", to: "2026-06-15" },
+        ctx(),
+      )
+    ).content[0].text;
+
+    expect(text).toContain("Сертралин 150 milligram");
+    expect(text).not.toContain("75 milligram");
   });
 
   it("names the weekdays instead of leaving bare indexes", async () => {

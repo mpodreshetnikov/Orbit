@@ -9,6 +9,7 @@ import {
 } from "./repository.ts";
 import type { HealthStructureParseContext } from "./service.ts";
 import { emptyLlmUsage } from "../_shared/llm-usage.ts";
+import { DEFAULT_OPENROUTER_MODEL } from "../_shared/llm-model.ts";
 import { DEFAULT_HEALTH_STAGE_MODELS } from "../_shared/health-stage-models.ts";
 import type { StructuredParseOutcome } from "./types.ts";
 
@@ -63,7 +64,7 @@ export function createDefaultHealthStructureDeps(): HealthStructureDeps {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const openRouterModel =
-    Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? "openai/gpt-5.2:nitro";
+    Deno.env.get("OPENROUTER_HEALTH_STRUCTURE_MODEL") ?? DEFAULT_OPENROUTER_MODEL;
   // Per-stage models. The variable wins where it is set; where it is not, the floor is the
   // measured configuration named in `_shared/health-stage-models.ts`, which is also where the
   // evidence for each stage lives — including why reconcile is held on the more expensive model

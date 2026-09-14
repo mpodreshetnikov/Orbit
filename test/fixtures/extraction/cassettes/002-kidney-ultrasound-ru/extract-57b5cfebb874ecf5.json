@@ -1,7 +1,7 @@
 {
-  "request_hash": "329388ac960988f7",
+  "request_hash": "57b5cfebb874ecf5",
   "stage": "extract",
-  "model": "openai/gpt-5.2:nitro",
+  "model": "openai/gpt-5.2",
   "response": {
     "id": "gen-1788337000-cmkJvHvvqqIOMotXChNK",
     "object": "chat.completion",

@@ -459,6 +459,92 @@ describe("MedicationForm", () => {
     });
   });
 
+  it("keeps a recorded strength when an unrelated field is edited", async () => {
+    // The form has no field for a strength, and it rebuilt `dose_definition`
+    // from its own inputs, so opening a course and changing a reminder time
+    // emptied the ingredients recorded over the connector. That is real data
+    // loss on rows nobody meant to touch.
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          custom_name: "Золофт",
+          dose_definition: {
+            intake: { amount: 1.5, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00"], amounts: [1.5] } as MedSchedule,
+        } as unknown as MedRegimen)}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("medications.notesPlaceholder"), {
+      target: { value: "по назначению врача" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dose_definition: expect.objectContaining({
+            intake: { amount: 1.5, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("carries a per-unit strength across an amount change, and drops a legacy total", async () => {
+    // The two fields part company exactly here. 150 mg was the total for 1.5
+    // pills; reattaching it to 2 would assert a dose the record never held. The
+    // per-unit figure is the one that survives, because it never depended on
+    // the amount.
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          custom_name: "Золофт",
+          dose_definition: {
+            intake: { amount: 1.5, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+            active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00"], amounts: [1.5] } as MedSchedule,
+        } as unknown as MedRegimen)}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("medications.amountPerIntake"), {
+      target: { value: "2" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dose_definition: {
+            intake: { amount: 2, unit: "pill" },
+            active: [],
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+        }),
+      );
+    });
+  });
+
   it("keeps weekly per-slot amounts when an unrelated field is edited", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();

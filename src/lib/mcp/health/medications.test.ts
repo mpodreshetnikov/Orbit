@@ -460,6 +460,133 @@ describe("createRegimen / updateRegimen", () => {
     ]);
   });
 
+  it("keeps a stored strength through a titration that never mentions it", async () => {
+    // `dose_definition` is one jsonb column, so naming it replaces all of it.
+    // "Change the dose to 2 pills" is the natural call and says nothing about
+    // the strength, which would leave the course and every regenerated event
+    // without one.
+    const stub = createSupabaseStub({
+      med_regimens: [
+        {
+          data: {
+            inventory: null,
+            dose_definition: {
+              intake: { amount: 1.5, unit: "pill" },
+              unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+            },
+            updated_at: "t1",
+          },
+        },
+        { data: regimen() },
+      ],
+    });
+
+    await updateRegimen(stub.client, "r-1", {
+      dose_definition: { intake: { amount: 2, unit: "pill" } },
+    });
+
+    expect(stub.argsFor("med_regimens", "update")[0][0]).toMatchObject({
+      dose_definition: {
+        intake: { amount: 2, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      },
+    });
+  });
+
+  it("lets a caller clear a strength, and drops one the new unit cannot carry", async () => {
+    const storedRow = {
+      inventory: null,
+      dose_definition: {
+        intake: { amount: 1.5, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      },
+      updated_at: "t1",
+    };
+    const migratedRow = {
+      intake: { amount: 1.5, unit: "pill" },
+      unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      active: [{ name: "Сертралин", amount: 150, unit: "milligram" }],
+    };
+
+    const cleared = createSupabaseStub({
+      med_regimens: [
+        // A migrated row, still carrying the legacy total beside the per-unit
+        // figure. Clearing has to clear: leaving `active` behind would have
+        // `resolveIntakeStrength` fall straight back to it and keep rendering
+        // the strength the caller just deleted.
+        { data: { ...storedRow, dose_definition: migratedRow } },
+        { data: regimen() },
+      ],
+    });
+    await updateRegimen(cleared.client, "r-1", {
+      dose_definition: { intake: { amount: 1.5, unit: "pill" }, unit_strength: [] },
+    });
+    expect(cleared.argsFor("med_regimens", "update")[0][0]).toEqual({
+      dose_definition: { intake: { amount: 1.5, unit: "pill" }, unit_strength: [], active: [] },
+    });
+
+    // A per-pill figure is not a per-ml one, and carrying it would have the
+    // renderer state milligrams per millilitre nobody recorded.
+    const reunited = createSupabaseStub({
+      med_regimens: [{ data: storedRow }, { data: regimen() }],
+    });
+    await updateRegimen(reunited.client, "r-1", {
+      dose_definition: { intake: { amount: 5, unit: "ml" } },
+    });
+    expect(reunited.argsFor("med_regimens", "update")[0][0]).toEqual({
+      dose_definition: { intake: { amount: 5, unit: "ml" }, active: [] },
+    });
+  });
+
+  it("takes the strength merge again when a concurrent write moves the row", async () => {
+    // Merging `dose_definition` made the version guard apply to a second class
+    // of update, so that class needs the same evidence the stock merge has: a
+    // write between the read and the write must cost a retry against what they
+    // left, not a silent overwrite and not an error.
+    const stub = createSupabaseStub({
+      med_regimens: [
+        {
+          data: {
+            inventory: null,
+            dose_definition: {
+              intake: { amount: 1, unit: "pill" },
+              unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+            },
+            updated_at: "t1",
+          },
+        },
+        // The guard matched nothing: somebody rewrote the course first, and
+        // recorded a different strength while they were there.
+        { data: null },
+        {
+          data: {
+            inventory: null,
+            dose_definition: {
+              intake: { amount: 1, unit: "pill" },
+              unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+            },
+            updated_at: "t2",
+          },
+        },
+        { data: regimen() },
+      ],
+    });
+
+    await updateRegimen(stub.client, "r-1", {
+      dose_definition: { intake: { amount: 2, unit: "pill" } },
+    });
+
+    const writes = stub.argsFor("med_regimens", "update");
+    expect(writes).toHaveLength(2);
+    // Their 100 mg, not the 50 mg this call first read.
+    expect(writes[1][0]).toMatchObject({
+      dose_definition: {
+        intake: { amount: 2, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+      },
+    });
+  });
+
   it("merges again against what a concurrent write left", async () => {
     // A dose taken between the read and the write moves `current_amount`
     // through an RPC. Writing the merged object then carries the figure from
@@ -626,6 +753,54 @@ describe("logDose", () => {
     expect(result.dose.status).toBe("taken");
     expect(result.regimen.effective_status).toBe("active");
     expect(result.planned).toBe(false);
+  });
+
+  it("snapshots the course's per-unit strength onto the event it inserts", async () => {
+    // The event has to carry the strength that was in force when the intake
+    // happened, not borrow whatever the course says whenever it is next read:
+    // editing the course later must not rewrite what a past dose delivered.
+    const stub = stubFor({
+      dose_definition: {
+        intake: { amount: 1, unit: "pill" },
+        unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+      },
+    });
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+      amount: 2,
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "insert") as [[Record<string, unknown>]];
+    expect(values.planned_intake).toEqual({
+      intake: { amount: 2, unit: "pill" },
+      active: [],
+      unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+    });
+  });
+
+  it("never copies a legacy per-intake total onto an event of another amount", async () => {
+    // 50 mg was the total for the course's one pill. Copied onto this two-pill
+    // intake it would read as 50 mg for two, which is the defect the per-unit
+    // model exists to remove -- and it would be us writing it.
+    const stub = stubFor({
+      dose_definition: {
+        intake: { amount: 1, unit: "pill" },
+        active: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+      },
+    });
+
+    await logDose(stub.client, {
+      regimenId: "r-1",
+      at: "2026-06-15T08:00:00.000Z",
+      status: "taken",
+      amount: 2,
+    });
+
+    const [[values]] = stub.argsFor("med_dose_events", "insert") as [[Record<string, unknown>]];
+    expect(values.planned_intake).toEqual({ intake: { amount: 2, unit: "pill" }, active: [] });
   });
 
   it("resolves the dose already planned for that minute instead of inserting a second one", async () => {

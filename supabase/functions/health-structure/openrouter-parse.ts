@@ -1,3 +1,4 @@
+import { DEFAULT_OPENROUTER_MODEL } from "../_shared/llm-model.ts";
 import type {
   BodySiteCatalogItem,
   CheckupItemForContext,
@@ -44,7 +45,6 @@ export interface OpenRouterParseDeps {
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.2:nitro";
 const INVALID_JSON_ERROR_MESSAGE = "OpenRouter returned invalid JSON content";
 
 function asObject(value: unknown): Record<string, unknown> {
