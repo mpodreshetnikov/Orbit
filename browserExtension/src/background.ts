@@ -17,7 +17,7 @@ import { activeImportRuns } from "./core/active-runs.js";
 import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
-import { shouldAdoptRequestTab } from "./core/attention-policy.js";
+import { chooseReplacementTab, shouldAdoptRequestTab } from "./core/attention-policy.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
@@ -438,10 +438,25 @@ const autoImportSweep = createAutoImportSweep({
   },
   findRequestedTab: async (scope, nowMs) => {
     const tabId = await attentionStore.getRequestedTab(scope, nowMs);
-    if (tabId === null) return null;
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (!tab || !matchesMoneyImportSourcePageUrl(scope.sourceId, tab.url)) return null;
-    return tabId;
+    if (tabId !== null) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (tab && matchesMoneyImportSourcePageUrl(scope.sourceId, tab.url)) return tabId;
+    }
+    // The tab the request holds is gone or has left the bank. A tab of the person's on that
+    // bank takes its place: one opened beside the first and left when the first was closed
+    // sent no event to be adopted by, and is found here, when the request is served.
+    const patterns = getMoneyImportSourcePagePatterns(scope.sourceId);
+    const candidates =
+      patterns.length > 0 ? await chrome.tabs.query({ url: patterns }).catch(() => []) : [];
+    const replacement = chooseReplacementTab(candidates, (id) => autoImportSweep.ownsTab(id));
+    if (replacement === null) return null;
+    if (!(await attentionStore.bindRequestTab(scope, replacement, nowMs))) return null;
+    telemetry.info("money_import_run_request_tab_adopted", {
+      source_id: scope.sourceId,
+      previous_tab_present: tabId !== null,
+      at: "sweep",
+    });
+    return replacement;
   },
   runImport: async ({ grant, sourceId, tabId, nowMs, origin }) => {
     // The run's tab is told how the whole run ended, windows and all: a window's own "done"
@@ -494,6 +509,35 @@ const autoImportSweep = createAutoImportSweep({
   onWarning: (event, attrs) => telemetry.warn(event, attrs),
 });
 
+/**
+ * Hands a live request for this bank the tab that just loaded, when the tab the request holds
+ * is gone or has left the bank. See `shouldAdoptRequestTab`.
+ */
+async function adoptRequestTabIfDue(sourceId: string, tabId: number, nowMs: number): Promise<void> {
+  const grant = await grantStore.getGrant();
+  if (!grant) return;
+  const scope = { sourceId, payerPersonId: grant.person_id };
+  if (!(await attentionStore.isRunRequested(scope, nowMs))) return;
+  const boundTabId = await attentionStore.getRequestedTab(scope, nowMs);
+  const boundTab =
+    boundTabId === null || boundTabId === tabId
+      ? null
+      : await chrome.tabs.get(boundTabId).catch(() => null);
+  const adopt = shouldAdoptRequestTab({
+    requestLive: true,
+    boundTabId,
+    boundTabOnBank: Boolean(boundTab && matchesMoneyImportSourcePageUrl(sourceId, boundTab.url)),
+    tabId,
+  });
+  if (adopt && (await attentionStore.bindRequestTab(scope, tabId, nowMs))) {
+    telemetry.info("money_import_run_request_tab_adopted", {
+      source_id: sourceId,
+      previous_tab_present: boundTabId !== null,
+      at: "load",
+    });
+  }
+}
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const nextUrl = typeof changeInfo.url === "string" ? changeInfo.url : tab.url;
   if (!nextUrl) return;
@@ -503,63 +547,42 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
   void (async () => {
     const session = await sessionStore.getSession();
-    if (!session) {
-      // A load in a tab the sweep opened is the sweep's own doing, not a person's visit; with
-      // a run on, the load is the connector moving through the bank, and the widget is put
-      // back on the page it moved to (below), as in any other tab of that bank.
-      if (autoImportSweep.ownsTab(tabId)) return;
+    // A load in a tab the sweep opened is the sweep's own doing, not a person's visit; with a
+    // run on, the load is the connector moving through the bank, and the widget is put back on
+    // the page it moved to (below), as in any other tab of that bank.
+    const ownTab = autoImportSweep.ownsTab(tabId);
+    const visited =
+      isComplete && !ownTab
+        ? listMoneyImportSourceDefinitions().find((definition) =>
+            matchesMoneyImportSourcePageUrl(definition.sourceId, nextUrl),
+          )
+        : undefined;
+    if (visited) {
+      const nowMs = Date.now();
       // A finished load on a bank page is the one moment the extension knows the person's bank
       // session is live. It is a signal only -- for that bank, not for every bank the grant
-      // covers -- and the sweep it schedules works in a tab of its own.
-      if (isComplete) {
-        const visited = listMoneyImportSourceDefinitions().find((definition) =>
-          matchesMoneyImportSourcePageUrl(definition.sourceId, nextUrl),
-        );
-        if (visited && chrome.alarms?.create) {
-          await chrome.alarms.create(`${VISIT_SWEEP_ALARM_PREFIX}${visited.sourceId}`, {
-            delayInMinutes: VISIT_SWEEP_DELAY_MINUTES,
-          });
-        }
-        if (visited) {
-          const nowMs = Date.now();
-          // A live request follows the person: the tab Update opened may be gone, and the bank
-          // they opened again is where the run they asked for should go.
-          const grant = await grantStore.getGrant();
-          const scope = grant
-            ? { sourceId: visited.sourceId, payerPersonId: grant.person_id }
-            : null;
-          if (scope && (await attentionStore.isRunRequested(scope, nowMs))) {
-            const boundTabId = await attentionStore.getRequestedTab(scope, nowMs);
-            const boundTab =
-              boundTabId === null || boundTabId === tabId
-                ? null
-                : await chrome.tabs.get(boundTabId).catch(() => null);
-            const adopt = shouldAdoptRequestTab({
-              requestLive: true,
-              boundTabId,
-              boundTabOnBank: Boolean(
-                boundTab && matchesMoneyImportSourcePageUrl(visited.sourceId, boundTab.url),
-              ),
-              tabId,
-            });
-            if (adopt && (await attentionStore.bindRequestTab(scope, tabId, nowMs))) {
-              telemetry.info("money_import_run_request_tab_adopted", {
-                source_id: visited.sourceId,
-                previous_tab_present: boundTabId !== null,
-              });
-            }
-          }
-          // The tab Update opened, before its run has begun: the widget there tells the person
-          // to sign in and wait. It asks the worker what to show, so nothing more is sent.
-          const request = await attentionStore.findRequestForTab(tabId, nowMs);
-          if (request && request.sourceId === visited.sourceId) {
-            await injectSourcePageWidget(tabId).catch(() => undefined);
-          }
+      // covers -- and the sweep it schedules works in a tab of its own. Not while a session is
+      // stored: a run the person started, or one in flight, owns the bank's rate limits.
+      if (!session && chrome.alarms?.create) {
+        await chrome.alarms.create(`${VISIT_SWEEP_ALARM_PREFIX}${visited.sourceId}`, {
+          delayInMinutes: VISIT_SWEEP_DELAY_MINUTES,
+        });
+      }
+      // A live request follows the person, whatever else is running: the tab Update opened may
+      // be gone, and the bank they opened again is where the run they asked for should go. A
+      // request whose tab is still on the bank -- its run in progress there, or waiting -- keeps it.
+      await adoptRequestTabIfDue(visited.sourceId, tabId, nowMs);
+      // The tab Update opened, before its run has begun: the widget there tells the person to
+      // sign in and wait. It asks the worker what to show, so nothing more is sent. With a
+      // session stored, the sync below decides what the tab shows.
+      if (!session) {
+        const request = await attentionStore.findRequestForTab(tabId, nowMs);
+        if (request && request.sourceId === visited.sourceId) {
+          await injectSourcePageWidget(tabId).catch(() => undefined);
         }
       }
-      return;
     }
-    await syncSourcePageWidgetForSession(session, { tabId, tabUrl: nextUrl });
+    if (session) await syncSourcePageWidgetForSession(session, { tabId, tabUrl: nextUrl });
   })();
 });
 

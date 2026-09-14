@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  chooseReplacementTab,
   shouldAdoptRequestTab,
   ATTENTION_PAGE_MIN_INTERVAL_MS,
   DAY_MS,
@@ -144,5 +145,14 @@ describe("shouldAdoptRequestTab", () => {
         tabId: 43,
       }),
     ).toBe(false);
+  });
+});
+
+describe("chooseReplacementTab", () => {
+  it("takes the first of the person's tabs on the bank, never one of the sweep's own", () => {
+    const owned = new Set([7]);
+    expect(chooseReplacementTab([{ id: 7 }, { id: 8 }, { id: 9 }], (id) => owned.has(id))).toBe(8);
+    expect(chooseReplacementTab([{}, { id: 7 }], (id) => owned.has(id))).toBeNull();
+    expect(chooseReplacementTab([], () => false)).toBeNull();
   });
 });

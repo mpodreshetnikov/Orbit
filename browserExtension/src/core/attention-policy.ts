@@ -111,3 +111,21 @@ export function shouldAdoptRequestTab(input: {
   if (input.boundTabId !== null && input.boundTabOnBank) return false;
   return true;
 }
+
+/**
+ * The person's tab a request may move to when the tab it holds is gone: the first tab on the
+ * bank that is not one the sweep opened for itself. Consulted by the sweep the moment it serves
+ * the request, because a tab closed after another was opened sends no event of its own
+ * (review of #108).
+ */
+export function chooseReplacementTab(
+  tabs: ReadonlyArray<{ id?: number }>,
+  isSweepOwned: (tabId: number) => boolean,
+): number | null {
+  for (const tab of tabs) {
+    if (typeof tab.id !== "number") continue;
+    if (isSweepOwned(tab.id)) continue;
+    return tab.id;
+  }
+  return null;
+}
