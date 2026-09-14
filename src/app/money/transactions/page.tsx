@@ -37,6 +37,11 @@ import type {
 } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  REQUEST_TIMEOUT_MS,
+  SLOW_RESPONSE_AFTER_MS,
+  isTimeoutMessage,
+} from "@/lib/request-timeout";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -300,6 +305,24 @@ export default function MoneyTransactionsPage() {
   );
   const feedQuery = useInfiniteMoneyTransactionFeed(selectedPersonId, feedFilters);
   const feedSummaryQuery = useMoneyTransactionFeedSummary(selectedPersonId, feedFilters);
+
+  // The skeleton alone cannot tell a slow answer from one that is not coming (2026-09-14: a page
+  // the server had sent in 129 ms never reached the browser). After a while the page says so, and
+  // once the request budget is spent it says what happened and offers to try again.
+  const [feedWaitingLong, setFeedWaitingLong] = useState(false);
+  useEffect(() => {
+    if (!feedQuery.isLoading) {
+      setFeedWaitingLong(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setFeedWaitingLong(true), SLOW_RESPONSE_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [feedQuery.isLoading]);
+  const feedErrorMessage = feedQuery.isError
+    ? isTimeoutMessage(feedQuery.error?.message)
+      ? t("money.requestTimedOut", { seconds: Math.round(REQUEST_TIMEOUT_MS / 1000) })
+      : (feedQuery.error?.message ?? t("common.error"))
+    : null;
   const { data: transaction } = useMoneyTransaction(selectedTransactionId);
 
   useEffect(() => {
@@ -983,12 +1006,36 @@ export default function MoneyTransactionsPage() {
       <div className="min-h-0 flex-1 overflow-hidden">
         {feedQuery.isLoading ? (
           <div className="space-y-3">
+            {feedWaitingLong ? (
+              <p
+                className="text-center text-sm text-muted-foreground"
+                data-testid="transaction-feed-slow"
+              >
+                {t("money.feedWaitingLong")}
+              </p>
+            ) : null}
             {Array.from({ length: 6 }).map((_, index) => (
               <div
                 key={index}
                 className="h-20 animate-pulse rounded-[22px] border border-slate-200 bg-muted/40"
               />
             ))}
+          </div>
+        ) : feedQuery.isError ? (
+          <div
+            className="rounded-[28px] border border-dashed p-10 text-center text-muted-foreground"
+            data-testid="transaction-feed-error"
+          >
+            <p className="font-medium">{t("money.feedLoadFailed")}</p>
+            <p className="mt-1 text-sm">{feedErrorMessage}</p>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-4"
+              onClick={() => void feedQuery.refetch()}
+            >
+              {t("common.retry")}
+            </Button>
           </div>
         ) : rows.length === 0 ? (
           <div className="rounded-[28px] border border-dashed p-10 text-center text-muted-foreground">

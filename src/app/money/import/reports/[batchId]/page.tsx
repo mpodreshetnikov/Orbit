@@ -8,6 +8,8 @@ import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase";
+import { REPORT_ROW_SELECT, readReportRows } from "@/lib/money/import-report-rows";
+import { REQUEST_TIMEOUT_MS, isTimeoutMessage, timeoutSignal } from "@/lib/request-timeout";
 import type {
   MoneyImportApplyBatchResult,
   MoneyImportBatch,
@@ -193,6 +195,17 @@ function importSourceToAccountSource(source: string): string {
   return source;
 }
 
+/** A load error as the page says it: a request cut off by its budget is not the server's word. */
+function describeLoadError(
+  message: string | null | undefined,
+  t: ReturnType<typeof useTranslations>,
+): string {
+  if (isTimeoutMessage(message)) {
+    return t("money.requestTimedOut", { seconds: Math.round(REQUEST_TIMEOUT_MS / 1000) });
+  }
+  return message ?? t("money.importReportUnknownError");
+}
+
 function RowStatusBadge({
   status,
   t,
@@ -262,7 +275,7 @@ export default function MoneyImportReportPage() {
   const [lineJsonModal, setLineJsonModal] = useState<{
     open: boolean;
     title: string;
-    json: string;
+    json: string | null;
   }>({
     open: false,
     title: "",
@@ -289,11 +302,16 @@ export default function MoneyImportReportPage() {
         .from("money_import_batches")
         .select("*")
         .eq("id", batchId)
+        .abortSignal(timeoutSignal())
         .single();
 
       if (batchError || !batchData) {
         if (!cancelled) {
-          setError(batchError?.message ?? t("money.importReportBatchNotFound"));
+          setError(
+            batchError
+              ? describeLoadError(batchError.message, t)
+              : t("money.importReportBatchNotFound"),
+          );
           setLoading(false);
         }
         return;
@@ -301,15 +319,16 @@ export default function MoneyImportReportPage() {
 
       const { data: rowsData, error: rowsError } = await supabase
         .from("money_import_batch_rows")
-        .select("*")
+        .select(REPORT_ROW_SELECT)
         .eq("batch_id", batchId)
         .order("source_row_index", { ascending: true })
         .order("source_line_index", { ascending: true, nullsFirst: true })
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .abortSignal(timeoutSignal());
 
       if (rowsError) {
         if (!cancelled) {
-          setError(rowsError.message);
+          setError(describeLoadError(rowsError.message, t));
           setLoading(false);
         }
         return;
@@ -320,16 +339,24 @@ export default function MoneyImportReportPage() {
           .from("money_import_batch_brand_resolutions")
           .select("*")
           .eq("batch_id", batchId)
-          .order("source_name", { ascending: true }),
-        supabase.from("money_transaction_brands").select("*").order("name", { ascending: true }),
+          .order("source_name", { ascending: true })
+          .abortSignal(timeoutSignal()),
+        supabase
+          .from("money_transaction_brands")
+          .select("*")
+          .order("name", { ascending: true })
+          .abortSignal(timeoutSignal()),
       ]);
 
       if (brandResolutionsResponse.error || brandsResponse.error) {
         if (!cancelled) {
           setError(
-            brandResolutionsResponse.error?.message ??
-              brandsResponse.error?.message ??
-              t("money.importReportLoadFailed"),
+            describeLoadError(
+              brandResolutionsResponse.error?.message ??
+                brandsResponse.error?.message ??
+                t("money.importReportLoadFailed"),
+              t,
+            ),
           );
           setLoading(false);
         }
@@ -337,7 +364,7 @@ export default function MoneyImportReportPage() {
       }
 
       if (!cancelled) {
-        const reportRows = (rowsData ?? []) as MoneyImportBatchRow[];
+        const reportRows = readReportRows(rowsData);
         const transactionPayloads = reportRows
           .filter((row) => row.row_kind === "transaction")
           .map((row) => asRecord(row.payload));
@@ -360,6 +387,7 @@ export default function MoneyImportReportPage() {
                 .eq("owner_person_id", payerPersonId)
                 .eq("source", sourceForAccounts)
                 .order("account_label", { ascending: true })
+                .abortSignal(timeoutSignal())
             : Promise.resolve({
                 data: [] as Array<{ id: string; account_label: string | null }>,
                 error: null,
@@ -369,6 +397,7 @@ export default function MoneyImportReportPage() {
                 .from("money_cards")
                 .select("id, account_id, card_label, last4")
                 .in("id", cardIds)
+                .abortSignal(timeoutSignal())
             : Promise.resolve({
                 data: [] as Array<{
                   id: string;
@@ -383,9 +412,12 @@ export default function MoneyImportReportPage() {
         if (accountsResponse.error || cardsResponse.error) {
           if (!cancelled) {
             setError(
-              accountsResponse.error?.message ??
-                cardsResponse.error?.message ??
-                t("money.importReportLoadFailed"),
+              describeLoadError(
+                accountsResponse.error?.message ??
+                  cardsResponse.error?.message ??
+                  t("money.importReportLoadFailed"),
+                t,
+              ),
             );
             setLoading(false);
           }
@@ -598,13 +630,25 @@ export default function MoneyImportReportPage() {
     return cardNameById[cardId] ?? "Unknown card";
   };
 
-  const openPayloadJson = (title: string, payload: Record<string, unknown>) => {
-    const json = JSON.stringify(payload, null, 2);
-    setLineJsonModal({
-      open: true,
-      title,
-      json,
-    });
+  // The rows arrive without the raw record (see REPORT_ROW_SELECT); the JSON view fetches the
+  // full payload of the one row it is asked for. A later click wins over an earlier answer.
+  const payloadRequestRef = useRef(0);
+  const openPayloadJson = (title: string, row: MoneyImportBatchRow) => {
+    const requestId = ++payloadRequestRef.current;
+    setLineJsonModal({ open: true, title, json: null });
+    void (async () => {
+      const { data, error: payloadError } = await createClient()
+        .from("money_import_batch_rows")
+        .select("payload")
+        .eq("id", row.id)
+        .abortSignal(timeoutSignal())
+        .maybeSingle();
+      if (payloadRequestRef.current !== requestId) return;
+      const json = payloadError
+        ? describeLoadError(payloadError.message, t)
+        : JSON.stringify(data?.payload ?? row.payload ?? {}, null, 2);
+      setLineJsonModal((current) => ({ ...current, json }));
+    })();
   };
 
   const toggleExpanded = (transactionId: string) => {
@@ -1362,7 +1406,7 @@ export default function MoneyImportReportPage() {
                                   t("money.importReportTransactionPayloadTitle", {
                                     name: merchant,
                                   }),
-                                  payload,
+                                  tx,
                                 )
                               }
                             >
@@ -1481,7 +1525,7 @@ export default function MoneyImportReportPage() {
                                           t("money.importReportLinePayloadTitle", {
                                             name: lineTitle,
                                           }),
-                                          linePayload,
+                                          line,
                                         )
                                       }
                                     >
@@ -1517,7 +1561,7 @@ export default function MoneyImportReportPage() {
             <DialogDescription>{t("money.importReportPayloadJson")}</DialogDescription>
           </DialogHeader>
           <pre className="max-h-[70vh] overflow-auto rounded border bg-muted/40 p-3 text-xs">
-            {lineJsonModal.json}
+            {lineJsonModal.json ?? t("common.loading")}
           </pre>
         </DialogContent>
       </Dialog>

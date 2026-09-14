@@ -1,8 +1,9 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyTransactionsPage from "./page";
+import { SLOW_RESPONSE_AFTER_MS } from "@/lib/request-timeout";
 
 const hookMocks = vi.hoisted(() => ({
   useIsMobile: vi.fn(),
@@ -843,5 +844,56 @@ describe("MoneyTransactionsPage", () => {
 
     await waitFor(() => expect(routerMock.replace).toHaveBeenCalled());
     expect(String(routerMock.replace.mock.lastCall?.[0] ?? "")).toContain("categories=cat-food");
+  });
+
+  it("says when the feed is taking longer than usual", () => {
+    vi.useFakeTimers();
+    try {
+      hookMocks.useInfiniteMoneyTransactionFeed.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        isFetchingNextPage: false,
+      });
+
+      render(<MoneyTransactionsPage />);
+      expect(screen.queryByTestId("transaction-feed-slow")).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(SLOW_RESPONSE_AFTER_MS);
+      });
+
+      expect(screen.getByTestId("transaction-feed-slow")).toHaveTextContent(
+        "money.feedWaitingLong",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("explains a feed that did not arrive and offers to try again", async () => {
+    const refetch = vi.fn();
+    hookMocks.useInfiniteMoneyTransactionFeed.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error("TimeoutError: no answer in 20000 ms"),
+      refetch,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+    });
+
+    render(<MoneyTransactionsPage />);
+
+    const notice = screen.getByTestId("transaction-feed-error");
+    expect(notice).toHaveTextContent("money.feedLoadFailed");
+    expect(notice).toHaveTextContent("money.requestTimedOut");
+    expect(screen.queryByText("money.noTransactions")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(within(notice).getByRole("button", { name: "common.retry" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });
