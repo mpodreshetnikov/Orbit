@@ -195,6 +195,8 @@ Condition 5 is the one doubt a review does not answer, and it never justifies re
 
 Once the budget is spent and the doubt remains, it becomes the owner's question too: hand it over saying what the doubt is.
 
+**A merge that is refused is not a hand-over.** The three outcomes are decisions; being unable to carry one out is a fourth thing and must never be dressed as the third. When the five conditions hold and the merge itself is refused — the API denies it, the session is acting as an identity without the right, the branch cannot be updated — say so in the same message, in those words: what was attempted, what answered, and which identity it was attempted as (`get_me` names it). #82, #83, #86 and #106 sat five to nine days looking like ordinary hand-overs; one session reported the merge endpoint denying it, and the conclusion drawn — that the App could not merge — was wrong, since all three later merged under that same App by their own sessions. A named obstacle is checkable and gets corrected the same day; an unnamed one reads as "waiting for you" and costs a week, whichever diagnosis is right. Name it once, then hand over as below — this is not a licence to retry.
+
 **Hand it over, on the stop list.** Three surfaces are never self-merged, however sure the session is:
 
 1. **Database schema and migrations** — `supabase/db`, anything under the migrations directory. A migration is not undone by reverting the commit.
