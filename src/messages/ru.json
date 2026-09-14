@@ -253,6 +253,8 @@
     "feedWaitingLong": "Загрузка идёт дольше обычного. Проверьте соединение.",
     "feedLoadFailed": "Не удалось загрузить операции",
     "requestTimedOut": "Ответ не пришёл за {seconds} с. Проверьте соединение и попробуйте снова.",
+    "feedMoreFailed": "Не удалось загрузить остальное",
+    "summaryUnavailable": "Итоги не пришли",
     "accountsTitle": "Счета",
     "addAccount": "Добавить счет",
     "editAccount": "Редактировать счет",

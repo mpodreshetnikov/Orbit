@@ -308,21 +308,27 @@ export default function MoneyTransactionsPage() {
 
   // The skeleton alone cannot tell a slow answer from one that is not coming (2026-09-14: a page
   // the server had sent in 129 ms never reached the browser). After a while the page says so, and
-  // once the request budget is spent it says what happened and offers to try again.
+  // once the request budget is spent it says what happened and offers to try again. The timer
+  // belongs to one query: a new person or filter set starts its own, whatever the old one showed.
   const [feedWaitingLong, setFeedWaitingLong] = useState(false);
   useEffect(() => {
-    if (!feedQuery.isLoading) {
-      setFeedWaitingLong(false);
-      return;
-    }
+    setFeedWaitingLong(false);
+    if (!feedQuery.isLoading) return;
     const timer = window.setTimeout(() => setFeedWaitingLong(true), SLOW_RESPONSE_AFTER_MS);
     return () => window.clearTimeout(timer);
-  }, [feedQuery.isLoading]);
+  }, [feedQuery.isLoading, selectedPersonId, feedFilters]);
   const feedErrorMessage = feedQuery.isError
     ? isTimeoutMessage(feedQuery.error?.message)
       ? t("money.requestTimedOut", { seconds: Math.round(REQUEST_TIMEOUT_MS / 1000) })
       : (feedQuery.error?.message ?? t("common.error"))
     : null;
+  // A failed next page or refetch keeps the rows already loaded; only a feed with nothing to
+  // show gets the full error state.
+  const feedRowsUnavailable = feedQuery.isError && !feedQuery.data?.pages?.length;
+  const retryFeed = () => {
+    if (feedQuery.isFetchNextPageError) void feedQuery.fetchNextPage();
+    else void feedQuery.refetch();
+  };
   const { data: transaction } = useMoneyTransaction(selectedTransactionId);
 
   useEffect(() => {
@@ -964,40 +970,64 @@ export default function MoneyTransactionsPage() {
                   : "max-h-48 translate-y-0 opacity-100"
               }`}
             >
-              <div className="grid gap-3 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 sm:grid-cols-3">
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {t("money.summaryMatches")}
-                  </p>
-                  <p className="text-lg font-semibold text-slate-950">
-                    {feedSummaryQuery.data?.totalCount ?? 0}
-                  </p>
+              {feedSummaryQuery.isError ? (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-dashed border-slate-300 bg-slate-50/80 p-4 text-sm text-muted-foreground"
+                  data-testid="transaction-summary-error"
+                >
+                  <span>
+                    {t("money.summaryUnavailable")}:{" "}
+                    {isTimeoutMessage(feedSummaryQuery.error?.message)
+                      ? t("money.requestTimedOut", {
+                          seconds: Math.round(REQUEST_TIMEOUT_MS / 1000),
+                        })
+                      : (feedSummaryQuery.error?.message ?? t("common.error"))}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void feedSummaryQuery.refetch()}
+                  >
+                    {t("common.retry")}
+                  </Button>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {t("money.summaryPositive")}
-                  </p>
-                  <p className="text-lg font-semibold text-emerald-700">
-                    {formatMoney(
-                      feedSummaryQuery.data?.totalPositiveAmount ?? 0,
-                      summaryCurrency,
-                      intlLocale,
-                    )}
-                  </p>
+              ) : (
+                <div className="grid gap-3 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t("money.summaryMatches")}
+                    </p>
+                    <p className="text-lg font-semibold text-slate-950">
+                      {feedSummaryQuery.data?.totalCount ?? 0}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t("money.summaryPositive")}
+                    </p>
+                    <p className="text-lg font-semibold text-emerald-700">
+                      {formatMoney(
+                        feedSummaryQuery.data?.totalPositiveAmount ?? 0,
+                        summaryCurrency,
+                        intlLocale,
+                      )}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {t("money.summaryNegative")}
+                    </p>
+                    <p className="text-lg font-semibold text-rose-700">
+                      {formatMoney(
+                        feedSummaryQuery.data?.totalNegativeAmount ?? 0,
+                        summaryCurrency,
+                        intlLocale,
+                      )}
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {t("money.summaryNegative")}
-                  </p>
-                  <p className="text-lg font-semibold text-rose-700">
-                    {formatMoney(
-                      feedSummaryQuery.data?.totalNegativeAmount ?? 0,
-                      summaryCurrency,
-                      intlLocale,
-                    )}
-                  </p>
-                </div>
-              </div>
+              )}
             </div>
           ) : null}
         </div>
@@ -1021,19 +1051,14 @@ export default function MoneyTransactionsPage() {
               />
             ))}
           </div>
-        ) : feedQuery.isError ? (
+        ) : feedRowsUnavailable ? (
           <div
             className="rounded-[28px] border border-dashed p-10 text-center text-muted-foreground"
             data-testid="transaction-feed-error"
           >
             <p className="font-medium">{t("money.feedLoadFailed")}</p>
             <p className="mt-1 text-sm">{feedErrorMessage}</p>
-            <Button
-              type="button"
-              variant="outline"
-              className="mt-4"
-              onClick={() => void feedQuery.refetch()}
-            >
+            <Button type="button" variant="outline" className="mt-4" onClick={retryFeed}>
               {t("common.retry")}
             </Button>
           </div>
@@ -1147,6 +1172,20 @@ export default function MoneyTransactionsPage() {
 
             {virtual.bottomSpacer > 0 ? (
               <div style={{ height: `${virtual.bottomSpacer}px` }} />
+            ) : null}
+
+            {feedQuery.isError && !feedRowsUnavailable ? (
+              <div
+                className="mt-3 flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 p-3 text-sm text-muted-foreground"
+                data-testid="transaction-feed-more-error"
+              >
+                <span>
+                  {t("money.feedMoreFailed")}: {feedErrorMessage}
+                </span>
+                <Button type="button" variant="outline" size="sm" onClick={retryFeed}>
+                  {t("common.retry")}
+                </Button>
+              </div>
             ) : null}
 
             {feedQuery.isFetchingNextPage ? (

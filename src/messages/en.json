@@ -253,6 +253,8 @@
     "feedWaitingLong": "This is taking longer than usual. Check the connection.",
     "feedLoadFailed": "Could not load transactions",
     "requestTimedOut": "No answer in {seconds} s. Check the connection and try again.",
+    "feedMoreFailed": "Could not load more",
+    "summaryUnavailable": "Totals did not arrive",
     "accountsTitle": "Accounts",
     "addAccount": "Add account",
     "editAccount": "Edit account",
