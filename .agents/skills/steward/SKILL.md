@@ -22,7 +22,8 @@ skipped or disabled to reach green, and history on somebody else's branch is sti
 - **Automated Review Policy** — when the review runs, the watermark, when another is worth
   requesting and when it is not, the request budget, how to answer a review by class, and which
   findings are answered on the thread instead of by a push.
-- **The merge decision** — the three outcomes, the five merge conditions, the stop list.
+- **The merge decision** — the three outcomes, the five merge conditions, the stop list, and what
+  to say when the merge itself is refused.
 - **Reviewable Change Size** — the limit, and what to do when a branch is over it.
 
 Read it, then apply it. What this file adds is only the part about the session: which outcome it
