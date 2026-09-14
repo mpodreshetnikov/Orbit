@@ -2,6 +2,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
+import { REQUEST_TIMEOUT_MS, timeoutSignal } from "@/lib/request-timeout";
 import type {
   CreateMoneyLineItemInput,
   CreateMoneyTransactionInput,
@@ -24,6 +25,12 @@ type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Ins
 type MoneyLineItemUpdate = Database["public"]["Tables"]["money_line_items"]["Update"];
 
 const MONEY_TRANSACTION_FEED_PAGE_SIZE = 50;
+
+/**
+ * One retry, not react-query's three: each attempt has the request budget, and three retries
+ * would keep the skeleton up for a minute and a half before the page could say nothing is coming.
+ */
+const FEED_RETRIES = 1;
 
 export interface MoneyTransactionsFilters {
   accountId?: string | null;
@@ -151,31 +158,39 @@ async function fetchMoneyTransactionFeedPage({
   payerPersonId,
   filters,
   pageParam,
+  signal,
 }: {
   payerPersonId: string;
   filters: MoneyTransactionFeedFilters;
   pageParam: number;
+  signal?: AbortSignal;
 }): Promise<MoneyTransactionFeedPage> {
   const supabase = createClient() as ReturnType<typeof createClient> & {
     rpc: (
       fn: "money_list_transactions_feed",
       args: Record<string, unknown>,
-    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    ) => {
+      abortSignal: (
+        signal: AbortSignal,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
   };
-  const { data, error } = await supabase.rpc("money_list_transactions_feed", {
-    p_payer_person_id: payerPersonId,
-    p_search: filters.query?.trim() || null,
-    p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
-    p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
-    p_statuses: filters.statuses?.length ? filters.statuses : null,
-    p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
-    p_transfer_filter: filters.transferFilter ?? "all",
-    p_amount_sign: filters.amountSign ?? "all",
-    p_from: filters.from ?? null,
-    p_to: filters.to ?? null,
-    p_offset: pageParam,
-    p_limit: MONEY_TRANSACTION_FEED_PAGE_SIZE,
-  });
+  const { data, error } = await supabase
+    .rpc("money_list_transactions_feed", {
+      p_payer_person_id: payerPersonId,
+      p_search: filters.query?.trim() || null,
+      p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
+      p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
+      p_statuses: filters.statuses?.length ? filters.statuses : null,
+      p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
+      p_transfer_filter: filters.transferFilter ?? "all",
+      p_amount_sign: filters.amountSign ?? "all",
+      p_from: filters.from ?? null,
+      p_to: filters.to ?? null,
+      p_offset: pageParam,
+      p_limit: MONEY_TRANSACTION_FEED_PAGE_SIZE,
+    })
+    .abortSignal(timeoutSignal(REQUEST_TIMEOUT_MS, signal));
 
   if (error) throw new Error(error.message);
 
@@ -192,25 +207,32 @@ async function fetchMoneyTransactionFeedPage({
 async function fetchMoneyTransactionFeedSummary(
   payerPersonId: string,
   filters: MoneyTransactionFeedFilters,
+  signal?: AbortSignal,
 ): Promise<MoneyTransactionFeedSummary> {
   const supabase = createClient() as ReturnType<typeof createClient> & {
     rpc: (
       fn: "money_transaction_feed_summary",
       args: Record<string, unknown>,
-    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    ) => {
+      abortSignal: (
+        signal: AbortSignal,
+      ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
   };
-  const { data, error } = await supabase.rpc("money_transaction_feed_summary", {
-    p_payer_person_id: payerPersonId,
-    p_search: filters.query?.trim() || null,
-    p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
-    p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
-    p_statuses: filters.statuses?.length ? filters.statuses : null,
-    p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
-    p_transfer_filter: filters.transferFilter ?? "all",
-    p_amount_sign: filters.amountSign ?? "all",
-    p_from: filters.from ?? null,
-    p_to: filters.to ?? null,
-  });
+  const { data, error } = await supabase
+    .rpc("money_transaction_feed_summary", {
+      p_payer_person_id: payerPersonId,
+      p_search: filters.query?.trim() || null,
+      p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
+      p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
+      p_statuses: filters.statuses?.length ? filters.statuses : null,
+      p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
+      p_transfer_filter: filters.transferFilter ?? "all",
+      p_amount_sign: filters.amountSign ?? "all",
+      p_from: filters.from ?? null,
+      p_to: filters.to ?? null,
+    })
+    .abortSignal(timeoutSignal(REQUEST_TIMEOUT_MS, signal));
 
   if (error) throw new Error(error.message);
 
@@ -229,15 +251,17 @@ export function useInfiniteMoneyTransactionFeed(
 ) {
   return useInfiniteQuery({
     queryKey: ["money-transaction-feed", payerPersonId, filters],
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       fetchMoneyTransactionFeedPage({
         payerPersonId: payerPersonId!,
         filters,
         pageParam,
+        signal,
       }),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.nextOffset,
     enabled: !!payerPersonId,
+    retry: FEED_RETRIES,
   });
 }
 
@@ -247,8 +271,9 @@ export function useMoneyTransactionFeedSummary(
 ) {
   return useQuery({
     queryKey: ["money-transaction-feed-summary", payerPersonId, filters],
-    queryFn: () => fetchMoneyTransactionFeedSummary(payerPersonId!, filters),
+    queryFn: ({ signal }) => fetchMoneyTransactionFeedSummary(payerPersonId!, filters, signal),
     enabled: !!payerPersonId,
+    retry: FEED_RETRIES,
   });
 }
 

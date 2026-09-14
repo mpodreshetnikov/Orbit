@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyImportReportPage from "./page";
+import { REPORT_ROW_SELECT } from "@/lib/money/import-report-rows";
+import { projectReportRows } from "../../../../../../test/utils/web/import-report-rows";
 
 const importActionMock = vi.fn();
 
@@ -37,6 +39,7 @@ let brandsResult: { data: unknown; error: { message: string } | null } = {
   error: null,
 };
 const rpcMock = vi.fn();
+let rowsSelect: string | null = null;
 
 // The key, plus any values, so "Line items (1)" is distinguishable from "Line items (2)".
 // One function for the whole test, as next-intl's is stable for a locale: a fresh `t` on every
@@ -60,6 +63,9 @@ vi.mock("@/lib/supabase", () => ({
           select() {
             return this;
           },
+          abortSignal() {
+            return this;
+          },
           eq() {
             return this;
           },
@@ -70,6 +76,9 @@ vi.mock("@/lib/supabase", () => ({
       if (table === "money_accounts") {
         return {
           select() {
+            return this;
+          },
+          abortSignal() {
             return this;
           },
           eq() {
@@ -92,6 +101,9 @@ vi.mock("@/lib/supabase", () => ({
           select() {
             return this;
           },
+          abortSignal() {
+            return this;
+          },
           in() {
             return this;
           },
@@ -104,6 +116,9 @@ vi.mock("@/lib/supabase", () => ({
       if (table === "money_import_batch_brand_resolutions") {
         return {
           select() {
+            return this;
+          },
+          abortSignal() {
             return this;
           },
           eq() {
@@ -123,6 +138,9 @@ vi.mock("@/lib/supabase", () => ({
           select() {
             return this;
           },
+          abortSignal() {
+            return this;
+          },
           order() {
             return this;
           },
@@ -133,17 +151,33 @@ vi.mock("@/lib/supabase", () => ({
       }
 
       return {
-        select() {
+        rowId: null as string | null,
+        select(columns: string) {
+          if (columns !== "payload") rowsSelect = columns;
           return this;
         },
-        eq() {
+        eq(column: string, value: string) {
+          if (column === "id") this.rowId = value;
           return this;
         },
         order() {
           return this;
         },
+        abortSignal() {
+          return this;
+        },
+        async maybeSingle() {
+          const rows = Array.isArray(rowsResult.data)
+            ? (rowsResult.data as Array<Record<string, unknown>>)
+            : [];
+          const row = rows.find((candidate) => candidate.id === this.rowId);
+          return { data: row ? { payload: row.payload } : null, error: null };
+        },
         then(resolve: (value: unknown) => unknown) {
-          return Promise.resolve(rowsResult).then(resolve);
+          return Promise.resolve({
+            ...rowsResult,
+            data: projectReportRows(rowsResult.data),
+          }).then(resolve);
         },
       };
     },
@@ -377,6 +411,27 @@ describe("MoneyImportReportPage", () => {
         screen.queryByRole("heading", { name: /money\.importReportLinePayloadTitle Item A/ }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("asks for the rows by column and fetches a payload only for the JSON it opens", async () => {
+    batchResult = { data: makeBatch(), error: null };
+    rowsResult = { data: makeRows(), error: null };
+
+    render(<MoneyImportReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("money.importResultsTitle")).toBeInTheDocument();
+    });
+
+    expect(rowsSelect).toBe(REPORT_ROW_SELECT);
+    expect(rowsSelect).not.toContain("*");
+    expect(screen.queryByText(/"debug": "hidden"/)).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    const storeARow = screen.getByText("Store A").closest("section");
+    await user.click(within(storeARow!).getByRole("button", { name: /^JSON$/i }));
+
+    expect(await screen.findByText(/"debug": "hidden"/)).toBeInTheDocument();
   });
 
   it("shows dom fallback warning for tbank web batches", async () => {

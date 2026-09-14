@@ -140,10 +140,11 @@ describe("use-money-transactions", () => {
   });
 
   it("loads paged transaction feed through rpc with server-side filters", async () => {
-    const rpc = vi.fn().mockResolvedValue({
+    const feedRequest = createQueryBuilder({
       data: [{ id: "tx-1", line_item_titles: ["Milk"], category_ids: ["cat-food"] }],
       error: null,
     });
+    const rpc = vi.fn(() => feedRequest);
     createClientMock.mockReturnValue({ rpc });
 
     const { useInfiniteMoneyTransactionFeed } = await import("./use-money-transactions");
@@ -176,6 +177,7 @@ describe("use-money-transactions", () => {
       p_offset: 0,
       p_limit: 50,
     });
+    expect(feedRequest.abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
     expect(result.current.data?.pages[0]).toEqual(
       expect.objectContaining({
         items: [{ id: "tx-1", line_item_titles: ["Milk"], category_ids: ["cat-food"] }],
@@ -184,7 +186,7 @@ describe("use-money-transactions", () => {
   });
 
   it("normalizes feed items with fallback card metadata and next-page offsets", async () => {
-    const rpc = vi.fn().mockResolvedValue({
+    const feedRequest = createQueryBuilder({
       data: Array.from({ length: 50 }, (_, index) => ({
         id: `tx-${index + 1}`,
         line_items:
@@ -199,6 +201,7 @@ describe("use-money-transactions", () => {
       })),
       error: null,
     });
+    const rpc = vi.fn(() => feedRequest);
     createClientMock.mockReturnValue({ rpc });
 
     const { useInfiniteMoneyTransactionFeed } = await import("./use-money-transactions");
@@ -228,25 +231,27 @@ describe("use-money-transactions", () => {
   });
 
   it("keeps explicit card payloads and normalizes incomplete fallback card metadata", async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: [
-        {
-          id: "tx-1",
-          line_item_titles: [],
-          category_ids: [],
-          money_cards: null,
-        },
-        {
-          id: "tx-2",
-          line_item_titles: [],
-          category_ids: [],
-          card_id: null,
-          card_last4: 1234,
-          card_label: 987,
-        },
-      ],
-      error: null,
-    });
+    const rpc = vi.fn(() =>
+      createQueryBuilder({
+        data: [
+          {
+            id: "tx-1",
+            line_item_titles: [],
+            category_ids: [],
+            money_cards: null,
+          },
+          {
+            id: "tx-2",
+            line_item_titles: [],
+            category_ids: [],
+            card_id: null,
+            card_last4: 1234,
+            card_label: 987,
+          },
+        ],
+        error: null,
+      }),
+    );
     createClientMock.mockReturnValue({ rpc });
 
     const { useInfiniteMoneyTransactionFeed } = await import("./use-money-transactions");
@@ -270,23 +275,27 @@ describe("use-money-transactions", () => {
   });
 
   it("returns feed rpc errors", async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: null,
-      error: { message: "feed failed" },
-    });
+    const rpc = vi.fn(() =>
+      createQueryBuilder({
+        data: null,
+        error: { message: "feed failed" },
+      }),
+    );
     createClientMock.mockReturnValue({ rpc });
 
     const { useInfiniteMoneyTransactionFeed } = await import("./use-money-transactions");
     const { result } = renderHookWithQueryClient(() => useInfiniteMoneyTransactionFeed("p1"));
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    // One retry before the error shows: the feed keeps FEED_RETRIES = 1, a second later.
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 3_000 });
+    expect(rpc).toHaveBeenCalledTimes(2);
     expect((result.current.error as Error).message).toContain("feed failed");
   });
 
   it("loads transaction feed summary through rpc with server-side filters", async () => {
     const rpc = vi.fn((fn: string) => {
       if (fn === "money_transaction_feed_summary") {
-        return Promise.resolve({
+        return createQueryBuilder({
           data: [
             {
               total_count: 2,
@@ -298,7 +307,7 @@ describe("use-money-transactions", () => {
         });
       }
 
-      return Promise.resolve({ data: null, error: null });
+      return createQueryBuilder({ data: null, error: null });
     });
     createClientMock.mockReturnValue({ rpc });
 
@@ -338,10 +347,12 @@ describe("use-money-transactions", () => {
   });
 
   it("loads summary defaults, trims empty filters, and supports disabled summary queries", async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: [],
-      error: null,
-    });
+    const rpc = vi.fn(() =>
+      createQueryBuilder({
+        data: [],
+        error: null,
+      }),
+    );
     createClientMock.mockReturnValue({ rpc });
 
     const { useMoneyTransactionFeedSummary } = await import("./use-money-transactions");
@@ -379,16 +390,20 @@ describe("use-money-transactions", () => {
   });
 
   it("returns summary rpc errors", async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: null,
-      error: { message: "summary failed" },
-    });
+    const rpc = vi.fn(() =>
+      createQueryBuilder({
+        data: null,
+        error: { message: "summary failed" },
+      }),
+    );
     createClientMock.mockReturnValue({ rpc });
 
     const { useMoneyTransactionFeedSummary } = await import("./use-money-transactions");
     const { result } = renderHookWithQueryClient(() => useMoneyTransactionFeedSummary("p1"));
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    // One retry before the error shows: the feed keeps FEED_RETRIES = 1, a second later.
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 3_000 });
+    expect(rpc).toHaveBeenCalledTimes(2);
     expect((result.current.error as Error).message).toContain("summary failed");
   });
 

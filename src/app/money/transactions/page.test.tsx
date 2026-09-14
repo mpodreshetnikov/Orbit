@@ -1,8 +1,9 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MoneyTransactionsPage from "./page";
+import { SLOW_RESPONSE_AFTER_MS } from "@/lib/request-timeout";
 
 const hookMocks = vi.hoisted(() => ({
   useIsMobile: vi.fn(),
@@ -843,5 +844,142 @@ describe("MoneyTransactionsPage", () => {
 
     await waitFor(() => expect(routerMock.replace).toHaveBeenCalled());
     expect(String(routerMock.replace.mock.lastCall?.[0] ?? "")).toContain("categories=cat-food");
+  });
+
+  it("says when the feed is taking longer than usual", () => {
+    vi.useFakeTimers();
+    try {
+      hookMocks.useInfiniteMoneyTransactionFeed.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        isFetchingNextPage: false,
+      });
+
+      render(<MoneyTransactionsPage />);
+      expect(screen.queryByTestId("transaction-feed-slow")).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(SLOW_RESPONSE_AFTER_MS);
+      });
+
+      expect(screen.getByTestId("transaction-feed-slow")).toHaveTextContent(
+        "money.feedWaitingLong",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("explains a feed that did not arrive and offers to try again", async () => {
+    const refetch = vi.fn();
+    hookMocks.useInfiniteMoneyTransactionFeed.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error("TimeoutError: no answer in 20000 ms"),
+      refetch,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
+    });
+
+    render(<MoneyTransactionsPage />);
+
+    const notice = screen.getByTestId("transaction-feed-error");
+    expect(notice).toHaveTextContent("money.feedLoadFailed");
+    expect(notice).toHaveTextContent("money.requestTimedOut");
+    expect(screen.queryByText("money.noTransactions")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(within(notice).getByRole("button", { name: "common.retry" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the slow-feed timer over when the query changes", () => {
+    vi.useFakeTimers();
+    try {
+      hookMocks.useInfiniteMoneyTransactionFeed.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        isFetchingNextPage: false,
+      });
+
+      const { rerender } = render(<MoneyTransactionsPage />);
+      act(() => {
+        vi.advanceTimersByTime(SLOW_RESPONSE_AFTER_MS);
+      });
+      expect(screen.getByTestId("transaction-feed-slow")).toBeInTheDocument();
+
+      selectedPersonIdState = "person-2";
+      rerender(<MoneyTransactionsPage />);
+      expect(screen.queryByTestId("transaction-feed-slow")).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(SLOW_RESPONSE_AFTER_MS - 1);
+      });
+      expect(screen.queryByTestId("transaction-feed-slow")).not.toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByTestId("transaction-feed-slow")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the loaded rows when a later page fails, and offers to fetch it again", async () => {
+    const fetchNextPage = vi.fn();
+    const refetch = vi.fn();
+    hookMocks.useInfiniteMoneyTransactionFeed.mockReturnValue({
+      data: { pages: [{ items: makeFeedRows() }] },
+      isLoading: false,
+      isError: true,
+      isFetchNextPageError: true,
+      error: new Error("TimeoutError: no answer in 20000 ms"),
+      fetchNextPage,
+      refetch,
+      hasNextPage: true,
+      isFetchingNextPage: false,
+    });
+
+    render(<MoneyTransactionsPage />);
+
+    expect(screen.getByTestId("transaction-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("transaction-feed-error")).not.toBeInTheDocument();
+    const notice = screen.getByTestId("transaction-feed-more-error");
+    expect(notice).toHaveTextContent("money.feedMoreFailed");
+    expect(notice).toHaveTextContent("money.requestTimedOut");
+
+    const user = userEvent.setup();
+    await user.click(within(notice).getByRole("button", { name: "common.retry" }));
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+    expect(refetch).not.toHaveBeenCalled();
+  });
+
+  it("says when the totals did not arrive instead of showing zeros", async () => {
+    currentSearchParams = new URLSearchParams("accounts=acc-1");
+    const refetch = vi.fn();
+    hookMocks.useMoneyTransactionFeedSummary.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error("TimeoutError: no answer in 20000 ms"),
+      refetch,
+    });
+
+    render(<MoneyTransactionsPage />);
+
+    const notice = screen.getByTestId("transaction-summary-error");
+    expect(notice).toHaveTextContent("money.summaryUnavailable");
+    expect(notice).toHaveTextContent("money.requestTimedOut");
+    expect(screen.queryByText("money.summaryMatches")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(within(notice).getByRole("button", { name: "common.retry" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

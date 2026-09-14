@@ -22,6 +22,7 @@ const CHAIN_METHODS = [
   "lt",
   "or",
   "limit",
+  "abortSignal",
   "insert",
   "update",
   "delete",
