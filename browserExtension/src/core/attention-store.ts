@@ -39,6 +39,11 @@ export interface AttentionStore {
   getRequestedTab(scope: AutoRunScope, nowMs: number): Promise<number | null>;
   /** The live request whose tab this is, if any. */
   findRequestForTab(tabId: number, nowMs: number): Promise<AutoRunScope | null>;
+  /**
+   * Hands a live request another tab: the one the person opened after closing the first. False
+   * when there is no live request to bind.
+   */
+  bindRequestTab(scope: AutoRunScope, tabId: number, nowMs: number): Promise<boolean>;
   clearRunRequest(scope: AutoRunScope): Promise<void>;
 }
 
@@ -141,6 +146,14 @@ export function createAttentionStore(storage: LocalStorageLike): AttentionStore 
       const key = requestKey(scope);
       if (!isRunRequestLive(state.runRequests[key], nowMs)) return null;
       return state.requestTabs[key] ?? null;
+    },
+    bindRequestTab(scope, tabId, nowMs) {
+      return change(async (state) => {
+        const key = requestKey(scope);
+        if (!isRunRequestLive(state.runRequests[key], nowMs)) return false;
+        await write({ ...state, requestTabs: { ...state.requestTabs, [key]: tabId } });
+        return true;
+      });
     },
     async findRequestForTab(tabId, nowMs) {
       const state = await read();

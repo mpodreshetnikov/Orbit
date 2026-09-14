@@ -1065,6 +1065,13 @@ describe("background-router", () => {
           const [sourceId, payerPersonId] = found[0].split("::");
           return { sourceId, payerPersonId };
         }),
+        bindRequestTab: vi.fn(
+          async (scope: { sourceId: string; payerPersonId: string }, tabId: number) => {
+            if (!(key(scope) in state.runRequests)) return false;
+            state.requestTabs[key(scope)] = tabId;
+            return true;
+          },
+        ),
         clearRunRequest: vi.fn(async (scope: { sourceId: string; payerPersonId: string }) => {
           delete state.runRequests[key(scope)];
           delete state.requestTabs[key(scope)];

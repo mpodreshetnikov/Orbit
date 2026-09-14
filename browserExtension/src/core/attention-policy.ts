@@ -87,3 +87,27 @@ export function isRunRequestLive(
   if (typeof requestedAtMs !== "number" || !Number.isFinite(requestedAtMs)) return false;
   return nowMs - requestedAtMs < ttlMs;
 }
+
+/**
+ * Whether a bank tab that has just finished loading should become the tab of a live request.
+ *
+ * The tab Update opened can be closed before the run begins: the owner closed it in the minute
+ * of quiet after signing in, opened the bank again, and the run went to a window of the
+ * sweep's own while the new tab only looked on (2026-09-14). A live request follows the person
+ * to the tab they are in -- unless the tab it has is still there and still on the bank, which
+ * is the tab they were told to keep open.
+ */
+export function shouldAdoptRequestTab(input: {
+  requestLive: boolean;
+  /** The tab the request holds, if any. */
+  boundTabId: number | null;
+  /** That tab still exists and is still on the bank's site. */
+  boundTabOnBank: boolean;
+  /** The tab that just loaded. */
+  tabId: number;
+}): boolean {
+  if (!input.requestLive) return false;
+  if (input.boundTabId === input.tabId) return false;
+  if (input.boundTabId !== null && input.boundTabOnBank) return false;
+  return true;
+}

@@ -17,6 +17,7 @@ import { activeImportRuns } from "./core/active-runs.js";
 import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
+import { shouldAdoptRequestTab } from "./core/attention-policy.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
@@ -519,10 +520,38 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             delayInMinutes: VISIT_SWEEP_DELAY_MINUTES,
           });
         }
-        // The tab Update opened, before its run has begun: the widget there tells the person
-        // to sign in and wait. It asks the worker what to show, so nothing more is sent.
         if (visited) {
-          const request = await attentionStore.findRequestForTab(tabId, Date.now());
+          const nowMs = Date.now();
+          // A live request follows the person: the tab Update opened may be gone, and the bank
+          // they opened again is where the run they asked for should go.
+          const grant = await grantStore.getGrant();
+          const scope = grant
+            ? { sourceId: visited.sourceId, payerPersonId: grant.person_id }
+            : null;
+          if (scope && (await attentionStore.isRunRequested(scope, nowMs))) {
+            const boundTabId = await attentionStore.getRequestedTab(scope, nowMs);
+            const boundTab =
+              boundTabId === null || boundTabId === tabId
+                ? null
+                : await chrome.tabs.get(boundTabId).catch(() => null);
+            const adopt = shouldAdoptRequestTab({
+              requestLive: true,
+              boundTabId,
+              boundTabOnBank: Boolean(
+                boundTab && matchesMoneyImportSourcePageUrl(visited.sourceId, boundTab.url),
+              ),
+              tabId,
+            });
+            if (adopt && (await attentionStore.bindRequestTab(scope, tabId, nowMs))) {
+              telemetry.info("money_import_run_request_tab_adopted", {
+                source_id: visited.sourceId,
+                previous_tab_present: boundTabId !== null,
+              });
+            }
+          }
+          // The tab Update opened, before its run has begun: the widget there tells the person
+          // to sign in and wait. It asks the worker what to show, so nothing more is sent.
+          const request = await attentionStore.findRequestForTab(tabId, nowMs);
           if (request && request.sourceId === visited.sourceId) {
             await injectSourcePageWidget(tabId).catch(() => undefined);
           }

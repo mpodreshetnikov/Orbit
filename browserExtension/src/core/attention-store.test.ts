@@ -92,6 +92,22 @@ describe("attention-store", () => {
     await store.requestRun(TBANK, NOW + 1);
     expect(await store.getRequestedTab(TBANK, NOW + 2)).toBeNull();
   });
+
+  it("hands a live request another tab, and refuses when there is no live request", async () => {
+    const store = createAttentionStore(createStorage());
+    await store.requestRun(TBANK, NOW, 42);
+
+    expect(await store.bindRequestTab(TBANK, 43, NOW + 1000)).toBe(true);
+    expect(await store.getRequestedTab(TBANK, NOW + 1000)).toBe(43);
+    expect(await store.findRequestForTab(43, NOW + 1000)).toEqual(TBANK);
+    expect(await store.findRequestForTab(42, NOW + 1000)).toBeNull();
+    // The request's own clock is untouched: binding a tab does not renew the hour.
+    expect((await store.getState()).runRequests["tbank_web::person-1"]).toBe(NOW);
+
+    expect(await store.bindRequestTab(ALFA, 44, NOW)).toBe(false);
+    expect(await store.bindRequestTab(TBANK, 45, NOW + HOUR_MS)).toBe(false);
+    expect((await store.getState()).requestTabs).toEqual({ "tbank_web::person-1": 43 });
+  });
 });
 
 describe("attention-store under concurrent changes", () => {
