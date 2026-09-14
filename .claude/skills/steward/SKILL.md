@@ -43,6 +43,10 @@ how you would see it" cannot be answered in one sentence naming a check, a query
 or a screen, the session is not sure. `docs/QUALITY.md` owns what follows from that, and what follows
 is not a review.
 
+Being unable to merge is not the third outcome. If the five conditions hold and the merge is refused,
+`docs/QUALITY.md` says to name the obstacle, the identity it was attempted as, and what answered —
+never to let it read as a hand-over. Silence there is what cost #82, #83, #86 and #106 a week apiece.
+
 The push that answers a review is not a reason to wait for another one: what blocks a merge is a gap
 that earns a pass, and the last review's findings fixed in place is named there as a gap that does
 not.
