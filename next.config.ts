@@ -4,21 +4,16 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 // A self-hosted instance serves Storage from its own domain rather than *.supabase.co, so the
-// image optimizer has to accept whatever origin NEXT_PUBLIC_SUPABASE_URL names at build time.
+// image optimizer has to accept the host NEXT_PUBLIC_SUPABASE_URL names. Only the host: the
+// self-hosted image is built with a placeholder URL whose host deploy/web-start.mjs replaces when
+// the container starts, and an instance may serve plain HTTP or a non-default port.
 function selfHostedStoragePattern() {
   const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!raw) return [];
   try {
     const url = new URL(raw);
     if (url.hostname.endsWith(".supabase.co")) return [];
-    return [
-      {
-        protocol: url.protocol.replace(":", "") as "http" | "https",
-        hostname: url.hostname,
-        port: url.port,
-        pathname: "/storage/v1/**",
-      },
-    ];
+    return [{ hostname: url.hostname, pathname: "/storage/v1/**" }];
   } catch {
     return [];
   }
@@ -27,6 +22,10 @@ function selfHostedStoragePattern() {
 const nextConfig: NextConfig = {
   // The Docker image (deploy/web.Dockerfile) runs Next's standalone server; Vercel builds without it.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
+  // Appended to static asset URLs as ?dpl=. The self-hosted image builds with a placeholder that
+  // deploy/web-start.mjs replaces with a hash of the values it writes in, because writing them in
+  // changes a chunk without changing its file name, and browsers cache chunks forever by URL.
+  deploymentId: process.env.ORBIT_DEPLOYMENT_ID || undefined,
   eslint: {
     ignoreDuringBuilds: true,
   },

@@ -100,26 +100,24 @@ services:
   # --- Orbit's own services ----------------------------------------------------------------------
   web:
     container_name: orbit-web
-    image: ${ORBIT_WEB_IMAGE:-orbit-web:local}
+    image: orbit-web:local
     build:
       context: ${ORBIT_ROOT:?}
       dockerfile: deploy/web.Dockerfile
       target: web
       args:
-        NEXT_PUBLIC_SUPABASE_URL: ${ORBIT_PUBLIC_URL:?}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:?}
-        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?}
-        NEXT_PUBLIC_EXTENSION_ID: ${NEXT_PUBLIC_EXTENSION_ID:-}
         NEXT_PUBLIC_APP_VERSION: ${ORBIT_VERSION:-}
     restart: unless-stopped
     depends_on:
       api-gw:
         condition: service_healthy
     environment:
-      # Also read at run time, through dynamic process.env lookups the build cannot inline
-      # (src/lib/mcp/config.ts).
+      # Written into the compiled app when the container starts (deploy/web-start.mjs), and also
+      # read through dynamic process.env lookups (src/lib/mcp/config.ts).
       NEXT_PUBLIC_SUPABASE_URL: ${ORBIT_PUBLIC_URL:?}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:?}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?}
+      NEXT_PUBLIC_EXTENSION_ID: ${NEXT_PUBLIC_EXTENSION_ID:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?}
       SUPABASE_JWT_SECRET: ${JWT_SECRET:?}
       MCP_SERVER_ENABLED: ${MCP_SERVER_ENABLED:-0}

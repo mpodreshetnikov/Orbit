@@ -14,7 +14,9 @@ Everything lives on one server, in Docker containers that `deploy/orbit` starts 
 
 - **Caddy** answers on ports 80 and 443, gets the HTTPS certificate from Let's Encrypt by itself,
   and sends each request to the right place.
-- **web** is the Orbit app (Next.js).
+- **web** is the Orbit app (Next.js). `deploy/orbit` downloads it ready-built for the exact commit
+  you have checked out (CI publishes one for every commit on `main`, for x86 servers), and builds
+  it on the server only when there is none: on an ARM server, or with changes of your own.
 - **Supabase** is the backend: Postgres (the database), Auth (Google sign-in), Storage (uploaded
   files), Realtime, PostgREST and the Edge Functions. It is the official
   [self-hosted Supabase](https://supabase.com/docs/guides/self-hosting/docker) release, pinned in
@@ -29,9 +31,11 @@ The only file you edit is `deploy/.env`. Your data (database, files, certificate
 **Server.** Any Linux virtual server ("VPS") with:
 
 - 2 CPU cores, **2 GB RAM or more** (4 GB is comfortable), 40 GB disk — about $4–10 a month at
-  most providers. Running, Orbit uses about 0.9 GB; building the app on an update needs about 2 GB
-  more for a couple of minutes, so on a server with less than 4 GB `deploy/orbit install` adds a
-  2 GB swap file for that (set `ORBIT_NO_SWAP=true` in `deploy/.env` to skip it);
+  most providers. Running, Orbit uses about 0.9 GB. An x86 (Intel/AMD) server is the simple
+  choice: the app arrives ready-built. On an ARM server it is built on the server, which needs
+  about 2 GB more for a few minutes on every update. For that case, and for safety, on a server
+  with less than 4 GB `deploy/orbit install` adds a 2 GB swap file (set `ORBIT_NO_SWAP=true` in
+  `deploy/.env` to skip it);
 - Ubuntu 24.04 or Debian 12;
 - a public IPv4 address, and ports 80 and 443 open.
 
@@ -98,7 +102,7 @@ It prints one line per thing still missing, or `OK deploy/.env is complete`.
 
     deploy/orbit install
 
-The first run takes 5–15 minutes: it downloads Supabase, builds the app and starts everything. It
+The first run takes 5–15 minutes: it downloads Supabase and the app and starts everything. It
 prints what it is doing, and ends with:
 
     Orbit is up at https://orbit.example.com
@@ -255,7 +259,7 @@ time; you switch over only when the new one checks out, and you can switch back.
     git pull
     deploy/orbit update
 
-`update` rebuilds the app, applies database changes and restarts only what changed. It is safe to
+`update` gets the new app, applies database changes and restarts only what changed. It is safe to
 run as often as you like.
 
 **Letting someone in, or out:** edit `ORBIT_ALLOWED_EMAILS` (and Google's test users) and run
@@ -270,15 +274,16 @@ and follow the printed instructions (an SSH tunnel from your computer, then <htt
 
 ## When something goes wrong
 
-| What you see                                        | What to do                                                                                                                                    |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ERR deploy/.env: X is not filled in`               | Open `deploy/.env`, fill `X` following the comment above it, run the command again                                                            |
-| `429 Too Many Requests` or timeouts pulling images  | Docker Hub limits or blocks your server. Set `ORBIT_REGISTRY_MIRROR=https://mirror.gcr.io` in `deploy/.env`, run `deploy/orbit install` again |
-| The browser says the certificate is invalid         | DNS does not point at this server yet, or ports 80/443 are closed. Check `ping <domain>`, wait, then `deploy/orbit restart caddy`             |
-| Google says `redirect_uri_mismatch`                 | The redirect URI in Google Cloud Console must be exactly `https://<ORBIT_DOMAIN>/auth/v1/callback`                                            |
-| "Access denied" after signing in                    | Your e-mail is not in `ORBIT_ALLOWED_EMAILS`. Add it, run `deploy/orbit migrate`                                                              |
-| A service is not `healthy` in `deploy/orbit status` | `deploy/orbit logs <service>` shows why. Most often a typo in `deploy/.env`                                                                   |
-| The build stops with `Killed` or the server freezes | Not enough memory for the build. `swapon --show` should list `/orbit.swap`; if your provider forbids swap, use a 4 GB server                  |
+| What you see                                          | What to do                                                                                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ERR deploy/.env: X is not filled in`                 | Open `deploy/.env`, fill `X` following the comment above it, run the command again                                                                                       |
+| `429 Too Many Requests` or timeouts pulling images    | Docker Hub limits or blocks your server. Set `ORBIT_REGISTRY_MIRROR=https://mirror.gcr.io` in `deploy/.env`, run `deploy/orbit install` again                            |
+| The browser says the certificate is invalid           | DNS does not point at this server yet, or ports 80/443 are closed. Check `ping <domain>`, wait, then `deploy/orbit restart caddy`                                        |
+| Google says `redirect_uri_mismatch`                   | The redirect URI in Google Cloud Console must be exactly `https://<ORBIT_DOMAIN>/auth/v1/callback`                                                                       |
+| "Access denied" after signing in                      | Your e-mail is not in `ORBIT_ALLOWED_EMAILS`. Add it, run `deploy/orbit migrate`                                                                                         |
+| A service is not `healthy` in `deploy/orbit status`   | `deploy/orbit logs <service>` shows why. Most often a typo in `deploy/.env`                                                                                              |
+| `No prebuilt images for this commit` on an x86 server | CI publishes them about 15 minutes after a commit reaches `main`; it builds here meanwhile, which is fine. To download instead, wait and run `deploy/orbit update` again |
+| The build stops with `Killed` or the server freezes   | Not enough memory for the build. `swapon --show` should list `/orbit.swap`; if your provider forbids swap, use a 4 GB server                                             |
 
 ## Secrets
 
