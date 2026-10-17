@@ -14,13 +14,18 @@ set -euo pipefail
 ORBIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$ORBIT_ROOT/deploy"
 ENV_FILE="${ORBIT_ENV_FILE:-$DEPLOY_DIR/.env}"
+ORBIT_ENV_FILE="$ENV_FILE"
 UPSTREAM_DIR="$DEPLOY_DIR/.upstream"
-export ORBIT_ROOT
+export ORBIT_ROOT ORBIT_ENV_FILE
 
 # shellcheck source=deploy/lib/common.sh
 source "$DEPLOY_DIR/lib/common.sh"
 # shellcheck source=deploy/lib/secrets.sh
 source "$DEPLOY_DIR/lib/secrets.sh"
+# shellcheck source=deploy/lib/backup.sh
+source "$DEPLOY_DIR/lib/backup.sh"
+# shellcheck source=deploy/lib/import.sh
+source "$DEPLOY_DIR/lib/import.sh"
 
 # --- Configuration --------------------------------------------------------------------------------
 
@@ -130,7 +135,9 @@ sync_functions() {
 }
 
 prepare_data_dir() {
-  mkdir -p "$ORBIT_DATA_DIR"/{db,storage,caddy,functions}
+  mkdir -p "$ORBIT_DATA_DIR"/{db,storage,caddy,functions,wal-spool,backup-state}
+  # The database (uid 100 in supabase/postgres) writes the WAL spool; the backup container empties it.
+  chown 100:101 "$ORBIT_DATA_DIR/wal-spool" 2>/dev/null || chmod 777 "$ORBIT_DATA_DIR/wal-spool"
 }
 
 wait_healthy() {
@@ -238,6 +245,7 @@ cmd_build() {
     compose build web
   fi
   compose --profile tools build migrate
+  compose build backup
 }
 
 cmd_migrate() {
@@ -269,6 +277,7 @@ $(c_green "Orbit is up") at $ORBIT_PUBLIC_URL (version $ORBIT_VERSION)
 Next steps, if you have not done them yet (docs/SELF_HOSTING.md, step 3):
   - DNS: an A record for $ORBIT_DOMAIN pointing at this server's IP address.
   - Google Cloud Console: authorized redirect URI $ORBIT_PUBLIC_URL/auth/v1/callback
+  - Backups: fill the BACKUP_* lines in deploy/.env and run deploy/orbit backup setup.
 Allowed to sign in: $ORBIT_ALLOWED_EMAILS
 EOF
 }
@@ -280,7 +289,7 @@ cmd_status() {
   echo "URL:     $ORBIT_PUBLIC_URL"
   echo "Version: $ORBIT_VERSION"
   echo "Data:    $ORBIT_DATA_DIR ($(du -sh "$ORBIT_DATA_DIR" 2>/dev/null | cut -f1))"
-  if declare -F backup_status >/dev/null; then backup_status; fi
+  backup_status
 }
 
 cmd_studio() {
@@ -310,6 +319,16 @@ Usage: deploy/orbit <command>
   down             Stop everything (data stays in ORBIT_DATA_DIR)
   studio           Start the Supabase dashboard for an SSH-tunnel session
   studio-stop      Stop it again
+
+  backup setup     Check the BACKUP_* settings, create the repositories, take the first backup
+  backup now       Take a full backup now (base backup + snapshot)
+  backup verify    Restore the latest copies into a scratch directory and check them
+  backup status    When each backup job last succeeded
+  restore [--time "2026-10-17 12:00:00+00"] [--yes]
+                   Replace the database (and files) with the latest backup, or the state at --time
+
+  migrate-from-supabase export | import [--yes] | verify
+                   Move an Orbit that runs on hosted Supabase onto this server
   compose ...      Run any docker compose command against this stack
 
 Guide: docs/SELF_HOSTING.md
@@ -331,6 +350,9 @@ main() {
     down) load_env && compose down ;;
     studio) cmd_studio ;;
     studio-stop) load_env && compose --profile studio stop studio meta ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
+    migrate-from-supabase) cmd_migrate_from_supabase "$@" ;;
     compose) load_env && compose "$@" ;;
     help | -h | --help) usage ;;
     *) usage && exit 1 ;;

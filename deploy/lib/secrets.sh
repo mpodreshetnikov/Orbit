@@ -60,6 +60,9 @@ ensure_secrets() {
   env_has DASHBOARD_PASSWORD "$file" || env_append "$file" DASHBOARD_PASSWORD "$(openssl rand -hex 16)"
   env_has MCP_OAUTH_SIGNING_SECRET "$file" || env_append "$file" MCP_OAUTH_SIGNING_SECRET "$(openssl rand -hex 32)"
   env_has MONEY_FX_SYNC_TOKEN "$file" || env_append "$file" MONEY_FX_SYNC_TOKEN "$(openssl rand -hex 24)"
+  # Encrypt both backup copies before they leave the server.
+  env_has BACKUP_ENCRYPTION_KEY "$file" || env_append "$file" BACKUP_ENCRYPTION_KEY "$(openssl rand -hex 32)"
+  env_has BACKUP_SNAPSHOT_PASSWORD "$file" || env_append "$file" BACKUP_SNAPSHOT_PASSWORD "$(openssl rand -hex 32)"
   if ! env_has VAPID_PUBLIC_KEY "$file" || ! env_has VAPID_PRIVATE_KEY "$file"; then
     make_vapid_keys
     env_append "$file" VAPID_PUBLIC_KEY "$VAPID_PUBLIC_KEY_NEW"
