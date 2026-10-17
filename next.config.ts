@@ -30,6 +30,14 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // The self-hosted image build skips the type check: CI has already run it on every commit that
+  // reaches main, and on a small server it is the most memory-hungry step of the build.
+  typescript: {
+    ignoreBuildErrors: process.env.ORBIT_SKIP_BUILD_TYPECHECK === "1",
+  },
+  // Each build worker holds its own copy of the module graph; on a small server fewer workers trade
+  // a little build time for a lower memory peak.
+  experimental: process.env.ORBIT_BUILD_CPUS ? { cpus: Number(process.env.ORBIT_BUILD_CPUS) } : {},
   images: {
     remotePatterns: [
       {
