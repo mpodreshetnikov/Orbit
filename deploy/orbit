@@ -247,7 +247,9 @@ pull_prebuilt() {
   local kind="$1" prefix="${ORBIT_PREBUILT_IMAGES:-$ORBIT_PREBUILT_IMAGES_DEFAULT}" sha image
   [[ "${ORBIT_BUILD_LOCALLY:-false}" != "true" ]] || return 1
   sha="$(git -C "$ORBIT_ROOT" rev-parse HEAD 2>/dev/null)" || return 1
-  git -C "$ORBIT_ROOT" diff --quiet HEAD -- 2>/dev/null || return 1
+  # Any change, a new untracked file included, means the code is not that commit's. Ignored files
+  # (deploy/.env, deploy/.upstream) are not code and do not count.
+  [[ -z "$(git -C "$ORBIT_ROOT" status --porcelain 2>/dev/null)" ]] || return 1
   image="$prefix-$kind:$sha"
   docker pull --quiet "$image" >/dev/null 2>&1 || return 1
   docker tag "$image" "orbit-$kind:local"
