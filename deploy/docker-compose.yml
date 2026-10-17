@@ -33,8 +33,24 @@ services:
       - "127.0.0.1:8000:8000"
 
   db:
+    # Upstream's command, plus WAL archiving: every finished segment, or one per minute at most
+    # (archive_timeout), goes to the spool the `backup` service ships off the server.
+    command: !override
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=/bin/sh /etc/orbit/archive-wal.sh %p %f
+      - -c
+      - archive_timeout=60
     volumes:
       - ${ORBIT_DATA_DIR:?}/db:/var/lib/postgresql/data
+      - ${ORBIT_DATA_DIR:?}/wal-spool:/wal-spool
+      - ${ORBIT_ROOT:?}/deploy/backup/archive-wal.sh:/etc/orbit/archive-wal.sh:ro
       # /etc/postgresql-custom stays upstream's named volume `db-config`: the image seeds it with
       # its own config files, which a bind mount would hide. It also holds the pgsodium root key
       # that Vault encrypts its secrets with, so the backups read it from that volume.
@@ -140,6 +156,44 @@ services:
     volumes:
       - ${ORBIT_ROOT:?}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ${ORBIT_DATA_DIR:?}/caddy:/data
+
+  # Off-server copies of everything (deploy/backup/run.sh). Idle until BACKUP_* is filled in and
+  # `deploy/orbit backup setup` has run.
+  backup:
+    container_name: orbit-backup
+    image: orbit-backup:local
+    build:
+      context: ${ORBIT_ROOT:?}/deploy/backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
+      BACKUP_WAL_S3_ENDPOINT: ${BACKUP_WAL_S3_ENDPOINT:-}
+      BACKUP_WAL_S3_PREFIX: ${BACKUP_WAL_S3_PREFIX:-}
+      BACKUP_WAL_S3_REGION: ${BACKUP_WAL_S3_REGION:-auto}
+      BACKUP_WAL_S3_ACCESS_KEY_ID: ${BACKUP_WAL_S3_ACCESS_KEY_ID:-}
+      BACKUP_WAL_S3_SECRET_ACCESS_KEY: ${BACKUP_WAL_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_SNAPSHOT_REPOSITORY: ${BACKUP_SNAPSHOT_REPOSITORY:-}
+      BACKUP_SNAPSHOT_REGION: ${BACKUP_SNAPSHOT_REGION:-auto}
+      BACKUP_SNAPSHOT_ACCESS_KEY_ID: ${BACKUP_SNAPSHOT_ACCESS_KEY_ID:-}
+      BACKUP_SNAPSHOT_SECRET_ACCESS_KEY: ${BACKUP_SNAPSHOT_SECRET_ACCESS_KEY:-}
+      BACKUP_SNAPSHOT_PASSWORD: ${BACKUP_SNAPSHOT_PASSWORD:-}
+      BACKUP_TIME_UTC: ${BACKUP_TIME_UTC:-0330}
+      BACKUP_FILES_INTERVAL_MIN: ${BACKUP_FILES_INTERVAL_MIN:-15}
+      ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
+      BACKUP_HEALTHCHECK_URL: ${BACKUP_HEALTHCHECK_URL:-}
+    volumes:
+      # Same path as in the db container: WAL-G checks it against the server's data_directory.
+      - ${ORBIT_DATA_DIR:?}/db:/var/lib/postgresql/data:ro
+      - ${ORBIT_DATA_DIR:?}/wal-spool:/wal-spool
+      - ${ORBIT_DATA_DIR:?}/backup-state:/state
+      - ${ORBIT_DATA_DIR:?}/storage:/data/storage:ro
+      - db-config:/data/db-config:ro
+      - ${ORBIT_ENV_FILE:?}:/config/orbit.env:ro
 
   # One-shot: `deploy/orbit migrate`. Not started by `up`.
   migrate:
