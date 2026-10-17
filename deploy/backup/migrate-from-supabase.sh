@@ -33,20 +33,37 @@ dump_tables() {
 
 export_source() {
   : "${SOURCE_DB_URL:?SOURCE_DB_URL is required}" "${SOURCE_SUPABASE_URL:?}" "${SOURCE_SERVICE_ROLE_KEY:?}"
-  local args=() s t bucket name mime file
+  local args=() s t bucket name mime file snapshot in out
   mkdir -p "$DIR/files"
   for s in "${SCHEMAS[@]}"; do args+=(--schema="$s"); done
   for t in "${EXCLUDE[@]}"; do args+=(--exclude-table="$t"); done
-  log "dumping data from the hosted database"
-  pg_dump "$SOURCE_DB_URL" --format=custom --data-only --no-owner "${args[@]}" --file="$DIR/source.dump"
+
+  # Dump, row counts and the list of Storage objects all read one snapshot of the hosted database,
+  # so a write landing during the export cannot leave counts or files out of step with the dump.
+  # A session holds the snapshot open (pg_export_snapshot) while the others attach to it.
+  coproc HOLD { psql "$SOURCE_DB_URL" -qAtX -v ON_ERROR_STOP=1; }
+  in="${HOLD[1]}" out="${HOLD[0]}"
+  printf 'begin isolation level repeatable read;\nselect pg_export_snapshot();\n' >&"$in"
+  read -r -t 60 snapshot <&"$out" || { echo "could not open a snapshot on the hosted database" >&2; return 1; }
+  in_snapshot() {
+    psql "$SOURCE_DB_URL" -qAtX -v ON_ERROR_STOP=1 "$@" -c "begin isolation level repeatable read" \
+      -c "set transaction snapshot '$snapshot'" -c "$SQL" -c "commit"
+  }
+
+  log "dumping data from the hosted database (snapshot $snapshot)"
+  pg_dump "$SOURCE_DB_URL" --snapshot="$snapshot" --format=custom --data-only --no-owner "${args[@]}" --file="$DIR/source.dump"
 
   log "counting rows"
-  : >"$DIR/counts.tsv"
-  while read -r t; do
-    printf '%s\t%s\n' "$t" "$(psql "$SOURCE_DB_URL" -qAtc "select count(*) from $t")" >>"$DIR/counts.tsv"
-  done < <(dump_tables)
+  SQL="$(dump_tables | awk -v q="'" '{printf "%sselect %s, count(*) from %s", (NR > 1 ? " union all " : ""), q $0 q, $0}')"
+  SQL="$SQL" in_snapshot -F $'\t' >"$DIR/counts.tsv"
 
   log "downloading Storage objects"
+  SQL="select bucket_id, name, coalesce(metadata->>'mimetype', '') from storage.objects order by 1, 2" \
+    in_snapshot -F $'\t' >"$DIR/objects.tsv"
+  printf 'commit;\n' >&"$in"
+  exec {in}>&-
+  wait "$HOLD_PID" 2>/dev/null || true
+
   : >"$DIR/files.tsv"
   while IFS=$'\t' read -r bucket name mime; do
     file="$DIR/files/$bucket/$name"
@@ -54,15 +71,27 @@ export_source() {
     curl -fsS --retry 4 -H "apikey: $SOURCE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SOURCE_SERVICE_ROLE_KEY" \
       -o "$file" "$(object_url "$SOURCE_SUPABASE_URL" "$bucket" "$name")"
     printf '%s\t%s\t%s\t%s\n' "$bucket" "$name" "${mime:-application/octet-stream}" "$(sha256sum "$file" | cut -d' ' -f1)" >>"$DIR/files.tsv"
-  done < <(psql "$SOURCE_DB_URL" -qAt -F $'\t' -c "select bucket_id, name, coalesce(metadata->>'mimetype', '') from storage.objects order by 1, 2")
+  done <"$DIR/objects.tsv"
+  rm -f "$DIR/objects.tsv"
 
   log "exported $(wc -l <"$DIR/counts.tsv") tables and $(wc -l <"$DIR/files.tsv") objects into the migration directory"
 }
 
 import_into_target() {
   [[ -f "$DIR/source.dump" ]] || { echo "nothing exported yet: run deploy/orbit migrate-from-supabase export first" >&2; return 1; }
-  local list="$DIR/restore.list" missing tables bucket name mime sum file
+  local list="$DIR/restore.list" missing tables sequences bucket name mime sum file
   : "${SERVICE_ROLE_KEY:?}"
+
+  # Before an export's rows replace this instance's: delete its current files through the Storage
+  # API, which removes them from disk as well. Loading the rows alone would leave the files of the
+  # previous import behind, unreferenced, and in every snapshot from then on. A snapshot restore
+  # (no files.tsv) has just put its own files in place and keeps them.
+  if [[ -f "$DIR/files.tsv" ]]; then
+    while IFS=$'\t' read -r bucket name; do
+      curl -fsS --retry 4 -o /dev/null -X DELETE -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+        "$(object_url http://kong:8000 "$bucket" "$name")"
+    done < <(target_psql -F $'\t' -c "select bucket_id, name from storage.objects")
+  fi
 
   # Load only into tables this instance has. A table the hosted project has and this one does not
   # (a newer Supabase feature) is reported, not silently dropped.
@@ -75,12 +104,20 @@ import_into_target() {
   # Lists travel through the environment: awk -v does not take a value with newlines in it.
   tables="$(dump_tables | MISSING="$missing" awk 'BEGIN { n = split(ENVIRON["MISSING"], m, "\n"); for (i = 1; i <= n; i++) skip[m[i]] = 1 }
       !($0 in skip)')"
-  # The restore list: the data of exactly those tables, and the sequence values of their schemas.
+  # Sequence values, likewise only for sequences this instance has: one that belongs to a table it
+  # lacks would stop the whole load on its setval.
+  sequences="$(pg_restore --list "$DIR/source.dump" |
+    awk -v schemas="${SCHEMAS[*]}" 'BEGIN { split(schemas, s, " "); for (i in s) want[s[i]] = 1 }
+      $4 == "SEQUENCE" && $5 == "SET" && ($6 in want) {print $6 "." $7}' |
+    while read -r t; do
+      [[ "$(target_psql -c "select to_regclass('$t') is not null")" != t ]] || echo "$t"
+    done)"
+  # The restore list: the data of exactly those tables, and the values of exactly those sequences.
   pg_restore --list "$DIR/source.dump" |
-    TABLES="$tables" awk -v schemas="${SCHEMAS[*]}" '
+    TABLES="$tables" SEQUENCES="$sequences" awk '
       BEGIN { n = split(ENVIRON["TABLES"], t, "\n"); for (i = 1; i <= n; i++) load[t[i]] = 1
-              split(schemas, s, " "); for (i in s) want[s[i]] = 1 }
-      ($4 == "TABLE" && $5 == "DATA" && ($6 "." $7) in load) || ($4 == "SEQUENCE" && $5 == "SET" && ($6 in want))' >"$list"
+              n = split(ENVIRON["SEQUENCES"], q, "\n"); for (i = 1; i <= n; i++) setval[q[i]] = 1 }
+      ($4 == "TABLE" && $5 == "DATA" && ($6 "." $7) in load) || ($4 == "SEQUENCE" && $5 == "SET" && ($6 "." $7) in setval)' >"$list"
   tables="$(paste -sd, - <<<"$tables")"
   log "replacing the data of $(tr ',' '\n' <<<"$tables" | wc -l) tables in one transaction"
   {

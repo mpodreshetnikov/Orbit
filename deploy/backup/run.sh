@@ -84,17 +84,21 @@ job() {
   exec 9>"$STATE/.job.lock"
   flock -w 7200 9 || { notify "$name could not start: another backup job held the lock for 2 hours"; return 1; }
   log "start $name"
-  if "$@"; then
+  # The job runs as a process of its own: bash ignores set -e inside any function called from a
+  # condition or an `||` list -- which is how the daemon calls jobs -- and a subshell inherits that,
+  # so a failed pg_dump followed by a successful upload would count as a successful job.
+  local rc=0
+  "$0" __job "$@" || rc=$?
+  if ((rc == 0)); then
     mark "last_${name}"
     rm -f "$STATE/failing_${name}"
     log "done $name"
   else
     date -u +%FT%TZ >"$STATE/failing_${name}"
     notify "$name FAILED (deploy/orbit logs backup)"
-    flock -u 9
-    return 1
   fi
   flock -u 9
+  return $rc
 }
 
 # --- Jobs -----------------------------------------------------------------------------------------
@@ -213,7 +217,10 @@ verify() {
   if restic_configured; then
     rst check --read-data-subset=10% --quiet
     rst restore latest --tag nightly --host orbit --target "$scratch/snapshot" --include "$STATE/snapshot/postgres.dump" --quiet
-    pg_restore --list "$scratch/snapshot/$STATE/snapshot/postgres.dump" | grep -q 'TABLE DATA auth users'
+    # Through a file, not a pipe: grep -q stops reading at the first match, and under pipefail the
+    # pg_restore it cut off would fail the check.
+    pg_restore --list "$scratch/snapshot/$STATE/snapshot/postgres.dump" >"$scratch/toc"
+    grep -q 'TABLE DATA auth users' "$scratch/toc"
     log "snapshot repository consistent; nightly dump lists its tables"
   fi
   rm -rf "$scratch" "$sock"
@@ -267,7 +274,13 @@ pick_snapshot() {
 
 restore_files() {
   local tmp=/state/restore-files snapshot
-  snapshot="$(pick_snapshot /data/storage files nightly)"
+  # A rebuild from the nightly dump takes the files from that same nightly snapshot, so rows and
+  # files describe one moment; otherwise the newest of the 15-minute and nightly snapshots.
+  if [[ "${RESTORE_FILES_FROM:-}" == nightly ]]; then
+    snapshot="$(pick_snapshot /data/storage nightly)"
+  else
+    snapshot="$(pick_snapshot /data/storage files nightly)"
+  fi
   [[ -n "$snapshot" ]] || { echo "no snapshot with uploaded files at or before ${RESTORE_TARGET_TIME:-now}" >&2; return 1; }
   rm -rf "$tmp"
   rst restore "$snapshot" --target "$tmp" --include /data/storage --quiet
@@ -276,6 +289,9 @@ restore_files() {
   rm -rf "$tmp"
   rst restore latest --tag nightly --host orbit --target "$tmp" --include /data/db-config --quiet
   if [[ -f "$tmp/data/db-config/pgsodium_root.key" ]]; then
+    # The key it replaces is kept for deploy/orbit's rollback, should a later step of the restore fail.
+    [[ ! -f /restore/db-config/pgsodium_root.key ]] ||
+      cp -a /restore/db-config/pgsodium_root.key /restore/db-config/pgsodium_root.key.before-restore
     cp -a "$tmp/data/db-config/pgsodium_root.key" /restore/db-config/pgsodium_root.key
   fi
   rm -rf "$tmp"
@@ -288,6 +304,8 @@ init() {
   fi
   if walg_configured; then walg backup-list >/dev/null; fi
   touch "$STATE/initialized"
+  # From now on the database's archive_command keeps its segments for upload (archive-wal.sh).
+  touch "$SPOOL/.enabled"
   echo "backup storage reachable"
 }
 
@@ -347,6 +365,10 @@ daemon() {
 }
 
 case "${1:-daemon}" in
+  __job)
+    shift
+    "$@"
+    ;;
   daemon) daemon ;;
   nightly) nightly ;;
   files) job snapshot_files snapshot_files ;;

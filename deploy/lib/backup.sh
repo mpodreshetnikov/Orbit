@@ -121,54 +121,77 @@ cmd_restore() {
     [[ "$answer" == "RESTORE" ]] || die "Not restored."
   fi
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  RESTORE_STAMP="$stamp"
   step "Stopping Orbit"
   compose build backup >/dev/null
   compose stop
+  # Everything this restore replaces is kept as *.before-restore-$stamp, so that any failure from
+  # here on can put Orbit back exactly as it was (restore_rollback).
+  mv "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/db.before-restore-$stamp"
+  cp -a "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
+  cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.before-restore-$stamp"
 
   if ((from_snapshot == 0)) && [[ -n "${BACKUP_WAL_S3_PREFIX:-}" ]]; then
     step "Restoring the database${target_time:+ to $target_time}"
-    mv "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/db.before-restore-$stamp"
-    mkdir -p "$ORBIT_DATA_DIR/db"
-    if ! compose run --rm --no-deps -e RESTORE_TARGET_TIME="$target_time" \
-      -v "$ORBIT_DATA_DIR/db:/restore/db" backup restore-db; then
-      # Put the database back exactly as it was and bring Orbit up again before giving up.
-      rm -rf "$ORBIT_DATA_DIR/db"
-      mv "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
-      compose up -d --remove-orphans
-      die "The restore failed (see above); Orbit is back on the data it had before."
-    fi
+    compose run --rm --no-deps -e RESTORE_TARGET_TIME="$target_time" \
+      -v "$ORBIT_DATA_DIR/db:/restore/db" backup restore-db || restore_rollback
   elif [[ -n "${BACKUP_SNAPSHOT_REPOSITORY:-}" ]]; then
     step "Fetching the nightly database dump${target_time:+ from before $target_time}"
-    cp -a "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/db.before-restore-$stamp"
     mkdir -p "$ORBIT_DATA_DIR/migration"
     compose run --rm --no-deps -e RESTORE_TARGET_TIME="$target_time" \
-      -v "$ORBIT_DATA_DIR/migration:/migration" backup restore-dump
+      -v "$ORBIT_DATA_DIR/migration:/migration" backup restore-dump || restore_rollback
     from_snapshot=1
   fi
 
   if [[ -n "${BACKUP_SNAPSHOT_REPOSITORY:-}" ]]; then
     step "Restoring uploaded files and the Vault key"
-    cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.before-restore-$stamp"
-    compose run --rm --no-deps -e RESTORE_TARGET_TIME="$target_time" -v "$ORBIT_DATA_DIR/storage:/restore/storage" \
-      -v "orbit_db-config:/restore/db-config" backup restore-files
+    # Rebuilding from the nightly dump takes the files from that same nightly snapshot.
+    compose run --rm --no-deps -e RESTORE_TARGET_TIME="$target_time" \
+      -e RESTORE_FILES_FROM="$( ((from_snapshot == 1)) && echo nightly)" \
+      -v "$ORBIT_DATA_DIR/storage:/restore/storage" -v "orbit_db-config:/restore/db-config" \
+      backup restore-files || restore_rollback
   fi
 
-  step "Starting Orbit"
-  compose up -d --remove-orphans
-  wait_healthy 600
   if ((from_snapshot == 1)); then
-    # The dump replaces the rows of auth, public and storage in the running database; the files
-    # those Storage rows point at were restored above, from the same moment.
+    # Only the database runs while the dump replaces its rows: nothing public is up yet that could
+    # write into a database about to be truncated.
     step "Loading the nightly dump"
+    compose up -d db || restore_rollback
+    wait_healthy 300
     export SERVICE_ROLE_KEY
-    migration_run import
+    migration_run import || restore_rollback
   fi
-  # Vault secrets and the allowlist are per instance; write them again for this one.
-  cmd_migrate
+  # Vault secrets and the allowlist are per instance; write them again for this one. migrate
+  # starts only db and storage, so the public stack is still down.
+  cmd_migrate || restore_rollback
+
+  step "Starting Orbit"
+  compose up -d --remove-orphans || restore_rollback
+  wait_healthy 600
   compose restart functions >/dev/null
   wait_healthy 120
   warm_functions
-  # The restored database continues on a new timeline (or is a new one): start the copies afresh.
-  if [[ -n "${BACKUP_WAL_S3_PREFIX:-}" ]]; then in_backup nightly; fi
+
+  # On a new server nothing has switched backups on yet: init marks the repositories ready and
+  # enables WAL archiving, as `backup setup` does. Then start the chain of copies afresh -- the
+  # restored database continues on a new timeline, or is a new one.
+  step "Switching backups back on"
+  compose up -d backup
+  in_backup init
+  in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
   ok "Restored. The data it replaced is in $ORBIT_DATA_DIR/*.before-restore-$stamp; delete it once you are happy."
+}
+
+# Puts back what cmd_restore set aside and starts Orbit on it, then stops with the error.
+restore_rollback() {
+  local stamp="$RESTORE_STAMP"
+  warn "The restore failed; putting Orbit back on the data it had before"
+  compose stop >/dev/null 2>&1 || true
+  rm -rf "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/storage"
+  mv "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
+  mv "$ORBIT_DATA_DIR/storage.before-restore-$stamp" "$ORBIT_DATA_DIR/storage"
+  compose run --rm --no-deps -v "orbit_db-config:/restore/db-config" --entrypoint sh backup -c \
+    '[ ! -f /restore/db-config/pgsodium_root.key.before-restore ] || mv /restore/db-config/pgsodium_root.key.before-restore /restore/db-config/pgsodium_root.key' || true
+  compose up -d --remove-orphans
+  die "The restore failed (see above); Orbit is back on the data it had before."
 }

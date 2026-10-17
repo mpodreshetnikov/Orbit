@@ -18,3 +18,6 @@ if [ -f "$spool/$2" ]; then
 fi
 dd if="$1" of="$spool/$2.part" bs=1M conv=fsync 2>/dev/null
 mv "$spool/$2.part" "$spool/$2"
+# The rename is only durable once the directory is: without this, a power cut could leave the
+# segment acknowledged to Postgres but present only as an ignored .part, a gap in the archive.
+sync "$spool"
