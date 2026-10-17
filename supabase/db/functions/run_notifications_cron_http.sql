@@ -31,5 +31,13 @@ BEGIN
 END;
 $$;
 
+-- Executable only by its owner, the cron job, for the reason given in run_money_fx_sync_http.sql:
+-- `public` is exposed at /rest/v1/rpc/<name>, and this SECURITY DEFINER wrapper let any anonymous
+-- client queue notification runs on the shared pg_net worker -- runs that, overlapping, can send
+-- the same digest twice. The roles are named because revoking PUBLIC alone leaves Supabase's
+-- default grants to anon and authenticated in place. Nothing else calls it: the manual trigger,
+-- /api/notifications/run-cron, invokes the edge function directly.
+REVOKE ALL ON FUNCTION public.run_notifications_cron_http() FROM PUBLIC, anon, authenticated, service_role;
+
 COMMENT ON FUNCTION public.run_notifications_cron_http() IS
-  'Call notifications-cron Edge Function via pg_net. URL from vault (project_url). No-op if not set.';
+  'Call notifications-cron Edge Function via pg_net. URL from vault (project_url). No-op if not set. Executable only by its owner: the cron job.';

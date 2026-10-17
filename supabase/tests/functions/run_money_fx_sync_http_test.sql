@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(9);
+SELECT plan(10);
 
 SELECT has_function('public', 'run_money_fx_sync_http', ARRAY[]::text[]);
 
@@ -80,6 +80,20 @@ SELECT is(
   ),
   'Bearer fx-sync-token-for-tests',
   'the configured token is presented as a bearer credential'
+);
+
+-- Below the cron cadence, and long enough for a cold function plus cbr.ru: see the comment at
+-- the call. A value shortened back to seconds would let pg_net cut a run that would succeed.
+SELECT is(
+  (
+    SELECT queued.timeout_milliseconds
+    FROM net.http_request_queue AS queued, fx_queue_baseline AS baseline
+    WHERE queued.id > baseline.max_id
+    ORDER BY queued.id DESC
+    LIMIT 1
+  ),
+  30000,
+  'the request gets 30 s: room for a cold start, under the one-minute cadence'
 );
 
 -- The wrapper carries a Vault credential, and `public` is exposed over PostgREST,

@@ -41,9 +41,12 @@ BEGIN
       'Authorization', 'Bearer ' || TRIM(v_token)
     ),
     body := '{}'::jsonb,
-    -- The function waits on cbr.ru on top of its own start-up; same reasoning as
-    -- run_notifications_cron_http().
-    timeout_milliseconds := 60000
+    -- Room for the function's first run after a deploy plus its wait on cbr.ru (see
+    -- run_notifications_cron_http()), and kept below the one-minute cron cadence: pg_net takes its
+    -- next batch only once every request in the current one is done, so a ceiling of a minute or
+    -- more could hold this run's neighbour, the 00:05 notifications tick, until the next tick
+    -- queued behind it, and release both notification runs together.
+    timeout_milliseconds := 30000
   );
 END;
 $$;
