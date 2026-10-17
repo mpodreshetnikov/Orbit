@@ -1,0 +1,12 @@
+# Build context for deploy/web.Dockerfile. Secrets and local state never enter an image.
+.git
+**/node_modules
+.next
+.env*
+deploy/.env
+deploy/.upstream
+deploy/.state
+coverage
+.artifacts
+test-results
+browserExtension/dist

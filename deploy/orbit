@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+# Orbit on one server: install, update and operate a self-hosted instance.
+#
+#   deploy/orbit install     first run: checks the server, generates secrets, builds, starts, migrates
+#   deploy/orbit update      after `git pull`: rebuilds, migrates, restarts what changed
+#   deploy/orbit status      every service and its health, the URL, the last backup
+#   deploy/orbit help        everything else
+#
+# The only file a person edits is deploy/.env (copied from deploy/.env.example). Everything this
+# script generates is appended to the same file, so backing up that one file backs up every secret.
+# Full guide: docs/SELF_HOSTING.md.
+set -euo pipefail
+
+ORBIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPLOY_DIR="$ORBIT_ROOT/deploy"
+ENV_FILE="${ORBIT_ENV_FILE:-$DEPLOY_DIR/.env}"
+UPSTREAM_DIR="$DEPLOY_DIR/.upstream"
+export ORBIT_ROOT
+
+# shellcheck source=deploy/lib/common.sh
+source "$DEPLOY_DIR/lib/common.sh"
+# shellcheck source=deploy/lib/secrets.sh
+source "$DEPLOY_DIR/lib/secrets.sh"
+
+# --- Configuration --------------------------------------------------------------------------------
+
+load_env() {
+  [[ -f "$ENV_FILE" ]] || die "No $ENV_FILE yet. Run: cp deploy/.env.example deploy/.env, fill it in (docs/SELF_HOSTING.md), then run this again."
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+
+  ORBIT_DATA_DIR="${ORBIT_DATA_DIR:-/var/lib/orbit}"
+  if [[ "${ORBIT_HTTP_ONLY:-false}" == "true" ]]; then
+    ORBIT_PUBLIC_URL="http://${ORBIT_DOMAIN}"
+    ORBIT_SITE_ADDRESS="http://${ORBIT_DOMAIN}"
+  else
+    ORBIT_PUBLIC_URL="https://${ORBIT_DOMAIN}"
+    ORBIT_SITE_ADDRESS="${ORBIT_DOMAIN}"
+  fi
+  # The names the upstream Supabase stack reads, all derived from the one domain.
+  SITE_URL="$ORBIT_PUBLIC_URL"
+  SUPABASE_PUBLIC_URL="$ORBIT_PUBLIC_URL"
+  API_EXTERNAL_URL="$ORBIT_PUBLIC_URL/auth/v1"
+  ADDITIONAL_REDIRECT_URLS="$ORBIT_PUBLIC_URL/**"
+  ORBIT_VERSION="$(git -C "$ORBIT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  # The app switches MCP on only for the exact value "1" (src/lib/mcp/config.ts).
+  case "${MCP_SERVER_ENABLED:-false}" in
+    1 | true | TRUE | True | yes) MCP_SERVER_ENABLED=1 ;;
+    *) MCP_SERVER_ENABLED=0 ;;
+  esac
+  export ORBIT_DATA_DIR MCP_SERVER_ENABLED ORBIT_PUBLIC_URL ORBIT_SITE_ADDRESS SITE_URL SUPABASE_PUBLIC_URL \
+    API_EXTERNAL_URL ADDITIONAL_REDIRECT_URLS ORBIT_VERSION
+}
+
+# Fails with one line per problem, so a person (or an agent) can fix them all in one pass.
+check_env() {
+  local problems=0 name
+  for name in ORBIT_DOMAIN ORBIT_ADMIN_EMAIL ORBIT_ALLOWED_EMAILS GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
+    if [[ -z "${!name:-}" || "${!name}" == *"CHANGE_ME"* ]]; then
+      err "deploy/.env: $name is not filled in (see the comment above it)"
+      problems=$((problems + 1))
+    fi
+  done
+  if [[ -n "${ORBIT_DOMAIN:-}" && ! "$ORBIT_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then
+    err "deploy/.env: ORBIT_DOMAIN must be a bare domain like orbit.example.com (no https://, no slash)"
+    problems=$((problems + 1))
+  fi
+  [[ -n "${OPENROUTER_API_KEY:-}" ]] || warn "OPENROUTER_API_KEY is empty: document recognition and money categorization will be off"
+  ((problems == 0)) || die "Fix the $problems line(s) above in deploy/.env and run the command again."
+}
+
+# --- Docker compose -------------------------------------------------------------------------------
+
+compose() {
+  # ORBIT_COMPOSE_EXTRA: colon-separated extra override files, for local changes kept out of git.
+  local extra=() files=() file
+  IFS=: read -r -a files <<<"${ORBIT_COMPOSE_EXTRA:-}"
+  for file in "${files[@]}"; do [[ -n "$file" ]] && extra+=(-f "$file"); done
+  docker compose \
+    --project-name orbit \
+    --project-directory "$UPSTREAM_DIR/docker" \
+    -f "$UPSTREAM_DIR/docker/docker-compose.yml" \
+    -f "$DEPLOY_DIR/docker-compose.yml" \
+    "${extra[@]}" \
+    --env-file "$DEPLOY_DIR/supabase.defaults.env" \
+    --env-file "$ENV_FILE" \
+    "$@"
+}
+
+# Fetches Supabase's docker/ directory at the pinned commit. Idempotent: does nothing when the
+# checkout is already at that commit.
+fetch_upstream() {
+  # shellcheck source=deploy/supabase-upstream.env
+  source "$DEPLOY_DIR/supabase-upstream.env"
+  if [[ -d "$UPSTREAM_DIR/.git" ]] &&
+    [[ "$(git -C "$UPSTREAM_DIR" rev-parse HEAD 2>/dev/null)" == "$SUPABASE_UPSTREAM_COMMIT" ]]; then
+    return
+  fi
+  step "Fetching self-hosted Supabase $SUPABASE_UPSTREAM_TAG"
+  rm -rf "$UPSTREAM_DIR"
+  git init -q "$UPSTREAM_DIR"
+  git -C "$UPSTREAM_DIR" remote add origin https://github.com/supabase/supabase.git
+  git -C "$UPSTREAM_DIR" sparse-checkout set --no-cone /docker
+  retry 4 git -C "$UPSTREAM_DIR" fetch -q --depth 1 --filter=blob:none origin "$SUPABASE_UPSTREAM_COMMIT"
+  git -C "$UPSTREAM_DIR" checkout -q FETCH_HEAD
+}
+
+# The edge runtime serves every function from one directory: Orbit's functions, upstream's router
+# (`main`, which dispatches /functions/v1/<name> to ./<name>), and an import map. The map carries
+# only `imports` from supabase/functions/deno.json -- the runtime does not read lockfile v5, the
+# same reason scripts/just/deploy-supabase.cjs moves deno.lock aside for the hosted deploy.
+sync_functions() {
+  local target="$ORBIT_DATA_DIR/functions" staging
+  staging="$(mktemp -d)"
+  cp -R "$ORBIT_ROOT/supabase/functions/." "$staging/"
+  rm -f "$staging/deno.lock" "$staging/deno.json"
+  find "$staging" -name '*_test.ts' -delete
+  rm -rf "$staging/main" && cp -R "$UPSTREAM_DIR/docker/volumes/functions/main" "$staging/main"
+  sed -n '/"imports"/,/}/p' "$ORBIT_ROOT/supabase/functions/deno.json" |
+    { echo "{"; cat; echo "}"; } >"$staging/deno.jsonc"
+  mkdir -p "$target"
+  rm -rf "$target.old" && mv "$target" "$target.old" && mv "$staging" "$target" && rm -rf "$target.old"
+  # _shared/database.types.ts re-exports ../../db/database.types.ts, i.e. supabase/db.
+  mkdir -p "$ORBIT_DATA_DIR/functions-db"
+  cp "$ORBIT_ROOT/supabase/db/database.types.ts" "$ORBIT_DATA_DIR/functions-db/database.types.ts"
+  chmod -R a+rX "$target" "$ORBIT_DATA_DIR/functions-db"
+  # The swap replaced the directory the running container has mounted; callers restart `functions`.
+}
+
+prepare_data_dir() {
+  mkdir -p "$ORBIT_DATA_DIR"/{db,storage,caddy,functions}
+}
+
+wait_healthy() {
+  local deadline=$((SECONDS + ${1:-300})) unhealthy
+  step "Waiting for every service to report healthy"
+  while ((SECONDS < deadline)); do
+    # `|`-separated: a service without a healthcheck (caddy) has an empty Health field.
+    unhealthy="$(compose ps --format '{{.Service}}|{{.Health}}|{{.State}}' |
+      awk -F'|' '$3 != "running" || ($2 != "" && $2 != "healthy") {print $1}')"
+    [[ -z "$unhealthy" ]] && return 0
+    sleep 3
+  done
+  compose ps
+  die "Still not healthy after ${1:-300}s: $(echo "$unhealthy" | tr '\n' ' '). Look at: deploy/orbit logs <service>"
+}
+
+# --- Commands -------------------------------------------------------------------------------------
+
+cmd_check() {
+  load_env
+  preflight_server
+  check_env
+  ok "deploy/.env is complete"
+}
+
+cmd_install() {
+  step "Checking the server"
+  preflight_server
+  load_env
+  check_env
+  configure_registry_mirror
+  step "Generating missing secrets into deploy/.env"
+  ensure_secrets "$ENV_FILE"
+  load_env
+  fetch_upstream
+  prepare_data_dir
+  sync_functions
+  cmd_build
+  start_migrated
+  smoke_test
+  summary
+}
+
+cmd_update() {
+  load_env
+  check_env
+  ensure_secrets "$ENV_FILE"
+  load_env
+  fetch_upstream
+  prepare_data_dir
+  sync_functions
+  cmd_build
+  start_migrated
+  smoke_test
+  ok "Orbit updated to $ORBIT_VERSION"
+}
+
+# The schema moves before the code that needs it is exposed: `migrate` starts only what it depends
+# on (db, storage), and the web app and functions are (re)created afterwards. If the migration
+# fails, the previous release keeps serving against the schema it knows.
+start_migrated() {
+  cmd_migrate
+  step "Starting the stack"
+  compose up -d --remove-orphans
+  wait_healthy 600
+  # The function code directory was swapped by sync_functions; a restart remounts it.
+  compose restart functions >/dev/null
+  wait_healthy 120
+}
+
+cmd_build() {
+  load_env
+  if [[ -n "${ORBIT_WEB_IMAGE:-}" ]]; then
+    step "Pulling the prebuilt web image $ORBIT_WEB_IMAGE"
+    compose pull web
+  else
+    step "Building the web app (a few minutes on the first run)"
+    compose build web
+  fi
+  compose --profile tools build migrate
+}
+
+cmd_migrate() {
+  load_env
+  step "Migrating the database"
+  compose --profile tools run --rm migrate
+}
+
+smoke_test() {
+  local base="http://127.0.0.1" host_header="Host: $ORBIT_DOMAIN" code
+  step "Checking the instance answers"
+  # Straight at Caddy over plain HTTP with the right Host header, so it works before DNS points
+  # here. With HTTPS on, Caddy answers port 80 with a redirect, which still proves the domain routes.
+  code="$(curl -s -o /dev/null -w '%{http_code}' -H "$host_header" -H "apikey: $ANON_KEY" "$base/auth/v1/health" || true)"
+  [[ "$code" =~ ^(200|301|308)$ ]] || die "Auth did not answer through Caddy (HTTP $code). deploy/orbit logs caddy api-gw auth"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -H "$host_header" -H "apikey: $SERVICE_ROLE_KEY" \
+    -H "Authorization: Bearer $SERVICE_ROLE_KEY" "$base/rest/v1/" || true)"
+  [[ "$code" =~ ^(200|301|308)$ ]] || die "The database API did not answer through Caddy (HTTP $code). deploy/orbit logs rest"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -H "$host_header" "$base/login" || true)"
+  [[ "$code" =~ ^(200|301|307|308)$ ]] || die "The web app did not answer through Caddy (HTTP $code). deploy/orbit logs web"
+  ok "Caddy routes the domain to Auth, the database API and the web app"
+}
+
+summary() {
+  cat <<EOF
+
+$(c_green "Orbit is up") at $ORBIT_PUBLIC_URL (version $ORBIT_VERSION)
+
+Next steps, if you have not done them yet (docs/SELF_HOSTING.md, step 3):
+  - DNS: an A record for $ORBIT_DOMAIN pointing at this server's IP address.
+  - Google Cloud Console: authorized redirect URI $ORBIT_PUBLIC_URL/auth/v1/callback
+Allowed to sign in: $ORBIT_ALLOWED_EMAILS
+EOF
+}
+
+cmd_status() {
+  load_env
+  compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}\t{{.RunningFor}}'
+  echo
+  echo "URL:     $ORBIT_PUBLIC_URL"
+  echo "Version: $ORBIT_VERSION"
+  echo "Data:    $ORBIT_DATA_DIR ($(du -sh "$ORBIT_DATA_DIR" 2>/dev/null | cut -f1))"
+  if declare -F backup_status >/dev/null; then backup_status; fi
+}
+
+cmd_studio() {
+  load_env
+  compose --profile studio up -d studio meta api-gw
+  cat <<EOF
+Supabase Studio is running, reachable only from this machine. From your own computer:
+
+  ssh -L 8000:127.0.0.1:8000 <you>@<this server>
+
+then open http://localhost:8000 and sign in as ${DASHBOARD_USERNAME:-orbit} with DASHBOARD_PASSWORD
+from deploy/.env. Stop it with: deploy/orbit studio-stop
+EOF
+}
+
+usage() {
+  cat <<'EOF'
+Usage: deploy/orbit <command>
+
+  install          First install on this server (safe to re-run)
+  update           Rebuild and migrate after `git pull`
+  check            Check the server and deploy/.env without changing anything
+  status           Services, health, URL, data size, last backup
+  migrate          Apply database migrations and deploy.sql only
+  logs [service]   Follow logs (services: web caddy db auth rest storage realtime functions ...)
+  restart [svc]    Restart everything, or one service
+  down             Stop everything (data stays in ORBIT_DATA_DIR)
+  studio           Start the Supabase dashboard for an SSH-tunnel session
+  studio-stop      Stop it again
+  compose ...      Run any docker compose command against this stack
+
+Guide: docs/SELF_HOSTING.md
+EOF
+}
+
+main() {
+  local command="${1:-help}"
+  shift || true
+  case "$command" in
+    install) cmd_install "$@" ;;
+    update) cmd_update "$@" ;;
+    check) cmd_check "$@" ;;
+    status) cmd_status "$@" ;;
+    build) cmd_build "$@" ;;
+    migrate) cmd_migrate "$@" ;;
+    logs) load_env && compose logs -f --tail=200 "$@" ;;
+    restart) load_env && compose restart "$@" ;;
+    down) load_env && compose down ;;
+    studio) cmd_studio ;;
+    studio-stop) load_env && compose --profile studio stop studio meta ;;
+    compose) load_env && compose "$@" ;;
+    help | -h | --help) usage ;;
+    *) usage && exit 1 ;;
+  esac
+}
+
+main "$@"

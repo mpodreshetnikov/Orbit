@@ -50,6 +50,10 @@ yarn-error.log*
 .env*
 !mcp/.env.example
 !.env.observability.example
+!deploy/.env.example
+
+# self-hosted deploy state (deploy/orbit)
+/deploy/.upstream/
 browserExtension/env.js
 
 # MCP generated local configs and env

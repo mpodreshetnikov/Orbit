@@ -1,0 +1,168 @@
+# Orbit on top of the official self-hosted Supabase stack.
+#
+# Never run this file on its own: `deploy/orbit` fetches Supabase's docker/ directory at the release
+# pinned in deploy/supabase-upstream.env into deploy/.upstream, and runs
+#
+#   docker compose -f deploy/.upstream/docker/docker-compose.yml -f deploy/docker-compose.yml \
+#     --env-file deploy/supabase.defaults.env --env-file deploy/.env ...
+#
+# so every service below either adds to an upstream service of the same name or is Orbit's own.
+# Relative paths resolve against the upstream directory, which is why everything of Orbit's is
+# addressed through ORBIT_ROOT and ORBIT_DATA_DIR, both exported by deploy/orbit.
+
+name: orbit
+
+services:
+  # --- Upstream services Orbit does not run by default --------------------------------------------
+  # The Supabase dashboard. `deploy/orbit studio` starts it for a session, reachable only through an
+  # SSH tunnel; it is never published on the domain.
+  studio:
+    profiles: ["studio"]
+  meta:
+    profiles: ["studio"]
+  # Orbit connects to Postgres directly from inside the network; no connection pooler is needed.
+  supavisor:
+    profiles: ["pooler"]
+
+  # --- Upstream services, adjusted ---------------------------------------------------------------
+  api-gw:
+    # Upstream waits for Studio and publishes port 8000 to the world. Here the public way in is
+    # Caddy, and port 8000 answers on the loopback only -- for `deploy/orbit studio` over SSH.
+    depends_on: !reset {}
+    ports: !override
+      - "127.0.0.1:8000:8000"
+
+  db:
+    volumes:
+      - ${ORBIT_DATA_DIR:?}/db:/var/lib/postgresql/data
+      # /etc/postgresql-custom stays upstream's named volume `db-config`: the image seeds it with
+      # its own config files, which a bind mount would hide. It also holds the pgsodium root key
+      # that Vault encrypts its secrets with, so the backups read it from that volume.
+
+  storage:
+    volumes:
+      - ${ORBIT_DATA_DIR:?}/storage:/var/lib/storage
+  imgproxy:
+    volumes:
+      - ${ORBIT_DATA_DIR:?}/storage:/var/lib/storage
+
+  auth:
+    environment:
+      # Orbit signs in with Google only (src/components/auth/login-form.tsx).
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "true"
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?fill GOOGLE_CLIENT_ID in deploy/.env}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET:?fill GOOGLE_CLIENT_SECRET in deploy/.env}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${ORBIT_PUBLIC_URL:?}/auth/v1/callback
+      # Same as skip_nonce_check in supabase/config.toml.
+      GOTRUE_EXTERNAL_SKIP_NONCE_CHECK: "true"
+
+  functions:
+    volumes:
+      !override # Assembled by deploy/orbit from supabase/functions plus upstream's router (`main`).
+      - ${ORBIT_DATA_DIR:?}/functions:/home/deno/functions:ro
+      - ${ORBIT_DATA_DIR:?}/functions-db:/home/deno/db:ro
+      - deno-cache:/root/.cache/deno
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_HEALTH_OCR_MODEL: ${OPENROUTER_HEALTH_OCR_MODEL:-}
+      OPENROUTER_HEALTH_STRUCTURE_MODEL: ${OPENROUTER_HEALTH_STRUCTURE_MODEL:-}
+      OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL: ${OPENROUTER_HEALTH_STAGE_CLASSIFY_MODEL:-}
+      OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL: ${OPENROUTER_HEALTH_STAGE_EXTRACT_MODEL:-}
+      OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL: ${OPENROUTER_HEALTH_STAGE_RECONCILE_MODEL:-}
+      OPENROUTER_HEALTH_STRUCTURE_FALLBACK_MODELS: ${OPENROUTER_HEALTH_STRUCTURE_FALLBACK_MODELS:-}
+      OPENROUTER_MONEY_CATEGORIZE_MODEL: ${OPENROUTER_MONEY_CATEGORIZE_MODEL:-}
+      WHO_ICD_CLIENT_ID: ${WHO_ICD_CLIENT_ID:-}
+      WHO_ICD_CLIENT_SECRET: ${WHO_ICD_CLIENT_SECRET:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?}
+      MONEY_FX_SYNC_TOKEN: ${MONEY_FX_SYNC_TOKEN:?}
+      OBS_EXPORTER_MODE: ${OBS_EXPORTER_MODE:-off}
+      OBS_OTLP_ENDPOINT: ${OBS_OTLP_ENDPOINT:-}
+      OBS_GRAFANA_CLOUD_OTLP_HEADERS: ${OBS_GRAFANA_CLOUD_OTLP_HEADERS:-}
+      OBS_ENV: production
+
+  # --- Orbit's own services ----------------------------------------------------------------------
+  web:
+    container_name: orbit-web
+    image: ${ORBIT_WEB_IMAGE:-orbit-web:local}
+    build:
+      context: ${ORBIT_ROOT:?}
+      dockerfile: deploy/web.Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${ORBIT_PUBLIC_URL:?}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:?}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?}
+        NEXT_PUBLIC_EXTENSION_ID: ${NEXT_PUBLIC_EXTENSION_ID:-}
+        NEXT_PUBLIC_APP_VERSION: ${ORBIT_VERSION:-}
+    restart: unless-stopped
+    depends_on:
+      api-gw:
+        condition: service_healthy
+    environment:
+      # Also read at run time, through dynamic process.env lookups the build cannot inline
+      # (src/lib/mcp/config.ts).
+      NEXT_PUBLIC_SUPABASE_URL: ${ORBIT_PUBLIC_URL:?}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:?}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?}
+      SUPABASE_JWT_SECRET: ${JWT_SECRET:?}
+      MCP_SERVER_ENABLED: ${MCP_SERVER_ENABLED:-0}
+      MCP_OAUTH_SIGNING_SECRET: ${MCP_OAUTH_SIGNING_SECRET:?}
+      MCP_PUBLIC_ORIGIN: ${ORBIT_PUBLIC_URL:?}
+      OBS_EXPORTER_MODE: ${OBS_EXPORTER_MODE:-off}
+      OBS_OTLP_ENDPOINT: ${OBS_OTLP_ENDPOINT:-}
+      OBS_GRAFANA_CLOUD_OTLP_HEADERS: ${OBS_GRAFANA_CLOUD_OTLP_HEADERS:-}
+      OBS_ENV: production
+      OBS_RELEASE: ${ORBIT_VERSION:-}
+
+  caddy:
+    container_name: orbit-caddy
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    depends_on:
+      api-gw:
+        condition: service_healthy
+      web:
+        condition: service_started
+    networks:
+      default:
+        # Inside the network the public domain resolves to Caddy, so the web server's own calls to
+        # NEXT_PUBLIC_SUPABASE_URL stay on the machine instead of leaving through the public IP.
+        aliases:
+          - ${ORBIT_DOMAIN:?}
+    environment:
+      ORBIT_SITE_ADDRESS: ${ORBIT_SITE_ADDRESS:?}
+      ORBIT_ACME_EMAIL: ${ORBIT_ADMIN_EMAIL:?fill ORBIT_ADMIN_EMAIL in deploy/.env}
+    volumes:
+      - ${ORBIT_ROOT:?}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${ORBIT_DATA_DIR:?}/caddy:/data
+
+  # One-shot: `deploy/orbit migrate`. Not started by `up`.
+  migrate:
+    profiles: ["tools"]
+    image: orbit-tools:local
+    build:
+      context: ${ORBIT_ROOT:?}
+      dockerfile: deploy/web.Dockerfile
+      target: tools
+      args:
+        GIT_SHA: ${ORBIT_VERSION:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      # Storage creates the storage schema the bucket definitions in deploy.sql write to.
+      storage:
+        condition: service_healthy
+    environment:
+      # Inside the compose network; Postgres there has no TLS, and the Supabase CLI defaults to it.
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?}@db:5432/postgres?sslmode=disable
+      PROJECT_URL_INTERNAL: http://kong:8000
+      MONEY_FX_SYNC_TOKEN: ${MONEY_FX_SYNC_TOKEN:?}
+      ORBIT_ALLOWED_EMAILS: ${ORBIT_ALLOWED_EMAILS:-}
+      # Keep the output to what a person needs to read: no command tags, no NOTICEs. Errors print.
+      PGOPTIONS: -c client_min_messages=warning
+      PSQLRC: /app/deploy/lib/quiet.psqlrc
