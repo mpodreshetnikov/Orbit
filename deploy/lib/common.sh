@@ -78,22 +78,36 @@ configure_registry_mirror() {
 # already running (docs/SELF_HOSTING.md, "What runs where"). A server with less than 4 GB therefore
 # gets a 2 GB swap file the first time, unless it has swap already or ORBIT_NO_SWAP=true. Swap is
 # only touched during builds; the running stack fits in memory.
+# ORBIT_MEMINFO, ORBIT_SWAP_FILE and ORBIT_FSTAB point it elsewhere, for testing.
 ensure_swap() {
-  local mem_mb swap_mb
-  mem_mb="$(awk '/MemTotal/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)"
-  swap_mb="$(awk '/SwapTotal/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)"
+  local mem_mb swap_mb meminfo="${ORBIT_MEMINFO:-/proc/meminfo}"
+  local file="${ORBIT_SWAP_FILE:-/orbit.swap}" fstab="${ORBIT_FSTAB:-/etc/fstab}"
+  mem_mb="$(awk '/MemTotal/ {print int($2 / 1024)}' "$meminfo" 2>/dev/null || echo 0)"
+  swap_mb="$(awk '/SwapTotal/ {print int($2 / 1024)}' "$meminfo" 2>/dev/null || echo 0)"
   ((mem_mb > 0 && mem_mb < 3800 && swap_mb < 1024)) || return 0
   [[ "${ORBIT_NO_SWAP:-false}" != "true" ]] || return 0
-  if [[ "$(id -u)" != 0 ]] || [[ -e /orbit.swap ]]; then
+  if [[ "$(id -u)" != 0 ]]; then
     warn "This server has ${mem_mb} MB of RAM and no swap; building the app may run out of memory. Add swap, or run as root once so deploy/orbit adds it."
     return 0
   fi
-  step "Adding a 2 GB swap file (${mem_mb} MB of RAM is tight for building the app)"
-  if fallocate -l 2G /orbit.swap 2>/dev/null || dd if=/dev/zero of=/orbit.swap bs=1M count=2048 status=none; then
-    chmod 600 /orbit.swap && mkswap /orbit.swap >/dev/null && swapon /orbit.swap &&
-      { grep -q '^/orbit.swap ' /etc/fstab || echo '/orbit.swap none swap sw 0 0' >>/etc/fstab; } &&
-      ok "swap on: /orbit.swap" && return 0
+  # Left behind by an earlier run but not active (a reboot before it reached fstab, an interrupted
+  # mkswap): switch it on, or make it again.
+  if [[ -e "$file" ]]; then
+    if chmod 600 "$file" && { swapon "$file" 2>/dev/null || { mkswap "$file" >/dev/null && swapon "$file"; }; }; then
+      grep -q "^$file " "$fstab" || echo "$file none swap sw 0 0" >>"$fstab"
+      ok "swap on: $file"
+      return 0
+    fi
+    rm -f "$file"
   fi
-  rm -f /orbit.swap
+  step "Adding a 2 GB swap file (${mem_mb} MB of RAM is tight for building the app)"
+  if fallocate -l 2G "$file" 2>/dev/null || dd if=/dev/zero of="$file" bs=1M count=2048 status=none; then
+    if chmod 600 "$file" && mkswap "$file" >/dev/null && swapon "$file"; then
+      grep -q "^$file " "$fstab" || echo "$file none swap sw 0 0" >>"$fstab"
+      ok "swap on: $file"
+      return 0
+    fi
+  fi
+  rm -f "$file"
   warn "Could not add swap here (some containers and VPS types forbid it); the build may run out of memory."
 }
