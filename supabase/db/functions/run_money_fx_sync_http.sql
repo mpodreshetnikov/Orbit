@@ -41,7 +41,9 @@ BEGIN
       'Authorization', 'Bearer ' || TRIM(v_token)
     ),
     body := '{}'::jsonb,
-    timeout_milliseconds := 5000
+    -- The function waits on cbr.ru on top of its own start-up; same reasoning as
+    -- run_notifications_cron_http().
+    timeout_milliseconds := 60000
   );
 END;
 $$;

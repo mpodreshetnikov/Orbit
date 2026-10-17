@@ -20,10 +20,13 @@ BEGIN
     RETURN;
   END IF;
 
+  -- 1 s was shorter than the function's first run after a deploy, which builds its module graph,
+  -- so pg_net cut the request and logged a timeout for a run that would have succeeded. It is a
+  -- ceiling, not a wait: the cron job returns as soon as the request is queued.
   PERFORM net.http_post(
     url := TRIM(v_url) || '/functions/v1/notifications-cron',
     headers := jsonb_build_object(),
-    timeout_milliseconds := 1000
+    timeout_milliseconds := 30000
   );
 END;
 $$;
