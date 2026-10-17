@@ -513,3 +513,61 @@ jobs:
         if: steps.tip.outputs.deploy_sha != ''
       - if: steps.tip.outputs.deploy_sha != ''
         run: just ci-deploy-supabase
+
+  publish-self-hosted-images:
+    # The images a self-hosted server runs (docs/SELF_HOSTING.md), so that `deploy/orbit` pulls them
+    # instead of building on the server: the web build alone needs ~2 GB of RAM and minutes of CPU.
+    # They hold no instance's values -- deploy/web-start.mjs writes those in at start -- so one image
+    # serves every server. Tagged by full commit SHA: a server pulls exactly the commit it checked
+    # out, and builds locally when there is none (a fork's own commit, an uncommitted change, arm64).
+    needs: [secrets-scan, quality-gates]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Publish Self-Hosted Images
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Name the images
+        id: names
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "web=$prefix-web:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "tools=$prefix-tools:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "version=${GITHUB_SHA::12}" >>"$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web.Dockerfile
+          target: web
+          platforms: linux/amd64
+          build-args: NEXT_PUBLIC_APP_VERSION=${{ steps.names.outputs.version }}
+          tags: ${{ steps.names.outputs.web }}
+          push: true
+          cache-from: type=gha,scope=self-hosted
+          cache-to: type=gha,scope=self-hosted,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web.Dockerfile
+          target: tools
+          platforms: linux/amd64
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: ${{ steps.names.outputs.tools }}
+          push: true
+          cache-from: type=gha,scope=self-hosted
+      # A server pulls without logging in, so a package GitHub created private is no use to it.
+      - name: Check a server can pull them
+        run: |
+          for image in "${{ steps.names.outputs.web }}" "${{ steps.names.outputs.tools }}"; do
+            if ! DOCKER_CONFIG="$(mktemp -d)" docker manifest inspect "$image" >/dev/null 2>&1; then
+              echo "::warning::$image is not public, so servers build it themselves. Make the package public once: github.com/${GITHUB_REPOSITORY_OWNER}?tab=packages -> the package -> Package settings -> Change visibility."
+            fi
+          done

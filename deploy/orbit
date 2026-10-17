@@ -235,16 +235,38 @@ warm_functions() {
   fi
 }
 
+# The images CI publishes for each commit on main (publish-self-hosted-images in
+# .github/workflows/main.yml). The same commit means the same code, so a fork's server can use them
+# for every commit it shares with this repository and builds the rest itself.
+ORBIT_PREBUILT_IMAGES_DEFAULT=ghcr.io/mpodreshetnikov/orbit
+
+# Pulls the prebuilt image for the checked-out commit under the local name compose runs, and fails
+# when there is none to pull: an uncommitted change, a commit CI has not published (yet), or a
+# processor it does not build for.
+pull_prebuilt() {
+  local kind="$1" prefix="${ORBIT_PREBUILT_IMAGES:-$ORBIT_PREBUILT_IMAGES_DEFAULT}" sha image
+  [[ "${ORBIT_BUILD_LOCALLY:-false}" != "true" ]] || return 1
+  sha="$(git -C "$ORBIT_ROOT" rev-parse HEAD 2>/dev/null)" || return 1
+  git -C "$ORBIT_ROOT" diff --quiet HEAD -- 2>/dev/null || return 1
+  image="$prefix-$kind:$sha"
+  docker pull --quiet "$image" >/dev/null 2>&1 || return 1
+  docker tag "$image" "orbit-$kind:local"
+}
+
 cmd_build() {
   load_env
-  if [[ -n "${ORBIT_WEB_IMAGE:-}" ]]; then
-    step "Pulling the prebuilt web image $ORBIT_WEB_IMAGE"
-    compose pull web
+  step "Getting the web app"
+  if pull_prebuilt web && pull_prebuilt tools; then
+    ok "pulled the images CI built for this commit"
   else
-    step "Building the web app (a few minutes on the first run)"
+    if [[ "${ORBIT_BUILD_LOCALLY:-false}" == "true" ]]; then
+      step "Building it here (a few minutes on the first run)"
+    else
+      step "No prebuilt images for this commit; building them here (a few minutes on the first run)"
+    fi
     compose build web
+    compose --profile tools build migrate
   fi
-  compose --profile tools build migrate
   compose build backup
 }
 
