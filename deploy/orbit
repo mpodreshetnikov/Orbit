@@ -162,6 +162,7 @@ cmd_install() {
   load_env
   check_env
   configure_registry_mirror
+  ensure_swap
   step "Generating missing secrets into deploy/.env"
   ensure_secrets "$ENV_FILE"
   load_env
@@ -177,6 +178,7 @@ cmd_install() {
 cmd_update() {
   load_env
   check_env
+  ensure_swap
   ensure_secrets "$ENV_FILE"
   load_env
   fetch_upstream
@@ -199,6 +201,31 @@ start_migrated() {
   # The function code directory was swapped by sync_functions; a restart remounts it.
   compose restart functions >/dev/null
   wait_healthy 120
+  warm_functions
+}
+
+# A function's first request after a restart builds its module graph, which takes seconds; the
+# runtime then keeps the worker and its compiled modules. Paying that here means the first cron
+# tick or user request after an update gets a warm function. Each function answers a bare OPTIONS
+# with an empty 200 and does nothing else, so this is safe to repeat. It must not look like a CORS
+# preflight (no Origin, no Access-Control-Request-Method): the gateway answers those itself and the
+# worker would never see the request. Straight at the gateway's loopback port, which works the same
+# with and without HTTPS.
+warm_functions() {
+  local dir name code cold=()
+  step "Warming up the edge functions"
+  for dir in "$ORBIT_ROOT"/supabase/functions/*/; do
+    name="$(basename "$dir")"
+    [[ "$name" == _* ]] && continue
+    code="$(curl -s -o /dev/null -m 60 -w '%{http_code}' -X OPTIONS -H "apikey: $ANON_KEY" \
+      "http://127.0.0.1:8000/functions/v1/$name" || true)"
+    [[ "$code" == 200 ]] || cold+=("$name (HTTP $code)")
+  done
+  if ((${#cold[@]} == 0)); then
+    ok "edge functions are warm"
+  else
+    warn "not warmed, so their first request will be slow or fail: ${cold[*]}. Look at: deploy/orbit logs functions"
+  fi
 }
 
 cmd_build() {

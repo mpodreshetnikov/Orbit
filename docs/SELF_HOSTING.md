@@ -28,7 +28,10 @@ The only file you edit is `deploy/.env`. Your data (database, files, certificate
 
 **Server.** Any Linux virtual server ("VPS") with:
 
-- 2 CPU cores, **4 GB RAM**, 40 GB disk (about $5–10 a month at most providers);
+- 2 CPU cores, **2 GB RAM or more** (4 GB is comfortable), 40 GB disk — about $4–10 a month at
+  most providers. Running, Orbit uses about 0.9 GB; building the app on an update needs about 2 GB
+  more for a couple of minutes, so on a server with less than 4 GB `deploy/orbit install` adds a
+  2 GB swap file for that (set `ORBIT_NO_SWAP=true` in `deploy/.env` to skip it);
 - Ubuntu 24.04 or Debian 12;
 - a public IPv4 address, and ports 80 and 443 open.
 
@@ -142,7 +145,7 @@ and follow the printed instructions (an SSH tunnel from your computer, then <htt
 | Google says `redirect_uri_mismatch`                 | The redirect URI in Google Cloud Console must be exactly `https://<ORBIT_DOMAIN>/auth/v1/callback`                                            |
 | "Access denied" after signing in                    | Your e-mail is not in `ORBIT_ALLOWED_EMAILS`. Add it, run `deploy/orbit migrate`                                                              |
 | A service is not `healthy` in `deploy/orbit status` | `deploy/orbit logs <service>` shows why. Most often a typo in `deploy/.env`                                                                   |
-| The build stops with `Killed` or the server freezes | Not enough memory. Use a 4 GB server, or add swap: `fallocate -l 4G /swap && chmod 600 /swap && mkswap /swap && swapon /swap`                 |
+| The build stops with `Killed` or the server freezes | Not enough memory for the build. `swapon --show` should list `/orbit.swap`; if your provider forbids swap, use a 4 GB server                  |
 
 ## Secrets
 
