@@ -1,0 +1,23 @@
+# One domain for everything (deploy/docker-compose.yml, service caddy). Caddy obtains and renews
+# the HTTPS certificate itself; ORBIT_SITE_ADDRESS is the bare domain, or http://<domain> for a
+# test install without a certificate.
+{
+	email {$ORBIT_ACME_EMAIL}
+}
+
+{$ORBIT_SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Supabase's APIs, the paths supabase-js builds on NEXT_PUBLIC_SUPABASE_URL. None of them
+	# collides with an Orbit route (/auth/callback, /api/*, /.well-known/oauth-*).
+	@supabase path /auth/v1/* /rest/v1/* /graphql/v1* /realtime/v1/* /storage/v1/* /functions/v1/*
+	handle @supabase {
+		reverse_proxy api-gw:8000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header -Server
+}

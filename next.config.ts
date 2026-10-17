@@ -3,7 +3,30 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
+// A self-hosted instance serves Storage from its own domain rather than *.supabase.co, so the
+// image optimizer has to accept whatever origin NEXT_PUBLIC_SUPABASE_URL names at build time.
+function selfHostedStoragePattern() {
+  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!raw) return [];
+  try {
+    const url = new URL(raw);
+    if (url.hostname.endsWith(".supabase.co")) return [];
+    return [
+      {
+        protocol: url.protocol.replace(":", "") as "http" | "https",
+        hostname: url.hostname,
+        port: url.port,
+        pathname: "/storage/v1/**",
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
 const nextConfig: NextConfig = {
+  // The Docker image (deploy/web.Dockerfile) runs Next's standalone server; Vercel builds without it.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -29,6 +52,7 @@ const nextConfig: NextConfig = {
         hostname: "*.supabase.co",
         pathname: "/storage/v1/**",
       },
+      ...selfHostedStoragePattern(),
     ],
   },
   async headers() {

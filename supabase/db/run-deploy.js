@@ -296,7 +296,8 @@ function main() {
 
   let gitSha;
   try {
-    gitSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    // The deploy image has no .git, so it is handed the commit instead (deploy/web.Dockerfile).
+    gitSha = process.env.GIT_SHA || execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
   } catch {
     gitSha = "";
   }

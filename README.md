@@ -184,6 +184,19 @@ with the error attached and a retry path that reuses the same record. The full c
 
 ---
 
+## Run your own
+
+One Linux server with Docker, a domain and a Google OAuth client are all it takes:
+
+```bash
+git clone https://github.com/mpodreshetnikov/Orbit.git && cd Orbit
+cp deploy/.env.example deploy/.env   # fill it in: every line explains itself
+deploy/orbit install                 # ends with "Orbit is up at https://<your domain>"
+```
+
+[`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md) walks through every step — server, DNS, Google
+sign-in, updates — in plain language, and has a section for an AI agent doing it on someone's behalf.
+
 ## Getting started
 
 **Prerequisites:** [`just`](https://github.com/casey/just), Node.js 22, Deno 2.x, the Supabase CLI, and Docker.
@@ -299,6 +312,7 @@ supabase/
   functions/            Deno Edge Functions
 browserExtension/       Chrome MV3 extension and bank connectors
 shared/                 code shared between app and extension
+deploy/                 self-hosting: `orbit` CLI, compose override, Caddy, `.env.example`
 docs/                   architecture, design, quality, security, runbook
 .agents/skills/         repo-local agent skills (mirrored to .claude/skills)
 scripts/just/           command implementations behind the justfile
@@ -315,6 +329,7 @@ observability/          local Grafana LGTM configuration
 | [`docs/DESIGN.md`](./docs/DESIGN.md)                                                     | Design patterns, anti-patterns, deep design map                   |
 | [`docs/design/core-beliefs.md`](./docs/design/core-beliefs.md)                           | The principles the codebase is held to                            |
 | [`docs/SETUP.md`](./docs/SETUP.md)                                                       | Local setup and environment variables                             |
+| [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md)                                         | Running your own instance on one server with `deploy/orbit`       |
 | [`docs/QUALITY.md`](./docs/QUALITY.md)                                                   | Quality gates and scoring model                                   |
 | [`docs/SECURITY.md`](./docs/SECURITY.md)                                                 | Access model, RLS expectations, secret handling                   |
 | [`docs/RUNBOOK.md`](./docs/RUNBOOK.md)                                                   | Operations and debugging procedures                               |
