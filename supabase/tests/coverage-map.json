@@ -135,6 +135,9 @@
     "supabase/db/functions/run_money_fx_sync_http.sql": [
       "supabase/tests/functions/run_money_fx_sync_http_test.sql"
     ],
+    "supabase/db/functions/run_notifications_cron_http.sql": [
+      "supabase/tests/functions/run_notifications_cron_http_test.sql"
+    ],
     "supabase/db/functions/search_medical_records.sql": [
       "supabase/tests/functions/record_query_functions_test.sql"
     ],
