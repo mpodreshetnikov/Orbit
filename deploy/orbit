@@ -45,7 +45,12 @@ load_env() {
   API_EXTERNAL_URL="$ORBIT_PUBLIC_URL/auth/v1"
   ADDITIONAL_REDIRECT_URLS="$ORBIT_PUBLIC_URL/**"
   ORBIT_VERSION="$(git -C "$ORBIT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-  export ORBIT_DATA_DIR ORBIT_PUBLIC_URL ORBIT_SITE_ADDRESS SITE_URL SUPABASE_PUBLIC_URL \
+  # The app switches MCP on only for the exact value "1" (src/lib/mcp/config.ts).
+  case "${MCP_SERVER_ENABLED:-false}" in
+    1 | true | TRUE | True | yes) MCP_SERVER_ENABLED=1 ;;
+    *) MCP_SERVER_ENABLED=0 ;;
+  esac
+  export ORBIT_DATA_DIR MCP_SERVER_ENABLED ORBIT_PUBLIC_URL ORBIT_SITE_ADDRESS SITE_URL SUPABASE_PUBLIC_URL \
     API_EXTERNAL_URL ADDITIONAL_REDIRECT_URLS ORBIT_VERSION
 }
 
@@ -164,12 +169,7 @@ cmd_install() {
   prepare_data_dir
   sync_functions
   cmd_build
-  step "Starting the stack"
-  compose up -d --remove-orphans
-  wait_healthy 600
-  cmd_migrate
-  compose restart functions >/dev/null
-  wait_healthy 120
+  start_migrated
   smoke_test
   summary
 }
@@ -183,13 +183,22 @@ cmd_update() {
   prepare_data_dir
   sync_functions
   cmd_build
-  compose up -d --remove-orphans
-  wait_healthy 600
-  cmd_migrate
-  compose restart functions >/dev/null
-  wait_healthy 120
+  start_migrated
   smoke_test
   ok "Orbit updated to $ORBIT_VERSION"
+}
+
+# The schema moves before the code that needs it is exposed: `migrate` starts only what it depends
+# on (db, storage), and the web app and functions are (re)created afterwards. If the migration
+# fails, the previous release keeps serving against the schema it knows.
+start_migrated() {
+  cmd_migrate
+  step "Starting the stack"
+  compose up -d --remove-orphans
+  wait_healthy 600
+  # The function code directory was swapped by sync_functions; a restart remounts it.
+  compose restart functions >/dev/null
+  wait_healthy 120
 }
 
 cmd_build() {

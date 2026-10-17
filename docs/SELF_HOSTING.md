@@ -122,8 +122,8 @@ another safe place now.** Without it, even a perfect backup cannot be opened.
 `update` rebuilds the app, applies database changes and restarts only what changed. It is safe to
 run as often as you like.
 
-**Letting someone else in:** add their e-mail to `ORBIT_ALLOWED_EMAILS` (and to Google's test users)
-and run `deploy/orbit migrate`.
+**Letting someone in, or out:** edit `ORBIT_ALLOWED_EMAILS` (and Google's test users) and run
+`deploy/orbit migrate`. The list is the whole allowlist: an e-mail removed from it loses access.
 
 **The Supabase dashboard** (tables, logs, SQL) is not on the internet. To open it:
 

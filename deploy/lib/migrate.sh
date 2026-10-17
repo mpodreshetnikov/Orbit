@@ -46,13 +46,18 @@ begin
 end $$;
 SQL
 
+# ORBIT_ALLOWED_EMAILS is the whole allowlist: an address taken out of it loses access here, because
+# middleware, RLS and MCP all consult public.allowed_users. An empty value leaves the table alone, so
+# an instance managed some other way is not emptied by accident.
 if [[ -n "${ORBIT_ALLOWED_EMAILS:-}" ]]; then
-  echo "==> Allowlisting: ${ORBIT_ALLOWED_EMAILS}"
+  echo "==> Allowlist: ${ORBIT_ALLOWED_EMAILS}"
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -v emails="$ORBIT_ALLOWED_EMAILS" <<'SQL'
-insert into public.allowed_users (email)
-select lower(trim(e)) from unnest(string_to_array(:'emails', ',')) as e
-where trim(e) <> ''
-on conflict (email) do nothing;
+begin;
+create temp table wanted on commit drop as
+  select distinct lower(trim(e)) as email from unnest(string_to_array(:'emails', ',')) as e where trim(e) <> '';
+delete from public.allowed_users where lower(email) not in (select email from wanted);
+insert into public.allowed_users (email) select email from wanted on conflict (email) do nothing;
+commit;
 SQL
 fi
 

@@ -45,6 +45,8 @@ COPY --from=build /app/.next/static ./.next/static
 # Next's file tracing keeps only @swc/helpers' cjs build, but the compiled server also requires its
 # esm files at start-up (MODULE_NOT_FOUND .../@swc/helpers/esm/_interop_require_default.js).
 COPY --from=build /app/node_modules/@swc/helpers ./node_modules/@swc/helpers
+# The image optimizer writes .next/cache/images at run time, as the unprivileged user below.
+RUN mkdir -p .next/cache && chown -R node:node .next/cache
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=5s --retries=6 --start-period=20s \

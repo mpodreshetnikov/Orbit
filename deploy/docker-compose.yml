@@ -100,9 +100,13 @@ services:
       api-gw:
         condition: service_healthy
     environment:
+      # Also read at run time, through dynamic process.env lookups the build cannot inline
+      # (src/lib/mcp/config.ts).
+      NEXT_PUBLIC_SUPABASE_URL: ${ORBIT_PUBLIC_URL:?}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:?}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?}
       SUPABASE_JWT_SECRET: ${JWT_SECRET:?}
-      MCP_SERVER_ENABLED: ${MCP_SERVER_ENABLED:-false}
+      MCP_SERVER_ENABLED: ${MCP_SERVER_ENABLED:-0}
       MCP_OAUTH_SIGNING_SECRET: ${MCP_OAUTH_SIGNING_SECRET:?}
       MCP_PUBLIC_ORIGIN: ${ORBIT_PUBLIC_URL:?}
       OBS_EXPORTER_MODE: ${OBS_EXPORTER_MODE:-off}
