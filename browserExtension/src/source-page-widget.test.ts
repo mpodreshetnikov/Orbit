@@ -502,6 +502,39 @@ describe("source-page-widget", () => {
     expect(askedBeforeUnload()).toBe(false);
   });
 
+  it("tells a tab on the sign-in screen to sign in, and lets it close", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: null,
+      active_run: null,
+      is_run_tab: false,
+      pending_request: { source_id: "tbank_web" },
+      on_login_page: true,
+    });
+    widget.mount();
+    expect(getShadowText()).toContain("Sign in to the bank");
+    // Nothing can start on the sign-in screen (2026-10-18: the owner was asked before leaving
+    // it, with no import anywhere near); closing costs nothing.
+    expect(askedBeforeUnload()).toBe(false);
+    widget.unmount();
+  });
+
+  it("tells a signed-in waiting tab that the run is coming, and asks before it closes", () => {
+    const { widget } = createUnattendedHarness({
+      ok: true,
+      session: null,
+      active_run: null,
+      is_run_tab: false,
+      pending_request: { source_id: "tbank_web" },
+      on_login_page: false,
+    });
+    widget.mount();
+    expect(getShadowText()).toContain("You are signed in");
+    expect(getShadowText()).not.toContain("Sign in to the bank");
+    expect(askedBeforeUnload()).toBe(true);
+    widget.unmount();
+  });
+
   it("tells a waiting tab that the run it waited for failed before it began", () => {
     const { widget } = createUnattendedHarness({
       ok: true,
@@ -509,6 +542,7 @@ describe("source-page-widget", () => {
       active_run: null,
       is_run_tab: false,
       pending_request: { source_id: "tbank_web" },
+      on_login_page: true,
     });
     widget.mount();
     expect(getShadowText()).toContain("Sign in to the bank");
@@ -611,6 +645,7 @@ describe("source-page-widget", () => {
       active_run: null,
       is_run_tab: false,
       pending_request: { source_id: "tbank_web" },
+      on_login_page: true,
     });
     widget.mount();
 
@@ -618,7 +653,8 @@ describe("source-page-widget", () => {
     expect(getShadowText()).toContain("Sign in to the bank");
     // The tab is asked about while it waits, too: closed in the minute after signing in, the
     // run it waited for went elsewhere (2026-09-14).
-    expect(askedBeforeUnload()).toBe(true);
+    // On the sign-in screen nothing has begun; the tab may close without a word (2026-10-18).
+    expect(askedBeforeUnload()).toBe(false);
 
     widget.handleRuntimeMessage({
       type: "MONEY_IMPORT_SESSION_UPDATED",

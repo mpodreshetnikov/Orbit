@@ -45,6 +45,7 @@ type WidgetMode = "manual" | "run_tab" | "other_tab" | "waiting";
 type WidgetSessionExtras = {
   is_run_tab?: unknown;
   pending_request?: unknown;
+  on_login_page?: unknown;
 };
 
 type WidgetActiveRun = Record<string, unknown> & {
@@ -79,6 +80,8 @@ interface WidgetState {
   isRunTab: boolean;
   /** A run the person asked for, not yet begun: the source it is for. */
   pendingRequest: { source_id: string } | null;
+  /** The tab is on the bank's sign-in screen: nothing can start here, and closing costs nothing. */
+  onLoginPage: boolean;
   /**
    * The sweep's run has ended, windows and all. A window's own "done" is not that: the next
    * window follows in the same tab, and the tab is protected until the last one is through.
@@ -437,6 +440,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
     session: null,
     isRunTab: false,
     pendingRequest: null,
+    onLoginPage: false,
     finished: false,
     running: false,
     error: null,
@@ -481,7 +485,11 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
         origin === "auto" ? "statusDoneAuto" : "statusDoneRequested",
       );
     } else if (mode === "waiting") {
-      elements.statusText.textContent = widgetText(locale, "statusWaitingSignIn");
+      // Before sign-in the tab says what to do; after it, that the run is coming and to stay.
+      elements.statusText.textContent = widgetText(
+        locale,
+        state.onLoginPage ? "statusWaitingSignIn" : "statusWaitingSignedIn",
+      );
     } else if (mode === "run_tab") {
       // Whatever a window said of itself: the tab is the run's until the run says it is over.
       elements.statusText.textContent = widgetText(
@@ -594,7 +602,13 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
       // No session, but a request the person made from the attention page that has not run
       // yet: the widget stays, and says what to do. A run that has told this tab how it ended
       // keeps its last word on the page. Otherwise there is nothing to show.
-      state = { ...state, session: null, isRunTab: false, pendingRequest };
+      state = {
+        ...state,
+        session: null,
+        isRunTab: false,
+        pendingRequest,
+        onLoginPage: extras.on_login_page === true,
+      };
       if (!pendingRequest && !state.finished && mounted) {
         unmount();
         return;
@@ -609,6 +623,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
       session,
       isRunTab: extras.is_run_tab === true,
       pendingRequest: null,
+      onLoginPage: false,
       // A new session is a new run, or the next window of one: what the last one said of its
       // end no longer holds.
       finished: sameRun ? state.finished : false,
@@ -660,6 +675,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
       applySession(nextSession, {
         is_run_tab: message.is_run_tab,
         pending_request: message.pending_request,
+        on_login_page: message.on_login_page,
       });
       return;
     }
@@ -755,6 +771,7 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
         applySession(nextSession, {
           is_run_tab: response?.is_run_tab,
           pending_request: response?.pending_request,
+          on_login_page: response?.on_login_page,
         });
         const activeRun =
           response?.active_run && typeof response.active_run === "object"
@@ -798,7 +815,8 @@ export function createSourcePageWidget(customDeps?: Partial<SourcePageWidgetDeps
   const onBeforeUnload = (event: BeforeUnloadEvent) => {
     const mode = resolveMode(state);
     const guarded =
-      (mode === "run_tab" && state.running) || (mode === "waiting" && !state.finished);
+      (mode === "run_tab" && state.running) ||
+      (mode === "waiting" && !state.finished && !state.onLoginPage);
     if (!guarded) return;
     event.preventDefault();
     event.returnValue = "";
