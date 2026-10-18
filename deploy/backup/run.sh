@@ -96,13 +96,14 @@ test_alert() {
     --data-urlencode "text=Orbit on $(hostname -s 2>/dev/null || echo server): a test. Backup problems will be reported here." || code=$?
   case "$code" in
     0) echo "sent a test message to Telegram" ;;
-    # No answer at all, as opposed to Telegram answering no: the network is in the way.
-    6 | 7 | 28 | 35)
-      echo "this server cannot reach api.telegram.org (curl exit $code): its network blocks Telegram, so alerts cannot be sent from it" >&2
+    # 22 is curl -f's "the server answered with an error": Telegram itself said no.
+    22)
+      echo "Telegram did not take the message: check the token, and that you have sent the bot a message first" >&2
       return 1
       ;;
+    # Anything else is no answer at all -- refused, timed out, reset, cut short: the network is in the way.
     *)
-      echo "Telegram did not take the message: check the token, and that you have sent the bot a message first" >&2
+      echo "this server cannot reach api.telegram.org (curl exit $code): its network blocks Telegram, so alerts cannot be sent from it" >&2
       return 1
       ;;
   esac
