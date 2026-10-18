@@ -21,7 +21,9 @@ urls=(
 )
 fmt='%{http_code} exit=%{exitcode} ip=%{remote_ip} connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s bytes=%{size_download}'
 
-first_addr() { getent "$1" "$2" 2>/dev/null | awk 'NR == 1 {print $1}'; }
+# The first address of a family. getent maps IPv4 into IPv6 (::ffff:a.b.c.d), which is not an
+# AAAA record and would read as one.
+first_addr() { getent "$1" "$2" 2>/dev/null | awk '$1 !~ /^::ffff:/ {print $1; exit}'; }
 
 echo "== This server"
 route="$(ip -o route get 1.1.1.1 2>/dev/null || true)"
@@ -51,7 +53,9 @@ done
 
 echo
 echo "== From Orbit's network, where the services run"
-if docker image inspect orbit-backup:local >/dev/null 2>&1; then
+if ! docker network inspect "$net" >/dev/null 2>&1; then
+  echo "Orbit's network $net does not exist: Orbit is not running (deploy/orbit install, or update)."
+elif docker image inspect orbit-backup:local >/dev/null 2>&1; then
   # The loop runs in the container: its variables are meant for that shell, not this one.
   # shellcheck disable=SC2016
   docker run --rm --network "$net" --entrypoint sh orbit-backup:local -c '
