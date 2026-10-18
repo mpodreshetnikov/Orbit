@@ -174,32 +174,50 @@ wait_healthy() {
 # their modules and to OpenRouter for AI. Only reports: a failure further on then has its cause
 # named here. Probes from a one-off backup container on Orbit's own network, the path the services
 # take; a host counts as reachable only when it answers as it should (2xx or 3xx), not with a block
-# page.
+# page. A failure shows curl's reason: a timeout where the server itself gets through usually means
+# packets too large for the server's link (deploy/bootstrap.sh, clamp_container_mss).
 check_network() {
   local urls=(https://api.github.com https://accounts.google.com/.well-known/openid-configuration
     https://deno.land https://registry.npmjs.org https://jsr.io https://openrouter.ai/api/v1/models)
-  local url host i from_server from_container blocked=() container_codes
-  step "Checking what this server and its containers can reach"
+  local url host i from_server from_container dev ok_re='^[23][0-9][0-9]$' server_blocked=() container_blocked=() container_codes
+  dev="$(ip -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' || true)"
+  step "Checking what this server and its containers can reach (link MTU $(cat "/sys/class/net/${dev:-none}/mtu" 2>/dev/null || echo '?'))"
   # The loop runs in the container: its variables are meant for that shell, not this one.
   # shellcheck disable=SC2016
   container_codes="$(compose run --rm --no-deps -T --entrypoint sh backup -c \
-    'for u in "$@"; do curl -s -o /dev/null -m 10 -w "%{http_code}\n" "$u" || true; done' sh "${urls[@]}" 2>/dev/null || true)"
+    'for u in "$@"; do curl -s -o /dev/null -m 10 -w "%{http_code} %{exitcode}\n" "$u" || true; done' sh "${urls[@]}" 2>/dev/null || true)"
   i=0
   for url in "${urls[@]}"; do
     i=$((i + 1))
-    from_server="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$url" || true)"
+    from_server="$(curl -s -o /dev/null -m 10 -w '%{http_code} %{exitcode}' "$url" || true)"
     from_container="$(sed -n "${i}p" <<<"$container_codes")"
-    printf '     %-62s server %-4s containers %s\n' "$url" "${from_server:-000}" "${from_container:-000}"
+    printf '     %-62s server %-14s containers %s\n' "$url" "$(curl_result "${from_server:-000 0}")" "$(curl_result "${from_container:-000 0}")"
     host="${url#https://}"
-    [[ "${from_container:-000}" =~ ^[23][0-9][0-9]$ ]] || blocked+=("${host%%/*}")
+    host="${host%%/*}"
+    if ! [[ "${from_server%% *}" =~ $ok_re ]]; then
+      server_blocked+=("$host")
+    elif ! [[ "${from_container%% *}" =~ $ok_re ]]; then
+      container_blocked+=("$host")
+    fi
   done
-  if ((${#blocked[@]} == ${#urls[@]})); then
-    warn "Orbit's containers reach none of these, so Google sign-in, AI and the functions will not work. Traffic from Docker's network is blocked: by this server's firewall, or by its provider."
-  elif ((${#blocked[@]})); then
-    warn "Orbit's containers cannot reach: ${blocked[*]}. Whatever needs those will fail; the provider's network may block them."
-  else
-    ok "the server and Orbit's containers reach the internet"
-  fi
+  ((${#server_blocked[@]} == 0)) ||
+    warn "This server cannot reach: ${server_blocked[*]}. Its network or the service refuses it; whatever needs those will not work from here."
+  ((${#container_blocked[@]} == 0)) ||
+    warn "Orbit's containers cannot reach: ${container_blocked[*]}, although this server can."
+  ((${#server_blocked[@]} + ${#container_blocked[@]})) || ok "the server and Orbit's containers reach the internet"
+}
+
+# "<http code> <curl exit code>" as a person reads it: the code, or why there was none.
+curl_result() {
+  local code="${1%% *}" exit="${1##* }"
+  case "$code:$exit" in
+    000:28) echo "timed out" ;;
+    000:6) echo "no DNS" ;;
+    000:7) echo "refused" ;;
+    000:35) echo "TLS failed" ;;
+    000:*) echo "failed ($exit)" ;;
+    *) echo "$code" ;;
+  esac
 }
 
 # --- Commands -------------------------------------------------------------------------------------
