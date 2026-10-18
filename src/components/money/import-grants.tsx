@@ -117,10 +117,13 @@ export function MoneyImportGrants({
 
     try {
       const issuedForPersonId = personId;
+      // The sources the grant is issued for: a checkbox toggled while the request is in flight
+      // must not reach the extension as the grant's, since the row keeps what was submitted.
+      const issuedSources = selectedSources;
       const created = await createGrant.mutateAsync({
         personId: issuedForPersonId,
         label,
-        allowedSources: selectedSources,
+        allowedSources: issuedSources,
       });
       // The mutation captured the person it was submitted for. If the selection moved on while
       // it was in flight, showing the key now would put one person's credential in another
@@ -134,12 +137,32 @@ export function MoneyImportGrants({
       // The key exists to be handed to the extension, and a person should not have to carry it
       // there by hand (2026-10-18: "why am I even seeing a key"). It is shown only when no
       // extension took it: on a device without one, the screen is the one way to copy it.
-      const delivered = await onSendToExtension({
-        token: created.token,
-        personId: issuedForPersonId,
-        allowedSources: selectedSources,
-      });
+      setDelivering(true);
+      let delivered = false;
+      try {
+        delivered = await onSendToExtension({
+          token: created.token,
+          personId: issuedForPersonId,
+          allowedSources: created.grant.allowed_sources ?? issuedSources,
+        });
+      } finally {
+        setDelivering(false);
+      }
+      // The selection may have moved on during the probe as well; the same rule holds.
+      if (personIdRef.current !== issuedForPersonId) {
+        toast.success(
+          t(
+            delivered
+              ? "money.importGrantSentToExtension"
+              : "money.importGrantCreatedForOtherPerson",
+          ),
+        );
+        return;
+      }
       if (delivered) {
+        // An older key still on screen from an issuance nothing took would otherwise stay
+        // offered, and sending it would overwrite the key the extension just received.
+        setIssuedToken(null);
         toast.success(t("money.importGrantSentToExtension"));
         return;
       }
@@ -151,6 +174,8 @@ export function MoneyImportGrants({
   };
 
   const [sending, setSending] = useState(false);
+  // A new key is being handed to the extension; the panel says so instead of showing the key.
+  const [delivering, setDelivering] = useState(false);
 
   const handleSendToExtension = async () => {
     if (!issuedToken || !personId) return;
@@ -239,6 +264,12 @@ export function MoneyImportGrants({
             </label>
           ))}
         </div>
+
+        {delivering && (
+          <p className="text-sm text-muted-foreground" data-testid="money-import-grant-delivering">
+            {t("money.importGrantDelivering")}
+          </p>
+        )}
 
         {issuedToken && (
           <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
