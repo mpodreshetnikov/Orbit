@@ -9,8 +9,9 @@
 #                                         lists them; never the repository's whole set)
 #   ORBIT_VARS_JSON                       toJSON(vars) of the workflow
 #   ORBIT_COMMIT                          the commit to deploy
-#   ORBIT_ACTION                          deploy (the default), or restore: then restore the latest
-#                                         backup over it (a server replacing a lost one)
+#   ORBIT_ACTION                          deploy (the default); restore: then restore the latest
+#                                         backup over it (a server replacing a lost one); doctor:
+#                                         only run deploy/doctor.sh there, changing nothing
 #   GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SERVER_URL   from Actions
 set -Eeuo pipefail
 
@@ -90,6 +91,12 @@ sudo=""
 # The command is built here and runs there: client-side expansion is the point.
 # shellcheck disable=SC2029
 remote() { ssh "${ssh_opts[@]}" "$user@$host" "$@"; }
+
+# Sent over stdin, so it runs whatever version of Orbit the server has, or none.
+if [[ "${ORBIT_ACTION:-deploy}" == doctor ]]; then
+  remote "$sudo bash -s" <"$here/../doctor.sh"
+  exit 0
+fi
 
 # Files travel over stdin into a directory only this login can read, and are gone after the run.
 # The workflow token in it lets the server fetch a private repository and pull its images; it

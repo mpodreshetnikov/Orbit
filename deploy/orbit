@@ -480,6 +480,7 @@ Usage: deploy/orbit <command>
   migrate-from-supabase export | import [--yes] | verify
                    Move an Orbit that runs on hosted Supabase onto this server
   compose ...      Run any docker compose command against this stack
+  doctor           What this server's network lets Orbit reach, in detail (only reads)
 
 Guide: docs/SELF_HOSTING.md
 EOF
@@ -505,6 +506,7 @@ main() {
     restore) cmd_restore "$@" ;;
     migrate-from-supabase) cmd_migrate_from_supabase "$@" ;;
     compose) load_env && compose "$@" ;;
+    doctor) bash "$DEPLOY_DIR/doctor.sh" ;;
     help | -h | --help) usage ;;
     *) usage && exit 1 ;;
   esac

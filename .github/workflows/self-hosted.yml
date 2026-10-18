@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one)"
+        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one); doctor = only show what the server's network reaches, changing nothing"
         type: choice
-        options: [deploy, restore]
+        options: [deploy, restore, doctor]
         default: deploy
 
 permissions:
@@ -30,8 +30,10 @@ jobs:
     environment: production
     runs-on: ubuntu-latest
     # One deploy at a time; a newer one waits rather than cancelling one halfway through a migration.
+    # A doctor run only reads, and has a group of its own: in the deploys' group it would take the
+    # single pending slot from a deploy waiting there.
     concurrency:
-      group: self-hosted-deploy
+      group: ${{ inputs.action == 'doctor' && 'self-hosted-doctor' || 'self-hosted-deploy' }}
       cancel-in-progress: false
     steps:
       # Here and not in a job-level `if`, which cannot see an environment's variables.
