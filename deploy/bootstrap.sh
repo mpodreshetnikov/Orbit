@@ -216,6 +216,43 @@ EOF
   systemctl enable fail2ban >/dev/null 2>&1
   systemctl restart fail2ban
   ok "open to the world: 22, 80, 443; SSH password guessers are banned for an hour"
+  clamp_container_mss
+}
+
+# A container's connections leave through the server with the packet size the container offered,
+# sized for a 1500-byte link. Where the server's own link is smaller (a tunnel, many VPS networks)
+# and the path does not say so, the larger answers never arrive: the connection stalls, while the
+# server's own connections, sized for its link, work. On the first real server the containers
+# reached Google and npm but timed out on GitHub and JSR. Clamping the MSS of forwarded
+# connections to the route's MTU fixes that and changes nothing on a 1500-byte link. A unit
+# applies it at every boot, after Docker; applying it twice is a no-op.
+clamp_container_mss() {
+  local rule="-p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+  cat >/etc/systemd/system/orbit-mss-clamp.service <<UNIT
+[Unit]
+Description=Orbit: fit container connections to this server's link (TCP MSS clamping)
+After=docker.service ufw.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -t mangle -C FORWARD $rule 2>/dev/null || iptables -t mangle -A FORWARD $rule'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable orbit-mss-clamp.service >/dev/null 2>&1
+  systemctl restart orbit-mss-clamp.service
+  ok "container connections fit this server's link (MTU $(link_mtu))"
+}
+
+# The MTU of the interface the default route leaves through.
+link_mtu() {
+  local dev
+  dev="$(ip -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' || true)"
+  cat "/sys/class/net/${dev:-none}/mtu" 2>/dev/null || echo "?"
 }
 
 fetch_orbit() {
