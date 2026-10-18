@@ -15,7 +15,9 @@
 #                                         migrate-from-supabase: then replace its data with the hosted
 #                                         project's, exported here (SOURCE_* below)
 #   SOURCE_DB_URL, SOURCE_SUPABASE_URL, SOURCE_SERVICE_ROLE_KEY
-#                                         the hosted project, for migrate-from-supabase only
+#                                         the hosted project, for migrate-from-supabase only; or
+#   HOSTED_PROJECT_REF, HOSTED_DB_PASS, HOSTED_SERVICE_ROLE_KEY
+#                                         the same, from what the hosted production deploys with
 #   GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SERVER_URL   from Actions
 set -Eeuo pipefail
 
@@ -101,8 +103,20 @@ remote() { ssh "${ssh_opts[@]}" "$user@$host" "$@"; }
 # the first server's could not). The export reads only; the old project is not changed. It runs in
 # the backup image, which has the tools, as this user, so the files stay removable.
 if [[ "${ORBIT_ACTION:-deploy}" == migrate-from-supabase ]]; then
-  [[ -n "${SOURCE_DB_URL:-}" && -n "${SOURCE_SUPABASE_URL:-}" && -n "${SOURCE_SERVICE_ROLE_KEY:-}" ]] ||
+  # One whole set: a database from one project and files from another would import and still
+  # verify, against checksums of the wrong files.
+  if [[ -n "${SOURCE_DB_URL:-}${SOURCE_SUPABASE_URL:-}${SOURCE_SERVICE_ROLE_KEY:-}" ]]; then
+    [[ -n "${SOURCE_DB_URL:-}" && -n "${SOURCE_SUPABASE_URL:-}" && -n "${SOURCE_SERVICE_ROLE_KEY:-}" ]] ||
+      fail "Set all three of the SOURCE_DB_URL and SOURCE_SERVICE_ROLE_KEY secrets and the SOURCE_SUPABASE_URL variable, or none."
+  elif [[ -n "${HOSTED_PROJECT_REF:-}" && -n "${HOSTED_DB_PASS:-}" && -n "${HOSTED_SERVICE_ROLE_KEY:-}" ]]; then
+    # The session pooler the hosted production's own deploy connects through (main.yml).
+    SOURCE_DB_URL="postgresql://postgres.$HOSTED_PROJECT_REF:$HOSTED_DB_PASS@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+    SOURCE_SUPABASE_URL="https://$HOSTED_PROJECT_REF.supabase.co"
+    SOURCE_SERVICE_ROLE_KEY="$HOSTED_SERVICE_ROLE_KEY"
+    export SOURCE_DB_URL SOURCE_SUPABASE_URL SOURCE_SERVICE_ROLE_KEY
+  else
     fail "Set the SOURCE_DB_URL and SOURCE_SERVICE_ROLE_KEY secrets and the SOURCE_SUPABASE_URL variable (docs/SELF_HOSTING.md, Moving from hosted Supabase)."
+  fi
   image="ghcr.io/${GITHUB_REPOSITORY,,}-backup:$ORBIT_COMMIT"
   docker pull --quiet "$image" >/dev/null 2>&1 || docker build --quiet -t "$image" "$here/../backup" >/dev/null
   mkdir -p "$work/migration"
@@ -135,11 +149,12 @@ if [[ "${ORBIT_ACTION:-deploy}" == restore ]]; then
   remote "$sudo /opt/orbit/deploy/orbit restore --yes"
 fi
 # Choosing this action in the workflow is the confirmation `import` otherwise asks for. This log is
-# public on a public repository: an object's name can say what a person stored, so a mismatch names
-# its bucket only (the server's `deploy/orbit migrate-from-supabase verify` names it in full).
+# public on a public repository: an object's name can say what a person stored, and the allowlist
+# check names the people it is missing, so a mismatch shows its bucket only and an address none.
+# On the server, `deploy/orbit migrate-from-supabase import` and `verify` show both in full.
 if [[ "${ORBIT_ACTION:-deploy}" == migrate-from-supabase ]]; then
   tar -C "$work/migration" -cz . | remote "$sudo /opt/orbit/deploy/orbit migrate-from-supabase receive"
   remote "$sudo /opt/orbit/deploy/orbit migrate-from-supabase import --yes" 2>&1 |
-    sed -E 's|^(MISMATCH object [^/]*)/.*|\1/...|'
+    sed -E -e 's|^(MISMATCH object [^/]*)/.*|\1/...|' -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/<e-mail>/g'
 fi
 echo "::notice::Orbit $(cut -c1-12 <<<"$ORBIT_COMMIT") is on $host"

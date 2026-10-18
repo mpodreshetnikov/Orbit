@@ -88,11 +88,15 @@ jobs:
           ORBIT_SECRET_VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           ORBIT_SECRET_VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           # The hosted project to move from, for migrate-from-supabase only (docs/SELF_HOSTING.md,
-          # "Moving from hosted Supabase"). Without SOURCE_* secrets, the ones this repository's
-          # hosted production deploys with (main.yml) stand in.
-          SOURCE_DB_URL: ${{ inputs.action == 'migrate-from-supabase' && (secrets.SOURCE_DB_URL || (secrets.SUPABASE_DB_PASS && vars.SUPABASE_PROJECT_REF && format('postgresql://postgres.{0}:{1}@aws-1-eu-central-1.pooler.supabase.com:5432/postgres', vars.SUPABASE_PROJECT_REF, secrets.SUPABASE_DB_PASS))) || '' }}
-          SOURCE_SUPABASE_URL: ${{ inputs.action == 'migrate-from-supabase' && (vars.SOURCE_SUPABASE_URL || (vars.SUPABASE_PROJECT_REF && format('https://{0}.supabase.co', vars.SUPABASE_PROJECT_REF))) || '' }}
-          SOURCE_SERVICE_ROLE_KEY: ${{ inputs.action == 'migrate-from-supabase' && (secrets.SOURCE_SERVICE_ROLE_KEY || secrets.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY) || '' }}
+          # "Moving from hosted Supabase"): the SOURCE_* settings, or else the ones this repository's
+          # hosted production deploys with (main.yml). deploy/ci/deploy.sh takes one whole set,
+          # never a mix of the two.
+          SOURCE_DB_URL: ${{ inputs.action == 'migrate-from-supabase' && secrets.SOURCE_DB_URL || '' }}
+          SOURCE_SUPABASE_URL: ${{ inputs.action == 'migrate-from-supabase' && vars.SOURCE_SUPABASE_URL || '' }}
+          SOURCE_SERVICE_ROLE_KEY: ${{ inputs.action == 'migrate-from-supabase' && secrets.SOURCE_SERVICE_ROLE_KEY || '' }}
+          HOSTED_PROJECT_REF: ${{ inputs.action == 'migrate-from-supabase' && vars.SUPABASE_PROJECT_REF || '' }}
+          HOSTED_DB_PASS: ${{ inputs.action == 'migrate-from-supabase' && secrets.SUPABASE_DB_PASS || '' }}
+          HOSTED_SERVICE_ROLE_KEY: ${{ inputs.action == 'migrate-from-supabase' && secrets.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || '' }}
           ORBIT_VARS_JSON: ${{ toJSON(vars) }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_ACTION: ${{ inputs.action || 'deploy' }}
