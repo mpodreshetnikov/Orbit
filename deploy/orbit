@@ -498,6 +498,7 @@ Usage: deploy/orbit <command>
   backup now       Take a full backup now (base backup + snapshot)
   backup verify    Restore the latest copies into a scratch directory and check them
   backup status    When each backup job last succeeded
+  backup test-alert  Send a test message to the Telegram alerts
   restore [--time "2026-10-17 12:00:00+00"] [--yes]
                    Replace the database (and files) with the latest backup, or the state at --time
 

@@ -93,7 +93,8 @@ cmd_backup() {
     files) in_backup files ;;
     verify) in_backup verify ;;
     status) backup_status ;;
-    *) die "Unknown: deploy/orbit backup $sub (setup | now | verify | status)" ;;
+    test-alert) in_backup test-alert ;;
+    *) die "Unknown: deploy/orbit backup $sub (setup | now | verify | status | test-alert)" ;;
   esac
 }
 

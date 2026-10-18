@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one); doctor = only show what the server's network reaches, changing nothing; migrate-from-supabase = then replace the data with the hosted Supabase project's (which is only read)"
+        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one); doctor = only show what the server's network reaches, changing nothing; migrate-from-supabase = then replace the data with the hosted Supabase project's (which is only read); test-alert = then send a test message to the Telegram alerts"
         type: choice
-        options: [deploy, restore, doctor, migrate-from-supabase]
+        options: [deploy, restore, doctor, migrate-from-supabase, test-alert]
         default: deploy
 
 permissions:

@@ -221,7 +221,8 @@ Two optional settings in the same section, both free:
   the whole server is gone, healthchecks.io e-mails you. Telegram cannot do that part: a dead server
   sends no messages.
 
-Run `deploy/orbit update` after changing them.
+Run `deploy/orbit update` after changing them, then `deploy/orbit backup test-alert` to see a test
+message arrive (from GitHub: run the workflow with _action_ `test-alert`).
 
 ### Checking and restoring
 
