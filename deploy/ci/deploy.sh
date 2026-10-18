@@ -13,7 +13,8 @@
 #                                         backup over it (a server replacing a lost one); doctor:
 #                                         only run deploy/doctor.sh there, changing nothing;
 #                                         migrate-from-supabase: then replace its data with the hosted
-#                                         project's, exported here (SOURCE_* below)
+#                                         project's, exported here (SOURCE_* below); test-alert: then
+#                                         send a test message to the Telegram alerts
 #   SOURCE_DB_URL, SOURCE_SUPABASE_URL, SOURCE_SERVICE_ROLE_KEY
 #                                         the hosted project, for migrate-from-supabase only; or
 #   HOSTED_PROJECT_REF, HOSTED_DB_PASS, HOSTED_SERVICE_ROLE_KEY
@@ -147,6 +148,9 @@ remote "set -e
 
 if [[ "${ORBIT_ACTION:-deploy}" == restore ]]; then
   remote "$sudo /opt/orbit/deploy/orbit restore --yes"
+fi
+if [[ "${ORBIT_ACTION:-deploy}" == test-alert ]]; then
+  remote "$sudo /opt/orbit/deploy/orbit backup test-alert"
 fi
 # Choosing this action in the workflow is the confirmation `import` otherwise asks for. This log is
 # public on a public repository: an object's name can say what a person stored, and the allowlist
