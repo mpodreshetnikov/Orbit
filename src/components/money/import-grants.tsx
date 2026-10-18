@@ -130,9 +130,21 @@ export function MoneyImportGrants({
         setLabel("");
         return;
       }
-      setIssuedToken(created.token);
       setLabel("");
-      toast.success(t("money.importGrantCreated"));
+      // The key exists to be handed to the extension, and a person should not have to carry it
+      // there by hand (2026-10-18: "why am I even seeing a key"). It is shown only when no
+      // extension took it: on a device without one, the screen is the one way to copy it.
+      const delivered = await onSendToExtension({
+        token: created.token,
+        personId: issuedForPersonId,
+        allowedSources: selectedSources,
+      });
+      if (delivered) {
+        toast.success(t("money.importGrantSentToExtension"));
+        return;
+      }
+      setIssuedToken(created.token);
+      toast.message(t("money.importGrantShownToCopy"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("money.importGrantCreateFailed"));
     }

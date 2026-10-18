@@ -609,6 +609,7 @@
     "importGrantSendToExtension": "Send to extension",
     "importGrantSentToExtension": "The extension has the key.",
     "importGrantSendFailed": "The extension did not take the key. Check it is installed and up to date, then copy the key instead — it is not shown again.",
+    "importGrantShownToCopy": "No extension took the key on this device, so it is shown once: copy it to where the extension is.",
     "importRangeTitle": "Import history range",
     "importRangeLoading": "Loading import context...",
     "importRangePromptHistory": "No recent imports were found for this source. Choose how much history to import.",
