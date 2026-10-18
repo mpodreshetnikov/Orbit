@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one)"
+        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one); doctor = only show what the server's network reaches, changing nothing"
         type: choice
-        options: [deploy, restore]
+        options: [deploy, restore, doctor]
         default: deploy
 
 permissions:
