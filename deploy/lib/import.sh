@@ -57,11 +57,20 @@ cmd_migrate_from_supabase() {
       warm_functions
       cmd_migrate_from_supabase verify
       ;;
+    receive)
+      # An export made elsewhere, as a gzipped tar on stdin: GitHub Actions exports on its runner,
+      # which reaches Supabase's cloud from any network, and sends the result here (deploy/ci/deploy.sh).
+      rm -rf "$ORBIT_DATA_DIR/migration"
+      (umask 077 && mkdir -p "$ORBIT_DATA_DIR/migration")
+      tar -xz -C "$ORBIT_DATA_DIR/migration"
+      [[ -f "$ORBIT_DATA_DIR/migration/source.dump" ]] || die "What arrived holds no source.dump: not an export."
+      ok "Received the export into $ORBIT_DATA_DIR/migration. Next: deploy/orbit migrate-from-supabase import"
+      ;;
     verify)
       export SERVICE_ROLE_KEY
       step "Comparing this instance with the export"
       migration_run verify
       ;;
-    *) die "Usage: deploy/orbit migrate-from-supabase export | import [--yes] | verify" ;;
+    *) die "Usage: deploy/orbit migrate-from-supabase export | receive | import [--yes] | verify" ;;
   esac
 }
