@@ -142,7 +142,9 @@ cmd_restore() {
   # subshell there: it exits rather than returning, which would skip the rollback.
   mv "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/db.before-restore-$stamp"
   cp -a "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db" || restore_rollback
-  cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.before-restore-$stamp" || restore_rollback
+  # Into a temporary name first: a copy cut short by a full disk must never pass for the files.
+  cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.copying-$stamp" || restore_rollback
+  mv "$ORBIT_DATA_DIR/storage.copying-$stamp" "$ORBIT_DATA_DIR/storage.before-restore-$stamp" || restore_rollback
 
   if ((from_snapshot == 0)) && [[ -n "${BACKUP_WAL_S3_PREFIX:-}" ]]; then
     step "Restoring the database${target_time:+ to $target_time}"
@@ -190,6 +192,8 @@ cmd_restore() {
   # restored database continues on a new timeline, or is a new one.
   step "Switching backups back on"
   compose up -d backup
+  # The restore stands now, so its new timeline may be recorded in bucket 1.
+  in_backup commit-restore
   if in_backup init; then
     in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
   else
@@ -203,7 +207,9 @@ restore_rollback() {
   local stamp="$RESTORE_STAMP"
   warn "The restore failed; putting Orbit back on the data it had before"
   compose stop >/dev/null 2>&1 || true
-  # Only what was already set aside goes back: a failure while setting aside stops halfway.
+  # Only what was already set aside goes back: a failure while setting aside stops halfway, and a
+  # half-made copy is dropped, never put in place of the files.
+  rm -rf "$ORBIT_DATA_DIR/storage.copying-$stamp"
   if [[ -d "$ORBIT_DATA_DIR/db.before-restore-$stamp" ]]; then
     rm -rf "$ORBIT_DATA_DIR/db"
     mv "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
@@ -214,6 +220,8 @@ restore_rollback() {
   fi
   compose run --rm --no-deps -v "orbit_db-config:/restore/db-config" --entrypoint sh backup -c \
     '[ ! -f /restore/db-config/pgsodium_root.key.before-restore ] || mv /restore/db-config/pgsodium_root.key.before-restore /restore/db-config/pgsodium_root.key' || true
+  # The timeline the failed restore started never happened; it must not reach bucket 1.
+  compose run --rm --no-deps backup discard-restore >/dev/null 2>&1 || true
   compose up -d --remove-orphans
   die "The restore failed (see above); Orbit is back on the data it had before."
 }

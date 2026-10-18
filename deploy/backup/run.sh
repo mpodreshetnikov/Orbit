@@ -227,7 +227,7 @@ fresh() {
 # Restores both copies into a scratch area and reads them back -- what a real restore would need,
 # not just that the files exist -- and checks they are recent.
 verify() {
-  local scratch="$STATE/verify" sock="$STATE/verify-sock" users records dump listed restored stale=0
+  local scratch="$STATE/verify" sock="$STATE/verify-sock" users records dump listed restored snapshot stale=0
   if ! walg_configured && ! restic_configured; then
     echo "no backup storage is configured (BACKUP_* in deploy/.env): nothing is backed up" >&2
     return 1
@@ -261,17 +261,19 @@ verify() {
       { echo "the nightly snapshot has no deploy/.env" >&2 && return 1; }
     # The uploaded files of the newest copy come back, each checked against the hash restic
     # recorded: all of them while they fit in a third of the free disk, a sample of 50 after that.
-    rst ls latest --tag files --host orbit --json --recursive /data/storage |
+    # The newest copy of them is a 15-minute one or a nightly one, whichever came last.
+    snapshot="$(pick_snapshot /data/storage files nightly)"
+    [[ -n "$snapshot" ]] || { echo "bucket 2 holds no copy of the uploaded files" >&2 && return 1; }
+    rst ls "$snapshot" --json --recursive /data/storage |
       jq -r 'select(.type == "file") | .path' >"$scratch/files.list"
     listed="$(wc -l <"$scratch/files.list")"
-    if (($(rst stats latest --tag files --host orbit --mode restore-size --json | jq .total_size) >
+    if (($(rst stats "$snapshot" --mode restore-size --json | jq .total_size) >
       $(df -Pk "$STATE" | awk 'NR==2 {print $4}') * 1024 / 3)); then
       shuf -n 50 "$scratch/files.list" >"$scratch/files.sample"
       listed="$(wc -l <"$scratch/files.sample")"
-      rst restore latest --tag files --host orbit --target "$scratch/files" \
-        --include-file "$scratch/files.sample" --quiet
+      rst restore "$snapshot" --target "$scratch/files" --include-file "$scratch/files.sample" --quiet
     else
-      rst restore latest --tag files --host orbit --target "$scratch/files" --include /data/storage --quiet
+      rst restore "$snapshot" --target "$scratch/files" --include /data/storage --quiet
     fi
     restored="$(find "$scratch/files" -type f | wc -l)"
     ((restored == listed)) || { echo "$restored of $listed uploaded files came back" >&2 && return 1; }
@@ -290,14 +292,10 @@ restore_db() {
   # The restored database goes on as a new timeline, which Postgres records in a .history file.
   # It was written with archiving off, so nothing would ever upload it -- and a later recovery from
   # a base backup taken before this restore would not know the timeline exists, replay the old one
-  # to its end, and bring back what this restore undid. Into the spool with it, the way
-  # archive-wal.sh queues a segment.
-  local history
-  for history in /restore/db/pg_wal/*.history; do
-    [[ -f "$history" ]] || continue
-    cp "$history" "$SPOOL/$(basename "$history").part"
-    mv "$SPOOL/$(basename "$history").part" "$SPOOL/$(basename "$history")"
-  done
+  # to its end, and bring back what this restore undid. It waits here until deploy/orbit knows the
+  # restore stands (commit-restore), so that a rolled-back restore leaves no timeline behind.
+  rm -rf "$STATE/restore-history" && mkdir -p "$STATE/restore-history"
+  cp /restore/db/pg_wal/*.history "$STATE/restore-history/" 2>/dev/null || true
   # Hand back Supabase's own config arrangement: its server reads /etc/postgresql/postgresql.conf.
   rm -f /restore/db/postgresql.conf
   [[ -f /restore/db/postgresql.conf.supabase ]] && mv /restore/db/postgresql.conf.supabase /restore/db/postgresql.conf
@@ -307,6 +305,18 @@ restore_db() {
 
 # The nightly full dump, for a rebuild when the WAL-G copy is gone too (`deploy/orbit restore
 # --from-snapshot`). It is loaded by deploy/backup/migrate-from-supabase.sh like an export.
+# The restore stands: its timeline history goes up with the next WAL, the way archive-wal.sh
+# queues a segment. A rolled-back restore discards it instead (discard-restore).
+commit_restore() {
+  local history
+  for history in "$STATE"/restore-history/*.history; do
+    [[ -f "$history" ]] || continue
+    cp "$history" "$SPOOL/$(basename "$history").part"
+    mv "$SPOOL/$(basename "$history").part" "$SPOOL/$(basename "$history")"
+  done
+  rm -rf "$STATE/restore-history"
+}
+
 restore_dump() {
   local tmp=/state/restore-dump snapshot
   snapshot="$(pick_snapshot /state/snapshot nightly)"
@@ -493,6 +503,8 @@ case "${1:-daemon}" in
   files) job snapshot_files snapshot_files ;;
   verify) job verify verify ;;
   restore-db) restore_db ;;
+  commit-restore) commit_restore ;;
+  discard-restore) rm -rf "$STATE/restore-history" ;;
   restore-files) restore_files ;;
   restore-dump) restore_dump ;;
   init) init ;;
