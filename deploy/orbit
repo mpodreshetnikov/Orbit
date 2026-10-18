@@ -297,7 +297,11 @@ cmd_build() {
     compose build web
     compose --profile tools build migrate
   fi
-  compose build backup
+  if pull_prebuilt backup; then
+    ok "pulled the backup image CI built for this commit"
+  else
+    compose build backup
+  fi
 }
 
 cmd_migrate() {

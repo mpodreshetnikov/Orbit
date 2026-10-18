@@ -547,6 +547,7 @@ jobs:
           prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "web=$prefix-web:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
           echo "tools=$prefix-tools:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "backup=$prefix-backup:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
           echo "version=${GITHUB_SHA::12}" >>"$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
@@ -569,10 +570,21 @@ jobs:
           tags: ${{ steps.names.outputs.tools }}
           push: true
           cache-from: type=gha,scope=self-hosted
+      # The backup image too: building it on the server needs Ubuntu's and PostgreSQL's package
+      # archives, which a server's network may not reach -- on 2026-10-18 a first install stopped
+      # after twelve minutes of apt timeouts on exactly this build.
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/backup
+          platforms: linux/amd64
+          tags: ${{ steps.names.outputs.backup }}
+          push: true
+          cache-from: type=gha,scope=self-hosted-backup
+          cache-to: type=gha,scope=self-hosted-backup,mode=max
       # A server pulls without logging in, so a package GitHub created private is no use to it.
       - name: Check a server can pull them
         run: |
-          for image in "${{ steps.names.outputs.web }}" "${{ steps.names.outputs.tools }}"; do
+          for image in "${{ steps.names.outputs.web }}" "${{ steps.names.outputs.tools }}" "${{ steps.names.outputs.backup }}"; do
             if ! DOCKER_CONFIG="$(mktemp -d)" docker manifest inspect "$image" >/dev/null 2>&1; then
               echo "::warning::$image is not public, so servers build it themselves. Make the package public once: github.com/${GITHUB_REPOSITORY_OWNER}?tab=packages -> the package -> Package settings -> Change visibility."
             fi
