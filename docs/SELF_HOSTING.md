@@ -265,7 +265,11 @@ time; you switch over only when the new one checks out, and you can switch back.
     export SOURCE_DB_URL='postgresql://postgres.<ref>:<password>@<pooler host>:5432/postgres'
     export SOURCE_SUPABASE_URL='https://<ref>.supabase.co'
     export SOURCE_SERVICE_ROLE_KEY='<legacy service_role key>'
-    sudo deploy/orbit migrate-from-supabase export # reads only; the old project is not changed
+
+    # reads only; the old project is not changed. sudo passes on these three only when told to:
+
+    sudo --preserve-env=SOURCE_DB_URL,SOURCE_SUPABASE_URL,SOURCE_SERVICE_ROLE_KEY \
+     deploy/orbit migrate-from-supabase export
     sudo deploy/orbit migrate-from-supabase import # asks you to type IMPORT
 
     # ends with: verified: N tables have the same row counts, M objects the same bytes

@@ -33,6 +33,14 @@ age_of() { local t; t="$(cat "$STATE/$1" 2>/dev/null || echo 0)"; echo $(($(date
 
 # --- Configuration --------------------------------------------------------------------------------
 
+# Which storage the backups were set up for (`init` records it). Changed destinations or a new
+# bucket must go through `deploy/orbit backup setup` again -- and its checks -- before anything is
+# written there. deploy/lib/backup.sh computes the same.
+config_id() {
+  printf '%s|%s|%s' "${BACKUP_WAL_S3_ENDPOINT:-}" "${BACKUP_WAL_S3_PREFIX:-}" "${BACKUP_SNAPSHOT_REPOSITORY:-}" |
+    sha256sum | cut -c1-16
+}
+
 walg_configured() { [[ -n "${BACKUP_WAL_S3_PREFIX:-}" && -n "${BACKUP_WAL_S3_ACCESS_KEY_ID:-}" ]]; }
 restic_configured() { [[ -n "${BACKUP_SNAPSHOT_REPOSITORY:-}" && -n "${BACKUP_SNAPSHOT_ACCESS_KEY_ID:-}" ]]; }
 
@@ -308,17 +316,25 @@ init() {
     # into a folder that holds another database's backups would overwrite that one's history -- the
     # copy a replacement server is meant to restore from. WALG_PREVENT_WAL_OVERWRITE stops the
     # overwrite itself; this stops it from being set up at all, and says why.
-    local ours theirs
+    local ours list theirs
     ours="$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -U supabase_admin -d postgres -Atc 'select system_identifier from pg_control_system()')"
-    theirs="$(walg backup-list --detail --json 2>/dev/null | jq -r '.[]?.system_identifier' | sort -u)"
-    if [[ -n "$theirs" ]] && ! grep -qx "$ours" <<<"$theirs"; then
+    # WAL-G logs to stderr; shown only when the listing fails, as the reason backups cannot start.
+    if ! list="$(walg backup-list --detail --json 2>"$STATE/.walg-list.err")"; then
+      cat "$STATE/.walg-list.err" >&2
+      echo "bucket 1 ($BACKUP_WAL_S3_PREFIX) cannot be read (the error is above)" >&2
+      return 1
+    fi
+    theirs="$(jq -r '.[]?.system_identifier | select(. != null)' <<<"${list:-[]}" 2>/dev/null | sort -u)"
+    # One folder holds one database's chain: any other identifier in it, alongside ours or not,
+    # means a mixed or foreign folder.
+    if [[ -n "$theirs" ]] && grep -vqx "$ours" <<<"$theirs"; then
       echo "bucket 1 ($BACKUP_WAL_S3_PREFIX) already holds the backups of another database." >&2
       echo "If this server replaces a lost one, restore from it first: deploy/orbit restore." >&2
       echo "To start a new chain of backups instead, point BACKUP_WAL_S3_PREFIX at a new, empty folder." >&2
       return 1
     fi
   fi
-  touch "$STATE/initialized"
+  config_id >"$STATE/initialized"
   # From now on the database's archive_command keeps its segments for upload (archive-wal.sh).
   touch "$SPOOL/.enabled"
   echo "backup storage reachable"
@@ -345,7 +361,12 @@ daemon() {
     log "no backup storage configured (BACKUP_* in deploy/.env); idle"
     exec sleep infinity
   fi
-  until [[ -f "$STATE/initialized" ]]; do
+  local warned=0
+  until [[ "$(cat "$STATE/initialized" 2>/dev/null)" == "$(config_id)" ]]; do
+    if [[ -s "$STATE/initialized" ]] && ((warned == 0)); then
+      notify "the backup destinations changed; nothing is backed up until deploy/orbit backup setup checks them"
+      warned=1
+    fi
     log "waiting for deploy/orbit backup setup"
     sleep 60
   done

@@ -11,6 +11,13 @@
 # same database password, API keys and backup encryption keys, so the one line is all that has to
 # be kept somewhere safe. A value already in deploy/.env always wins over the derived one.
 
+# Every name ensure_secrets writes; deploy/orbit apply-env never empties one of them.
+GENERATED_NAMES="ORBIT_MASTER_KEY POSTGRES_PASSWORD JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SECRET_KEY_BASE
+REALTIME_DB_ENC_KEY VAULT_ENC_KEY PG_META_CRYPTO_KEY S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
+DASHBOARD_PASSWORD MCP_OAUTH_SIGNING_SECRET MONEY_FX_SYNC_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_SNAPSHOT_PASSWORD
+VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY"
+GENERATED_NAMES="$(tr ' ' '\n' <<<"$GENERATED_NAMES")"
+
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 hex2bin() { printf '%b' "$(sed 's/../\\x&/g')"; }
 
@@ -26,13 +33,15 @@ secret_hex() {
 }
 
 # HS256 JWT in the shape Supabase's API keys have: {"role": ..., "iss": "supabase", iat, exp}.
-# Issued "now" -- or, with a master key, at a fixed moment, so that the same key comes out again.
+# Issued now for ten years -- or, with a master key, with fixed times, so that the same key comes
+# out again on any later install: issued 2026-01-01, expiring 2100-01-01.
 make_api_key() {
-  local role="$1" secret="$2" now header payload signature
+  local role="$1" secret="$2" now exp header payload signature
   now="$(date +%s)"
-  [[ -z "${ORBIT_MASTER_KEY:-}" ]] || now=1767225600
+  exp=$((now + 10 * 365 * 24 * 3600))
+  [[ -z "${ORBIT_MASTER_KEY:-}" ]] || { now=1767225600 && exp=4102444800; }
   header="$(printf '{"alg":"HS256","typ":"JWT"}' | b64url)"
-  payload="$(printf '{"role":"%s","iss":"supabase","iat":%s,"exp":%s}' "$role" "$now" $((now + 10 * 365 * 24 * 3600)) | b64url)"
+  payload="$(printf '{"role":"%s","iss":"supabase","iat":%s,"exp":%s}' "$role" "$now" "$exp" | b64url)"
   signature="$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -hmac "$secret" -binary | b64url)"
   printf '%s.%s.%s' "$header" "$payload" "$signature"
 }

@@ -2,6 +2,12 @@
 # `deploy/orbit backup ...` and `deploy/orbit restore`. Sourced, never run. The work itself happens
 # in the backup container (deploy/backup/run.sh); this file decides when and with what mounted.
 
+# The same fingerprint of the backup destinations as config_id in deploy/backup/run.sh.
+backup_config_id() {
+  printf '%s|%s|%s' "${BACKUP_WAL_S3_ENDPOINT:-}" "${BACKUP_WAL_S3_PREFIX:-}" "${BACKUP_SNAPSHOT_REPOSITORY:-}" |
+    sha256sum | cut -c1-16
+}
+
 backup_configured() {
   [[ -n "${BACKUP_WAL_S3_PREFIX:-}" || -n "${BACKUP_SNAPSHOT_REPOSITORY:-}" ]]
 }

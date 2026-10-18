@@ -187,13 +187,22 @@ cmd_install() {
 # over. Each value is taken literally up to the end of its line; deploy/.env is created from
 # .env.example first if there is none, and lines the file does not mention are left alone.
 cmd_apply_env() {
-  local from="${1:?Usage: deploy/orbit apply-env <file>}" line name count=0
+  local from="${1:?Usage: deploy/orbit apply-env <file>}" line name value current count=0
   [[ -f "$from" ]] || die "$from does not exist"
   [[ -f "$ENV_FILE" ]] || install -m 600 "$DEPLOY_DIR/.env.example" "$ENV_FILE"
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^[A-Z][A-Z0-9_]*= ]] || continue
     name="${line%%=*}"
-    env_set "$ENV_FILE" "$name" "${line#*=}"
+    value="${line#*=}"
+    current="$(grep -E "^$name=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
+    # An empty value clears an optional setting, but never a key the server created for itself.
+    if [[ -z "$value" && -n "$current" ]] && grep -qx "$name" <<<"$GENERATED_NAMES"; then continue; fi
+    # Every key of an installed server came from its master key; another one would not open them.
+    if [[ "$name" == ORBIT_MASTER_KEY && -n "$current" && "$value" != "$current" ]] &&
+      env_has POSTGRES_PASSWORD "$ENV_FILE"; then
+      die "$from has a different ORBIT_MASTER_KEY than this server was installed with; this server's is in $ENV_FILE"
+    fi
+    env_set "$ENV_FILE" "$name" "$value"
     count=$((count + 1))
   done <"$from"
   chmod 600 "$ENV_FILE"
@@ -313,14 +322,14 @@ smoke_test() {
 }
 
 # Backups switch themselves on once their settings are filled in: on the install that has them, or
-# on the first update after they were added. A failure here does not fail the install -- Orbit is
+# on the first update after they were added or pointed somewhere else. A failure here does not fail the install -- Orbit is
 # up by now -- but says what to do; the usual one is a replacement server meeting the backups of
 # the server it replaces, which it must restore from rather than write over. Its own process, so
 # that `set -e` holds inside it.
 ensure_backups_on() {
   backup_configured || return 0
-  [[ ! -f "$ORBIT_DATA_DIR/backup-state/initialized" ]] || return 0
-  step "The BACKUP_* settings are filled in; switching backups on"
+  [[ "$(cat "$ORBIT_DATA_DIR/backup-state/initialized" 2>/dev/null)" != "$(backup_config_id)" ]] || return 0
+  step "The BACKUP_* settings are new or changed; switching backups on"
   "$DEPLOY_DIR/orbit" backup setup ||
     warn "Backups are NOT on (the reason is above). Once it is fixed: deploy/orbit backup setup"
 }

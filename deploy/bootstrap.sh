@@ -58,10 +58,11 @@ preflight() {
 install_packages() {
   step "Installing packages and automatic security updates"
   retry apt-get update -qq
-  retry apt-get install -y -qq ca-certificates curl git openssl jq ufw fail2ban python3-systemd \
+  retry apt-get install -y -qq ca-certificates curl git openssl jq sudo ufw fail2ban python3-systemd \
     unattended-upgrades >/dev/null
   # Security updates install themselves every day. A kernel update needs a reboot to take effect;
-  # it happens at 04:30 UTC, after the nightly backup, and Docker brings Orbit back by itself.
+  # it happens at 04:30 UTC, after the nightly backup, and Docker brings Orbit back by itself --
+  # but not while someone is logged in, who may be halfway through a restore.
   cat >/etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -69,6 +70,7 @@ EOF
   cat >/etc/apt/apt.conf.d/52orbit-unattended-upgrades <<'EOF'
 Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-Time "04:30";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
 Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 EOF
   ok "packages installed; security updates are automatic"
