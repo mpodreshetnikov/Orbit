@@ -28,6 +28,9 @@ Common variables used by this repo:
   - `SUPABASE_JWT_SECRET` (mints short-lived user JWTs for MCP tool calls)
   - `MCP_OAUTH_SIGNING_SECRET` (HMAC key protecting the MCP consent form)
   - `MCP_PUBLIC_ORIGIN` (optional issuer override when proxy headers are unreliable)
+  - `APP_PUBLIC_ORIGIN` (the public origin sign-in and sign-out redirect to; when unset, the proxy's
+    forwarded headers decide, so set it wherever the app is not behind a proxy that overwrites them —
+    a self-hosted server sets it from its domain)
 - Supabase Edge Functions:
   - `OPENROUTER_API_KEY`
   - `WHO_ICD_CLIENT_ID`
