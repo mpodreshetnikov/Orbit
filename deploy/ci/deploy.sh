@@ -46,15 +46,17 @@ host="$(setting ORBIT_SERVER_HOST)"
 names="$(grep -oE '^[A-Z][A-Z0-9_]*=' "$here/../.env.example" | tr -d '=')
 POSTGRES_PASSWORD JWT_SECRET ANON_KEY SERVICE_ROLE_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY"
 install -m 600 /dev/null "$work/settings"
+# GitHub is where these settings live: one deleted there is emptied on the server too (except the
+# keys the server created for itself, which deploy/orbit apply-env never empties).
 for name in $names; do
   value="$(setting "$name")"
   [[ "$value" != *$'\n'* ]] || fail "$name has more than one line; deploy/.env takes one line per setting."
-  [[ -z "$value" ]] || printf '%s=%s\n' "$name" "$value" >>"$work/settings"
+  printf '%s=%s\n' "$name" "$value" >>"$work/settings"
 done
 # The images this repository's own CI published for the commit.
 [[ -n "$(setting ORBIT_PREBUILT_IMAGES)" ]] ||
-  printf 'ORBIT_PREBUILT_IMAGES=ghcr.io/%s\n' "${GITHUB_REPOSITORY,,}" >>"$work/settings"
-echo "Settings for deploy/.env: $(cut -d= -f1 "$work/settings" | paste -sd' ')"
+  sed -i "s|^ORBIT_PREBUILT_IMAGES=\$|ORBIT_PREBUILT_IMAGES=ghcr.io/${GITHUB_REPOSITORY,,}|" "$work/settings"
+echo "Settings for deploy/.env: $(grep -v '=$' "$work/settings" | cut -d= -f1 | paste -sd' ')"
 
 # SSH. The server's host key is pinned by ORBIT_SSH_KNOWN_HOSTS when set; otherwise the key it
 # presents now is accepted, and printed so that it can be pinned.

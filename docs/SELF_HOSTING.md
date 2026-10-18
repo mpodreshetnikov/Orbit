@@ -286,7 +286,8 @@ and installs — and after that deploys every commit that reaches `main`.
     ends green; the log shows the same steps as a manual install.
 
 After that, changing a setting is: edit it on the _Secrets and variables_ page, then _Run workflow_
-again. Every push to `main` (including syncing your fork) deploys by itself, after the checks pass.
+again. That page is where the settings live from now on: one deleted there is emptied on the server
+too, and an edit made in `deploy/.env` on the server by hand is overwritten by the next deploy. Every push to `main` (including syncing your fork) deploys by itself, after the checks pass.
 Root login is switched off by the first run, which is why GitHub logs in as `orbit` from then on.
 
 **The server is gone**: rent a new one with the same key (step 2), change `ORBIT_SERVER_HOST`,

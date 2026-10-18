@@ -23,6 +23,7 @@
 #                     for this run only (deploy/ci/deploy.sh passes the workflow's)
 set -Eeuo pipefail
 
+ORBIT_REPO_GIVEN="${ORBIT_REPO:+yes}"
 ORBIT_REPO="${ORBIT_REPO:-https://github.com/mpodreshetnikov/Orbit.git}"
 ORBIT_REF="${ORBIT_REF:-main}"
 ORBIT_DIR="${ORBIT_DIR:-/opt/orbit}"
@@ -115,13 +116,15 @@ install_docker() {
   rm -f "$tmp"
   systemctl enable --now docker >/dev/null 2>&1
   ok "container logs are capped at 30 MB per service"
-  # With a token, the images of a private repository can be pulled -- for this run only.
+  # With a token, the images of a private repository can be pulled -- for this run only, through
+  # a Docker client config of its own: root's stays as it was, whatever logins it holds.
   if [[ -n "${ORBIT_TOKEN_FILE:-}" ]]; then
-    if docker login ghcr.io -u x-access-token --password-stdin <"$ORBIT_TOKEN_FILE" >/dev/null 2>&1; then
-      trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-    else
+    DOCKER_CONFIG="$(mktemp -d)"
+    export DOCKER_CONFIG
+    trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+    [[ ! -f /root/.docker/config.json ]] || cp /root/.docker/config.json "$DOCKER_CONFIG/"
+    docker login ghcr.io -u x-access-token --password-stdin <"$ORBIT_TOKEN_FILE" >/dev/null 2>&1 ||
       warn "Could not log in to ghcr.io with the token; only public images can be pulled."
-    fi
   fi
 }
 
@@ -219,11 +222,16 @@ fetch_orbit() {
   step "Getting Orbit into $ORBIT_DIR"
   if [[ ! -d "$ORBIT_DIR/.git" ]]; then
     retry gitx clone --quiet "$ORBIT_REPO" "$ORBIT_DIR"
+  elif [[ -n "$ORBIT_REPO_GIVEN" && "$(git -C "$ORBIT_DIR" remote get-url origin)" != "$ORBIT_REPO" ]]; then
+    # Asked to deploy from a repository (a fork's CI, say): fetch from that one from now on.
+    git -C "$ORBIT_DIR" remote set-url origin "$ORBIT_REPO"
+    ok "$ORBIT_DIR now follows $ORBIT_REPO"
   fi
   # deploy/orbit runs as root on a checkout owned by orbit; git refuses that unless told it is fine.
   git config --system --get-all safe.directory | grep -qx "$ORBIT_DIR" ||
     git config --system --add safe.directory "$ORBIT_DIR"
-  if git -C "$ORBIT_DIR" diff --quiet HEAD -- 2>/dev/null; then
+  # Clean means no change at all, an untracked file included: deploy/orbit would build one in.
+  if [[ -z "$(git -C "$ORBIT_DIR" status --porcelain 2>/dev/null)" ]]; then
     # A branch is checked out as itself, so that `git pull` updates it later; a commit, detached.
     if gitx -C "$ORBIT_DIR" ls-remote --exit-code --heads origin "$ORBIT_REF" >/dev/null 2>&1; then
       retry gitx -C "$ORBIT_DIR" fetch --quiet origin "+refs/heads/$ORBIT_REF:refs/remotes/origin/$ORBIT_REF"

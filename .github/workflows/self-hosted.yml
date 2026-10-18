@@ -18,6 +18,8 @@ on:
 permissions:
   contents: read
   packages: read
+  # The tip check below reads the tip's own run.
+  actions: read
 
 jobs:
   deploy:
@@ -30,7 +32,18 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      # From main, the group above gives one deploy at a time but not the newest commit: a slower,
+      # older run can arrive last, or displace the newer one's pending job. The same check as the
+      # hosted production's deploys: deploy only while this commit is still main's tip (run by hand,
+      # the deploy is of whatever was chosen).
+      - name: Check this commit is still the tip of main
+        id: tip
+        if: github.event_name == 'push'
+        uses: ./.github/actions/production-tip-check
+        with:
+          job: Deploy to your server / Deploy to your server
       - name: Deploy
+        if: github.event_name != 'push' || steps.tip.outputs.deploy_sha != ''
         env:
           # Only the secrets a server needs reach this step, by name -- never the whole set, which
           # in this repository also holds the hosted production's tokens. Keep the list in step

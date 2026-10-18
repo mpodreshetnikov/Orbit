@@ -584,5 +584,6 @@ jobs:
     permissions:
       contents: read
       packages: read
+      actions: read
     uses: ./.github/workflows/self-hosted.yml
     secrets: inherit
