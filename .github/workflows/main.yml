@@ -344,7 +344,7 @@ jobs:
     # deploy-supabase. The old order ran the upload first, which only worked because the bucket
     # already existed in the live project.
     needs: [secrets-scan, quality-gates, extension-release-bundle, deploy-supabase]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SUPABASE_PROJECT_REF != ''
     name: Publish Extension Release
     environment: production
     # Serialised per release version, not globally. Two runs uploading the same
@@ -389,12 +389,14 @@ jobs:
         if: needs.quality-gates.outputs.extension_version_changed == 'true'
         run: just extension-release-publish
 
+  # The hosted production's jobs (Vercel, Supabase, the extension it serves) skip themselves in a
+  # repository without that production's variables -- a fork that deploys to its own server.
   deploy-vercel-production:
     # Not gated on the extension publish. Publishing a browser extension is an optional artifact
     # of a release; on 2026-08-31 its failure on an unset secret skipped both production deploys
     # for a merge that carried nothing either of them would have shipped. T-260901-w78.
     needs: [secrets-scan, quality-gates]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.VERCEL_PROJECT_ID != ''
     name: Deploy Vercel Production
     environment: production
     # Serialised, because the production alias lands on whichever run finishes last rather than
@@ -452,7 +454,7 @@ jobs:
   deploy-supabase:
     # Same as above, and this is also the job the publish now waits for.
     needs: [secrets-scan, quality-gates]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SUPABASE_PROJECT_REF != ''
     name: Deploy Supabase Production
     environment: production
     # Serialised for a different reason than the Vercel job: two overlapping deploys replace the
@@ -571,3 +573,17 @@ jobs:
               echo "::warning::$image is not public, so servers build it themselves. Make the package public once: github.com/${GITHUB_REPOSITORY_OWNER}?tab=packages -> the package -> Package settings -> Change visibility."
             fi
           done
+
+  deploy-self-hosted:
+    # Your own server, when this repository is set up for it (docs/SELF_HOSTING.md, "Deploy from
+    # GitHub"): the job is skipped until the ORBIT_SERVER_HOST variable exists. After the images, so
+    # the server pulls this commit's instead of building it.
+    needs: [publish-self-hosted-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ORBIT_SERVER_HOST != ''
+    name: Deploy to your server
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ./.github/workflows/self-hosted.yml
+    secrets: inherit
