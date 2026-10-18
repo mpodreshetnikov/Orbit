@@ -7,6 +7,8 @@
  * for any user, so it must never reach a client bundle.
  */
 
+import { getRequestOrigin } from "@/lib/request-origin";
+
 /** Scopes this server understands. Reads and writes are separable so a future client can ask for less. */
 export const MCP_SCOPE_READ = "health:read";
 export const MCP_SCOPE_WRITE = "health:write";
@@ -79,9 +81,8 @@ export function getSupabaseServiceRoleKey(): string {
 /**
  * The public origin this server is reachable at.
  *
- * Behind Vercel, `request.url` reflects the internal URL, so the forwarded
- * headers are the source of truth. `MCP_PUBLIC_ORIGIN` overrides both, which is
- * what you want when running behind a tunnel.
+ * The origin the request came in on (`getRequestOrigin`). `MCP_PUBLIC_ORIGIN`
+ * overrides it, which is what you want when running behind a tunnel.
  *
  * The value must be byte-identical everywhere it appears -- the discovery
  * documents, the authorize/token URLs, and the resource identifier -- or the
@@ -93,23 +94,7 @@ export function getPublicOrigin(request: Request): string {
     return override.replace(/\/+$/, "");
   }
 
-  const headers = request.headers;
-  const forwardedHost = headers.get("x-forwarded-host");
-  if (forwardedHost) {
-    const proto = headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || "https";
-    return `${proto}://${forwardedHost.split(",")[0]?.trim()}`;
-  }
-
-  const forwarded = headers.get("forwarded");
-  if (forwarded) {
-    const host = /host="?([^;,"]+)"?/i.exec(forwarded)?.[1];
-    const proto = /proto="?([^;,"]+)"?/i.exec(forwarded)?.[1] ?? "https";
-    if (host) {
-      return `${proto}://${host}`;
-    }
-  }
-
-  return new URL(request.url).origin;
+  return getRequestOrigin(request);
 }
 
 export function getIssuer(request: Request): string {

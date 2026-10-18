@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
+import { getRequestOrigin } from "@/lib/request-origin";
 
 const EMAIL_OTP_TYPES = new Set([
   "magiclink",
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
   const type = requestUrl.searchParams.get("type");
   const next = sanitizeNextPath(requestUrl.searchParams.get("next"));
 
-  const redirectUrl = new URL(next, request.url);
+  const redirectUrl = new URL(next, getRequestOrigin(request));
 
   if (code || (tokenHash && isEmailOtpType(type))) {
     // Create a response that we'll use to set cookies
@@ -68,5 +69,5 @@ export async function GET(request: NextRequest) {
   }
 
   // No code, redirect to login
-  return NextResponse.redirect(new URL("/login", request.url));
+  return NextResponse.redirect(new URL("/login", getRequestOrigin(request)));
 }

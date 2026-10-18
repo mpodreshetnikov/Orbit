@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import type { Database } from "@/types/database";
 import { getDevAuthBypassAutoLoginEmail, isDevAuthBypassEnabled } from "@/lib/dev-auth-bypass";
+import { getRequestOrigin } from "@/lib/request-origin";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -14,7 +15,7 @@ function sanitizeNextPath(next: string | null): string {
 }
 
 function toLoginRedirect(request: NextRequest): NextResponse {
-  return NextResponse.redirect(new URL("/login", request.url));
+  return NextResponse.redirect(new URL("/login", getRequestOrigin(request)));
 }
 
 function isAlreadyRegisteredError(message: string): boolean {
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
     return toLoginRedirect(request);
   }
 
-  const callbackUrl = new URL("/auth/callback", request.url);
+  const callbackUrl = new URL("/auth/callback", getRequestOrigin(request));
   callbackUrl.searchParams.set("next", nextPath);
 
   const { data: linkData, error: generateLinkError } = await adminClient.auth.admin.generateLink({
