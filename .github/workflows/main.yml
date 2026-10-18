@@ -548,6 +548,7 @@ jobs:
           echo "web=$prefix-web:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
           echo "tools=$prefix-tools:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
           echo "backup=$prefix-backup:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "functions=$prefix-functions:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
           echo "version=${GITHUB_SHA::12}" >>"$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
@@ -581,10 +582,25 @@ jobs:
           push: true
           cache-from: type=gha,scope=self-hosted-backup
           cache-to: type=gha,scope=self-hosted-backup,mode=max
+      # And the edge functions, every module they import downloaded at build time
+      # (deploy/functions.Dockerfile): on 2026-10-18 a server could not download from jsr.io or npm
+      # at all, and the functions never started.
+      - name: Assemble the edge functions
+        id: functions
+        run: |
+          deploy/orbit assemble-functions "$RUNNER_TEMP/functions"
+          echo "base=$(cat "$RUNNER_TEMP/functions/edge-runtime-image")" >>"$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ runner.temp }}/functions
+          platforms: linux/amd64
+          build-args: EDGE_RUNTIME_IMAGE=${{ steps.functions.outputs.base }}
+          tags: ${{ steps.names.outputs.functions }}
+          push: true
       # A server pulls without logging in, so a package GitHub created private is no use to it.
       - name: Check a server can pull them
         run: |
-          for image in "${{ steps.names.outputs.web }}" "${{ steps.names.outputs.tools }}" "${{ steps.names.outputs.backup }}"; do
+          for image in "${{ steps.names.outputs.web }}" "${{ steps.names.outputs.tools }}" "${{ steps.names.outputs.backup }}" "${{ steps.names.outputs.functions }}"; do
             if ! DOCKER_CONFIG="$(mktemp -d)" docker manifest inspect "$image" >/dev/null 2>&1; then
               echo "::warning::$image is not public, so servers build it themselves. Make the package public once: github.com/${GITHUB_REPOSITORY_OWNER}?tab=packages -> the package -> Package settings -> Change visibility."
             fi

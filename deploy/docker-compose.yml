@@ -73,11 +73,11 @@ services:
       GOTRUE_EXTERNAL_SKIP_NONCE_CHECK: "true"
 
   functions:
-    volumes:
-      !override # Assembled by deploy/orbit from supabase/functions plus upstream's router (`main`).
-      - ${ORBIT_DATA_DIR:?}/functions:/home/deno/functions:ro
-      - ${ORBIT_DATA_DIR:?}/functions-db:/home/deno/db:ro
-      - deno-cache:/root/.cache/deno
+    # Orbit's functions, upstream's router (`main`) and every module they import, in one image
+    # (deploy/functions.Dockerfile) that deploy/orbit pulls or builds: the runtime downloads nothing
+    # when it starts. No volumes: upstream's mounted the code, and a cache over the image's own.
+    image: orbit-functions:local
+    volumes: !reset []
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_HEALTH_OCR_MODEL: ${OPENROUTER_HEALTH_OCR_MODEL:-}

@@ -112,30 +112,46 @@ fetch_upstream() {
   git -C "$UPSTREAM_DIR" checkout -q FETCH_HEAD
 }
 
-# The edge runtime serves every function from one directory: Orbit's functions, upstream's router
-# (`main`, which dispatches /functions/v1/<name> to ./<name>), and an import map. The map carries
-# only `imports` from supabase/functions/deno.json -- the runtime does not read lockfile v5, the
-# same reason scripts/just/deploy-supabase.cjs moves deno.lock aside for the hosted deploy.
-sync_functions() {
-  local target="$ORBIT_DATA_DIR/functions" staging
-  staging="$(mktemp -d)"
-  cp -R "$ORBIT_ROOT/supabase/functions/." "$staging/"
-  rm -f "$staging/deno.lock" "$staging/deno.json"
-  find "$staging" -name '*_test.ts' -delete
-  rm -rf "$staging/main" && cp -R "$UPSTREAM_DIR/docker/volumes/functions/main" "$staging/main"
+# What deploy/functions.Dockerfile builds from, written into the empty or missing directory OUT:
+# Orbit's functions, upstream's router (`main`, which dispatches /functions/v1/<name> to ./<name>)
+# and an import map, all in functions/; the types they share in db/; the base image's name in
+# edge-runtime-image. The map carries only `imports` from supabase/functions/deno.json -- the
+# runtime does not read lockfile v5, the same reason scripts/just/deploy-supabase.cjs moves
+# deno.lock aside for the hosted deploy.
+assemble_functions() {
+  local out="${1:?Usage: deploy/orbit assemble-functions <dir>}"
+  fetch_upstream
+  mkdir -p "$out/functions" "$out/db"
+  cp -R "$ORBIT_ROOT/supabase/functions/." "$out/functions/"
+  rm -f "$out/functions/deno.lock" "$out/functions/deno.json"
+  find "$out/functions" -name '*_test.ts' -delete
+  rm -rf "$out/functions/main" && cp -R "$UPSTREAM_DIR/docker/volumes/functions/main" "$out/functions/main"
   sed -n '/"imports"/,/}/p' "$ORBIT_ROOT/supabase/functions/deno.json" |
-    { echo "{"; cat; echo "}"; } >"$staging/deno.jsonc"
-  mkdir -p "$target"
-  rm -rf "$target.old" && mv "$target" "$target.old" && mv "$staging" "$target" && rm -rf "$target.old"
+    { echo "{"; cat; echo "}"; } >"$out/functions/deno.jsonc"
   # _shared/database.types.ts re-exports ../../db/database.types.ts, i.e. supabase/db.
-  mkdir -p "$ORBIT_DATA_DIR/functions-db"
-  cp "$ORBIT_ROOT/supabase/db/database.types.ts" "$ORBIT_DATA_DIR/functions-db/database.types.ts"
-  chmod -R a+rX "$target" "$ORBIT_DATA_DIR/functions-db"
-  # The swap replaced the directory the running container has mounted; callers restart `functions`.
+  cp "$ORBIT_ROOT/supabase/db/database.types.ts" "$out/db/database.types.ts"
+  cp "$DEPLOY_DIR/functions.Dockerfile" "$out/Dockerfile"
+  cp "$DEPLOY_DIR/functions-warm.sh" "$out/warm.sh"
+  # The runtime upstream pins for this release, so the functions run on what upstream tested.
+  grep -m1 -oE 'supabase/edge-runtime:[^[:space:]"]+' "$UPSTREAM_DIR/docker/docker-compose.yml" \
+    >"$out/edge-runtime-image" || die "No edge runtime image in upstream's docker-compose.yml"
+  chmod -R a+rX "$out"
+}
+
+# CI's image for this commit when there is one; built here otherwise, which downloads the
+# functions' modules from deno.land, npm and jsr.io once, at build time.
+ensure_functions_image() {
+  pull_prebuilt functions && return
+  local dir
+  dir="$(mktemp -d)"
+  assemble_functions "$dir"
+  docker build --build-arg EDGE_RUNTIME_IMAGE="$(cat "$dir/edge-runtime-image")" \
+    -t orbit-functions:local "$dir" || { rm -rf "$dir"; die "Could not build the edge functions' image (above)"; }
+  rm -rf "$dir"
 }
 
 prepare_data_dir() {
-  mkdir -p "$ORBIT_DATA_DIR"/{db,storage,caddy,functions,wal-spool,backup-state}
+  mkdir -p "$ORBIT_DATA_DIR"/{db,storage,caddy,wal-spool,backup-state}
   # The database (uid 100 in supabase/postgres) writes the WAL spool; the backup container empties it.
   chown 100:101 "$ORBIT_DATA_DIR/wal-spool" 2>/dev/null || chmod 777 "$ORBIT_DATA_DIR/wal-spool"
 }
@@ -170,16 +186,18 @@ wait_healthy() {
 }
 
 # What the server, and Orbit's containers, can reach. Orbit needs both: the server pulls images, and
-# its containers call out -- Auth to Google for sign-in, the functions to deno.land, npm and JSR for
-# their modules and to OpenRouter for AI. Only reports: a failure further on then has its cause
-# named here. Probes from a one-off backup container on Orbit's own network, the path the services
-# take; a host counts as reachable only when it answers as it should (2xx or 3xx), not with a block
-# page. A failure shows curl's reason: a timeout where the server itself gets through usually means
-# packets too large for the server's link (deploy/bootstrap.sh, clamp_container_mss).
+# its containers call out -- Auth to Google for sign-in, the functions to OpenRouter for AI.
+# deno.land, npm and JSR matter only to a server that builds the functions' image itself. Only
+# reports: a failure further on then has its cause named here. Probes from a one-off backup
+# container on Orbit's own network, the path the services take; a host counts as reachable only
+# when it answers as it should (2xx or 3xx, not a block page) and the whole answer arrives -- some
+# networks let a connection open and then stall it. A failure shows curl's reason: a timeout where
+# the server itself gets through usually means packets too large for the server's link
+# (deploy/bootstrap.sh, clamp_container_mss).
 check_network() {
   local urls=(https://api.github.com https://accounts.google.com/.well-known/openid-configuration
-    https://deno.land https://registry.npmjs.org https://jsr.io https://openrouter.ai/api/v1/models)
-  local url host i from_server from_container dev ok_re='^[23][0-9][0-9]$' server_blocked=() container_blocked=() container_codes
+    https://deno.land https://registry.npmjs.org https://jsr.io/@std/path/meta.json https://openrouter.ai/api/v1/models)
+  local url host i from_server from_container dev server_blocked=() container_blocked=() container_codes
   dev="$(ip -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' || true)"
   step "Checking what this server and its containers can reach (link MTU $(cat "/sys/class/net/${dev:-none}/mtu" 2>/dev/null || echo '?'))"
   # The loop runs in the container: its variables are meant for that shell, not this one.
@@ -191,12 +209,12 @@ check_network() {
     i=$((i + 1))
     from_server="$(curl -s -o /dev/null -m 10 -w '%{http_code} %{exitcode}' "$url" || true)"
     from_container="$(sed -n "${i}p" <<<"$container_codes")"
-    printf '     %-62s server %-14s containers %s\n' "$url" "$(curl_result "${from_server:-000 0}")" "$(curl_result "${from_container:-000 0}")"
+    printf '     %-62s server %-20s containers %s\n' "$url" "$(curl_result "${from_server:-000 0}")" "$(curl_result "${from_container:-000 0}")"
     host="${url#https://}"
     host="${host%%/*}"
-    if ! [[ "${from_server%% *}" =~ $ok_re ]]; then
+    if ! reached "$from_server"; then
       server_blocked+=("$host")
-    elif ! [[ "${from_container%% *}" =~ $ok_re ]]; then
+    elif ! reached "$from_container"; then
       container_blocked+=("$host")
     fi
   done
@@ -207,6 +225,9 @@ check_network() {
   ((${#server_blocked[@]} + ${#container_blocked[@]})) || ok "the server and Orbit's containers reach the internet"
 }
 
+# Whether "<http code> <curl exit code>" is a whole answer of the expected kind.
+reached() { [[ "${1%% *}" =~ ^[23][0-9][0-9]$ && "${1##* }" == 0 ]]; }
+
 # "<http code> <curl exit code>" as a person reads it: the code, or why there was none.
 curl_result() {
   local code="${1%% *}" exit="${1##* }"
@@ -216,7 +237,9 @@ curl_result() {
     000:7) echo "refused" ;;
     000:35) echo "TLS failed" ;;
     000:*) echo "failed ($exit)" ;;
-    *) echo "$code" ;;
+    *:0) echo "$code" ;;
+    *:28) echo "$code, then stalled" ;;
+    *) echo "$code, then failed ($exit)" ;;
   esac
 }
 
@@ -241,7 +264,6 @@ cmd_install() {
   load_env
   fetch_upstream
   prepare_data_dir
-  sync_functions
   cmd_build
   check_network
   start_migrated
@@ -284,7 +306,6 @@ cmd_update() {
   load_env
   fetch_upstream
   prepare_data_dir
-  sync_functions
   cmd_build
   check_network
   start_migrated
@@ -301,9 +322,9 @@ start_migrated() {
   step "Starting the stack"
   compose up -d --remove-orphans
   wait_healthy 600
-  # The function code directory was swapped by sync_functions; a restart remounts it.
-  compose restart functions >/dev/null
-  wait_healthy 120
+  # Where releases before the functions image kept their code, mounted into the container `up` has
+  # just replaced; the image carries it now.
+  rm -rf "$ORBIT_DATA_DIR/functions" "$ORBIT_DATA_DIR/functions-db"
   warm_functions
 }
 
@@ -373,6 +394,9 @@ cmd_build() {
     compose build web
     compose --profile tools build migrate
   fi
+  step "Getting the edge functions"
+  ensure_functions_image
+  ok "the edge functions are ready, every module they import included"
   ensure_backup_image
 }
 
@@ -481,6 +505,8 @@ Usage: deploy/orbit <command>
                    Move an Orbit that runs on hosted Supabase onto this server
   compose ...      Run any docker compose command against this stack
   doctor           What this server's network lets Orbit reach, in detail (only reads)
+  assemble-functions DIR
+                   Write what the edge functions' image is built from into DIR (CI uses it)
 
 Guide: docs/SELF_HOSTING.md
 EOF
@@ -507,6 +533,7 @@ main() {
     migrate-from-supabase) cmd_migrate_from_supabase "$@" ;;
     compose) load_env && compose "$@" ;;
     doctor) bash "$DEPLOY_DIR/doctor.sh" ;;
+    assemble-functions) assemble_functions "$@" ;;
     help | -h | --help) usage ;;
     *) usage && exit 1 ;;
   esac
