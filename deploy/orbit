@@ -179,7 +179,25 @@ cmd_install() {
   cmd_build
   start_migrated
   smoke_test
+  ensure_backups_on
   summary
+}
+
+# Writes the NAME=value lines of a settings file into deploy/.env: what CI and bootstrap.sh hand
+# over. Each value is taken literally up to the end of its line; deploy/.env is created from
+# .env.example first if there is none, and lines the file does not mention are left alone.
+cmd_apply_env() {
+  local from="${1:?Usage: deploy/orbit apply-env <file>}" line name count=0
+  [[ -f "$from" ]] || die "$from does not exist"
+  [[ -f "$ENV_FILE" ]] || install -m 600 "$DEPLOY_DIR/.env.example" "$ENV_FILE"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[A-Z][A-Z0-9_]*= ]] || continue
+    name="${line%%=*}"
+    env_set "$ENV_FILE" "$name" "${line#*=}"
+    count=$((count + 1))
+  done <"$from"
+  chmod 600 "$ENV_FILE"
+  ok "wrote $count setting(s) into $ENV_FILE"
 }
 
 cmd_update() {
@@ -194,6 +212,7 @@ cmd_update() {
   cmd_build
   start_migrated
   smoke_test
+  ensure_backups_on
   ok "Orbit updated to $ORBIT_VERSION"
 }
 
@@ -293,6 +312,19 @@ smoke_test() {
   ok "Caddy routes the domain to Auth, the database API and the web app"
 }
 
+# Backups switch themselves on once their settings are filled in: on the install that has them, or
+# on the first update after they were added. A failure here does not fail the install -- Orbit is
+# up by now -- but says what to do; the usual one is a replacement server meeting the backups of
+# the server it replaces, which it must restore from rather than write over. Its own process, so
+# that `set -e` holds inside it.
+ensure_backups_on() {
+  backup_configured || return 0
+  [[ ! -f "$ORBIT_DATA_DIR/backup-state/initialized" ]] || return 0
+  step "The BACKUP_* settings are filled in; switching backups on"
+  "$DEPLOY_DIR/orbit" backup setup ||
+    warn "Backups are NOT on (the reason is above). Once it is fixed: deploy/orbit backup setup"
+}
+
 summary() {
   cat <<EOF
 
@@ -301,8 +333,16 @@ $(c_green "Orbit is up") at $ORBIT_PUBLIC_URL (version $ORBIT_VERSION)
 Next steps, if you have not done them yet (docs/SELF_HOSTING.md, step 3):
   - DNS: an A record for $ORBIT_DOMAIN pointing at this server's IP address.
   - Google Cloud Console: authorized redirect URI $ORBIT_PUBLIC_URL/auth/v1/callback
-  - Backups: fill the BACKUP_* lines in deploy/.env and run deploy/orbit backup setup.
-Allowed to sign in: $ORBIT_ALLOWED_EMAILS
+EOF
+  backup_configured || echo "  - Backups: fill the BACKUP_* lines in deploy/.env and run deploy/orbit update."
+  echo "Allowed to sign in: $ORBIT_ALLOWED_EMAILS"
+  [[ -n "${ORBIT_MASTER_KEY_CREATED:-}" ]] || return 0
+  cat <<EOF
+
+$(c_green "Save the master key now.") Every password and key of this server is derived from it, so
+with it and the backup buckets a lost server can be rebuilt. Show it with
+  grep ORBIT_MASTER_KEY $ENV_FILE
+and keep it in a password manager (or as the ORBIT_MASTER_KEY secret of your GitHub fork).
 EOF
 }
 
@@ -336,6 +376,7 @@ Usage: deploy/orbit <command>
   install          First install on this server (safe to re-run)
   update           Rebuild and migrate after `git pull`
   check            Check the server and deploy/.env without changing anything
+  apply-env FILE   Write the NAME=value lines of FILE into deploy/.env (CI and bootstrap.sh use it)
   status           Services, health, URL, data size, last backup
   migrate          Apply database migrations and deploy.sql only
   logs [service]   Follow logs (services: web caddy db auth rest storage realtime functions ...)
@@ -366,6 +407,7 @@ main() {
     install) cmd_install "$@" ;;
     update) cmd_update "$@" ;;
     check) cmd_check "$@" ;;
+    apply-env) cmd_apply_env "$@" ;;
     status) cmd_status "$@" ;;
     build) cmd_build "$@" ;;
     migrate) cmd_migrate "$@" ;;

@@ -46,19 +46,39 @@ address. It can take from a minute to an hour to start working; check with `ping
 
 ## Step 2 — Prepare the server
 
-Connect to the server (`ssh root@<server ip>`) and run, one line at a time:
+Connect to the server (`ssh root@<server ip>`) and run this one line:
 
-    apt update && apt install -y git curl openssl
-    curl -fsSL https://get.docker.com | sh
-    git clone https://github.com/mpodreshetnikov/Orbit.git /opt/orbit
+    curl -fsSL https://raw.githubusercontent.com/mpodreshetnikov/Orbit/main/deploy/bootstrap.sh | bash
+
+In a minute or two it installs Docker, sets the server up safely ("What the server setup does",
+below) and puts Orbit into `/opt/orbit`. It ends with `The server is ready.`
+
+From now on log in as `orbit`, not `root`: `ssh orbit@<server ip>`, with the same key. Then:
+
     cd /opt/orbit
 
-`docker --version` should now print a version, and you are inside the Orbit folder.
+If you logged in with a password, not a key, the setup leaves passwords allowed and says so: add
+your key first (`ssh-copy-id root@<server ip>` from your computer) and run the line again.
+
+### What the server setup does
+
+`deploy/bootstrap.sh` only does what a careful administrator would, and is safe to run again:
+
+| What                       | Why                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| User `orbit` with `sudo`   | Day-to-day logins are not root; it gets the SSH keys root already has                      |
+| SSH: keys only, no root    | Password guessing stops working. Done only once `orbit` has a key, so nobody is locked out |
+| Firewall (`ufw`)           | Only SSH (22), HTTP (80) and HTTPS (443) are reachable from outside                        |
+| `fail2ban`                 | An address that fails to log in 5 times in 10 minutes is banned for an hour                |
+| Automatic security updates | Installed daily; if one needs a reboot, it happens at 04:30 UTC and Orbit starts by itself |
+| Docker, logs capped        | Each service keeps at most 30 MB of logs, so they cannot fill the disk                     |
+
+The database and the Supabase dashboard are not reachable from outside at all, firewall or not:
+Orbit's containers publish only ports 80 and 443.
 
 ## Step 3 — Fill in the settings
 
-    cp deploy/.env.example deploy/.env
-    nano deploy/.env
+    sudo nano deploy/.env
 
 Every setting has a comment above it saying what it is and where to get it. You must replace each
 `CHANGE_ME`:
@@ -94,24 +114,26 @@ In `nano`, save with `Ctrl+O`, `Enter`, and leave with `Ctrl+X`.
 
 You can check the file without changing anything:
 
-    deploy/orbit check
+    sudo deploy/orbit check
 
 It prints one line per thing still missing, or `OK deploy/.env is complete`.
 
 ## Step 4 — Install
 
-    deploy/orbit install
+    sudo deploy/orbit install
 
-The first run takes 5–15 minutes: it downloads Supabase and the app and starts everything. It
-prints what it is doing, and ends with:
+The first run takes 5–15 minutes: it downloads Supabase and the app and starts everything. If you
+filled in the backup settings too (Step 5), it switches backups on as well. It prints what it is
+doing, and ends with:
 
     Orbit is up at https://orbit.example.com
 
 Open that address, press **Sign in with Google**, and you are in.
 
-`deploy/orbit install` also generated the passwords and keys the server needs and **appended them
-to `deploy/.env`**. That file is now the key to all your data: **copy it to a password manager or
-another safe place now.** Without it, even a perfect backup cannot be opened.
+`deploy/orbit install` also created the passwords and keys the server needs, all derived from one
+**master key**, and wrote them into `deploy/.env`. **Copy the master key to a password manager now**
+(the install shows how to see it). With it and the backups, a lost server can be rebuilt with the
+same keys; without it, even a perfect backup cannot be opened.
 
 ## Step 5 — Backups (do not skip this)
 
@@ -156,11 +178,16 @@ In `deploy/.env`, section 4:
 
 Then:
 
-    deploy/orbit backup setup
+    sudo deploy/orbit update
 
-It checks both buckets, takes the first full backup and prints the status. **Then copy
-`deploy/.env` to your password manager again**: it now holds `BACKUP_ENCRYPTION_KEY` and
-`BACKUP_SNAPSHOT_PASSWORD`, without which the backups cannot be decrypted by anyone, including you.
+It sees the new settings and switches backups on: checks both buckets, takes the first full backup
+and prints the status (`deploy/orbit backup setup` does the same on its own). The keys that encrypt
+the backups are derived from the master key, so the master key in your password manager is all you
+need to open them. An instance installed before master keys existed has no master key: keep a copy
+of its whole `deploy/.env` instead.
+
+A bucket that already holds the backups of another Orbit — say, of a server you are replacing — is
+refused rather than written over: restore from it first (below), or use a new folder.
 
 ### Get told when something is wrong
 
@@ -178,19 +205,23 @@ Run `deploy/orbit update` after changing them.
 
 ### Checking and restoring
 
-    deploy/orbit backup status     # when each copy last succeeded
-    deploy/orbit backup now        # take a full backup right now
-    deploy/orbit backup verify     # restore into a scratch area and check it opens
+    sudo deploy/orbit backup status     # when each copy last succeeded
+    sudo deploy/orbit backup now        # take a full backup right now
+    sudo deploy/orbit backup verify     # restore into a scratch area and check it opens
 
 **Undo a mistake** (deleted something an hour ago) — restore the state from just before it:
 
-    deploy/orbit restore --time "2026-10-17 14:05:00+00"
+    sudo deploy/orbit restore --time "2026-10-17 14:05:00+00"
 
-**The server is gone** — on a new server, follow Steps 1–2, put your saved `deploy/.env` in place
-(do not create a new one), then:
+**The server is gone** — on a new server, follow Steps 1–3 with the same settings, and put your
+saved master key into `ORBIT_MASTER_KEY` before installing (or put your saved `deploy/.env` in place
+instead, if the instance predates master keys). Then:
 
-    deploy/orbit install
-    deploy/orbit restore
+    sudo deploy/orbit install
+    sudo deploy/orbit restore
+
+`install` starts an empty Orbit and says the backup buckets hold another database's backups — the
+old server's, which is what `restore` brings back.
 
 `restore` asks you to type `RESTORE`, stops Orbit, rebuilds the database from bucket 1 (up to the
 last minute, or to `--time`), brings back uploaded files and the Vault key from bucket 2, and starts
@@ -199,7 +230,7 @@ until you remove it. If the restore fails, Orbit is put back on the data it had.
 
 **Bucket 1 is lost too** — rebuild from the nightly snapshot in bucket 2 instead:
 
-    deploy/orbit restore --from-snapshot
+    sudo deploy/orbit restore --from-snapshot
 
 This loads the nightly database dump (so up to a day of changes is lost) and the uploaded files from
 the same moment. `--time` works here too and picks the last snapshot before it.
@@ -234,8 +265,8 @@ time; you switch over only when the new one checks out, and you can switch back.
     export SOURCE_DB_URL='postgresql://postgres.<ref>:<password>@<pooler host>:5432/postgres'
     export SOURCE_SUPABASE_URL='https://<ref>.supabase.co'
     export SOURCE_SERVICE_ROLE_KEY='<legacy service_role key>'
-    deploy/orbit migrate-from-supabase export # reads only; the old project is not changed
-    deploy/orbit migrate-from-supabase import # asks you to type IMPORT
+    sudo deploy/orbit migrate-from-supabase export # reads only; the old project is not changed
+    sudo deploy/orbit migrate-from-supabase import # asks you to type IMPORT
 
     # ends with: verified: N tables have the same row counts, M objects the same bytes
 
@@ -248,16 +279,18 @@ time; you switch over only when the new one checks out, and you can switch back.
 
 ## Everyday commands
 
-    deploy/orbit status            # is everything running? (all should say healthy)
-    deploy/orbit logs web          # follow one service's log (Ctrl+C to stop)
-    deploy/orbit restart           # restart everything
-    deploy/orbit down              # stop everything; data stays in /var/lib/orbit
+Log in as `orbit` and `cd /opt/orbit` first. `deploy/orbit` runs as root, hence the `sudo`.
+
+    sudo deploy/orbit status            # is everything running? (all should say healthy)
+    sudo deploy/orbit logs web          # follow one service's log (Ctrl+C to stop)
+    sudo deploy/orbit restart           # restart everything
+    sudo deploy/orbit down              # stop everything; data stays in /var/lib/orbit
 
 **Updating** to a newer Orbit:
 
     cd /opt/orbit
     git pull
-    deploy/orbit update
+    sudo deploy/orbit update
 
 `update` gets the new app, applies database changes and restarts only what changed. It is safe to
 run as often as you like.
@@ -267,7 +300,7 @@ run as often as you like.
 
 **The Supabase dashboard** (tables, logs, SQL) is not on the internet. To open it:
 
-    deploy/orbit studio
+    sudo deploy/orbit studio
 
 and follow the printed instructions (an SSH tunnel from your computer, then <http://localhost:8000>).
 `deploy/orbit studio-stop` closes it again.
@@ -287,9 +320,14 @@ and follow the printed instructions (an SSH tunnel from your computer, then <htt
 
 ## Secrets
 
-Never edit the section of `deploy/.env` below `Generated by deploy/orbit`, and never delete a line
-from it: the database was initialised with that password, and every signed-in session and connected
-AI assistant was signed with that `JWT_SECRET`. `deploy/orbit` only ever adds what is missing.
+Every password and key the server needs for itself is derived from `ORBIT_MASTER_KEY` and written
+into the section of `deploy/.env` below `Generated by deploy/orbit`. A value you set yourself always
+wins over the derived one — moving from hosted Supabase uses this to keep its `JWT_SECRET`.
+
+Never edit that section, never delete a line from it, and never change `ORBIT_MASTER_KEY` once
+installed: the database was initialised with that password, and every signed-in session and
+connected AI assistant was signed with that `JWT_SECRET`. `deploy/orbit` only ever adds what is
+missing.
 
 To rotate a secret on purpose, stop the stack, change it in `deploy/.env` and in the place that
 already holds it (the database password: `ALTER USER ... PASSWORD` for each Supabase role, as the
@@ -303,6 +341,9 @@ You are deploying Orbit for a person. The contract:
 - **The person owns three things you cannot produce:** a server they can SSH into, a domain whose A
   record points at it, and a Google OAuth client (Step 3). Ask for them up front, together, with
   the exact redirect URI `https://<domain>/auth/v1/callback`. Everything else you can do yourself.
+- **Prepare a fresh server with `deploy/bootstrap.sh`** (Step 2), as root. With
+  `ORBIT_SETTINGS=<file of NAME=value lines>` it also fills `deploy/.env` and installs, unattended.
+  It locks SSH to keys and disables root login: reconnect as `orbit` afterwards.
 - **Configuration is only `deploy/.env`.** Start from `deploy/.env.example`; it documents every
   variable. Do not edit `deploy/docker-compose.yml` or the downloaded `deploy/.upstream/` for a
   per-instance setting; put local overrides in your own compose file and list it in
@@ -314,7 +355,8 @@ You are deploying Orbit for a person. The contract:
   `deploy/orbit status` lists every service `running` and `healthy`; `curl -sI https://<domain>/login`
   returns `HTTP/2 200`; `curl -s https://<domain>/auth/v1/health` returns JSON with `"name":"GoTrue"`.
 - **Never** regenerate or remove lines below `Generated by deploy/orbit` in `deploy/.env`, never
-  delete `/var/lib/orbit`, and never print the generated secrets into a chat.
+  change `ORBIT_MASTER_KEY`, never delete `/var/lib/orbit`, and never print the master key or the
+  generated secrets into a chat. Tell the person to save the master key, and how to see it.
 - **Backups are part of done.** Ask for two S3 buckets at two different providers (Step 5) and run
   `deploy/orbit backup setup`; `deploy/orbit backup verify` must print `restore verified`.
 - **Moving an existing Orbit** off hosted Supabase is "Moving from hosted Supabase" above.

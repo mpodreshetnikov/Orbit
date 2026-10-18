@@ -71,7 +71,11 @@ backup_setup() {
   echo
   echo "$(c_green "Backups are on.") Two keys in deploy/.env decrypt them: BACKUP_ENCRYPTION_KEY (bucket 1)"
   echo "and BACKUP_SNAPSHOT_PASSWORD (bucket 2). They live on this server: if it is lost, so are they,"
-  echo "unless you keep a copy. Store deploy/.env in your password manager NOW."
+  if env_has ORBIT_MASTER_KEY "$ENV_FILE" || [[ -n "${ORBIT_MASTER_KEY:-}" ]]; then
+    echo "unless you keep a copy of ORBIT_MASTER_KEY, which recreates both. Keep it safe."
+  else
+    echo "unless you keep a copy. Store deploy/.env in your password manager NOW."
+  fi
 }
 
 cmd_backup() {
@@ -177,8 +181,11 @@ cmd_restore() {
   # restored database continues on a new timeline, or is a new one.
   step "Switching backups back on"
   compose up -d backup
-  in_backup init
-  in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
+  if in_backup init; then
+    in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
+  else
+    warn "Backups are NOT on again (the reason is above). Fix it, then run deploy/orbit backup setup"
+  fi
   ok "Restored. The data it replaced is in $ORBIT_DATA_DIR/*.before-restore-$stamp; delete it once you are happy."
 }
 

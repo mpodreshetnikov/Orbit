@@ -46,6 +46,7 @@ walg() {
     WALG_LIBSODIUM_KEY="${BACKUP_ENCRYPTION_KEY:?BACKUP_ENCRYPTION_KEY is missing; run deploy/orbit backup setup}" \
     WALG_LIBSODIUM_KEY_TRANSFORM=hex \
     WALG_COMPRESSION_METHOD=brotli \
+    WALG_PREVENT_WAL_OVERWRITE=true \
     PGHOST=db PGPORT=5432 PGUSER=supabase_admin PGDATABASE=postgres PGPASSWORD="${POSTGRES_PASSWORD:?}" \
     wal-g "$@"
 }
@@ -302,7 +303,21 @@ init() {
   if restic_configured && ! rst cat config >/dev/null 2>&1; then
     rst init
   fi
-  if walg_configured; then walg backup-list >/dev/null; fi
+  if walg_configured; then
+    # A new database starts its WAL at the same file names as the one before it, so archiving it
+    # into a folder that holds another database's backups would overwrite that one's history -- the
+    # copy a replacement server is meant to restore from. WALG_PREVENT_WAL_OVERWRITE stops the
+    # overwrite itself; this stops it from being set up at all, and says why.
+    local ours theirs
+    ours="$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -U supabase_admin -d postgres -Atc 'select system_identifier from pg_control_system()')"
+    theirs="$(walg backup-list --detail --json 2>/dev/null | jq -r '.[]?.system_identifier' | sort -u)"
+    if [[ -n "$theirs" ]] && ! grep -qx "$ours" <<<"$theirs"; then
+      echo "bucket 1 ($BACKUP_WAL_S3_PREFIX) already holds the backups of another database." >&2
+      echo "If this server replaces a lost one, restore from it first: deploy/orbit restore." >&2
+      echo "To start a new chain of backups instead, point BACKUP_WAL_S3_PREFIX at a new, empty folder." >&2
+      return 1
+    fi
+  fi
   touch "$STATE/initialized"
   # From now on the database's archive_command keeps its segments for upload (archive-wal.sh).
   touch "$SPOOL/.enabled"
