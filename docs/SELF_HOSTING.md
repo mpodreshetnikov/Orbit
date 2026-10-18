@@ -271,9 +271,13 @@ and installs — and after that deploys every commit that reaches `main`.
     | Secrets                                   | `ORBIT_MASTER_KEY`                  | The master key from step 3                             |
     | Variables, or Secrets for the secret ones | everything in `deploy/.env.example` | Same names, same values as Step 3 and Step 5 describe  |
 
-    At the least `ORBIT_DOMAIN`, `ORBIT_ADMIN_EMAIL`, `ORBIT_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID` and
-    (as a secret) `GOOGLE_CLIENT_SECRET`; for backups, the `BACKUP_*` names. Put passwords and keys
-    under _Secrets_, which nobody can read back; the rest can be _Variables_. Optional:
+    At the least `ORBIT_DOMAIN`, `ORBIT_ADMIN_EMAIL`, `ORBIT_ALLOWED_EMAILS` and `GOOGLE_CLIENT_ID`
+    as variables and `GOOGLE_CLIENT_SECRET` as a secret; for backups, the `BACKUP_*` names. These
+    go under _Secrets_, which nobody can read back: `GOOGLE_CLIENT_SECRET`, `OPENROUTER_API_KEY`,
+    `WHO_ICD_CLIENT_SECRET`, the four `BACKUP_*_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`,
+    `ALERT_TELEGRAM_BOT_TOKEN`, `BACKUP_HEALTHCHECK_URL`, `OBS_GRAFANA_CLOUD_OTLP_HEADERS` (and, when
+    moving from hosted Supabase, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `VAPID_*`). Everything
+    else is a _Variable_ — a setting saved as a secret under any other name is not read. Optional:
     `ORBIT_SERVER_USER` if your provider's login is not `root` (e.g. `ubuntu`), and
     `ORBIT_SSH_KNOWN_HOSTS` with the output of `ssh-keyscan <server ip>` so GitHub checks it talks to
     your server.
