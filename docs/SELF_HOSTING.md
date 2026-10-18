@@ -262,7 +262,9 @@ and installs — and after that deploys every commit that reaches `main`.
 
 3.  **Make the master key**: `openssl rand -hex 32`. Save the output in your password manager now —
     it is the one thing that, with the backups, rebuilds everything.
-4.  **Type in the settings**: in your fork, _Settings → Secrets and variables → Actions_.
+4.  **Type in the settings**: in your fork, _Settings → Secrets and variables → Actions_ (the
+    _Repository_ ones). Or in _Settings → Environments → production_: the deploy reads both, and
+    where a name is in both, the environment's value wins.
 
     | Where                                     | Name                                | Value                                                  |
     | ----------------------------------------- | ----------------------------------- | ------------------------------------------------------ |

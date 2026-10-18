@@ -396,7 +396,10 @@ jobs:
     # of a release; on 2026-08-31 its failure on an unset secret skipped both production deploys
     # for a merge that carried nothing either of them would have shipped. T-260901-w78.
     needs: [secrets-scan, quality-gates]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.VERCEL_PROJECT_ID != ''
+    # Not gated on VERCEL_PROJECT_ID here: it is a variable of the production environment, which a
+    # job-level `if` cannot see -- gated here, this job skipped on 2026-10-18 with the variable set.
+    # The tip check below carries that condition, and every later step follows the tip check.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
     # Serialised, because the production alias lands on whichever run finishes last rather than
@@ -431,6 +434,7 @@ jobs:
       # fails naming that run when the newer commit's deploy was displaced and will not.
       - name: Check this commit is still the tip of main
         id: tip
+        if: vars.VERCEL_PROJECT_ID != ''
         uses: ./.github/actions/production-tip-check
         with:
           job: Deploy Vercel Production
@@ -576,10 +580,11 @@ jobs:
 
   deploy-self-hosted:
     # Your own server, when this repository is set up for it (docs/SELF_HOSTING.md, "Deploy from
-    # GitHub"): the job is skipped until the ORBIT_SERVER_HOST variable exists. After the images, so
-    # the server pulls this commit's instead of building it.
+    # GitHub"): it stands down until the ORBIT_SERVER_HOST variable exists, a check made inside it
+    # because the variable may live in the production environment, which an `if` here cannot see.
+    # After the images, so the server pulls this commit's instead of building it.
     needs: [publish-self-hosted-images]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ORBIT_SERVER_HOST != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy to your server
     permissions:
       contents: read
