@@ -356,7 +356,7 @@ jobs:
     # deploy-supabase. The old order ran the upload first, which only worked because the bucket
     # already existed in the live project.
     needs: [secrets-scan, quality-gates, extension-release-bundle, deploy-supabase]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SUPABASE_PROJECT_REF != ''
     name: Publish Extension Release
     environment: production
     # Serialised per release version, not globally. Two runs uploading the same
@@ -401,11 +401,16 @@ jobs:
         if: needs.quality-gates.outputs.extension_version_changed == 'true'
         run: just extension-release-publish
 
+  # The hosted production's jobs (Vercel, Supabase, the extension it serves) skip themselves in a
+  # repository without that production's variables -- a fork that deploys to its own server.
   deploy-vercel-production:
     # Not gated on the extension publish. Publishing a browser extension is an optional artifact
     # of a release; on 2026-08-31 its failure on an unset secret skipped both production deploys
     # for a merge that carried nothing either of them would have shipped. T-260901-w78.
     needs: [secrets-scan, quality-gates]
+    # Not gated on VERCEL_PROJECT_ID here: it is a variable of the production environment, which a
+    # job-level `if` cannot see -- gated here, this job skipped on 2026-10-18 with the variable set.
+    # The tip check below carries that condition, and every later step follows the tip check.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Deploy Vercel Production
     environment: production
@@ -441,6 +446,7 @@ jobs:
       # fails naming that run when the newer commit's deploy was displaced and will not.
       - name: Check this commit is still the tip of main
         id: tip
+        if: vars.VERCEL_PROJECT_ID != ''
         uses: ./.github/actions/production-tip-check
         with:
           job: Deploy Vercel Production
@@ -464,7 +470,7 @@ jobs:
   deploy-supabase:
     # Same as above, and this is also the job the publish now waits for.
     needs: [secrets-scan, quality-gates]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SUPABASE_PROJECT_REF != ''
     name: Deploy Supabase Production
     environment: production
     # Serialised for a different reason than the Vercel job: two overlapping deploys replace the
@@ -553,6 +559,8 @@ jobs:
           prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "web=$prefix-web:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
           echo "tools=$prefix-tools:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "backup=$prefix-backup:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "functions=$prefix-functions:$GITHUB_SHA" >>"$GITHUB_OUTPUT"
           echo "version=${GITHUB_SHA::12}" >>"$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
@@ -575,11 +583,52 @@ jobs:
           tags: ${{ steps.names.outputs.tools }}
           push: true
           cache-from: type=gha,scope=self-hosted
+      # The backup image too: building it on the server needs Ubuntu's and PostgreSQL's package
+      # archives, which a server's network may not reach -- on 2026-10-18 a first install stopped
+      # after twelve minutes of apt timeouts on exactly this build.
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/backup
+          platforms: linux/amd64
+          tags: ${{ steps.names.outputs.backup }}
+          push: true
+          cache-from: type=gha,scope=self-hosted-backup
+          cache-to: type=gha,scope=self-hosted-backup,mode=max
+      # And the edge functions, every module they import downloaded at build time
+      # (deploy/functions.Dockerfile): on 2026-10-18 a server could not download from jsr.io or npm
+      # at all, and the functions never started.
+      - name: Assemble the edge functions
+        id: functions
+        run: |
+          deploy/orbit assemble-functions "$RUNNER_TEMP/functions"
+          echo "base=$(cat "$RUNNER_TEMP/functions/edge-runtime-image")" >>"$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ runner.temp }}/functions
+          platforms: linux/amd64
+          build-args: EDGE_RUNTIME_IMAGE=${{ steps.functions.outputs.base }}
+          tags: ${{ steps.names.outputs.functions }}
+          push: true
       # A server pulls without logging in, so a package GitHub created private is no use to it.
       - name: Check a server can pull them
         run: |
-          for image in "${{ steps.names.outputs.web }}" "${{ steps.names.outputs.tools }}"; do
+          for image in "${{ steps.names.outputs.web }}" "${{ steps.names.outputs.tools }}" "${{ steps.names.outputs.backup }}" "${{ steps.names.outputs.functions }}"; do
             if ! DOCKER_CONFIG="$(mktemp -d)" docker manifest inspect "$image" >/dev/null 2>&1; then
               echo "::warning::$image is not public, so servers build it themselves. Make the package public once: github.com/${GITHUB_REPOSITORY_OWNER}?tab=packages -> the package -> Package settings -> Change visibility."
             fi
           done
+
+  deploy-self-hosted:
+    # Your own server, when this repository is set up for it (docs/SELF_HOSTING.md, "Deploy from
+    # GitHub"): it stands down until the ORBIT_SERVER_HOST variable exists, a check made inside it
+    # because the variable may live in the production environment, which an `if` here cannot see.
+    # After the images, so the server pulls this commit's instead of building it.
+    needs: [publish-self-hosted-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Deploy to your server
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    uses: ./.github/workflows/self-hosted.yml
+    secrets: inherit

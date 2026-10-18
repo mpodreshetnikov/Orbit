@@ -34,7 +34,7 @@ cmd_migrate_from_supabase() {
       [[ -n "${SOURCE_DB_URL:-}" && -n "${SOURCE_SUPABASE_URL:-}" && -n "${SOURCE_SERVICE_ROLE_KEY:-}" ]] ||
         die "Set SOURCE_DB_URL, SOURCE_SUPABASE_URL and SOURCE_SERVICE_ROLE_KEY first (docs/SELF_HOSTING.md, Moving from hosted Supabase)."
       export SOURCE_DB_URL SOURCE_SUPABASE_URL SOURCE_SERVICE_ROLE_KEY
-      compose build backup >/dev/null
+      ensure_backup_image >/dev/null
       step "Exporting from $SOURCE_SUPABASE_URL"
       migration_run export
       ok "Exported into $ORBIT_DATA_DIR/migration. Next: deploy/orbit migrate-from-supabase import"

@@ -112,36 +112,52 @@ fetch_upstream() {
   git -C "$UPSTREAM_DIR" checkout -q FETCH_HEAD
 }
 
-# The edge runtime serves every function from one directory: Orbit's functions, upstream's router
-# (`main`, which dispatches /functions/v1/<name> to ./<name>), and an import map. The map carries
-# only `imports` from supabase/functions/deno.json -- the runtime does not read lockfile v5, the
-# same reason scripts/just/deploy-supabase.cjs moves deno.lock aside for the hosted deploy.
-sync_functions() {
-  local target="$ORBIT_DATA_DIR/functions" staging
-  staging="$(mktemp -d)"
-  cp -R "$ORBIT_ROOT/supabase/functions/." "$staging/"
-  rm -f "$staging/deno.lock" "$staging/deno.json"
-  find "$staging" -name '*_test.ts' -delete
-  rm -rf "$staging/main" && cp -R "$UPSTREAM_DIR/docker/volumes/functions/main" "$staging/main"
+# What deploy/functions.Dockerfile builds from, written into the empty or missing directory OUT:
+# Orbit's functions, upstream's router (`main`, which dispatches /functions/v1/<name> to ./<name>)
+# and an import map, all in functions/; the types they share in db/; the base image's name in
+# edge-runtime-image. The map carries only `imports` from supabase/functions/deno.json -- the
+# runtime does not read lockfile v5, the same reason scripts/just/deploy-supabase.cjs moves
+# deno.lock aside for the hosted deploy.
+assemble_functions() {
+  local out="${1:?Usage: deploy/orbit assemble-functions <dir>}"
+  fetch_upstream
+  mkdir -p "$out/functions" "$out/db"
+  cp -R "$ORBIT_ROOT/supabase/functions/." "$out/functions/"
+  rm -f "$out/functions/deno.lock" "$out/functions/deno.json"
+  find "$out/functions" -name '*_test.ts' -delete
+  rm -rf "$out/functions/main" && cp -R "$UPSTREAM_DIR/docker/volumes/functions/main" "$out/functions/main"
   sed -n '/"imports"/,/}/p' "$ORBIT_ROOT/supabase/functions/deno.json" |
-    { echo "{"; cat; echo "}"; } >"$staging/deno.jsonc"
-  mkdir -p "$target"
-  rm -rf "$target.old" && mv "$target" "$target.old" && mv "$staging" "$target" && rm -rf "$target.old"
+    { echo "{"; cat; echo "}"; } >"$out/functions/deno.jsonc"
   # _shared/database.types.ts re-exports ../../db/database.types.ts, i.e. supabase/db.
-  mkdir -p "$ORBIT_DATA_DIR/functions-db"
-  cp "$ORBIT_ROOT/supabase/db/database.types.ts" "$ORBIT_DATA_DIR/functions-db/database.types.ts"
-  chmod -R a+rX "$target" "$ORBIT_DATA_DIR/functions-db"
-  # The swap replaced the directory the running container has mounted; callers restart `functions`.
+  cp "$ORBIT_ROOT/supabase/db/database.types.ts" "$out/db/database.types.ts"
+  cp "$DEPLOY_DIR/functions.Dockerfile" "$out/Dockerfile"
+  cp "$DEPLOY_DIR/functions-warm.sh" "$out/warm.sh"
+  # The runtime upstream pins for this release, so the functions run on what upstream tested.
+  grep -m1 -oE 'supabase/edge-runtime:[^[:space:]"]+' "$UPSTREAM_DIR/docker/docker-compose.yml" \
+    >"$out/edge-runtime-image" || die "No edge runtime image in upstream's docker-compose.yml"
+  chmod -R a+rX "$out"
+}
+
+# CI's image for this commit when there is one; built here otherwise, which downloads the
+# functions' modules from deno.land, npm and jsr.io once, at build time.
+ensure_functions_image() {
+  pull_prebuilt functions && return
+  local dir
+  dir="$(mktemp -d)"
+  assemble_functions "$dir"
+  docker build --build-arg EDGE_RUNTIME_IMAGE="$(cat "$dir/edge-runtime-image")" \
+    -t orbit-functions:local "$dir" || { rm -rf "$dir"; die "Could not build the edge functions' image (above)"; }
+  rm -rf "$dir"
 }
 
 prepare_data_dir() {
-  mkdir -p "$ORBIT_DATA_DIR"/{db,storage,caddy,functions,wal-spool,backup-state}
+  mkdir -p "$ORBIT_DATA_DIR"/{db,storage,caddy,wal-spool,backup-state}
   # The database (uid 100 in supabase/postgres) writes the WAL spool; the backup container empties it.
   chown 100:101 "$ORBIT_DATA_DIR/wal-spool" 2>/dev/null || chmod 777 "$ORBIT_DATA_DIR/wal-spool"
 }
 
 wait_healthy() {
-  local deadline=$((SECONDS + ${1:-300})) unhealthy
+  local deadline=$((SECONDS + ${1:-300})) unhealthy=""
   step "Waiting for every service to report healthy"
   while ((SECONDS < deadline)); do
     # `|`-separated: a service without a healthcheck (caddy) has an empty Health field.
@@ -151,7 +167,80 @@ wait_healthy() {
     sleep 3
   done
   compose ps
-  die "Still not healthy after ${1:-300}s: $(echo "$unhealthy" | tr '\n' ' '). Look at: deploy/orbit logs <service>"
+  # The cause, where a deploy from GitHub can show it: what the failing healthcheck printed. Not the
+  # service's own log, which can hold user data and would land in a public Actions log; that goes
+  # to a file on the server instead.
+  local service container logfile
+  logfile="$ORBIT_DATA_DIR/unhealthy-$(date -u +%Y%m%dT%H%M%SZ).log"
+  (umask 077 && : >"$logfile")
+  for service in $unhealthy; do
+    container="$(compose ps -q "$service" 2>/dev/null | head -1)"
+    printf '\n%s: its last healthcheck said: %s\n' "$service" "$(docker inspect --format '{{json .State.Health}}' \
+      "$container" 2>/dev/null | jq -r '.Log[-1].Output // empty' 2>/dev/null | tr -s '\n' ' ' | cut -c1-300)"
+    compose logs --no-color --tail 200 "$service" >>"$logfile" 2>&1 || true
+    # From the log, only the hosts of the addresses its errors name: no paths, no queries.
+    printf '%s: its errors name: %s\n' "$service" "$(compose logs --no-color --tail 200 "$service" 2>&1 |
+      grep -iE 'error|fail' | grep -oE 'https?://[A-Za-z0-9.-]+' | sort -u | tr '\n' ' ' || true)"
+  done
+  die "Still not healthy after ${1:-300}s: $(echo "$unhealthy" | tr '\n' ' '). Their logs are in $logfile on the server"
+}
+
+# What the server, and Orbit's containers, can reach. Orbit needs both: the server pulls images, and
+# its containers call out -- Auth to Google for sign-in, the functions to OpenRouter for AI.
+# deno.land, npm and JSR matter only to a server that builds the functions' image itself. Only
+# reports: a failure further on then has its cause named here. Probes from a one-off backup
+# container on Orbit's own network, the path the services take; a host counts as reachable only
+# when it answers as it should (2xx or 3xx, not a block page) and the whole answer arrives -- some
+# networks let a connection open and then stall it. A failure shows curl's reason: a timeout where
+# the server itself gets through usually means packets too large for the server's link
+# (deploy/bootstrap.sh, clamp_container_mss).
+check_network() {
+  local urls=(https://api.github.com https://accounts.google.com/.well-known/openid-configuration
+    https://deno.land https://registry.npmjs.org https://jsr.io/@std/path/meta.json https://openrouter.ai/api/v1/models)
+  local url host i from_server from_container dev server_blocked=() container_blocked=() container_codes
+  dev="$(ip -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' || true)"
+  step "Checking what this server and its containers can reach (link MTU $(cat "/sys/class/net/${dev:-none}/mtu" 2>/dev/null || echo '?'))"
+  # The loop runs in the container: its variables are meant for that shell, not this one.
+  # shellcheck disable=SC2016
+  container_codes="$(compose run --rm --no-deps -T --entrypoint sh backup -c \
+    'for u in "$@"; do curl -s -o /dev/null -m 10 -w "%{http_code} %{exitcode}\n" "$u" || true; done' sh "${urls[@]}" 2>/dev/null || true)"
+  i=0
+  for url in "${urls[@]}"; do
+    i=$((i + 1))
+    from_server="$(curl -s -o /dev/null -m 10 -w '%{http_code} %{exitcode}' "$url" || true)"
+    from_container="$(sed -n "${i}p" <<<"$container_codes")"
+    printf '     %-62s server %-20s containers %s\n' "$url" "$(curl_result "${from_server:-000 0}")" "$(curl_result "${from_container:-000 0}")"
+    host="${url#https://}"
+    host="${host%%/*}"
+    if ! reached "$from_server"; then
+      server_blocked+=("$host")
+    elif ! reached "$from_container"; then
+      container_blocked+=("$host")
+    fi
+  done
+  ((${#server_blocked[@]} == 0)) ||
+    warn "This server cannot reach: ${server_blocked[*]}. Its network or the service refuses it; whatever needs those will not work from here."
+  ((${#container_blocked[@]} == 0)) ||
+    warn "Orbit's containers cannot reach: ${container_blocked[*]}, although this server can."
+  ((${#server_blocked[@]} + ${#container_blocked[@]})) || ok "the server and Orbit's containers reach the internet"
+}
+
+# Whether "<http code> <curl exit code>" is a whole answer of the expected kind.
+reached() { [[ "${1%% *}" =~ ^[23][0-9][0-9]$ && "${1##* }" == 0 ]]; }
+
+# "<http code> <curl exit code>" as a person reads it: the code, or why there was none.
+curl_result() {
+  local code="${1%% *}" exit="${1##* }"
+  case "$code:$exit" in
+    000:28) echo "timed out" ;;
+    000:6) echo "no DNS" ;;
+    000:7) echo "refused" ;;
+    000:35) echo "TLS failed" ;;
+    000:*) echo "failed ($exit)" ;;
+    *:0) echo "$code" ;;
+    *:28) echo "$code, then stalled" ;;
+    *) echo "$code, then failed ($exit)" ;;
+  esac
 }
 
 # --- Commands -------------------------------------------------------------------------------------
@@ -175,11 +264,38 @@ cmd_install() {
   load_env
   fetch_upstream
   prepare_data_dir
-  sync_functions
   cmd_build
+  check_network
   start_migrated
   smoke_test
+  ensure_backups_on
   summary
+}
+
+# Writes the NAME=value lines of a settings file into deploy/.env: what CI and bootstrap.sh hand
+# over. Each value is taken literally up to the end of its line; deploy/.env is created from
+# .env.example first if there is none, and lines the file does not mention are left alone.
+cmd_apply_env() {
+  local from="${1:?Usage: deploy/orbit apply-env <file>}" line name value current count=0
+  [[ -f "$from" ]] || die "$from does not exist"
+  [[ -f "$ENV_FILE" ]] || install -m 600 "$DEPLOY_DIR/.env.example" "$ENV_FILE"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[A-Z][A-Z0-9_]*= ]] || continue
+    name="${line%%=*}"
+    value="${line#*=}"
+    current="$(grep -E "^$name=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
+    # An empty value clears an optional setting, but never a key the server created for itself.
+    if [[ -z "$value" && -n "$current" ]] && grep -qx "$name" <<<"$GENERATED_NAMES"; then continue; fi
+    # Every key of an installed server came from its master key; another one would not open them.
+    if [[ "$name" == ORBIT_MASTER_KEY && -n "$current" && "$value" != "$current" ]] &&
+      env_has POSTGRES_PASSWORD "$ENV_FILE"; then
+      die "$from has a different ORBIT_MASTER_KEY than this server was installed with; this server's is in $ENV_FILE"
+    fi
+    env_set "$ENV_FILE" "$name" "$value"
+    count=$((count + 1))
+  done <"$from"
+  chmod 600 "$ENV_FILE"
+  ok "wrote $count setting(s) into $ENV_FILE"
 }
 
 cmd_update() {
@@ -190,10 +306,11 @@ cmd_update() {
   load_env
   fetch_upstream
   prepare_data_dir
-  sync_functions
   cmd_build
+  check_network
   start_migrated
   smoke_test
+  ensure_backups_on
   ok "Orbit updated to $ORBIT_VERSION"
 }
 
@@ -205,9 +322,9 @@ start_migrated() {
   step "Starting the stack"
   compose up -d --remove-orphans
   wait_healthy 600
-  # The function code directory was swapped by sync_functions; a restart remounts it.
-  compose restart functions >/dev/null
-  wait_healthy 120
+  # Where releases before the functions image kept their code, mounted into the container `up` has
+  # just replaced; the image carries it now.
+  rm -rf "$ORBIT_DATA_DIR/functions" "$ORBIT_DATA_DIR/functions-db"
   warm_functions
 }
 
@@ -255,6 +372,14 @@ pull_prebuilt() {
   docker tag "$image" "orbit-$kind:local"
 }
 
+# Every command that runs the backup image gets it here: CI's image for this commit when there is
+# one, built on this server only otherwise -- a build needs Ubuntu's and PostgreSQL's package
+# archives, which a server's network may not reach.
+ensure_backup_image() {
+  pull_prebuilt backup && return
+  compose build backup
+}
+
 cmd_build() {
   load_env
   step "Getting the web app"
@@ -269,7 +394,10 @@ cmd_build() {
     compose build web
     compose --profile tools build migrate
   fi
-  compose build backup
+  step "Getting the edge functions"
+  ensure_functions_image
+  ok "the edge functions are ready, every module they import included"
+  ensure_backup_image
 }
 
 cmd_migrate() {
@@ -293,6 +421,19 @@ smoke_test() {
   ok "Caddy routes the domain to Auth, the database API and the web app"
 }
 
+# Backups switch themselves on once their settings are filled in: on the install that has them, or
+# on the first update after they were added or pointed somewhere else. A failure here does not fail the install -- Orbit is
+# up by now -- but says what to do; the usual one is a replacement server meeting the backups of
+# the server it replaces, which it must restore from rather than write over. Its own process, so
+# that `set -e` holds inside it.
+ensure_backups_on() {
+  backup_configured || return 0
+  [[ "$(cat "$ORBIT_DATA_DIR/backup-state/initialized" 2>/dev/null)" != "$(backup_config_id)" ]] || return 0
+  step "The BACKUP_* settings are new or changed; switching backups on"
+  "$DEPLOY_DIR/orbit" backup setup ||
+    warn "Backups are NOT on (the reason is above). Once it is fixed: deploy/orbit backup setup"
+}
+
 summary() {
   cat <<EOF
 
@@ -301,8 +442,16 @@ $(c_green "Orbit is up") at $ORBIT_PUBLIC_URL (version $ORBIT_VERSION)
 Next steps, if you have not done them yet (docs/SELF_HOSTING.md, step 3):
   - DNS: an A record for $ORBIT_DOMAIN pointing at this server's IP address.
   - Google Cloud Console: authorized redirect URI $ORBIT_PUBLIC_URL/auth/v1/callback
-  - Backups: fill the BACKUP_* lines in deploy/.env and run deploy/orbit backup setup.
-Allowed to sign in: $ORBIT_ALLOWED_EMAILS
+EOF
+  backup_configured || echo "  - Backups: fill the BACKUP_* lines in deploy/.env and run deploy/orbit update."
+  echo "Allowed to sign in: $ORBIT_ALLOWED_EMAILS"
+  [[ -n "${ORBIT_MASTER_KEY_CREATED:-}" ]] || return 0
+  cat <<EOF
+
+$(c_green "Save the master key now.") Every password and key of this server is derived from it, so
+with it and the backup buckets a lost server can be rebuilt. Show it with
+  grep ORBIT_MASTER_KEY $ENV_FILE
+and keep it in a password manager (or as the ORBIT_MASTER_KEY secret of your GitHub fork).
 EOF
 }
 
@@ -336,6 +485,7 @@ Usage: deploy/orbit <command>
   install          First install on this server (safe to re-run)
   update           Rebuild and migrate after `git pull`
   check            Check the server and deploy/.env without changing anything
+  apply-env FILE   Write the NAME=value lines of FILE into deploy/.env (CI and bootstrap.sh use it)
   status           Services, health, URL, data size, last backup
   migrate          Apply database migrations and deploy.sql only
   logs [service]   Follow logs (services: web caddy db auth rest storage realtime functions ...)
@@ -354,6 +504,9 @@ Usage: deploy/orbit <command>
   migrate-from-supabase export | import [--yes] | verify
                    Move an Orbit that runs on hosted Supabase onto this server
   compose ...      Run any docker compose command against this stack
+  doctor           What this server's network lets Orbit reach, in detail (only reads)
+  assemble-functions DIR
+                   Write what the edge functions' image is built from into DIR (CI uses it)
 
 Guide: docs/SELF_HOSTING.md
 EOF
@@ -366,6 +519,7 @@ main() {
     install) cmd_install "$@" ;;
     update) cmd_update "$@" ;;
     check) cmd_check "$@" ;;
+    apply-env) cmd_apply_env "$@" ;;
     status) cmd_status "$@" ;;
     build) cmd_build "$@" ;;
     migrate) cmd_migrate "$@" ;;
@@ -378,6 +532,8 @@ main() {
     restore) cmd_restore "$@" ;;
     migrate-from-supabase) cmd_migrate_from_supabase "$@" ;;
     compose) load_env && compose "$@" ;;
+    doctor) bash "$DEPLOY_DIR/doctor.sh" ;;
+    assemble-functions) assemble_functions "$@" ;;
     help | -h | --help) usage ;;
     *) usage && exit 1 ;;
   esac

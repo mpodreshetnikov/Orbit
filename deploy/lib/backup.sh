@@ -2,6 +2,12 @@
 # `deploy/orbit backup ...` and `deploy/orbit restore`. Sourced, never run. The work itself happens
 # in the backup container (deploy/backup/run.sh); this file decides when and with what mounted.
 
+# The same fingerprint of the backup destinations as config_id in deploy/backup/run.sh.
+backup_config_id() {
+  printf '%s|%s|%s' "${BACKUP_WAL_S3_ENDPOINT:-}" "${BACKUP_WAL_S3_PREFIX:-}" "${BACKUP_SNAPSHOT_REPOSITORY:-}" |
+    sha256sum | cut -c1-16
+}
+
 backup_configured() {
   [[ -n "${BACKUP_WAL_S3_PREFIX:-}" || -n "${BACKUP_SNAPSHOT_REPOSITORY:-}" ]]
 }
@@ -56,8 +62,8 @@ backup_setup() {
   ensure_secrets "$ENV_FILE"
   load_env
   prepare_data_dir
-  step "Building and starting the backup service"
-  compose build backup
+  step "Starting the backup service"
+  ensure_backup_image
   compose up -d db backup
   wait_healthy 300
   step "Checking the backup storage"
@@ -71,7 +77,11 @@ backup_setup() {
   echo
   echo "$(c_green "Backups are on.") Two keys in deploy/.env decrypt them: BACKUP_ENCRYPTION_KEY (bucket 1)"
   echo "and BACKUP_SNAPSHOT_PASSWORD (bucket 2). They live on this server: if it is lost, so are they,"
-  echo "unless you keep a copy. Store deploy/.env in your password manager NOW."
+  if env_has ORBIT_MASTER_KEY "$ENV_FILE" || [[ -n "${ORBIT_MASTER_KEY:-}" ]]; then
+    echo "unless you keep a copy of ORBIT_MASTER_KEY, which recreates both. Keep it safe."
+  else
+    echo "unless you keep a copy. Store deploy/.env in your password manager NOW."
+  fi
 }
 
 cmd_backup() {
@@ -123,13 +133,18 @@ cmd_restore() {
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   RESTORE_STAMP="$stamp"
   step "Stopping Orbit"
-  compose build backup >/dev/null
+  ensure_backup_image >/dev/null
   compose stop
   # Everything this restore replaces is kept as *.before-restore-$stamp, so that any failure from
   # here on can put Orbit back exactly as it was (restore_rollback).
+  # Every step after the first move ends in restore_rollback when it fails, so a full disk or a
+  # service that does not come back cannot leave Orbit half restored. wait_healthy runs in a
+  # subshell there: it exits rather than returning, which would skip the rollback.
   mv "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/db.before-restore-$stamp"
-  cp -a "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
-  cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.before-restore-$stamp"
+  cp -a "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db" || restore_rollback
+  # Into a temporary name first: a copy cut short by a full disk must never pass for the files.
+  cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.copying-$stamp" || restore_rollback
+  mv "$ORBIT_DATA_DIR/storage.copying-$stamp" "$ORBIT_DATA_DIR/storage.before-restore-$stamp" || restore_rollback
 
   if ((from_snapshot == 0)) && [[ -n "${BACKUP_WAL_S3_PREFIX:-}" ]]; then
     step "Restoring the database${target_time:+ to $target_time}"
@@ -157,7 +172,7 @@ cmd_restore() {
     # write into a database about to be truncated.
     step "Loading the nightly dump"
     compose up -d db || restore_rollback
-    wait_healthy 300
+    (wait_healthy 300) || restore_rollback
     export SERVICE_ROLE_KEY
     migration_run import || restore_rollback
   fi
@@ -167,9 +182,9 @@ cmd_restore() {
 
   step "Starting Orbit"
   compose up -d --remove-orphans || restore_rollback
-  wait_healthy 600
-  compose restart functions >/dev/null
-  wait_healthy 120
+  (wait_healthy 600) || restore_rollback
+  compose restart functions >/dev/null || restore_rollback
+  (wait_healthy 120) || restore_rollback
   warm_functions
 
   # On a new server nothing has switched backups on yet: init marks the repositories ready and
@@ -177,8 +192,13 @@ cmd_restore() {
   # restored database continues on a new timeline, or is a new one.
   step "Switching backups back on"
   compose up -d backup
-  in_backup init
-  in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
+  # The restore stands now, so its new timeline may be recorded in bucket 1.
+  in_backup commit-restore
+  if in_backup init; then
+    in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
+  else
+    warn "Backups are NOT on again (the reason is above). Fix it, then run deploy/orbit backup setup"
+  fi
   ok "Restored. The data it replaced is in $ORBIT_DATA_DIR/*.before-restore-$stamp; delete it once you are happy."
 }
 
@@ -187,11 +207,21 @@ restore_rollback() {
   local stamp="$RESTORE_STAMP"
   warn "The restore failed; putting Orbit back on the data it had before"
   compose stop >/dev/null 2>&1 || true
-  rm -rf "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/storage"
-  mv "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
-  mv "$ORBIT_DATA_DIR/storage.before-restore-$stamp" "$ORBIT_DATA_DIR/storage"
+  # Only what was already set aside goes back: a failure while setting aside stops halfway, and a
+  # half-made copy is dropped, never put in place of the files.
+  rm -rf "$ORBIT_DATA_DIR/storage.copying-$stamp"
+  if [[ -d "$ORBIT_DATA_DIR/db.before-restore-$stamp" ]]; then
+    rm -rf "$ORBIT_DATA_DIR/db"
+    mv "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
+  fi
+  if [[ -d "$ORBIT_DATA_DIR/storage.before-restore-$stamp" ]]; then
+    rm -rf "$ORBIT_DATA_DIR/storage"
+    mv "$ORBIT_DATA_DIR/storage.before-restore-$stamp" "$ORBIT_DATA_DIR/storage"
+  fi
   compose run --rm --no-deps -v "orbit_db-config:/restore/db-config" --entrypoint sh backup -c \
     '[ ! -f /restore/db-config/pgsodium_root.key.before-restore ] || mv /restore/db-config/pgsodium_root.key.before-restore /restore/db-config/pgsodium_root.key' || true
+  # The timeline the failed restore started never happened; it must not reach bucket 1.
+  compose run --rm --no-deps backup discard-restore >/dev/null 2>&1 || true
   compose up -d --remove-orphans
   die "The restore failed (see above); Orbit is back on the data it had before."
 }

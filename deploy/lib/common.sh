@@ -58,15 +58,22 @@ preflight_server() {
 # Docker Hub limits anonymous pulls and is unreachable from some networks (Russia among them).
 # ORBIT_REGISTRY_MIRROR=https://mirror.gcr.io (or any Docker Hub mirror) routes pulls through it.
 configure_registry_mirror() {
-  local mirror="${ORBIT_REGISTRY_MIRROR:-}" daemon_json=/etc/docker/daemon.json
+  local mirror="${ORBIT_REGISTRY_MIRROR:-}" daemon_json=/etc/docker/daemon.json tmp
   [[ -n "$mirror" ]] || return 0
   if [[ -f "$daemon_json" ]] && grep -q "$mirror" "$daemon_json"; then return 0; fi
-  if [[ -f "$daemon_json" ]] && [[ -s "$daemon_json" ]]; then
-    warn "$daemon_json already exists; add \"registry-mirrors\": [\"$mirror\"] to it yourself and restart Docker"
-    return 0
-  fi
   step "Routing Docker Hub pulls through $mirror"
-  printf '{\n  "registry-mirrors": ["%s"]\n}\n' "$mirror" >"$daemon_json"
+  if [[ -s "$daemon_json" ]]; then
+    # bootstrap.sh installs jq and writes its own settings here; merge rather than overwrite them.
+    if ! command -v jq >/dev/null; then
+      warn "$daemon_json already exists; add \"registry-mirrors\": [\"$mirror\"] to it yourself and restart Docker"
+      return 0
+    fi
+    tmp="$(mktemp)"
+    jq --arg m "$mirror" '. + {"registry-mirrors": [$m]}' "$daemon_json" >"$tmp" && cat "$tmp" >"$daemon_json"
+    rm -f "$tmp"
+  else
+    printf '{\n  "registry-mirrors": ["%s"]\n}\n' "$mirror" >"$daemon_json"
+  fi
   if command -v systemctl >/dev/null && systemctl is-active --quiet docker; then
     systemctl restart docker
   else

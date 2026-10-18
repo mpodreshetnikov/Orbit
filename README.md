@@ -186,16 +186,20 @@ with the error attached and a retry path that reuses the same record. The full c
 
 ## Run your own
 
-One Linux server with Docker, a domain and a Google OAuth client are all it takes:
+A fresh Ubuntu or Debian server, a domain and a Google OAuth client are all it takes. As root on
+the server:
 
 ```bash
-git clone https://github.com/mpodreshetnikov/Orbit.git && cd Orbit
-cp deploy/.env.example deploy/.env   # fill it in: every line explains itself
-deploy/orbit install                 # ends with "Orbit is up at https://<your domain>"
+curl -fsSL https://raw.githubusercontent.com/mpodreshetnikov/Orbit/main/deploy/bootstrap.sh | bash
+sudo nano /opt/orbit/deploy/.env        # fill it in: every line explains itself
+sudo /opt/orbit/deploy/orbit install    # ends with "Orbit is up at https://<your domain>"
 ```
 
+The first line also secures the server: SSH by key only, a firewall, fail2ban and automatic security
+updates. With the backup settings filled in, `install` switches on off-site backups too.
 [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md) walks through every step — server, DNS, Google
-sign-in, updates — in plain language, and has a section for an AI agent doing it on someone's behalf.
+sign-in, backups, updates — in plain language, and has a section for an AI agent doing it on someone's
+behalf.
 
 ## Getting started
 

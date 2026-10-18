@@ -33,6 +33,14 @@ age_of() { local t; t="$(cat "$STATE/$1" 2>/dev/null || echo 0)"; echo $(($(date
 
 # --- Configuration --------------------------------------------------------------------------------
 
+# Which storage the backups were set up for (`init` records it). Changed destinations or a new
+# bucket must go through `deploy/orbit backup setup` again -- and its checks -- before anything is
+# written there. deploy/lib/backup.sh computes the same.
+config_id() {
+  printf '%s|%s|%s' "${BACKUP_WAL_S3_ENDPOINT:-}" "${BACKUP_WAL_S3_PREFIX:-}" "${BACKUP_SNAPSHOT_REPOSITORY:-}" |
+    sha256sum | cut -c1-16
+}
+
 walg_configured() { [[ -n "${BACKUP_WAL_S3_PREFIX:-}" && -n "${BACKUP_WAL_S3_ACCESS_KEY_ID:-}" ]]; }
 restic_configured() { [[ -n "${BACKUP_SNAPSHOT_REPOSITORY:-}" && -n "${BACKUP_SNAPSHOT_ACCESS_KEY_ID:-}" ]]; }
 
@@ -46,6 +54,7 @@ walg() {
     WALG_LIBSODIUM_KEY="${BACKUP_ENCRYPTION_KEY:?BACKUP_ENCRYPTION_KEY is missing; run deploy/orbit backup setup}" \
     WALG_LIBSODIUM_KEY_TRANSFORM=hex \
     WALG_COMPRESSION_METHOD=brotli \
+    WALG_PREVENT_WAL_OVERWRITE=true \
     PGHOST=db PGPORT=5432 PGUSER=supabase_admin PGDATABASE=postgres PGPASSWORD="${POSTGRES_PASSWORD:?}" \
     wal-g "$@"
 }
@@ -106,8 +115,11 @@ job() {
 push_spool() {
   local f
   shopt -s nullglob
+  # wal-push reads ahead for .ready files in an archive_status directory next to the segment, as
+  # if this were pg_wal, and logs an ERROR when there is none; an empty one keeps the log honest.
+  mkdir -p "$SPOOL/archive_status"
   for f in "$SPOOL"/*; do
-    [[ "$f" == *.part ]] && continue
+    [[ -f "$f" && "$f" != *.part ]] || continue
     walg wal-push "$f" >/dev/null && rm -f "$f" && mark last_wal_push
   done
   shopt -u nullglob
@@ -204,26 +216,71 @@ recover_into() {
   done
 }
 
+# Fails, naming what, when a copy is older than it should be.
+fresh() {
+  local name="$1" limit="$2" what="$3"
+  (($(age_of "last_$name") <= limit)) && return 0
+  echo "$what is $(($(age_of "last_$name") / 60)) minutes old" >&2
+  return 1
+}
+
+# Restores both copies into a scratch area and reads them back -- what a real restore would need,
+# not just that the files exist -- and checks they are recent.
 verify() {
-  local scratch="$STATE/verify" sock="$STATE/verify-sock" users records
+  local scratch="$STATE/verify" sock="$STATE/verify-sock" users records dump listed restored snapshot stale=0
+  if ! walg_configured && ! restic_configured; then
+    echo "no backup storage is configured (BACKUP_* in deploy/.env): nothing is backed up" >&2
+    return 1
+  fi
   rm -rf "$scratch" "$sock"
   if walg_configured; then
+    fresh base_backup $((2 * 86400)) "the newest base backup in bucket 1" || stale=1
+    fresh wal_push 1800 "the newest WAL in bucket 1" || stale=1
     recover_into "$scratch/db" "$sock"
     users="$(psql -h "$sock" -p 5439 -U supabase_admin -d postgres -Atc 'select count(*) from auth.users')"
     records="$(psql -h "$sock" -p 5439 -U supabase_admin -d postgres -Atc 'select count(*) from public.medical_records')"
     stop_scratch_postgres "$scratch/db"
+    rm -rf "$scratch/db"
     log "WAL-G copy restored and read: $users users, $records medical records"
   fi
   if restic_configured; then
+    fresh snapshot_full $((2 * 86400)) "the newest nightly snapshot in bucket 2" || stale=1
+    fresh snapshot_files $((3 * ${BACKUP_FILES_INTERVAL_MIN:-15} * 60 > 3600 ? 3 * ${BACKUP_FILES_INTERVAL_MIN:-15} * 60 : 3600)) \
+      "the newest copy of uploaded files in bucket 2" || stale=1
     rst check --read-data-subset=10% --quiet
-    rst restore latest --tag nightly --host orbit --target "$scratch/snapshot" --include "$STATE/snapshot/postgres.dump" --quiet
-    # Through a file, not a pipe: grep -q stops reading at the first match, and under pipefail the
-    # pg_restore it cut off would fail the check.
-    pg_restore --list "$scratch/snapshot/$STATE/snapshot/postgres.dump" >"$scratch/toc"
-    grep -q 'TABLE DATA auth users' "$scratch/toc"
-    log "snapshot repository consistent; nightly dump lists its tables"
+    rst restore latest --tag nightly --host orbit --target "$scratch/snapshot" \
+      --include "$STATE/snapshot" --include /data/db-config --quiet
+    dump="$scratch/snapshot/$STATE/snapshot/postgres.dump"
+    # Converting the whole dump to SQL reads and decompresses every row in it.
+    pg_restore -f /dev/null "$dump"
+    users="$(pg_restore --data-only --schema auth --table users -f - "$dump" |
+      awk '/^COPY /{rows=1; next} /^\\\.$/{rows=0} rows{n++} END{print n+0}')"
+    [[ -s "$scratch/snapshot/data/db-config/pgsodium_root.key" ]] ||
+      { echo "the nightly snapshot has no Vault key" >&2 && return 1; }
+    grep -q '^ORBIT_DOMAIN=' "$scratch/snapshot/$STATE/snapshot/orbit.env" ||
+      { echo "the nightly snapshot has no deploy/.env" >&2 && return 1; }
+    # The uploaded files of the newest copy come back, each checked against the hash restic
+    # recorded: all of them while they fit in a third of the free disk, a sample of 50 after that.
+    # The newest copy of them is a 15-minute one or a nightly one, whichever came last.
+    snapshot="$(pick_snapshot /data/storage files nightly)"
+    [[ -n "$snapshot" ]] || { echo "bucket 2 holds no copy of the uploaded files" >&2 && return 1; }
+    rst ls "$snapshot" --json --recursive /data/storage |
+      jq -r 'select(.type == "file") | .path' >"$scratch/files.list"
+    listed="$(wc -l <"$scratch/files.list")"
+    if (($(rst stats "$snapshot" --mode restore-size --json | jq .total_size) >
+      $(df -Pk "$STATE" | awk 'NR==2 {print $4}') * 1024 / 3)); then
+      shuf -n 50 "$scratch/files.list" >"$scratch/files.sample"
+      listed="$(wc -l <"$scratch/files.sample")"
+      rst restore "$snapshot" --target "$scratch/files" --include-file "$scratch/files.sample" --quiet
+    else
+      rst restore "$snapshot" --target "$scratch/files" --include /data/storage --quiet
+    fi
+    restored="$(find "$scratch/files" -type f | wc -l)"
+    ((restored == listed)) || { echo "$restored of $listed uploaded files came back" >&2 && return 1; }
+    log "snapshots restored and read: dump with $users users, the Vault key, deploy/.env, $restored uploaded files"
   fi
   rm -rf "$scratch" "$sock"
+  ((stale == 0)) || return 1
   echo "restore verified"
 }
 
@@ -232,6 +289,13 @@ restore_db() {
   walg_configured || { echo "BACKUP_WAL_* is not configured; restore from the snapshot instead (docs/SELF_HOSTING.md)" >&2; return 1; }
   recover_into /restore/db "$sock"
   stop_scratch_postgres /restore/db
+  # The restored database goes on as a new timeline, which Postgres records in a .history file.
+  # It was written with archiving off, so nothing would ever upload it -- and a later recovery from
+  # a base backup taken before this restore would not know the timeline exists, replay the old one
+  # to its end, and bring back what this restore undid. It waits here until deploy/orbit knows the
+  # restore stands (commit-restore), so that a rolled-back restore leaves no timeline behind.
+  rm -rf "$STATE/restore-history" && mkdir -p "$STATE/restore-history"
+  cp /restore/db/pg_wal/*.history "$STATE/restore-history/" 2>/dev/null || true
   # Hand back Supabase's own config arrangement: its server reads /etc/postgresql/postgresql.conf.
   rm -f /restore/db/postgresql.conf
   [[ -f /restore/db/postgresql.conf.supabase ]] && mv /restore/db/postgresql.conf.supabase /restore/db/postgresql.conf
@@ -241,6 +305,18 @@ restore_db() {
 
 # The nightly full dump, for a rebuild when the WAL-G copy is gone too (`deploy/orbit restore
 # --from-snapshot`). It is loaded by deploy/backup/migrate-from-supabase.sh like an export.
+# The restore stands: its timeline history goes up with the next WAL, the way archive-wal.sh
+# queues a segment. A rolled-back restore discards it instead (discard-restore).
+commit_restore() {
+  local history
+  for history in "$STATE"/restore-history/*.history; do
+    [[ -f "$history" ]] || continue
+    cp "$history" "$SPOOL/$(basename "$history").part"
+    mv "$SPOOL/$(basename "$history").part" "$SPOOL/$(basename "$history")"
+  done
+  rm -rf "$STATE/restore-history"
+}
+
 restore_dump() {
   local tmp=/state/restore-dump snapshot
   snapshot="$(pick_snapshot /state/snapshot nightly)"
@@ -302,8 +378,30 @@ init() {
   if restic_configured && ! rst cat config >/dev/null 2>&1; then
     rst init
   fi
-  if walg_configured; then walg backup-list >/dev/null; fi
-  touch "$STATE/initialized"
+  if walg_configured; then
+    # A new database starts its WAL at the same file names as the one before it, so archiving it
+    # into a folder that holds another database's backups would overwrite that one's history -- the
+    # copy a replacement server is meant to restore from. WALG_PREVENT_WAL_OVERWRITE stops the
+    # overwrite itself; this stops it from being set up at all, and says why.
+    local ours list theirs
+    ours="$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -U supabase_admin -d postgres -Atc 'select system_identifier from pg_control_system()')"
+    # WAL-G logs to stderr; shown only when the listing fails, as the reason backups cannot start.
+    if ! list="$(walg backup-list --detail --json 2>"$STATE/.walg-list.err")"; then
+      cat "$STATE/.walg-list.err" >&2
+      echo "bucket 1 ($BACKUP_WAL_S3_PREFIX) cannot be read (the error is above)" >&2
+      return 1
+    fi
+    theirs="$(jq -r '.[]?.system_identifier | select(. != null)' <<<"${list:-[]}" 2>/dev/null | sort -u)"
+    # One folder holds one database's chain: any other identifier in it, alongside ours or not,
+    # means a mixed or foreign folder.
+    if [[ -n "$theirs" ]] && grep -vqx "$ours" <<<"$theirs"; then
+      echo "bucket 1 ($BACKUP_WAL_S3_PREFIX) already holds the backups of another database." >&2
+      echo "If this server replaces a lost one, restore from it first: deploy/orbit restore." >&2
+      echo "To start a new chain of backups instead, point BACKUP_WAL_S3_PREFIX at a new, empty folder." >&2
+      return 1
+    fi
+  fi
+  config_id >"$STATE/initialized"
   # From now on the database's archive_command keeps its segments for upload (archive-wal.sh).
   touch "$SPOOL/.enabled"
   echo "backup storage reachable"
@@ -324,32 +422,40 @@ status() {
 
 # --- The loop -------------------------------------------------------------------------------------
 
-daemon() {
-  local today last_day="" files_every=$((${BACKUP_FILES_INTERVAL_MIN:-15} * 60)) alerted_spool=0
-  if ! walg_configured && ! restic_configured; then
-    log "no backup storage configured (BACKUP_* in deploy/.env); idle"
-    exec sleep infinity
-  fi
-  until [[ -f "$STATE/initialized" ]]; do
-    log "waiting for deploy/orbit backup setup"
-    sleep 60
-  done
-  log "backup daemon up: wal=$(walg_configured && echo on || echo off) snapshots=$(restic_configured && echo on || echo off)"
+# WAL goes out on its own loop, so that the nightly base backup and snapshot -- which take minutes
+# -- never hold up the copy that keeps the database within a minute of the server.
+wal_loop() {
+  local alerted=0 problem
   while true; do
-    walg_configured && { push_spool || true; }
-
-    # A segment stuck in the spool means the database is no longer copied off the server.
+    push_spool || true
+    problem=""
+    # A segment stuck in the spool: the upload to bucket 1 fails.
     if [[ -n "$(find "$SPOOL" -maxdepth 1 -type f ! -name '.*' -mmin +15 -print -quit)" ]]; then
-      if ((SECONDS - alerted_spool > 3600 || alerted_spool == 0)); then
-        notify "WAL has not reached bucket 1 for 15+ minutes"
-        alerted_spool=$SECONDS
-      fi
+      problem="WAL has not reached bucket 1 for 15+ minutes"
+    # Segments piling up in pg_wal: archive_command itself fails (the spool is not writable, the
+    # disk is full), so nothing even reaches the spool -- and pg_wal grows until the disk is full.
+    elif (($(find "$PGDATA_RO/pg_wal/archive_status" -name '*.ready' 2>/dev/null | wc -l) > 10)); then
+      problem="the database cannot hand its WAL to the backup (archive_command fails); its disk is filling up"
+    # Nothing at all for half an hour, although Orbit's cron writes to the database every minute.
+    # Not in the first half hour after a start: the stack may just have been down on purpose.
+    elif ((SECONDS > 1800 && $(age_of last_wal_push) > 1800)); then
+      problem="no WAL has been uploaded to bucket 1 for 30+ minutes"
     fi
+    if [[ -n "$problem" ]] && ((alerted == 0 || SECONDS - alerted > 3600)); then
+      notify "$problem"
+      alerted=$SECONDS
+    fi
+    [[ -n "$problem" ]] || alerted=0
+    sleep 5
+  done
+}
 
+jobs_loop() {
+  local today last_day="" files_every=$((${BACKUP_FILES_INTERVAL_MIN:-15} * 60))
+  while true; do
     if restic_configured && (($(age_of last_snapshot_files) >= files_every)); then
       job snapshot_files snapshot_files || true
     fi
-
     today="$(date -u +%F)"
     if [[ "$today" != "$last_day" && "$(date -u +%H%M)" > "${BACKUP_TIME_UTC:-0330}" ]] &&
       (($(age_of last_nightly_run) > 20 * 3600)); then
@@ -360,8 +466,31 @@ daemon() {
         restic_configured && { job prune prune || true; }
       fi
     fi
-    sleep 5
+    sleep 30
   done
+}
+
+daemon() {
+  if ! walg_configured && ! restic_configured; then
+    log "no backup storage configured (BACKUP_* in deploy/.env); idle"
+    exec sleep infinity
+  fi
+  local warned=0
+  until [[ "$(cat "$STATE/initialized" 2>/dev/null)" == "$(config_id)" ]]; do
+    if [[ -s "$STATE/initialized" ]] && ((warned == 0)); then
+      notify "the backup destinations changed; nothing is backed up until deploy/orbit backup setup checks them"
+      warned=1
+    fi
+    log "waiting for deploy/orbit backup setup"
+    sleep 60
+  done
+  log "backup daemon up: wal=$(walg_configured && echo on || echo off) snapshots=$(restic_configured && echo on || echo off)"
+  if walg_configured; then wal_loop & fi
+  jobs_loop &
+  # Either loop ending is a fault: exit, and Docker restarts the container.
+  wait -n
+  log "a backup loop stopped; restarting"
+  exit 1
 }
 
 case "${1:-daemon}" in
@@ -374,6 +503,8 @@ case "${1:-daemon}" in
   files) job snapshot_files snapshot_files ;;
   verify) job verify verify ;;
   restore-db) restore_db ;;
+  commit-restore) commit_restore ;;
+  discard-restore) rm -rf "$STATE/restore-history" ;;
   restore-files) restore_files ;;
   restore-dump) restore_dump ;;
   init) init ;;
