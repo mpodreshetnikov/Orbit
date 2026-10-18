@@ -1,8 +1,9 @@
 name: Deploy to your server
 
 # Installs Orbit on your own server and keeps it on the latest main, configured entirely by this
-# repository's secrets and variables (docs/SELF_HOSTING.md, "Deploy from GitHub"). Does nothing
-# until the ORBIT_SERVER_HOST variable is set. The work is deploy/ci/deploy.sh.
+# repository's secrets and variables, or its production environment's (docs/SELF_HOSTING.md,
+# "Deploy from GitHub"). Does nothing until the ORBIT_SERVER_HOST variable is set. The work is
+# deploy/ci/deploy.sh.
 on:
   # Every commit on main, once its images are published (deploy-self-hosted in main.yml).
   workflow_call:
@@ -24,26 +25,44 @@ permissions:
 jobs:
   deploy:
     name: Deploy to your server
-    if: vars.ORBIT_SERVER_HOST != ''
+    # The settings may be the repository's or this environment's: with it, the job sees both, an
+    # environment's value winning. GitHub creates the environment when it does not exist yet.
+    environment: production
     runs-on: ubuntu-latest
     # One deploy at a time; a newer one waits rather than cancelling one halfway through a migration.
     concurrency:
       group: self-hosted-deploy
       cancel-in-progress: false
     steps:
+      # Here and not in a job-level `if`, which cannot see an environment's variables.
+      - name: Check a server is set up
+        id: server
+        env:
+          HOST: ${{ vars.ORBIT_SERVER_HOST }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [[ -n "$HOST" ]]; then
+            echo "set=true" >>"$GITHUB_OUTPUT"
+          elif [[ "$EVENT" == workflow_dispatch ]]; then
+            echo "::error::Set the ORBIT_SERVER_HOST variable to your server's IP address, under Settings -> Secrets and variables -> Actions, or in the production environment (docs/SELF_HOSTING.md, Deploy from GitHub)."
+            exit 1
+          else
+            echo "::notice::No server to deploy to: the ORBIT_SERVER_HOST variable is not set."
+          fi
       - uses: actions/checkout@v4
+        if: steps.server.outputs.set == 'true'
       # From main, the group above gives one deploy at a time but not the newest commit: a slower,
       # older run can arrive last, or displace the newer one's pending job. The same check as the
       # hosted production's deploys: deploy only while this commit is still main's tip (run by hand,
       # the deploy is of whatever was chosen).
       - name: Check this commit is still the tip of main
         id: tip
-        if: github.event_name == 'push'
+        if: steps.server.outputs.set == 'true' && github.event_name == 'push'
         uses: ./.github/actions/production-tip-check
         with:
           job: Deploy to your server / Deploy to your server
       - name: Deploy
-        if: github.event_name != 'push' || steps.tip.outputs.deploy_sha != ''
+        if: steps.server.outputs.set == 'true' && (github.event_name != 'push' || steps.tip.outputs.deploy_sha != '')
         env:
           # Only the secrets a server needs reach this step, by name -- never the whole set, which
           # in this repository also holds the hosted production's tokens. Keep the list in step
