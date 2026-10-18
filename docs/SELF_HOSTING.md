@@ -8,6 +8,13 @@ What you end up with: Orbit at `https://<your domain>`, with a real HTTPS certif
 sign-in limited to the e-mails you list, uploads, reminders and the AI features — the same app as
 the hosted version, running entirely on your machine.
 
+There are two ways to get there, and both end in the same server:
+
+- **By hand**, Steps 1–5 below: you log in to the server and run three commands.
+- **From GitHub**, [Deploy from GitHub](#deploy-from-github): you fork the repository, type your
+  settings into its _Secrets and variables_ page and press one button; from then on every change on
+  `main` deploys itself. You never log in to the server.
+
 ## What runs where
 
 Everything lives on one server, in Docker containers that `deploy/orbit` starts and looks after:
@@ -237,6 +244,49 @@ until you remove it. If the restore fails, Orbit is put back on the data it had.
 
 This loads the nightly database dump (so up to a day of changes is lost) and the uploaded files from
 the same moment. `--time` works here too and picks the last snapshot before it.
+
+## Deploy from GitHub
+
+The same setup as Steps 2–5, done by GitHub Actions in your fork of this repository: it logs in to
+the server over SSH, prepares it with `deploy/bootstrap.sh`, writes `deploy/.env` from your settings
+and installs — and after that deploys every commit that reaches `main`.
+
+1.  **Fork** this repository on GitHub (the _Fork_ button), open the fork's _Actions_ tab once and
+    enable workflows (GitHub keeps them off in a new fork), and do Step 1: a server and a domain.
+2.  **Let GitHub log in to the server.** On your computer, make a key pair just for this:
+
+        ssh-keygen -t ed25519 -f orbit-deploy -N ''
+
+    and give the server the public half: `ssh-copy-id -i orbit-deploy.pub root@<server ip>` (or
+    paste `orbit-deploy.pub` into your provider's "SSH keys" when creating the server).
+
+3.  **Make the master key**: `openssl rand -hex 32`. Save the output in your password manager now —
+    it is the one thing that, with the backups, rebuilds everything.
+4.  **Type in the settings**: in your fork, _Settings → Secrets and variables → Actions_.
+
+    | Where                                     | Name                                | Value                                                  |
+    | ----------------------------------------- | ----------------------------------- | ------------------------------------------------------ |
+    | Variables                                 | `ORBIT_SERVER_HOST`                 | The server's IP address                                |
+    | Secrets                                   | `ORBIT_SSH_PRIVATE_KEY`             | The whole `orbit-deploy` file (the one without `.pub`) |
+    | Secrets                                   | `ORBIT_MASTER_KEY`                  | The master key from step 3                             |
+    | Variables, or Secrets for the secret ones | everything in `deploy/.env.example` | Same names, same values as Step 3 and Step 5 describe  |
+
+    At the least `ORBIT_DOMAIN`, `ORBIT_ADMIN_EMAIL`, `ORBIT_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID` and
+    (as a secret) `GOOGLE_CLIENT_SECRET`; for backups, the `BACKUP_*` names. Put passwords and keys
+    under _Secrets_, which nobody can read back; the rest can be _Variables_. Optional:
+    `ORBIT_SERVER_USER` if your provider's login is not `root` (e.g. `ubuntu`), and
+    `ORBIT_SSH_KNOWN_HOSTS` with the output of `ssh-keyscan <server ip>` so GitHub checks it talks to
+    your server.
+
+5.  **Deploy**: _Actions → Deploy to your server → Run workflow_. The first run takes 5–15 minutes and
+    ends green; the log shows the same steps as a manual install.
+
+After that, changing a setting is: edit it on the _Secrets and variables_ page, then _Run workflow_
+again. Every push to `main` (including syncing your fork) deploys by itself, after the checks pass.
+Root login is switched off by the first run, which is why GitHub logs in as `orbit` from then on.
+
+**The server is gone**: rent a new one with the same key (step 2), change `ORBIT_SERVER_HOST`,
+and run the workflow with _action_ set to `restore`: it installs, then restores the latest backup.
 
 ## Moving from hosted Supabase
 

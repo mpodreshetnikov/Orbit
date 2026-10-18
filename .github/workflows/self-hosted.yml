@@ -1,0 +1,40 @@
+name: Deploy to your server
+
+# Installs Orbit on your own server and keeps it on the latest main, configured entirely by this
+# repository's secrets and variables (docs/SELF_HOSTING.md, "Deploy from GitHub"). Does nothing
+# until the ORBIT_SERVER_HOST variable is set. The work is deploy/ci/deploy.sh.
+on:
+  # Every commit on main, once its images are published (deploy-self-hosted in main.yml).
+  workflow_call:
+  # By hand: Actions -> Deploy to your server -> Run workflow.
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one)"
+        type: choice
+        options: [deploy, restore]
+        default: deploy
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Deploy to your server
+    if: vars.ORBIT_SERVER_HOST != ''
+    runs-on: ubuntu-latest
+    # One deploy at a time; a newer one waits rather than cancelling one halfway through a migration.
+    concurrency:
+      group: self-hosted-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        env:
+          ORBIT_SECRETS_JSON: ${{ toJSON(secrets) }}
+          ORBIT_VARS_JSON: ${{ toJSON(vars) }}
+          ORBIT_COMMIT: ${{ github.sha }}
+          ORBIT_ACTION: ${{ inputs.action || 'deploy' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: deploy/ci/deploy.sh

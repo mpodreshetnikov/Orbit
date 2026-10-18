@@ -19,6 +19,8 @@
 #   ORBIT_REF         the branch, tag or commit to check out (default: main)
 #   ORBIT_DIR         where to put it (default: /opt/orbit)
 #   ORBIT_SKIP_INSTALL=true   prepare the server only, do not run deploy/orbit install
+#   ORBIT_TOKEN_FILE  a file holding a GitHub token, for a private repository and its images; used
+#                     for this run only (deploy/ci/deploy.sh passes the workflow's)
 set -Eeuo pipefail
 
 ORBIT_REPO="${ORBIT_REPO:-https://github.com/mpodreshetnikov/Orbit.git}"
@@ -34,6 +36,18 @@ die() {
   printf '\033[31mERR\033[0m  %s\n' "$*" >&2
   exit 1
 }
+# git with the GitHub token, when there is one, as an HTTP header passed through the environment:
+# neither the command line nor the checkout's config ever holds it.
+gitx() {
+  if [[ -n "${ORBIT_TOKEN_FILE:-}" ]]; then
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+      GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$(cat "$ORBIT_TOKEN_FILE")" | base64 -w0)" \
+      git "$@"
+  else
+    git "$@"
+  fi
+}
+
 retry() {
   local n=1
   until "$@"; do
@@ -101,6 +115,14 @@ install_docker() {
   rm -f "$tmp"
   systemctl enable --now docker >/dev/null 2>&1
   ok "container logs are capped at 30 MB per service"
+  # With a token, the images of a private repository can be pulled -- for this run only.
+  if [[ -n "${ORBIT_TOKEN_FILE:-}" ]]; then
+    if docker login ghcr.io -u x-access-token --password-stdin <"$ORBIT_TOKEN_FILE" >/dev/null 2>&1; then
+      trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+    else
+      warn "Could not log in to ghcr.io with the token; only public images can be pulled."
+    fi
+  fi
 }
 
 create_user() {
@@ -196,20 +218,23 @@ EOF
 fetch_orbit() {
   step "Getting Orbit into $ORBIT_DIR"
   if [[ ! -d "$ORBIT_DIR/.git" ]]; then
-    retry git clone --quiet "$ORBIT_REPO" "$ORBIT_DIR"
+    retry gitx clone --quiet "$ORBIT_REPO" "$ORBIT_DIR"
   fi
   # deploy/orbit runs as root on a checkout owned by orbit; git refuses that unless told it is fine.
   git config --system --get-all safe.directory | grep -qx "$ORBIT_DIR" ||
     git config --system --add safe.directory "$ORBIT_DIR"
   if git -C "$ORBIT_DIR" diff --quiet HEAD -- 2>/dev/null; then
     # A branch is checked out as itself, so that `git pull` updates it later; a commit, detached.
-    if git -C "$ORBIT_DIR" ls-remote --exit-code --heads origin "$ORBIT_REF" >/dev/null 2>&1; then
-      retry git -C "$ORBIT_DIR" fetch --quiet origin "+refs/heads/$ORBIT_REF:refs/remotes/origin/$ORBIT_REF"
+    if gitx -C "$ORBIT_DIR" ls-remote --exit-code --heads origin "$ORBIT_REF" >/dev/null 2>&1; then
+      retry gitx -C "$ORBIT_DIR" fetch --quiet origin "+refs/heads/$ORBIT_REF:refs/remotes/origin/$ORBIT_REF"
       git -C "$ORBIT_DIR" checkout --quiet -B "$ORBIT_REF" "origin/$ORBIT_REF"
     else
-      retry git -C "$ORBIT_DIR" fetch --quiet origin "$ORBIT_REF"
+      retry gitx -C "$ORBIT_DIR" fetch --quiet origin "$ORBIT_REF"
       git -C "$ORBIT_DIR" checkout --quiet --detach FETCH_HEAD
     fi
+  elif [[ "$ORBIT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+    # Asked for one exact commit (a deploy from CI): installing another one would be a lie.
+    die "$ORBIT_DIR has local changes, so it cannot be moved to $ORBIT_REF. See them with: git -C $ORBIT_DIR status"
   else
     warn "$ORBIT_DIR has local changes; left on the commit it is on."
   fi

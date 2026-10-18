@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Puts Orbit on your own server from GitHub Actions (.github/workflows/self-hosted.yml), configured
+# entirely by the repository's secrets and variables -- docs/SELF_HOSTING.md, "Deploy from GitHub".
+# It runs on the Actions runner and, over SSH, runs deploy/bootstrap.sh on the server: a fresh
+# server gets set up and installed, an existing one brought to this commit. Safe to repeat.
+#
+# Environment:
+#   ORBIT_SECRETS_JSON, ORBIT_VARS_JSON   toJSON(secrets) and toJSON(vars) of the workflow
+#   ORBIT_COMMIT                          the commit to deploy
+#   ORBIT_ACTION                          deploy (the default), or restore: then restore the latest
+#                                         backup over it (a server replacing a lost one)
+#   GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SERVER_URL   from Actions
+set -Eeuo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+fail() {
+  echo "::error::$*"
+  exit 1
+}
+
+# A secret wins over a variable of the same name.
+setting() {
+  local value
+  value="$(jq -r --arg n "$1" '.[$n] // empty' <<<"$ORBIT_SECRETS_JSON")"
+  [[ -n "$value" ]] || value="$(jq -r --arg n "$1" '.[$n] // empty' <<<"$ORBIT_VARS_JSON")"
+  printf '%s' "$value"
+}
+
+host="$(setting ORBIT_SERVER_HOST)"
+[[ -n "$host" ]] || fail "Set the ORBIT_SERVER_HOST variable to your server's IP address."
+[[ -n "$(setting ORBIT_SSH_PRIVATE_KEY)" ]] ||
+  fail "Set the ORBIT_SSH_PRIVATE_KEY secret to a private key your server accepts (docs/SELF_HOSTING.md, Deploy from GitHub)."
+[[ -n "$(setting ORBIT_MASTER_KEY)" ]] ||
+  fail "Set the ORBIT_MASTER_KEY secret to the output of: openssl rand -hex 32 -- and keep a copy: every key of the server is derived from it."
+
+# What goes into deploy/.env: every setting deploy/.env.example names, and the generated values a
+# move from hosted Supabase sets on purpose. Nothing else -- the SSH settings stay here.
+names="$(grep -oE '^[A-Z][A-Z0-9_]*=' "$here/../.env.example" | tr -d '=')
+POSTGRES_PASSWORD JWT_SECRET ANON_KEY SERVICE_ROLE_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY"
+install -m 600 /dev/null "$work/settings"
+for name in $names; do
+  value="$(setting "$name")"
+  [[ "$value" != *$'\n'* ]] || fail "$name has more than one line; deploy/.env takes one line per setting."
+  [[ -z "$value" ]] || printf '%s=%s\n' "$name" "$value" >>"$work/settings"
+done
+# The images this repository's own CI published for the commit.
+[[ -n "$(setting ORBIT_PREBUILT_IMAGES)" ]] ||
+  printf 'ORBIT_PREBUILT_IMAGES=ghcr.io/%s\n' "${GITHUB_REPOSITORY,,}" >>"$work/settings"
+echo "Settings for deploy/.env: $(cut -d= -f1 "$work/settings" | paste -sd' ')"
+
+# SSH. The server's host key is pinned by ORBIT_SSH_KNOWN_HOSTS when set; otherwise the key it
+# presents now is accepted, and printed so that it can be pinned.
+install -m 600 /dev/null "$work/key"
+setting ORBIT_SSH_PRIVATE_KEY >"$work/key"
+echo >>"$work/key"
+if [[ -n "$(setting ORBIT_SSH_KNOWN_HOSTS)" ]]; then
+  setting ORBIT_SSH_KNOWN_HOSTS >"$work/known_hosts"
+else
+  ssh-keyscan -T 15 "$host" 2>/dev/null >"$work/known_hosts" || true
+  [[ -s "$work/known_hosts" ]] || fail "Cannot reach $host on port 22."
+  echo "::notice::Accepted the SSH host key $host presents. To pin it, set the variable ORBIT_SSH_KNOWN_HOSTS to the output of: ssh-keyscan $host"
+fi
+ssh_opts=(-i "$work/key" -o UserKnownHostsFile="$work/known_hosts" -o StrictHostKeyChecking=yes
+  -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30)
+
+# The first deploy logs in as root (or ORBIT_SERVER_USER); bootstrap.sh then turns root logins
+# off, so every later one is `orbit`.
+user=""
+for candidate in orbit "$(setting ORBIT_SERVER_USER)" root; do
+  [[ -n "$candidate" ]] || continue
+  if ssh "${ssh_opts[@]}" "$candidate@$host" true 2>/dev/null; then
+    user="$candidate"
+    break
+  fi
+done
+[[ -n "$user" ]] || fail "ORBIT_SSH_PRIVATE_KEY does not log in to $host as orbit, $(setting ORBIT_SERVER_USER) or root."
+echo "Logged in to $host as $user"
+sudo=""
+[[ "$user" == root ]] || sudo="sudo -n"
+# The command is built here and runs there: client-side expansion is the point.
+# shellcheck disable=SC2029
+remote() { ssh "${ssh_opts[@]}" "$user@$host" "$@"; }
+
+# Files travel over stdin into a directory only this login can read, and are gone after the run.
+# The workflow token in it lets the server fetch a private repository and pull its images; it
+# expires when this run ends.
+dir="$(remote 'umask 077 && mktemp -d')"
+remote "cat >$dir/settings" <"$work/settings"
+remote "cat >$dir/bootstrap.sh" <"$here/../bootstrap.sh"
+printf '%s' "$GITHUB_TOKEN" | remote "cat >$dir/token"
+ssh-keygen -y -f "$work/key" | remote "cat >$dir/ssh_key.pub"
+
+remote "set -e
+  trap 'rm -rf $dir' EXIT
+  $sudo env ORBIT_REPO='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' ORBIT_REF='$ORBIT_COMMIT' \
+    ORBIT_SETTINGS=$dir/settings ORBIT_TOKEN_FILE=$dir/token ORBIT_SSH_KEY=\"\$(cat $dir/ssh_key.pub)\" \
+    bash $dir/bootstrap.sh"
+
+if [[ "${ORBIT_ACTION:-deploy}" == restore ]]; then
+  remote "$sudo /opt/orbit/deploy/orbit restore --yes"
+fi
+echo "::notice::Orbit $(cut -c1-12 <<<"$ORBIT_COMMIT") is on $host"
