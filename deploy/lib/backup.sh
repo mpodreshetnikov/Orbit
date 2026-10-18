@@ -137,9 +137,12 @@ cmd_restore() {
   compose stop
   # Everything this restore replaces is kept as *.before-restore-$stamp, so that any failure from
   # here on can put Orbit back exactly as it was (restore_rollback).
+  # Every step after the first move ends in restore_rollback when it fails, so a full disk or a
+  # service that does not come back cannot leave Orbit half restored. wait_healthy runs in a
+  # subshell there: it exits rather than returning, which would skip the rollback.
   mv "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/db.before-restore-$stamp"
-  cp -a "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
-  cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.before-restore-$stamp"
+  cp -a "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db" || restore_rollback
+  cp -a "$ORBIT_DATA_DIR/storage" "$ORBIT_DATA_DIR/storage.before-restore-$stamp" || restore_rollback
 
   if ((from_snapshot == 0)) && [[ -n "${BACKUP_WAL_S3_PREFIX:-}" ]]; then
     step "Restoring the database${target_time:+ to $target_time}"
@@ -167,7 +170,7 @@ cmd_restore() {
     # write into a database about to be truncated.
     step "Loading the nightly dump"
     compose up -d db || restore_rollback
-    wait_healthy 300
+    (wait_healthy 300) || restore_rollback
     export SERVICE_ROLE_KEY
     migration_run import || restore_rollback
   fi
@@ -177,9 +180,9 @@ cmd_restore() {
 
   step "Starting Orbit"
   compose up -d --remove-orphans || restore_rollback
-  wait_healthy 600
-  compose restart functions >/dev/null
-  wait_healthy 120
+  (wait_healthy 600) || restore_rollback
+  compose restart functions >/dev/null || restore_rollback
+  (wait_healthy 120) || restore_rollback
   warm_functions
 
   # On a new server nothing has switched backups on yet: init marks the repositories ready and
@@ -200,9 +203,15 @@ restore_rollback() {
   local stamp="$RESTORE_STAMP"
   warn "The restore failed; putting Orbit back on the data it had before"
   compose stop >/dev/null 2>&1 || true
-  rm -rf "$ORBIT_DATA_DIR/db" "$ORBIT_DATA_DIR/storage"
-  mv "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
-  mv "$ORBIT_DATA_DIR/storage.before-restore-$stamp" "$ORBIT_DATA_DIR/storage"
+  # Only what was already set aside goes back: a failure while setting aside stops halfway.
+  if [[ -d "$ORBIT_DATA_DIR/db.before-restore-$stamp" ]]; then
+    rm -rf "$ORBIT_DATA_DIR/db"
+    mv "$ORBIT_DATA_DIR/db.before-restore-$stamp" "$ORBIT_DATA_DIR/db"
+  fi
+  if [[ -d "$ORBIT_DATA_DIR/storage.before-restore-$stamp" ]]; then
+    rm -rf "$ORBIT_DATA_DIR/storage"
+    mv "$ORBIT_DATA_DIR/storage.before-restore-$stamp" "$ORBIT_DATA_DIR/storage"
+  fi
   compose run --rm --no-deps -v "orbit_db-config:/restore/db-config" --entrypoint sh backup -c \
     '[ ! -f /restore/db-config/pgsodium_root.key.before-restore ] || mv /restore/db-config/pgsodium_root.key.before-restore /restore/db-config/pgsodium_root.key' || true
   compose up -d --remove-orphans
