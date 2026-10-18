@@ -151,7 +151,41 @@ wait_healthy() {
     sleep 3
   done
   compose ps
+  # What a service says while failing its healthcheck is usually the cause; print it here, where
+  # a deploy from GitHub can show it, rather than only naming the command that would.
+  local service
+  for service in $unhealthy; do
+    printf '\n--- the last lines of %s ---\n' "$service"
+    compose logs --no-color --tail 30 "$service" 2>&1 || true
+  done
   die "Still not healthy after ${1:-300}s: $(echo "$unhealthy" | tr '\n' ' '). Look at: deploy/orbit logs <service>"
+}
+
+# What the server, and a container on it, can reach. Orbit needs both: the server pulls images, and
+# its containers call out -- Auth to Google for sign-in, the functions to npm and JSR for their
+# modules and to OpenRouter for AI. Only reports: a failure further on then has its cause named
+# here. Run after the backup image is in place; it is the container this uses.
+check_network() {
+  local urls=(https://github.com https://oauth2.googleapis.com https://registry.npmjs.org https://jsr.io
+    https://openrouter.ai) url i from_server from_container blocked=() container_codes
+  step "Checking what this server and its containers can reach"
+  container_codes="$(docker run --rm --entrypoint sh orbit-backup:local -c \
+    'for u in "$@"; do curl -s -o /dev/null -m 10 -w "%{http_code}\n" "$u" || true; done' sh "${urls[@]}" 2>/dev/null || true)"
+  i=0
+  for url in "${urls[@]}"; do
+    i=$((i + 1))
+    from_server="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$url" || true)"
+    from_container="$(sed -n "${i}p" <<<"$container_codes")"
+    printf '     %-32s server %-4s containers %s\n' "$url" "${from_server:-000}" "${from_container:-000}"
+    [[ "${from_container:-000}" != 000 ]] || blocked+=("$url")
+  done
+  if ((${#blocked[@]} == ${#urls[@]})); then
+    warn "Containers on this server reach none of these, so Google sign-in, AI and the functions will not work. Traffic from Docker's network is blocked: by this server's firewall, or by its provider."
+  elif ((${#blocked[@]})); then
+    warn "Containers on this server cannot reach: ${blocked[*]}. Whatever needs those will fail; the provider's network may block them."
+  else
+    ok "the server and its containers reach the internet"
+  fi
 }
 
 # --- Commands -------------------------------------------------------------------------------------
@@ -177,6 +211,7 @@ cmd_install() {
   prepare_data_dir
   sync_functions
   cmd_build
+  check_network
   start_migrated
   smoke_test
   ensure_backups_on
@@ -219,6 +254,7 @@ cmd_update() {
   prepare_data_dir
   sync_functions
   cmd_build
+  check_network
   start_migrated
   smoke_test
   ensure_backups_on
