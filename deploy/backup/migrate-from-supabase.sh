@@ -82,17 +82,6 @@ import_into_target() {
   local list="$DIR/restore.list" missing tables sequences bucket name mime sum file
   : "${SERVICE_ROLE_KEY:?}"
 
-  # Before an export's rows replace this instance's: delete its current files through the Storage
-  # API, which removes them from disk as well. Loading the rows alone would leave the files of the
-  # previous import behind, unreferenced, and in every snapshot from then on. A snapshot restore
-  # (no files.tsv) has just put its own files in place and keeps them.
-  if [[ -f "$DIR/files.tsv" ]]; then
-    while IFS=$'\t' read -r bucket name; do
-      curl -fsS --retry 4 -o /dev/null -X DELETE -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
-        "$(object_url http://kong:8000 "$bucket" "$name")"
-    done < <(target_psql -F $'\t' -c "select bucket_id, name from storage.objects")
-  fi
-
   # Load only into tables this instance has. A table the hosted project has and this one does not
   # (a newer Supabase feature) is reported, not silently dropped.
   missing="$(dump_tables | while read -r t; do
@@ -118,6 +107,35 @@ import_into_target() {
       BEGIN { n = split(ENVIRON["TABLES"], t, "\n"); for (i = 1; i <= n; i++) load[t[i]] = 1
               n = split(ENVIRON["SEQUENCES"], q, "\n"); for (i = 1; i <= n; i++) setval[q[i]] = 1 }
       ($4 == "TABLE" && $5 == "DATA" && ($6 "." $7) in load) || ($4 == "SEQUENCE" && $5 == "SET" && ($6 "." $7) in setval)' >"$list"
+  # A column the hosted project has and this instance lacks -- its Supabase release is ahead of the
+  # one pinned here -- would stop the load halfway on a bare COPY error. Name them all up front.
+  local table columns column have unknown=""
+  while read -r table columns; do
+    have=",$(target_psql -c "select string_agg(column_name, ',') from information_schema.columns
+      where table_schema || '.' || table_name = '${table//\"/}'"),"
+    for column in ${columns//,/ }; do
+      column="${column//\"/}"
+      [[ "$have" == *",$column,"* ]] || unknown+=" $table.$column"
+    done
+  done < <(pg_restore --data-only --use-list="$list" --file=- "$DIR/source.dump" |
+    sed -n 's/^COPY \([^ ]*\) (\(.*\)) FROM stdin;$/\1 \2/p')
+  if [[ -n "$unknown" ]]; then
+    echo "the hosted data has columns this instance does not:$unknown" >&2
+    echo "Its Supabase is newer than the release pinned in deploy/supabase-upstream.env: pin a newer" >&2
+    echo "self-hosted release there, run deploy/orbit update, then import again. Nothing was changed." >&2
+    return 1
+  fi
+  # Before an export's rows replace this instance's: delete its current files through the Storage
+  # API, which removes them from disk as well. Loading the rows alone would leave the files of the
+  # previous import behind, unreferenced, and in every snapshot from then on. A snapshot restore
+  # (no files.tsv) has just put its own files in place and keeps them.
+  if [[ -f "$DIR/files.tsv" ]]; then
+    while IFS=$'\t' read -r bucket name; do
+      curl -fsS --retry 4 -o /dev/null -X DELETE -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+        "$(object_url http://kong:8000 "$bucket" "$name")"
+    done < <(target_psql -F $'\t' -c "select bucket_id, name from storage.objects")
+  fi
+
   tables="$(paste -sd, - <<<"$tables")"
   log "replacing the data of $(tr ',' '\n' <<<"$tables" | wc -l) tables in one transaction"
   {

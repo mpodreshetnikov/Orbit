@@ -146,14 +146,17 @@ copies your data **off the server, to two places, continuously**, encrypted befo
 | 2. Snapshots        | Uploaded files every 15 minutes; nightly a database dump, the Vault key and `deploy/.env` (restic) | 15 minutes (files), 1 day | Bucket 2 |
 
 Two copies with two different tools at two different companies means one fire, one bankruptcy,
-one blocked payment card or one bug cannot take everything. Every Sunday the server restores the
-latest copies into a scratch area and checks they open; if any backup fails or goes stale you get a
-message.
+one blocked payment card or one bug cannot take everything. Every Sunday the server restores both
+copies into a scratch area and reads them back — the database up to the last minute, the nightly
+dump, the Vault key and the uploaded files — and checks none of them is out of date. If any backup
+fails, goes stale, or the database stops handing its journal over, you get a message.
 
 ### Create the two buckets
 
-A "bucket" is a folder in an online storage service that speaks the S3 protocol. Orbit's data is
-hundreds of megabytes, so the cost is pennies or zero. Pick **two different companies**, ideally in
+A "bucket" is a folder in an online storage service that speaks the S3 protocol. Bucket 1 holds two
+weeks of the database journal, about 80 MB a day (Orbit's reminders write to the database every
+minute), so 1–2 GB plus the nightly copies; bucket 2 holds the snapshots, about the size of your data
+and files. The cost is pennies or zero. Pick **two different companies**, ideally in
 two different countries and not the one your server is with. Some that work:
 
 - **Cloudflare R2** — 10 GB free. Endpoint `https://<account id>.r2.cloudflarestorage.com`, region
@@ -207,7 +210,7 @@ Run `deploy/orbit update` after changing them.
 
     sudo deploy/orbit backup status     # when each copy last succeeded
     sudo deploy/orbit backup now        # take a full backup right now
-    sudo deploy/orbit backup verify     # restore into a scratch area and check it opens
+    sudo deploy/orbit backup verify     # restore both copies into a scratch area and read them back
 
 **Undo a mistake** (deleted something an hour ago) — restore the state from just before it:
 
@@ -275,10 +278,20 @@ time; you switch over only when the new one checks out, and you can switch back.
     # ends with: verified: N tables have the same row counts, M objects the same bytes
 
 4.  **Check the new one** at its address: sign in, open records and their files, wait for a reminder.
-5.  **Switch**: pick a quiet moment, run `export` and `import` once more so the copy is fresh, point
-    the domain at the new server (or keep the new subdomain), and add
-    `https://<domain>/auth/v1/callback` to the Google OAuth client's redirect URIs.
-6.  **Switch back**, if something is wrong: point the domain back. The old project was never touched.
+    Until you switch, both send reminders, so a device may get each one twice.
+5.  **Switch**, at a quiet moment:
+    1.  Stop writing to the old one. Nobody uses the old Orbit — the website, the browser extension or
+        an AI assistant — from here on: what it writes after the last export would not be copied. Then
+        pause the old one's scheduled jobs, in the old project's _SQL Editor_:
+
+            update cron.job set active = false;
+
+    2.  Run `export` and `import` once more, so the copy is complete.
+    3.  Point the domain at the new server (or keep the new subdomain), and add
+        `https://<domain>/auth/v1/callback` to the Google OAuth client's redirect URIs.
+
+6.  **Switch back**, if something is wrong: point the domain back and resume its jobs
+    (`update cron.job set active = true;`). Apart from that pause, the old project was never touched.
     Turn it off (Supabase project, Vercel project) only after a week or two of the new one working.
 
 ## Everyday commands
