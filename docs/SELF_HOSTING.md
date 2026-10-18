@@ -334,6 +334,13 @@ time; you switch over only when the new one checks out, and you can switch back.
 
     # ends with: verified: N tables have the same row counts, M objects the same bytes
 
+    **From GitHub** instead, for a server deployed from there: add the secrets `SOURCE_DB_URL` and
+    `SOURCE_SERVICE_ROLE_KEY` and the variable `SOURCE_SUPABASE_URL` (the same three values), then
+    _Actions → Deploy to your server → Run workflow_ with _action_ `migrate-from-supabase`. The
+    export runs on GitHub's machine, which reaches Supabase's cloud from anywhere, and travels to
+    the server over SSH; choosing the action is the confirmation. The log ends with the same
+    `verified:` line.
+
 4.  **Check the new one** at its address: sign in, open records and their files, wait for a reminder.
     Until you switch, both send reminders, so a device may get each one twice.
 5.  **Switch**, at a quiet moment:
