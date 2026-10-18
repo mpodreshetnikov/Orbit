@@ -141,7 +141,7 @@ prepare_data_dir() {
 }
 
 wait_healthy() {
-  local deadline=$((SECONDS + ${1:-300})) unhealthy
+  local deadline=$((SECONDS + ${1:-300})) unhealthy=""
   step "Waiting for every service to report healthy"
   while ((SECONDS < deadline)); do
     # `|`-separated: a service without a healthcheck (caddy) has an empty Health field.
@@ -151,40 +151,54 @@ wait_healthy() {
     sleep 3
   done
   compose ps
-  # What a service says while failing its healthcheck is usually the cause; print it here, where
-  # a deploy from GitHub can show it, rather than only naming the command that would.
-  local service
+  # The cause, where a deploy from GitHub can show it: what the failing healthcheck printed. Not the
+  # service's own log, which can hold user data and would land in a public Actions log; that goes
+  # to a file on the server instead.
+  local service container logfile
+  logfile="$ORBIT_DATA_DIR/unhealthy-$(date -u +%Y%m%dT%H%M%SZ).log"
+  (umask 077 && : >"$logfile")
   for service in $unhealthy; do
-    printf '\n--- the last lines of %s ---\n' "$service"
-    compose logs --no-color --tail 30 "$service" 2>&1 || true
+    container="$(compose ps -q "$service" 2>/dev/null | head -1)"
+    printf '\n%s: its last healthcheck said: %s\n' "$service" "$(docker inspect --format '{{json .State.Health}}' \
+      "$container" 2>/dev/null | jq -r '.Log[-1].Output // empty' 2>/dev/null | tr -s '\n' ' ' | cut -c1-300)"
+    compose logs --no-color --tail 200 "$service" >>"$logfile" 2>&1 || true
+    # From the log, only the hosts of the addresses its errors name: no paths, no queries.
+    printf '%s: its errors name: %s\n' "$service" "$(compose logs --no-color --tail 200 "$service" 2>&1 |
+      grep -iE 'error|fail' | grep -oE 'https?://[A-Za-z0-9.-]+' | sort -u | tr '\n' ' ' || true)"
   done
-  die "Still not healthy after ${1:-300}s: $(echo "$unhealthy" | tr '\n' ' '). Look at: deploy/orbit logs <service>"
+  die "Still not healthy after ${1:-300}s: $(echo "$unhealthy" | tr '\n' ' '). Their logs are in $logfile on the server"
 }
 
-# What the server, and a container on it, can reach. Orbit needs both: the server pulls images, and
-# its containers call out -- Auth to Google for sign-in, the functions to npm and JSR for their
-# modules and to OpenRouter for AI. Only reports: a failure further on then has its cause named
-# here. Run after the backup image is in place; it is the container this uses.
+# What the server, and Orbit's containers, can reach. Orbit needs both: the server pulls images, and
+# its containers call out -- Auth to Google for sign-in, the functions to deno.land, npm and JSR for
+# their modules and to OpenRouter for AI. Only reports: a failure further on then has its cause
+# named here. Probes from a one-off backup container on Orbit's own network, the path the services
+# take; a host counts as reachable only when it answers as it should (2xx or 3xx), not with a block
+# page.
 check_network() {
-  local urls=(https://github.com https://oauth2.googleapis.com https://registry.npmjs.org https://jsr.io
-    https://openrouter.ai) url i from_server from_container blocked=() container_codes
+  local urls=(https://api.github.com https://accounts.google.com/.well-known/openid-configuration
+    https://deno.land https://registry.npmjs.org https://jsr.io https://openrouter.ai/api/v1/models)
+  local url host i from_server from_container blocked=() container_codes
   step "Checking what this server and its containers can reach"
-  container_codes="$(docker run --rm --entrypoint sh orbit-backup:local -c \
+  # The loop runs in the container: its variables are meant for that shell, not this one.
+  # shellcheck disable=SC2016
+  container_codes="$(compose run --rm --no-deps -T --entrypoint sh backup -c \
     'for u in "$@"; do curl -s -o /dev/null -m 10 -w "%{http_code}\n" "$u" || true; done' sh "${urls[@]}" 2>/dev/null || true)"
   i=0
   for url in "${urls[@]}"; do
     i=$((i + 1))
     from_server="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$url" || true)"
     from_container="$(sed -n "${i}p" <<<"$container_codes")"
-    printf '     %-32s server %-4s containers %s\n' "$url" "${from_server:-000}" "${from_container:-000}"
-    [[ "${from_container:-000}" != 000 ]] || blocked+=("$url")
+    printf '     %-62s server %-4s containers %s\n' "$url" "${from_server:-000}" "${from_container:-000}"
+    host="${url#https://}"
+    [[ "${from_container:-000}" =~ ^[23][0-9][0-9]$ ]] || blocked+=("${host%%/*}")
   done
   if ((${#blocked[@]} == ${#urls[@]})); then
-    warn "Containers on this server reach none of these, so Google sign-in, AI and the functions will not work. Traffic from Docker's network is blocked: by this server's firewall, or by its provider."
+    warn "Orbit's containers reach none of these, so Google sign-in, AI and the functions will not work. Traffic from Docker's network is blocked: by this server's firewall, or by its provider."
   elif ((${#blocked[@]})); then
-    warn "Containers on this server cannot reach: ${blocked[*]}. Whatever needs those will fail; the provider's network may block them."
+    warn "Orbit's containers cannot reach: ${blocked[*]}. Whatever needs those will fail; the provider's network may block them."
   else
-    ok "the server and its containers reach the internet"
+    ok "the server and Orbit's containers reach the internet"
   fi
 }
 
