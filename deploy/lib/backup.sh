@@ -62,8 +62,8 @@ backup_setup() {
   ensure_secrets "$ENV_FILE"
   load_env
   prepare_data_dir
-  step "Building and starting the backup service"
-  compose build backup
+  step "Starting the backup service"
+  ensure_backup_image
   compose up -d db backup
   wait_healthy 300
   step "Checking the backup storage"
@@ -133,7 +133,7 @@ cmd_restore() {
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   RESTORE_STAMP="$stamp"
   step "Stopping Orbit"
-  compose build backup >/dev/null
+  ensure_backup_image >/dev/null
   compose stop
   # Everything this restore replaces is kept as *.before-restore-$stamp, so that any failure from
   # here on can put Orbit back exactly as it was (restore_rollback).

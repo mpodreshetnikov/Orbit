@@ -283,6 +283,14 @@ pull_prebuilt() {
   docker tag "$image" "orbit-$kind:local"
 }
 
+# Every command that runs the backup image gets it here: CI's image for this commit when there is
+# one, built on this server only otherwise -- a build needs Ubuntu's and PostgreSQL's package
+# archives, which a server's network may not reach.
+ensure_backup_image() {
+  pull_prebuilt backup && return
+  compose build backup
+}
+
 cmd_build() {
   load_env
   step "Getting the web app"
@@ -297,7 +305,7 @@ cmd_build() {
     compose build web
     compose --profile tools build migrate
   fi
-  compose build backup
+  ensure_backup_image
 }
 
 cmd_migrate() {
