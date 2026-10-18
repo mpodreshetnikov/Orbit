@@ -152,13 +152,6 @@ export default defineConfig({
         resolve: {
           alias: mobileAlias,
         },
-        // Given tsconfigRaw, esbuild stops looking for a tsconfig on disk. It has to: `mobile`
-        // extends `expo/tsconfig.base`, which resolves through that package's exports map, and
-        // Vite's own tsconfig reader treats the specifier as a directory and fails to load the
-        // project at all.
-        esbuild: {
-          tsconfigRaw: { compilerOptions: { target: "es2022", useDefineForClassFields: false } },
-        },
         test: {
           name: "mobile",
           ...sharedTestOptions(),
