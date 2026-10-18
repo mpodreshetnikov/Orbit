@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one); doctor = only show what the server's network reaches, changing nothing"
+        description: "deploy = install or update; restore = then replace the data with the latest backup (a server that replaces a lost one); doctor = only show what the server's network reaches, changing nothing; migrate-from-supabase = then replace the data with the hosted Supabase project's (which is only read)"
         type: choice
-        options: [deploy, restore, doctor]
+        options: [deploy, restore, doctor, migrate-from-supabase]
         default: deploy
 
 permissions:
@@ -87,6 +87,16 @@ jobs:
           ORBIT_SECRET_SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
           ORBIT_SECRET_VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           ORBIT_SECRET_VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          # The hosted project to move from, for migrate-from-supabase only (docs/SELF_HOSTING.md,
+          # "Moving from hosted Supabase"): the SOURCE_* settings, or else the ones this repository's
+          # hosted production deploys with (main.yml). deploy/ci/deploy.sh takes one whole set,
+          # never a mix of the two.
+          SOURCE_DB_URL: ${{ inputs.action == 'migrate-from-supabase' && secrets.SOURCE_DB_URL || '' }}
+          SOURCE_SUPABASE_URL: ${{ inputs.action == 'migrate-from-supabase' && vars.SOURCE_SUPABASE_URL || '' }}
+          SOURCE_SERVICE_ROLE_KEY: ${{ inputs.action == 'migrate-from-supabase' && secrets.SOURCE_SERVICE_ROLE_KEY || '' }}
+          HOSTED_PROJECT_REF: ${{ inputs.action == 'migrate-from-supabase' && vars.SUPABASE_PROJECT_REF || '' }}
+          HOSTED_DB_PASS: ${{ inputs.action == 'migrate-from-supabase' && secrets.SUPABASE_DB_PASS || '' }}
+          HOSTED_SERVICE_ROLE_KEY: ${{ inputs.action == 'migrate-from-supabase' && secrets.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || '' }}
           ORBIT_VARS_JSON: ${{ toJSON(vars) }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_ACTION: ${{ inputs.action || 'deploy' }}

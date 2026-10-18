@@ -501,7 +501,7 @@ Usage: deploy/orbit <command>
   restore [--time "2026-10-17 12:00:00+00"] [--yes]
                    Replace the database (and files) with the latest backup, or the state at --time
 
-  migrate-from-supabase export | import [--yes] | verify
+  migrate-from-supabase export | receive | import [--yes] | verify
                    Move an Orbit that runs on hosted Supabase onto this server
   compose ...      Run any docker compose command against this stack
   doctor           What this server's network lets Orbit reach, in detail (only reads)

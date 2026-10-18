@@ -11,7 +11,13 @@
 #   ORBIT_COMMIT                          the commit to deploy
 #   ORBIT_ACTION                          deploy (the default); restore: then restore the latest
 #                                         backup over it (a server replacing a lost one); doctor:
-#                                         only run deploy/doctor.sh there, changing nothing
+#                                         only run deploy/doctor.sh there, changing nothing;
+#                                         migrate-from-supabase: then replace its data with the hosted
+#                                         project's, exported here (SOURCE_* below)
+#   SOURCE_DB_URL, SOURCE_SUPABASE_URL, SOURCE_SERVICE_ROLE_KEY
+#                                         the hosted project, for migrate-from-supabase only; or
+#   HOSTED_PROJECT_REF, HOSTED_DB_PASS, HOSTED_SERVICE_ROLE_KEY
+#                                         the same, from what the hosted production deploys with
 #   GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SERVER_URL   from Actions
 set -Eeuo pipefail
 
@@ -92,6 +98,32 @@ sudo=""
 # shellcheck disable=SC2029
 remote() { ssh "${ssh_opts[@]}" "$user@$host" "$@"; }
 
+# The hosted project is exported here, on the runner, before the server is touched: Supabase's
+# cloud sits behind Cloudflare, which some servers' networks cannot download from (on 2026-10-18,
+# the first server's could not). The export reads only; the old project is not changed. It runs in
+# the backup image, which has the tools, as this user, so the files stay removable.
+if [[ "${ORBIT_ACTION:-deploy}" == migrate-from-supabase ]]; then
+  # One whole set: a database from one project and files from another would import and still
+  # verify, against checksums of the wrong files.
+  if [[ -n "${SOURCE_DB_URL:-}${SOURCE_SUPABASE_URL:-}${SOURCE_SERVICE_ROLE_KEY:-}" ]]; then
+    [[ -n "${SOURCE_DB_URL:-}" && -n "${SOURCE_SUPABASE_URL:-}" && -n "${SOURCE_SERVICE_ROLE_KEY:-}" ]] ||
+      fail "Set all three of the SOURCE_DB_URL and SOURCE_SERVICE_ROLE_KEY secrets and the SOURCE_SUPABASE_URL variable, or none."
+  elif [[ -n "${HOSTED_PROJECT_REF:-}" && -n "${HOSTED_DB_PASS:-}" && -n "${HOSTED_SERVICE_ROLE_KEY:-}" ]]; then
+    # The session pooler the hosted production's own deploy connects through (main.yml).
+    SOURCE_DB_URL="postgresql://postgres.$HOSTED_PROJECT_REF:$HOSTED_DB_PASS@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+    SOURCE_SUPABASE_URL="https://$HOSTED_PROJECT_REF.supabase.co"
+    SOURCE_SERVICE_ROLE_KEY="$HOSTED_SERVICE_ROLE_KEY"
+    export SOURCE_DB_URL SOURCE_SUPABASE_URL SOURCE_SERVICE_ROLE_KEY
+  else
+    fail "Set the SOURCE_DB_URL and SOURCE_SERVICE_ROLE_KEY secrets and the SOURCE_SUPABASE_URL variable (docs/SELF_HOSTING.md, Moving from hosted Supabase)."
+  fi
+  image="ghcr.io/${GITHUB_REPOSITORY,,}-backup:$ORBIT_COMMIT"
+  docker pull --quiet "$image" >/dev/null 2>&1 || docker build --quiet -t "$image" "$here/../backup" >/dev/null
+  mkdir -p "$work/migration"
+  docker run --rm --user "$(id -u):$(id -g)" -e SOURCE_DB_URL -e SOURCE_SUPABASE_URL -e SOURCE_SERVICE_ROLE_KEY \
+    -v "$work/migration:/migration" --entrypoint /usr/local/bin/migrate-from-supabase "$image" export
+fi
+
 # Sent over stdin, so it runs whatever version of Orbit the server has, or none.
 if [[ "${ORBIT_ACTION:-deploy}" == doctor ]]; then
   remote "$sudo bash -s" <"$here/../doctor.sh"
@@ -115,5 +147,14 @@ remote "set -e
 
 if [[ "${ORBIT_ACTION:-deploy}" == restore ]]; then
   remote "$sudo /opt/orbit/deploy/orbit restore --yes"
+fi
+# Choosing this action in the workflow is the confirmation `import` otherwise asks for. This log is
+# public on a public repository: an object's name can say what a person stored, and the allowlist
+# check names the people it is missing, so a mismatch shows its bucket only and an address none.
+# On the server, `deploy/orbit migrate-from-supabase import` and `verify` show both in full.
+if [[ "${ORBIT_ACTION:-deploy}" == migrate-from-supabase ]]; then
+  tar -C "$work/migration" -cz . | remote "$sudo /opt/orbit/deploy/orbit migrate-from-supabase receive"
+  remote "$sudo /opt/orbit/deploy/orbit migrate-from-supabase import --yes" 2>&1 |
+    sed -E -e 's|^(MISMATCH object [^/]*)/.*|\1/...|' -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/<e-mail>/g'
 fi
 echo "::notice::Orbit $(cut -c1-12 <<<"$ORBIT_COMMIT") is on $host"
