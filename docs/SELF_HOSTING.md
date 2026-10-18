@@ -51,6 +51,11 @@ settings create an **A record**: name `orbit` (or whatever you chose), value = y
 address. It can take from a minute to an hour to start working; check with `ping orbit.example.com`
 — it should show your server's IP.
 
+No domain yet? Use `<server ip with dashes>.sslip.io` (for `1.2.3.4`: `1-2-3-4.sslip.io`): a free
+public service that already points every such name at that IP, so there is no DNS to set up, and the
+HTTPS certificate works the same. Switching to your own domain later is changing `ORBIT_DOMAIN` and
+the Google redirect URI.
+
 ## Step 2 — Prepare the server
 
 Connect to the server (`ssh root@<server ip>`) and run this one line:
@@ -167,7 +172,8 @@ and files. The cost is pennies or zero. Pick **two different companies**, ideall
 two different countries and not the one your server is with. Some that work:
 
 - **Cloudflare R2** — 10 GB free. Endpoint `https://<account id>.r2.cloudflarestorage.com`, region
-  `auto`.
+  `auto`. Some networks, Russian ones among them, cut transfers to Cloudflare short: from a server
+  there, pick another.
 - **Backblaze B2** — 10 GB free. Endpoint like `https://s3.eu-central-003.backblazeb2.com`, region
   `eu-central-003`.
 - **Yandex Object Storage**, **Selectel**, **VK Cloud** — payable from Russia. Endpoint
@@ -176,6 +182,10 @@ two different countries and not the one your server is with. Some that work:
 
 At each one: create a bucket (private, no public access), then create an access key that can read
 and write that bucket. You get an **access key ID** and a **secret access key**.
+
+One bucket for both also works — the two copies in two folders of it, with the same key pair — and
+keeps the two-tools protection, but one blocked account or one company's failure then takes both:
+fine to start with, worth a second company later.
 
 ### Fill them in and switch backups on
 
@@ -388,17 +398,20 @@ and follow the printed instructions (an SSH tunnel from your computer, then <htt
 
 ## When something goes wrong
 
-| What you see                                          | What to do                                                                                                                                                                                                                                                               |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ERR deploy/.env: X is not filled in`                 | Open `deploy/.env`, fill `X` following the comment above it, run the command again                                                                                                                                                                                       |
-| `429 Too Many Requests` or timeouts pulling images    | Docker Hub limits or blocks your server. Set `ORBIT_REGISTRY_MIRROR=https://mirror.gcr.io` in `deploy/.env`, run `deploy/orbit install` again                                                                                                                            |
-| The browser says the certificate is invalid           | DNS does not point at this server yet, or ports 80/443 are closed. Check `ping <domain>`, wait, then `deploy/orbit restart caddy`                                                                                                                                        |
-| Google says `redirect_uri_mismatch`                   | The redirect URI in Google Cloud Console must be exactly `https://<ORBIT_DOMAIN>/auth/v1/callback`                                                                                                                                                                       |
-| "Access denied" after signing in                      | Your e-mail is not in `ORBIT_ALLOWED_EMAILS`. Add it, run `deploy/orbit migrate`                                                                                                                                                                                         |
-| A service is not `healthy` in `deploy/orbit status`   | `deploy/orbit logs <service>` shows why. Most often a typo in `deploy/.env`                                                                                                                                                                                              |
-| `No prebuilt images for this commit` on an x86 server | CI publishes them about 15 minutes after a commit reaches `main`; it builds here meanwhile, which is fine. To download instead, wait and run `deploy/orbit update` again                                                                                                 |
-| `Could not build the edge functions' image`           | Building it here downloads the functions' modules from deno.land, npm and jsr.io, and your server's network blocks one of them (`deploy/orbit doctor` shows which). Use CI's image instead: wait until it is published for this commit, then `deploy/orbit update` again |
-| The build stops with `Killed` or the server freezes   | Not enough memory for the build. `swapon --show` should list `/orbit.swap`; if your provider forbids swap, use a 4 GB server                                                                                                                                             |
+| What you see                                           | What to do                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ERR deploy/.env: X is not filled in`                  | Open `deploy/.env`, fill `X` following the comment above it, run the command again                                                                                                                                                                                       |
+| `429 Too Many Requests` or timeouts pulling images     | Docker Hub limits or blocks your server. Set `ORBIT_REGISTRY_MIRROR=https://mirror.gcr.io` in `deploy/.env`, run `deploy/orbit install` again                                                                                                                            |
+| The browser says the certificate is invalid            | DNS does not point at this server yet, or ports 80/443 are closed. Check `ping <domain>`, wait, then `deploy/orbit restart caddy`                                                                                                                                        |
+| Google says `redirect_uri_mismatch`                    | The redirect URI in Google Cloud Console must be exactly `https://<ORBIT_DOMAIN>/auth/v1/callback`                                                                                                                                                                       |
+| "Access denied" after signing in                       | Your e-mail is not in `ORBIT_ALLOWED_EMAILS`. Add it, run `deploy/orbit migrate`                                                                                                                                                                                         |
+| A service is not `healthy` in `deploy/orbit status`    | `deploy/orbit logs <service>` shows why. Most often a typo in `deploy/.env`                                                                                                                                                                                              |
+| `No prebuilt images for this commit` on an x86 server  | CI publishes them about 15 minutes after a commit reaches `main`; it builds here meanwhile, which is fine. To download instead, wait and run `deploy/orbit update` again                                                                                                 |
+| `Could not build the edge functions' image`            | Building it here downloads the functions' modules from deno.land, npm and jsr.io, and your server's network blocks one of them (`deploy/orbit doctor` shows which). Use CI's image instead: wait until it is published for this commit, then `deploy/orbit update` again |
+| `ssh-keygen` is not recognized (Windows)               | Run it in PowerShell, not `cmd`. If PowerShell does not know it either: _Settings → Apps → Optional features → Add a feature → OpenSSH Client_, then open a new PowerShell window                                                                                        |
+| `This server cannot reach: openrouter.ai` (HTTP 403)   | OpenRouter refuses servers in some countries. Everything except the AI features works; they come back with a server elsewhere or another AI provider                                                                                                                     |
+| A backup or a download times out though the site works | Your server's network cuts some transfers short — on 2026-10-18 a server in Russia could not download from anything on Cloudflare. Run the workflow with _action_ `doctor`, and use services it can reach                                                                |
+| The build stops with `Killed` or the server freezes    | Not enough memory for the build. `swapon --show` should list `/orbit.swap`; if your provider forbids swap, use a 4 GB server                                                                                                                                             |
 
 ## Secrets
 
