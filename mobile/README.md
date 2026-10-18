@@ -25,7 +25,12 @@ JavaScript bundle from your machine.
    ```
 
    The URL must be `https` and a bare origin; the app refuses anything else and says why.
-   `http://localhost:…` is allowed, for a local stack.
+
+   A local Supabase stack is **not** reachable this way from a phone: `localhost` on the device is
+   the device, and the computer's LAN address is plain `http`, which the app rejects so that an
+   access token is never sent in clear text. Loopback is accepted only for a host that runs the
+   bundle itself (`expo start --web`, or a simulator on a Mac). Pointing a phone at a local stack
+   needs an https tunnel, which is not set up yet — use the deployed instance.
 
 3. Install and start:
 
@@ -48,8 +53,9 @@ just test-unit-mobile # the unit tests alone
 ```
 
 `just check` does **not** cover this directory: the typecheck needs `mobile/node_modules`, which the
-repository's own install does not create. CI runs `mobile-check` as its own job whenever anything
-here changes.
+repository's own install does not create. CI runs `mobile-check` inside `Quality Gates`, which
+`main protection` requires, whenever anything here changes — including a change to
+`supabase/db/database.types.ts`, since `@db` resolves onto it.
 
 Only the pure modules are unit-tested — the instance configuration, the day boundary, and the
 mapping from database rows to what a screen shows. Those hold the decisions; the screens lay the

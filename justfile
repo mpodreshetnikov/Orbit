@@ -102,8 +102,8 @@ quality-lint-mobile:
 #
 # Deliberately not part of `quality-typecheck`, and so not part of `check`: this needs
 # `mobile/node_modules`, which `install-dependencies` does not create because the web app has no use
-# for it. `mobile-check` below is the gate for this surface, and CI runs it as its own job whenever
-# anything under `mobile/` changes.
+# for it. `mobile-check` below is the gate for this surface, and CI runs it inside `Quality Gates` --
+# the job `main protection` actually requires -- whenever anything under `mobile/` changes.
 quality-typecheck-mobile:
   npm --prefix mobile run typecheck
 

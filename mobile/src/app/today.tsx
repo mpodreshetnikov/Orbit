@@ -1,7 +1,8 @@
-import { Redirect } from "expo-router";
+import { Redirect, Stack } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
   Pressable,
   RefreshControl,
@@ -10,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSession } from "@/lib/session";
+import { msUntilNextLocalDay } from "@/features/doses/day";
 import { countDue, presentDoses, type DoseCard } from "@/features/doses/present";
 import { fetchDosesForDay, resolveOwnPerson } from "@/features/doses/query";
 import { theme } from "@/theme";
@@ -46,6 +48,25 @@ export default function Today() {
     void load();
   }, [load]);
 
+  // The list holds one local day, so it has to stop holding it when that day ends. Two ways a day
+  // can end under a mounted screen, and both happen on a phone: it is backgrounded overnight and
+  // comes back the next morning, or it is simply left open past midnight. Without these the heading
+  // says today over yesterday's doses until somebody pulls to refresh.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void load();
+      }
+    });
+    return () => subscription.remove();
+  }, [load]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => void load(), msUntilNextLocalDay(new Date()));
+    return () => clearTimeout(timer);
+    // Re-armed on every load, so the next timer is measured from the day the data is actually for.
+  }, [load, loaded]);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     await load();
@@ -81,26 +102,42 @@ export default function Today() {
   const due = countDue(loaded.cards);
 
   return (
-    <FlatList
-      data={loaded.cards}
-      keyExtractor={(card) => card.id}
-      contentContainerStyle={styles.list}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
-      ListHeaderComponent={
-        <View style={styles.header}>
-          <Text style={styles.headerPerson}>{loaded.personName}</Text>
-          <Text style={styles.headerDue}>
-            {due === 0 ? "на сегодня всё" : `осталось приёмов: ${due}`}
-          </Text>
-        </View>
-      }
-      ListEmptyComponent={
-        <View style={styles.centered}>
-          <Text style={styles.empty}>На сегодня приёмов не запланировано</Text>
-        </View>
-      }
-      renderItem={({ item }) => <DoseRow card={item} />}
-    />
+    <>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Выйти из аккаунта"
+              onPress={() => void signOut()}
+              hitSlop={theme.space.sm}
+            >
+              <Text style={styles.headerAction}>Выйти</Text>
+            </Pressable>
+          ),
+        }}
+      />
+      <FlatList
+        data={loaded.cards}
+        keyExtractor={(card) => card.id}
+        contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <Text style={styles.headerPerson}>{loaded.personName}</Text>
+            <Text style={styles.headerDue}>
+              {due === 0 ? "на сегодня всё" : `осталось приёмов: ${due}`}
+            </Text>
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={styles.centered}>
+            <Text style={styles.empty}>На сегодня приёмов не запланировано</Text>
+          </View>
+        }
+        renderItem={({ item }) => <DoseRow card={item} />}
+      />
+    </>
   );
 }
 
@@ -137,6 +174,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: theme.space.md, paddingBottom: theme.space.md },
   headerPerson: { fontSize: 28, fontWeight: "700", color: theme.color.text },
   headerDue: { fontSize: 15, color: theme.color.textMuted, marginTop: theme.space.xs },
+  headerAction: { fontSize: 17, color: theme.color.accent },
   centered: { flexGrow: 1, alignItems: "center", justifyContent: "center", gap: theme.space.md },
   row: {
     flexDirection: "row",

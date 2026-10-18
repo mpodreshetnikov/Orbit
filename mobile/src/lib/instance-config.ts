@@ -43,8 +43,10 @@ export function resolveInstanceConfig(extra: unknown): InstanceConfig {
     throw new InstanceConfigError(`EXPO_PUBLIC_SUPABASE_URL is not a URL: ${supabaseUrl}`);
   }
 
-  // Plain http would send the access token in clear text. Localhost is the one exception, because a
-  // developer pointing the app at a local stack has no certificate to present.
+  // Plain http would send the access token in clear text. Loopback is the one exception, and it is
+  // narrower than it looks: it only helps a host that runs the bundle itself, such as
+  // `expo start --web` or a simulator. On a phone `localhost` is the phone, so a local stack needs
+  // an https tunnel rather than this exception — see mobile/README.md.
   const isLoopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
   if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLoopback)) {
     throw new InstanceConfigError(

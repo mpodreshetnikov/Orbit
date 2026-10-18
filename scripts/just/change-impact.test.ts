@@ -35,6 +35,19 @@ describe("change-impact", () => {
     expect(classifyChangedFiles(["native/ios/capacitor-config.ts"]).mobileImpact).toBe(false);
   });
 
+  it("treats the generated database types as mobile impact as well as database impact", () => {
+    // `mobile/tsconfig.json` maps `@db` onto this file and the root typecheck excludes `mobile`, so
+    // a renamed column or enum value would otherwise regenerate the types and merge without the
+    // client ever being compiled against them.
+    const impact = classifyChangedFiles(["supabase/db/database.types.ts"]);
+    expect(impact.mobileImpact).toBe(true);
+    expect(impact.dbImpact).toBe(true);
+  });
+
+  it("does not claim mobile impact for other files under supabase/db", () => {
+    expect(classifyChangedFiles(["supabase/db/schema.snapshot.sql"]).mobileImpact).toBe(false);
+  });
+
   it("treats the extraction corpus and its harness as fixture impact", () => {
     // The corpus matched no flag at all: `test/fixtures/` is not a source prefix and `isDocFile`
     // does not claim it either, so a corpus-only change reported no impact whatsoever. No gate

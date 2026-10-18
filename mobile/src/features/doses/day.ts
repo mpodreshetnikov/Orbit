@@ -13,3 +13,16 @@ export function localDayBounds(now: Date): { startIso: string; endIso: string } 
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
   return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
+
+/**
+ * How long until the local day ends.
+ *
+ * The screen holds one day's doses, so it has to know when that day stops being today — a phone left
+ * in the foreground overnight would otherwise keep yesterday's list on screen under today's heading.
+ * Returns at least 1 so a caller passing an instant exactly at midnight still schedules forward
+ * rather than firing in a loop.
+ */
+export function msUntilNextLocalDay(now: Date): number {
+  const { endIso } = localDayBounds(now);
+  return Math.max(1, new Date(endIso).getTime() - now.getTime());
+}

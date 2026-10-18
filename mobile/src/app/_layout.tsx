@@ -15,7 +15,8 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <SessionProvider>
-        <StatusBar style="auto" />
+        {/* Dark content, to match the light-only palette declared in app.config.ts. */}
+        <StatusBar style="dark" />
         <Stack
           screenOptions={{
             headerStyle: { backgroundColor: theme.color.background },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localDayBounds } from "@/features/doses/day";
+import { localDayBounds, msUntilNextLocalDay } from "@/features/doses/day";
 
 describe("localDayBounds", () => {
   it("starts at local midnight of the day the instant falls in", () => {
@@ -44,5 +44,27 @@ describe("localDayBounds", () => {
     const { startIso, endIso } = localDayBounds(now);
     expect(new Date(startIso).getTime()).toBeLessThanOrEqual(now.getTime());
     expect(new Date(endIso).getTime()).toBeGreaterThan(now.getTime());
+  });
+});
+
+describe("msUntilNextLocalDay", () => {
+  it("counts the time left in the local day", () => {
+    const now = new Date(2026, 9, 18, 23, 30, 0, 0);
+    expect(msUntilNextLocalDay(now)).toBe(30 * 60 * 1000);
+  });
+
+  it("is a whole day just after midnight", () => {
+    const now = new Date(2026, 9, 18, 0, 0, 0, 0);
+    const endOfDay = new Date(2026, 9, 19, 0, 0, 0, 0).getTime();
+    expect(msUntilNextLocalDay(now)).toBe(endOfDay - now.getTime());
+  });
+
+  it("never returns zero, so a caller cannot schedule a loop at the boundary", () => {
+    const midnight = new Date(2026, 9, 19, 0, 0, 0, 0);
+    expect(msUntilNextLocalDay(midnight)).toBeGreaterThan(0);
+  });
+
+  it("stays positive across a month boundary", () => {
+    expect(msUntilNextLocalDay(new Date(2026, 9, 31, 23, 59, 0, 0))).toBe(60 * 1000);
   });
 });
