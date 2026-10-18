@@ -94,6 +94,36 @@ quality-lint-extension:
 quality-lint-scripts:
   npx eslint scripts native vite.config.extension.ts capacitor.config.ts --ext .js,.cjs,.mjs,.ts,.tsx --max-warnings=0
 
+# Run ESLint for the mobile client.
+quality-lint-mobile:
+  npx eslint mobile/src --ext .ts,.tsx --max-warnings=0
+
+# Typecheck the mobile client against its own dependency tree and TypeScript version.
+#
+# Deliberately not part of `quality-typecheck`, and so not part of `check`: this needs
+# `mobile/node_modules`, which `install-dependencies` does not create because the web app has no use
+# for it. `mobile-check` below is the gate for this surface, and CI runs it as its own job whenever
+# anything under `mobile/` changes.
+quality-typecheck-mobile:
+  npm --prefix mobile run typecheck
+
+# Run the mobile client's unit tests (also covered by `test-unit`, which runs every vitest project).
+test-unit-mobile:
+  npx vitest run --project mobile
+
+# Install the mobile client's locked dependencies. Its own tree: Expo and the web app disagree about
+# vite, so they cannot share one.
+mobile-install:
+  npm --prefix mobile ci
+
+# Full local gate for the mobile client. Run this after changing anything under `mobile/`.
+mobile-check: quality-lint-mobile quality-typecheck-mobile test-unit-mobile
+
+# Start the mobile client's dev server. Open the QR code in Expo Go on a phone; see mobile/README.md
+# for the two environment variables it needs.
+mobile-start:
+  npm --prefix mobile run start
+
 # Run Deno lint for Supabase Edge Functions.
 quality-lint-supabase-functions:
   deno lint --config supabase/functions/deno.json supabase/functions

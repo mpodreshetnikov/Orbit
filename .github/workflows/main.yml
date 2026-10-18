@@ -307,6 +307,55 @@ jobs:
       - name: Test and coverage
         run: just test-unit-coverage && just coverage-check
 
+  mobile-gates:
+    name: Mobile Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Detected here rather than taken from `quality-gates`, so this job does not queue behind the
+      # longest one in the pipeline for a change that is entirely in `mobile/`. change-impact.cjs
+      # uses only Node built-ins and git, so it runs before any install.
+      - name: Detect change impact
+        id: impact
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "mobileImpact=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            FROM="${{ github.event.pull_request.base.sha }}"
+            TO="${{ github.event.pull_request.head.sha }}"
+          else
+            FROM="${{ github.event.before }}"
+            TO="${{ github.sha }}"
+          fi
+
+          node scripts/just/change-impact.cjs --from "$FROM" --to "$TO" --format github-output --output-file "$GITHUB_OUTPUT"
+      - name: Skip when nothing under mobile/ changed
+        if: steps.impact.outputs.mobileImpact != 'true'
+        run: echo "No change under mobile/; skipping the mobile client's gates."
+      - uses: actions/setup-node@v4
+        if: steps.impact.outputs.mobileImpact == 'true'
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@just
+        if: steps.impact.outputs.mobileImpact == 'true'
+      # Two installs, because the two trees cannot be one: the mobile client's own dependencies for
+      # its typecheck, and the repository's for the ESLint and vitest that gate it.
+      - name: Install dependencies
+        if: steps.impact.outputs.mobileImpact == 'true'
+        run: npm ci
+      - name: Install mobile dependencies
+        if: steps.impact.outputs.mobileImpact == 'true'
+        run: just mobile-install
+      - name: Lint, typecheck and test the mobile client
+        if: steps.impact.outputs.mobileImpact == 'true'
+        run: just mobile-check
+
   extension-release-bundle:
     needs: [secrets-scan, quality-gates]
     if: needs.quality-gates.outputs.extension_version_changed == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
