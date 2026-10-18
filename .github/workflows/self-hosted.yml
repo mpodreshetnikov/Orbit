@@ -35,27 +35,24 @@ jobs:
           # Only the secrets a server needs reach this step, by name -- never the whole set, which
           # in this repository also holds the hosted production's tokens. Keep the list in step
           # with docs/SELF_HOSTING.md, "Deploy from GitHub"; any other setting is a variable.
-          ORBIT_SECRETS_JSON: >-
-            {
-              "ORBIT_SSH_PRIVATE_KEY": ${{ toJSON(secrets.ORBIT_SSH_PRIVATE_KEY) }},
-              "ORBIT_MASTER_KEY": ${{ toJSON(secrets.ORBIT_MASTER_KEY) }},
-              "GOOGLE_CLIENT_SECRET": ${{ toJSON(secrets.GOOGLE_CLIENT_SECRET) }},
-              "OPENROUTER_API_KEY": ${{ toJSON(secrets.OPENROUTER_API_KEY) }},
-              "WHO_ICD_CLIENT_SECRET": ${{ toJSON(secrets.WHO_ICD_CLIENT_SECRET) }},
-              "BACKUP_WAL_S3_ACCESS_KEY_ID": ${{ toJSON(secrets.BACKUP_WAL_S3_ACCESS_KEY_ID) }},
-              "BACKUP_WAL_S3_SECRET_ACCESS_KEY": ${{ toJSON(secrets.BACKUP_WAL_S3_SECRET_ACCESS_KEY) }},
-              "BACKUP_SNAPSHOT_ACCESS_KEY_ID": ${{ toJSON(secrets.BACKUP_SNAPSHOT_ACCESS_KEY_ID) }},
-              "BACKUP_SNAPSHOT_SECRET_ACCESS_KEY": ${{ toJSON(secrets.BACKUP_SNAPSHOT_SECRET_ACCESS_KEY) }},
-              "ALERT_TELEGRAM_BOT_TOKEN": ${{ toJSON(secrets.ALERT_TELEGRAM_BOT_TOKEN) }},
-              "BACKUP_HEALTHCHECK_URL": ${{ toJSON(secrets.BACKUP_HEALTHCHECK_URL) }},
-              "OBS_GRAFANA_CLOUD_OTLP_HEADERS": ${{ toJSON(secrets.OBS_GRAFANA_CLOUD_OTLP_HEADERS) }},
-              "POSTGRES_PASSWORD": ${{ toJSON(secrets.POSTGRES_PASSWORD) }},
-              "JWT_SECRET": ${{ toJSON(secrets.JWT_SECRET) }},
-              "ANON_KEY": ${{ toJSON(secrets.ANON_KEY) }},
-              "SERVICE_ROLE_KEY": ${{ toJSON(secrets.SERVICE_ROLE_KEY) }},
-              "VAPID_PUBLIC_KEY": ${{ toJSON(secrets.VAPID_PUBLIC_KEY) }},
-              "VAPID_PRIVATE_KEY": ${{ toJSON(secrets.VAPID_PRIVATE_KEY) }}
-            }
+          ORBIT_SECRET_ORBIT_SSH_PRIVATE_KEY: ${{ secrets.ORBIT_SSH_PRIVATE_KEY }}
+          ORBIT_SECRET_ORBIT_MASTER_KEY: ${{ secrets.ORBIT_MASTER_KEY }}
+          ORBIT_SECRET_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          ORBIT_SECRET_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ORBIT_SECRET_WHO_ICD_CLIENT_SECRET: ${{ secrets.WHO_ICD_CLIENT_SECRET }}
+          ORBIT_SECRET_BACKUP_WAL_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_WAL_S3_ACCESS_KEY_ID }}
+          ORBIT_SECRET_BACKUP_WAL_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_WAL_S3_SECRET_ACCESS_KEY }}
+          ORBIT_SECRET_BACKUP_SNAPSHOT_ACCESS_KEY_ID: ${{ secrets.BACKUP_SNAPSHOT_ACCESS_KEY_ID }}
+          ORBIT_SECRET_BACKUP_SNAPSHOT_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SNAPSHOT_SECRET_ACCESS_KEY }}
+          ORBIT_SECRET_ALERT_TELEGRAM_BOT_TOKEN: ${{ secrets.ALERT_TELEGRAM_BOT_TOKEN }}
+          ORBIT_SECRET_BACKUP_HEALTHCHECK_URL: ${{ secrets.BACKUP_HEALTHCHECK_URL }}
+          ORBIT_SECRET_OBS_GRAFANA_CLOUD_OTLP_HEADERS: ${{ secrets.OBS_GRAFANA_CLOUD_OTLP_HEADERS }}
+          ORBIT_SECRET_POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          ORBIT_SECRET_JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ORBIT_SECRET_ANON_KEY: ${{ secrets.ANON_KEY }}
+          ORBIT_SECRET_SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
+          ORBIT_SECRET_VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          ORBIT_SECRET_VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           ORBIT_VARS_JSON: ${{ toJSON(vars) }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_ACTION: ${{ inputs.action || 'deploy' }}

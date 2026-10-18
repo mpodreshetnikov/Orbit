@@ -5,7 +5,9 @@
 # server gets set up and installed, an existing one brought to this commit. Safe to repeat.
 #
 # Environment:
-#   ORBIT_SECRETS_JSON, ORBIT_VARS_JSON   toJSON(secrets) and toJSON(vars) of the workflow
+#   ORBIT_SECRET_<NAME>                   the secrets a server needs, each by name (the workflow
+#                                         lists them; never the repository's whole set)
+#   ORBIT_VARS_JSON                       toJSON(vars) of the workflow
 #   ORBIT_COMMIT                          the commit to deploy
 #   ORBIT_ACTION                          deploy (the default), or restore: then restore the latest
 #                                         backup over it (a server replacing a lost one)
@@ -21,11 +23,14 @@ fail() {
   exit 1
 }
 
+vars_json="${ORBIT_VARS_JSON:-}"
+[[ -n "$vars_json" ]] || vars_json='{}'
+
 # A secret wins over a variable of the same name.
 setting() {
-  local value
-  value="$(jq -r --arg n "$1" '.[$n] // empty' <<<"$ORBIT_SECRETS_JSON")"
-  [[ -n "$value" ]] || value="$(jq -r --arg n "$1" '.[$n] // empty' <<<"$ORBIT_VARS_JSON")"
+  local secret="ORBIT_SECRET_$1" value
+  value="${!secret:-}"
+  [[ -n "$value" ]] || value="$(jq -r --arg n "$1" '.[$n] // empty' <<<"$vars_json")"
   printf '%s' "$value"
 }
 
