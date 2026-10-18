@@ -90,13 +90,22 @@ test_alert() {
     echo "ALERT_TELEGRAM_BOT_TOKEN and ALERT_TELEGRAM_CHAT_ID are not both set" >&2
     return 1
   }
+  local code=0
   curl -fsS -m 20 -o /dev/null "https://api.telegram.org/bot${ALERT_TELEGRAM_BOT_TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${ALERT_TELEGRAM_CHAT_ID}" \
-    --data-urlencode "text=Orbit on $(hostname -s 2>/dev/null || echo server): a test. Backup problems will be reported here." || {
-    echo "Telegram did not take the message: check the token, and that you have sent the bot a message first" >&2
-    return 1
-  }
-  echo "sent a test message to Telegram"
+    --data-urlencode "text=Orbit on $(hostname -s 2>/dev/null || echo server): a test. Backup problems will be reported here." || code=$?
+  case "$code" in
+    0) echo "sent a test message to Telegram" ;;
+    # No answer at all, as opposed to Telegram answering no: the network is in the way.
+    6 | 7 | 28 | 35)
+      echo "this server cannot reach api.telegram.org (curl exit $code): its network blocks Telegram, so alerts cannot be sent from it" >&2
+      return 1
+      ;;
+    *)
+      echo "Telegram did not take the message: check the token, and that you have sent the bot a message first" >&2
+      return 1
+      ;;
+  esac
 }
 
 ping_ok() { [[ -z "${BACKUP_HEALTHCHECK_URL:-}" ]] || curl -fsS -m 20 -o /dev/null "$BACKUP_HEALTHCHECK_URL" || true; }
