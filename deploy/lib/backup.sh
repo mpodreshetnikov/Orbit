@@ -2,6 +2,12 @@
 # `deploy/orbit backup ...` and `deploy/orbit restore`. Sourced, never run. The work itself happens
 # in the backup container (deploy/backup/run.sh); this file decides when and with what mounted.
 
+# The same fingerprint of the backup destinations as config_id in deploy/backup/run.sh.
+backup_config_id() {
+  printf '%s|%s|%s' "${BACKUP_WAL_S3_ENDPOINT:-}" "${BACKUP_WAL_S3_PREFIX:-}" "${BACKUP_SNAPSHOT_REPOSITORY:-}" |
+    sha256sum | cut -c1-16
+}
+
 backup_configured() {
   [[ -n "${BACKUP_WAL_S3_PREFIX:-}" || -n "${BACKUP_SNAPSHOT_REPOSITORY:-}" ]]
 }
@@ -71,7 +77,11 @@ backup_setup() {
   echo
   echo "$(c_green "Backups are on.") Two keys in deploy/.env decrypt them: BACKUP_ENCRYPTION_KEY (bucket 1)"
   echo "and BACKUP_SNAPSHOT_PASSWORD (bucket 2). They live on this server: if it is lost, so are they,"
-  echo "unless you keep a copy. Store deploy/.env in your password manager NOW."
+  if env_has ORBIT_MASTER_KEY "$ENV_FILE" || [[ -n "${ORBIT_MASTER_KEY:-}" ]]; then
+    echo "unless you keep a copy of ORBIT_MASTER_KEY, which recreates both. Keep it safe."
+  else
+    echo "unless you keep a copy. Store deploy/.env in your password manager NOW."
+  fi
 }
 
 cmd_backup() {
@@ -177,8 +187,11 @@ cmd_restore() {
   # restored database continues on a new timeline, or is a new one.
   step "Switching backups back on"
   compose up -d backup
-  in_backup init
-  in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
+  if in_backup init; then
+    in_backup nightly || warn "The first backup after the restore failed; run deploy/orbit backup now"
+  else
+    warn "Backups are NOT on again (the reason is above). Fix it, then run deploy/orbit backup setup"
+  fi
   ok "Restored. The data it replaced is in $ORBIT_DATA_DIR/*.before-restore-$stamp; delete it once you are happy."
 }
 
