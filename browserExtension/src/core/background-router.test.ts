@@ -284,6 +284,7 @@ describe("background-router", () => {
       active_run: null,
       is_run_tab: false,
       pending_request: null,
+      on_login_page: false,
     });
   });
 
@@ -342,6 +343,7 @@ describe("background-router", () => {
       }),
       is_run_tab: false,
       pending_request: null,
+      on_login_page: false,
     });
 
     parseDeferred.resolve({
@@ -1168,6 +1170,23 @@ describe("background-router", () => {
           senderTabId: 43,
         }),
       ).resolves.toMatchObject({ is_run_tab: false, pending_request: null });
+    });
+
+    it("tells a waiting tab whether it is still on the sign-in screen", async () => {
+      const deps = createDeps();
+      deps.sessionStore.getSession.mockResolvedValue(null);
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, deps, {
+          senderTabId: 42,
+          senderUrl: "https://www.tbank.ru/auth/login/?redirectTo=%2Fevents%2F",
+        }),
+      ).resolves.toMatchObject({ on_login_page: true });
+      await expect(
+        routeBackgroundMessage({ type: "MONEY_IMPORT_GET_SESSION" }, deps, {
+          senderTabId: 42,
+          senderUrl: "https://www.tbank.ru/events/feed/",
+        }),
+      ).resolves.toMatchObject({ on_login_page: false });
     });
 
     it("tells the page about the run in flight for its source, and the last attempt", async () => {

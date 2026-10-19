@@ -41,6 +41,7 @@ export type WidgetStringKey =
   | "statusOwnTabRequested"
   | "statusOtherTab"
   | "statusWaitingSignIn"
+  | "statusWaitingSignedIn"
   | "statusDoneAuto"
   | "statusDoneRequested";
 
@@ -75,7 +76,9 @@ const STRINGS: Record<WidgetLocale, Record<WidgetStringKey, string>> = {
       "The import you asked for is running in this tab. Please keep it open until it finishes.",
     statusOtherTab: "An import is running in another tab.",
     statusWaitingSignIn:
-      "Sign in to the bank. The import starts by itself about a minute after; please keep this tab open.",
+      "Sign in to the bank. The import starts by itself about a minute after you are in.",
+    statusWaitingSignedIn:
+      "You are signed in. The import starts by itself within a minute; please keep this tab open until it finishes.",
     statusDoneAuto: "Import finished; this tab will close by itself.",
     statusDoneRequested: "Import finished. You can close this tab.",
   },
@@ -108,7 +111,9 @@ const STRINGS: Record<WidgetLocale, Record<WidgetStringKey, string>> = {
       "Выгрузка по вашему запросу идёт в этой вкладке. Не закрывайте её, пока она не завершится.",
     statusOtherTab: "Выгрузка идёт в другой вкладке.",
     statusWaitingSignIn:
-      "Войдите в банк. Выгрузка начнётся сама примерно через минуту после входа; эту вкладку не закрывайте.",
+      "Войдите в банк. Выгрузка начнётся сама примерно через минуту после входа.",
+    statusWaitingSignedIn:
+      "Вы вошли. Выгрузка начнётся сама в течение минуты; не закрывайте эту вкладку, пока она не завершится.",
     statusDoneAuto: "Выгрузка завершена, вкладка закроется сама.",
     statusDoneRequested: "Выгрузка завершена. Вкладку можно закрыть.",
   },

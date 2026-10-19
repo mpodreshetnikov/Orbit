@@ -15,6 +15,7 @@ import {
   withFailedAttempt,
   type AutoRunOrigin,
 } from "./auto-run-policy.js";
+import { looksLikeBankLoginUrl } from "./bank-login-url.js";
 import type { AttentionStore } from "./attention-store.js";
 import { activeImportRuns } from "./active-runs.js";
 import {
@@ -104,6 +105,8 @@ export interface BackgroundRouterContext {
   senderTabId?: number | null;
   /** The origin of the page that sent the message, as the runtime reports it. */
   senderOrigin?: string | null;
+  /** The URL of the page that sent the message: a bank tab says whether it is signed in by it. */
+  senderUrl?: string | null;
 }
 
 /**
@@ -514,6 +517,9 @@ export async function routeBackgroundMessage(
       // run's own, in any other bank tab as an onlooker's.
       is_run_tab: runTabId !== null && runTabId === senderTabId,
       pending_request: pending ? { source_id: pending.sourceId } : null,
+      // A waiting tab on the sign-in screen is told to sign in and may close freely; one past it
+      // is told the run is coming and asked to stay.
+      on_login_page: looksLikeBankLoginUrl(context?.senderUrl),
     };
   }
 

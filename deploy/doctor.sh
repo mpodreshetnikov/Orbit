@@ -18,6 +18,9 @@ urls=(
   https://jsr.io/@std/path/meta.json
   https://jsr.io
   https://openrouter.ai/api/v1/models
+  https://api.telegram.org
+  https://hc-ping.com
+  https://uptime.betterstack.com
 )
 fmt='%{http_code} exit=%{exitcode} ip=%{remote_ip} connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s bytes=%{size_download}'
 
