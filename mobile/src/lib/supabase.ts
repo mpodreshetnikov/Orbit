@@ -16,7 +16,9 @@ const { supabaseUrl, supabaseAnonKey } = instanceConfig();
  * ever speaks this data API cannot be made to execute an instance's code.
  *
  * `detectSessionInUrl` is off because there is no URL bar to read a session out of, and `processLock`
- * is what keeps two screens refreshing the token at once from racing.
+ * is what keeps two screens refreshing the token at once from racing. `pkce` is what makes the Google
+ * sign-in safe to finish on a custom scheme: the redirect carries a code, not a token, and only this
+ * app holds the verifier that turns it into a session.
  *
  * Session storage is `AsyncStorage` rather than `expo-secure-store`, which looks like the weaker
  * choice and is a deliberate one for now: SecureStore warns above 2048 bytes and a Supabase session
@@ -31,6 +33,7 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    flowType: "pkce",
     lock: processLock,
   },
 });

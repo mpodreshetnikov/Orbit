@@ -1,29 +1,25 @@
+import * as Linking from "expo-linking";
 import { Redirect } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { parseOAuthCallback } from "@/lib/oauth-callback";
 import { useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/theme";
 
 /**
- * Sign in with the same credentials as the web app.
+ * Sign in with Google, the way the web app does — it is the only way an Orbit instance lets anyone
+ * in (`deploy/supabase.defaults.env` turns email sign-in off), and `public.allowed_users` decides who
+ * gets past it.
  *
- * Email and password only: the web app's other entry points assume a browser, and an OAuth round
- * trip needs the deep-link handling that `scheme` exists for but nothing yet uses.
+ * The round trip runs in the system's authentication sheet, which returns to this app on its own
+ * scheme (`exp://` under Expo Go, `orbit://` in a build); both are on the instance's redirect
+ * allowlist in `deploy/orbit`. The client is PKCE, so the redirect carries a code and the session is
+ * minted here by exchanging it.
  */
 export default function SignIn() {
   const { session } = useSession();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -31,93 +27,67 @@ export default function SignIn() {
     return <Redirect href="/today" />;
   }
 
-  const canSubmit = email.trim() !== "" && password !== "" && !busy;
+  async function signInWithGoogle(): Promise<string | null> {
+    const redirectTo = Linking.createURL("auth/callback");
+    const { data, error: startError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo, skipBrowserRedirect: true },
+    });
+    if (startError) {
+      return startError.message;
+    }
+    const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+    if (result.type !== "success") {
+      // Closing the sheet is a choice, not a failure: say nothing and let them press again.
+      return null;
+    }
+    const callback = parseOAuthCallback(result.url);
+    if ("error" in callback) {
+      return callback.error;
+    }
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(callback.code);
+    return exchangeError ? exchangeError.message : null;
+  }
 
   async function submit() {
     setBusy(true);
     setError(null);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-    if (signInError) {
-      // Supabase deliberately says "Invalid login credentials" without saying which half was wrong;
-      // passing its message through keeps that property rather than guessing a friendlier one.
-      setError(signInError.message);
+    const message = await signInWithGoogle();
+    // On success the session listener redirects; the button stays busy rather than flashing back.
+    if (message !== null || !(await supabase.auth.getSession()).data.session) {
+      setError(message);
       setBusy(false);
-      return;
     }
-    // On success the session listener redirects; leaving `busy` set avoids a flash of the form.
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <View style={styles.container}>
       <View style={styles.form}>
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="Почта"
-          placeholderTextColor={theme.color.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="email"
-          keyboardType="email-address"
-          inputMode="email"
-          returnKeyType="next"
-        />
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="Пароль"
-          placeholderTextColor={theme.color.textMuted}
-          autoCapitalize="none"
-          autoComplete="current-password"
-          secureTextEntry
-          returnKeyType="go"
-          onSubmitEditing={() => {
-            if (canSubmit) {
-              void submit();
-            }
-          }}
-        />
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable
           accessibilityRole="button"
-          disabled={!canSubmit}
+          disabled={busy}
           onPress={() => void submit()}
           style={({ pressed }) => [
             styles.button,
-            !canSubmit && styles.buttonDisabled,
+            busy && styles.buttonDisabled,
             pressed && styles.buttonPressed,
           ]}
         >
           {busy ? (
             <ActivityIndicator color={theme.color.background} />
           ) : (
-            <Text style={styles.buttonLabel}>Войти</Text>
+            <Text style={styles.buttonLabel}>Войти через Google</Text>
           )}
         </Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: "center", backgroundColor: theme.color.background },
   form: { padding: theme.space.lg, gap: theme.space.md },
-  input: {
-    backgroundColor: theme.color.surface,
-    borderRadius: theme.radius,
-    paddingHorizontal: theme.space.md,
-    paddingVertical: theme.space.md,
-    fontSize: 17,
-    color: theme.color.text,
-  },
   error: { color: theme.color.danger, fontSize: 15 },
   button: {
     backgroundColor: theme.color.accent,

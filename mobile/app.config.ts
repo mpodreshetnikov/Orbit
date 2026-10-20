@@ -28,7 +28,7 @@ const config: ExpoConfig = {
   // bar content, and every background in `src/theme.ts` is still white — white on white. A
   // dark palette is worth having and worth seeing on a device before it ships.
   userInterfaceStyle: "light",
-  plugins: ["expo-router"],
+  plugins: ["expo-router", "expo-web-browser"],
   experiments: {
     typedRoutes: true,
   },

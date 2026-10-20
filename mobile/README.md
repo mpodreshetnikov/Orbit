@@ -14,13 +14,14 @@ JavaScript bundle from your machine.
 
 1. Install **Expo Go** from the App Store on the iPhone, and put the phone on the same network as
    the computer.
-2. Point the app at an instance. The two values are the same ones the web app uses — the Supabase
-   project URL and its anon (publishable) key, from the Supabase dashboard under Project Settings →
-   API:
+2. Point the app at an instance. The two values are the same ones the web app uses: the instance's
+   own address, and its anon key — `ANON_KEY` in the server's `deploy/.env` (see
+   `docs/SELF_HOSTING.md`; for an instance on hosted Supabase, the project URL and anon key under
+   Project Settings → API):
 
    ```sh
    # mobile/.env.local — git-ignored
-   EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   EXPO_PUBLIC_SUPABASE_URL=https://orbit.example.com
    EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
    ```
 
@@ -39,8 +40,10 @@ JavaScript bundle from your machine.
    just mobile-start
    ```
 
-4. Scan the QR code with the iPhone's camera. Sign in with the same email and password as the web
-   app.
+4. Scan the QR code with the iPhone's camera, then **Войти через Google** with the same account as
+   the web app. The sheet returns to Expo Go on an `exp://` address, which the instance accepts only
+   once it runs a `deploy/orbit` that lists it in `ADDITIONAL_REDIRECT_URLS` — before that, Google
+   signs you in and the instance refuses the redirect.
 
 Hot reload is live: save a file and the phone updates. That loop is the reason this is Expo rather
 than SwiftUI — see the Decision Log in `T-261018-l19`.
