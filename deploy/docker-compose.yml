@@ -123,6 +123,8 @@ services:
       MCP_SERVER_ENABLED: ${MCP_SERVER_ENABLED:-0}
       MCP_OAUTH_SIGNING_SECRET: ${MCP_OAUTH_SIGNING_SECRET:?}
       MCP_PUBLIC_ORIGIN: ${ORBIT_PUBLIC_URL:?}
+      # Where the app sends the browser after signing in and out (src/lib/request-origin.ts).
+      APP_PUBLIC_ORIGIN: ${ORBIT_PUBLIC_URL:?}
       OBS_EXPORTER_MODE: ${OBS_EXPORTER_MODE:-off}
       OBS_OTLP_ENDPOINT: ${OBS_OTLP_ENDPOINT:-}
       OBS_GRAFANA_CLOUD_OTLP_HEADERS: ${OBS_GRAFANA_CLOUD_OTLP_HEADERS:-}

@@ -197,6 +197,8 @@ sudo /opt/orbit/deploy/orbit install    # ends with "Orbit is up at https://<you
 
 The first line also secures the server: SSH by key only, a firewall, fail2ban and automatic security
 updates. With the backup settings filled in, `install` switches on off-site backups too.
+Or never log in to the server at all: fork this repository and let GitHub Actions set it up and
+deploy every change — [`INSTALL.md`](./INSTALL.md) is that path as a ten-step checklist.
 [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md) walks through every step — server, DNS, Google
 sign-in, backups, updates — in plain language, and has a section for an AI agent doing it on someone's
 behalf.

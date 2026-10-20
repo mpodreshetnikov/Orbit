@@ -53,6 +53,28 @@ describe("GET /auth/callback", () => {
     expect(response.headers.get("location")).toBe("http://localhost/settings");
   });
 
+  it("redirects to the public origin behind a proxy, not the address the server listens on", async () => {
+    createServerClientMock.mockReturnValue({
+      auth: { exchangeCodeForSession: vi.fn().mockResolvedValue(undefined), verifyOtp: vi.fn() },
+    });
+
+    const { GET } = await import("./route");
+    const request = {
+      url: "https://0.0.0.0:3000/auth/callback?code=abc123&next=/health",
+      headers: new Headers({
+        "x-forwarded-host": "orbit.example.com",
+        "x-forwarded-proto": "https",
+      }),
+      cookies: {
+        getAll: () => [],
+      },
+    } as never;
+
+    const response = await GET(request);
+
+    expect(response.headers.get("location")).toBe("https://orbit.example.com/health");
+  });
+
   it("verifies token hash and redirects to next path", async () => {
     const exchangeCodeForSession = vi.fn();
     const verifyOtp = vi.fn().mockResolvedValue(undefined);

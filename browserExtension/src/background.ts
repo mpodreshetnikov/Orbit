@@ -728,6 +728,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
         {
           senderTabId: sender.tab?.id ?? null,
           senderOrigin: sender.origin ?? sender.url ?? null,
+          senderUrl: sender.url ?? sender.tab?.url ?? null,
         },
       );
 
