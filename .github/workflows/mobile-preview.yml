@@ -68,12 +68,16 @@ jobs:
         run: |
           nohup npx expo start --tunnel > "$RUNNER_TEMP/expo.log" 2>&1 &
           for _ in $(seq 1 90); do
-            # Expo prints the tunnel's address ("Metro waiting on exp://….exp.direct" through ngrok on
-            # SDK 57, "Waiting on http://….on.expo.app" on later SDKs); Expo Go opens the same host on
-            # its own scheme.
-            # The local address ("Waiting on http://localhost:8081") is printed first and skipped.
+            # Expo's own tunnel prints its address ("Waiting on http://….on.expo.app", SDK 58 on); Expo
+            # Go opens the same host on its own scheme. The local address is skipped.
             url="$(grep -oiE 'waiting on [a-z]+://[^ ]+' "$RUNNER_TEMP/expo.log" | grep -viE '://(localhost|127\.|[0-9.]+:)' | head -1 | sed -E 's#^[Ww]aiting on [a-z]+://#exp://#' || true)"
             [[ -n "$url" ]] && break
+            # Through ngrok (SDK 57) it prints only "Tunnel ready." and the local address in CI mode; the
+            # ngrok agent's own API names the public host.
+            if grep -q 'Tunnel ready' "$RUNNER_TEMP/expo.log"; then
+              host="$(curl -sf --max-time 5 http://127.0.0.1:4040/api/tunnels | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{try{const t=JSON.parse(s).tunnels.find((x)=>x.public_url.startsWith("https://"))??JSON.parse(s).tunnels[0];process.stdout.write(new URL(t.public_url).host)}catch{}})' || true)"
+              [[ -n "$host" ]] && { url="exp://$host"; break; }
+            fi
             grep -q 'CommandError' "$RUNNER_TEMP/expo.log" && break
             sleep 2
           done
