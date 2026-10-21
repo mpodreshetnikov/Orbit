@@ -103,10 +103,19 @@ jobs:
           minutes="${MINUTES:-60}"
           (( minutes > 180 )) && minutes=180
           until="$(date -u -d "+$minutes minutes" +%H:%M)"
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -f state=success -f context="Mobile preview" \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            -f description="$URL until $until UTC" > /dev/null
+          # The status is a convenience: the address is already in the run's summary. A failed
+          # post (the API once answered with an empty body) is retried, and then only warned about,
+          # so it never takes down a tunnel that is up and serving.
+          for attempt in 1 2 3; do
+            if gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state=success -f context="Mobile preview" \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              -f description="$URL until $until UTC" > /dev/null; then
+              exit 0
+            fi
+            sleep $(( attempt * 5 ))
+          done
+          echo "::warning title=Mobile preview::Could not publish the address on the commit; it is in the run summary."
       - name: Keep serving
         env:
           MINUTES: ${{ inputs.minutes }}
