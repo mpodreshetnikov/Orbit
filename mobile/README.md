@@ -53,7 +53,9 @@ with this version of Expo Go".
 **Without a computer:** dispatch _Actions → Mobile preview → Run workflow_ on any branch. A GitHub
 runner serves that branch behind an anonymous ngrok tunnel for an hour and posts an `exp://` address
 to open in Expo Go. It needs the `MOBILE_PREVIEW_INSTANCE` repository variable (the instance's
-domain). Expo's own signed tunnel, which needs the `EXPO_TOKEN` secret, arrives with SDK 58.
+domain) and the `EXPO_TOKEN` secret: a personal access token, not a robot one, for the Expo account
+the phone's Expo Go is signed in to. Expo Go refuses a tunnelled project served anonymously, and
+ngrok refuses a robot user.
 
 Hot reload is live: save a file and the phone updates. That loop is the reason this is Expo rather
 than SwiftUI — see the Decision Log in `T-261018-l19`.
