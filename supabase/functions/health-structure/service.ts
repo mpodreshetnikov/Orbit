@@ -13,6 +13,12 @@ import { convertRefRangeToCanonical, convertToCanonical } from "./unit-conversio
 export interface HealthStructureServiceInput {
   authToken: string | null;
   recordId: string | null;
+  /**
+   * The document's text when the caller brings it rather than the record holding it: an MCP client
+   * that transcribed the pages itself (`health-ingest`). It replaces the record's `ocr_text` for this
+   * run and is written to it, so anchors are grounded in, and the record keeps, the same text.
+   */
+  documentText?: string;
 }
 
 export interface HealthStructureParseContext {
@@ -271,7 +277,7 @@ export async function runHealthStructureService(
     // a caller that never owned the record, and stamping it would clear the owner's claim.
     mayRecordFailure = true;
 
-    const ocrText = asString(record.ocr_text);
+    const ocrText = asString(input.documentText) ?? asString(record.ocr_text);
     if (!ocrText) throw new Error("No OCR text found for this record. Run health-ocr first.");
     await recordSpan?.end({
       status: "ok",
@@ -360,6 +366,8 @@ export async function runHealthStructureService(
         status: "structure_review",
         // A previous failure is cleared by the run that succeeds, the way ocr_error is.
         structure_error: null,
+        // Text the caller supplied replaces the transcription, so an error about the old one goes too.
+        ...(asString(input.documentText) ? { ocr_text: ocrText, ocr_error: null } : {}),
       },
       { runId },
     );
@@ -510,6 +518,11 @@ export async function runHealthStructureService(
       payload: {
         success: true,
         structured_data: structuredData,
+        // What was refused before or during the writes, with the reason, for a caller that has to
+        // see it in the same turn. Empty arrays rather than absent keys, so "nothing refused" reads
+        // the same as it is.
+        rejected: parseOutcome.rejected ?? [],
+        dropped_condition_resolutions: droppedResolutions,
       },
     };
   } catch (error) {

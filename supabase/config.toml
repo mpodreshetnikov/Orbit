@@ -415,6 +415,8 @@ OBS_GRAFANA_CLOUD_OTLP_HEADERS = "env(OBS_GRAFANA_CLOUD_OTLP_HEADERS)"
 verify_jwt = false
 [functions.health-structure]
 verify_jwt = false
+[functions.health-ingest]
+verify_jwt = false
 [functions.icd-lookup]
 verify_jwt = false
 [functions.money-categorize]
