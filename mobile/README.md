@@ -12,6 +12,11 @@ doses for one person.
 No Apple Developer account, no Mac and no build are needed for this loop — Expo Go runs the
 JavaScript bundle from your machine.
 
+Expo Go from the App Store runs one Expo SDK, and it reaches the store weeks after that SDK is
+published on npm. Stay on the SDK the store's Expo Go runs (57 as of 2026-10-21; its App Store
+release notes name it), not on `expo@latest`: a newer project opens only to "Project is incompatible
+with this version of Expo Go".
+
 1. Install **Expo Go** from the App Store on the iPhone, and put the phone on the same network as
    the computer.
 2. Install the dependencies once:
