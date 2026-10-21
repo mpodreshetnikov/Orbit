@@ -74,7 +74,13 @@ export function parseClientSubmission(
           obs_code: resolution.kind === "resolved" ? resolution.entry.obs_code : null,
         };
       }),
-      findings: extract.value.findings,
+      // Codes are resolved from the printed labels, as for observations: a valid but wrong code from
+      // the caller would otherwise win over the grounded label in `buildFindingRows`.
+      findings: extract.value.findings.map((finding) => ({
+        ...finding,
+        finding_code: null,
+        site_code: null,
+      })),
       conditions: extract.value.conditions,
       ...reconcile.value,
       findings_to_resolve: findingGate.accepted,
@@ -144,11 +150,8 @@ function absenceCovers(
     bodySiteCatalog: BodySiteCatalogItem[];
   },
 ): boolean {
-  const type = resolveFindingType(
-    absence.finding_code,
-    absence.finding_type_text,
-    catalogs.findingTypeCatalog,
-  );
+  // Resolved from the absence's own words; the caller's codes are not evidence.
+  const type = resolveFindingType(null, absence.finding_type_text, catalogs.findingTypeCatalog);
   const sameFinding =
     type.kind === "resolved" && existing.finding_code
       ? type.entry.finding_code === existing.finding_code
@@ -156,11 +159,18 @@ function absenceCovers(
         existing.finding_type_text.toLowerCase().trim();
   if (!sameFinding) return false;
 
-  const hasSite = Boolean(absence.site_code || absence.body_site_text);
-  if (!hasSite) return !existing.site_code && !existing.body_site_text;
-  if (!existing.site_code) return false;
+  if (!absence.body_site_text) return !existing.site_code && !existing.body_site_text;
+  // A finding whose site the catalogue never resolved is matched by its printed site alone; the
+  // hierarchy needs codes on both sides.
+  if (!existing.site_code) {
+    return (
+      Boolean(existing.body_site_text) &&
+      normalizeForGrounding(absence.body_site_text) ===
+        normalizeForGrounding(existing.body_site_text ?? "")
+    );
+  }
 
-  const site = resolveBodySite(absence.site_code, absence.body_site_text, catalogs.bodySiteCatalog);
+  const site = resolveBodySite(null, absence.body_site_text, catalogs.bodySiteCatalog);
   if (site.kind !== "resolved") return false;
   return siteContains(site.entry.site_code, existing.site_code, catalogs.bodySiteCatalog);
 }
