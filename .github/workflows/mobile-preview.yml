@@ -57,13 +57,17 @@ jobs:
         working-directory: mobile
         env:
           CI: "1"
+          # Leave mobile/tsconfig.json as committed rather than letting Expo rewrite it on start.
+          EXPO_NO_TYPESCRIPT_SETUP: "1"
           # Expo's signed tunnel is tied to an Expo account; this is the token the owner created.
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           [[ -n "$EXPO_TOKEN" ]] || { echo "::error::The EXPO_TOKEN repository secret is not set."; exit 1; }
           nohup npx expo start --tunnel > "$RUNNER_TEMP/expo.log" 2>&1 &
           for _ in $(seq 1 90); do
-            url="$(grep -oE 'Metro waiting on exp://[^ ]+' "$RUNNER_TEMP/expo.log" | head -1 | sed 's/^Metro waiting on //' || true)"
+            # Expo prints the tunnel's web address ("Waiting on http://….on.expo.app"); Expo Go opens the
+            # same host on its own scheme.
+            url="$(grep -oE 'Waiting on [a-z]+://[^ ]+' "$RUNNER_TEMP/expo.log" | head -1 | sed -E 's#^Waiting on [a-z]+://#exp://#' || true)"
             [[ -n "$url" ]] && break
             grep -q 'CommandError' "$RUNNER_TEMP/expo.log" && break
             sleep 2
