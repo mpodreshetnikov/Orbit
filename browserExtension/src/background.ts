@@ -371,6 +371,7 @@ const selfUpdater: Promise<SelfUpdater> = (async () => {
     Boolean(appOrigin);
   return createSelfUpdater({
     supported,
+    extensionId: chrome.runtime.id,
     currentVersion: () => chrome.runtime.getManifest().version,
     fetchLatest: async () => {
       const response = await fetch(`${appOrigin}/api/extension-release/latest`, {
@@ -379,9 +380,10 @@ const selfUpdater: Promise<SelfUpdater> = (async () => {
       if (!response.ok) return null;
       return parseReleaseInfo(await response.json());
     },
+    holdImports: () => activeImportRuns.holdForUpdate(),
     // A session stored for a run the person has not started yet counts too: reloading would
     // cut the widget on the bank page they are about to press.
-    isBusy: async () => activeImportRuns.size() > 0 || Boolean(await sessionStore.getSession()),
+    isBusy: async () => Boolean(await sessionStore.getSession()),
     sendNative: (message) =>
       chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message) as Promise<NativeHostReply>,
     reload: () => chrome.runtime.reload(),

@@ -120,6 +120,24 @@ apply() {
   ok "\"version\":\"$version\""
 }
 
+# One stage or apply at a time: two hosts (two browsers, or two calls close together) would
+# otherwise delete the staging tree under each other. mkdir is atomic; a lock older than ten
+# minutes belongs to a host that died and is taken over.
+LOCK="$HOST_DIR/.lock"
+acquire_lock() {
+  local waited=0
+  until mkdir "$LOCK" 2>/dev/null; do
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+      rm -rf "$LOCK"
+      continue
+    fi
+    [ "$waited" -ge 300 ] && fail "Another update is in progress."
+    sleep 1
+    waited=$((waited + 1))
+  done
+  trap 'rm -rf "$LOCK"' EXIT
+}
+
 message=$(read_message) || exit 0
 # shellcheck source=/dev/null
 [ -f "$HOST_DIR/config.env" ] && . "$HOST_DIR/config.env"
@@ -127,6 +145,7 @@ message=$(read_message) || exit 0
 action=$(json_get "$message" action)
 version=$(json_get "$message" version)
 printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){0,3}$' || fail "Invalid version."
+acquire_lock
 
 case "$action" in
   stage) stage "$version" "$(json_get "$message" sha256)" "$(json_get "$message" url)" ;;

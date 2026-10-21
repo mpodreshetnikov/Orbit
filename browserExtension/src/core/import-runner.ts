@@ -11,7 +11,7 @@ import {
 } from "./backfill-scheduler.js";
 import type { BackfillStore } from "./backfill-store.js";
 import type { SessionStore } from "./session-store.js";
-import { activeImportRuns } from "./active-runs.js";
+import { activeImportRuns, UPDATE_IN_PROGRESS_ERROR } from "./active-runs.js";
 import { RUN_STARTED_AT_KEY } from "./session-janitor.js";
 import { liveRuns, type RunWindowKind } from "./run-board.js";
 
@@ -659,8 +659,14 @@ export async function runScheduledImport(
       throw new Error("A session started by the person is in progress");
     }
     const sessionId = typeof session.session_id === "string" ? session.session_id : "";
+    // A fresh session is never already running, so a refusal here is an update replacing the
+    // extension's files: the window is given back rather than read on files that are changing.
+    if (sessionId && !activeImportRuns.begin(sessionId)) {
+      await clearOwnSession(deps.sessionStore, session);
+      await tryCompleteSessionAsFailed(session, deps.callEdge);
+      throw new Error(UPDATE_IN_PROGRESS_ERROR);
+    }
     if (sessionId) {
-      activeImportRuns.begin(sessionId);
       liveRuns.start({
         session_id: sessionId,
         source_id: input.sourceId,

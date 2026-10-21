@@ -62,6 +62,15 @@ case "$(uname -s)" in
     ;;
 esac
 
+# One extension folder per machine: every browser reaches the same host, and the host cannot tell
+# which browser asked, so a second folder replaces the first rather than being added to it.
+if [ -f "$HOST_DIR/config.env" ]; then
+  previous="$(sed -n 's/^EXTENSION_DIR=//p' "$HOST_DIR/config.env")"
+  if [ -n "$previous" ] && [ "$(eval "printf '%s' $previous")" != "$EXTENSION_DIR" ]; then
+    echo "Note: the updater was set up for $(eval "printf '%s' $previous"); it now updates this folder instead."
+  fi
+fi
+
 mkdir -p "$HOST_DIR"
 cp "$EXTENSION_DIR/updater/orbit-updater.sh" "$HOST_DIR/orbit-updater.sh"
 chmod 755 "$HOST_DIR/orbit-updater.sh"

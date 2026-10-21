@@ -30,6 +30,15 @@ $extensionId = -join ($digest[0..15] | ForEach-Object {
 })
 
 $hostDir = Join-Path $env:LOCALAPPDATA 'Orbit\extension-updater'
+# One extension folder per machine: every browser reaches the same host, and the host cannot tell
+# which browser asked, so a second folder replaces the first rather than being added to it.
+$previousConfig = Join-Path $hostDir 'config.json'
+if (Test-Path -LiteralPath $previousConfig) {
+  $previous = [string](Get-Content -LiteralPath $previousConfig -Raw | ConvertFrom-Json).extensionDir
+  if ($previous -and $previous -ne $ExtensionDir) {
+    Write-Host "Note: the updater was set up for $previous; it now updates this folder instead."
+  }
+}
 New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'orbit-updater.ps1') -Destination $hostDir -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'orbit-updater.cmd') -Destination $hostDir -Force

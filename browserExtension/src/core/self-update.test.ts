@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createActiveRunRegistry } from "./active-runs.js";
 import {
   compareExtensionVersions,
   createSelfUpdater,
@@ -13,10 +14,12 @@ const RELEASE: ReleaseInfo = {
   version: "0.1.24",
   sha256: "a".repeat(64),
   download_url: "https://privateorbit.space/storage/v1/object/public/x.zip",
+  extension_id: "orbit-id",
 };
 
 function setup(overrides: Partial<SelfUpdaterDeps> & { busy?: boolean[] } = {}) {
   const busy = overrides.busy ?? [];
+  const registry = createActiveRunRegistry();
   const calls: Array<Record<string, unknown>> = [];
   const reload = vi.fn();
   const sendNative = vi.fn(async (message: Record<string, unknown>): Promise<NativeHostReply> => {
@@ -25,15 +28,17 @@ function setup(overrides: Partial<SelfUpdaterDeps> & { busy?: boolean[] } = {}) 
   });
   const deps: SelfUpdaterDeps = {
     supported: true,
+    extensionId: "orbit-id",
     currentVersion: () => "0.1.23",
     fetchLatest: async () => RELEASE,
+    holdImports: () => registry.holdForUpdate(),
     isBusy: async () => (busy.length > 0 ? busy.shift()! : false),
     sendNative,
     reload,
     now: () => Date.parse("2026-10-21T12:00:00Z"),
     ...overrides,
   };
-  return { updater: createSelfUpdater(deps), calls, reload, sendNative };
+  return { updater: createSelfUpdater(deps), calls, reload, sendNative, registry };
 }
 
 describe("compareExtensionVersions", () => {
@@ -55,6 +60,11 @@ describe("parseReleaseInfo", () => {
     expect(parseReleaseInfo({ ...RELEASE, sha256: "A".repeat(64), extra: 1 })).toEqual(RELEASE);
   });
 
+  it("keeps the id only when the endpoint gives one", () => {
+    const { extension_id: _omitted, ...withoutId } = RELEASE;
+    expect(parseReleaseInfo(withoutId)?.extension_id).toBeNull();
+  });
+
   it("refuses a release it could not verify or fetch safely", () => {
     expect(parseReleaseInfo(null)).toBeNull();
     expect(parseReleaseInfo({ ...RELEASE, sha256: "abc" })).toBeNull();
@@ -69,6 +79,11 @@ describe("isHostMissingError", () => {
     expect(isHostMissingError("Access to the specified native messaging host is forbidden.")).toBe(
       true,
     );
+    expect(
+      isHostMissingError(
+        "Native messaging host space.privateorbit.extension_updater is not registered.",
+      ),
+    ).toBe(true);
     expect(isHostMissingError("Download failed: 404 not found")).toBe(false);
   });
 });
@@ -118,7 +133,45 @@ describe("createSelfUpdater", () => {
     expect(calls.map((call) => call.action)).toEqual(["stage"]);
   });
 
-  it("holds the reload when an import started while the files were replaced", async () => {
+  it("waits while a run is in flight, whatever the stored session says", async () => {
+    const { updater, calls, registry } = setup();
+    registry.begin("run-1");
+    expect((await updater.check("alarm")).phase).toBe("waiting_for_import");
+    expect(calls.map((call) => call.action)).toEqual(["stage"]);
+    registry.end("run-1");
+    await updater.onImportsSettled();
+    expect(calls.map((call) => call.action)).toEqual(["stage", "apply"]);
+  });
+
+  it("keeps a run from beginning while the files are replaced", async () => {
+    let begunDuringApply: boolean | null = null;
+    const registry = createActiveRunRegistry();
+    const { updater, reload } = setup({
+      holdImports: () => registry.holdForUpdate(),
+      sendNative: async (message) => {
+        if (message.action === "apply") begunDuringApply = registry.begin("run-1");
+        return { ok: true };
+      },
+    });
+    await updater.check("manual");
+    expect(begunDuringApply).toBe(false);
+    expect(reload).toHaveBeenCalledOnce();
+    // Released afterwards, for the case where the reload does not end the worker.
+    expect(registry.isHeldForUpdate()).toBe(false);
+  });
+
+  it("releases the hold when the host fails", async () => {
+    const registry = createActiveRunRegistry();
+    const { updater } = setup({
+      holdImports: () => registry.holdForUpdate(),
+      sendNative: async (message) =>
+        message.action === "apply" ? { ok: false, error: "disk full" } : { ok: true },
+    });
+    expect((await updater.check("manual")).error).toBe("disk full");
+    expect(registry.isHeldForUpdate()).toBe(false);
+  });
+
+  it("holds the reload when a session was stored while the files were replaced", async () => {
     const { updater, reload } = setup({ busy: [false, true] });
     expect((await updater.check("alarm")).phase).toBe("reload_pending");
     expect(reload).not.toHaveBeenCalled();
@@ -167,6 +220,52 @@ describe("createSelfUpdater", () => {
     const status = await updater.check("manual");
     expect(status).toMatchObject({ phase: "error" });
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a release built for another extension id", async () => {
+    const { updater, sendNative } = setup({
+      fetchLatest: async () => ({ ...RELEASE, extension_id: "someone-else" }),
+    });
+    const status = await updater.check("alarm");
+    expect(status.phase).toBe("error");
+    expect(status.error).toContain("someone-else");
+    expect(sendNative).not.toHaveBeenCalled();
+  });
+
+  it("finds a waiting update again in a worker that started after the import ended", async () => {
+    // A fresh worker: nothing staged in memory, the phase is idle.
+    const { updater, calls, reload } = setup();
+    await updater.onImportsSettled();
+    expect(calls.map((call) => call.action)).toEqual(["stage", "apply"]);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("leaves an up-to-date or failed updater alone when an import ends", async () => {
+    const { updater, sendNative } = setup({ currentVersion: () => "0.1.24" });
+    await updater.check("alarm");
+    const fetches = sendNative.mock.calls.length;
+    await updater.onImportsSettled();
+    expect(sendNative.mock.calls.length).toBe(fetches);
+  });
+
+  it("runs another pass when an import ends while one is deciding to wait", async () => {
+    let settle: (() => Promise<void>) | null = null;
+    let first = true;
+    const { updater, calls, reload } = setup({
+      isBusy: async () => {
+        if (first) {
+          first = false;
+          // The import ends right after this pass saw it.
+          void settle?.();
+          return true;
+        }
+        return false;
+      },
+    });
+    settle = () => updater.onImportsSettled();
+    await updater.check("alarm");
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    expect(calls.map((call) => call.action)).toEqual(["stage", "apply"]);
   });
 
   it("reports when nothing is published", async () => {

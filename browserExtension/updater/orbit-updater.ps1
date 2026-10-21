@@ -116,10 +116,24 @@ try {
   if ($null -eq $message) { exit 0 }
   $version = [string]$message.version
   if ($version -notmatch '^[0-9]+(\.[0-9]+){0,3}$') { throw 'Invalid version.' }
-  switch ([string]$message.action) {
-    'stage' { Invoke-Stage $version ([string]$message.sha256) ([string]$message.url) }
-    'apply' { Invoke-Apply $version }
-    default { throw 'Unknown action.' }
+  # One stage or apply at a time: two hosts (two browsers, or two calls close together) would
+  # otherwise delete the staging tree under each other. A mutex is released by Windows when its
+  # owner dies, so a crashed host never leaves it held.
+  $mutex = New-Object Threading.Mutex($false, 'Local\OrbitExtensionUpdater')
+  try {
+    try {
+      if (-not $mutex.WaitOne([TimeSpan]::FromMinutes(5))) { throw 'Another update is in progress.' }
+    } catch [Threading.AbandonedMutexException] {
+      # Its previous owner died; the mutex is ours now.
+    }
+    switch ([string]$message.action) {
+      'stage' { Invoke-Stage $version ([string]$message.sha256) ([string]$message.url) }
+      'apply' { Invoke-Apply $version }
+      default { throw 'Unknown action.' }
+    }
+  } finally {
+    try { $mutex.ReleaseMutex() } catch {}
+    $mutex.Dispose()
   }
   Send-Reply @{ ok = $true; version = $version }
 } catch {

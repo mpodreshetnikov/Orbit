@@ -10,8 +10,11 @@
  *
  * An import must never be cut by an update (Max, 2026-10-21). A reload ends the service worker
  * and every run in it, and a swap mid-run changes the scripts a run injects next. So `apply`
- * and the reload each happen only when nothing is importing, checked right before each of them;
- * an update found during an import waits, and goes ahead when the import ends.
+ * and the reload each happen only under a hold on the run registry, taken in the same
+ * synchronous step that sees no run in flight, and kept until the reload: a run that tries to
+ * begin meanwhile is refused rather than started on files that are changing. A stored session
+ * (a run about to start) also defers both. An update found during an import waits, and goes
+ * ahead when the import ends.
  */
 
 export const SELF_UPDATE_ALARM = "orbit-self-update";
@@ -22,6 +25,8 @@ export interface ReleaseInfo {
   version: string;
   sha256: string;
   download_url: string;
+  /** The id the release's key gives it; null when the endpoint does not say. */
+  extension_id: string | null;
 }
 
 export type SelfUpdatePhase =
@@ -56,9 +61,16 @@ export interface NativeHostReply {
 
 export interface SelfUpdaterDeps {
   supported: boolean;
+  /** This extension's id: a release built with another key would install as another extension. */
+  extensionId: string;
   currentVersion: () => string;
   fetchLatest: () => Promise<ReleaseInfo | null>;
-  /** True while an import runs or a session waits for one. */
+  /**
+   * Keeps runs from beginning until the release is called; null while a run is in flight.
+   * See `ActiveRunRegistry.holdForUpdate`.
+   */
+  holdImports: () => (() => void) | null;
+  /** True while a session is stored: a run is about to start, or one is in flight. */
   isBusy: () => Promise<boolean>;
   sendNative: (message: Record<string, unknown>) => Promise<NativeHostReply>;
   reload: () => void;
@@ -72,7 +84,7 @@ export interface SelfUpdater {
    * Looks for a newer release and installs it when nothing is importing. The alarm and the
    * popup's button both land here; the button only differs in being now.
    */
-  check(origin: "alarm" | "startup" | "manual"): Promise<SelfUpdateStatus>;
+  check(origin: "alarm" | "startup" | "manual" | "settled"): Promise<SelfUpdateStatus>;
   /** Called when an import ends; finishes an update that waited for it. */
   onImportsSettled(): Promise<void>;
 }
@@ -103,16 +115,21 @@ export function parseReleaseInfo(payload: unknown): ReleaseInfo | null {
   if (compareExtensionVersions(version, version) === null) return null;
   if (!/^[0-9a-f]{64}$/.test(sha256)) return null;
   if (!url.startsWith("https://")) return null;
-  return { version, sha256, download_url: url };
+  const extensionId =
+    typeof record.extension_id === "string" && record.extension_id.trim()
+      ? record.extension_id.trim()
+      : null;
+  return { version, sha256, download_url: url, extension_id: extensionId };
 }
 
 /**
  * What Chrome says when no host is registered under the name ("Specified native messaging host
- * not found.") or the host does not list this extension ("Access to the specified native
- * messaging host is forbidden."). Either way the person has to run the installer.
+ * not found."; on Windows "Native messaging host <name> is not registered.") or the host does
+ * not list this extension ("Access to the specified native messaging host is forbidden.").
+ * Either way the person has to run the installer.
  */
 export function isHostMissingError(message: string): boolean {
-  return /native messaging host.*(not found|forbidden)/i.test(message);
+  return /native messaging host.*(not found|is not registered|forbidden)/i.test(message);
 }
 
 export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
@@ -127,6 +144,8 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
   /** The release staged by the host and not yet applied. */
   let staged: ReleaseInfo | null = null;
   let inFlight: Promise<SelfUpdateStatus> | null = null;
+  /** An import ended while a pass was already running, after it may have decided to wait. */
+  let settledDuringPass = false;
 
   const set = (patch: Partial<SelfUpdateStatus>) => {
     state = { ...state, ...patch };
@@ -138,26 +157,51 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     deps.onInfo?.("extension_self_update_failed", { error: message });
   };
 
-  const reloadWhenIdle = async () => {
-    if (await deps.isBusy()) {
-      set({ phase: "reload_pending" });
+  /**
+   * Runs `step` with runs kept out, or reports `waitingPhase` when an import is in flight or
+   * about to start. The hold is released afterwards; after a reload there is nothing left to
+   * release it for.
+   */
+  const whenIdle = async (waitingPhase: SelfUpdatePhase, step: () => Promise<void>) => {
+    const release = deps.holdImports();
+    if (!release) {
+      set({ phase: waitingPhase });
       return;
     }
+    try {
+      if (await deps.isBusy()) {
+        set({ phase: waitingPhase });
+        return;
+      }
+      await step();
+    } finally {
+      release();
+    }
+  };
+
+  const reloadNow = async () => {
     deps.onInfo?.("extension_self_update_reloading", { to: state.latest_version });
     deps.reload();
   };
 
+  const reloadWhenIdle = () => whenIdle("reload_pending", reloadNow);
+
   const applyWhenIdle = async () => {
-    if (!staged) return;
-    if (await deps.isBusy()) {
-      set({ phase: "waiting_for_import" });
-      return;
-    }
-    set({ phase: "applying" });
-    const reply = await deps.sendNative({ action: "apply", version: staged.version });
-    if (!reply?.ok) throw new Error(reply?.error || "The updater could not apply the release.");
-    staged = null;
-    await reloadWhenIdle();
+    const release = staged;
+    if (!release) return;
+    await whenIdle("waiting_for_import", async () => {
+      set({ phase: "applying" });
+      const reply = await deps.sendNative({ action: "apply", version: release.version });
+      if (!reply?.ok) throw new Error(reply?.error || "The updater could not apply the release.");
+      staged = null;
+      // Still under the same hold, so no run has begun since the files changed; a session the
+      // app stored meanwhile still defers the reload, as it deferred the apply.
+      if (await deps.isBusy()) {
+        set({ phase: "reload_pending" });
+        return;
+      }
+      await reloadNow();
+    });
   };
 
   const run = async (origin: string): Promise<SelfUpdateStatus> => {
@@ -170,6 +214,11 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
         return { ...state };
       }
       set({ latest_version: latest.version });
+      if (latest.extension_id && latest.extension_id !== deps.extensionId) {
+        throw new Error(
+          `The published release is for extension ${latest.extension_id}, not ${deps.extensionId}.`,
+        );
+      }
       const order = compareExtensionVersions(latest.version, state.current_version);
       if (order === null || order <= 0) {
         set({ phase: "up_to_date" });
@@ -199,29 +248,64 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     return { ...state };
   };
 
-  return {
-    status: () => ({ ...state }),
-    async check(origin) {
-      if (!deps.supported) return { ...state };
-      // A reload is already owed; checking again would only stage the same files twice.
+  /** One pass: whatever the update owes next, from where the last pass left it. */
+  const pass = async (origin: string): Promise<SelfUpdateStatus> => {
+    try {
       if (state.phase === "reload_pending") {
         await reloadWhenIdle();
         return { ...state };
       }
-      if (!inFlight) {
-        inFlight = run(origin).finally(() => {
-          inFlight = null;
-        });
+      if (state.phase === "waiting_for_import" && staged) {
+        await applyWhenIdle();
+        return { ...state };
       }
-      return inFlight;
+    } catch (error) {
+      fail(error);
+      return { ...state };
+    }
+    return run(origin);
+  };
+
+  /**
+   * Every entry goes through one pass at a time, so two of them never drive the host at once.
+   * An import that ends while a pass runs gets a pass of its own afterwards: the running one
+   * may already have decided to wait for it.
+   */
+  const drive = (origin: string): Promise<SelfUpdateStatus> => {
+    if (inFlight) return inFlight;
+    inFlight = pass(origin).finally(() => {
+      inFlight = null;
+      if (settledDuringPass) {
+        settledDuringPass = false;
+        if (state.phase === "waiting_for_import" || state.phase === "reload_pending") {
+          void drive("settled");
+        }
+      }
+    });
+    return inFlight;
+  };
+
+  return {
+    status: () => ({ ...state }),
+    async check(origin) {
+      if (!deps.supported) return { ...state };
+      return drive(origin);
     },
     async onImportsSettled() {
       if (!deps.supported) return;
-      try {
-        if (state.phase === "reload_pending") await reloadWhenIdle();
-        else if (state.phase === "waiting_for_import") await applyWhenIdle();
-      } catch (error) {
-        fail(error);
+      if (inFlight) {
+        settledDuringPass = true;
+        return;
+      }
+      // "idle" is a worker that started after the last pass: the service worker is ended when
+      // idle, and with it what an earlier one staged and was waiting to apply. A full check
+      // finds it again, and the host still holds the staged copy.
+      if (
+        state.phase === "idle" ||
+        state.phase === "waiting_for_import" ||
+        state.phase === "reload_pending"
+      ) {
+        await drive("settled");
       }
     },
   };
