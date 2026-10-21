@@ -7,14 +7,12 @@ name: Сегодня
 - tapOn:
     text: "Open"
     optional: true
-# Expo Go's first-run tour of its developer menu, when it shows.
-- tapOn:
-    text: "Continue"
-    optional: true
 - extendedWaitUntil:
     visible: "Vitamin D3"
-    timeout: 300000
+    timeout: 600000
+# Expo Go's first-run tour of its developer menu, laid over the app once it has loaded.
 - tapOn:
     text: "Continue"
     optional: true
+- assertNotVisible: "This is the developer menu.*"
 - takeScreenshot: today-01-day

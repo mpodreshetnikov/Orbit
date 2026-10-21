@@ -200,10 +200,17 @@ jobs:
             sleep 2
           done
           [[ -n "$up" ]] || { cat ../metro.log; echo "::error::Metro is not answering on 127.0.0.1:8081"; exit 1; }
-          # Build the bundle once before the app asks, so the first screen is not a two-minute spinner.
-          curl -fsS -o /dev/null --max-time 600 \
-            "http://127.0.0.1:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=true&minify=false" \
-            || echo "::warning::Pre-bundling failed; Expo Go will build it on open."
+          # Build the bundle before the app asks, so the flow does not spend its wait on a four-minute
+          # spinner. The URL is the one the manifest hands Expo Go: any other query is another bundle.
+          bundle="$(curl -fsS -H 'expo-platform: ios' -H 'accept: application/expo+json,application/json' \
+            http://127.0.0.1:8081 | jq -r '.launchAsset.url // empty' | sed 's#//[^/]*/#//127.0.0.1:8081/#')"
+          if [[ -n "$bundle" ]]; then
+            echo "Pre-bundling $bundle"
+            curl -fsS -o /dev/null --max-time 900 "$bundle" \
+              || echo "::warning::Pre-bundling failed; Expo Go will build it on open."
+          else
+            echo "::warning::No launchAsset in the manifest; Expo Go will build the bundle on open."
+          fi
       - name: Run the flows
         run: |
           mkdir -p recordings
