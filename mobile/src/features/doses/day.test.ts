@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { localDayBounds, msUntilNextLocalDay } from "@/features/doses/day";
 
 describe("localDayBounds", () => {

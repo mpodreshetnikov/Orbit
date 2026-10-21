@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { formatMessage, pluralCategory, t } from "@/lib/i18n";
 
 describe("pluralCategory", () => {
@@ -47,5 +47,39 @@ describe("t", () => {
 
   it("prints a missing key as itself", () => {
     expect(t("medications.noSuchKey")).toBe("medications.noSuchKey");
+  });
+});
+
+describe("without Intl.PluralRules", () => {
+  it("falls back to Russian's own rule", () => {
+    const original = Intl.PluralRules;
+    // Hermes builds without Intl exist; the fallback is what they get.
+    (Intl as unknown as { PluralRules: unknown }).PluralRules = undefined;
+    try {
+      expect([1, 3, 11, 12, 22, 25, 101, 1.5].map(pluralCategory)).toEqual([
+        "one",
+        "few",
+        "many",
+        "many",
+        "few",
+        "many",
+        "one",
+        "other",
+      ]);
+    } finally {
+      (Intl as unknown as { PluralRules: unknown }).PluralRules = original;
+    }
+  });
+});
+
+describe("formatMessage, the edges", () => {
+  it("leaves a plural as written when its value is not a number or no branch fits", () => {
+    const message = "{n, plural, one {#}}";
+    expect(formatMessage(message, { n: "x" })).toBe(message);
+    expect(formatMessage(message, { n: 5 })).toBe(message);
+  });
+
+  it("does not descend into a key that ends at a string", () => {
+    expect(t("medications.taken.deeper")).toBe("medications.taken.deeper");
   });
 });

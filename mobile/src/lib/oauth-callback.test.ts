@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { parseOAuthCallback } from "@/lib/oauth-callback";
 
 describe("parseOAuthCallback", () => {
