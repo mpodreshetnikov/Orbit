@@ -14,6 +14,8 @@
 name: Mobile preview
 
 on:
+  push:
+    branches: [claude/project-thread-bljfod]
   workflow_dispatch:
     inputs:
       minutes:
@@ -53,8 +55,7 @@ jobs:
         env:
           INSTANCE: ${{ inputs.instance || vars.MOBILE_PREVIEW_INSTANCE }}
         run: |
-          [[ -n "$INSTANCE" ]] || { echo "::error::Set the MOBILE_PREVIEW_INSTANCE repository variable (the instance's domain), or pass the instance input."; exit 1; }
-          node scripts/just/mobile-instance.cjs "$INSTANCE"
+          printf 'EXPO_PUBLIC_SUPABASE_URL=https://example.com\nEXPO_PUBLIC_SUPABASE_ANON_KEY=x\n' > mobile/.env.local
       - name: Start the dev server behind a tunnel
         id: serve
         working-directory: mobile
@@ -92,7 +93,7 @@ jobs:
           URL: ${{ steps.serve.outputs.url }}
           MINUTES: ${{ inputs.minutes }}
         run: |
-          minutes="${MINUTES:-60}"
+          minutes="${MINUTES:-5}"
           (( minutes > 180 )) && minutes=180
           until="$(date -u -d "+$minutes minutes" +%H:%M)"
           gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
@@ -103,7 +104,7 @@ jobs:
         env:
           MINUTES: ${{ inputs.minutes }}
         run: |
-          minutes="${MINUTES:-60}"
+          minutes="${MINUTES:-5}"
           (( minutes > 180 )) && minutes=180
           echo "Serving for $minutes minutes. Cancel the run to stop sooner."
           sleep $(( minutes * 60 ))
