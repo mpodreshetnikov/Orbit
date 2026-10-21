@@ -1870,7 +1870,6 @@ export default function MoneyImportPage() {
                       <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
                         <li>{t("money.importExtensionInstallFirefoxStep1")}</li>
                         <li>{t("money.importExtensionInstallFirefoxStep2")}</li>
-                        <li>{t("money.importExtensionInstallProdStep3Firefox")}</li>
                       </ol>
                     ) : (
                       <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">

@@ -550,7 +550,6 @@
     "importExtensionInstallFirefox": "Install the signed Orbit add-on for Firefox. Firefox keeps it up to date by itself.",
     "importExtensionInstallFirefoxStep1": "Click Download latest extension. If Firefox asks, allow this site to install add-ons.",
     "importExtensionInstallFirefoxStep2": "Click Add in the install prompt and confirm access to the bank sites and Orbit.",
-    "importExtensionInstallProdStep3Firefox": "Reload this page, then click Retry check.",
     "importExtensionFirefoxUnavailable": "The Firefox build has not been published yet. Until then, import through Chrome.",
     "importExtensionUpdateAvailableFirefox": "A newer version is available. Firefox installs it on its next update check, or download it now.",
     "importExtensionRetryCheck": "Retry check",
