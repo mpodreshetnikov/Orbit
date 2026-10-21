@@ -32,6 +32,9 @@ concurrency:
 jobs:
   serve:
     name: Serve to Expo Go
+    # Where the server deploy keeps ORBIT_DOMAIN and ANON_KEY (self-hosted.yml); only those two are
+    # read here.
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 190
     steps:
