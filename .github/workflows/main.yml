@@ -115,8 +115,6 @@ jobs:
       - name: Detect extension release policy
         id: extension-version-policy
         shell: bash
-        env:
-          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="$(node -p "require('./browserExtension/manifest.json').version")"
@@ -137,20 +135,11 @@ jobs:
             TO="${{ github.sha }}"
           fi
 
-          # On a push to main the publish decision is taken against what is actually published, not
-          # against the previous commit, so a publish that failed is retried by the next push
-          # instead of being skipped forever as "version unchanged". T-260901-0dr. The bucket is
-          # public, so this reads latest.json with no key; an unreachable Storage falls back to the
-          # commit-range comparison rather than publishing on every push.
-          #
-          # Pull requests keep the commit-range comparison. They never publish, and comparing
-          # against production there would build the release bundle on every one of them.
-          PUBLISHED_ARGS=()
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" && -n "$SUPABASE_PROJECT_REF" ]]; then
-            PUBLISHED_ARGS=(--supabase-url "https://${SUPABASE_PROJECT_REF}.supabase.co")
-          fi
-
-          npx tsx scripts/extension/release.ts check-version-bump --from "$FROM" --to "$TO" "${PUBLISHED_ARGS[@]}" --format github-output --output-file "$GITHUB_OUTPUT"
+          # Whether to publish is not decided here: publish-extension-release compares the manifest
+          # against what the server it publishes to actually serves (T-260901-0dr, T-260901-fta).
+          # This is the commit range only -- whether the change owes a bump, and whether to build
+          # the bundle as a check.
+          npx tsx scripts/extension/release.ts check-version-bump --from "$FROM" --to "$TO" --format github-output --output-file "$GITHUB_OUTPUT"
       - name: Enforce extension manifest version bump
         if: steps.extension-version-policy.outputs.requiresVersionBump == 'true'
         shell: bash
@@ -351,17 +340,18 @@ jobs:
           if-no-files-found: error
 
   publish-extension-release:
-    # Into your server's Storage (docs/SELF_HOSTING.md), the Orbit the extension is for: the archive
-    # is built here, inside the production environment, because the origins and the Storage URL it
-    # carries are the server's -- ORBIT_DOMAIN, which may live only in that environment. The bundle
-    # above is the pull request's build check. Until 2026-10-21 this job built for and uploaded to
-    # the hosted Supabase project, so 0.1.22 matched only private-orbit.vercel.app and the app on
-    # privateorbit.space never saw it.
+    # Into your server's Storage (docs/SELF_HOSTING.md), the Orbit the extension is for. Everything
+    # is decided and built here, inside the production environment, because ORBIT_DOMAIN may live
+    # only there: whether to publish (the manifest against the server's own latest.json, so a
+    # failed publish or a new server is caught up by the next push), and the archive, whose origins
+    # and Storage URL are the server's. The bundle job above is only the pull request's build
+    # check. Until 2026-10-21 this job built for and uploaded to the hosted Supabase project, so
+    # 0.1.22 matched only private-orbit.vercel.app and the app on privateorbit.space never saw it.
     #
     # After deploy-self-hosted, not before it: the upload goes into a bucket that
     # `20260314000000_extension_release_bucket.sql` creates, and the server applies migrations as it
     # deploys.
-    needs: [secrets-scan, quality-gates, extension-release-bundle, deploy-self-hosted]
+    needs: [secrets-scan, quality-gates, deploy-self-hosted]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Extension Release
     environment: production
@@ -381,42 +371,76 @@ jobs:
       group: publish-extension-release-${{ needs.quality-gates.outputs.extension_next_version }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    env:
-      ORBIT_DOMAIN: ${{ vars.ORBIT_DOMAIN }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
     steps:
       # Here and not in a job-level `if`, which cannot see an environment's variables.
       - name: Check a server is set up
         id: server
+        env:
+          ORBIT_DOMAIN: ${{ vars.ORBIT_DOMAIN }}
+          ORBIT_HTTP_ONLY: ${{ vars.ORBIT_HTTP_ONLY }}
         run: |
-          if [[ "${{ needs.quality-gates.outputs.extension_version_changed }}" != 'true' ]]; then
-            echo "Extension manifest version unchanged; skipping release publish."
-          elif [[ -z "$ORBIT_DOMAIN" ]]; then
+          if [[ -z "$ORBIT_DOMAIN" ]]; then
             echo "::notice::No server to publish the extension to: the ORBIT_DOMAIN variable is not set."
-          elif [[ -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
-            echo "::error::The SERVICE_ROLE_KEY secret is not set, so the extension cannot be uploaded to the server's Storage (docs/SELF_HOSTING.md, Deploy from GitHub)."
-            exit 1
-          else
-            echo "publish=true" >>"$GITHUB_OUTPUT"
-            echo "NEXT_PUBLIC_APP_ORIGIN=https://$ORBIT_DOMAIN" >>"$GITHUB_ENV"
-            echo "NEXT_PUBLIC_SUPABASE_URL=https://$ORBIT_DOMAIN" >>"$GITHUB_ENV"
+            exit 0
           fi
+          # The server's public URL, as deploy/orbit builds it.
+          scheme=https
+          [[ "$ORBIT_HTTP_ONLY" != true ]] || scheme=http
+          echo "set=true" >>"$GITHUB_OUTPUT"
+          echo "url=$scheme://$ORBIT_DOMAIN" >>"$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-        if: steps.server.outputs.publish == 'true'
+        if: steps.server.outputs.set == 'true'
       - uses: actions/setup-node@v4
-        if: steps.server.outputs.publish == 'true'
+        if: steps.server.outputs.set == 'true'
         with:
           node-version: 22
       - uses: taiki-e/install-action@just
-        if: steps.server.outputs.publish == 'true'
+        if: steps.server.outputs.set == 'true'
       - name: Install dependencies
-        if: steps.server.outputs.publish == 'true'
+        if: steps.server.outputs.set == 'true'
         run: npm ci
+      # Publishes when the server has no release or an older one. A server it cannot read is not
+      # published to: that is the commit-range answer, and the range here is empty.
+      - name: Compare with the release the server serves
+        id: policy
+        if: steps.server.outputs.set == 'true'
+        run: |
+          npx tsx scripts/extension/release.ts check-version-bump --from HEAD --to HEAD \
+            --supabase-url "${{ steps.server.outputs.url }}" --format env | tee -a "$GITHUB_OUTPUT"
+      # The server's service_role key: the secret when there is one (a server moved from hosted
+      # Supabase), else the one deploy/orbit derived on the server from ORBIT_MASTER_KEY
+      # (deploy/lib/secrets.sh), which is the same key whenever the master key is.
+      - name: Find the server's service_role key
+        if: steps.server.outputs.set == 'true' && steps.policy.outputs.versionChanged == 'true'
+        env:
+          SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ORBIT_MASTER_KEY: ${{ secrets.ORBIT_MASTER_KEY }}
+        run: |
+          key="$SERVICE_ROLE_KEY"
+          if [[ -z "$key" && -n "$ORBIT_MASTER_KEY" ]]; then
+            # shellcheck disable=SC1091
+            source deploy/lib/secrets.sh
+            jwt="${JWT_SECRET:-$(secret_hex JWT_SECRET 32)}"
+            key="$(make_api_key service_role "$jwt")"
+          fi
+          if [[ -z "$key" ]]; then
+            echo "::error::Neither the SERVICE_ROLE_KEY nor the ORBIT_MASTER_KEY secret is set, so the extension cannot be uploaded to the server's Storage (docs/SELF_HOSTING.md, Deploy from GitHub)."
+            exit 1
+          fi
+          echo "::add-mask::$key"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$key" >>"$GITHUB_ENV"
       - name: Build the extension for your server
-        if: steps.server.outputs.publish == 'true'
+        if: steps.server.outputs.set == 'true' && steps.policy.outputs.versionChanged == 'true'
+        env:
+          NEXT_PUBLIC_APP_ORIGIN: ${{ steps.server.outputs.url }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ steps.server.outputs.url }}
         run: just extension-release-build
       - name: Publish the extension to your server's Storage
-        if: steps.server.outputs.publish == 'true'
+        if: steps.server.outputs.set == 'true' && steps.policy.outputs.versionChanged == 'true'
+        env:
+          NEXT_PUBLIC_APP_ORIGIN: ${{ steps.server.outputs.url }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ steps.server.outputs.url }}
         run: just extension-release-publish
 
   # The hosted production's jobs (Vercel, Supabase, the extension it serves) skip themselves in a
