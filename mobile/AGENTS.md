@@ -39,3 +39,23 @@ Docs: https://docs.expo.dev/eas/index.md
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+
+## Showing a change to the owner on their phone
+
+A change to this client is reviewed on the owner's iPhone before it reaches `main`, and a cloud
+session cannot run `just mobile-start` where the phone can reach it. So, whenever you change
+anything the client draws or does and the session runs in the cloud:
+
+1. Push the branch, then dispatch the **Mobile preview** workflow (`.github/workflows/mobile-preview.yml`)
+   on that branch — through the GitHub MCP tools, `actions_run_trigger` with `run_workflow`,
+   `workflow_id: mobile-preview.yml` and `ref` set to the branch. `minutes` defaults to 60.
+2. Wait a minute or two, then read the address from the commit status the run posts on the
+   branch's head commit: context **Mobile preview**, description `exp://… until HH:MM UTC`
+   (`pull_request_read` with `get_status` on the branch's pull request). The job log has it too,
+   but GitHub serves a job's log only after the job ends, which is when the server stops.
+3. Send that address to the owner in the conversation with one line on what to look at, and say
+   how long the server stays up. Dispatch again when they ask for more time or after a new push —
+   a run serves the commit it started on, not later pushes.
+
+The same works on `main` after a merge, to show what shipped. The workflow only serves the
+JavaScript bundle; it deploys nothing and writes nothing to the instance.
