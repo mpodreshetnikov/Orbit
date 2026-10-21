@@ -1,13 +1,14 @@
 import * as Linking from "expo-linking";
 import { Redirect } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { Button, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
 import { parseOAuthCallback } from "@/lib/oauth-callback";
 import { useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
+import { testSignInCredentials } from "@/lib/test-sign-in";
 import { space, usePalette } from "@/theme";
 
 /**
@@ -25,6 +26,17 @@ export default function SignIn() {
   const { session } = useSession();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Only in a recordings bundle: sign straight in as the local test user, so the simulator lands on
+  // the app rather than on a Google sheet it cannot finish.
+  useEffect(() => {
+    const credentials = testSignInCredentials();
+    if (credentials && session === null) {
+      void supabase.auth
+        .signInWithPassword(credentials)
+        .then(({ error: signInError }) => setError(signInError?.message ?? null));
+    }
+  }, [session]);
 
   if (session) {
     return <Redirect href="/today" />;
