@@ -92,6 +92,19 @@ jobs:
                select 1 from public.med_dose_events e
                 where e.regimen_id = r.id
                   and date_trunc('minute', e.scheduled_at) = date_trunc('minute', s.at));
+          -- Yesterday, every daily slot taken on time: a course always has a history to open.
+          insert into public.med_dose_events
+            (person_id, regimen_id, scheduled_at, actual_at, taken_at, planned_intake, status)
+          select r.person_id, r.id, s.at, s.at, s.at, r.dose_definition, 'taken'
+            from public.med_regimens r
+            cross join lateral jsonb_array_elements_text(r.schedule->'times') as t(slot)
+            cross join lateral (select ((current_date - 1) || ' ' || t.slot)::timestamp at time zone 'UTC' as at) s
+           where r.status = 'active'
+             and r.schedule->>'mode' = 'daily_times'
+             and not exists (
+               select 1 from public.med_dose_events e
+                where e.regimen_id = r.id
+                  and date_trunc('minute', e.scheduled_at) = date_trunc('minute', s.at));
           SQL
       - name: Open the tunnel
         run: |

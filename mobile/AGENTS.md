@@ -72,7 +72,8 @@ under `src/app/`: Expo Router would treat it as a route.
 
 **Recordings.** The `Mobile recordings` workflow runs on every pull request touching `mobile/` (and by
 dispatch on any branch). `e2e/setup/open.yaml` loads the client unrecorded; then each `e2e/*.yaml`
-is recorded as `<flow>.mp4`, with a PNG per `takeScreenshot`. To read a run:
+is recorded as `<flow>.mp4`, with a PNG per `takeScreenshot`, in file-name order against one
+database: number the files, and put a flow that changes data after the read-only ones. To read a run:
 
 ```bash
 gh run list -R mpodreshetnikov/Orbit -w "Mobile recordings" -b <branch> -L 1
@@ -83,4 +84,5 @@ Screenshots land under `<dir>/.maestro/tests/*/<flow name>/takeScreenshot/`, vid
 `<dir>/**/recordings/`; on failure `zz-failure.png` is the last screen. Look at every picture before
 sending it on. Writing flows: a list row is one accessibility element ("Vitamin D3, Просрочено · …")
 and Maestro matches text whole, so match rows by prefix (`"Vitamin D3.*"`); the data is
-`supabase/seed.sql`'s user `dev@example.com` with today's doses generated in the run.
+`supabase/seed.sql`'s user `dev@example.com`, with today's doses and yesterday's (taken) generated
+in the run.
