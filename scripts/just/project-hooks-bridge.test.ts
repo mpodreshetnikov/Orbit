@@ -5,7 +5,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as bridge from "./project-hooks-bridge.cjs";
 
-const { matches } = bridge as unknown as { matches: (matcher: unknown, key: string) => boolean };
+const { matches, passesIf } = bridge as unknown as {
+  matches: (matcher: unknown, key: string) => boolean;
+  passesIf: (rule: unknown, input: unknown) => boolean;
+};
 
 const BRIDGE = path.join(__dirname, "project-hooks-bridge.cjs");
 const ORBIT_ROOT = path.resolve(__dirname, "..", "..");
@@ -50,14 +53,28 @@ afterEach(() => {
 });
 
 describe("matching", () => {
-  it("follows Claude Code: no matcher, empty or * match all; otherwise an anchored regex", () => {
+  it("follows Claude Code: everything, exact name lists, or an unanchored regex", () => {
     expect(matches(undefined, "Edit")).toBe(true);
     expect(matches("", "Edit")).toBe(true);
     expect(matches("*", "Bash")).toBe(true);
     expect(matches("Edit|Write|NotebookEdit", "Write")).toBe(true);
+    expect(matches("Edit, Write", "Write")).toBe(true);
     expect(matches("Edit|Write", "MultiEdit")).toBe(false);
-    expect(matches("Bash", "Bash")).toBe(true);
+    expect(matches("^Notebook", "NotebookEdit")).toBe(true);
+    expect(matches("Edit.*", "EditFile")).toBe(true);
     expect(matches("(", "Bash")).toBe(false);
+  });
+
+  it("applies a handler's if filter, and runs nothing on one it cannot read", () => {
+    const bash = (command: string) => ({ tool_name: "Bash", tool_input: { command } });
+    const edit = (file: string) => ({ tool_name: "Edit", tool_input: { file_path: file } });
+    expect(passesIf(undefined, bash("ls"))).toBe(true);
+    expect(passesIf("Bash(git *)", bash("git commit -m x"))).toBe(true);
+    expect(passesIf("Bash(git *)", bash("ls"))).toBe(false);
+    expect(passesIf("Edit(*.ts)", edit("/r/src/a.ts"))).toBe(true);
+    expect(passesIf("Edit(*.ts)", edit("/r/src/a.md"))).toBe(false);
+    expect(passesIf("Edit", bash("ls"))).toBe(false);
+    expect(passesIf("not a rule (", bash("ls"))).toBe(false);
   });
 });
 
@@ -96,13 +113,93 @@ describe("the bridge", () => {
     expect(out.context?.additionalContext).toBe(`${root}|${JSON.stringify(input)}`);
   });
 
-  it("passes a blocking exit through with its reason", () => {
+  it("passes a blocking exit through with its reason, after every matching hook has run", () => {
     const root = repo({
-      PreToolUse: [{ hooks: [{ type: "command", command: "echo refused >&2; exit 2" }] }],
+      PreToolUse: [
+        { hooks: [{ type: "command", command: "echo refused >&2; exit 2" }] },
+        { hooks: [{ type: "command", command: 'touch "$CLAUDE_PROJECT_DIR/ran-after"' }] },
+      ],
     });
     const out = runBridge(root, { hook_event_name: "PreToolUse", tool_name: "Bash" });
     expect(out.status).toBe(2);
     expect(out.stderr).toContain("refused");
+    expect(fs.existsSync(path.join(root, "ran-after"))).toBe(true);
+  });
+
+  it("keeps structured decisions, the stricter one winning", () => {
+    const answer = (fields: unknown) => `echo '${JSON.stringify(fields)}'`;
+    const root = repo({
+      PreToolUse: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: answer({ hookSpecificOutput: { permissionDecision: "allow" } }),
+            },
+            {
+              type: "command",
+              command: answer({
+                hookSpecificOutput: { permissionDecision: "deny", permissionDecisionReason: "no" },
+              }),
+            },
+            { type: "command", command: say("context too") },
+          ],
+        },
+      ],
+      Stop: [
+        { hooks: [{ type: "command", command: answer({ continue: false, stopReason: "x" }) }] },
+      ],
+    });
+    const pre = spawnSync(process.execPath, [BRIDGE], {
+      encoding: "utf8",
+      input: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash" }),
+      env: {
+        ...process.env,
+        PROJECT_HOOKS_BRIDGE_REPO_ROOT: root,
+        CLAUDE_PROJECT_DIR: "/home/user",
+      },
+    });
+    expect(JSON.parse(pre.stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "no",
+        additionalContext: "context too",
+      },
+    });
+    const stop = spawnSync(process.execPath, [BRIDGE], {
+      encoding: "utf8",
+      input: JSON.stringify({ hook_event_name: "Stop" }),
+      env: {
+        ...process.env,
+        PROJECT_HOOKS_BRIDGE_REPO_ROOT: root,
+        CLAUDE_PROJECT_DIR: "/home/user",
+      },
+    });
+    expect(JSON.parse(stop.stdout)).toEqual({ continue: false, stopReason: "x" });
+  });
+
+  it("runs an exec-form hook with its argument vector, not through the shell", () => {
+    const root = repo({
+      PostToolUse: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: process.execPath,
+              args: [
+                "-e",
+                'process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:"exec"}}))',
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      runBridge(root, { hook_event_name: "PostToolUse", tool_name: "Edit" }).context
+        ?.additionalContext,
+    ).toBe("exec");
   });
 
   it("stays out of the way when the session already loaded this repository's hooks", () => {

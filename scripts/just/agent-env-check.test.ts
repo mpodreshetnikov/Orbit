@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -20,26 +20,21 @@ const BRIDGE = path.join(ORBIT_ROOT, "scripts", "just", "project-hooks-bridge.cj
 const DOC = path.join(ORBIT_ROOT, "docs", "AGENT_ENVIRONMENT.md");
 const temporaries: string[] = [];
 
-/** The settings the documented setup-script block writes, run against a scratch HOME. */
+/**
+ * The settings the documented setup-script block writes, read from the document and written to a
+ * scratch HOME. Parsed rather than run: the test checks what the block says, not the shell.
+ */
 function homeFromDocumentedBlock(bridge = BRIDGE) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-check-"));
   temporaries.push(home);
   const doc = fs.readFileSync(DOC, "utf8");
-  const block = /```sh\n(mkdir -p ~\/\.claude[\s\S]*?)```/.exec(doc)?.[1];
-  expect(block).toBeTruthy();
-  execFileSync(
-    "bash",
-    [
-      "-c",
-      (block as string).replaceAll(
-        "/home/user/Orbit/scripts/just/project-hooks-bridge.cjs",
-        bridge,
-      ),
-    ],
-    {
-      env: { ...process.env, HOME: home },
-    },
+  const json = /cat > ~\/\.claude\/settings\.json <<'JSON'\n([\s\S]*?)\nJSON\n/.exec(doc)?.[1];
+  expect(json).toBeTruthy();
+  const settings = JSON.parse(
+    (json as string).replaceAll("/home/user/Orbit/scripts/just/project-hooks-bridge.cjs", bridge),
   );
+  fs.mkdirSync(path.join(home, ".claude"));
+  fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify(settings));
   return home;
 }
 

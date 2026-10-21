@@ -19,9 +19,14 @@ registry found this by its absence: 21 merges into `main` against two claims mad
 What such a session does read is `~/.claude/settings.json` inside its container. The environment's
 setup script writes that file, registering
 [`scripts/just/project-hooks-bridge.cjs`](../scripts/just/project-hooks-bridge.cjs) once per event.
-On each event the bridge runs whatever `.claude/settings.json` here registers for it, with
-`CLAUDE_PROJECT_DIR` pointing at this checkout. A hook added here later needs no change to the setup
-script.
+On each event the bridge runs whatever `.claude/settings.json` here registers for it, the way
+Claude Code would, with `CLAUDE_PROJECT_DIR` pointing at this checkout. The block routes every common
+hook event, so a hook added here later needs no change to it; one on an event the block leaves out
+is caught by the check below, which refuses until the block routes it too.
+
+The same block points git at a dispatcher that runs a repository's own `.githooks/pre-commit`, so
+the commit-time claim check also reaches commits made without Claude Code's hooks. It forwards
+`pre-commit` only: `pre-push` needs `just`, which a cloud container may not have.
 
 ## Setup
 
@@ -29,17 +34,29 @@ In the Orbit project's settings, open the cloud environment (the gear beside it)
 its **Setup script**. New sessions pick it up; a running one does not.
 
 ```sh
+# Claude Code hooks: every event routed through Orbit's bridge.
 mkdir -p ~/.claude
 cat > ~/.claude/settings.json <<'JSON'
 {"hooks": {
-  "SessionStart": [{"hooks": [{"type": "command", "timeout": 60, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
-  "UserPromptSubmit": [{"hooks": [{"type": "command", "timeout": 60, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
-  "PreToolUse": [{"hooks": [{"type": "command", "timeout": 60, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
-  "PostToolUse": [{"hooks": [{"type": "command", "timeout": 60, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
-  "PostToolUseFailure": [{"hooks": [{"type": "command", "timeout": 60, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
-  "Stop": [{"hooks": [{"type": "command", "timeout": 60, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}]
+  "SessionStart": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "SessionEnd": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "PreToolUse": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "PermissionRequest": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "PostToolUse": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "PostToolUseFailure": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "Notification": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "Stop": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "SubagentStop": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}],
+  "PreCompact": [{"hooks": [{"type": "command", "timeout": 600, "command": "f=/home/user/Orbit/scripts/just/project-hooks-bridge.cjs; [ -f \"$f\" ] && exec node \"$f\"; exit 0"}]}]
 }}
 JSON
+
+# Git: a repository's own .githooks/pre-commit, for commits made without Claude Code's hooks.
+mkdir -p ~/.git-hooks
+printf '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/.githooks/pre-commit"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n' > ~/.git-hooks/pre-commit
+chmod +x ~/.git-hooks/pre-commit
+git config --global core.hooksPath ~/.git-hooks
 ```
 
 The path assumes the clone at `/home/user/Orbit`, where cloud sessions put it. If the bridge file is
