@@ -178,7 +178,16 @@ jobs:
                  --jq '.artifacts[].name' | grep -qx backend; then
               gh run download "$GITHUB_RUN_ID" -n backend -D backend
               cat backend/env >> "$GITHUB_ENV"
-              exit 0
+              # The simulator shares this Mac's network. A quick tunnel can answer the Linux job
+              # and still fail TLS here for a while, which reaches the app as a failed sign-in, so
+              # wait until it serves this machine too.
+              url="$(sed -n 's/^EXPO_PUBLIC_SUPABASE_URL=//p' backend/env)"
+              for _ in $(seq 1 60); do
+                curl -fsS -o /dev/null "$url/auth/v1/health" && exit 0
+                sleep 5
+              done
+              echo "::error::The tunnel at $url never answered from the Mac."
+              exit 1
             fi
             sleep 10
           done
