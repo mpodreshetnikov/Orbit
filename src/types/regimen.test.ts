@@ -4,7 +4,9 @@ import {
   getEffectiveStatus,
   plannedIntakeFor,
   resolveIntakeStrength,
+  firstUnitStrength,
   withCarriedStrength,
+  withFormStrength,
 } from "./regimen";
 import type { MedDuration, MedRegimenStatus } from "./regimen";
 
@@ -81,13 +83,24 @@ describe("getEffectiveStatus", () => {
         { today },
       ),
     ).toBe("active");
-    // end exactly today: start 2026-03-01 + 4 days => 2026-03-05
+    // last dose today: five days from 2026-03-01 dose on the 1st through the 5th
+    expect(
+      getEffectiveStatus(
+        regimen("active", { type: "for_days", days: 5, start_date: "2026-03-01" }),
+        { today },
+      ),
+    ).toBe("active");
+  });
+
+  it("returns completed on the day after a for_days course's last dose", () => {
+    // four days from 2026-03-01 dose on the 1st through the 4th, so on the 5th
+    // nothing is due and the course has finished -- it used to read active here
     expect(
       getEffectiveStatus(
         regimen("active", { type: "for_days", days: 4, start_date: "2026-03-01" }),
         { today },
       ),
-    ).toBe("active");
+    ).toBe("completed");
   });
 });
 
@@ -98,8 +111,8 @@ describe("getCourseWindow", () => {
   });
 
   it("refuses a value that is the right shape but not a date", () => {
-    // `medDurationSchema` accepts any string, so this is writable through the
-    // MCP tools as well as importable, and a length check alone would send it
+    // `medDurationSchema` now refuses it, but a row from the app or an import
+    // never passes that schema, and a length check alone would send it
     // through the date arithmetic and render "NaN-NaN-NaN" as a course end.
     expect(getCourseWindow({ type: "for_days", days: 4, start_date: "abcdefghij" })).toEqual({
       start: null,
@@ -407,5 +420,71 @@ describe("withCarriedStrength", () => {
       intake: { amount: 1, unit: "pill" },
       active: [],
     });
+  });
+});
+
+describe("withFormStrength", () => {
+  const sertraline = { name: "Сертралин", amount: 100, unit: "milligram" };
+
+  it("records the strength the form holds, per unit", () => {
+    expect(
+      withFormStrength(
+        { intake: { amount: 1.5, unit: "pill" } },
+        { amount: 1.5, unit: "pill" },
+        { name: "Сертралин", amount: 100, unit: "milligram" },
+        "Золофт",
+      ),
+    ).toEqual({ intake: { amount: 1.5, unit: "pill" }, active: [], unit_strength: [sertraline] });
+  });
+
+  it("replaces only the first ingredient and keeps the rest", () => {
+    const second = { name: "Кофеин", amount: 50, unit: "milligram" };
+    expect(
+      withFormStrength(
+        { intake: { amount: 1, unit: "pill" }, unit_strength: [sertraline, second] },
+        { amount: 2, unit: "pill" },
+        { name: "Сертралин", amount: 50, unit: "milligram" },
+        "Золофт",
+      ).unit_strength,
+    ).toEqual([{ ...sertraline, amount: 50 }, second]);
+  });
+
+  it("removes the first ingredient when the amount is cleared", () => {
+    expect(
+      withFormStrength(
+        { intake: { amount: 1, unit: "pill" }, unit_strength: [sertraline] },
+        { amount: 1, unit: "pill" },
+        { name: "Сертралин", amount: null, unit: "milligram" },
+        "Золофт",
+      ),
+    ).toEqual({ intake: { amount: 1, unit: "pill" }, active: [] });
+  });
+
+  it("names a strength typed without an ingredient after the course", () => {
+    expect(
+      withFormStrength(
+        null,
+        { amount: 1, unit: "pill" },
+        { name: "  ", amount: 25, unit: "milligram" },
+        "Атаракс",
+      ).unit_strength,
+    ).toEqual([{ name: "Атаракс", amount: 25, unit: "milligram" }]);
+  });
+
+  it("does not store a zero or negative strength", () => {
+    expect(
+      withFormStrength(
+        null,
+        { amount: 1, unit: "pill" },
+        { name: "X", amount: 0, unit: "milligram" },
+        "X",
+      ),
+    ).not.toHaveProperty("unit_strength");
+  });
+
+  it("reads back the first ingredient for the form to show", () => {
+    expect(firstUnitStrength({ unit_strength: [sertraline] })).toEqual(sertraline);
+    expect(firstUnitStrength({ active: [sertraline] })).toBeNull();
+    expect(firstUnitStrength(null)).toBeNull();
   });
 });

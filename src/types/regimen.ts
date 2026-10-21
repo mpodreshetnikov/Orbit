@@ -152,9 +152,12 @@ function statusBoundary(duration: MedDuration): string | null {
   // rule reach the status would leave such a course running forever and keep
   // the duplicate-medication guard treating it as current.
   if (duration.type === "until_date") return asDate(duration.end_date);
-  // One day past the last dosing day, which is where the dashboard has always
-  // drawn this line.
-  if (duration.type === "for_days" && end != null && start != null) return shiftDate(end, 1);
+  // The last dosing day, as for `until_date`: the day after a four-day course's
+  // last dose is a day it does not dose on, so it must not read as running. The
+  // boundary used to be one day later, which showed every finished `for_days`
+  // course as active for a day and kept the duplicate-medication guard treating
+  // it as current.
+  if (duration.type === "for_days" && end != null && start != null) return end;
   return null;
 }
 
@@ -179,9 +182,9 @@ export function getCourseWindow(duration?: MedDuration | null): {
 
   if (duration.type === "until_date") {
     const end = asDate(duration.end_date);
-    // An end before the start is not a window. Nothing forbids the pair on
-    // write -- the duration schema has no cross-field check -- and the
-    // generator answers it by producing no events at all, so rendering
+    // An end before the start is not a window. The MCP duration schema refuses
+    // the pair on write, but a row from the app or an import never passes it, and
+    // the generator answers it by producing no events at all, so rendering
     // "2026-09-10 to 2026-09-01" would describe a course that never doses as if
     // it ran backwards. The start is still true, so it is kept.
     if (end != null && (start == null || end >= start)) return { start, end };
@@ -326,6 +329,42 @@ export function withCarriedStrength(
   const planned: PlannedIntake = { intake, active: legacy };
   if (perUnit.length > 0) planned.unit_strength = perUnit;
   return planned;
+}
+
+/**
+ * The definition the medication form stores: `withCarriedStrength`, with the
+ * first per-unit ingredient replaced by what the form's strength fields say.
+ *
+ * The form edits one ingredient -- what nearly every course has -- and must not
+ * be the thing that drops a second one recorded over the connector, so any
+ * further ingredients carried forward stay behind it. An empty or non-positive
+ * amount means "no strength" for that first slot: it is removed, not stored as
+ * zero, which no reader could tell from a real figure. A blank ingredient name
+ * falls back to the course's own name, so a strength typed without one is still
+ * recorded and still found by a search for the course.
+ */
+export function withFormStrength(
+  stored: PlannedIntake | null | undefined,
+  intake: { amount: number; unit: string },
+  strength: { name: string; amount: number | null; unit: string },
+  courseName: string,
+): PlannedIntake {
+  const planned = withCarriedStrength(stored, intake);
+  const rest = planned.unit_strength?.slice(1) ?? [];
+  const name = strength.name.trim() || courseName.trim();
+  const first =
+    strength.amount != null && Number.isFinite(strength.amount) && strength.amount > 0 && name
+      ? [{ name, amount: strength.amount, unit: strength.unit }]
+      : [];
+  const unitStrength = [...first, ...rest];
+  if (unitStrength.length > 0) planned.unit_strength = unitStrength;
+  else delete planned.unit_strength;
+  return planned;
+}
+
+/** The first per-unit ingredient a definition records, which the medication form edits. */
+export function firstUnitStrength(stored: PlannedIntake | null | undefined): MedIngredient | null {
+  return namedIngredients(stored?.unit_strength)[0] ?? null;
 }
 
 /**
