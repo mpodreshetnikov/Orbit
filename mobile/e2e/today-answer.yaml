@@ -1,0 +1,32 @@
+# Answering doses on "Сегодня": take one, skip another, then undo the take from its menu.
+appId: host.exp.Exponent
+name: Сегодня — ответы
+---
+- openLink: exp://127.0.0.1:8081
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Omega-3.*"
+    timeout: 60000
+- takeScreenshot: answer-01-open
+- tapOn:
+    text: "Принято"
+    index: 0
+- takeScreenshot: answer-02-taken
+- tapOn:
+    text: "Пропущено"
+    index: 0
+- takeScreenshot: answer-03-skipped
+# An answered dose stays in place for a few seconds, then folds into the done section.
+- extendedWaitUntil:
+    visible: "Выполнено сегодня.*"
+    timeout: 20000
+- tapOn: "Выполнено сегодня.*"
+- takeScreenshot: answer-04-done
+- tapOn:
+    text: "Действия"
+    index: 0
+- takeScreenshot: answer-05-menu
+- tapOn: "Отменить приём"
+- takeScreenshot: answer-06-undone

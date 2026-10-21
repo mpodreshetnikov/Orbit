@@ -28,7 +28,7 @@ Use these command IDs in plans, PRs, and handoffs:
 - `test`: `just quality-smoke-build` (smoke/integration build gate)
 - `mobile-install`: `just mobile-install` (install the native iOS client's own locked dependencies; its tree is separate from the web app's)
 - `mobile-start`: `just mobile-start` (long-running: start the Expo dev server and open it in Expo Go on a phone--see `mobile/README.md` and the background note below)
-- `mobile-check`: `just mobile-check` (lint, typecheck and unit tests for the native iOS client; **not** covered by `check`)
+- `mobile-check`: `just mobile-check` (lint, typecheck and tests for the native iOS client, failing below 90% coverage; **not** covered by `check`)
 - `test-unit-mobile`: `just test-unit-mobile`
 - `ios-sync`: `just ios-sync` (copy web assets and native plugins into `ios/`; run after changing `capacitor.config.ts` or adding a Capacitor plugin)
 - `ios-open`: `just ios-open` (open the iOS app shell in Xcode; macOS only)
@@ -96,6 +96,7 @@ Commands such as `dev-ready` start servers and do not exit until the stack is st
 - Debugging and operations: `docs/RUNBOOK.md`
 - Debug information in code: `docs/design/common/error-handling-and-observability.md`
 - Quality gates and PR checks: `docs/QUALITY.md`
+- UI on every platform (web and iOS), mobile coverage, and pictures before merge: `docs/QUALITY.md`, "User-Interface Changes Ship On Every Platform"
 - Security and RLS expectations: `docs/SECURITY.md`
 - Where work is tracked, and how a multi-hour execution plan is written: the private task registry (see below)
 

@@ -59,3 +59,28 @@ anything the client draws or does and the session runs in the cloud:
 
 The same works on `main` after a merge, to show what shipped. The workflow only serves the
 JavaScript bundle; it deploys nothing and writes nothing to the instance.
+
+## Proving a change before merge: tests and simulator recordings
+
+Policy is in `docs/QUALITY.md` under "User-Interface Changes Ship On Every Platform"; here is how.
+
+**Tests.** `just mobile-check` runs lint, typecheck and `jest --coverage` under `jest-expo`, and fails
+below 90% of lines or branches of `src/`. A screen test renders through Expo Router with
+`renderScreens` (`test/render.tsx`) against `test/fake-supabase.ts` and `test/fixtures.ts`; `render`
+and `fireEvent` are async in `@testing-library/react-native` 14, so await both. Never put a test file
+under `src/app/`: Expo Router would treat it as a route.
+
+**Recordings.** The `Mobile recordings` workflow runs on every pull request touching `mobile/` (and by
+dispatch on any branch). `e2e/setup/open.yaml` loads the client unrecorded; then each `e2e/*.yaml`
+is recorded as `<flow>.mp4`, with a PNG per `takeScreenshot`. To read a run:
+
+```bash
+gh run list -R mpodreshetnikov/Orbit -w "Mobile recordings" -b <branch> -L 1
+gh run download <run-id> -R mpodreshetnikov/Orbit -n recordings -D <dir>
+```
+
+Screenshots land under `<dir>/.maestro/tests/*/<flow name>/takeScreenshot/`, videos under
+`<dir>/**/recordings/`; on failure `zz-failure.png` is the last screen. Look at every picture before
+sending it on. Writing flows: a list row is one accessibility element ("Vitamin D3, Просрочено · …")
+and Maestro matches text whole, so match rows by prefix (`"Vitamin D3.*"`); the data is
+`supabase/seed.sql`'s user `dev@example.com` with today's doses generated in the run.

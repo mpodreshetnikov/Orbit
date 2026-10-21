@@ -1,0 +1,37 @@
+# "Лекарства": the course list, search, a status filter, a course and its history.
+appId: host.exp.Exponent
+name: Лекарства
+---
+- openLink: exp://127.0.0.1:8081
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Лекарства"
+    timeout: 60000
+- tapOn: "Лекарства"
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 30000
+- takeScreenshot: meds-01-list
+# The native search bar hides under the large title until the list is pulled down.
+- swipe:
+    direction: DOWN
+- tapOn: "Поиск"
+- inputText: "Mag"
+- takeScreenshot: meds-02-search
+- tapOn:
+    text: "Cancel|Отмена|Отменить"
+    optional: true
+- tapOn: "Приостановлено"
+- takeScreenshot: meds-03-filter
+- tapOn: "Все"
+- tapOn: "Vitamin D3.*"
+- extendedWaitUntil:
+    visible: "Ежедневно в 08:00.*"
+    timeout: 20000
+- takeScreenshot: meds-04-course
+- scrollUntilVisible:
+    element: "История приёмов.*"
+- tapOn: "История приёмов.*"
+- takeScreenshot: meds-05-history
