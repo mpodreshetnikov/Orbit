@@ -41,6 +41,30 @@ CREATE TABLE "public"."checkup_items" (
 
 
 --
+-- Name: med_regimens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE "public"."med_regimens" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "person_id" "uuid" NOT NULL,
+    "custom_name" "text" NOT NULL,
+    "status" "public"."medication_status" DEFAULT 'active'::"public"."medication_status" NOT NULL,
+    "intake_unit" "public"."medication_unit" DEFAULT 'pill'::"public"."medication_unit" NOT NULL,
+    "dose_definition" "jsonb",
+    "intake_advice_type" "public"."med_intake_advice_type" DEFAULT 'none'::"public"."med_intake_advice_type",
+    "intake_advice_text" "text",
+    "schedule" "jsonb" NOT NULL,
+    "duration" "jsonb" NOT NULL,
+    "reminder_prefs" "jsonb",
+    "inventory" "jsonb",
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "deleted_at" timestamp with time zone
+);
+
+
+--
 -- Name: allowed_users; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -321,30 +345,6 @@ CREATE TABLE "public"."med_inventory_transactions" (
     "unit" "text" NOT NULL,
     "note" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
-);
-
-
---
--- Name: med_regimens; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE "public"."med_regimens" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "person_id" "uuid" NOT NULL,
-    "custom_name" "text" NOT NULL,
-    "status" "public"."medication_status" DEFAULT 'active'::"public"."medication_status" NOT NULL,
-    "intake_unit" "public"."medication_unit" DEFAULT 'pill'::"public"."medication_unit" NOT NULL,
-    "dose_definition" "jsonb",
-    "intake_advice_type" "public"."med_intake_advice_type" DEFAULT 'none'::"public"."med_intake_advice_type",
-    "intake_advice_text" "text",
-    "schedule" "jsonb" NOT NULL,
-    "duration" "jsonb" NOT NULL,
-    "reminder_prefs" "jsonb",
-    "inventory" "jsonb",
-    "notes" "text",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "deleted_at" timestamp with time zone
 );
 
 

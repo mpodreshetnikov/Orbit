@@ -613,7 +613,12 @@ export function registerMedicationTools(server: McpToolServer): void {
         ...personSelectorSchema,
         ...paginationSchema,
         status: z.enum(["active", "paused", "completed", "archived"]).optional(),
-        search: z.string().optional().describe("Filter by medication name."),
+        search: z
+          .string()
+          .optional()
+          .describe(
+            "Filter by medication name or active ingredient: 'sertraline' finds a course named Zoloft whose strength names it.",
+          ),
         include_archived: z.boolean().default(false),
         timezone: z
           .string()
