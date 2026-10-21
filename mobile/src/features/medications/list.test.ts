@@ -1,5 +1,5 @@
 import type { MedRegimen } from "@orbit-types/regimen";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { displayStatus, filterRegimens } from "@/features/medications/list";
 
 function course(id: string, name: string, extra: Partial<MedRegimen> = {}): MedRegimen {

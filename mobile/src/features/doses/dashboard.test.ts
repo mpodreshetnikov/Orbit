@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import { buildDashboard, withStatus } from "@/features/doses/dashboard";
 import type { DayDose, DoseStatus } from "@/features/doses/model";
 

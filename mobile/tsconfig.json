@@ -34,11 +34,7 @@
       // medication types with their helpers, and the message catalogue. metro.config.js watches
       // exactly these two folders, so nothing else outside this project can be bundled by accident.
       "@orbit-types/*": ["../src/types/*"],
-      "@orbit-messages/*": ["../src/messages/*"],
-      // The tests here are run by the repository's own vitest at the root, not by a runner inside
-      // this app: vitest's dependency tree and Expo's disagree on vite's version, and the tests
-      // need no React Native runtime because every module they touch is pure.
-      "vitest": ["../node_modules/vitest"]
+      "@orbit-messages/*": ["../src/messages/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],

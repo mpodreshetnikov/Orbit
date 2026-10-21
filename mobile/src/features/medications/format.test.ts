@@ -1,5 +1,5 @@
 import type { MedRegimen } from "@orbit-types/regimen";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@jest/globals";
 import {
   asUnit,
   formatAmountWithUnit,
@@ -82,5 +82,50 @@ describe("isLowInventory", () => {
     expect(at(5)).toBe(true);
     expect(at(6)).toBe(false);
     expect(at(1, false)).toBe(false);
+  });
+});
+
+describe("scheduleSummary, the rarer modes", () => {
+  it("prints a one-off intake's moment, and nothing for a missing or broken one", () => {
+    expect(scheduleSummary(course({ mode: "one_off", due_at: "2026-10-21T09:30:00" }))).toMatch(
+      /21 окт\. 2026 г\., 09:30/,
+    );
+    expect(scheduleSummary(course({ mode: "one_off", due_at: "" }))).toBeNull();
+    expect(scheduleSummary(course({ mode: "one_off", due_at: "not a date" }))).toBeNull();
+  });
+
+  it("describes a day interval by its times, its legacy single time, or 09:00", () => {
+    expect(
+      scheduleSummary(course({ mode: "interval_days", interval: { every: 2 }, times: ["10:00"] })),
+    ).toBe("Каждые 2 дней в 10:00");
+    expect(
+      scheduleSummary(
+        course({ mode: "interval_days", interval: { every: 3 }, times: [], time_of_day: "07:30" }),
+      ),
+    ).toBe("Каждые 3 дней в 07:30");
+    expect(scheduleSummary(course({ mode: "interval_days", interval: { every: 3 } }))).toBe(
+      "Каждые 3 дней в 09:00",
+    );
+    expect(scheduleSummary(course({ mode: "interval_days", interval: {} }))).toBeNull();
+  });
+
+  it("reads 7 as Sunday and leaves out times it does not have", () => {
+    expect(scheduleSummary(course({ mode: "days_of_week", days_of_week: [7] }))).toBe("Вс");
+    expect(scheduleSummary(course({ mode: "days_of_week", days_of_week: [] }))).toBeNull();
+  });
+
+  it("returns null for an hourly interval without its step, and for an unknown mode", () => {
+    expect(scheduleSummary(course({ mode: "interval_hours", interval: {} }))).toBeNull();
+    expect(scheduleSummary(course({ mode: "lunar" }))).toBeNull();
+  });
+});
+
+describe("intakeAdviceLabel, the edges", () => {
+  it("says nothing for an empty custom text, an unknown type, or no course", () => {
+    expect(
+      intakeAdviceLabel({ intake_advice_type: "custom", intake_advice_text: "  " }),
+    ).toBeNull();
+    expect(intakeAdviceLabel({ intake_advice_type: "with_moonlight" })).toBeNull();
+    expect(intakeAdviceLabel(null)).toBeNull();
   });
 });

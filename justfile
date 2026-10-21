@@ -107,9 +107,10 @@ quality-lint-mobile:
 quality-typecheck-mobile:
   npm --prefix mobile run typecheck
 
-# Run the mobile client's unit tests (also covered by `test-unit`, which runs every vitest project).
+# Run the mobile client's tests under jest-expo, with coverage. Fails below 90% of lines or branches
+# of mobile/src (`jest.coverageThreshold` in mobile/package.json, T-261021-kr8).
 test-unit-mobile:
-  npx vitest run --project mobile
+  npm --prefix mobile test -- --coverage
 
 # Install the mobile client's locked dependencies. Its own tree: Expo and the web app disagree about
 # vite, so they cannot share one.
