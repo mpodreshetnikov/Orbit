@@ -74,3 +74,35 @@ elif docker image inspect orbit-backup:local >/dev/null 2>&1; then
 else
   echo "No orbit-backup:local image yet: install first (deploy/orbit install)."
 fi
+
+# The heartbeat (BACKUP_HEALTHCHECK_URL) is pinged after each nightly run; when it goes quiet, this
+# says whether the daemon ran, is stuck in a job, or failed. Only the daemon's own lines are shown:
+# a tool's error output can name buckets and endpoints, and this log is public.
+echo
+echo "== Backups"
+if ! docker inspect orbit-backup >/dev/null 2>&1; then
+  echo "No orbit-backup container."
+else
+  echo "container:   $(docker inspect orbit-backup --format '{{.State.Status}} since {{.State.StartedAt}}, {{.RestartCount}} restart(s)')"
+  echo "now:         $(date -u +%FT%TZ)"
+  # shellcheck disable=SC2016
+  docker exec orbit-backup sh -c '
+    for f in /state/last_* /state/failing_* /state/initialized; do
+      [ -f "$f" ] || continue
+      case "$f" in
+        */last_*) echo "   $(basename "$f")  $(date -u -d "@$(cat "$f")" +%FT%TZ)" ;;
+        *) echo "   $(basename "$f")  $(date -u -r "$f" +%FT%TZ)" ;;
+      esac
+    done
+    # The image has no ps; a process directory is created when the process starts.
+    echo "processes, with their start:"
+    for p in /proc/[0-9]*; do
+      c="$(cat "$p/comm" 2>/dev/null)" || continue
+      case "$c" in sh | sleep | cat | date | "") continue ;; esac
+      echo "   $(date -u -r "$p" +%FT%TZ)  $c"
+    done' 2>&1
+  echo "daemon log, last 3 days:"
+  docker logs --since 72h orbit-backup 2>&1 |
+    grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z (start|done|ALERT|backup daemon|a backup loop|waiting|no backup)' |
+    grep -v -E ' (start|done) (snapshot_files|wal)' | tail -60 | sed 's/^/   /'
+fi
