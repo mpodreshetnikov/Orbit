@@ -19,9 +19,9 @@ Notes:
 - Configure GitHub Actions Supabase values:
   - Secrets: `SUPABASE_ACCESS_TOKEN`, `SUPABASEDBPASS`
   - Variables: `SUPABASE_PROJECT_REF`
-- Configure GitHub Actions extension release values:
-  - Secret: `SUPABASE_PRODUCTION_SERVICE_ROLE_KEY`
-  - Variables: `SUPABASE_PROJECT_REF` and either `NEXT_PUBLIC_APP_ORIGIN` or `NEXT_PUBLIC_APP_ORIGINS`
+- Configure GitHub Actions extension release values (the release goes to your server, `docs/SELF_HOSTING.md`):
+  - Secret: `SERVICE_ROLE_KEY` (the server's, the one "Deploy from GitHub" already sets)
+  - Variable: `ORBIT_DOMAIN`; the build's app origin and Storage URL are both `https://<ORBIT_DOMAIN>`
 - Disable Vercel's automatic Git deploy integration if you want GitHub Actions to be the only deployment trigger.
 - Command execution policy (including avoiding `npm run` for project workflows) is canonical in `docs/QUALITY.md`.
 - MCP setup instructions are in `mcp/README.md`.
@@ -37,7 +37,7 @@ Notes:
 - CI flow:
   - `quality-gates` fails if packaged extension files change without a manifest version bump.
   - `extension-release-bundle` runs when the manifest version changes and uploads the versioned ZIP + `latest.json` as a workflow artifact.
-  - `publish-extension-release` runs only on `main` and uploads the prepared bundle to Supabase Storage.
+  - `publish-extension-release` runs only on `main`, after `deploy-self-hosted`: it builds the bundle again for `https://<ORBIT_DOMAIN>` and uploads it to the server's Storage. An extension only works on the origins it was built for, so a build for another domain is invisible to the app.
 - Local/manual operator flow:
   - run `extension-release-build`
   - inspect `.artifacts/extension-release/`

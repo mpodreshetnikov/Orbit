@@ -351,12 +351,18 @@ jobs:
           if-no-files-found: error
 
   publish-extension-release:
-    # After deploy-supabase, not before it: the publish uploads into a Storage bucket that
-    # `20260314000000_extension_release_bucket.sql` creates, and that migration is applied by
-    # deploy-supabase. The old order ran the upload first, which only worked because the bucket
-    # already existed in the live project.
-    needs: [secrets-scan, quality-gates, extension-release-bundle, deploy-supabase]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SUPABASE_PROJECT_REF != ''
+    # Into your server's Storage (docs/SELF_HOSTING.md), the Orbit the extension is for: the archive
+    # is built here, inside the production environment, because the origins and the Storage URL it
+    # carries are the server's -- ORBIT_DOMAIN, which may live only in that environment. The bundle
+    # above is the pull request's build check. Until 2026-10-21 this job built for and uploaded to
+    # the hosted Supabase project, so 0.1.22 matched only private-orbit.vercel.app and the app on
+    # privateorbit.space never saw it.
+    #
+    # After deploy-self-hosted, not before it: the upload goes into a bucket that
+    # `20260314000000_extension_release_bucket.sql` creates, and the server applies migrations as it
+    # deploys.
+    needs: [secrets-scan, quality-gates, extension-release-bundle, deploy-self-hosted]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Extension Release
     environment: production
     # Serialised per release version, not globally. Two runs uploading the same
@@ -376,29 +382,41 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
-      NEXT_PUBLIC_APP_ORIGIN: ${{ vars.NEXT_PUBLIC_APP_ORIGIN }}
-      NEXT_PUBLIC_APP_ORIGINS: ${{ vars.NEXT_PUBLIC_APP_ORIGINS }}
-      NEXT_PUBLIC_SUPABASE_URL: https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY }}
+      ORBIT_DOMAIN: ${{ vars.ORBIT_DOMAIN }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
     steps:
+      # Here and not in a job-level `if`, which cannot see an environment's variables.
+      - name: Check a server is set up
+        id: server
+        run: |
+          if [[ "${{ needs.quality-gates.outputs.extension_version_changed }}" != 'true' ]]; then
+            echo "Extension manifest version unchanged; skipping release publish."
+          elif [[ -z "$ORBIT_DOMAIN" ]]; then
+            echo "::notice::No server to publish the extension to: the ORBIT_DOMAIN variable is not set."
+          elif [[ -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo "::error::The SERVICE_ROLE_KEY secret is not set, so the extension cannot be uploaded to the server's Storage (docs/SELF_HOSTING.md, Deploy from GitHub)."
+            exit 1
+          else
+            echo "publish=true" >>"$GITHUB_OUTPUT"
+            echo "NEXT_PUBLIC_APP_ORIGIN=https://$ORBIT_DOMAIN" >>"$GITHUB_ENV"
+            echo "NEXT_PUBLIC_SUPABASE_URL=https://$ORBIT_DOMAIN" >>"$GITHUB_ENV"
+          fi
       - uses: actions/checkout@v4
+        if: steps.server.outputs.publish == 'true'
       - uses: actions/setup-node@v4
+        if: steps.server.outputs.publish == 'true'
         with:
           node-version: 22
       - uses: taiki-e/install-action@just
+        if: steps.server.outputs.publish == 'true'
       - name: Install dependencies
+        if: steps.server.outputs.publish == 'true'
         run: npm ci
-      - name: Skip extension release publish when manifest version is unchanged
-        if: needs.quality-gates.outputs.extension_version_changed != 'true'
-        run: echo "Extension manifest version unchanged; skipping release publish."
-      - name: Download extension release artifact
-        if: needs.quality-gates.outputs.extension_version_changed == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: chrome-extension-release-${{ needs.quality-gates.outputs.extension_next_version }}
-          path: .artifacts/extension-release
-      - name: Publish extension release to Supabase Storage
-        if: needs.quality-gates.outputs.extension_version_changed == 'true'
+      - name: Build the extension for your server
+        if: steps.server.outputs.publish == 'true'
+        run: just extension-release-build
+      - name: Publish the extension to your server's Storage
+        if: steps.server.outputs.publish == 'true'
         run: just extension-release-publish
 
   # The hosted production's jobs (Vercel, Supabase, the extension it serves) skip themselves in a
