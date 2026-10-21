@@ -191,14 +191,18 @@ jobs:
           EXPO_PUBLIC_TEST_SIGNIN_EMAIL: ${{ env.TEST_EMAIL }}
           EXPO_PUBLIC_TEST_SIGNIN_PASSWORD: ${{ env.TEST_PASSWORD }}
         run: |
-          nohup npx expo start --localhost --port 8081 > ../metro.log 2>&1 &
+          # Not `--localhost`: that binds Metro to `localhost`, which Node resolves to ::1 here, and
+          # Expo Go dials 127.0.0.1 and is refused. Ask on 127.0.0.1 so that mismatch fails here.
+          nohup npx expo start --lan --port 8081 > ../metro.log 2>&1 &
+          up=""
           for _ in $(seq 1 90); do
-            curl -fsS http://localhost:8081/status 2>/dev/null | grep -q running && break
+            curl -fsS http://127.0.0.1:8081/status 2>/dev/null | grep -q running && { up=1; break; }
             sleep 2
           done
+          [[ -n "$up" ]] || { cat ../metro.log; echo "::error::Metro is not answering on 127.0.0.1:8081"; exit 1; }
           # Build the bundle once before the app asks, so the first screen is not a two-minute spinner.
           curl -fsS -o /dev/null --max-time 600 \
-            "http://localhost:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=true&minify=false" \
+            "http://127.0.0.1:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=true&minify=false" \
             || echo "::warning::Pre-bundling failed; Expo Go will build it on open."
       - name: Run the flows
         run: |
