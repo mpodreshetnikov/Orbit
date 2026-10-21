@@ -6,9 +6,10 @@
 # open the `exp://` link it prints in Expo Go, and the runner keeps the server up for the minutes
 # asked for. Nothing here deploys anything or writes to the instance.
 #
-# Reads the same settings the server deploy does: the `ORBIT_DOMAIN` variable and the `ANON_KEY`
-# secret. The anon key is public by design (every browser that opens Orbit receives it); it is a
-# secret here only so a fork does not inherit this instance.
+# Needs no secrets: it asks the instance named by the `MOBILE_PREVIEW_INSTANCE` repository variable
+# for its public settings (`/.well-known/orbit-instance`, through `scripts/just/mobile-instance.cjs`,
+# the same path `just mobile-start <domain>` takes). Not the `production` environment the server
+# deploy reads: that one is closed to branches, and a preview exists to run on one.
 
 name: Mobile preview
 
@@ -18,9 +19,13 @@ on:
   workflow_dispatch:
     inputs:
       minutes:
-        description: "How long to keep the dev server up"
+        description: "How long to keep the dev server up (at most 180)"
         type: number
         default: 60
+      instance:
+        description: "Instance domain; empty uses the MOBILE_PREVIEW_INSTANCE variable"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -32,9 +37,6 @@ concurrency:
 jobs:
   serve:
     name: Serve to Expo Go
-    # Where the server deploy keeps ORBIT_DOMAIN and ANON_KEY (self-hosted.yml); only those two are
-    # read here.
-    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 190
     steps:
@@ -50,13 +52,9 @@ jobs:
           npm install --global @expo/ngrok@^4.1.0
       - name: Point the client at the instance
         env:
-          ORBIT_DOMAIN: ${{ vars.ORBIT_DOMAIN }}
-          ANON_KEY: ${{ secrets.ANON_KEY }}
+          INSTANCE: ${{ inputs.instance || vars.MOBILE_PREVIEW_INSTANCE }}
         run: |
-          [[ -n "$ORBIT_DOMAIN" ]] || { echo "::error::The ORBIT_DOMAIN repository variable is not set."; exit 1; }
-          [[ -n "$ANON_KEY" ]] || { echo "::error::The ANON_KEY repository secret is not set."; exit 1; }
-          printf 'EXPO_PUBLIC_SUPABASE_URL=https://%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' \
-            "$ORBIT_DOMAIN" "$ANON_KEY" > mobile/.env.local
+          printf 'EXPO_PUBLIC_SUPABASE_URL=https://example.com\nEXPO_PUBLIC_SUPABASE_ANON_KEY=x\n' > mobile/.env.local
       - name: Start the dev server behind a tunnel
         working-directory: mobile
         env:
