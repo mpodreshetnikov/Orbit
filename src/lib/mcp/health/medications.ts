@@ -89,7 +89,12 @@ export async function listMedications(
   if (needle) {
     // `imatch` is `~*`: a case-insensitive regex, with no wildcard aliasing of
     // its own, so an escaped needle means exactly "contains this text".
-    query = query.regexIMatch("custom_name", regexLiteral(needle));
+    //
+    // Matched against the course name and every active ingredient it names
+    // (`med_regimen_search_text`, a computed field), not the name alone: the
+    // owner calls a course «Золофт» and asks about «сертралин», and a name-only
+    // search answered that with an empty list.
+    query = query.regexIMatch("med_regimen_search_text", regexLiteral(needle));
   }
 
   if (params.limit != null) {

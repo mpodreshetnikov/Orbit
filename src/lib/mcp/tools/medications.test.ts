@@ -1200,8 +1200,8 @@ describe("list_medication_doses", () => {
   });
 
   it("does not present a fractional hourly interval as the plan", async () => {
-    // `medScheduleSchema` requires a whole number of days but not of hours, and
-    // the generator casts `every` from text to int — which 1.5 does not
+    // `medScheduleSchema` refuses this on write, but a stored row need not have
+    // passed it, and the generator casts `every` from text to int — which 1.5 does not
     // survive, so the course generates nothing at all.
     meds.listMedications.mockResolvedValue({
       regimens: [

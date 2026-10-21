@@ -60,6 +60,9 @@
       "supabase/tests/functions/mark_dose_taken_test.sql",
       "supabase/tests/functions/medication_dose_lifecycle_test.sql"
     ],
+    "supabase/db/functions/med_regimen_search_text.sql": [
+      "supabase/tests/functions/med_regimen_search_text_test.sql"
+    ],
     "supabase/db/functions/money_categories_enforce_invariants.sql": [
       "supabase/tests/functions/money_canonical_categories_test.sql"
     ],

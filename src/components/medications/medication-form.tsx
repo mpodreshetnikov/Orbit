@@ -46,7 +46,7 @@ import type {
   RegimenInventory,
   AddOneTimeToExistingPayload,
 } from "@/types/regimen";
-import { toPositiveAmount, withCarriedStrength } from "@/types/regimen";
+import { firstUnitStrength, toPositiveAmount, withFormStrength } from "@/types/regimen";
 
 interface MedicationFormPropsBase {
   mode: "create" | "edit";
@@ -229,6 +229,26 @@ export const mapLegacyIntakeAdvice = (v: string | null | undefined): string => {
   );
 };
 
+/** Units a per-unit strength is commonly written in. */
+const STRENGTH_UNITS = ["milligram", "microgram", "gram", "iu", "ml"] as const;
+
+/** The strength units to offer, keeping a stored unit outside the list selectable. */
+function strengthUnitOptions(current: string): string[] {
+  // A blank stored unit is never offered: Radix reserves the empty value for
+  // clearing a select and throws on an item that carries it.
+  return !current.trim() || (STRENGTH_UNITS as readonly string[]).includes(current)
+    ? [...STRENGTH_UNITS]
+    : [...STRENGTH_UNITS, current];
+}
+
+function strengthUnitLabel(unit: string, t: ReturnType<typeof useTranslations>): string {
+  if (unit === "microgram") return t("medications.unitMicrogram");
+  if ((MEDICATION_UNITS as string[]).includes(unit)) {
+    return t(medicationUnitKey(unit as MedicationUnit), { count: 1 });
+  }
+  return unit;
+}
+
 export function MedicationForm({
   mode,
   initial,
@@ -246,7 +266,16 @@ export function MedicationForm({
     return defaultKind ?? "regular";
   });
   const [unit, setUnit] = useState<MedicationUnit>(() => initial?.intake_unit ?? "pill");
-  const [dosePerUnit, setDosePerUnit] = useState(() => "");
+  // What one unit of the dosage form contains (`ADR-260907-cvj`): 100 mg in one
+  // tablet, not what the whole intake delivers, so it survives a titration.
+  const initialStrength = firstUnitStrength(initial?.dose_definition);
+  const [strengthName, setStrengthName] = useState(() => initialStrength?.name ?? "");
+  const [strengthAmount, setStrengthAmount] = useState<number | null>(
+    () => initialStrength?.amount ?? null,
+  );
+  const [strengthUnit, setStrengthUnit] = useState(
+    () => initialStrength?.unit.trim() || "milligram",
+  );
   const [intakeAdvice, setIntakeAdvice] = useState(
     () =>
       mapLegacyIntakeAdvice(initial?.intake_advice_type ?? null) ||
@@ -329,18 +358,23 @@ export function MedicationForm({
   };
 
   /**
-   * The form has no field for a strength yet, so an edit must not be the thing
-   * that destroys one recorded elsewhere -- over the connector, or by hand. It
-   * rebuilt `dose_definition` from its own inputs alone, which silently emptied
-   * the ingredients of every course anyone opened and saved, even when the save
-   * changed only a reminder time.
+   * The form edits the first per-unit ingredient and carries everything else,
+   * so a save that changes only a reminder time cannot destroy a strength
+   * recorded elsewhere -- over the connector, or by hand. Rebuilding
+   * `dose_definition` from the form's own inputs alone once silently emptied the
+   * ingredients of every course anyone opened and saved.
    *
-   * What carries over and what does not is `withCarriedStrength`, shared with
-   * the MCP update path so the rule is stated once: a strength belongs to the
-   * unit it was recorded for, and the legacy total additionally to the amount.
+   * What carries over is `withCarriedStrength`, shared with the MCP update path
+   * so the rule is stated once: a strength belongs to the unit it was recorded
+   * for, and the legacy total additionally to the amount.
    */
   const buildDoseDefinition = (amount: number): PlannedIntake =>
-    withCarriedStrength(initial?.dose_definition, { amount, unit });
+    withFormStrength(
+      initial?.dose_definition,
+      { amount, unit },
+      { name: strengthName, amount: strengthAmount, unit: strengthUnit },
+      name,
+    );
 
   const buildInventory = (): RegimenInventory | null =>
     inventoryEnabled
@@ -767,14 +801,42 @@ export function MedicationForm({
                 {t("medications.dosePerUnit")}{" "}
                 <span className="text-muted-foreground font-normal">{t("common.optional")}</span>
               </Label>
+              <div className="flex items-center gap-2">
+                <NumberInput
+                  id="dosePerUnit"
+                  value={strengthAmount}
+                  onValueChange={setStrengthAmount}
+                  placeholder={t("medications.dosePerUnitPlaceholder")}
+                  className="w-24"
+                />
+                <Select value={strengthUnit} onValueChange={setStrengthUnit}>
+                  <SelectTrigger className="w-24" aria-label={t("medications.strengthUnit")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {strengthUnitOptions(strengthUnit).map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {strengthUnitLabel(u, t)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="activeIngredient">
+                {t("medications.activeIngredient")}{" "}
+                <span className="text-muted-foreground font-normal">{t("common.optional")}</span>
+              </Label>
               <Input
-                id="dosePerUnit"
-                value={dosePerUnit}
-                onChange={(e) => setDosePerUnit(e.target.value)}
-                placeholder={t("medications.dosePerUnitPlaceholder")}
+                id="activeIngredient"
+                value={strengthName}
+                onChange={(e) => setStrengthName(e.target.value)}
+                placeholder={t("medications.activeIngredientPlaceholder")}
               />
             </div>
           </div>
+          <p className="text-muted-foreground text-xs -mt-2">{t("medications.dosePerUnitHint")}</p>
           {kind === "one_time" && (
             <>
               <div className="space-y-2">

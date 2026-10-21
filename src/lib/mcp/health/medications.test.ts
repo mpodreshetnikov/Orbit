@@ -99,7 +99,7 @@ describe("listMedications", () => {
     expect(regimens[1].status).toBe("active");
   });
 
-  it("filters by name in the query, case-insensitively", async () => {
+  it("filters by name or ingredient in the query, case-insensitively", async () => {
     // In memory this was a filter over a response PostgREST had already capped
     // at `max_rows`, so a long history could hide its own oldest courses.
     const stub = createSupabaseStub({
@@ -111,7 +111,9 @@ describe("listMedications", () => {
       search: "FERROUS",
     });
 
-    expect(stub.argsFor("med_regimens", "regexIMatch")).toEqual([["custom_name", "FERROUS"]]);
+    expect(stub.argsFor("med_regimens", "regexIMatch")).toEqual([
+      ["med_regimen_search_text", "FERROUS"],
+    ]);
     expect(regimens.map((r) => r.custom_name)).toEqual(["Ferrous sulfate"]);
   });
 
@@ -122,7 +124,7 @@ describe("listMedications", () => {
     await listMedications(stub.client, { personId: "p-1", search: "B*Complex (50%)" });
 
     expect(stub.argsFor("med_regimens", "regexIMatch")).toEqual([
-      ["custom_name", "B\\*Complex \\(50%\\)"],
+      ["med_regimen_search_text", "B\\*Complex \\(50%\\)"],
     ]);
   });
 
