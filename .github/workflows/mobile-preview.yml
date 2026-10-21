@@ -71,7 +71,8 @@ jobs:
             # Expo prints the tunnel's address ("Metro waiting on exp://….exp.direct" through ngrok on
             # SDK 57, "Waiting on http://….on.expo.app" on later SDKs); Expo Go opens the same host on
             # its own scheme.
-            url="$(grep -oiE 'waiting on [a-z]+://[^ ]+' "$RUNNER_TEMP/expo.log" | head -1 | sed -E 's#^[Ww]aiting on [a-z]+://#exp://#' || true)"
+            # The local address ("Waiting on http://localhost:8081") is printed first and skipped.
+            url="$(grep -oiE 'waiting on [a-z]+://[^ ]+' "$RUNNER_TEMP/expo.log" | grep -viE '://(localhost|127\.|[0-9.]+:)' | head -1 | sed -E 's#^[Ww]aiting on [a-z]+://#exp://#' || true)"
             [[ -n "$url" ]] && break
             grep -q 'CommandError' "$RUNNER_TEMP/expo.log" && break
             sleep 2
