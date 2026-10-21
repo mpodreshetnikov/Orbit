@@ -7,6 +7,18 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import {
+  buildFirefoxUpdatesManifest,
+  FIREFOX_UPDATES_PATH,
+  FIREFOX_XPI_CONTENT_TYPE,
+  type FirefoxReleaseMetadata,
+  getFirefoxReleaseObjectPath,
+  hasAmoCredentials,
+  lintFirefoxBuild,
+  sha256OfFile,
+  signFirefoxBuild,
+} from "./firefox-release";
+import { DEFAULT_GECKO_ID } from "./build-lib";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -77,6 +89,8 @@ export interface ExtensionReleaseMetadata {
   extension_id: string;
   sha256: string;
   download_url: string;
+  /** The signed Firefox add-on of the same version; absent when the release was not signed. */
+  firefox?: FirefoxReleaseMetadata;
 }
 
 export interface ExtensionReleaseManifest {
@@ -859,7 +873,14 @@ export async function prepareExtensionRelease(
   const buildEnv = ensureProductionReleaseBuildEnv(process.env);
   const supabaseUrl = options.supabaseUrl ?? buildEnv.supabaseUrl;
 
+  // Baked into the Firefox manifest, so a signed install asks this Storage for its next version.
+  process.env.EXTENSION_FIREFOX_UPDATE_URL ||= buildSupabaseStoragePublicUrl({
+    supabaseUrl,
+    objectPath: FIREFOX_UPDATES_PATH,
+  });
+
   await buildExtensionProduction(rootDir);
+  await lintFirefoxBuild(rootDir);
 
   const sourceManifestPath = path.join(rootDir, EXTENSION_RELEASE_MANIFEST_PATH);
   const distManifestPath = path.join(rootDir, EXTENSION_RELEASE_DIST_DIR, "manifest.json");
@@ -892,6 +913,8 @@ export async function prepareExtensionRelease(
     }),
   });
 
+  metadata.firefox = await prepareFirefoxRelease({ rootDir, artifactDir, version, supabaseUrl });
+
   const metadataPath = path.join(artifactDir, EXTENSION_RELEASE_LATEST_PATH);
   await fs.mkdir(path.dirname(metadataPath), { recursive: true });
   await fs.writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
@@ -903,6 +926,44 @@ export async function prepareExtensionRelease(
     metadataPath,
     metadata,
   };
+}
+
+/**
+ * Signs the Firefox build and writes its update manifest, or says why it did not. Without AMO
+ * credentials -- a pull request, a fork, a server whose owner has not set them up -- the release is
+ * Chrome-only rather than failing: the Firefox build has still been linted.
+ */
+async function prepareFirefoxRelease(input: {
+  rootDir: string;
+  artifactDir: string;
+  version: string;
+  supabaseUrl: string;
+}): Promise<FirefoxReleaseMetadata | undefined> {
+  if (!hasAmoCredentials(process.env)) {
+    console.warn(
+      "[extension-release] WEB_EXT_API_KEY / WEB_EXT_API_SECRET are not set; the release has no signed Firefox add-on.",
+    );
+    return undefined;
+  }
+
+  const objectPath = getFirefoxReleaseObjectPath(input.version);
+  const xpiPath = path.join(input.artifactDir, ...objectPath.split("/"));
+  await signFirefoxBuild(input.rootDir, xpiPath);
+
+  const firefox: FirefoxReleaseMetadata = {
+    version: input.version,
+    extension_id: process.env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID,
+    sha256: await sha256OfFile(xpiPath),
+    download_url: buildSupabaseStoragePublicUrl({ supabaseUrl: input.supabaseUrl, objectPath }),
+  };
+  const updatesPath = path.join(input.artifactDir, ...FIREFOX_UPDATES_PATH.split("/"));
+  await fs.mkdir(path.dirname(updatesPath), { recursive: true });
+  await fs.writeFile(
+    updatesPath,
+    `${JSON.stringify(buildFirefoxUpdatesManifest(firefox), null, 2)}\n`,
+    "utf8",
+  );
+  return firefox;
 }
 
 async function createSupabaseAdminClient(input: { supabaseUrl: string; serviceRoleKey: string }) {
@@ -972,6 +1033,11 @@ export async function publishPreparedExtensionRelease(
     throw new Error(`Failed to upload extension artifact: ${artifactUpload.error.message}`);
   }
 
+  // Before latest.json, like the archive: a pointer must never name a file that is not there yet.
+  if (metadata.firefox) {
+    await uploadFirefoxRelease({ supabase, artifactDir, firefox: metadata.firefox });
+  }
+
   const latestUpload = await supabase.storage
     .from(EXTENSION_RELEASE_BUCKET)
     .upload(EXTENSION_RELEASE_LATEST_PATH, latestMetadataContent, {
@@ -990,6 +1056,42 @@ export async function publishPreparedExtensionRelease(
     metadataPath,
     metadata,
   };
+}
+
+async function uploadFirefoxRelease(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseAdminClient>>;
+  artifactDir: string;
+  firefox: FirefoxReleaseMetadata;
+}): Promise<void> {
+  const objectPath = getFirefoxReleaseObjectPath(input.firefox.version);
+  const uploads = [
+    {
+      objectPath,
+      contentType: FIREFOX_XPI_CONTENT_TYPE,
+      cacheControl: EXTENSION_RELEASE_ARTIFACT_CACHE_SECONDS,
+    },
+    {
+      // Polled by every installed add-on; it has to be current for the same reason latest.json is.
+      objectPath: FIREFOX_UPDATES_PATH,
+      contentType: EXTENSION_RELEASE_METADATA_CONTENT_TYPE,
+      cacheControl: EXTENSION_RELEASE_METADATA_CACHE_SECONDS,
+    },
+  ];
+  for (const upload of uploads) {
+    const content = await fs.readFile(
+      path.join(input.artifactDir, ...upload.objectPath.split("/")),
+    );
+    const result = await input.supabase.storage
+      .from(EXTENSION_RELEASE_BUCKET)
+      .upload(upload.objectPath, content, {
+        upsert: true,
+        contentType: upload.contentType,
+        cacheControl: upload.cacheControl,
+      });
+    if (result.error) {
+      throw new Error(`Failed to upload ${upload.objectPath}: ${result.error.message}`);
+    }
+  }
 }
 
 function runGit(rootDir: string, args: string[]): Promise<string> {

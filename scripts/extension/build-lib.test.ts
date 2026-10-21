@@ -11,6 +11,8 @@ import {
   resolveAppOrigins,
   shouldIgnoreWatchEvent,
   toCsvList,
+  toFirefoxManifest,
+  toFirefoxMatchPattern,
 } from "./build-lib";
 
 describe("build-lib", () => {
@@ -82,5 +84,63 @@ describe("build-lib", () => {
     expect(shouldIgnoreWatchEvent("dist/main.js")).toBe(true);
     expect(shouldIgnoreWatchEvent("src/index.ts")).toBe(true);
     expect(shouldIgnoreWatchEvent("popup-src/main.tsx")).toBe(false);
+  });
+
+  describe("toFirefoxManifest", () => {
+    const chromeManifest = {
+      manifest_version: 3,
+      name: "Orbit",
+      version: "1.2.3",
+      key: "MIIB...",
+      permissions: ["storage"],
+      host_permissions: [
+        "http://localhost:3000/*",
+        "http://localhost/*",
+        "https://orbit.example/*",
+      ],
+      content_scripts: [{ matches: ["http://127.0.0.1:3000/*"], js: ["content-script.js"] }],
+      background: { service_worker: "background.js", type: "module" },
+    };
+
+    it("drops the port Firefox's match patterns cannot carry", () => {
+      expect(toFirefoxMatchPattern("http://localhost:3000/*")).toBe("http://localhost/*");
+      expect(toFirefoxMatchPattern("https://*.tbank.ru/*")).toBe("https://*.tbank.ru/*");
+      const manifest = toFirefoxManifest(chromeManifest, { geckoId: "orbit@example.com" });
+      expect(manifest.host_permissions).toEqual(["http://localhost/*", "https://orbit.example/*"]);
+      expect(manifest.content_scripts).toEqual([
+        { matches: ["http://127.0.0.1/*"], js: ["content-script.js"] },
+      ]);
+    });
+
+    it("runs the service worker as a background script and drops the Chrome key", () => {
+      const manifest = toFirefoxManifest(chromeManifest, { geckoId: "orbit@example.com" });
+      expect(manifest.key).toBeUndefined();
+      expect(manifest.background).toEqual({ scripts: ["background.js"], type: "module" });
+      expect(manifest.permissions).toEqual(["storage"]);
+      expect(manifest.version).toBe("1.2.3");
+      expect(manifest.browser_specific_settings).toEqual({
+        gecko: {
+          id: "orbit@example.com",
+          strict_min_version: "128.0",
+          data_collection_permissions: { required: ["financialAndPaymentInfo", "websiteContent"] },
+        },
+      });
+    });
+
+    it("names the update URL only when there is one", () => {
+      const manifest = toFirefoxManifest(chromeManifest, {
+        geckoId: "orbit@example.com",
+        updateUrl: "https://orbit.example/updates.json",
+      });
+      expect(
+        (manifest.browser_specific_settings as { gecko: Record<string, unknown> }).gecko.update_url,
+      ).toBe("https://orbit.example/updates.json");
+    });
+
+    it("refuses a manifest with no service worker", () => {
+      expect(() =>
+        toFirefoxManifest({ ...chromeManifest, background: {} }, { geckoId: "x@y" }),
+      ).toThrow(/service_worker/);
+    });
   });
 });

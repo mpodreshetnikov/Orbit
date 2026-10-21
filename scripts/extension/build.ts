@@ -8,11 +8,14 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import {
   fileExists,
+  DEFAULT_GECKO_ID,
   originToPattern,
   parseArgs,
   parseDotEnv,
   resolveAppOrigins,
   shouldIgnoreWatchEvent,
+  toFirefoxManifest,
+  toFirefoxMatchPattern,
   unique,
 } from "./build-lib";
 import { listMoneyImportSourceDefinitions } from "./money-import-sources";
@@ -23,6 +26,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..", "..");
 const extensionDir = path.join(rootDir, "browserExtension");
 const distDir = path.join(extensionDir, "dist");
+const firefoxDistDir = path.join(extensionDir, "dist-firefox");
 const manifestPath = path.join(extensionDir, "manifest.json");
 const localEnvPath = path.join(rootDir, ".env.local");
 
@@ -145,20 +149,12 @@ async function build(mode: string): Promise<void> {
   await runEsbuildClassicScriptBundles();
   await runViteBuild();
 
-  const envJs = [
-    `export const BUILD_MODE = ${JSON.stringify(mode)};`,
-    `export const DEV_HOT_RELOAD = ${mode === "development"};`,
-    `export const APP_ORIGINS = ${JSON.stringify(appOrigins)};`,
-    `export const APP_ORIGIN_PATTERNS = ${JSON.stringify(appPatterns)};`,
-    "",
-  ].join("\n");
-
   await fs.writeFile(
     path.join(distDir, "manifest.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
     "utf8",
   );
-  await fs.writeFile(path.join(distDir, "env.js"), envJs, "utf8");
+  await fs.writeFile(path.join(distDir, "env.js"), envJs(mode, appOrigins, appPatterns), "utf8");
   await fs.writeFile(
     path.join(distDir, "reload-trigger.json"),
     `${JSON.stringify({ buildId: new Date().toISOString(), mode }, null, 2)}\n`,
@@ -172,9 +168,49 @@ async function build(mode: string): Promise<void> {
     throw new Error(formatClassicScriptProblems(classicScriptProblems));
   }
 
-  console.log(
-    `[extension:${mode}] built -> browserExtension/dist (origins: ${appOrigins.join(", ")})`,
+  await writeFirefoxDist(
+    manifest,
+    env,
+    envJs(mode, appOrigins, appPatterns.map(toFirefoxMatchPattern)),
   );
+
+  console.log(
+    `[extension:${mode}] built -> browserExtension/dist, browserExtension/dist-firefox (origins: ${appOrigins.join(", ")})`,
+  );
+}
+
+/**
+ * The same files as the Chrome build under a Firefox manifest. Built every time rather than on
+ * request, so a change that breaks Firefox is caught by the same build that ships Chrome.
+ */
+async function writeFirefoxDist(
+  chromeManifest: Record<string, unknown>,
+  env: Record<string, string | undefined>,
+  firefoxEnvJs: string,
+): Promise<void> {
+  await fs.rm(firefoxDistDir, { recursive: true, force: true });
+  await fs.cp(distDir, firefoxDistDir, { recursive: true });
+  const manifest = toFirefoxManifest(chromeManifest, {
+    geckoId: env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID,
+    updateUrl: env.EXTENSION_FIREFOX_UPDATE_URL?.trim() || undefined,
+  });
+  await fs.writeFile(
+    path.join(firefoxDistDir, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
+  // The background queries the app's tabs by these patterns, which Firefox cannot match with a port.
+  await fs.writeFile(path.join(firefoxDistDir, "env.js"), firefoxEnvJs, "utf8");
+}
+
+function envJs(mode: string, appOrigins: string[], appPatterns: string[]): string {
+  return [
+    `export const BUILD_MODE = ${JSON.stringify(mode)};`,
+    `export const DEV_HOT_RELOAD = ${mode === "development"};`,
+    `export const APP_ORIGINS = ${JSON.stringify(appOrigins)};`,
+    `export const APP_ORIGIN_PATTERNS = ${JSON.stringify(appPatterns)};`,
+    "",
+  ].join("\n");
 }
 
 async function startWatch(mode: string): Promise<never> {
