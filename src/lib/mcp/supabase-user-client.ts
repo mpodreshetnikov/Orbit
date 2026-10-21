@@ -20,17 +20,49 @@ import type { McpAuthExtra } from "./verify-token";
  * silently fail to inherit any future tightening of the policies.
  */
 export function createUserScopedSupabaseClient(auth: McpAuthExtra): SupabaseClient<Database> {
-  const supabaseUrl = getSupabaseUrl();
-
-  const jwt = mintSupabaseUserJwt({
-    userId: auth.authUserId,
-    email: auth.userEmail,
-    supabaseUrl,
-    secret: getSupabaseJwtSecret(),
-  });
-
-  return createClient<Database>(supabaseUrl, getSupabaseAnonKey(), {
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  return createClient<Database>(getSupabaseUrl(), getSupabaseAnonKey(), {
+    global: { headers: { Authorization: `Bearer ${mintUserScopedJwt(auth)}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+function mintUserScopedJwt(auth: McpAuthExtra): string {
+  return mintSupabaseUserJwt({
+    userId: auth.authUserId,
+    email: auth.userEmail,
+    supabaseUrl: getSupabaseUrl(),
+    secret: getSupabaseJwtSecret(),
+  });
+}
+
+/**
+ * Calls an edge function as the granting user, with the same five-minute token the client above
+ * carries. The function authenticates that token and applies the allowlist itself, so this is the
+ * browser's own call made from the server -- not a way around either.
+ *
+ * Resolves with whatever the function answered, error statuses included: the caller decides what
+ * a refusal means. Rejects only when the function could not be reached at all.
+ */
+export async function invokeEdgeFunctionAsUser(
+  auth: McpAuthExtra,
+  name: string,
+  body: unknown,
+): Promise<{ status: number; payload: unknown }> {
+  const response = await fetch(`${getSupabaseUrl()}/functions/v1/${name}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${mintUserScopedJwt(auth)}`,
+      apikey: getSupabaseAnonKey(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  let payload: unknown = text;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    // Not JSON -- a gateway error page, say. Handed back as text for the caller to report.
+  }
+  return { status: response.status, payload };
 }

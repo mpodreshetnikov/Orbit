@@ -42,8 +42,11 @@ describe("registerHealthTools", () => {
   it("covers every capability the connector promises", () => {
     expect([...byName.keys()].sort()).toEqual(
       [
+        "activate_medical_record",
         "add_measurement",
         "add_medication",
+        "create_medical_record",
+        "dismiss_condition_closure",
         "get_checkup",
         "get_condition",
         "get_measurement_history",
@@ -62,6 +65,8 @@ describe("registerHealthTools", () => {
         "search_catalog_entries",
         "search_findings",
         "get_finding_history",
+        "get_ingest_candidates",
+        "ingest_medical_document",
         "search_medical_records",
         "search_observations",
         "upsert_catalog_entry",
@@ -94,8 +99,12 @@ describe("registerHealthTools", () => {
   });
 
   const WRITE_TOOLS = [
+    "activate_medical_record",
     "add_measurement",
     "add_medication",
+    "create_medical_record",
+    "dismiss_condition_closure",
+    "ingest_medical_document",
     "log_dose",
     "update_medication",
     "upsert_catalog_entry",
