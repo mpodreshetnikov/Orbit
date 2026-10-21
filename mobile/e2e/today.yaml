@@ -15,6 +15,10 @@ name: Сегодня
 - tapOn:
     text: "Continue"
     optional: true
+# "Continue" opens the developer menu itself; close it too.
+- tapOn:
+    text: "Close"
+    optional: true
 - extendedWaitUntil:
     visible: "Vitamin D3"
     timeout: 30000
