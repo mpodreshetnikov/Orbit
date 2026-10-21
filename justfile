@@ -220,6 +220,10 @@ quality-db-test:
 tasks-claim id *options:
   node scripts/just/tasks-claim-here.cjs "{{ id }}" {{ options }}
 
+# Point this checkout's git at scripts/git-hooks, so a commit no claimed task stands behind is reported.
+git-hooks:
+  git config core.hooksPath scripts/git-hooks
+
 # Start local Supabase stack. Through the retry runner: the CLI's readiness probe reaches the
 # API gateway before the edge runtime is listening and calls the resulting 502 fatal, which fails
 # this lane roughly six times in ten. Only that signature is retried — see T-260829-hhj.
