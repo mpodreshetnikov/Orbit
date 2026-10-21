@@ -1844,6 +1844,7 @@ export default function MoneyImportPage() {
                       <li>{t("money.importExtensionInstallProdStep1")}</li>
                       <li>{t("money.importExtensionInstallProdStep2")}</li>
                       <li>{t("money.importExtensionInstallProdStep3")}</li>
+                      <li>{t("money.importExtensionInstallProdStep4")}</li>
                     </ol>
                   </>
                 )}

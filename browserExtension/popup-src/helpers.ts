@@ -8,3 +8,68 @@ export function toIsoFromInput(value: string): string | null {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
+
+/** What the background reports about keeping an unpacked install up to date. */
+export interface UpdateStatus {
+  phase: string;
+  current_version: string;
+  latest_version: string | null;
+  checked_at: string | null;
+  error: string | null;
+}
+
+export interface UpdateStatusView {
+  text: string;
+  buttonLabel: string;
+  updateAvailable: boolean;
+  /** An update is already under way or waiting; pressing again would change nothing. */
+  busy: boolean;
+}
+
+export function describeUpdateStatus(status: UpdateStatus): UpdateStatusView {
+  const current = `Installed: ${status.current_version}`;
+  const latest = status.latest_version;
+  const check: UpdateStatusView = {
+    text: current,
+    buttonLabel: "Check for updates",
+    updateAvailable: false,
+    busy: false,
+  };
+  switch (status.phase) {
+    case "up_to_date":
+      return { ...check, text: `${current}\nUp to date.` };
+    case "available":
+      return {
+        ...check,
+        text: `${current}\nAvailable: ${latest}`,
+        buttonLabel: `Update to ${latest}`,
+        updateAvailable: true,
+      };
+    case "checking":
+    case "staging":
+    case "applying":
+      return {
+        ...check,
+        text: `${current}\nUpdating to ${latest ?? "the latest version"}...`,
+        busy: true,
+      };
+    case "waiting_for_import":
+    case "reload_pending":
+      return {
+        ...check,
+        text: `${current}\n${latest} is ready and installs as soon as the import in progress ends.`,
+        busy: true,
+      };
+    case "host_missing":
+      return {
+        ...check,
+        text:
+          `${current}\nThe updater is not installed. In the extension folder run ` +
+          "updater/install.sh (macOS) or updater/install-windows.cmd (Windows), then try again.",
+      };
+    case "error":
+      return { ...check, text: `${current}\nUpdate failed: ${status.error ?? "unknown error"}` };
+    default:
+      return check;
+  }
+}

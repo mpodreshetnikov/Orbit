@@ -82,7 +82,26 @@ Document the end-to-end import architecture including connector parsing, extensi
   - shows installed version and latest available version when the extension is detected
   - shows a soft update prompt when installed version is older than the published version
   - keeps import non-blocking; outdated extension warns but does not prevent starting import
-- Automatic silent install is not supported for consumer Chrome from the website. The supported flow is download + manual install/update.
+- Automatic silent install is not supported for consumer Chrome from the website. The supported flow is download + manual install, then optional self-update.
+
+## Self-Update Of The Unpacked Extension
+
+An unpacked extension cannot rewrite its own folder, but `chrome.runtime.reload()` reads it again
+from disk. `browserExtension/updater/` ships inside every release: a native messaging host
+(`orbit-updater.sh` for macOS, `orbit-updater.ps1` behind `orbit-updater.cmd` for Windows) and the
+installers that register it for the extension's id (`install.sh`, `install-windows.ps1`/`.cmd`).
+The person runs the installer once from the unpacked folder.
+
+- `browserExtension/src/core/self-update.ts` checks `GET /api/extension-release/latest` every 15
+  minutes, at browser start, and from the popup's Updates card.
+- The host works in two steps: `stage` downloads the ZIP, verifies its `sha256` and unpacks it beside
+  the folder; `apply` mirrors the staged copy over the folder. The extension then reloads.
+- **An update never lands during an import.** `apply` and the reload each run only when no import
+  run is active and no session is stored; otherwise the update waits and goes ahead when the import
+  ends (the run registry or the stored session clearing).
+- Only a production build loaded unpacked updates itself. A development build is built from the
+  working tree, and the host refuses to mirror over any folder that is not a built Orbit extension
+  (the extension's key in `manifest.json`, a `background.js`, no `src/`, `package.json` or `.git`).
 
 ## Anti-Patterns To Avoid
 
