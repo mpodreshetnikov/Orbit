@@ -245,14 +245,38 @@ jobs:
           ( cd recordings && maestro test ../mobile/e2e/setup/open.yaml ) || exit 1
           flows="${{ inputs.flows }}"
           if [[ -z "$flows" ]]; then flows="$(cd mobile/e2e && ls *.yaml)"; fi
+          # `maestro test` spends half a minute starting up before its first step, with the camera
+          # already rolling, so each video is cut to the flow's own steps afterwards: Maestro logs
+          # when each one ran, and the recording started at a known moment.
+          command -v ffmpeg >/dev/null || brew install --quiet ffmpeg || echo "::warning::No ffmpeg; the videos stay uncut."
           status=0
           for flow in $flows; do
             name="${flow%.yaml}"
             xcrun simctl io "$SIM_UDID" recordVideo --codec=h264 --force "recordings/$name.mp4" &
             video=$!
+            started="$(python3 -c 'import time; print(time.time())')"
             sleep 1
             ( cd recordings && maestro test --format junit --output "$name.xml" "../mobile/e2e/$flow" ) || status=1
             kill -INT "$video"; wait "$video" || true
+            steps="$(ls -td ~/.maestro/tests/*/ | head -1)"
+            # From a second before the first step that is not set-up to a second and a half after the last.
+            span="$(python3 - "$steps" "$started" <<'PY' || true
+          import glob, json, sys
+          runs = glob.glob(sys.argv[1] + "*/commands.json")
+          timed = [c["metadata"] for c in json.load(open(runs[0])) if c.get("metadata", {}).get("timestamp")]
+          steps = [m for m in timed if m.get("status") not in ("SKIPPED",)][2:]
+          first = steps[0]["timestamp"] / 1000
+          last = max((m["timestamp"] + (m.get("duration") or 0)) / 1000 for m in steps)
+          start = float(sys.argv[2])
+          print(f"{max(0, first - start - 1):.2f} {last - start + 1.5:.2f}")
+          PY
+            )"
+            if [[ -n "$span" ]] && command -v ffmpeg >/dev/null; then
+              read -r from to <<<"$span"
+              ffmpeg -v error -y -i "recordings/$name.mp4" -ss "$from" -to "$to" -c:v libx264 -preset veryfast -an "recordings/$name.cut.mp4" \
+                && mv "recordings/$name.cut.mp4" "recordings/$name.mp4" \
+                || echo "::warning::Could not cut $name.mp4; it stays as recorded."
+            fi
           done
           exit $status
       - name: Last screen on failure

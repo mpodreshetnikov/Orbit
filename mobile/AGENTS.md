@@ -73,7 +73,8 @@ under `src/app/`: Expo Router would treat it as a route.
 **Recordings.** The `Mobile recordings` workflow runs on every pull request touching `mobile/` (and by
 dispatch on any branch). `e2e/setup/open.yaml` loads the client unrecorded; then each `e2e/*.yaml`
 is recorded as `<flow>.mp4`, with a PNG per `takeScreenshot`, in file-name order against one
-database: number the files, and put a flow that changes data after the read-only ones. To read a run:
+database: number the files, and put a flow that changes data after the read-only ones. Each video is
+cut to its flow's own steps, so Maestro's start-up is not in it. To read a run:
 
 ```bash
 gh run list -R mpodreshetnikov/Orbit -w "Mobile recordings" -b <branch> -L 1
