@@ -471,6 +471,30 @@ describe("withFormStrength", () => {
     ).toEqual([{ name: "Атаракс", amount: 25, unit: "milligram" }]);
   });
 
+  it("drops a strength left as loaded when the dosage form changes", () => {
+    // 100 mg was said about one pill; untouched beside a millilitre it would
+    // claim 100 mg per ml.
+    expect(
+      withFormStrength(
+        { intake: { amount: 1, unit: "pill" }, unit_strength: [sertraline] },
+        { amount: 5, unit: "ml" },
+        { name: "Сертралин", amount: 100, unit: "milligram" },
+        "Золофт",
+      ),
+    ).toEqual({ intake: { amount: 5, unit: "ml" }, active: [] });
+  });
+
+  it("keeps a strength retyped for the new dosage form", () => {
+    expect(
+      withFormStrength(
+        { intake: { amount: 1, unit: "pill" }, unit_strength: [sertraline] },
+        { amount: 5, unit: "ml" },
+        { name: "Сертралин", amount: 20, unit: "milligram" },
+        "Золофт",
+      ).unit_strength,
+    ).toEqual([{ ...sertraline, amount: 20 }]);
+  });
+
   it("does not store a zero or negative strength", () => {
     expect(
       withFormStrength(

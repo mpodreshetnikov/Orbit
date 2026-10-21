@@ -234,7 +234,9 @@ const STRENGTH_UNITS = ["milligram", "microgram", "gram", "iu", "ml"] as const;
 
 /** The strength units to offer, keeping a stored unit outside the list selectable. */
 function strengthUnitOptions(current: string): string[] {
-  return (STRENGTH_UNITS as readonly string[]).includes(current)
+  // A blank stored unit is never offered: Radix reserves the empty value for
+  // clearing a select and throws on an item that carries it.
+  return !current.trim() || (STRENGTH_UNITS as readonly string[]).includes(current)
     ? [...STRENGTH_UNITS]
     : [...STRENGTH_UNITS, current];
 }
@@ -271,7 +273,9 @@ export function MedicationForm({
   const [strengthAmount, setStrengthAmount] = useState<number | null>(
     () => initialStrength?.amount ?? null,
   );
-  const [strengthUnit, setStrengthUnit] = useState(() => initialStrength?.unit ?? "milligram");
+  const [strengthUnit, setStrengthUnit] = useState(
+    () => initialStrength?.unit.trim() || "milligram",
+  );
   const [intakeAdvice, setIntakeAdvice] = useState(
     () =>
       mapLegacyIntakeAdvice(initial?.intake_advice_type ?? null) ||

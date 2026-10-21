@@ -5,9 +5,12 @@
 -- (`?search_text=imatch.sertraline` on med_regimens), so the MCP `list_medications` search pages
 -- and counts in the query instead of filtering a truncated response afterwards.
 --
--- The ingredient names come from `dose_definition.unit_strength` and from the legacy per-intake
--- `dose_definition.active` (ADR-260907-cvj), because a course is named however the owner calls it
--- -- «Золофт» -- while the question is often about what it contains: «сертралин».
+-- The ingredient names come from `dose_definition.unit_strength`, or from the legacy per-intake
+-- `dose_definition.active` only when no per-unit ingredient is named -- the precedence every reader
+-- applies (ADR-260907-cvj). A legacy total can outlive an edit of the per-unit strength, and
+-- searching both would keep finding an ingredient the owner has replaced. Searched at all because
+-- a course is named however the owner calls it -- «Золофт» -- while the question is often about
+-- what it contains: «сертралин».
 --
 -- Each part sits on its own line, so a search cannot match across the end of one name and the
 -- start of the next. Elements that are not objects, and arrays that are not arrays, are skipped:
@@ -19,19 +22,26 @@ LANGUAGE sql
 IMMUTABLE
 SET search_path = public, pg_temp
 AS $$
+  WITH named AS (
+    SELECT source, ingredient->>'name' AS name, ordinality
+    FROM (
+      SELECT 1 AS source, r.dose_definition->'unit_strength' AS list
+      UNION ALL
+      SELECT 2, r.dose_definition->'active'
+    ) AS lists
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE WHEN jsonb_typeof(lists.list) = 'array' THEN lists.list ELSE '[]'::jsonb END
+    ) WITH ORDINALITY AS e(ingredient, ordinality)
+    WHERE jsonb_typeof(ingredient) = 'object'
+      AND nullif(btrim(ingredient->>'name'), '') IS NOT NULL
+  )
   SELECT concat_ws(
     E'\n',
     r.custom_name,
     (
-      SELECT string_agg(ingredient->>'name', E'\n')
-      FROM jsonb_array_elements(
-        CASE WHEN jsonb_typeof(r.dose_definition->'unit_strength') = 'array'
-          THEN r.dose_definition->'unit_strength' ELSE '[]'::jsonb END
-        || CASE WHEN jsonb_typeof(r.dose_definition->'active') = 'array'
-          THEN r.dose_definition->'active' ELSE '[]'::jsonb END
-      ) AS ingredient
-      WHERE jsonb_typeof(ingredient) = 'object'
-        AND nullif(btrim(ingredient->>'name'), '') IS NOT NULL
+      SELECT string_agg(name, E'\n' ORDER BY ordinality)
+      FROM named
+      WHERE source = (SELECT min(source) FROM named)
     )
   );
 $$;

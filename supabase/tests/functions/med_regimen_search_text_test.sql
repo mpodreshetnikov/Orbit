@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(7);
+SELECT plan(8);
 
 SELECT has_function('public', 'med_regimen_search_text', ARRAY['med_regimens']);
 
@@ -38,8 +38,8 @@ VALUES
 
 SELECT is(
   (SELECT public.med_regimen_search_text(r) FROM public.med_regimens r WHERE r.id = 'a1a1a1a1-0000-4000-8000-000000000010'),
-  E'Золофт\nСертралин\nСертралин',
-  'names the course and the ingredients of both the per-unit and the legacy strength'
+  E'Золофт\nСертралин',
+  'names the course and its per-unit ingredients, ahead of the legacy total'
 );
 
 SELECT is(
@@ -74,6 +74,16 @@ SELECT is(
   ),
   0,
   'a search cannot match across the end of one name and the start of the next'
+);
+
+SELECT is(
+  public.med_regimen_search_text(ROW(
+    gen_random_uuid(), gen_random_uuid(), 'Курс', 'active', 'pill',
+    '{"intake":{"amount":1,"unit":"pill"},"unit_strength":[{"name":"Флуоксетин","amount":20,"unit":"milligram"}],"active":[{"name":"Сертралин","amount":50,"unit":"milligram"}]}'::jsonb,
+    'none', NULL, '{}'::jsonb, '{}'::jsonb, NULL, NULL, NULL, now(), now(), NULL
+  )::public.med_regimens),
+  E'Курс\nФлуоксетин',
+  'a legacy total left behind by a replaced strength is not searched'
 );
 
 SELECT ok(

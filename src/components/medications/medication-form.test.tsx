@@ -588,6 +588,27 @@ describe("MedicationForm", () => {
     });
   });
 
+  it("opens a course whose stored strength unit is blank", () => {
+    // Radix throws on a select item whose value is empty, so offering the
+    // stored blank unit would take the whole form down.
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            unit_strength: [{ name: "X", amount: 10, unit: "" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00"], amounts: [1] } as MedSchedule,
+        } as unknown as MedRegimen)}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText(/medications\.dosePerUnit/)).toHaveValue("10");
+  });
+
   it("records no strength when the field is left empty", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();

@@ -29,7 +29,13 @@ const calendarDate = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a calendar date as YYYY-MM-DD")
   .refine((value) => {
     const parsed = new Date(`${value}T00:00:00Z`);
-    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    // Year 0000 round-trips in JavaScript, but PostgreSQL has no year zero, so
+    // the generator's cast would reject it just the same.
+    return (
+      !value.startsWith("0000") &&
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.toISOString().slice(0, 10) === value
+    );
   }, "Not a calendar date");
 
 /**
@@ -158,9 +164,11 @@ export const plannedIntakeSchema = z.object({
   unit_strength: z
     .array(
       z.object({
-        name: z.string(),
+        // Blank is not a name or a unit: no reader can print it, and the form's
+        // unit select cannot hold an empty value at all.
+        name: z.string().trim().min(1),
         amount: positiveAmount,
-        unit: z.string(),
+        unit: z.string().trim().min(1),
       }),
     )
     .optional()

@@ -34,17 +34,22 @@ WITH candidates AS (
   WHERE NOT (r.dose_definition ? 'unit_strength')
     AND jsonb_typeof(r.dose_definition->'active') = 'array'
     AND jsonb_array_length(r.dose_definition->'active') > 0
-    AND jsonb_typeof(r.dose_definition->'intake'->'amount') = 'number'
-    AND (r.dose_definition->'intake'->>'amount')::numeric > 0
+    -- CASE, because SQL does not promise to evaluate AND/OR left to right: a cast guarded only by
+    -- a sibling condition can still run on a string and abort the whole migration.
+    AND CASE WHEN jsonb_typeof(r.dose_definition->'intake'->'amount') = 'number'
+      THEN (r.dose_definition->'intake'->>'amount')::numeric > 0 ELSE false END
     AND NOT EXISTS (
       SELECT 1
       FROM jsonb_array_elements(r.dose_definition->'active') AS ingredient
-      WHERE jsonb_typeof(ingredient) <> 'object'
-        OR jsonb_typeof(ingredient->'name') <> 'string'
+      -- IS DISTINCT FROM, not <>: a missing key is NULL, and NULL <> 'string' is not true, so a
+      -- field that is absent would pass a check meant to refuse it.
+      WHERE jsonb_typeof(ingredient) IS DISTINCT FROM 'object'
+        OR jsonb_typeof(ingredient->'name') IS DISTINCT FROM 'string'
         OR nullif(btrim(ingredient->>'name'), '') IS NULL
-        OR jsonb_typeof(ingredient->'unit') <> 'string'
-        OR jsonb_typeof(ingredient->'amount') <> 'number'
-        OR (ingredient->>'amount')::numeric <= 0
+        OR jsonb_typeof(ingredient->'unit') IS DISTINCT FROM 'string'
+        OR nullif(btrim(ingredient->>'unit'), '') IS NULL
+        OR CASE WHEN jsonb_typeof(ingredient->'amount') = 'number'
+          THEN (ingredient->>'amount')::numeric <= 0 ELSE true END
     )
 ),
 derived AS (

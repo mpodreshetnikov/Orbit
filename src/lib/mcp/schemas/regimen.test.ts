@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { medDurationSchema, medScheduleSchema } from "./regimen";
+import { medDurationSchema, medScheduleSchema, plannedIntakeSchema } from "./regimen";
 
 function messages(result: { success: boolean; error?: { issues: { message: string }[] } }) {
   return result.success ? [] : (result.error?.issues.map((issue) => issue.message) ?? []);
@@ -86,10 +86,28 @@ describe("medDurationSchema write checks", () => {
   });
 
   it("refuses a date that is not a calendar day", () => {
-    for (const start_date of ["2026-02-30", "26.07.2026", "2026-7-26"]) {
+    // 0000 round-trips in JavaScript; PostgreSQL has no year zero.
+    for (const start_date of ["2026-02-30", "26.07.2026", "2026-7-26", "0000-01-01"]) {
       expect(medDurationSchema.safeParse({ type: "for_days", days: 4, start_date }).success).toBe(
         false,
       );
+    }
+  });
+});
+
+describe("plannedIntakeSchema write checks", () => {
+  it("refuses a strength with a blank name or unit", () => {
+    for (const ingredient of [
+      { name: "Сертралин", amount: 100, unit: "" },
+      { name: "Сертралин", amount: 100, unit: "  " },
+      { name: " ", amount: 100, unit: "milligram" },
+    ]) {
+      expect(
+        plannedIntakeSchema.safeParse({
+          intake: { amount: 1, unit: "pill" },
+          unit_strength: [ingredient],
+        }).success,
+      ).toBe(false);
     }
   });
 });

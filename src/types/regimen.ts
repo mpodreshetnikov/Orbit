@@ -352,8 +352,23 @@ export function withFormStrength(
   const planned = withCarriedStrength(stored, intake);
   const rest = planned.unit_strength?.slice(1) ?? [];
   const name = strength.name.trim() || courseName.trim();
+  // The fields open on the stored strength, so after a change of dosage form
+  // they still hold "100 mg" -- a figure about a pill, now beside a millilitre.
+  // Left exactly as loaded, they are the old record rather than a new
+  // statement, and `withCarriedStrength` has already dropped it for that reason.
+  const loaded = firstUnitStrength(stored);
+  const untouchedAcrossUnitChange =
+    stored?.intake?.unit !== intake.unit &&
+    loaded != null &&
+    loaded.name === strength.name &&
+    loaded.amount === strength.amount &&
+    loaded.unit === strength.unit;
   const first =
-    strength.amount != null && Number.isFinite(strength.amount) && strength.amount > 0 && name
+    !untouchedAcrossUnitChange &&
+    strength.amount != null &&
+    Number.isFinite(strength.amount) &&
+    strength.amount > 0 &&
+    name
       ? [{ name, amount: strength.amount, unit: strength.unit }]
       : [];
   const unitStrength = [...first, ...rest];
