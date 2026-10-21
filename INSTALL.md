@@ -51,6 +51,11 @@ Run the workflow with _action_ `migrate-from-supabase`: it copies the users, rec
 then checks every table and file against the original, which keeps running untouched.
 [Moving from hosted Supabase](./docs/SELF_HOSTING.md#moving-from-hosted-supabase)
 
+## Running agents on it
+
+Claude Code cloud sessions that change this repository need one block in their environment's setup
+script, or they refuse to work: [`docs/AGENT_ENVIRONMENT.md`](./docs/AGENT_ENVIRONMENT.md).
+
 ## When it does not work
 
 - Run the workflow with _action_ `doctor`: it shows what the server's network can and cannot reach,
