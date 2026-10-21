@@ -156,19 +156,37 @@ describe("createSelfUpdater", () => {
     await updater.check("manual");
     expect(begunDuringApply).toBe(false);
     expect(reload).toHaveBeenCalledOnce();
-    // Released afterwards, for the case where the reload does not end the worker.
-    expect(registry.isHeldForUpdate()).toBe(false);
+    // Kept: a run awaiting storage could otherwise begin in the moments before the worker goes.
+    expect(registry.isHeldForUpdate()).toBe(true);
   });
 
-  it("releases the hold when the host fails", async () => {
-    const registry = createActiveRunRegistry();
-    const { updater } = setup({
-      holdImports: () => registry.holdForUpdate(),
+  it("releases the hold when the host put the previous files back", async () => {
+    const { updater, registry } = setup({
       sendNative: async (message) =>
-        message.action === "apply" ? { ok: false, error: "disk full" } : { ok: true },
+        message.action === "apply"
+          ? { ok: false, error: "disk full", restored: true }
+          : { ok: true },
     });
     expect((await updater.check("manual")).error).toBe("disk full");
     expect(registry.isHeldForUpdate()).toBe(false);
+  });
+
+  it("keeps runs out of a half-replaced folder until an apply succeeds", async () => {
+    let applies = 0;
+    const { updater, registry, reload } = setup({
+      sendNative: async (message) => {
+        if (message.action !== "apply") return { ok: true };
+        applies += 1;
+        return applies === 1 ? { ok: false, error: "locked", restored: false } : { ok: true };
+      },
+    });
+    expect((await updater.check("alarm")).phase).toBe("error");
+    expect(registry.isHeldForUpdate()).toBe(true);
+    expect(registry.begin("run-1")).toBe(false);
+
+    await updater.check("manual");
+    expect(applies).toBe(2);
+    expect(reload).toHaveBeenCalledOnce();
   });
 
   it("holds the reload when a session was stored while the files were replaced", async () => {

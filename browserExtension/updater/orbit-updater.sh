@@ -42,7 +42,7 @@ fail() {
   local message
   message=$(printf '%s' "$1" | tr -d '"\\' | tr '\n\r\t' '   ')
   log "error: $message"
-  reply "{\"ok\":false,\"error\":\"$message\"}"
+  reply "{\"ok\":false,\"error\":\"$message\"${2:+,$2}}"
   exit 0
 }
 
@@ -102,6 +102,17 @@ stage() {
   ok "\"version\":\"$version\""
 }
 
+# Makes $2 an exact copy of $1.
+mirror() {
+  mkdir -p "$2" || return 1
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete "$1/" "$2/" >>"$LOG" 2>&1
+  else
+    find "$2" -mindepth 1 -maxdepth 1 -exec rm -rf {} + >>"$LOG" 2>&1 &&
+      cp -R "$1/." "$2/" >>"$LOG" 2>&1
+  fi
+}
+
 apply() {
   local version="$1"
   local files="$STAGE_ROOT/$version/files"
@@ -110,13 +121,27 @@ apply() {
   is_built_orbit_extension "$EXTENSION_DIR" ||
     fail "$EXTENSION_DIR does not hold the built Orbit extension."
   log "apply $version to $EXTENSION_DIR"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "$files/" "$EXTENSION_DIR/" >>"$LOG" 2>&1 || fail "Cannot replace the files."
-  else
-    find "$EXTENSION_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + >>"$LOG" 2>&1 &&
-      cp -R "$files/." "$EXTENSION_DIR/" >>"$LOG" 2>&1 || fail "Cannot replace the files."
+  # A mirror that stops halfway leaves a folder of neither release, which no worker can run. So
+  # the current files are kept aside first and put back when the mirror fails; the reply says
+  # whether that worked, and the extension keeps imports out until a mirror succeeds.
+  local backup="$HOST_DIR/previous"
+  rm -rf "$backup"
+  mirror "$EXTENSION_DIR" "$backup" || fail "Cannot keep a copy of the current files." "\"restored\":true"
+  if ! mirror "$files" "$EXTENSION_DIR"; then
+    if mirror "$backup" "$EXTENSION_DIR"; then
+      fail "Cannot replace the files; the previous version is back." "\"restored\":true"
+    fi
+    fail "Cannot replace the files, nor put the previous ones back." "\"restored\":false"
   fi
-  rm -rf "$STAGE_ROOT"
+  rm -rf "$STAGE_ROOT" "$backup"
+  # The host is a copy outside the folder, so it takes its own update from the release it just
+  # applied. A rename replaces the file whole; this running shell keeps reading the old one.
+  if [ -f "$EXTENSION_DIR/updater/orbit-updater.sh" ]; then
+    cp "$EXTENSION_DIR/updater/orbit-updater.sh" "$HOST_DIR/.orbit-updater.sh.new" &&
+      chmod 755 "$HOST_DIR/.orbit-updater.sh.new" &&
+      mv -f "$HOST_DIR/.orbit-updater.sh.new" "$HOST_DIR/orbit-updater.sh" ||
+      log "could not refresh the host from $version"
+  fi
   ok "\"version\":\"$version\""
 }
 

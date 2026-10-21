@@ -18,6 +18,8 @@ $ProgressPreference = 'SilentlyContinue'
 $HostDir = $PSScriptRoot
 $LogPath = Join-Path $HostDir 'updater.log'
 $StageRoot = Join-Path $HostDir 'staged'
+# Set by an apply: whether the folder still holds a whole release if it fails.
+$Restored = $null
 
 function Write-Log([string]$Text) {
   $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -94,6 +96,12 @@ function Invoke-Stage([string]$Version, [string]$Sha256, [string]$Url) {
   Set-Content -LiteralPath $marker -Value $Sha256 -NoNewline
 }
 
+# Makes $Target an exact copy of $Source; returns robocopy's exit code, 8 and up being a failure.
+function Invoke-Mirror([string]$Source, [string]$Target) {
+  & robocopy.exe $Source $Target /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-File -Append -LiteralPath $LogPath
+  return $LASTEXITCODE
+}
+
 function Invoke-Apply([string]$Version) {
   $dir = Join-Path $StageRoot $Version
   $files = Join-Path $dir 'files'
@@ -106,9 +114,36 @@ function Invoke-Apply([string]$Version) {
     throw "$extensionDir does not hold the built Orbit extension."
   }
   Write-Log "apply $Version to $extensionDir"
-  & robocopy.exe $files $extensionDir /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-File -Append -LiteralPath $LogPath
-  if ($LASTEXITCODE -ge 8) { throw "Cannot replace the files (robocopy $LASTEXITCODE)." }
-  Remove-Item -LiteralPath $StageRoot -Recurse -Force
+  # A mirror that stops halfway leaves a folder of neither release, which no worker can run. So
+  # the current files are kept aside first and put back when the mirror fails; the reply says
+  # whether that worked, and the extension keeps imports out until a mirror succeeds.
+  $backup = Join-Path $HostDir 'previous'
+  $script:Restored = $true
+  $code = Invoke-Mirror $extensionDir $backup
+  if ($code -ge 8) { throw "Cannot keep a copy of the current files (robocopy $code)." }
+  $code = Invoke-Mirror $files $extensionDir
+  if ($code -ge 8) {
+    if ((Invoke-Mirror $backup $extensionDir) -ge 8) {
+      $script:Restored = $false
+      throw "Cannot replace the files (robocopy $code), nor put the previous ones back."
+    }
+    throw "Cannot replace the files (robocopy $code); the previous version is back."
+  }
+  Remove-Item -LiteralPath $StageRoot, $backup -Recurse -Force
+  # The host is a copy outside the folder, so it takes its own update from the release it just
+  # applied. PowerShell has already read this script whole, so replacing it does not touch the
+  # run in progress.
+  try {
+    foreach ($name in @('orbit-updater.ps1', 'orbit-updater.cmd')) {
+      $source = Join-Path (Join-Path $extensionDir 'updater') $name
+      if (-not (Test-Path -LiteralPath $source)) { continue }
+      $next = Join-Path $HostDir ".$name.new"
+      Copy-Item -LiteralPath $source -Destination $next -Force
+      Move-Item -LiteralPath $next -Destination (Join-Path $HostDir $name) -Force
+    }
+  } catch {
+    Write-Log "could not refresh the host from ${Version}: $($_.Exception.Message)"
+  }
 }
 
 try {
@@ -139,5 +174,7 @@ try {
 } catch {
   $text = $_.Exception.Message
   try { Write-Log "error: $text" } catch {}
-  Send-Reply @{ ok = $false; error = $text }
+  $reply = @{ ok = $false; error = $text }
+  if ($null -ne $script:Restored) { $reply.restored = $script:Restored }
+  Send-Reply $reply
 }

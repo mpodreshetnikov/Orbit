@@ -100,7 +100,12 @@ The person runs the installer once from the unpacked folder.
   registry (`ActiveRunRegistry.holdForUpdate`), taken in the same synchronous step that sees no run
   in flight; a run that tries to begin meanwhile is refused with a clear message instead of starting
   on changing files. A stored session also defers both. An update found during an import waits and
-  goes ahead when the import ends (the run registry or the stored session clearing).
+  goes ahead when the import ends (the run registry or the stored session clearing). A scheduled
+  window claims the registry before it asks the server for a session, and the hold is not released
+  after the reload is requested.
+- A failed `apply` puts the previous files back from a copy the host takes first. If even that
+  fails, the hold stays until a later `apply` succeeds, so no run starts on a half-replaced folder.
+- The installed host is a copy outside the folder; each `apply` refreshes it from the release.
 - One unpacked folder per machine. Every browser and profile reaches the same host with the same
   extension id, so the host cannot tell installations apart; installing from a second folder
   replaces the first, and the installers say so. A release whose `extension_id` is not the running

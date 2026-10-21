@@ -577,6 +577,9 @@ function unattendedParseStrategy(connector: Connector | null): ConnectorParseStr
     : null;
 }
 
+/** Numbers each scheduled window's claim on the run registry, so no two share one. */
+let scheduledWindowClaims = 0;
+
 export async function runScheduledImport(
   input: ScheduledImportInput,
   deps: ImportRunnerDeps & {
@@ -603,6 +606,22 @@ export async function runScheduledImport(
   const origin = input.origin ?? "auto";
 
   const runWindow = async (
+    window: BackfillSlice,
+    kind: RunWindowKind,
+  ): Promise<ScheduledImportRunResult> => {
+    // Claimed before `create_session`, the first await: until the session is stored nothing
+    // else tells an update that a window is starting, and a reload meanwhile would leave the
+    // server's session open. While an update holds the registry the window is given back.
+    const claim = `scheduled-window:${(scheduledWindowClaims += 1)}`;
+    if (!activeImportRuns.begin(claim)) throw new Error(UPDATE_IN_PROGRESS_ERROR);
+    try {
+      return await runClaimedWindow(window, kind);
+    } finally {
+      activeImportRuns.end(claim);
+    }
+  };
+
+  const runClaimedWindow = async (
     window: BackfillSlice,
     kind: RunWindowKind,
   ): Promise<ScheduledImportRunResult> => {
@@ -659,14 +678,8 @@ export async function runScheduledImport(
       throw new Error("A session started by the person is in progress");
     }
     const sessionId = typeof session.session_id === "string" ? session.session_id : "";
-    // A fresh session is never already running, so a refusal here is an update replacing the
-    // extension's files: the window is given back rather than read on files that are changing.
-    if (sessionId && !activeImportRuns.begin(sessionId)) {
-      await clearOwnSession(deps.sessionStore, session);
-      await tryCompleteSessionAsFailed(session, deps.callEdge);
-      throw new Error(UPDATE_IN_PROGRESS_ERROR);
-    }
     if (sessionId) {
+      activeImportRuns.begin(sessionId);
       liveRuns.start({
         session_id: sessionId,
         source_id: input.sourceId,

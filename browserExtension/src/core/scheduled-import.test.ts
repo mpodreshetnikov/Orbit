@@ -416,9 +416,24 @@ describe("runScheduledImport", () => {
     } finally {
       release?.();
     }
+    expect(harness.createdWindows).toEqual([]);
     expect(harness.connector.parse).not.toHaveBeenCalled();
     expect(harness.getSession()).toBeNull();
-    expect(activeImportRuns.has("session-1")).toBe(false);
+  });
+
+  it("keeps an update out while the window's session is being created", async () => {
+    const harness = createHarness();
+    let heldDuringCreate: (() => void) | null | undefined;
+    const create = harness.callEdge.getMockImplementation()!;
+    harness.callEdge.mockImplementation(async (url: string, token: string, payload) => {
+      if (payload.action === "create_session" && heldDuringCreate === undefined) {
+        heldDuringCreate = activeImportRuns.holdForUpdate();
+      }
+      return create(url, token, payload);
+    });
+    await runScheduledImport(INPUT, harness.deps);
+    expect(heldDuringCreate).toBeNull();
+    expect(activeImportRuns.size()).toBe(0);
   });
 
   it("puts each window on the run board while it runs, and takes it off after", async () => {

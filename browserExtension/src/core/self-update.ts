@@ -57,6 +57,8 @@ export interface NativeHostReply {
   ok?: boolean;
   error?: string;
   version?: string;
+  /** On a failed apply: whether the host put the previous files back. */
+  restored?: boolean;
 }
 
 export interface SelfUpdaterDeps {
@@ -158,49 +160,76 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
   };
 
   /**
-   * Runs `step` with runs kept out, or reports `waitingPhase` when an import is in flight or
-   * about to start. The hold is released afterwards; after a reload there is nothing left to
-   * release it for.
+   * Kept after an apply that failed and could not put the old files back: the folder holds
+   * neither release, so no run may begin on it until an apply succeeds. A worker that starts
+   * on such a folder could not run either, which is why the host restores before it fails.
    */
-  const whenIdle = async (waitingPhase: SelfUpdatePhase, step: () => Promise<void>) => {
-    const release = deps.holdImports();
+  let brokenTreeHold: (() => void) | null = null;
+
+  /**
+   * Runs `step` with runs kept out, or reports `waitingPhase` when an import is in flight or
+   * about to start. `step` says what becomes of the hold: released when it is done, kept when
+   * the files are broken, and left alone after a reload -- releasing it then would let a run
+   * already awaiting storage begin in the moments before the worker goes.
+   */
+  const whenIdle = async (
+    waitingPhase: SelfUpdatePhase,
+    step: (release: () => void) => Promise<"done" | "kept" | "reloaded">,
+  ) => {
+    const release = brokenTreeHold ?? deps.holdImports();
     if (!release) {
       set({ phase: waitingPhase });
       return;
     }
+    let outcome: "done" | "kept" | "reloaded" = "done";
     try {
-      if (await deps.isBusy()) {
+      // Under a kept hold nothing has begun since, and the folder must be repaired regardless.
+      if (!brokenTreeHold && (await deps.isBusy())) {
         set({ phase: waitingPhase });
         return;
       }
-      await step();
+      outcome = await step(release);
     } finally {
-      release();
+      if (outcome === "done") release();
     }
   };
 
-  const reloadNow = async () => {
+  const reloadNow = () => {
     deps.onInfo?.("extension_self_update_reloading", { to: state.latest_version });
     deps.reload();
   };
 
-  const reloadWhenIdle = () => whenIdle("reload_pending", reloadNow);
+  const reloadWhenIdle = () =>
+    whenIdle("reload_pending", async () => {
+      reloadNow();
+      return "reloaded";
+    });
 
   const applyWhenIdle = async () => {
     const release = staged;
     if (!release) return;
-    await whenIdle("waiting_for_import", async () => {
+    await whenIdle("waiting_for_import", async (releaseHold) => {
       set({ phase: "applying" });
       const reply = await deps.sendNative({ action: "apply", version: release.version });
-      if (!reply?.ok) throw new Error(reply?.error || "The updater could not apply the release.");
+      if (!reply?.ok) {
+        fail(new Error(reply?.error || "The updater could not apply the release."));
+        if (reply?.restored) {
+          brokenTreeHold = null;
+          return "done";
+        }
+        brokenTreeHold = releaseHold;
+        return "kept";
+      }
       staged = null;
+      brokenTreeHold = null;
       // Still under the same hold, so no run has begun since the files changed; a session the
       // app stored meanwhile still defers the reload, as it deferred the apply.
       if (await deps.isBusy()) {
         set({ phase: "reload_pending" });
-        return;
+        return "done";
       }
-      await reloadNow();
+      reloadNow();
+      return "reloaded";
     });
   };
 
@@ -255,7 +284,8 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
         await reloadWhenIdle();
         return { ...state };
       }
-      if (state.phase === "waiting_for_import" && staged) {
+      // A kept hold means the folder is broken: repair it with the staged release first.
+      if ((state.phase === "waiting_for_import" || brokenTreeHold) && staged) {
         await applyWhenIdle();
         return { ...state };
       }
