@@ -1,26 +1,14 @@
 # The "Сегодня" tab: opens signed in as the seed user and shows the day's doses.
+# `setup/open.yaml` has already loaded the client, so this starts on a warm app.
 appId: host.exp.Exponent
 name: Сегодня
 ---
 - openLink: exp://127.0.0.1:8081
-# iOS asks before a link leaves for another app.
 - tapOn:
     text: "Open"
-    optional: true
-# Expo Go lays a tour of its developer menu over the app on its first launch, and nothing under
-# it is visible to Maestro until it is closed: wait for whichever comes first.
-- extendedWaitUntil:
-    visible: "Vitamin D3.*|Continue"
-    timeout: 600000
-- tapOn:
-    text: "Continue"
-    optional: true
-# "Continue" opens the developer menu itself; close it too.
-- tapOn:
-    text: "Close"
     optional: true
 # A dose row reads as one element, "Vitamin D3, Просрочено · …": Maestro matches the whole text.
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
-    timeout: 30000
+    timeout: 60000
 - takeScreenshot: today-01-day

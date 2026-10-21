@@ -223,6 +223,8 @@ jobs:
       - name: Run the flows
         run: |
           mkdir -p recordings
+          # Load the app and get past the first-launch screens before any camera rolls.
+          ( cd recordings && maestro test ../mobile/e2e/setup/open.yaml ) || exit 1
           flows="${{ inputs.flows }}"
           if [[ -z "$flows" ]]; then flows="$(cd mobile/e2e && ls *.yaml)"; fi
           status=0
