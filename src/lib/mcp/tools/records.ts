@@ -21,7 +21,7 @@ import { withPerson, withUserClient } from "../tool-context";
 import { fail, ok, summarizeList } from "../tool-result";
 import type { McpToolServer } from "./types";
 
-const RECORD_TYPES = [
+export const RECORD_TYPES = [
   "lab",
   "visit",
   "imaging",
