@@ -76,6 +76,22 @@ jobs:
            where email = '$TEST_EMAIL';
           select public.generate_med_dose_events_for_horizon(
             (select id from auth.users where email = '$TEST_EMAIL'), 'UTC', 7);
+          -- The generator only creates slots still ahead of now(), so a run after 08:00 UTC would
+          -- find no morning doses. Put today's earlier slots back, as the overdue doses they would
+          -- be had the cron run at midnight: the recordings then show the same day whatever the hour.
+          insert into public.med_dose_events
+            (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status)
+          select r.person_id, r.id, s.at, s.at, r.dose_definition, 'scheduled'
+            from public.med_regimens r
+            cross join lateral jsonb_array_elements_text(r.schedule->'times') as t(slot)
+            cross join lateral (select (current_date || ' ' || t.slot)::timestamp at time zone 'UTC' as at) s
+           where r.status = 'active'
+             and r.schedule->>'mode' = 'daily_times'
+             and s.at < now()
+             and not exists (
+               select 1 from public.med_dose_events e
+                where e.regimen_id = r.id
+                  and date_trunc('minute', e.scheduled_at) = date_trunc('minute', s.at));
           SQL
       - name: Open the tunnel
         run: |
@@ -89,10 +105,12 @@ jobs:
           done
           [[ -n "$url" ]] || { cat cloudflared.log; echo "::error::No tunnel address"; exit 1; }
           # A quick tunnel answers before its DNS has spread; wait until it serves the API.
+          healthy=""
           for _ in $(seq 1 60); do
-            curl -fsS -o /dev/null "$url/auth/v1/health" && break
+            curl -fsS -o /dev/null "$url/auth/v1/health" && { healthy=1; break; }
             sleep 2
           done
+          [[ -n "$healthy" ]] || { cat cloudflared.log; echo "::error::The tunnel never served the API"; exit 1; }
           anon="$(npx supabase status -o env | sed -n 's/^ANON_KEY="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p')"
           [[ -n "$anon" ]] || { echo "::error::No anon key from supabase status"; exit 1; }
           mkdir -p backend
