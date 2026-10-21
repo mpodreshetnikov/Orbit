@@ -7,6 +7,8 @@ name: Сегодня
 - tapOn:
     text: "Open"
     optional: true
+# The app comes back where the last flow left it; start on the "Сегодня" tab.
+- tapOn: "Сегодня"
 # A dose row reads as one element, "Vitamin D3, Просрочено · …": Maestro matches the whole text.
 - extendedWaitUntil:
     visible: "Vitamin D3.*"

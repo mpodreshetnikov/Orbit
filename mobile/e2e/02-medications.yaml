@@ -20,9 +20,9 @@ name: Лекарства
 - tapOn: "Поиск"
 - inputText: "Mag"
 - takeScreenshot: meds-02-search
-- tapOn:
-    text: "Cancel|Отмена|Отменить"
-    optional: true
+# Empty the query again: the app keeps it, and the next steps and flows need the whole list.
+- eraseText: 20
+- hideKeyboard
 - tapOn: "Приостановлено"
 - takeScreenshot: meds-03-filter
 - tapOn: "Все"

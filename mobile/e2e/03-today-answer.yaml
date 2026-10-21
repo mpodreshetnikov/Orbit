@@ -7,6 +7,8 @@ name: Сегодня — ответы
 - tapOn:
     text: "Open"
     optional: true
+# The app comes back where the last flow left it; start on the "Сегодня" tab.
+- tapOn: "Сегодня"
 - extendedWaitUntil:
     visible: "Omega-3.*"
     timeout: 60000
