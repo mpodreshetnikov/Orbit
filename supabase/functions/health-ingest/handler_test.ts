@@ -146,6 +146,8 @@ const kidneyAbsence = {
   confidence: 0.9,
 };
 
+const canReadRecord = async () => true;
+
 function request(body: unknown, token: string | null = "user-jwt"): Request {
   return new Request("http://localhost/functions/v1/health-ingest", {
     method: "POST",
@@ -177,7 +179,9 @@ Deno.test(
   "health-ingest stores a value in canonical units and keeps the client's text",
   async () => {
     const { repository, state } = repositoryMock();
-    const response = await createHealthIngestHandler({ repository })(request(submission()));
+    const response = await createHealthIngestHandler({ repository, canReadRecord })(
+      request(submission()),
+    );
     const body = await response.json();
 
     assertEquals(response.status, 200);
@@ -189,6 +193,7 @@ Deno.test(
     assertEquals(state.observationRows[0].is_applied, true);
     const recordWrite = state.updates.find((patch) => patch.status === "structure_review");
     assertEquals(recordWrite?.ocr_text, DOCUMENT);
+    assertEquals(recordWrite?.ocr_error, null);
     assertEquals(recordWrite?.record_date, "2025-10-27");
   },
 );
@@ -196,7 +201,7 @@ Deno.test(
 Deno.test("health-ingest refuses an entity whose anchor is not in the text", async () => {
   const { repository, state } = repositoryMock();
   const ungrounded = { ...b12, source_anchor: "Витамин В12 704 пмоль/л" };
-  const response = await createHealthIngestHandler({ repository })(
+  const response = await createHealthIngestHandler({ repository, canReadRecord })(
     request(
       submission({
         extraction: {
@@ -230,7 +235,7 @@ Deno.test(
       source_anchor: "в почках конкременты не выявлены",
       confidence: 0.9,
     };
-    const backed = await createHealthIngestHandler({ repository })(
+    const backed = await createHealthIngestHandler({ repository, canReadRecord })(
       request(
         submission({
           extraction: {
@@ -248,9 +253,10 @@ Deno.test(
     assertEquals(state.insertedFindings[0].resolution_status, "resolved");
 
     const unbacked = repositoryMock();
-    const response = await createHealthIngestHandler({ repository: unbacked.repository })(
-      request(submission({ reconciliation: { findings_to_resolve: [closure] } })),
-    );
+    const response = await createHealthIngestHandler({
+      repository: unbacked.repository,
+      canReadRecord,
+    })(request(submission({ reconciliation: { findings_to_resolve: [closure] } })));
     assertEquals((await response.json()).rejected, [
       {
         entityKind: "finding_to_resolve",
@@ -265,7 +271,7 @@ Deno.test(
   "health-ingest proposes a lab closure as pending and refuses an unknown condition",
   async () => {
     const { repository, state } = repositoryMock();
-    const response = await createHealthIngestHandler({ repository })(
+    const response = await createHealthIngestHandler({ repository, canReadRecord })(
       request(
         submission({
           reconciliation: {
@@ -302,7 +308,7 @@ Deno.test(
 
 Deno.test("health-ingest refuses a call with no text before touching the record", async () => {
   const { repository, state } = repositoryMock();
-  const response = await createHealthIngestHandler({ repository })(
+  const response = await createHealthIngestHandler({ repository, canReadRecord })(
     request(submission({ source_text: "  " })),
   );
 
@@ -313,8 +319,70 @@ Deno.test("health-ingest refuses a call with no text before touching the record"
 
 Deno.test("health-ingest refuses a caller that is not an allowed user", async () => {
   const { repository, state } = repositoryMock({ user: null });
-  const response = await createHealthIngestHandler({ repository })(request(submission()));
+  const response = await createHealthIngestHandler({ repository, canReadRecord })(
+    request(submission()),
+  );
 
   assertEquals(response.status, 400);
   assertEquals(state.observationRows, []);
+});
+
+Deno.test("health-ingest refuses a record the caller's own token cannot read", async () => {
+  const { repository, state } = repositoryMock();
+  const response = await createHealthIngestHandler({
+    repository,
+    canReadRecord: async () => false,
+  })(request(submission()));
+
+  assertEquals(response.status, 400);
+  assertEquals((await response.json()).error, "Record not found or access denied");
+  assertEquals(state.updates, []);
+});
+
+Deno.test("health-ingest refuses a submission missing its extraction", async () => {
+  const { repository, state } = repositoryMock();
+  const response = await createHealthIngestHandler({ repository, canReadRecord })(
+    request(submission({ extraction: undefined })),
+  );
+
+  assertEquals(response.status, 400);
+  assertEquals((await response.json()).error, "Missing required field: extraction");
+  assertEquals(state.updates, []);
+  assertEquals(state.observationRows, []);
+});
+
+Deno.test("health-ingest resolves a finding's codes from its label, not the caller's", async () => {
+  const { repository, state } = repositoryMock();
+  const findingRows: Record<string, unknown>[] = [];
+  (repository as unknown as { replaceRecordFindings: unknown }).replaceRecordFindings = async (
+    _id: string,
+    rows: Record<string, unknown>[],
+  ) => {
+    findingRows.push(...rows);
+  };
+  await createHealthIngestHandler({ repository, canReadRecord })(
+    request(
+      submission({
+        extraction: {
+          observations: [],
+          findings: [
+            {
+              finding_code: "SOMETHING_ELSE",
+              finding_type_text: "Конкременты",
+              site_code: "kidney_right",
+              body_site_text: "почках",
+              source_anchor: "в почках конкременты",
+              confidence: 0.9,
+            },
+          ],
+          conditions: [],
+          asserted_absences: [],
+        },
+      }),
+    ),
+  );
+
+  assertEquals(state.updates.length > 0, true);
+  assertEquals(findingRows[0]?.finding_code, "CALCULUS");
+  assertEquals(findingRows[0]?.site_code, "kidney");
 });

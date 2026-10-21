@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import {
   buildEdgePropagationHeaders,
@@ -26,6 +27,12 @@ import {
  */
 export interface HealthIngestDeps {
   repository: HealthStructureRepository | null;
+  /**
+   * Whether the caller's own token can read the record. The service runs on the service role once
+   * the caller is authenticated, so this is what keeps the record's RLS deciding who may ingest
+   * into it, as it decides what the caller sees in the browser.
+   */
+  canReadRecord: (token: string, recordId: string) => Promise<boolean>;
   log?: Pick<Console, "log" | "warn" | "error">;
 }
 
@@ -82,6 +89,16 @@ export function createHealthIngestHandler(deps: HealthIngestDeps) {
       // Checked before the service runs, so a malformed call never takes the record's claim or
       // stamps a structure_error on it.
       if (!documentText) throw new Error("Missing required field: source_text");
+      // A truncated call must not replace the record's contents with defaults and empty lists.
+      for (const field of ["classification", "extraction"] as const) {
+        if (!body[field] || typeof body[field] !== "object" || Array.isArray(body[field])) {
+          throw new Error(`Missing required field: ${field}`);
+        }
+      }
+      const token = getBearerToken(req);
+      if (token && recordId && !(await deps.canReadRecord(token, recordId))) {
+        throw new Error("Record not found or access denied");
+      }
       const submission: ClientSubmission = {
         classification: body.classification,
         extraction: body.extraction,
@@ -89,7 +106,7 @@ export function createHealthIngestHandler(deps: HealthIngestDeps) {
       };
 
       const result = await runHealthStructureService(
-        { authToken: getBearerToken(req), recordId, documentText },
+        { authToken: token, recordId, documentText },
         {
           repository: deps.repository,
           parseStructuredData: (text, parseContext) =>
@@ -120,4 +137,24 @@ function createDefaultRepository(): HealthStructureRepository | null {
   return createSupabaseHealthStructureRepository({ supabaseUrl, supabaseServiceRoleKey });
 }
 
-export const handleRequest = createHealthIngestHandler({ repository: createDefaultRepository() });
+async function canReadRecordWithUserToken(token: string, recordId: string): Promise<boolean> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!supabaseUrl || !anonKey) throw new Error("Supabase environment not configured");
+  const client = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data, error } = await client
+    .from("medical_records")
+    .select("id")
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to check access to the record: ${error.message}`);
+  return data !== null;
+}
+
+export const handleRequest = createHealthIngestHandler({
+  repository: createDefaultRepository(),
+  canReadRecord: canReadRecordWithUserToken,
+});

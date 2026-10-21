@@ -366,7 +366,8 @@ export async function runHealthStructureService(
         status: "structure_review",
         // A previous failure is cleared by the run that succeeds, the way ocr_error is.
         structure_error: null,
-        ...(asString(input.documentText) ? { ocr_text: ocrText } : {}),
+        // Text the caller supplied replaces the transcription, so an error about the old one goes too.
+        ...(asString(input.documentText) ? { ocr_text: ocrText, ocr_error: null } : {}),
       },
       { runId },
     );
