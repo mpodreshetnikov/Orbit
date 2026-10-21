@@ -1,0 +1,86 @@
+# Serves the iOS client to Expo Go from a GitHub runner, so trying it on a phone needs no computer.
+#
+# Expo Go runs the JavaScript bundle a dev server hands it; it cannot open an EAS Update, which only
+# a development build of our own can, and that build needs an Apple Developer membership
+# (T-261018-l19 `M6`). Until then this is the cloud stand-in for `just mobile-start`: dispatch it,
+# open the `exp://` link it prints in Expo Go, and the runner keeps the server up for the minutes
+# asked for. Nothing here deploys anything or writes to the instance.
+#
+# Reads the same settings the server deploy does: the `ORBIT_DOMAIN` variable and the `ANON_KEY`
+# secret. The anon key is public by design (every browser that opens Orbit receives it); it is a
+# secret here only so a fork does not inherit this instance.
+
+name: Mobile preview
+
+on:
+  push:
+    branches: [claude/project-thread-bljfod]
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to keep the dev server up"
+        type: number
+        default: 60
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-preview
+  cancel-in-progress: true
+
+jobs:
+  serve:
+    name: Serve to Expo Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 190
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install mobile dependencies
+        run: |
+          npm --prefix mobile ci
+          npm install --global @expo/ngrok@^4.1.0
+      - name: Point the client at the instance
+        env:
+          ORBIT_DOMAIN: ${{ vars.ORBIT_DOMAIN }}
+          ANON_KEY: ${{ secrets.ANON_KEY }}
+        run: |
+          [[ -n "$ORBIT_DOMAIN" ]] || { echo "::error::The ORBIT_DOMAIN repository variable is not set."; exit 1; }
+          [[ -n "$ANON_KEY" ]] || { echo "::error::The ANON_KEY repository secret is not set."; exit 1; }
+          printf 'EXPO_PUBLIC_SUPABASE_URL=https://%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' \
+            "$ORBIT_DOMAIN" "$ANON_KEY" > mobile/.env.local
+      - name: Start the dev server behind a tunnel
+        working-directory: mobile
+        env:
+          CI: "1"
+        run: |
+          nohup npx expo start --tunnel > "$RUNNER_TEMP/expo.log" 2>&1 &
+          for _ in $(seq 1 90); do
+            url="$(grep -oE 'exp://[A-Za-z0-9.-]+\.exp\.direct[^ ]*' "$RUNNER_TEMP/expo.log" | head -1 || true)"
+            [[ -n "$url" ]] && break
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/expo.log"
+          [[ -n "$url" ]] || { echo "::error::The tunnel did not come up; the log is above."; exit 1; }
+          # Warm the bundle so the first open on the phone does not wait for Metro to compile it.
+          curl -sf -o /dev/null "http://localhost:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=true" || true
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Open in Expo Go"
+            echo
+            echo "[$url]($url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Open in Expo Go::$url"
+      - name: Keep serving
+        env:
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          minutes="${MINUTES:-10}"
+          (( minutes > 180 )) && minutes=180
+          echo "Serving for $minutes minutes. Cancel the run to stop sooner."
+          sleep $(( minutes * 60 ))
