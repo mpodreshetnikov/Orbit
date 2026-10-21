@@ -68,6 +68,11 @@ jobs:
           HEALTH_STRUCTURE_PARSER_MODE: e2e_stub
           OPENROUTER_API_KEY: e2e-local-disabled
         run: just supabase-local-start
+      # Migrations alone leave the functions at their first definition; the live ones come from
+      # supabase/db, as every other lane applies them. Without this, mark_dose_taken has no
+      # p_taken_at and every tap on "Принято" fails and puts the dose back.
+      - name: Apply the idempotent SQL objects
+        run: just supabase-local-deploy-sql
       - name: Give the seed user a password and today's doses
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 <<SQL
