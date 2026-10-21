@@ -16,6 +16,7 @@ const {
   locateRegistry,
   message,
   shouldReport,
+  stagedPathsOutsideRegistry,
   taskStatusOnMain,
 } = hook as unknown as {
   changedPathsOutsideRegistry: (repoRoot: string, snapshot?: unknown) => string[];
@@ -32,6 +33,7 @@ const {
   locateRegistry: (repoRoot: string, env: Record<string, string>) => string | null;
   message: (result: { verdict: string; id?: string; status?: string }, filePath: string) => string;
   shouldReport: (key: string, statePath: string, now: number) => boolean;
+  stagedPathsOutsideRegistry: (repoRoot: string) => string[];
   taskStatusOnMain: (registryRoot: string, id: string) => string | null;
 };
 
@@ -462,5 +464,71 @@ describe("the hook itself", () => {
       (e) => e.matcher === "Bash" && e.hooks.some((h) => h.command.includes("task-claim-hook.cjs")),
     );
     expect(failed).toBeDefined();
+  });
+});
+
+describe("the pre-commit end", () => {
+  /**
+   * A commit through the dispatcher a cloud setup script installs, into a checkout carrying the
+   * repository's pre-commit. Its size advisory has no script to run here and fails quietly.
+   */
+  function commitThroughGlobalHooks(code: string, env: Record<string, string>) {
+    for (const file of ["scripts/just/task-claim-hook.cjs", ".githooks/pre-commit"]) {
+      fs.mkdirSync(path.dirname(path.join(code, file)), { recursive: true });
+      fs.copyFileSync(path.join(ORBIT_ROOT, file), path.join(code, file));
+    }
+    fs.chmodSync(path.join(code, ".githooks/pre-commit"), 0o755);
+    const global = path.join(path.dirname(code), "global-hooks");
+    fs.mkdirSync(global, { recursive: true });
+    fs.writeFileSync(
+      path.join(global, "pre-commit"),
+      '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/.githooks/pre-commit"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n',
+      { mode: 0o755 },
+    );
+    git(code, "add", "-A");
+    const result = spawnSync("git", ["-c", `core.hooksPath=${global}`, "commit", "-q", "-m", "x"], {
+      cwd: code,
+      encoding: "utf8",
+      env: { ...process.env, ORBIT_TASKS_REGISTRY: "", ...env },
+    });
+    expect(result.status).toBe(0);
+    return result.stderr;
+  }
+
+  it("judges the staged paths outside the registry only", () => {
+    const { code } = fixture([]);
+    fs.mkdirSync(path.join(code, "docs", "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(code, "docs", "tasks", "T-1-x.md"), "registry\n");
+    git(code, "add", "-A");
+    expect(stagedPathsOutsideRegistry(code)).toEqual([]);
+    fs.writeFileSync(path.join(code, "src", "x.ts"), "code\n");
+    git(code, "add", "-A");
+    expect(stagedPathsOutsideRegistry(code)).toEqual(["src/x.ts"]);
+  });
+
+  it("reports an unclaimed commit and lets it through; a claimed one is silent", () => {
+    const { registry, code } = fixture([{ id: "T-260902-jxe", status: "in-progress" }]);
+    const env = { ORBIT_TASKS_REGISTRY: registry };
+
+    fs.writeFileSync(path.join(code, "src", "a.ts"), "a\n");
+    const unclaimed = commitThroughGlobalHooks(code, env);
+    expect(unclaimed).toContain("task-claim (pre-commit)");
+    expect(unclaimed).toContain("No claimed task");
+    expect(git(code, "log", "--format=%s")).toBe("x");
+
+    fs.writeFileSync(path.join(code, ".git", "current-task"), "T-260902-jxe\n");
+    fs.writeFileSync(path.join(code, "src", "b.ts"), "b\n");
+    expect(commitThroughGlobalHooks(code, env)).not.toContain("task-claim (pre-commit)");
+  });
+
+  it("says nothing for a commit that only records in the registry", () => {
+    const { registry, code } = fixture([]);
+    fs.writeFileSync(path.join(code, "seed.txt"), "seed\n");
+    commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry });
+    fs.mkdirSync(path.join(code, "docs", "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(code, "docs", "tasks", "T-1-x.md"), "registry\n");
+    expect(commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry })).not.toContain(
+      "task-claim (pre-commit)",
+    );
   });
 });

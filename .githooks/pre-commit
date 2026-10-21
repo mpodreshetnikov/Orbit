@@ -11,3 +11,8 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 node scripts/just/check-pr-size.cjs --advisory || true
+
+# Also advisory: reports a commit outside docs/tasks/ that no in-progress task stands behind. This is
+# the end of the claim check a cloud session holding several repositories still meets, since it loads
+# no hooks from .claude/settings.json; see the header of scripts/just/task-claim-hook.cjs.
+node scripts/just/task-claim-hook.cjs --git || true
