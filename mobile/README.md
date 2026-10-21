@@ -14,7 +14,13 @@ JavaScript bundle from your machine.
 
 1. Install **Expo Go** from the App Store on the iPhone, and put the phone on the same network as
    the computer.
-2. Point the app at an instance by naming it once:
+2. Install the dependencies once:
+
+   ```sh
+   just mobile-install
+   ```
+
+3. Start it, naming the instance the first time:
 
    ```sh
    just mobile-start orbit.example.com
@@ -34,12 +40,15 @@ JavaScript bundle from your machine.
    bundle itself (`expo start --web`, or a simulator on a Mac). Pointing a phone at a local stack
    needs an https tunnel, which is not set up yet — use the deployed instance.
 
-3. Install the dependencies once with `just mobile-install`, then start as above.
-
 4. Scan the QR code with the iPhone's camera, then **Войти через Google** with the same account as
    the web app. The sheet returns to Expo Go on an `exp://` address, which the instance accepts only
    once it runs a `deploy/orbit` that lists it in `ADDITIONAL_REDIRECT_URLS` — before that, Google
    signs you in and the instance refuses the redirect.
+
+**Without a computer:** dispatch _Actions → Mobile preview → Run workflow_ on any branch. A GitHub
+runner serves that branch behind Expo's tunnel for an hour and prints an `exp://` address to open
+in Expo Go. It needs the `MOBILE_PREVIEW_INSTANCE` repository variable (the instance's domain) and
+the `EXPO_TOKEN` secret, because Expo's tunnel is tied to an Expo account.
 
 Hot reload is live: save a file and the phone updates. That loop is the reason this is Expo rather
 than SwiftUI — see the Decision Log in `T-261018-l19`.

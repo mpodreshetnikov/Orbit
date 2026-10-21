@@ -123,7 +123,7 @@ mobile-check: quality-lint-mobile quality-typecheck-mobile test-unit-mobile
 # (`just mobile-start orbit.example.com`) and its settings land in mobile/.env.local; after that a
 # bare `just mobile-start` reuses them. See mobile/README.md.
 mobile-start instance="":
-  {{ if instance != "" { "node scripts/just/mobile-instance.cjs " + instance } else { "true" } }}
+  node scripts/just/mobile-instance.cjs {{ quote(instance) }}
   npm --prefix mobile run start
 
 # Run Deno lint for Supabase Edge Functions.

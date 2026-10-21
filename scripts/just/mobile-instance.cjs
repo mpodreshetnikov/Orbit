@@ -4,13 +4,16 @@
  *
  * Asks the instance for its public settings (`/.well-known/orbit-instance`) and writes them to
  * `mobile/.env.local`, which Expo reads when the dev server starts. Run by `just mobile-start
- * <domain>`; once the file exists, a bare `just mobile-start` reuses it.
+ * <domain>`; once the file exists, a bare `just mobile-start` reuses it, and this only checks that it
+ * is there.
  */
 
 const fs = require("fs");
 const path = require("path");
 
 const ENV_FILE = path.join(__dirname, "..", "..", "mobile", ".env.local");
+// Covers the connection, the headers and the body: an instance that stalls must not hang the start.
+const TIMEOUT_MS = 15000;
 
 /** Accept `orbit.example.com` or `https://orbit.example.com[/]`, and return the bare origin. */
 function instanceOrigin(input) {
@@ -44,12 +47,23 @@ function envFileFor(settings) {
 }
 
 async function main() {
+  if (!process.argv[2] && fs.existsSync(ENV_FILE)) return;
   const origin = instanceOrigin(process.argv[2]);
-  const response = await fetch(`${origin}/.well-known/orbit-instance`);
-  if (!response.ok) {
-    throw new Error(`${origin} answered ${response.status}; is it an Orbit instance?`);
+  const signal = AbortSignal.timeout(TIMEOUT_MS);
+  let settings;
+  try {
+    const response = await fetch(`${origin}/.well-known/orbit-instance`, { signal });
+    if (!response.ok) {
+      throw new Error(`${origin} answered ${response.status}; is it an Orbit instance?`);
+    }
+    settings = await response.json();
+  } catch (error) {
+    if (error.name === "TimeoutError") {
+      throw new Error(`${origin} did not answer within ${TIMEOUT_MS / 1000} seconds.`);
+    }
+    throw error;
   }
-  fs.writeFileSync(ENV_FILE, envFileFor(await response.json()));
+  fs.writeFileSync(ENV_FILE, envFileFor(settings));
   console.log(`mobile/.env.local now points at ${origin}.`);
 }
 

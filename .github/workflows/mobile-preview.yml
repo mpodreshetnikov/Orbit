@@ -14,8 +14,6 @@
 name: Mobile preview
 
 on:
-  push:
-    branches: [claude/project-thread-bljfod]
   workflow_dispatch:
     inputs:
       minutes:
@@ -29,6 +27,9 @@ on:
 
 permissions:
   contents: read
+  # The address is published as a commit status: job logs and summaries are only readable once the
+  # job ends, and this job's whole point is the time before it ends.
+  statuses: write
 
 concurrency:
   group: mobile-preview
@@ -52,8 +53,10 @@ jobs:
         env:
           INSTANCE: ${{ inputs.instance || vars.MOBILE_PREVIEW_INSTANCE }}
         run: |
-          printf 'EXPO_PUBLIC_SUPABASE_URL=https://example.com\nEXPO_PUBLIC_SUPABASE_ANON_KEY=x\n' > mobile/.env.local
+          [[ -n "$INSTANCE" ]] || { echo "::error::Set the MOBILE_PREVIEW_INSTANCE repository variable (the instance's domain), or pass the instance input."; exit 1; }
+          node scripts/just/mobile-instance.cjs "$INSTANCE"
       - name: Start the dev server behind a tunnel
+        id: serve
         working-directory: mobile
         env:
           CI: "1"
@@ -83,11 +86,24 @@ jobs:
             echo "[$url]($url)"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice title=Open in Expo Go::$url"
+      - name: Publish the address on the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.serve.outputs.url }}
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          minutes="${MINUTES:-60}"
+          (( minutes > 180 )) && minutes=180
+          until="$(date -u -d "+$minutes minutes" +%H:%M)"
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state=success -f context="Mobile preview" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            -f description="$URL until $until UTC" > /dev/null
       - name: Keep serving
         env:
           MINUTES: ${{ inputs.minutes }}
         run: |
-          minutes="${MINUTES:-10}"
+          minutes="${MINUTES:-60}"
           (( minutes > 180 )) && minutes=180
           echo "Serving for $minutes minutes. Cancel the run to stop sooner."
           sleep $(( minutes * 60 ))
