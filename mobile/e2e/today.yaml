@@ -7,12 +7,15 @@ name: Сегодня
 - tapOn:
     text: "Open"
     optional: true
+# Expo Go lays a tour of its developer menu over the app on its first launch, and nothing under
+# it is visible to Maestro until it is closed: wait for whichever comes first.
 - extendedWaitUntil:
-    visible: "Vitamin D3"
+    visible: "Vitamin D3|Continue"
     timeout: 600000
-# Expo Go's first-run tour of its developer menu, laid over the app once it has loaded.
 - tapOn:
     text: "Continue"
     optional: true
-- assertNotVisible: "This is the developer menu.*"
+- extendedWaitUntil:
+    visible: "Vitamin D3"
+    timeout: 30000
 - takeScreenshot: today-01-day
