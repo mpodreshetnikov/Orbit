@@ -89,11 +89,11 @@ async function findByName(deps: ProposalMaterializationDeps, name: string): Prom
  * unverified in some *other* draft with a newer date -- without it, approving even an `active`
  * proposal would pick that unrelated row up and take the condition off the active chart.
  */
-async function recomputeCurrentStatus(
-  deps: ProposalMaterializationDeps,
+export async function recomputeConditionCurrentStatus(
+  supabase: SupabaseClient,
   conditionId: string,
 ): Promise<void> {
-  const { data, error } = await deps.supabase
+  const { data, error } = await supabase
     .from("condition_records")
     .select("status_in_record, medical_records!inner(record_date)")
     .eq("condition_id", conditionId)
@@ -106,7 +106,7 @@ async function recomputeCurrentStatus(
   const status = (data as { status_in_record?: string } | null)?.status_in_record;
   if (!status) return;
 
-  const { error: updateError } = await deps.supabase
+  const { error: updateError } = await supabase
     .from("conditions")
     .update({ current_status: status })
     .eq("id", conditionId);
@@ -197,7 +197,7 @@ export async function materializeConditionProposals(
     if (error) throw new ProposalMaterializationError(error.message);
 
     // The reused or created condition now has a newer mention; its status follows from it.
-    await recomputeCurrentStatus(deps, conditionId);
+    await recomputeConditionCurrentStatus(deps.supabase, conditionId);
 
     materialized += 1;
   }

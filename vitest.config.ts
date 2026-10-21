@@ -30,6 +30,15 @@ const mobileAlias = [
     find: /^@\//,
     replacement: `${path.join(rootDir, "mobile", "src")}${path.sep}`,
   },
+  // The web app's pure modules the client shares, as `mobile/tsconfig.json` maps them.
+  {
+    find: /^@orbit-types\//,
+    replacement: `${path.join(rootDir, "src", "types")}${path.sep}`,
+  },
+  {
+    find: /^@orbit-messages\//,
+    replacement: `${path.join(rootDir, "src", "messages")}${path.sep}`,
+  },
 ];
 
 const isCi = process.env.CI === "true" || process.env.CI === "1";

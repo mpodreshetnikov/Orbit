@@ -2,11 +2,13 @@ import * as Linking from "expo-linking";
 import { Redirect } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { View } from "react-native";
+import { Button, Text } from "@/components/ui";
+import { t } from "@/lib/i18n";
 import { parseOAuthCallback } from "@/lib/oauth-callback";
 import { useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
-import { theme } from "@/theme";
+import { space, usePalette } from "@/theme";
 
 /**
  * Sign in with Google, the way the web app does — it is the only way an Orbit instance lets anyone
@@ -19,6 +21,7 @@ import { theme } from "@/theme";
  * minted here by exchanging it.
  */
 export default function SignIn() {
+  const palette = usePalette();
   const { session } = useSession();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,43 +64,29 @@ export default function SignIn() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.form}>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={() => void submit()}
-          style={({ pressed }) => [
-            styles.button,
-            busy && styles.buttonDisabled,
-            pressed && styles.buttonPressed,
-          ]}
-        >
-          {busy ? (
-            <ActivityIndicator color={theme.color.background} />
-          ) : (
-            <Text style={styles.buttonLabel}>Войти через Google</Text>
-          )}
-        </Pressable>
+    <View
+      style={{
+        flex: 1,
+        justifyContent: "center",
+        padding: space.xl,
+        gap: space.xl,
+        backgroundColor: palette.background,
+      }}
+    >
+      <View style={{ gap: space.xs }}>
+        <Text size="xl" weight="semibold">
+          {t("auth.welcome")}
+        </Text>
+        <Text size="sm" tone="mutedForeground">
+          {t("auth.subtitle")}
+        </Text>
       </View>
+      {error ? (
+        <Text size="sm" tone="destructive">
+          {error}
+        </Text>
+      ) : null}
+      <Button label={t("auth.signInWithGoogle")} busy={busy} onPress={() => void submit()} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", backgroundColor: theme.color.background },
-  form: { padding: theme.space.lg, gap: theme.space.md },
-  error: { color: theme.color.danger, fontSize: 15 },
-  button: {
-    backgroundColor: theme.color.accent,
-    borderRadius: theme.radius,
-    paddingVertical: theme.space.md,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 52,
-  },
-  buttonDisabled: { opacity: 0.4 },
-  buttonPressed: { opacity: 0.85 },
-  buttonLabel: { color: theme.color.background, fontSize: 17, fontWeight: "600" },
-});

@@ -1,7 +1,6 @@
 import { Redirect } from "expo-router";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { Placeholder } from "@/components/ui";
 import { useSession } from "@/lib/session";
-import { theme } from "@/theme";
 
 /**
  * Where a cold start lands.
@@ -14,21 +13,8 @@ export default function Index() {
   const { session } = useSession();
 
   if (session === undefined) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator color={theme.color.accent} />
-      </View>
-    );
+    return <Placeholder busy />;
   }
 
   return <Redirect href={session ? "/today" : "/sign-in"} />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.color.background,
-  },
-});
