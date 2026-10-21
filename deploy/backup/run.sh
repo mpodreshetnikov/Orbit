@@ -109,7 +109,20 @@ test_alert() {
   esac
 }
 
-ping_ok() { [[ -z "${BACKUP_HEALTHCHECK_URL:-}" ]] || curl -fsS -m 20 -o /dev/null "$BACKUP_HEALTHCHECK_URL" || true; }
+# A ping that does not arrive looks, from the monitor's side, exactly like a backup that did not
+# run: say so here, where doctor and `deploy/orbit logs backup` show it. A few tries, because the
+# monitor raises its alarm only a day later.
+ping_ok() {
+  [[ -n "${BACKUP_HEALTHCHECK_URL:-}" ]] || return 0
+  local try code
+  for try in 1 2 3; do
+    code=0
+    curl -fsS -m 20 -o /dev/null "$BACKUP_HEALTHCHECK_URL" 2>/dev/null || code=$?
+    ((code == 0)) && return 0
+    ((try < 3)) && sleep 60
+  done
+  log "ALERT the heartbeat ping did not arrive (curl exit $code): the monitor will report a missed backup. deploy/orbit doctor shows whether this server reaches it"
+}
 
 # Runs a job; on failure records it and alerts, but never kills the daemon. Jobs take turns: the
 # daemon's schedule and a `deploy/orbit backup now` must not write to one repository at once.
