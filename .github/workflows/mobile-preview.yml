@@ -62,10 +62,10 @@ jobs:
           CI: "1"
           # Leave mobile/tsconfig.json as committed rather than letting Expo rewrite it on start.
           EXPO_NO_TYPESCRIPT_SETUP: "1"
-          # Expo's signed tunnel is tied to an Expo account; this is the token the owner created.
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        # No EXPO_TOKEN: on SDK 57 the tunnel is ngrok's, which refuses an Expo robot token ("Cannot use
+        # ngrok with a robot user") and opens an anonymous tunnel without one. Expo's own signed tunnel
+        # (SDK 58 on) needs the EXPO_TOKEN secret back in this env.
         run: |
-          [[ -n "$EXPO_TOKEN" ]] || { echo "::error::The EXPO_TOKEN repository secret is not set."; exit 1; }
           nohup npx expo start --tunnel > "$RUNNER_TEMP/expo.log" 2>&1 &
           for _ in $(seq 1 90); do
             # Expo prints the tunnel's address ("Metro waiting on exp://….exp.direct" through ngrok on
