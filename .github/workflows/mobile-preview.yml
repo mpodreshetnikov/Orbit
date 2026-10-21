@@ -47,9 +47,7 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - name: Install mobile dependencies
-        run: |
-          npm --prefix mobile ci
-          npm install --global @expo/ngrok@^4.1.0
+        run: npm --prefix mobile ci
       - name: Point the client at the instance
         env:
           INSTANCE: ${{ inputs.instance || vars.MOBILE_PREVIEW_INSTANCE }}
@@ -59,17 +57,21 @@ jobs:
         working-directory: mobile
         env:
           CI: "1"
+          # Expo's signed tunnel is tied to an Expo account; this is the token the owner created.
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
+          [[ -n "$EXPO_TOKEN" ]] || { echo "::error::The EXPO_TOKEN repository secret is not set."; exit 1; }
           nohup npx expo start --tunnel > "$RUNNER_TEMP/expo.log" 2>&1 &
           for _ in $(seq 1 90); do
-            url="$(grep -oE 'exp://[A-Za-z0-9.-]+\.exp\.direct[^ ]*' "$RUNNER_TEMP/expo.log" | head -1 || true)"
+            url="$(grep -oE 'Metro waiting on exp://[^ ]+' "$RUNNER_TEMP/expo.log" | head -1 | sed 's/^Metro waiting on //' || true)"
             [[ -n "$url" ]] && break
+            grep -q 'CommandError' "$RUNNER_TEMP/expo.log" && break
             sleep 2
           done
           cat "$RUNNER_TEMP/expo.log"
           [[ -n "$url" ]] || { echo "::error::The tunnel did not come up; the log is above."; exit 1; }
           # Warm the bundle so the first open on the phone does not wait for Metro to compile it.
-          curl -sf -o /dev/null "http://localhost:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=true" || true
+          curl -sf --max-time 300 -o /dev/null "http://localhost:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=true" || true
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
             echo "### Open in Expo Go"
