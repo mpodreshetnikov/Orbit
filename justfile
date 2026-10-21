@@ -119,9 +119,11 @@ mobile-install:
 # Full local gate for the mobile client. Run this after changing anything under `mobile/`.
 mobile-check: quality-lint-mobile quality-typecheck-mobile test-unit-mobile
 
-# Start the mobile client's dev server. Open the QR code in Expo Go on a phone; see mobile/README.md
-# for the two environment variables it needs.
-mobile-start:
+# Start the mobile client's dev server. Open the QR code in Expo Go on a phone. Name the instance once
+# (`just mobile-start orbit.example.com`) and its settings land in mobile/.env.local; after that a
+# bare `just mobile-start` reuses them. See mobile/README.md.
+mobile-start instance="":
+  node scripts/just/mobile-instance.cjs {{ quote(instance) }}
   npm --prefix mobile run start
 
 # Run Deno lint for Supabase Edge Functions.
