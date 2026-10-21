@@ -127,6 +127,14 @@ describe("build-lib", () => {
       });
     });
 
+    it("leaves the Chrome self-updater's permission out", () => {
+      const manifest = toFirefoxManifest(
+        { ...chromeManifest, permissions: ["storage", "nativeMessaging"] },
+        { geckoId: "orbit@example.com" },
+      );
+      expect(manifest.permissions).toEqual(["storage"]);
+    });
+
     it("names the update URL only when there is one", () => {
       const manifest = toFirefoxManifest(chromeManifest, {
         geckoId: "orbit@example.com",

@@ -126,6 +126,15 @@ export function toFirefoxMatchPattern(pattern: string): string {
 }
 
 /**
+ * Permissions only the Chrome build uses. `nativeMessaging` belongs to the Chrome self-updater,
+ * which a signed Firefox add-on does not need: Firefox updates it from `update_url`.
+ */
+export const CHROME_ONLY_PERMISSIONS = ["nativeMessaging"];
+
+/** Files of the Chrome dist that stay out of the Firefox package, for the same reason. */
+export const CHROME_ONLY_DIST_ENTRIES = ["updater"];
+
+/**
  * The Chrome manifest rewritten for Firefox. Firefox's Manifest V3 does not run a background
  * service worker, so the same `background.js` runs as an event page through `background.scripts`.
  * `key` is Chrome's way to pin the extension id and means nothing to Firefox, whose id is
@@ -136,7 +145,14 @@ export function toFirefoxManifest(
   manifest: Record<string, unknown>,
   options: { geckoId: string; updateUrl?: string },
 ): Record<string, unknown> {
-  const { key: _key, background, host_permissions, content_scripts, ...rest } = manifest;
+  const {
+    key: _key,
+    background,
+    host_permissions,
+    content_scripts,
+    permissions,
+    ...rest
+  } = manifest;
   const chromeBackground = (background ?? {}) as Record<string, unknown>;
   const script = chromeBackground.service_worker;
   if (typeof script !== "string" || !script) {
@@ -157,6 +173,13 @@ export function toFirefoxManifest(
 
   return {
     ...rest,
+    ...(permissions
+      ? {
+          permissions: (permissions as string[]).filter(
+            (permission) => !CHROME_ONLY_PERMISSIONS.includes(permission),
+          ),
+        }
+      : {}),
     host_permissions: patterns(host_permissions),
     content_scripts: ((content_scripts as Record<string, unknown>[] | undefined) ?? []).map(
       (entry) => ({ ...entry, matches: patterns(entry.matches) }),

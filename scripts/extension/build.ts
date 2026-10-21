@@ -7,6 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import {
+  CHROME_ONLY_DIST_ENTRIES,
   fileExists,
   DEFAULT_GECKO_ID,
   originToPattern,
@@ -190,6 +191,9 @@ async function writeFirefoxDist(
 ): Promise<void> {
   await fs.rm(firefoxDistDir, { recursive: true, force: true });
   await fs.cp(distDir, firefoxDistDir, { recursive: true });
+  for (const entry of CHROME_ONLY_DIST_ENTRIES) {
+    await fs.rm(path.join(firefoxDistDir, entry), { recursive: true, force: true });
+  }
   const manifest = toFirefoxManifest(chromeManifest, {
     geckoId: env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID,
     updateUrl: env.EXTENSION_FIREFOX_UPDATE_URL?.trim() || undefined,
