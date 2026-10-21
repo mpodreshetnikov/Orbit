@@ -258,13 +258,15 @@ function run(raw, input, repoRoot = REPO_ROOT, env = process.env) {
   for (const hook of hooksFor(settings, event, input)) {
     const result = spawnHook(hook, raw, input, repoRoot, env);
     if (result === null) continue;
-    const failed = result.error !== undefined || result.status !== 0;
+    // A hook that exits without reading its input leaves the write to its stdin with EPIPE; that
+    // is the hook's choice, not a failure, and its exit status still stands.
+    const error = result.error?.code === "EPIPE" ? undefined : result.error;
+    const failed = error !== undefined || result.status !== 0;
     if (result.status === 2 || (failed && hook.onFailure === "block")) {
       const answer = answerOf(result.stdout);
       if (answer && !answer.plain) answers.push(answer);
       blocks.push(
-        result.stderr ||
-          `${hook.command}: ${result.error ? result.error.message : `exited ${result.status}`}`,
+        result.stderr || `${hook.command}: ${error ? error.message : `exited ${result.status}`}`,
       );
       continue;
     }
