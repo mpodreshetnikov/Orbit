@@ -48,7 +48,10 @@ load_env() {
   SITE_URL="$ORBIT_PUBLIC_URL"
   SUPABASE_PUBLIC_URL="$ORBIT_PUBLIC_URL"
   API_EXTERNAL_URL="$ORBIT_PUBLIC_URL/auth/v1"
-  ADDITIONAL_REDIRECT_URLS="$ORBIT_PUBLIC_URL/**"
+  # orbit:// and exp:// are where the iOS client's Google sign-in returns (mobile/, through Expo Go
+  # for exp://). Both sign in with PKCE, so a code sent to another app on those schemes cannot be
+  # exchanged without the verifier the requesting app kept.
+  ADDITIONAL_REDIRECT_URLS="$ORBIT_PUBLIC_URL/**,orbit://**,exp://**"
   ORBIT_VERSION="$(git -C "$ORBIT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
   # The app switches MCP on only for the exact value "1" (src/lib/mcp/config.ts).
   case "${MCP_SERVER_ENABLED:-false}" in

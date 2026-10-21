@@ -2968,6 +2968,10 @@ export type Database = {
         Args: { p_dose_event_id: string; p_note?: string; p_taken_at?: string }
         Returns: undefined
       }
+      med_regimen_search_text: {
+        Args: { r: Database["public"]["Tables"]["med_regimens"]["Row"] }
+        Returns: string
+      }
       money_apply_category_rule_pipeline: {
         Args: {
           p_force_overwrite_locked?: boolean

@@ -8,7 +8,7 @@ Use these command IDs in plans, PRs, and handoffs:
 
 - Source of truth for all available commands and descriptions: `just --list --unsorted`
 - `commands-list`: `just commands-list`
-- `hooks-install`: `just git-hooks-install` (enable repository git hooks: pre-push secrets preflight and reviewable-size gate, pre-commit advisory size warning)
+- `hooks-install`: `just git-hooks-install` (enable repository git hooks: pre-push secrets preflight and reviewable-size gate, pre-commit advisory size warning and unclaimed-task report)
 - `hooks-status`: `just git-hooks-status`
 - `install`: `just install-dependencies`
 - `dev-ready`: `just dev-ready-local` (long-running: run in background when invoked by an agent—see below)
@@ -26,6 +26,10 @@ Use these command IDs in plans, PRs, and handoffs:
 - `format-check`: `just quality-format-check`
 - `format-write`: `just quality-format-write`
 - `test`: `just quality-smoke-build` (smoke/integration build gate)
+- `mobile-install`: `just mobile-install` (install the native iOS client's own locked dependencies; its tree is separate from the web app's)
+- `mobile-start`: `just mobile-start` (long-running: start the Expo dev server and open it in Expo Go on a phone--see `mobile/README.md` and the background note below)
+- `mobile-check`: `just mobile-check` (lint, typecheck and unit tests for the native iOS client; **not** covered by `check`)
+- `test-unit-mobile`: `just test-unit-mobile`
 - `ios-sync`: `just ios-sync` (copy web assets and native plugins into `ios/`; run after changing `capacitor.config.ts` or adding a Capacitor plugin)
 - `ios-open`: `just ios-open` (open the iOS app shell in Xcode; macOS only)
 - `test-unit-web`: `just test-unit-web`
@@ -76,7 +80,7 @@ For less common and environment-specific commands (deploy, targeted DB ops, sing
 Commands such as `dev-ready` start servers and do not exit until the stack is stopped. If an agent runs them in the foreground, the agent will wait indefinitely. **Run these in the background** so the agent does not block:
 
 - **How:** Start the command with background execution (e.g. run the terminal command with your environment’s “run in background” / “don’t wait for exit” option, such as `is_background: true`). The stack will keep running; use `dev-stop` when teardown is needed.
-- **Which:** `dev-ready`, `dev` (when starting the stack).
+- **Which:** `dev-ready`, `dev` (when starting the stack), `mobile-start`.
 - **If background execution is disabled:** Do not start the stack from the agent. Ask the user to run `dev-ready` or `dev` in a separate terminal before tasks that need the stack, and to run `dev-stop` in that terminal when done.
 
 ### DB Command Guidance
@@ -111,4 +115,4 @@ When they are absent, the registry is simply unavailable in this checkout: say s
 
 ### No Task, No Work
 
-**Nothing in this repository is changed until a task covering it exists in the registry and is `in-progress`** — the one rule from the registry that gates work in this tree, so it is stated here rather than only linked. Its scope, its exception for trivial changes, and the two gates on creating that task (a duplicate search, and the user's confirmation) are canonical in `docs/tasks/README.md` under `No Work Without A Task` and `Creating A Task`; the `task-registry` skill carries the applied workflow. The claim is made with `just tasks-claim <id>`, which publishes it to the registry's `main` and arms `.git/current-task` here; a `PostToolUse` hook (`scripts/just/task-claim-hook.cjs`) reads that marker after every edit outside `docs/tasks/` and reports an edit no in-progress task stands behind (ADR-260902-i6t in the registry). When the registry is not linked into this checkout the gate cannot be satisfied — the paragraph above applies, and the hook says so.
+**Nothing in this repository is changed until a task covering it exists in the registry and is `in-progress`** — the one rule from the registry that gates work in this tree, so it is stated here rather than only linked. Its scope, its exception for trivial changes, and the two gates on creating that task (a duplicate search, and the user's confirmation) are canonical in `docs/tasks/README.md` under `No Work Without A Task` and `Creating A Task`; the `task-registry` skill carries the applied workflow. The claim is made with `just tasks-claim <id>`, which publishes it to the registry's `main` and arms `.git/current-task` here; a `PostToolUse` hook (`scripts/just/task-claim-hook.cjs`) reads that marker after every edit outside `docs/tasks/` and reports an edit no in-progress task stands behind (ADR-260902-i6t in the registry). When the registry is not linked into this checkout the gate cannot be satisfied — the paragraph above applies, and the hook says so. A cloud session holding both repositories loads no hooks from this repository on its own; the environment's setup script routes them through `scripts/just/project-hooks-bridge.cjs`, and `node scripts/just/agent-env-check.cjs` refuses a cloud session where it does not — `CLAUDE.md` and `tasks-claim` both stop on that refusal. Setup and the reasoning: [`docs/AGENT_ENVIRONMENT.md`](./docs/AGENT_ENVIRONMENT.md). The claim check also runs at commit time from `.githooks/pre-commit` (`just git-hooks-install`), for whatever commits here without Claude Code's hooks; it reports and never refuses.

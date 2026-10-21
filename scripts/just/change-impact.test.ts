@@ -8,6 +8,7 @@ const { classifyChangedFiles } = require("./change-impact.cjs") as {
     dbImpact: boolean;
     functionsImpact: boolean;
     fixturesImpact: boolean;
+    mobileImpact: boolean;
     docsOnly: boolean;
   };
 };
@@ -17,6 +18,34 @@ describe("change-impact", () => {
     expect(classifyChangedFiles(["scripts/extension/build.ts"]).extensionImpact).toBe(true);
     expect(classifyChangedFiles(["vite.config.extension.ts"]).extensionImpact).toBe(true);
     expect(classifyChangedFiles(["browserExtension/src/background.ts"]).extensionImpact).toBe(true);
+  });
+
+  it("treats the mobile client as mobile impact and nothing else", () => {
+    const impact = classifyChangedFiles(["mobile/src/app/today.tsx"]);
+    expect(impact.mobileImpact).toBe(true);
+    // The mobile app installs and typechecks on its own, so a change confined to it must not pull
+    // in the web, database or extension lanes.
+    expect(impact.webImpact).toBe(false);
+    expect(impact.dbImpact).toBe(false);
+    expect(impact.extensionImpact).toBe(false);
+  });
+
+  it("does not claim mobile impact for the web app or the Capacitor shell", () => {
+    expect(classifyChangedFiles(["src/app/page.tsx"]).mobileImpact).toBe(false);
+    expect(classifyChangedFiles(["native/ios/capacitor-config.ts"]).mobileImpact).toBe(false);
+  });
+
+  it("treats the generated database types as mobile impact as well as database impact", () => {
+    // `mobile/tsconfig.json` maps `@db` onto this file and the root typecheck excludes `mobile`, so
+    // a renamed column or enum value would otherwise regenerate the types and merge without the
+    // client ever being compiled against them.
+    const impact = classifyChangedFiles(["supabase/db/database.types.ts"]);
+    expect(impact.mobileImpact).toBe(true);
+    expect(impact.dbImpact).toBe(true);
+  });
+
+  it("does not claim mobile impact for other files under supabase/db", () => {
+    expect(classifyChangedFiles(["supabase/db/schema.snapshot.sql"]).mobileImpact).toBe(false);
   });
 
   it("treats the extraction corpus and its harness as fixture impact", () => {
