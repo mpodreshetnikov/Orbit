@@ -10,7 +10,7 @@ name: Сегодня
 # Expo Go lays a tour of its developer menu over the app on its first launch, and nothing under
 # it is visible to Maestro until it is closed: wait for whichever comes first.
 - extendedWaitUntil:
-    visible: "Vitamin D3|Continue"
+    visible: "Vitamin D3.*|Continue"
     timeout: 600000
 - tapOn:
     text: "Continue"
@@ -19,7 +19,8 @@ name: Сегодня
 - tapOn:
     text: "Close"
     optional: true
+# A dose row reads as one element, "Vitamin D3, Просрочено · …": Maestro matches the whole text.
 - extendedWaitUntil:
-    visible: "Vitamin D3"
+    visible: "Vitamin D3.*"
     timeout: 30000
 - takeScreenshot: today-01-day
