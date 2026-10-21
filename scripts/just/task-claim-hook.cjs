@@ -30,15 +30,12 @@
  * command that failed (`PostToolUseFailure`): a failed command has often written before it failed.
  * A shell command that changed nothing stays silent.
  *
- * It also runs as a git `pre-commit` hook (`--git`, from `.githooks/pre-commit`), which is
- * the one end of the gate a session that never loads this repository's `.claude/settings.json` still
- * meets. A cloud session holding several repositories starts above the clones and reads no hooks from
- * any of them, so for the project threads that do most of the work the `PostToolUse` half never runs
- * (T-260902-jxe). Git runs its hooks whatever started it. The verdict is the same; it judges the
- * staged paths outside `docs/tasks/`, goes to stderr, where the command's output carries it back to
- * the agent, is not throttled, and never refuses the commit. Git finds the hook through
- * `core.hooksPath`: `just git-hooks-install` sets it for a checkout, and a cloud environment's setup script
- * sets it globally (see AGENTS.md).
+ * A session that did not load this repository's `.claude/settings.json` -- a cloud session holding
+ * several repositories starts above the clones -- reaches these hooks through
+ * `project-hooks-bridge.cjs` (T-260902-jxe). The check also runs as a git `pre-commit` hook (`--git`,
+ * from `.githooks/pre-commit`), for whatever commits here without Claude Code's hooks. The verdict
+ * is the same; it judges the staged paths outside `docs/tasks/`, goes to stderr, where the command's
+ * output carries it back, is not throttled, and never refuses the commit.
  *
  * Reported once per verdict per REPORT_INTERVAL_MS, tracked in .git/task-claim-hook-state, so a
  * fresh session hears it on its first code edit and then is left alone until the situation changes.
