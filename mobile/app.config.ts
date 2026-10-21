@@ -24,10 +24,9 @@ const config: ExpoConfig = {
   version: "0.1.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
-  // Light only, declared honestly. `automatic` would let a dark-mode phone pick light status
-  // bar content, and every background in `src/theme.ts` is still white — white on white. A
-  // dark palette is worth having and worth seeing on a device before it ships.
-  userInterfaceStyle: "light",
+  // Follows the phone. `src/theme.ts` carries the web app's dark palette as well as its light one,
+  // and the navigation theme and status bar switch with it in `src/app/_layout.tsx`.
+  userInterfaceStyle: "automatic",
   plugins: ["expo-router", "expo-web-browser"],
   experiments: {
     typedRoutes: true,

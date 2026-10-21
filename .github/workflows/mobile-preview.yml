@@ -62,16 +62,24 @@ jobs:
           CI: "1"
           # Leave mobile/tsconfig.json as committed rather than letting Expo rewrite it on start.
           EXPO_NO_TYPESCRIPT_SETUP: "1"
-          # Expo's signed tunnel is tied to an Expo account; this is the token the owner created.
+          # Expo Go opens a tunnelled project only when the CLI serving it is signed in to the same Expo
+          # account as the phone. A personal access token, not a robot one: on SDK 57 the tunnel is
+          # ngrok's, which refuses a robot user ("Cannot use ngrok with a robot user").
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           [[ -n "$EXPO_TOKEN" ]] || { echo "::error::The EXPO_TOKEN repository secret is not set."; exit 1; }
           nohup npx expo start --tunnel > "$RUNNER_TEMP/expo.log" 2>&1 &
           for _ in $(seq 1 90); do
-            # Expo prints the tunnel's web address ("Waiting on http://….on.expo.app"); Expo Go opens the
-            # same host on its own scheme.
-            url="$(grep -oE 'Waiting on [a-z]+://[^ ]+' "$RUNNER_TEMP/expo.log" | head -1 | sed -E 's#^Waiting on [a-z]+://#exp://#' || true)"
+            # Expo's own tunnel prints its address ("Waiting on http://….on.expo.app", SDK 58 on); Expo
+            # Go opens the same host on its own scheme. The local address is skipped.
+            url="$(grep -oiE 'waiting on [a-z]+://[^ ]+' "$RUNNER_TEMP/expo.log" | grep -viE '://(localhost|127\.|[0-9.]+:)' | head -1 | sed -E 's#^[Ww]aiting on [a-z]+://#exp://#' || true)"
             [[ -n "$url" ]] && break
+            # Through ngrok (SDK 57) it prints only "Tunnel ready." and the local address in CI mode; the
+            # ngrok agent's own API names the public host.
+            if grep -q 'Tunnel ready' "$RUNNER_TEMP/expo.log"; then
+              host="$(curl -sf --max-time 5 http://127.0.0.1:4040/api/tunnels | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{try{const t=JSON.parse(s).tunnels.find((x)=>x.public_url.startsWith("https://"))??JSON.parse(s).tunnels[0];process.stdout.write(new URL(t.public_url).host)}catch{}})' || true)"
+              [[ -n "$host" ]] && { url="exp://$host"; break; }
+            fi
             grep -q 'CommandError' "$RUNNER_TEMP/expo.log" && break
             sleep 2
           done
@@ -95,10 +103,19 @@ jobs:
           minutes="${MINUTES:-60}"
           (( minutes > 180 )) && minutes=180
           until="$(date -u -d "+$minutes minutes" +%H:%M)"
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -f state=success -f context="Mobile preview" \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            -f description="$URL until $until UTC" > /dev/null
+          # The status is a convenience: the address is already in the run's summary. A failed
+          # post (the API once answered with an empty body) is retried, and then only warned about,
+          # so it never takes down a tunnel that is up and serving.
+          for attempt in 1 2 3; do
+            if gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state=success -f context="Mobile preview" \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              -f description="$URL until $until UTC" > /dev/null; then
+              exit 0
+            fi
+            sleep $(( attempt * 5 ))
+          done
+          echo "::warning title=Mobile preview::Could not publish the address on the commit; it is in the run summary."
       - name: Keep serving
         env:
           MINUTES: ${{ inputs.minutes }}

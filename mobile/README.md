@@ -12,6 +12,11 @@ doses for one person.
 No Apple Developer account, no Mac and no build are needed for this loop — Expo Go runs the
 JavaScript bundle from your machine.
 
+Expo Go from the App Store runs one Expo SDK, and it reaches the store weeks after that SDK is
+published on npm. Stay on the SDK the store's Expo Go runs (57 as of 2026-10-21; its App Store
+release notes name it), not on `expo@latest`: a newer project opens only to "Project is incompatible
+with this version of Expo Go".
+
 1. Install **Expo Go** from the App Store on the iPhone, and put the phone on the same network as
    the computer.
 2. Install the dependencies once:
@@ -46,9 +51,11 @@ JavaScript bundle from your machine.
    signs you in and the instance refuses the redirect.
 
 **Without a computer:** dispatch _Actions → Mobile preview → Run workflow_ on any branch. A GitHub
-runner serves that branch behind Expo's tunnel for an hour and prints an `exp://` address to open
-in Expo Go. It needs the `MOBILE_PREVIEW_INSTANCE` repository variable (the instance's domain) and
-the `EXPO_TOKEN` secret, because Expo's tunnel is tied to an Expo account.
+runner serves that branch behind an anonymous ngrok tunnel for an hour and posts an `exp://` address
+to open in Expo Go. It needs the `MOBILE_PREVIEW_INSTANCE` repository variable (the instance's
+domain) and the `EXPO_TOKEN` secret: a personal access token, not a robot one, for the Expo account
+the phone's Expo Go is signed in to. Expo Go refuses a tunnelled project served anonymously, and
+ngrok refuses a robot user.
 
 Hot reload is live: save a file and the phone updates. That loop is the reason this is Expo rather
 than SwiftUI — see the Decision Log in `T-261018-l19`.
