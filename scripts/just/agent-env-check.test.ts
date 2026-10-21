@@ -13,6 +13,10 @@ const { check, missingEvents } = envCheck as unknown as {
     exists?: (file: string) => boolean;
   }) => { ok: boolean; message: string };
   missingEvents: (project: unknown, user: unknown, exists?: (file: string) => boolean) => string[];
+  unbridgeableHooks: (project: unknown) => string[];
+};
+const { unbridgeableHooks } = envCheck as unknown as {
+  unbridgeableHooks: (p: unknown) => string[];
 };
 
 const ORBIT_ROOT = path.resolve(__dirname, "..", "..");
@@ -55,9 +59,43 @@ describe("which events are covered", () => {
     expect(missingEvents(project, null)).toEqual(["PostToolUse", "SessionStart"]);
   });
 
+  it("does not count a bridge that sees only some of the event's calls", () => {
+    const bridge = "node /x/scripts/just/project-hooks-bridge.cjs";
+    const limited = (group: object) => ({
+      hooks: { PostToolUse: [group], SessionStart: via(bridge) },
+    });
+    const hook = { type: "command", command: bridge };
+    expect(missingEvents(project, limited({ matcher: "Bash", hooks: [hook] }), () => true)).toEqual(
+      ["PostToolUse"],
+    );
+    expect(
+      missingEvents(project, limited({ hooks: [{ ...hook, if: "Bash(git *)" }] }), () => true),
+    ).toEqual(["PostToolUse"]);
+    expect(missingEvents(project, limited({ matcher: "*", hooks: [hook] }), () => true)).toEqual(
+      [],
+    );
+  });
+
   it("does not count some other hook on the event", () => {
     const user = { hooks: { PostToolUse: via("echo hi"), SessionStart: via("echo hi") } };
     expect(missingEvents(project, user, () => true)).toEqual(["PostToolUse", "SessionStart"]);
+  });
+});
+
+describe("what the bridge can run", () => {
+  it("names hooks that are not commands", () => {
+    expect(
+      unbridgeableHooks({
+        hooks: { Stop: [{ hooks: [{ type: "command", command: "x" }, { type: "prompt" }] }] },
+      }),
+    ).toEqual(["Stop: prompt hook"]);
+  });
+
+  it("finds none in this repository's settings, or they would be silent in cloud sessions", () => {
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(ORBIT_ROOT, ".claude", "settings.json"), "utf8"),
+    );
+    expect(unbridgeableHooks(settings)).toEqual([]);
   });
 });
 

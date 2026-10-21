@@ -5,8 +5,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as bridge from "./project-hooks-bridge.cjs";
 
-const { matches, passesIf } = bridge as unknown as {
+const { matches, mergeAnswers, passesIf } = bridge as unknown as {
   matches: (matcher: unknown, key: string) => boolean;
+  mergeAnswers: (event: string, answers: unknown[]) => unknown;
   passesIf: (rule: unknown, input: unknown) => boolean;
 };
 
@@ -65,6 +66,19 @@ describe("matching", () => {
     expect(matches("(", "Bash")).toBe(false);
   });
 
+  it("ranks decisions deny over defer over ask over allow", () => {
+    const decide = (...values: string[]) =>
+      (
+        mergeAnswers(
+          "PreToolUse",
+          values.map((permissionDecision) => ({ hookSpecificOutput: { permissionDecision } })),
+        ) as { hookSpecificOutput: { permissionDecision: string } }
+      ).hookSpecificOutput.permissionDecision;
+    expect(decide("allow", "defer")).toBe("defer");
+    expect(decide("defer", "ask")).toBe("defer");
+    expect(decide("defer", "deny")).toBe("deny");
+  });
+
   it("applies a handler's if filter, and runs nothing on one it cannot read", () => {
     const bash = (command: string) => ({ tool_name: "Bash", tool_input: { command } });
     const edit = (file: string) => ({ tool_name: "Edit", tool_input: { file_path: file } });
@@ -89,10 +103,92 @@ describe("the bridge", () => {
     });
     const out = runBridge(root, { hook_event_name: "PostToolUse", tool_name: "Write" });
     expect(out.status).toBe(0);
-    expect(out.context).toEqual({
-      hookEventName: "PostToolUse",
-      additionalContext: "one\n\nplain two",
+    // Plain stdout is context only on the events Claude Code reads it that way.
+    expect(out.context).toEqual({ hookEventName: "PostToolUse", additionalContext: "one" });
+  });
+
+  it("matches each event on its own field", () => {
+    const root = repo({
+      Notification: [
+        { matcher: "idle_prompt", hooks: [{ type: "command", command: say("idle") }] },
+      ],
+      PreCompact: [{ matcher: "manual", hooks: [{ type: "command", command: say("manual") }] }],
     });
+    expect(
+      runBridge(root, { hook_event_name: "Notification", notification_type: "idle_prompt" }).context
+        ?.additionalContext,
+    ).toBe("idle");
+    expect(runBridge(root, { hook_event_name: "PreCompact", trigger: "auto" }).context).toBeNull();
+  });
+
+  it("blocks when a fail-closed hook fails, and only then", () => {
+    const root = repo({
+      PreToolUse: [
+        { hooks: [{ type: "command", command: "exit 1", onFailure: "block" }] },
+        { hooks: [{ type: "command", command: "exit 1" }] },
+      ],
+    });
+    const out = runBridge(root, { hook_event_name: "PreToolUse", tool_name: "Bash" });
+    expect(out.status).toBe(2);
+    expect(out.stderr).toContain("exited 1");
+    const open = repo({ PreToolUse: [{ hooks: [{ type: "command", command: "exit 1" }] }] });
+    expect(runBridge(open, { hook_event_name: "PreToolUse", tool_name: "Bash" }).status).toBe(0);
+  });
+
+  it("keeps a blocking hook's JSON reason", () => {
+    const root = repo({
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: `echo '${JSON.stringify({ decision: "block", reason: "why" })}'; exit 2`,
+            },
+          ],
+        },
+      ],
+    });
+    const result = spawnSync(process.execPath, [BRIDGE], {
+      encoding: "utf8",
+      input: JSON.stringify({ hook_event_name: "Stop" }),
+      env: {
+        ...process.env,
+        PROJECT_HOOKS_BRIDGE_REPO_ROOT: root,
+        CLAUDE_PROJECT_DIR: "/home/user",
+      },
+    });
+    expect(result.status).toBe(2);
+    expect(JSON.parse(result.stdout)).toEqual({ decision: "block", reason: "why" });
+  });
+
+  it("runs an async hook in the background without waiting for it", () => {
+    const root = repo({
+      PostToolUse: [
+        {
+          hooks: [
+            { type: "command", async: true, command: 'sleep 1; cat > "$CLAUDE_PROJECT_DIR/late"' },
+          ],
+        },
+      ],
+    });
+    const started = Date.now();
+    const out = runBridge(root, { hook_event_name: "PostToolUse", tool_name: "Edit" });
+    expect(out).toMatchObject({ status: 0, context: null });
+    expect(Date.now() - started).toBeLessThan(900);
+    const late = path.join(root, "late");
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(late) && Date.now() < deadline) spawnSync("sleep", ["0.1"]);
+    expect(fs.readFileSync(late, "utf8")).toContain("PostToolUse");
+  });
+
+  it("runs hooks in the session's directory when it exists", () => {
+    const root = repo({ SessionStart: [{ hooks: [{ type: "command", command: "pwd" }] }] });
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "project-hooks-bridge-cwd-"));
+    temporaries.push(elsewhere);
+    const at = (cwd: string) =>
+      runBridge(root, { hook_event_name: "SessionStart", cwd }).context?.additionalContext;
+    expect(at(elsewhere)).toBe(fs.realpathSync(elsewhere));
+    expect(at("/no/such/dir")).toBe(fs.realpathSync(root));
   });
 
   it("hands each hook the input on stdin and this repository as CLAUDE_PROJECT_DIR", () => {
@@ -189,7 +285,8 @@ describe("the bridge", () => {
               command: process.execPath,
               args: [
                 "-e",
-                'process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:"exec"}}))',
+                "process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:process.argv[1]}}))",
+                "${CLAUDE_PROJECT_DIR}/exec",
               ],
             },
           ],
@@ -199,7 +296,7 @@ describe("the bridge", () => {
     expect(
       runBridge(root, { hook_event_name: "PostToolUse", tool_name: "Edit" }).context
         ?.additionalContext,
-    ).toBe("exec");
+    ).toBe(`${root}/exec`);
   });
 
   it("stays out of the way when the session already loaded this repository's hooks", () => {

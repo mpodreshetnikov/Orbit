@@ -26,7 +26,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const { spawnSync } = require("child_process");
+const os = require("os");
+const { spawn, spawnSync } = require("child_process");
 
 const REPO_ROOT = process.env.PROJECT_HOOKS_BRIDGE_REPO_ROOT
   ? path.resolve(process.env.PROJECT_HOOKS_BRIDGE_REPO_ROOT)
@@ -34,7 +35,24 @@ const REPO_ROOT = process.env.PROJECT_HOOKS_BRIDGE_REPO_ROOT
 // Claude Code's default for a command hook without `timeout`.
 const DEFAULT_TIMEOUT_S = 600;
 // The strongest of each structured decision wins when several hooks answer one event.
-const PERMISSION_RANK = { allow: 0, ask: 1, deny: 2 };
+const PERMISSION_RANK = { allow: 0, ask: 1, defer: 2, deny: 3 };
+// What each event's matcher is tested against; tool events use `tool_name`.
+const MATCH_FIELD = {
+  SessionStart: "source",
+  SessionEnd: "reason",
+  Notification: "notification_type",
+  SubagentStart: "agent_type",
+  SubagentStop: "agent_type",
+  PreCompact: "trigger",
+  PostCompact: "trigger",
+};
+// The events whose plain (non-JSON) stdout Claude Code adds to the context; elsewhere it only logs it.
+const PLAIN_STDOUT_IS_CONTEXT = new Set([
+  "UserPromptSubmit",
+  "UserPromptExpansion",
+  "SessionStart",
+  "PostModelSwitch",
+]);
 
 function samePath(a, b) {
   try {
@@ -44,11 +62,10 @@ function samePath(a, b) {
   }
 }
 
-/** What a matcher is tested against: the tool for tool events, the source for SessionStart. */
+/** What a matcher is tested against: the tool for tool events, the event's own field otherwise. */
 function matchKey(input) {
-  if (typeof input.tool_name === "string") return input.tool_name;
-  if (typeof input.source === "string") return input.source;
-  return "";
+  const field = MATCH_FIELD[input.hook_event_name] ?? "tool_name";
+  return typeof input[field] === "string" ? input[field] : "";
 }
 
 /**
@@ -109,16 +126,21 @@ function hooksFor(settings, event, input) {
     .filter((hook) => passesIf(hook.if, input));
 }
 
-/** One hook's answer as Claude Code reads it: its JSON object, or plain stdout as context. */
-function answerOf(stdout) {
+/**
+ * One hook's answer as Claude Code reads it: its JSON object, or plain stdout as context on the
+ * events that take it that way (on the others Claude Code only logs it).
+ */
+function answerOf(stdout, event) {
   const text = (stdout || "").trim();
   if (!text) return null;
+  let parsed = null;
   try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" ? parsed : { plain: text };
+    parsed = JSON.parse(text);
   } catch {
-    return { plain: text };
+    // Plain text.
   }
+  if (parsed && typeof parsed === "object") return parsed;
+  return event === undefined || PLAIN_STDOUT_IS_CONTEXT.has(event) ? { plain: text } : null;
 }
 
 /** Kept for callers that only want the context of one answer. */
@@ -173,19 +195,47 @@ function mergeAnswers(event, answers) {
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
-function spawnHook(hook, raw, repoRoot, env) {
+/** The session's directory when it still exists, as Claude Code runs hooks there; else this repository. */
+function workingDirectory(input, repoRoot) {
+  try {
+    if (typeof input.cwd === "string" && fs.statSync(input.cwd).isDirectory()) return input.cwd;
+  } catch {
+    // Gone: fall back.
+  }
+  return repoRoot;
+}
+
+/**
+ * The program and arguments to start: exec form runs the command itself with its argument vector,
+ * `${CLAUDE_PROJECT_DIR}` expanded as Claude Code expands it there; shell form goes through sh,
+ * which expands the variable itself.
+ */
+function argvOf(hook, repoRoot) {
+  if (!Array.isArray(hook.args)) return ["sh", ["-c", hook.command]];
+  const expand = (value) =>
+    String(value).replace(/\$\{CLAUDE_PROJECT_DIR\}|\$CLAUDE_PROJECT_DIR\b/g, repoRoot);
+  return [expand(hook.command), hook.args.map(expand)];
+}
+
+function spawnHook(hook, raw, input, repoRoot, env) {
+  const [program, args] = argvOf(hook, repoRoot);
+  const cwd = workingDirectory(input, repoRoot);
+  const childEnv = { ...env, CLAUDE_PROJECT_DIR: repoRoot };
+  if (hook.async === true) {
+    // In the background, as Claude Code runs it: no wait, no timeout, no answer. The input goes
+    // through an unlinked file so it survives this process exiting.
+    const file = path.join(os.tmpdir(), `project-hooks-bridge-${process.pid}-${Date.now()}.json`);
+    fs.writeFileSync(file, raw);
+    const fd = fs.openSync(file, "r");
+    fs.unlinkSync(file);
+    spawn(program, args, { cwd, env: childEnv, detached: true, stdio: [fd, "ignore", "ignore"] })
+      .on("error", () => {})
+      .unref();
+    fs.closeSync(fd);
+    return null;
+  }
   const timeout = (Number(hook.timeout) > 0 ? Number(hook.timeout) : DEFAULT_TIMEOUT_S) * 1000;
-  const options = {
-    cwd: repoRoot,
-    input: raw,
-    encoding: "utf8",
-    timeout,
-    env: { ...env, CLAUDE_PROJECT_DIR: repoRoot },
-  };
-  // Exec form runs the command itself with its argument vector; shell form goes through sh.
-  return Array.isArray(hook.args)
-    ? spawnSync(hook.command, hook.args.map(String), options)
-    : spawnSync("sh", ["-c", hook.command], options);
+  return spawnSync(program, args, { cwd, input: raw, encoding: "utf8", timeout, env: childEnv });
 }
 
 function run(raw, input, repoRoot = REPO_ROOT, env = process.env) {
@@ -201,19 +251,32 @@ function run(raw, input, repoRoot = REPO_ROOT, env = process.env) {
   }
 
   // Every matching hook runs, as Claude Code runs them all; a block is reported after the last.
+  // A blocking hook's JSON still counts, its reason standing in for stderr; a hook marked
+  // `onFailure: "block"` blocks when it fails, cannot start or times out.
   const answers = [];
   const blocks = [];
   for (const hook of hooksFor(settings, event, input)) {
-    const result = spawnHook(hook, raw, repoRoot, env);
-    if (result.status === 2) {
-      blocks.push(result.stderr || "");
+    const result = spawnHook(hook, raw, input, repoRoot, env);
+    if (result === null) continue;
+    const failed = result.error !== undefined || result.status !== 0;
+    if (result.status === 2 || (failed && hook.onFailure === "block")) {
+      const answer = answerOf(result.stdout);
+      if (answer && !answer.plain) answers.push(answer);
+      blocks.push(
+        result.stderr ||
+          `${hook.command}: ${result.error ? result.error.message : `exited ${result.status}`}`,
+      );
       continue;
     }
-    const answer = answerOf(result.stdout);
+    if (failed) continue;
+    const answer = answerOf(result.stdout, event);
     if (answer) answers.push(answer);
   }
-  if (blocks.length > 0) return { code: 2, stderr: blocks.join("\n") };
   const merged = mergeAnswers(event, answers);
+  if (blocks.length > 0) {
+    const out = merged ? `${JSON.stringify(merged)}\n` : undefined;
+    return { code: 2, stderr: blocks.join("\n"), stdout: out };
+  }
   return merged ? { code: 0, stdout: `${JSON.stringify(merged)}\n` } : { code: 0 };
 }
 

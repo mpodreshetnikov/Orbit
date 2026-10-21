@@ -46,20 +46,47 @@ function bridgePathIn(command) {
 
 /**
  * The events this repository registers hooks on that the user settings do not route through an
- * existing bridge. Empty means every hook here reaches the session.
+ * existing bridge for every input. A bridge behind a matcher or an `if` sees only some of the
+ * event's calls, so it does not count. Empty means every hook here reaches the session.
  */
 function missingEvents(projectSettings, userSettings, exists = fs.existsSync) {
   const needed = Object.keys(projectSettings?.hooks ?? {});
+  const unfiltered = (matcher) => matcher === undefined || matcher === "" || matcher === "*";
   return needed.filter((event) => {
     const groups = userSettings?.hooks?.[event];
     if (!Array.isArray(groups)) return true;
-    return !groups.some((group) =>
-      (group?.hooks ?? []).some((hook) => {
-        const bridge = bridgePathIn(hook?.command);
-        return bridge !== null && exists(bridge);
-      }),
+    return !groups.some(
+      (group) =>
+        unfiltered(group?.matcher) &&
+        (group?.hooks ?? []).some((hook) => {
+          const bridge = bridgePathIn(hook?.command);
+          return (
+            hook?.type === "command" &&
+            hook.if === undefined &&
+            hook.async !== true &&
+            bridge !== null &&
+            exists(bridge)
+          );
+        }),
     );
   });
+}
+
+/**
+ * The hooks here the bridge cannot run: anything but a command hook. Claude Code runs http, mcp,
+ * prompt and agent hooks itself; the bridge would drop them silently, so this repository's tests
+ * fail on one rather than let it go quiet in cloud sessions.
+ */
+function unbridgeableHooks(projectSettings) {
+  const found = [];
+  for (const [event, groups] of Object.entries(projectSettings?.hooks ?? {})) {
+    for (const group of Array.isArray(groups) ? groups : []) {
+      for (const hook of group?.hooks ?? []) {
+        if (hook?.type !== "command") found.push(`${event}: ${hook?.type ?? "untyped"} hook`);
+      }
+    }
+  }
+  return found;
 }
 
 function check({
@@ -100,4 +127,4 @@ if (require.main === module) {
   process.exit(result.ok ? 0 : 1);
 }
 
-module.exports = { bridgePathIn, check, missingEvents };
+module.exports = { bridgePathIn, check, missingEvents, unbridgeableHooks };
