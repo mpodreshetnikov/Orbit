@@ -3,6 +3,10 @@ appId: host.exp.Exponent
 name: Сегодня
 ---
 - openLink: exp://127.0.0.1:8081
+# iOS asks before a link leaves for another app.
+- tapOn:
+    text: "Open"
+    optional: true
 # Expo Go's first-run tour of its developer menu, when it shows.
 - tapOn:
     text: "Continue"
