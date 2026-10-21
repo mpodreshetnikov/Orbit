@@ -1,5 +1,0 @@
-#!/bin/sh
-# Reports a commit outside docs/tasks/ that no in-progress task stands behind. Never refuses the
-# commit: see the header of scripts/just/task-claim-hook.cjs.
-node "$(git rev-parse --show-toplevel)/scripts/just/task-claim-hook.cjs" --git || true
-exit 0

@@ -468,18 +468,21 @@ describe("the hook itself", () => {
 });
 
 describe("the pre-commit end", () => {
-  /** A commit through the dispatcher a cloud setup script installs, into a checkout carrying the hook. */
+  /**
+   * A commit through the dispatcher a cloud setup script installs, into a checkout carrying the
+   * repository's pre-commit. Its size advisory has no script to run here and fails quietly.
+   */
   function commitThroughGlobalHooks(code: string, env: Record<string, string>) {
-    for (const file of ["scripts/just/task-claim-hook.cjs", "scripts/git-hooks/pre-commit"]) {
+    for (const file of ["scripts/just/task-claim-hook.cjs", ".githooks/pre-commit"]) {
       fs.mkdirSync(path.dirname(path.join(code, file)), { recursive: true });
       fs.copyFileSync(path.join(ORBIT_ROOT, file), path.join(code, file));
     }
-    fs.chmodSync(path.join(code, "scripts/git-hooks/pre-commit"), 0o755);
+    fs.chmodSync(path.join(code, ".githooks/pre-commit"), 0o755);
     const global = path.join(path.dirname(code), "global-hooks");
     fs.mkdirSync(global, { recursive: true });
     fs.writeFileSync(
       path.join(global, "pre-commit"),
-      '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/scripts/git-hooks/pre-commit"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n',
+      '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/.githooks/pre-commit"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n',
       { mode: 0o755 },
     );
     git(code, "add", "-A");
@@ -515,7 +518,7 @@ describe("the pre-commit end", () => {
 
     fs.writeFileSync(path.join(code, ".git", "current-task"), "T-260902-jxe\n");
     fs.writeFileSync(path.join(code, "src", "b.ts"), "b\n");
-    expect(commitThroughGlobalHooks(code, env)).toBe("");
+    expect(commitThroughGlobalHooks(code, env)).not.toContain("task-claim (pre-commit)");
   });
 
   it("says nothing for a commit that only records in the registry", () => {
@@ -524,6 +527,8 @@ describe("the pre-commit end", () => {
     commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry });
     fs.mkdirSync(path.join(code, "docs", "tasks"), { recursive: true });
     fs.writeFileSync(path.join(code, "docs", "tasks", "T-1-x.md"), "registry\n");
-    expect(commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry })).toBe("");
+    expect(commitThroughGlobalHooks(code, { ORBIT_TASKS_REGISTRY: registry })).not.toContain(
+      "task-claim (pre-commit)",
+    );
   });
 });

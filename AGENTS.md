@@ -8,7 +8,7 @@ Use these command IDs in plans, PRs, and handoffs:
 
 - Source of truth for all available commands and descriptions: `just --list --unsorted`
 - `commands-list`: `just commands-list`
-- `hooks-install`: `just git-hooks-install` (enable repository git hooks: pre-push secrets preflight and reviewable-size gate, pre-commit advisory size warning)
+- `hooks-install`: `just git-hooks-install` (enable repository git hooks: pre-push secrets preflight and reviewable-size gate, pre-commit advisory size warning and unclaimed-task report)
 - `hooks-status`: `just git-hooks-status`
 - `install`: `just install-dependencies`
 - `dev-ready`: `just dev-ready-local` (long-running: run in background when invoked by an agent—see below)
@@ -111,11 +111,11 @@ When they are absent, the registry is simply unavailable in this checkout: say s
 
 ### No Task, No Work
 
-**Nothing in this repository is changed until a task covering it exists in the registry and is `in-progress`** — the one rule from the registry that gates work in this tree, so it is stated here rather than only linked. Its scope, its exception for trivial changes, and the two gates on creating that task (a duplicate search, and the user's confirmation) are canonical in `docs/tasks/README.md` under `No Work Without A Task` and `Creating A Task`; the `task-registry` skill carries the applied workflow. The claim is made with `just tasks-claim <id>`, which publishes it to the registry's `main` and arms `.git/current-task` here; a `PostToolUse` hook (`scripts/just/task-claim-hook.cjs`) reads that marker after every edit outside `docs/tasks/` and reports an edit no in-progress task stands behind (ADR-260902-i6t in the registry). When the registry is not linked into this checkout the gate cannot be satisfied — the paragraph above applies, and the hook says so. A cloud session that holds both repositories starts above the clones and loads no hooks from this repository, so the same check also runs at commit time from `scripts/git-hooks/pre-commit`, which git runs whatever started it; it reports to the command's output and never refuses the commit. A checkout opts in with `just git-hooks`. A cloud environment opts in once, in its setup script, with a global dispatcher that runs a repository's own hook when it has one:
+**Nothing in this repository is changed until a task covering it exists in the registry and is `in-progress`** — the one rule from the registry that gates work in this tree, so it is stated here rather than only linked. Its scope, its exception for trivial changes, and the two gates on creating that task (a duplicate search, and the user's confirmation) are canonical in `docs/tasks/README.md` under `No Work Without A Task` and `Creating A Task`; the `task-registry` skill carries the applied workflow. The claim is made with `just tasks-claim <id>`, which publishes it to the registry's `main` and arms `.git/current-task` here; a `PostToolUse` hook (`scripts/just/task-claim-hook.cjs`) reads that marker after every edit outside `docs/tasks/` and reports an edit no in-progress task stands behind (ADR-260902-i6t in the registry). When the registry is not linked into this checkout the gate cannot be satisfied — the paragraph above applies, and the hook says so. A cloud session that holds both repositories starts above the clones and loads no hooks from this repository, so the same check also runs at commit time from `.githooks/pre-commit`, which git runs whatever started it; it reports to the command's output and never refuses the commit. A checkout opts in with `just git-hooks-install`. A cloud environment opts in once, in its setup script, with a global dispatcher that runs a repository's own `pre-commit` when it has one (only that hook: `pre-push` needs `just`, which a cloud container may not have):
 
 ```sh
 mkdir -p ~/.git-hooks
-printf '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/scripts/git-hooks/pre-commit"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n' > ~/.git-hooks/pre-commit
+printf '#!/bin/sh\nh="$(git rev-parse --show-toplevel)/.githooks/pre-commit"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n' > ~/.git-hooks/pre-commit
 chmod +x ~/.git-hooks/pre-commit
 git config --global core.hooksPath ~/.git-hooks
 ```
