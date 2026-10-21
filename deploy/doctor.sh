@@ -21,6 +21,16 @@ urls=(
   https://api.telegram.org
   https://hc-ping.com
   https://uptime.betterstack.com
+  # Other heartbeat monitors, to pick one this server reaches when the one in use is blocked.
+  https://healthchecks.io
+  https://cronitor.link
+  https://heartbeat.uptimerobot.com
+  https://nosnch.in
+  https://push.statuscake.com
+  https://ping.checklyhq.com
+  https://api.honeybadger.io
+  https://sentry.io
+  https://ping-admin.com
 )
 fmt='%{http_code} exit=%{exitcode} ip=%{remote_ip} connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s bytes=%{size_download}'
 
