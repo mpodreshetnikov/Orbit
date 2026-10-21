@@ -26,6 +26,10 @@ Use these command IDs in plans, PRs, and handoffs:
 - `format-check`: `just quality-format-check`
 - `format-write`: `just quality-format-write`
 - `test`: `just quality-smoke-build` (smoke/integration build gate)
+- `mobile-install`: `just mobile-install` (install the native iOS client's own locked dependencies; its tree is separate from the web app's)
+- `mobile-start`: `just mobile-start` (long-running: start the Expo dev server and open it in Expo Go on a phone--see `mobile/README.md` and the background note below)
+- `mobile-check`: `just mobile-check` (lint, typecheck and unit tests for the native iOS client; **not** covered by `check`)
+- `test-unit-mobile`: `just test-unit-mobile`
 - `ios-sync`: `just ios-sync` (copy web assets and native plugins into `ios/`; run after changing `capacitor.config.ts` or adding a Capacitor plugin)
 - `ios-open`: `just ios-open` (open the iOS app shell in Xcode; macOS only)
 - `test-unit-web`: `just test-unit-web`
@@ -76,7 +80,7 @@ For less common and environment-specific commands (deploy, targeted DB ops, sing
 Commands such as `dev-ready` start servers and do not exit until the stack is stopped. If an agent runs them in the foreground, the agent will wait indefinitely. **Run these in the background** so the agent does not block:
 
 - **How:** Start the command with background execution (e.g. run the terminal command with your environment’s “run in background” / “don’t wait for exit” option, such as `is_background: true`). The stack will keep running; use `dev-stop` when teardown is needed.
-- **Which:** `dev-ready`, `dev` (when starting the stack).
+- **Which:** `dev-ready`, `dev` (when starting the stack), `mobile-start`.
 - **If background execution is disabled:** Do not start the stack from the agent. Ask the user to run `dev-ready` or `dev` in a separate terminal before tasks that need the stack, and to run `dev-stop` in that terminal when done.
 
 ### DB Command Guidance
