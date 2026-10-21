@@ -79,7 +79,18 @@ export async function runClassifyStage(
     ctx,
   );
 
-  const raw = result.parsed;
+  const normalized = normalizeClassification(result.parsed);
+  return { ...normalized, usage: result.usage, finishReason: result.finishReason };
+}
+
+/**
+ * The deterministic half of the classify stage: coerce a classification, whoever produced it — the
+ * model's answer in `runClassifyStage`, or the fields an MCP client submitted — into the shape and
+ * the column types the record write expects.
+ */
+export function normalizeClassification(
+  raw: Record<string, unknown>,
+): Pick<StageResult<ClassifyResult>, "value" | "rejected" | "issues"> {
   // record_date lands in a `date` column. Anything that is not a real calendar date - "March
   // 2026", "не указано", "2026-02-31" - used to reach the database and fail the whole update,
   // after the model call had already been paid for.
@@ -94,8 +105,6 @@ export async function runClassifyStage(
       summary: asString(raw.summary, ""),
       keywords: asStringArray(raw.keywords),
     },
-    usage: result.usage,
-    finishReason: result.finishReason,
     rejected: issues.map((issue) => ({
       entityKind: issue.field,
       reason: `unrecognised value replaced with ${issue.appliedFallback}`,
