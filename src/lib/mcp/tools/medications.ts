@@ -254,10 +254,10 @@ function describeSchedule(
         `schedule interval_hours every ${intervalText(schedule.interval?.every)}h` +
         // The generator reads `every` as text and casts it to `int`
         // (`(v_schedule->'interval'->>'every')::int`), which a fractional value
-        // does not survive -- and `medScheduleSchema` requires a whole number of
-        // days for `interval_days` but not of hours here, so `every: 1.5` is
-        // writable and generates nothing at all. Printing it as the plan would
-        // describe doses that are never made.
+        // does not survive. `medScheduleSchema` now refuses a fractional value on
+        // write, but a row from the app or an import never passes that schema, so
+        // `every: 1.5` can still be stored and generates nothing at all. Printing
+        // it as the plan would describe doses that are never made.
         `${typeof schedule.interval?.every === "number" && !Number.isInteger(schedule.interval.every) ? " — not generated: the interval must be a whole number of hours" : ""}` +
         `${typeof schedule.amount === "number" && schedule.amount > 0 ? ` (${schedule.amount}${unitText(dose?.intake?.unit) ? ` ${unitText(dose?.intake?.unit)}` : ""} per intake)` : ""}` +
         // A scalar override is the same claim as a per-slot one, so it earns the
