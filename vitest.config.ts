@@ -18,6 +18,20 @@ const alias = [
   },
 ];
 
+/**
+ * The mobile app resolves `@/` to its own `src`, not the web app's.
+ *
+ * It has its own dependency tree and its own tsconfig, so sharing the array above would silently
+ * point a mobile test at a web module with the same path. Only the pure modules are tested here —
+ * nothing in this lane imports React Native, which is why it needs no native runtime.
+ */
+const mobileAlias = [
+  {
+    find: /^@\//,
+    replacement: `${path.join(rootDir, "mobile", "src")}${path.sep}`,
+  },
+];
+
 const isCi = process.env.CI === "true" || process.env.CI === "1";
 
 function readIntEnv(name: string, fallback: number): number {
@@ -132,6 +146,17 @@ export default defineConfig({
           environment: "node",
           setupFiles: ["test/setup/extension.ts"],
           include: ["browserExtension/src/**/*.{test,spec}.ts"],
+        },
+      },
+      {
+        resolve: {
+          alias: mobileAlias,
+        },
+        test: {
+          name: "mobile",
+          ...sharedTestOptions(),
+          environment: "node",
+          include: ["mobile/src/**/*.{test,spec}.ts"],
         },
       },
       {

@@ -54,6 +54,17 @@ function classifyChangedFiles(changedFiles) {
   const functionsImpact = normalizedChangedFiles.some((filePath) =>
     filePath.startsWith("supabase/functions/"),
   );
+  // The mobile client of `T-261018-l19`. It has its own dependency tree and its own typecheck, so
+  // its lane installs separately from the web app's and is worth skipping on a change that cannot
+  // reach it.
+  //
+  // The generated database types belong here as well as in `dbImpact`: `mobile/tsconfig.json` maps
+  // `@db` straight onto that file, and the root typecheck excludes `mobile`. Without this a renamed
+  // column or enum value would regenerate the types, pass every lane that runs, and leave the client
+  // uncompiled against the schema it reads.
+  const mobileImpact = normalizedChangedFiles.some(
+    (filePath) => filePath.startsWith("mobile/") || filePath === "supabase/db/database.types.ts",
+  );
   // The extraction corpus and the harness that scores it. Neither matched any flag above:
   // `test/fixtures/` is not a source prefix and `isDocFile` does not claim it either, so a change
   // touching only the corpus reported no impact at all. Nothing gates on these flags today, which
@@ -72,6 +83,7 @@ function classifyChangedFiles(changedFiles) {
     extensionImpact,
     functionsImpact,
     fixturesImpact,
+    mobileImpact,
     docsOnly,
   };
 }
@@ -188,6 +200,7 @@ function boolLines(impact) {
     `extensionImpact=${impact.extensionImpact}`,
     `functionsImpact=${impact.functionsImpact}`,
     `fixturesImpact=${impact.fixturesImpact}`,
+    `mobileImpact=${impact.mobileImpact}`,
     `docsOnly=${impact.docsOnly}`,
   ].join("\n");
 }
