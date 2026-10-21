@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@jest/globals";
 import { testSignInCredentials } from "@/lib/test-sign-in";
 
 const EMAIL = "EXPO_PUBLIC_TEST_SIGNIN_EMAIL";
