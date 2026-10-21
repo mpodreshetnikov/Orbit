@@ -14,16 +14,17 @@ JavaScript bundle from your machine.
 
 1. Install **Expo Go** from the App Store on the iPhone, and put the phone on the same network as
    the computer.
-2. Point the app at an instance. The two values are the same ones the web app uses: the instance's
-   own address, and its anon key — `ANON_KEY` in the server's `deploy/.env` (see
-   `docs/SELF_HOSTING.md`; for an instance on hosted Supabase, the project URL and anon key under
-   Project Settings → API):
+2. Point the app at an instance by naming it once:
 
    ```sh
-   # mobile/.env.local — git-ignored
-   EXPO_PUBLIC_SUPABASE_URL=https://orbit.example.com
-   EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   just mobile-start orbit.example.com
    ```
+
+   That asks the instance for its public settings (`/.well-known/orbit-instance`: the data API's
+   address and its anon key, both of which every browser opening Orbit already receives) and saves
+   them to `mobile/.env.local`, which is git-ignored. After that a bare `just mobile-start` reuses
+   them. To write the file by hand instead, it holds `EXPO_PUBLIC_SUPABASE_URL` and
+   `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
 
    The URL must be `https` and a bare origin; the app refuses anything else and says why.
 
@@ -33,12 +34,7 @@ JavaScript bundle from your machine.
    bundle itself (`expo start --web`, or a simulator on a Mac). Pointing a phone at a local stack
    needs an https tunnel, which is not set up yet — use the deployed instance.
 
-3. Install and start:
-
-   ```sh
-   just mobile-install
-   just mobile-start
-   ```
+3. Install the dependencies once with `just mobile-install`, then start as above.
 
 4. Scan the QR code with the iPhone's camera, then **Войти через Google** with the same account as
    the web app. The sheet returns to Expo Go on an `exp://` address, which the instance accepts only
