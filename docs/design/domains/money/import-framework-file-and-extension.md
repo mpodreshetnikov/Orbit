@@ -101,6 +101,10 @@ The person runs the installer once from the unpacked folder.
   in flight; a run that tries to begin meanwhile is refused with a clear message instead of starting
   on changing files. A stored session also defers both. An update found during an import waits and
   goes ahead when the import ends (the run registry or the stored session clearing).
+- One unpacked folder per machine. Every browser and profile reaches the same host with the same
+  extension id, so the host cannot tell installations apart; installing from a second folder
+  replaces the first, and the installers say so. A release whose `extension_id` is not the running
+  extension's is refused.
 - Only a production build loaded unpacked updates itself. A development build is built from the
   working tree, and the host refuses to mirror over any folder that is not a built Orbit extension
   (the extension's key in `manifest.json`, a `background.js`, no `src/`, `package.json` or `.git`).
