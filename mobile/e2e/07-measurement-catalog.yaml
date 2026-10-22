@@ -20,6 +20,11 @@ name: Каталог измерений
     visible: "Добавить новый тип измерения в каталог"
     timeout: 10000
 - tapOn: "Код"
+# A fresh simulator shows the slide-to-type tip over its first keyboard.
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn: "Код"
 - inputText: "wrist_left"
 - tapOn: "Название (RU)"
 - inputText: "Левое запястье"
