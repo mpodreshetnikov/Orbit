@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCreateBodySite, useUpdateBodySite } from "@/hooks";
+import { addSynonym, matchesCatalogEntry, parentCandidates } from "@/types/clinical-catalog";
 import type { BodySiteCatalog } from "@/types";
 
 interface BodySiteEditDialogProps {
@@ -89,34 +90,10 @@ export function BodySiteEditDialog({
     }
   }, [open, bodySite]);
 
-  // Get available parent sites (exclude self and descendants to prevent circular references)
-  const availableParents = allSites.filter((s) => {
-    if (!bodySite) return true;
-    // Exclude self
-    if (s.id === bodySite.id) return false;
-    // Exclude sites that have this site as parent (to prevent circular refs)
-    let current = s;
-    while (current.parent_site_code) {
-      if (current.parent_site_code === bodySite.site_code) return false;
-      const parent = allSites.find((p) => p.site_code === current.parent_site_code);
-      if (!parent) break;
-      current = parent;
-    }
-    return true;
-  });
-
-  // Filter available parents based on search
-  const filteredParents = availableParents.filter((site) => {
-    if (!parentSearch.trim()) return true;
-    const search = parentSearch.toLowerCase();
-    return (
-      site.site_code.toLowerCase().includes(search) ||
-      site.name_ru.toLowerCase().includes(search) ||
-      site.name_en.toLowerCase().includes(search) ||
-      site.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
-      site.synonyms_en?.some((s) => s.toLowerCase().includes(search))
-    );
-  });
+  // Self and descendants are left out, so no loop forms.
+  const filteredParents = parentCandidates(allSites, bodySite).filter((site) =>
+    matchesCatalogEntry(site.site_code, site, parentSearch),
+  );
 
   // Display value for parent site combobox
   const parentDisplayValue = parentSiteCode
@@ -133,17 +110,17 @@ export function BodySiteEditDialog({
   };
 
   const addSynonymRu = () => {
-    const trimmed = newSynonymRu.trim().toLowerCase();
-    if (trimmed && !synonymsRu.includes(trimmed)) {
-      setSynonymsRu([...synonymsRu, trimmed]);
+    const next = addSynonym(synonymsRu, newSynonymRu);
+    if (next) {
+      setSynonymsRu(next);
       setNewSynonymRu("");
     }
   };
 
   const addSynonymEn = () => {
-    const trimmed = newSynonymEn.trim().toLowerCase();
-    if (trimmed && !synonymsEn.includes(trimmed)) {
-      setSynonymsEn([...synonymsEn, trimmed]);
+    const next = addSynonym(synonymsEn, newSynonymEn);
+    if (next) {
+      setSynonymsEn(next);
       setNewSynonymEn("");
     }
   };

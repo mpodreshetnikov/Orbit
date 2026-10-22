@@ -1103,6 +1103,7 @@
     "unitEn": "Единица (EN)",
     "canonicalUnit": "Каноническая единица",
     "unit": "Единица",
+    "synonyms": "Синонимы",
     "synonymsRu": "Синонимы (RU)",
     "synonymsEn": "Синонимы (EN)",
     "addSynonym": "Добавить синоним...",
