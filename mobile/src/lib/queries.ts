@@ -79,6 +79,7 @@ import {
   updateTransaction,
 } from "@/features/money/transactions";
 import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
+import { saveCategory, type CategoryColumns } from "@/features/money/categories";
 import {
   fetchClinicalCatalog,
   saveClinicalEntry,
@@ -699,5 +700,17 @@ export function useSaveAccount() {
       void client.invalidateQueries({ queryKey: ["money-accounts"] });
       void client.invalidateQueries({ queryKey: ["money-cards"] });
     },
+  });
+}
+
+/** Add, change or delete (`columns: null`) a custom category. */
+export function useSaveCategory() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, columns }: { id?: string; columns: CategoryColumns | null }) =>
+      saveCategory(id, columns),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["money-categories"] }),
   });
 }

@@ -1,0 +1,25 @@
+# The category tree, reached from the money tab, and the form a custom category is added with.
+appId: host.exp.Exponent
+name: Категории
+---
+- openLink: exp://127.0.0.1:8081/--/money
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil:
+    visible: "Совпадений"
+    timeout: 60000
+- tapOn: "Категории"
+- extendedWaitUntil:
+    visible: "Income"
+    timeout: 20000
+- takeScreenshot: categories-01-tree
+- tapOn: "Income"
+- extendedWaitUntil:
+    visible: "Добавить категорию"
+    timeout: 10000
+- takeScreenshot: categories-02-actions
+- tapOn: "Добавить категорию"
+- extendedWaitUntil:
+    visible: "Каноническая ветка"
+    timeout: 10000
+- takeScreenshot: categories-03-form
+- tapOn: "Отмена"
