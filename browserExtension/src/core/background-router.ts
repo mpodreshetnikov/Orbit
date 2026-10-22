@@ -17,7 +17,7 @@ import {
 } from "./auto-run-policy.js";
 import { looksLikeBankLoginUrl } from "./bank-login-url.js";
 import type { AttentionStore } from "./attention-store.js";
-import { activeImportRuns } from "./active-runs.js";
+import { activeImportRuns, UPDATE_IN_PROGRESS_ERROR } from "./active-runs.js";
 import {
   buildAttentionStatus,
   describeLiveRun,
@@ -594,6 +594,9 @@ export async function routeBackgroundMessage(
       throw new Error("No active import session");
     }
     const activeSessionId = typeof session.session_id === "string" ? session.session_id.trim() : "";
+    if (activeImportRuns.isHeldForUpdate()) {
+      throw new Error(UPDATE_IN_PROGRESS_ERROR);
+    }
     if (activeSessionId && !activeImportRuns.begin(activeSessionId)) {
       throw new Error(`Import already running for session ${activeSessionId}`);
     }

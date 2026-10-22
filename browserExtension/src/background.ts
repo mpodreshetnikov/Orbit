@@ -1,11 +1,11 @@
 import "./connectors/tbank-web.js";
 import "./connectors/alfa-web.js";
 import { getConnector } from "./connectors/registry.js";
-import { APP_ORIGINS, APP_ORIGIN_PATTERNS, DEV_HOT_RELOAD } from "./env.js";
+import { APP_ORIGINS, APP_ORIGIN_PATTERNS, BUILD_MODE, DEV_HOT_RELOAD } from "./env.js";
 import { routeBackgroundMessage, type BackgroundMessage } from "./core/background-router.js";
 import { createImportDebugStore } from "./core/import-debug.js";
 import { createExtensionLogger } from "./core/observability.js";
-import { createSessionStore } from "./core/session-store.js";
+import { createSessionStore, SESSION_STORAGE_KEY } from "./core/session-store.js";
 import { createGrantStore } from "./core/grant-store.js";
 import { createBackfillStore } from "./core/backfill-store.js";
 import { createAutoRunStore } from "./core/auto-run-store.js";
@@ -18,6 +18,15 @@ import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
 import { chooseReplacementTab, shouldAdoptRequestTab } from "./core/attention-policy.js";
+import {
+  createSelfUpdater,
+  NATIVE_HOST_NAME,
+  parseReleaseInfo,
+  SELF_UPDATE_ALARM,
+  SELF_UPDATE_PERIOD_MINUTES,
+  type NativeHostReply,
+  type SelfUpdater,
+} from "./core/self-update.js";
 import {
   getAllMoneyImportSourcePagePatterns,
   getMoneyImportSourcePagePatterns,
@@ -342,6 +351,96 @@ void sessionJanitor.reconcile("boot");
 // thirty seconds. While a run is registered, a cheap API call every twenty keeps it here.
 keepWorkerAliveDuringRuns(activeImportRuns, { ping: () => chrome.runtime.getPlatformInfo() });
 
+/**
+ * Only a production build updates itself: a development build is built from the working tree
+ * and must not be overwritten by a release. Loaded unpacked it goes through the native host; an
+ * installed package (Firefox, signed) is updated by the browser, and only its reload is ours.
+ * See `core/self-update.ts`.
+ */
+let selfUpdateUsesHost = false;
+const SELF_UPDATE_PENDING_KEY = "orbit-self-update-pending";
+const selfUpdater: Promise<SelfUpdater> = (async () => {
+  let installType: string | null = null;
+  try {
+    installType = (await chrome.management?.getSelf?.())?.installType ?? null;
+  } catch {
+    installType = null;
+  }
+  const appOrigin = Array.isArray(APP_ORIGINS) ? APP_ORIGINS[0] : undefined;
+  const release = BUILD_MODE === "production" && Boolean(appOrigin);
+  const browserManaged = release && installType === "normal";
+  selfUpdateUsesHost =
+    release &&
+    installType === "development" &&
+    typeof chrome.runtime.sendNativeMessage === "function";
+  return createSelfUpdater({
+    supported: selfUpdateUsesHost || browserManaged,
+    browserManaged,
+    pendingStore: {
+      get: async () => {
+        const stored = (await chrome.storage.local.get(SELF_UPDATE_PENDING_KEY))[
+          SELF_UPDATE_PENDING_KEY
+        ];
+        return typeof stored === "string" ? stored : null;
+      },
+      set: async (version) => {
+        if (version) await chrome.storage.local.set({ [SELF_UPDATE_PENDING_KEY]: version });
+        else await chrome.storage.local.remove(SELF_UPDATE_PENDING_KEY);
+      },
+    },
+    extensionId: chrome.runtime.id,
+    currentVersion: () => chrome.runtime.getManifest().version,
+    fetchLatest: async () => {
+      const response = await fetch(`${appOrigin}/api/extension-release/latest`, {
+        cache: "no-store",
+      });
+      if (!response.ok) return null;
+      return parseReleaseInfo(await response.json());
+    },
+    holdImports: () => activeImportRuns.holdForUpdate(),
+    // A session stored for a run the person has not started yet counts too: reloading would
+    // cut the widget on the bank page they are about to press.
+    isBusy: async () => Boolean(await sessionStore.getSession()),
+    sendNative: (message) =>
+      chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message) as Promise<NativeHostReply>,
+    reload: () => chrome.runtime.reload(),
+    onInfo: (event, attrs) => telemetry.info(event, attrs),
+  });
+})();
+
+// A browser that installs updates itself holds a downloaded one back only while this listens,
+// and the reload that installs it then waits for imports like any other.
+chrome.runtime.onUpdateAvailable?.addListener((details) => {
+  void selfUpdater.then((updater) => updater.onBrowserUpdateAvailable(details.version));
+});
+
+// An event page is ended while idle, so a reload that waited for an import may wake in a new
+// one: it finds the held-back version in storage. Nothing is fetched for this.
+void selfUpdater.then((updater) => {
+  if (updater.status().phase !== "unsupported" && !selfUpdateUsesHost) void updater.check("wake");
+});
+
+// The browser looks for its own updates; the alarm is for the host only.
+void selfUpdater.then(async () => {
+  if (!selfUpdateUsesHost || !chrome.alarms?.create) return;
+  const existing = await chrome.alarms.get(SELF_UPDATE_ALARM).catch(() => null);
+  if (existing) return;
+  await chrome.alarms.create(SELF_UPDATE_ALARM, {
+    delayInMinutes: 1,
+    periodInMinutes: SELF_UPDATE_PERIOD_MINUTES,
+  });
+});
+
+// An update found during an import waits for it; these are the two signals that it is over.
+activeImportRuns.onChange((size) => {
+  if (size === 0) void selfUpdater.then((updater) => updater.onImportsSettled());
+});
+chrome.storage.onChanged?.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[SESSION_STORAGE_KEY]) return;
+  if (changes[SESSION_STORAGE_KEY].newValue) return;
+  void selfUpdater.then((updater) => updater.onImportsSettled());
+});
+
 const AUTO_IMPORT_ALARM = "money-import-auto";
 /**
  * A visit does not start a sweep; it schedules one. The person who just opened their bank may
@@ -642,6 +741,7 @@ chrome.runtime.onInstalled?.addListener((details) => {
 // than an interruption, and the badge has to be drawn again in any case.
 chrome.runtime.onStartup?.addListener(() => {
   void rearmAutoImportAlarmAtStart();
+  void selfUpdater.then((updater) => updater.check("startup"));
   void attentionStore
     .markBrowserStarted(Date.now())
     .then(() => refreshAttention("startup", { mayOpenPage: true }));
@@ -650,6 +750,10 @@ chrome.runtime.onStartup?.addListener(() => {
 if (chrome.alarms?.onAlarm) {
   void ensureAutoImportAlarm();
   chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === SELF_UPDATE_ALARM) {
+      void selfUpdater.then((updater) => updater.check("alarm"));
+      return;
+    }
     if (alarm.name === AUTO_IMPORT_ALARM) {
       void autoImportSweep
         .run("alarm")
@@ -676,6 +780,20 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
+  // The popup's update card. Only the extension's own pages may ask: a content script shares
+  // the extension id, but its sender URL is the web page it runs in.
+  if (message.type === "EXTENSION_UPDATE_STATUS" || message.type === "EXTENSION_UPDATE_CHECK") {
+    if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(""))) {
+      sendResponse({ ok: false, error: "Unsupported message type" });
+      return false;
+    }
+    void selfUpdater
+      .then((updater) =>
+        message.type === "EXTENSION_UPDATE_CHECK" ? updater.check("manual") : updater.status(),
+      )
+      .then((status) => sendResponse({ ok: true, status }));
+    return true;
+  }
   // A run from the widget on the bank page is answered at once and reports through its
   // broadcasts. Chrome ends a service worker whose single request is still open after five
   // minutes, and a run with receipts takes longer than that: the answer that waited for the

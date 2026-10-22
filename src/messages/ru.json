@@ -547,6 +547,7 @@
     "importExtensionInstallProdStep1": "Скачайте последний ZIP-архив расширения с этой страницы.",
     "importExtensionInstallProdStep2": "В Chrome откройте страницу расширений, включите режим разработчика, распакуйте ZIP и нажмите «Загрузить распакованное».",
     "importExtensionInstallProdStep3": "Выберите распакованную папку расширения, перезагрузите эту страницу и нажмите «Проверить снова».",
+    "importExtensionInstallProdStep4": "Один раз, по желанию: чтобы расширение обновлялось само, запустите в этой папке updater/install.sh (macOS) или updater/install-windows.cmd (Windows). Дальше обновления ставятся сами и никогда во время импорта.",
     "importExtensionRetryCheck": "Проверить снова",
     "importExtensionReloadHint": "После установки расширения перезагрузите эту страницу и нажмите «Проверить снова».",
     "importExtensionVersionCurrent": "Установленная версия расширения",

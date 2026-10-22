@@ -1,4 +1,4 @@
-const SESSION_STORAGE_KEY = "extension_import_session";
+export const SESSION_STORAGE_KEY = "extension_import_session";
 
 export interface LocalStorageLike {
   get(keys: string[]): Promise<Record<string, unknown>>;

@@ -23,4 +23,22 @@ describe("active run registry", () => {
     expect(registry.size()).toBe(0);
     expect(counts).toEqual([1, 2, 1]);
   });
+
+  it("gives an update the registry only when nothing runs, and keeps runs out until released", () => {
+    const registry = createActiveRunRegistry();
+    registry.begin("s1");
+    expect(registry.holdForUpdate()).toBeNull();
+    registry.end("s1");
+
+    const release = registry.holdForUpdate();
+    expect(release).not.toBeNull();
+    expect(registry.isHeldForUpdate()).toBe(true);
+    expect(registry.holdForUpdate()).toBeNull();
+    expect(registry.begin("s2")).toBe(false);
+
+    release!();
+    release!();
+    expect(registry.isHeldForUpdate()).toBe(false);
+    expect(registry.begin("s2")).toBe(true);
+  });
 });
