@@ -11,7 +11,7 @@ import {
 } from "./backfill-scheduler.js";
 import type { BackfillStore } from "./backfill-store.js";
 import type { SessionStore } from "./session-store.js";
-import { activeImportRuns } from "./active-runs.js";
+import { activeImportRuns, UPDATE_IN_PROGRESS_ERROR } from "./active-runs.js";
 import { RUN_STARTED_AT_KEY } from "./session-janitor.js";
 import { liveRuns, type RunWindowKind } from "./run-board.js";
 
@@ -577,6 +577,9 @@ function unattendedParseStrategy(connector: Connector | null): ConnectorParseStr
     : null;
 }
 
+/** Numbers each scheduled window's claim on the run registry, so no two share one. */
+let scheduledWindowClaims = 0;
+
 export async function runScheduledImport(
   input: ScheduledImportInput,
   deps: ImportRunnerDeps & {
@@ -603,6 +606,22 @@ export async function runScheduledImport(
   const origin = input.origin ?? "auto";
 
   const runWindow = async (
+    window: BackfillSlice,
+    kind: RunWindowKind,
+  ): Promise<ScheduledImportRunResult> => {
+    // Claimed before `create_session`, the first await: until the session is stored nothing
+    // else tells an update that a window is starting, and a reload meanwhile would leave the
+    // server's session open. While an update holds the registry the window is given back.
+    const claim = `scheduled-window:${(scheduledWindowClaims += 1)}`;
+    if (!activeImportRuns.begin(claim)) throw new Error(UPDATE_IN_PROGRESS_ERROR);
+    try {
+      return await runClaimedWindow(window, kind);
+    } finally {
+      activeImportRuns.end(claim);
+    }
+  };
+
+  const runClaimedWindow = async (
     window: BackfillSlice,
     kind: RunWindowKind,
   ): Promise<ScheduledImportRunResult> => {

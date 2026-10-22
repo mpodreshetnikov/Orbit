@@ -547,6 +547,7 @@
     "importExtensionInstallProdStep1": "Download the latest ZIP package from this page.",
     "importExtensionInstallProdStep2": "In Chrome open Extensions, enable Developer mode, then extract the ZIP and click Load unpacked.",
     "importExtensionInstallProdStep3": "Select the extracted extension folder, reload this page, then click Retry check.",
+    "importExtensionInstallProdStep4": "Optional, once: to update automatically, run updater/install.sh (macOS) or double-click updater/install-windows.cmd (Windows) in that folder. Updates then install on their own, never during an import.",
     "importExtensionRetryCheck": "Retry check",
     "importExtensionReloadHint": "After installing the extension, reload this page, then click Retry check.",
     "importExtensionVersionCurrent": "Installed extension version",
