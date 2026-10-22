@@ -34,11 +34,14 @@ function classifyChangedFiles(changedFiles) {
   // generator is what writes `schema.snapshot.sql` and `database.types.ts` and what the DB lane
   // runs to verify them. A change to either can only be exercised by running that lane, and
   // leaving them out meant the pull request that repaired the verification could not demonstrate
-  // it -- the lane it fixed was skipped on the change that fixed it.
+  // it -- the lane it fixed was skipped on the change that fixed it. The workflow that defines the
+  // lane is in for the same reason: a change to its steps or its image cache (T-261022-338) is
+  // otherwise merged without the lane having run once.
   const dbImpact = normalizedChangedFiles.some(
     (filePath) =>
       /^supabase\/(db|migrations|tests)\//.test(filePath) ||
       filePath === "supabase/config.toml" ||
+      filePath === ".github/workflows/main.yml" ||
       /^scripts\/just\/db-artifacts(\.|$)/.test(filePath),
   );
   const webImpact = normalizedChangedFiles.some(
