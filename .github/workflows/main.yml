@@ -430,11 +430,15 @@ jobs:
           fi
           echo "::add-mask::$key"
           echo "SUPABASE_SERVICE_ROLE_KEY=$key" >>"$GITHUB_ENV"
+      # With the AMO credentials the Firefox build is signed as an unlisted add-on and published
+      # beside the Chrome archive; without them the release is Chrome-only (T-261021-phi).
       - name: Build the extension for your server
         if: steps.server.outputs.set == 'true' && steps.policy.outputs.versionChanged == 'true'
         env:
           NEXT_PUBLIC_APP_ORIGIN: ${{ steps.server.outputs.url }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ steps.server.outputs.url }}
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: just extension-release-build
       - name: Publish the extension to your server's Storage
         if: steps.server.outputs.set == 'true' && steps.policy.outputs.versionChanged == 'true'
