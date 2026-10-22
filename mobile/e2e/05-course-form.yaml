@@ -27,8 +27,7 @@ name: Курс — форма
 - tapOn:
     id: "inventory-enabled"
 - tapOn: { id: "stock-current" } # The label does not focus its field.
-- inputText: "60"
-- hideKeyboard
+- inputText: "60" # A number pad has no key to hide it by; Save is in the bar above it.
 - takeScreenshot: form-03-stock
 - tapOn: "Сохранить"
 - extendedWaitUntil:
