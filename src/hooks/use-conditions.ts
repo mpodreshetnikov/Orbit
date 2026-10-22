@@ -2,7 +2,8 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import { AUTHORITATIVE_STATUS_FILTER } from "@/lib/conditions/unverified-closure";
+import { conditionTimeline } from "@/types/condition-summary";
+import { AUTHORITATIVE_STATUS_FILTER } from "@/types/condition-closure";
 import {
   proposedClosureStillHolds,
   type PersistedObservation,
@@ -233,28 +234,9 @@ async function fetchConditionDetail(conditionId: string): Promise<ConditionDetai
     };
   });
 
-  // Sort history by record_date (timeline order: newest first; null dates last)
-  const history = [...mapped].sort((a, b) => {
-    const dateA = a.record_date || a.created_at?.slice(0, 10) || "";
-    const dateB = b.record_date || b.created_at?.slice(0, 10) || "";
-    if (!dateA && !dateB) return 0;
-    if (!dateA) return 1;
-    if (!dateB) return -1;
-    return dateB.localeCompare(dateA); // descending (newest first)
-  });
-
-  // Calculate stats
-  const dates = history
-    .map((h) => h.record_date)
-    .filter((d): d is string => d !== null)
-    .sort();
-
   return {
     ...condition,
-    history,
-    mention_count: history.length,
-    first_mentioned_date: dates[0] || null,
-    last_mentioned_date: dates[dates.length - 1] || null,
+    ...conditionTimeline(mapped),
   } as ConditionDetail;
 }
 

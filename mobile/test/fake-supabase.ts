@@ -9,8 +9,8 @@ import type { Session } from "@supabase/supabase-js";
  * would for the simple cases the app uses, so a screen test also covers the query it depends on.
  * A joined column (`regimen:med_regimens(...)`) is not resolved; seed the row with the nested object
  * already in place. The three dose RPCs change the seeded dose as the database functions do, so a
- * refetch after a tap sees the new state; any other RPC is answered by `rpcHandlers`. Every call is
- * recorded in `calls`.
+ * refetch after a tap sees the new state; any other RPC, and any edge function, is answered by
+ * `rpcHandlers`. Every call is recorded in `calls`.
  *
  * Writes work the same way: `insert`, `update`, `upsert` and `delete` change the seeded rows, after
  * the filters chained to them, and a `select()` after one returns what was written. A new row gets an
@@ -225,6 +225,10 @@ export const supabase = {
     }
     doseFunctions[name]?.(args);
     return { data: rpcHandlers[name]?.(args) ?? null, error: null };
+  },
+  functions: {
+    invoke: (name: string, options: { body?: Record<string, unknown> } = {}) =>
+      supabase.rpc(name, options.body),
   },
   auth: {
     getSession: async () => ({ data: { session }, error: null }),

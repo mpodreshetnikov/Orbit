@@ -52,7 +52,7 @@ import {
   useRuleOnProposedClosure,
 } from "@/hooks";
 import { ConditionStatusBadge, ConditionAddHistoryDialog } from "@/components/conditions";
-import { isAwaitingClosureReview } from "@/lib/conditions/unverified-closure";
+import { isAwaitingClosureReview } from "@/types/condition-closure";
 import { cn } from "@/lib/utils";
 import type { ConditionStatus } from "@/types";
 
