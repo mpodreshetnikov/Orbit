@@ -19,6 +19,7 @@ Cross-links:
 4. Keep async workflows observable with status transitions and user feedback.
 5. Prefer additive evolution with migration history and idempotent deploy parity.
 6. Prefer shadcn/ui as the default frontend component system; extend `src/components/ui/*` before introducing bespoke primitives.
+7. A user-facing feature exists on the web app and the iOS client alike unless someone decided otherwise; each platform speaks its own idiom (`docs/QUALITY.md`, "User-Interface Changes Ship On Every Platform").
 
 ## Common Patterns Followed In This Repo
 
