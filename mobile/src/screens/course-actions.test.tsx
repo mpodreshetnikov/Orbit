@@ -92,7 +92,7 @@ describe("a course's menu", () => {
     await openCourseMenu("Vitamin D3");
 
     expect(offered[0]).toEqual(["Пополнить", "В архив", "Удалить лекарство", "Отмена"]);
-    expect(asked[0]).toMatch(/^Отправить лекарство в архив\?/);
+    await waitFor(() => expect(asked[0]).toMatch(/^Отправить лекарство в архив\?/));
     await waitFor(() =>
       expect(db.tables.med_regimens.find((row) => row.id === "reg-vitd")?.status).toBe("archived"),
     );
@@ -146,7 +146,7 @@ describe("a course's menu", () => {
     chooseInSheet("Пополнить");
     const shown = answerPrompt("+5");
     await openCourseMenu("Vitamin D3");
-    expect(shown[0]).toBe("1");
+    await waitFor(() => expect(shown[0]).toBe("1"));
     await waitFor(() =>
       expect(calls.rpc).toContainEqual({
         name: "update_regimen_inventory",

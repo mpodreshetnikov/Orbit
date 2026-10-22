@@ -10,6 +10,9 @@ export type CourseSheetActions = {
   refill: (amount: number) => void;
 };
 
+/** How long the system sheet takes to slide away. */
+const SHEET_DISMISS_MS = 400;
+
 /** "+5", "-3", "2,5": the refill field reads what a person types, comma or point. */
 export function parseStockAmount(typed: string): number | null {
   const amount = Number(typed.trim().replace(",", ".").replace(/^\+/, ""));
@@ -97,6 +100,11 @@ export function showCourseSheet(course: MedRegimen, actions: CourseSheetActions)
       cancelButtonIndex: options.length - 1,
       destructiveButtonIndex: choices.length - 1,
     },
-    (index) => choices[index]?.run(),
+    // iOS will not present the next alert while the sheet is still sliding away, and drops it
+    // without a word: the refill prompt and the confirmations wait for the sheet to be gone.
+    (index) => {
+      const choice = choices[index];
+      if (choice) setTimeout(choice.run, SHEET_DISMISS_MS);
+    },
   );
 }
