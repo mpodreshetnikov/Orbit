@@ -35,6 +35,8 @@ const light = {
   completedText: "#334155", // slate-700
   completedSurface: "rgba(100, 116, 139, 0.1)", // slate-500/10
   completedBorder: "rgba(100, 116, 139, 0.2)", // slate-500/20
+  rising: "#f97316", // orange-500, a measurement going up
+  falling: "#3b82f6", // blue-500, a measurement going down
 };
 
 export type Palette = typeof light;
@@ -66,6 +68,8 @@ const dark: Palette = {
   completedText: "#94a3b8", // slate-400
   completedSurface: "rgba(100, 116, 139, 0.1)",
   completedBorder: "rgba(100, 116, 139, 0.2)",
+  rising: "#f97316",
+  falling: "#3b82f6",
 };
 
 /** Geist's weights by the names `@expo-google-fonts/geist` registers them under. A custom font in
@@ -83,7 +87,7 @@ export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
 export const radius = { sm: 4, md: 6, lg: 8 } as const;
 
 /** Tailwind's type scale, in points: `text-xs` … `text-xl`. */
-export const text = { xs: 12, sm: 14, base: 16, lg: 18, xl: 20 } as const;
+export const text = { xs: 12, sm: 14, base: 16, lg: 18, xl: 20, "2xl": 24 } as const;
 
 export function usePalette(): Palette {
   return useColorScheme() === "dark" ? dark : light;

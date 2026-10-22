@@ -32,6 +32,10 @@ export default function TabsLayout() {
           md="medication"
         />
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="health">
+        <NativeTabs.Trigger.Label>{t("nav.health")}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: "heart", selected: "heart.fill" }} md="favorite" />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

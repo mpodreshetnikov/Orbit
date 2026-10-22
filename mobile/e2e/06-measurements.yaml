@@ -1,0 +1,39 @@
+# Measurements: the health tab's menu, the list by category, a value's chart and history, and an
+# entry's delete asked and cancelled. The seed carries a year of weights, so the chart has a line
+# to draw.
+appId: host.exp.Exponent
+name: Измерения
+---
+- openLink: exp://127.0.0.1:8081/--/health
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Отслеживание параметров тела"
+    timeout: 60000
+- takeScreenshot: measurements-01-health
+- tapOn: "Измерения"
+- extendedWaitUntil:
+    visible: "ОСНОВНЫЕ"
+    timeout: 20000
+- takeScreenshot: measurements-02-list
+- tapOn:
+    text: "Вес"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Динамика значений"
+    timeout: 20000
+- takeScreenshot: measurements-03-weight
+- scrollUntilVisible:
+    element: "История измерений"
+- takeScreenshot: measurements-04-history
+- scrollUntilVisible:
+    element: ".*80.80.*"
+- tapOn: ".*80.80.*"
+- tapOn: "Удалить"
+- extendedWaitUntil:
+    visible: "Удалить измерение"
+    timeout: 10000
+- takeScreenshot: measurements-05-delete
+- tapOn: "Отмена"
+- assertVisible: ".*80.80.*"
