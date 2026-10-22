@@ -18,7 +18,7 @@ name: Измерения
     timeout: 20000
 - takeScreenshot: measurements-02-list
 - tapOn:
-    text: "Вес"
+    text: "Вес.*" # The card reads as one element, its texts joined.
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Динамика значений"
