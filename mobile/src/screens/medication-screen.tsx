@@ -1,8 +1,10 @@
 import { getCourseWindow } from "@orbit-types/regimen";
 import { Stack, useLocalSearchParams, usePathname, useRouter, type Href } from "expo-router";
-import { ChevronRight, Clock } from "lucide-react-native";
+import { ChevronRight, Clock, Ellipsis } from "lucide-react-native";
 import { useCallback } from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { showCourseSheet } from "@/components/course-sheet";
+import { RefillSnooze } from "@/components/refill-snooze";
 import { HistoryRow, dateTimeLabel } from "@/components/history-row";
 import { LowStockBadge, StatusBadge } from "@/components/medication-badges";
 import { showDoseSheet } from "@/components/dose-sheet";
@@ -16,7 +18,14 @@ import {
 } from "@/features/medications/format";
 import { displayStatus } from "@/features/medications/list";
 import { t } from "@/lib/i18n";
-import { useDoseAction, useDoseHistory, useRegimen, type DoseAction } from "@/lib/queries";
+import {
+  useChangeStock,
+  useCourseChange,
+  useDoseAction,
+  useDoseHistory,
+  useRegimen,
+  type DoseAction,
+} from "@/lib/queries";
 import { space, usePalette } from "@/theme";
 
 /** How many intakes the course screen lists before "all of them" takes over. */
@@ -32,11 +41,12 @@ function calendarDay(day: string): string {
 }
 
 /**
- * One course — the web course page, read-only apart from its intakes.
+ * One course — the web course page.
  *
- * The card says what the course is: its status, its schedule, its dates, its stock and notes. Below
- * it the last few intakes, each answerable or undoable from its menu exactly as on the web, and a row
- * into the full history. Reached from either tab, so the history it opens is pushed onto whichever
+ * The card says what the course is: its status, its schedule, its dates, its stock and notes, and,
+ * when the stock runs low, lets the reminder about it be put off. Below it the last few intakes, each
+ * answerable or undoable from its menu exactly as on the web, and a row into the full history. The
+ * button in the bar holds what the web page's toolbar does: refill, archive or bring back, delete. Reached from either tab, so the history it opens is pushed onto whichever
  * stack the course is on and the back gesture returns where it came from.
  */
 export default function MedicationScreen() {
@@ -47,6 +57,8 @@ export default function MedicationScreen() {
   const regimen = useRegimen(id);
   const history = useDoseHistory(id);
   const action = useDoseAction();
+  const change = useCourseChange();
+  const stock = useChangeStock();
 
   const act = useCallback(
     (dose: DayDose, kind: DoseAction) =>
@@ -56,7 +68,34 @@ export default function MedicationScreen() {
 
   const course = regimen.data;
   const title = course?.custom_name ?? "";
-  const header = <Stack.Screen options={{ title }} />;
+  const header = (
+    <Stack.Screen
+      options={{
+        title,
+        headerRight: course
+          ? () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${t("common.actions")}: ${course.custom_name}`}
+                hitSlop={space.sm}
+                onPress={() =>
+                  showCourseSheet(course, {
+                    change: (kind) =>
+                      change.mutate(
+                        { regimenId: course.id, change: kind },
+                        { onSuccess: () => kind !== "unarchive" && router.back() },
+                      ),
+                    refill: (amount) => stock.mutate({ regimenId: course.id, amount }),
+                  })
+                }
+              >
+                <Icon icon={Ellipsis} size={22} tone="foreground" />
+              </Pressable>
+            )
+          : undefined,
+      }}
+    />
+  );
 
   if (regimen.error || history.error) {
     return (
@@ -168,6 +207,7 @@ export default function MedicationScreen() {
                 : ""}
             </Text>
           ) : null}
+          {isLowInventory(course) ? <RefillSnooze regimenId={course.id} /> : null}
           {course.notes ? (
             <View style={{ gap: 2 }}>
               <Text size="xs" weight="medium" tone="mutedForeground">

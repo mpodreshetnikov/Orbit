@@ -1,0 +1,70 @@
+# A course's own actions: the low-stock reminder put off and back, refill, delete asked and
+# cancelled, archive; then the list's reminder settings. Magnesium is seeded with low stock. It
+# changes the data, so it runs after the read-only flows.
+appId: host.exp.Exponent
+name: Курс — действия
+---
+# Seeded with a fixed id, so the link opens the course itself.
+- openLink: exp://127.0.0.1:8081/--/medications/30000001-0000-4000-8000-000000000004
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Если вы уже ждёте доставку.*"
+    timeout: 60000
+- takeScreenshot: course-01-low-stock
+- tapOn: "Отложить напоминание"
+- extendedWaitUntil:
+    visible: "Напоминание о низком запасе отложено до.*"
+    timeout: 15000
+- takeScreenshot: course-02-snoozed
+- tapOn: "Снять отложение"
+- extendedWaitUntil:
+    visible: "Если вы уже ждёте доставку.*"
+    timeout: 15000
+# The button in the bar is labelled with the course's name.
+- tapOn: "Действия: Magnesium"
+- takeScreenshot: course-03-menu
+- tapOn: "Пополнить"
+- extendedWaitUntil:
+    visible: "Плюс = пополнить.*"
+    timeout: 10000
+- eraseText: 5
+- inputText: "10"
+- takeScreenshot: course-04-refill
+# The prompt's title says "Пополнить" too; its button is the second match.
+- tapOn:
+    text: "Пополнить"
+    index: 1
+- extendedWaitUntil:
+    visible: "Сейчас: 13.*"
+    timeout: 15000
+- takeScreenshot: course-05-refilled
+- tapOn: "Действия: Magnesium"
+- tapOn: "Удалить лекарство"
+- extendedWaitUntil:
+    visible: "Удалить это лекарство.*"
+    timeout: 10000
+- takeScreenshot: course-06-delete-asked
+- tapOn: "Отмена"
+- tapOn: "Действия: Magnesium"
+- tapOn: "В архив"
+- extendedWaitUntil:
+    visible: "Отправить лекарство в архив.*"
+    timeout: 10000
+- tapOn: "В архив"
+# Archiving returns to the list; the archive filter now holds the course.
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 15000
+- tapOn: "В архиве"
+- extendedWaitUntil:
+    visible: "Magnesium.*"
+    timeout: 10000
+- takeScreenshot: course-07-archived
+- tapOn: "Настройки"
+- extendedWaitUntil:
+    visible: "Интервал напоминаний о просроченных"
+    timeout: 10000
+- takeScreenshot: settings-01-interval
+- tapOn: "Отмена"

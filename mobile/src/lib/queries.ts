@@ -10,6 +10,16 @@ import {
   resolveOwnPerson,
   undoDoseIntake,
 } from "@/features/doses/query";
+import {
+  archiveRegimen,
+  changeStock,
+  deleteRegimen,
+  fetchOverdueInterval,
+  fetchRefillSnooze,
+  saveOverdueInterval,
+  setRefillSnooze,
+  unarchiveRegimen,
+} from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
 import { useSession } from "@/lib/session";
 
@@ -131,5 +141,86 @@ export function useDoseAction() {
       void client.invalidateQueries({ queryKey: ["regimens"] });
       void client.invalidateQueries({ queryKey: ["regimen"] });
     },
+  });
+}
+
+/** Everything a change to a course can show up in: the lists, the course, and its doses. */
+function refreshCourses(client: QueryClient) {
+  void client.invalidateQueries({ queryKey: ["regimens"] });
+  void client.invalidateQueries({ queryKey: ["regimen"] });
+  void client.invalidateQueries({ queryKey: ["doses-day"] });
+  void client.invalidateQueries({ queryKey: ["dose-history"] });
+}
+
+export type CourseChange = "archive" | "unarchive" | "delete";
+
+const COURSE_CHANGES: Record<CourseChange, (regimenId: string) => Promise<void>> = {
+  archive: archiveRegimen,
+  unarchive: unarchiveRegimen,
+  delete: deleteRegimen,
+};
+
+/** Archive, bring back or delete a course; a failure buzzes, as a dose's does. */
+export function useCourseChange() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ regimenId, change }: { regimenId: string; change: CourseChange }) =>
+      COURSE_CHANGES[change](regimenId),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => refreshCourses(client),
+  });
+}
+
+/** Refill a course's stock, or write some off. */
+export function useChangeStock() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ regimenId, amount }: { regimenId: string; amount: number }) =>
+      changeStock(regimenId, amount),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => refreshCourses(client),
+  });
+}
+
+export function useRefillSnooze(regimenId: string) {
+  return useQuery({
+    queryKey: ["refill-snooze", regimenId],
+    queryFn: () => fetchRefillSnooze(regimenId),
+  });
+}
+
+export function useSetRefillSnooze() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ regimenId, until }: { regimenId: string; until: string | null }) =>
+      setRefillSnooze(regimenId, until),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: (_data, _error, { regimenId }) => {
+      void client.invalidateQueries({ queryKey: ["refill-snooze", regimenId] });
+      void client.invalidateQueries({ queryKey: ["regimens"] });
+    },
+  });
+}
+
+export function useOverdueInterval() {
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useQuery({
+    queryKey: ["overdue-interval", userId],
+    queryFn: () => fetchOverdueInterval(userId as string),
+    enabled: Boolean(userId),
+  });
+}
+
+export function useSaveOverdueInterval() {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useMutation({
+    mutationFn: (minutes: number) => saveOverdueInterval(userId as string, minutes),
+    onSuccess: (value) => client.setQueryData(["overdue-interval", userId], value),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
   });
 }

@@ -86,4 +86,5 @@ Screenshots land under `<dir>/.maestro/tests/*/<flow name>/takeScreenshot/`, vid
 sending it on. Writing flows: a list row is one accessibility element ("Vitamin D3, Просрочено · …")
 and Maestro matches text whole, so match rows by prefix (`"Vitamin D3.*"`); the data is
 `supabase/seed.sql`'s user `dev@example.com`, with today's doses and yesterday's (taken) generated
-in the run.
+in the run, and Magnesium given a low stock. Seeded rows keep fixed ids, so a flow can open one by
+link (`exp://127.0.0.1:8081/--/medications/<id>`).

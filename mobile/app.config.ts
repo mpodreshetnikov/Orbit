@@ -27,7 +27,7 @@ const config: ExpoConfig = {
   // Follows the phone. `src/theme.ts` carries the web app's dark palette as well as its light one,
   // and the navigation theme and status bar switch with it in `src/app/_layout.tsx`.
   userInterfaceStyle: "automatic",
-  plugins: ["expo-router", "expo-web-browser"],
+  plugins: ["expo-router", "expo-web-browser", "@react-native-community/datetimepicker"],
   experiments: {
     typedRoutes: true,
   },

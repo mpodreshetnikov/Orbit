@@ -1,7 +1,8 @@
 import type { MedRegimen } from "@orbit-types/regimen";
 import { Stack, useRouter, type Href } from "expo-router";
 import { useMemo, useState } from "react";
-import { FlatList, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Settings } from "lucide-react-native";
+import { Alert, FlatList, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { unitIcon } from "@/components/medication-icons";
 import { filterLabel, LowStockBadge, StatusBadge } from "@/components/medication-badges";
 import { Button, Icon, Placeholder, Text } from "@/components/ui";
@@ -17,7 +18,7 @@ import {
   type StatusFilter,
 } from "@/features/medications/list";
 import { t } from "@/lib/i18n";
-import { usePerson, useRegimens } from "@/lib/queries";
+import { usePerson, useOverdueInterval, useRegimens, useSaveOverdueInterval } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
 /**
@@ -25,7 +26,8 @@ import { radius, space, usePalette } from "@/theme";
  *
  * The search is the system's own, in the navigation bar under the large title; the filter is a row
  * of chips rather than the web's select, because a phone shows five short words at once. Each card is
- * the web `RegimenCard` and opens the course.
+ * the web `RegimenCard` and opens the course. The gear in the bar is the web page's settings dialog:
+ * how often an overdue dose is reminded about again, asked for in the system's own prompt.
  */
 export default function MedicationsScreen() {
   const palette = usePalette();
@@ -34,6 +36,27 @@ export default function MedicationsScreen() {
   const regimens = useRegimens(person.data?.id);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const interval = useOverdueInterval();
+  const saveInterval = useSaveOverdueInterval();
+
+  const editInterval = () =>
+    Alert.prompt(
+      t("medications.overdueReminderInterval"),
+      `${t("medications.overdueReminderIntervalDescription")}\n(${t("medications.overdueReminderIntervalMinutes")})`,
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("common.save"),
+          onPress: (typed?: string) => {
+            const minutes = Number((typed ?? "").trim());
+            if (Number.isFinite(minutes) && minutes > 0) saveInterval.mutate(minutes);
+          },
+        },
+      ],
+      "plain-text",
+      String(interval.data ?? ""),
+      "number-pad",
+    );
 
   const visible = useMemo(
     () => filterRegimens(regimens.data ?? [], { status, query }),
@@ -44,6 +67,16 @@ export default function MedicationsScreen() {
     <Stack.Screen
       options={{
         title: t("medications.navTitle"),
+        headerRight: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("medications.settings")}
+            hitSlop={space.sm}
+            onPress={editInterval}
+          >
+            <Icon icon={Settings} size={22} tone="foreground" />
+          </Pressable>
+        ),
         headerSearchBarOptions: {
           placeholder: t("common.search"),
           hideWhenScrolling: false,
