@@ -13,6 +13,7 @@ import {
   FIREFOX_XPI_CONTENT_TYPE,
   type FirefoxReleaseMetadata,
   getFirefoxReleaseObjectPath,
+  downloadSignedFirefoxVersion,
   hasAmoCredentials,
   lintFirefoxBuild,
   sha256OfFile,
@@ -81,6 +82,9 @@ const EXTENSION_NON_PACKAGED_PATTERNS = [
   // the version policy would require a version bump to land the change, which
   // is circular. The rest of scripts/extension/ stays governed.
   /^scripts\/extension\/release\.ts$/,
+  // Its Firefox half, for the same reason: it lints, signs or fetches the signed file, and
+  // publishes; what the add-on contains is decided by the build before it runs.
+  /^scripts\/extension\/firefox-release\.ts$/,
 ] as const;
 
 export interface ExtensionReleaseMetadata {
@@ -948,11 +952,22 @@ async function prepareFirefoxRelease(input: {
 
   const objectPath = getFirefoxReleaseObjectPath(input.version);
   const xpiPath = path.join(input.artifactDir, ...objectPath.split("/"));
-  await signFirefoxBuild(input.rootDir, xpiPath);
+  const geckoId = process.env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID;
+  const alreadySigned = await downloadSignedFirefoxVersion({
+    geckoId,
+    version: input.version,
+    destinationPath: xpiPath,
+    env: process.env,
+  });
+  if (alreadySigned) {
+    console.log(`[extension-release] AMO already signed ${input.version}; using that file.`);
+  } else {
+    await signFirefoxBuild(input.rootDir, xpiPath);
+  }
 
   const firefox: FirefoxReleaseMetadata = {
     version: input.version,
-    extension_id: process.env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID,
+    extension_id: geckoId,
     sha256: await sha256OfFile(xpiPath),
     download_url: buildSupabaseStoragePublicUrl({ supabaseUrl: input.supabaseUrl, objectPath }),
   };

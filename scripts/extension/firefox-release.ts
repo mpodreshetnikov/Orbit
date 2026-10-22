@@ -24,6 +24,7 @@ export const FIREFOX_DIST_DIR = "browserExtension/dist-firefox";
 /** web-ext reads its options from WEB_EXT_* variables, so the AMO credentials never reach argv. */
 const AMO_KEY_ENV = "WEB_EXT_API_KEY";
 const AMO_SECRET_ENV = "WEB_EXT_API_SECRET";
+const AMO_API_URL = "https://addons.mozilla.org/api/v5";
 
 export interface FirefoxReleaseMetadata {
   version: string;
@@ -88,9 +89,9 @@ export async function lintFirefoxBuild(rootDir: string): Promise<void> {
 }
 
 /**
- * Signs the built Firefox add-on into `destinationPath`. AMO signs a version once: signing a
- * version it already holds fails, so a publish that failed after signing is retried with a new
- * manifest version, not by re-running the job.
+ * Signs the built Firefox add-on into `destinationPath`. AMO signs a version once and refuses the
+ * same version again ("Version 0.1.26 already exists"), so a release whose publish failed after
+ * signing is completed by `downloadSignedFirefoxVersion`, not by this.
  */
 export async function signFirefoxBuild(rootDir: string, destinationPath: string): Promise<void> {
   await fs.mkdir(path.dirname(destinationPath), { recursive: true });
@@ -114,6 +115,65 @@ export async function signFirefoxBuild(rootDir: string, destinationPath: string)
   } finally {
     await fs.rm(signDir, { recursive: true, force: true });
   }
+}
+
+/** The short-lived token AMO's API takes: HS256 over the issuer, a nonce and a minute of validity. */
+export function createAmoJwt(
+  env: Record<string, string | undefined>,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): string {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const unsigned = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
+    iss: env[AMO_KEY_ENV]?.trim(),
+    jti: crypto.randomUUID(),
+    iat: nowSeconds,
+    exp: nowSeconds + 60,
+  })}`;
+  const signature = crypto
+    .createHmac("sha256", env[AMO_SECRET_ENV]?.trim() ?? "")
+    .update(unsigned)
+    .digest("base64url");
+  return `${unsigned}.${signature}`;
+}
+
+/**
+ * Downloads the add-on AMO already signed for `version` into `destinationPath`, and says whether
+ * there was one. Signing and publishing are separate steps, so a publish can fail after AMO has
+ * signed -- a Storage that refused the upload, a server not yet migrated -- and the next run, which
+ * cannot sign that version again, takes the signed file from AMO instead of needing a version bump.
+ * The manifest version is bumped whenever the packaged code changes, so the file AMO holds for a
+ * version is the build of that version.
+ */
+export async function downloadSignedFirefoxVersion(input: {
+  geckoId: string;
+  version: string;
+  destinationPath: string;
+  env: Record<string, string | undefined>;
+  fetchImpl?: typeof fetch;
+}): Promise<boolean> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const authorization = () => ({ Authorization: `JWT ${createAmoJwt(input.env)}` });
+  const versionUrl = `${AMO_API_URL}/addons/addon/${encodeURIComponent(input.geckoId)}/versions/v${encodeURIComponent(input.version)}/`;
+  const response = await fetchImpl(versionUrl, { headers: authorization() });
+  // 404: AMO does not know the version, or not the add-on yet -- its first release.
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    throw new Error(`AMO answered ${response.status} for ${input.version} of ${input.geckoId}.`);
+  }
+  const body = (await response.json()) as { file?: { url?: unknown; status?: unknown } };
+  const fileUrl = body.file?.url;
+  if (typeof fileUrl !== "string" || body.file?.status !== "public") {
+    throw new Error(
+      `AMO holds ${input.version} of ${input.geckoId} but has not signed it (file status ${String(body.file?.status)}).`,
+    );
+  }
+  const file = await fetchImpl(fileUrl, { headers: authorization() });
+  if (!file.ok) {
+    throw new Error(`AMO answered ${file.status} for the signed file of ${input.version}.`);
+  }
+  await fs.mkdir(path.dirname(input.destinationPath), { recursive: true });
+  await fs.writeFile(input.destinationPath, Buffer.from(await file.arrayBuffer()));
+  return true;
 }
 
 export async function sha256OfFile(filePath: string): Promise<string> {

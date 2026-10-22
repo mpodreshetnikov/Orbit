@@ -357,7 +357,7 @@ describe("extension release", () => {
     // makes the version policy circular: changing the policy would need a bump.
     expect(
       shouldRequireExtensionVersionBump({
-        changedFiles: ["scripts/extension/release.ts"],
+        changedFiles: ["scripts/extension/release.ts", "scripts/extension/firefox-release.ts"],
         versionChanged: false,
       }),
     ).toBe(false);
