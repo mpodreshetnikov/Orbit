@@ -39,6 +39,17 @@ import type {
   CreateMoneyLineItemInput,
 } from "@/types";
 import {
+  lineItemDraft,
+  lineItemDrafts,
+  lineItemInputs,
+  lineItemsMismatch,
+  lineItemsTotal,
+  manualCategoryChange,
+  transactionFormProblem,
+  withMerchantCategory,
+  type LineItemDraft,
+} from "@/types/money-transaction-form";
+import {
   MONEY_CURRENCIES,
   MONEY_LINE_STATUSES,
   MONEY_TRANSACTION_STATUSES,
@@ -55,27 +66,6 @@ export interface MoneyTransactionFormValues {
   merchant_name: string;
   comment: string;
   line_items: CreateMoneyLineItemInput[];
-}
-
-interface LineItemState {
-  id?: string;
-  key: string;
-  title: string;
-  amount: string;
-  quantity: string;
-  unit: string;
-  line_status: MoneyLineStatus;
-  related_line_item_id: string | null;
-  category_id: string | null;
-  category_locked_by_user: boolean;
-  beneficiary_person_id: string | null;
-  assignment_method: CreateMoneyLineItemInput["assignment_method"];
-  assignment_rule_id: string | null;
-  assignment_confidence: number | null;
-  raw_payload: Record<string, unknown> | null;
-  last_category_rule_id: string | null;
-  last_category_rule_run_id: string | null;
-  category_assigned_at: string | null;
 }
 
 interface MoneyTransactionFormProps {
@@ -103,33 +93,6 @@ function toLocalDateTimeInput(iso: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
     date.getDate(),
   )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function defaultLineItem(seed?: Partial<LineItemState>): LineItemState {
-  const key =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random()}`;
-  return {
-    key,
-    title: "",
-    amount: "",
-    quantity: "",
-    unit: "",
-    line_status: "final",
-    related_line_item_id: null,
-    category_id: null,
-    category_locked_by_user: false,
-    beneficiary_person_id: null,
-    assignment_method: "manual",
-    assignment_rule_id: null,
-    assignment_confidence: null,
-    raw_payload: null,
-    last_category_rule_id: null,
-    last_category_rule_run_id: null,
-    category_assigned_at: null,
-    ...seed,
-  };
 }
 
 export function MoneyTransactionForm({
@@ -171,32 +134,9 @@ export function MoneyTransactionForm({
   const [merchantName, setMerchantName] = useState(initialTransaction?.merchant_name ?? "");
   const [comment, setComment] = useState(initialTransaction?.comment ?? "");
 
-  const [lineItems, setLineItems] = useState<LineItemState[]>(() => {
-    if (initialLineItems && initialLineItems.length > 0) {
-      return initialLineItems.map((item) =>
-        defaultLineItem({
-          id: item.id,
-          title: item.title,
-          amount: String(item.amount),
-          quantity: item.quantity != null ? String(item.quantity) : "",
-          unit: item.unit ?? "",
-          line_status: item.line_status,
-          related_line_item_id: item.related_line_item_id,
-          category_id: item.category_id,
-          category_locked_by_user: item.category_locked_by_user ?? false,
-          beneficiary_person_id: item.beneficiary_person_id,
-          assignment_method: item.assignment_method,
-          assignment_rule_id: item.assignment_rule_id,
-          assignment_confidence: item.assignment_confidence,
-          raw_payload: item.raw_payload,
-          last_category_rule_id: item.last_category_rule_id ?? null,
-          last_category_rule_run_id: item.last_category_rule_run_id ?? null,
-          category_assigned_at: item.category_assigned_at ?? null,
-        }),
-      );
-    }
-    return [defaultLineItem()];
-  });
+  const [lineItems, setLineItems] = useState<LineItemDraft[]>(() =>
+    lineItemDrafts(initialLineItems),
+  );
 
   const [openCategoryKey, setOpenCategoryKey] = useState<string | null>(null);
   const [openMerchantDropdown, setOpenMerchantDropdown] = useState(false);
@@ -222,44 +162,22 @@ export function MoneyTransactionForm({
     prevAccountIdRef.current = accountId;
   }, [accountId, selectedAccount]);
 
-  const totalLineItems = useMemo(() => {
-    return lineItems.reduce((sum, item) => {
-      const value = parseFloat(item.amount);
-      return sum + (Number.isFinite(value) ? value : 0);
-    }, 0);
-  }, [lineItems]);
-
-  const amountNumber = Number.isFinite(parseFloat(amount)) ? parseFloat(amount) : 0;
-  // Compare in cents to avoid floating-point false positives
-  const totalCents = Math.round(totalLineItems * 100);
-  const amountCents = Math.round(amountNumber * 100);
-  const showMismatch = totalCents !== amountCents;
+  const totalLineItems = useMemo(() => lineItemsTotal(lineItems), [lineItems]);
+  const showMismatch = lineItemsMismatch(amount, lineItems);
 
   const categoryOptions = useMemo(
     () => [...categories].sort((a, b) => a.depth - b.depth),
     [categories],
   );
 
-  const handleLineItemChange = (key: string, updates: Partial<LineItemState>) => {
+  const handleLineItemChange = (key: string, updates: Partial<LineItemDraft>) => {
     setLineItems((items) =>
       items.map((item) => (item.key === key ? { ...item, ...updates } : item)),
     );
   };
 
-  const buildManualCategoryChange = (
-    item: LineItemState,
-    categoryId: string | null,
-  ): Partial<LineItemState> => ({
-    category_id: categoryId,
-    category_locked_by_user: categoryId !== null,
-    assignment_method: "manual",
-    assignment_rule_id: null,
-    assignment_confidence: null,
-    last_category_rule_id: null,
-    last_category_rule_run_id: null,
-    category_assigned_at: categoryId ? new Date().toISOString() : null,
-    raw_payload: item.raw_payload,
-  });
+  const buildManualCategoryChange = (item: LineItemDraft, categoryId: string | null) =>
+    manualCategoryChange(item, categoryId, new Date());
 
   const defaultLineItemValues = useMemo(
     () => ({
@@ -277,7 +195,7 @@ export function MoneyTransactionForm({
   const handleAddLineItem = () => {
     setLineItems((items) => [
       ...items,
-      defaultLineItem({
+      lineItemDraft({
         quantity: defaultLineItemValues.quantity,
         unit: defaultLineItemValues.unit,
         category_id: defaultLineItemValues.category_id,
@@ -313,13 +231,7 @@ export function MoneyTransactionForm({
     const trimmed = merchantName.trim();
     const defaultCat = trimmed ? (merchantDefaultCategoryId[trimmed] ?? null) : null;
     if (!defaultCat) return;
-    setLineItems((items) =>
-      items.map((item) => ({
-        ...item,
-        category_id:
-          item.category_id || item.category_locked_by_user ? item.category_id : defaultCat,
-      })),
-    );
+    setLineItems((items) => withMerchantCategory(items, defaultCat));
   }, [merchantName, merchantDefaultCategoryId]);
 
   const handleRemoveLineItem = (key: string) => {
@@ -327,41 +239,14 @@ export function MoneyTransactionForm({
   };
 
   const handleSubmit = async () => {
-    if (!accountId) {
-      toast.error(t("money.validationAccountRequired"));
-      return;
-    }
-    if (!postedAt) {
-      toast.error(t("money.validationPostedAtRequired"));
+    const problem = transactionFormProblem({ accountId, postedAt, amount });
+    if (problem) {
+      toast.error(t(problem));
       return;
     }
     const parsedAmount = parseFloat(amount);
-    if (!Number.isFinite(parsedAmount)) {
-      toast.error(t("money.validationAmountRequired"));
-      return;
-    }
 
-    const lineItemsPayload = lineItems
-      .filter((item) => item.title.trim() || item.amount.trim())
-      .map<CreateMoneyLineItemInput>((item) => ({
-        id: item.id,
-        title: item.title.trim() || merchantName.trim() || "Manual item",
-        amount: Number.isFinite(parseFloat(item.amount)) ? parseFloat(item.amount) : 0,
-        quantity: Number.isFinite(parseFloat(item.quantity)) ? parseFloat(item.quantity) : null,
-        unit: item.unit.trim() || null,
-        line_status: item.line_status,
-        related_line_item_id: item.related_line_item_id,
-        category_id: item.category_id ?? null,
-        beneficiary_person_id: item.beneficiary_person_id ?? null,
-        assignment_method: item.assignment_method ?? "manual",
-        assignment_rule_id: item.assignment_rule_id,
-        assignment_confidence: item.assignment_confidence,
-        raw_payload: item.raw_payload,
-        category_locked_by_user: item.category_locked_by_user,
-        last_category_rule_id: item.last_category_rule_id,
-        last_category_rule_run_id: item.last_category_rule_run_id,
-        category_assigned_at: item.category_assigned_at,
-      }));
+    const lineItemsPayload = lineItemInputs(lineItems, merchantName);
 
     const isoPostedAt = new Date(postedAt).toISOString();
 
