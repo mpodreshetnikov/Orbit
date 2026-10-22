@@ -79,7 +79,6 @@ name: Курс — действия
     notVisible: "Vitamin D3.*"
     timeout: 10000
 - assertVisible: "Magnesium.*"
-    timeout: 10000
 - takeScreenshot: course-07-archived
 - tapOn: "Настройки"
 - extendedWaitUntil:
