@@ -80,6 +80,10 @@ name: Курс — действия
     timeout: 10000
 - assertVisible: "Magnesium.*"
 - takeScreenshot: course-07-archived
+# Back on the list, iOS 26 can leave its search open over the title and the gear: close it.
+- tapOn:
+    text: "Close"
+    optional: true
 - tapOn: "Настройки"
 - extendedWaitUntil:
     visible: "Интервал напоминаний о просроченных"
