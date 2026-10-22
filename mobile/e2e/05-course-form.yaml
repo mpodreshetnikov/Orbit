@@ -15,6 +15,9 @@ name: Курс — форма
 - extendedWaitUntil:
     visible: "Основные данные"
     timeout: 10000
+- tapOn:
+    text: "Continue"
+    optional: true
 - inputText: "Омега-3"
 - hideKeyboard
 - takeScreenshot: form-01-new

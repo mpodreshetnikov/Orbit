@@ -5,6 +5,7 @@ import { stackOptions } from "@/components/stack-options";
 export default function TodayStack() {
   return (
     <Stack screenOptions={stackOptions}>
+      <Stack.Screen name="index" />
       <Stack.Screen name="medication/[id]/edit" options={{ presentation: "modal" }} />
     </Stack>
   );

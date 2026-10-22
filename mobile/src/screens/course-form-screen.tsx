@@ -172,12 +172,7 @@ function CourseFormBody({ initial, kind }: { initial: MedRegimen | null; kind: M
         title: initial ? t("medications.edit") : t("medications.add"),
         headerLargeTitle: false,
         headerLeft: () => (
-          <Button
-            compact
-            variant="ghost"
-            label={t("common.cancel")}
-            onPress={() => router.back()}
-          />
+          <Button compact variant="ghost" label={t("common.cancel")} onPress={router.back} />
         ),
         headerRight: () => (
           <Button
