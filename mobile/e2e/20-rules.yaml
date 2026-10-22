@@ -1,0 +1,20 @@
+# The category rules, reached from the money tab, and a rule's menu.
+appId: host.exp.Exponent
+name: Правила
+---
+- openLink: exp://127.0.0.1:8081/--/money
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil:
+    visible: "Совпадений"
+    timeout: 60000
+- tapOn: "Правила"
+- extendedWaitUntil:
+    visible: "Streaming"
+    timeout: 20000
+- takeScreenshot: rules-01-list
+- tapOn: "Действия: Streaming"
+- extendedWaitUntil:
+    visible: "Опустить ниже"
+    timeout: 10000
+- takeScreenshot: rules-02-menu
+- tapOn: "Отмена"

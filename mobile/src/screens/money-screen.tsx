@@ -58,6 +58,7 @@ export function useDebounced<T>(value: T, ms: number): T {
 const SECTIONS: [string, string][] = [
   ["money.accounts", "/money/accounts"],
   ["money.categories", "/money/categories"],
+  ["money.rules", "/money/rules"],
 ];
 
 const signLabel = (sign: MoneyAmountSignFilter) =>
