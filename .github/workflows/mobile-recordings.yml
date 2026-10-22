@@ -58,7 +58,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .cache/docker/supabase-images
-          key: ${{ runner.os }}-supabase-docker-${{ hashFiles('supabase/config.toml') }}
+          key: ${{ runner.os }}-supabase-docker-v2-${{ hashFiles('supabase/config.toml') }}
+          # v1 lacks postgres-meta (T-261022-338) but still spares every other pull until a run on
+          # main saves v2. A fallback hit is not a cache-hit, so that run still captures and saves.
+          restore-keys: |
+            ${{ runner.os }}-supabase-docker-${{ hashFiles('supabase/config.toml') }}
       - name: Load cached Supabase Docker images
         run: |
           shopt -s nullglob

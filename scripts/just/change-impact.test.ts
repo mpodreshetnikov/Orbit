@@ -100,6 +100,7 @@ describe("change-impact docsOnly", () => {
     expect(classifyChangedFiles(["scripts/just/db-artifacts.cjs"]).dbImpact).toBe(true);
     expect(classifyChangedFiles(["scripts/just/db-artifacts.test.ts"]).dbImpact).toBe(true);
     expect(classifyChangedFiles(["supabase/config.toml"]).dbImpact).toBe(true);
+    expect(classifyChangedFiles([".github/workflows/main.yml"]).dbImpact).toBe(true);
   });
 
   it("does not treat every script or supabase file as DB impact", () => {
