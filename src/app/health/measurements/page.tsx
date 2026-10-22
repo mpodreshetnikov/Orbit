@@ -32,7 +32,7 @@ import { MEASUREMENT_CATEGORY_LABELS } from "@/types";
 import { AddMeasurementDialog } from "@/components/measurements/add-measurement-dialog";
 import { BodyMeasurementsView } from "@/components/measurements/body-map";
 import { MeasurementVisibilityDialog } from "@/components/measurements/measurement-visibility-dialog";
-import { getMeasurementTrend } from "@/lib/measurement-trend";
+import { getMeasurementTrend } from "@/types/measurement-trend";
 
 type ViewMode = "cards" | "table" | "body";
 

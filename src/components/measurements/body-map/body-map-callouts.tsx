@@ -3,7 +3,7 @@
 import React from "react";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { MeasurementTrend } from "@/lib/measurement-trend";
+import type { MeasurementTrend } from "@/types/measurement-trend";
 import { BodyMap, type RegionTone } from "./body-map";
 import { layoutOnBodyLabels } from "./callout-layout";
 import { getBodyArtwork, parseViewBox, type BodyModel } from "./regions";
