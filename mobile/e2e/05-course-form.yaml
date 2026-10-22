@@ -33,7 +33,6 @@ name: Курс — форма
 - hideKeyboard
 - takeScreenshot: form-03-stock
 - tapOn: "Сохранить"
-# Saved, the form slides away and the new course opens with the stock it was given.
 - extendedWaitUntil:
     visible: "Сейчас: 60.*"
     timeout: 20000

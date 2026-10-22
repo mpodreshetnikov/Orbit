@@ -13,6 +13,7 @@ name: Курс — действия
 - extendedWaitUntil:
     visible: "Magnesium.*"
     timeout: 60000
+- tapOn: { text: "Close", optional: true } # A search 02 left open would swallow the next tap.
 # The list can still be settling under its search bar when it first shows: tap again until the
 # course opens.
 - tapOn:
