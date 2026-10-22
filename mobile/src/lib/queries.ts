@@ -1,5 +1,6 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
+import type { FindingSummary } from "@orbit-types/finding";
 import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
 import type {
   AddOneTimeToExistingPayload,
@@ -29,6 +30,7 @@ import {
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
 import { fetchObservations } from "@/features/observations/query";
+import { fetchActiveRecords, fetchFindings, markFindingResolved } from "@/features/findings/query";
 import {
   createCatalogEntry,
   createMeasurement,
@@ -377,5 +379,33 @@ export function useObservations(personId: string | undefined) {
     queryKey: ["observations", personId],
     queryFn: () => fetchObservations(personId as string),
     enabled: Boolean(personId),
+  });
+}
+
+export function useFindings(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["findings", personId],
+    queryFn: () => fetchFindings(personId as string),
+    enabled: Boolean(personId),
+  });
+}
+
+export function useActiveRecords(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["active-records", personId],
+    queryFn: () => fetchActiveRecords(personId as string),
+    enabled: Boolean(personId),
+  });
+}
+
+/** Mark a finding gone, on a record of the person's; the findings are refetched after. */
+export function useMarkFindingResolved() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { personId: string; recordId: string; finding: FindingSummary }) =>
+      markFindingResolved(input.personId, input.recordId, input.finding),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["findings"] }),
   });
 }

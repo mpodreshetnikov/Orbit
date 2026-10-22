@@ -77,6 +77,7 @@ beforeEach(() => {
         ref_range_low: 130,
         ref_range_high: 170,
       }),
+      result("g0", "glucose", "glucose", 4.8, "2026-02-01", { unit: "ммоль/л" }),
       result("g1", "glucose", "glucose", 5.1, "2026-08-01", { unit: "ммоль/л" }),
       result("t1", null, "Цвет мочи", null, "2026-07-01", { value_text: "жёлтый", unit: null }),
       // Not applied, and from a draft record: neither is part of the history.
@@ -117,6 +118,12 @@ describe("the lab values", () => {
     expect(await screen.findByText("Показателей пока нет")).toBeOnTheScreen();
   });
 
+  it("offers a retry when the person cannot be read", async () => {
+    fail("persons");
+    await renderScreens(routes, "/health/observations");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+  });
+
   it("offers a retry when they cannot be read", async () => {
     fail("record_observations");
     await renderScreens(routes, "/health/observations");
@@ -145,6 +152,11 @@ describe("a lab value's history", () => {
       nativeEvent: { layout: { width: 300, height: 200 } },
     });
     expect(screen.getAllByText("01.03.2026")).toHaveLength(2);
+  });
+
+  it("marks a rise", async () => {
+    await renderScreens(routes, "/health/observations/glucose");
+    expect(await screen.findByText(/^\+6\.\d%$/)).toBeOnTheScreen();
   });
 
   it("shows a text result without a chart", async () => {

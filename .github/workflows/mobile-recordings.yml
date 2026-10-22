@@ -106,6 +106,20 @@ jobs:
           update public.med_regimens
              set inventory = '{"enabled": true, "current_amount": 3, "refill_threshold_amount": 5, "unit": "pill", "auto_decrement_on_taken": true}'::jsonb
            where id = '30000001-0000-4000-8000-000000000004';
+          -- The seed's findings are Kate's; give the signed-in person one, so the findings
+          -- screens have something to show.
+          insert into public.record_findings
+            (person_id, record_id, finding_type_id, finding_code, finding_type_text, body_site_id,
+             site_code, body_site_text, size_mm, count, severity, laterality, description,
+             finding_date, source_anchor, is_llm_extracted, is_user_verified)
+          select r.person_id, r.id,
+                 (select id from public.finding_type_catalog where finding_code = 'cyst' limit 1),
+                 'cyst', 'Simple cyst',
+                 (select id from public.body_site_catalog where site_code = 'kidney_left' limit 1),
+                 'kidney_left', 'Left kidney', 12, 1, 'mild', 'left', 'Simple cortical cyst',
+                 r.record_date, 'Простая киста левой почки 12 мм', false, true
+            from public.medical_records r
+           where r.id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
           -- Yesterday, every daily slot taken on time: a course always has a history to open.
           insert into public.med_dose_events
             (person_id, regimen_id, scheduled_at, actual_at, taken_at, planned_intake, status)
