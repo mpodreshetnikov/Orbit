@@ -83,7 +83,8 @@
     "tsx": "^4.23.13",
     "typescript": "^5.7.3",
     "vite": "^7.3.6",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "web-ext": "10.7.0"
   },
   "overrides": {
     "@swc/helpers": "0.5.18",

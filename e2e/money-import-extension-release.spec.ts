@@ -239,3 +239,82 @@ test.describe("money import extension release flow", () => {
     }
   });
 });
+
+test.describe("money import extension release flow in Firefox", () => {
+  test.skip(
+    !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY,
+    "Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
+  );
+  test.use({
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:158.0) Gecko/20100101 Firefox/158.0",
+  });
+
+  const release = {
+    version: "0.1.1",
+    published_at: "2026-03-14T12:00:00.000Z",
+    extension_id: "abc123",
+    sha256: "deadbeef",
+    download_url: "https://downloads.example.test/orbit-extension-0.1.1.zip",
+  };
+
+  async function openImport(page: Page, payload: unknown) {
+    const personId = await resolveSelectedPersonId();
+    await forceProductionExtensionFlow(page);
+    await page.route("**/api/extension-release/latest", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(payload),
+      });
+    });
+    await devLogin(page);
+    await setSelectedPerson(page, personId);
+    await page.getByRole("button", { name: /T-Bank Web/ }).click();
+  }
+
+  test("offers the signed add-on, not the Chrome archive", async ({ page }) => {
+    await openImport(page, {
+      ...release,
+      firefox: {
+        version: "0.1.1",
+        extension_id: "orbit@privateorbit.space",
+        sha256: "cafe",
+        download_url: "https://downloads.example.test/orbit-extension-0.1.1.xpi",
+      },
+    });
+
+    await expect(
+      page.getByText(
+        "Install the signed Orbit add-on for Firefox. Firefox keeps it up to date by itself.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Download latest extension" })).toHaveAttribute(
+      "href",
+      "https://downloads.example.test/orbit-extension-0.1.1.xpi",
+    );
+    await expect(
+      page.getByText(
+        "Click Download latest extension. If Firefox asks, allow this site to install add-ons.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText(/Load unpacked/)).toHaveCount(0);
+    await page.screenshot({
+      path: test.info().outputPath("money-import-firefox-install.png"),
+      fullPage: true,
+    });
+  });
+
+  test("says the Firefox build is not out yet instead of offering the Chrome archive", async ({
+    page,
+  }) => {
+    await openImport(page, release);
+
+    await expect(
+      page.getByText(
+        "The Firefox build has not been published yet. Until then, import through Chrome.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Download latest extension" })).toHaveCount(0);
+  });
+});
