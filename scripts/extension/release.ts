@@ -9,10 +9,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import {
   buildFirefoxUpdatesManifest,
+  FIREFOX_DIST_DIR,
   FIREFOX_UPDATES_PATH,
   FIREFOX_XPI_CONTENT_TYPE,
   type FirefoxReleaseMetadata,
   getFirefoxReleaseObjectPath,
+  downloadSignedFirefoxVersion,
   hasAmoCredentials,
   lintFirefoxBuild,
   sha256OfFile,
@@ -948,11 +950,23 @@ async function prepareFirefoxRelease(input: {
 
   const objectPath = getFirefoxReleaseObjectPath(input.version);
   const xpiPath = path.join(input.artifactDir, ...objectPath.split("/"));
-  await signFirefoxBuild(input.rootDir, xpiPath);
+  const geckoId = process.env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID;
+  const alreadySigned = await downloadSignedFirefoxVersion({
+    geckoId,
+    version: input.version,
+    sourceDir: path.join(input.rootDir, FIREFOX_DIST_DIR),
+    destinationPath: xpiPath,
+    env: process.env,
+  });
+  if (alreadySigned) {
+    console.log(`[extension-release] AMO already signed ${input.version}; using that file.`);
+  } else {
+    await signFirefoxBuild(input.rootDir, xpiPath);
+  }
 
   const firefox: FirefoxReleaseMetadata = {
     version: input.version,
-    extension_id: process.env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID,
+    extension_id: geckoId,
     sha256: await sha256OfFile(xpiPath),
     download_url: buildSupabaseStoragePublicUrl({ supabaseUrl: input.supabaseUrl, objectPath }),
   };

@@ -22,7 +22,7 @@ Notes:
 - Configure GitHub Actions extension release values (the release goes to your server, `docs/SELF_HOSTING.md`):
   - Secret: `SERVICE_ROLE_KEY` when the server has one of its own (moved from hosted Supabase); otherwise the job derives the server's key from `ORBIT_MASTER_KEY`, as `deploy/orbit` did
   - Variable: `ORBIT_DOMAIN` (and `ORBIT_HTTP_ONLY` for a test server); the build's app origin and Storage URL are both the server's URL
-  - Secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` (addons.mozilla.org, Developer Hub, Manage API Keys) to sign the Firefox build as an unlisted add-on. The signed `.xpi` and `firefox/updates.json` are published beside the Chrome archive, and Firefox updates itself from that file. Without them the release is Chrome-only. AMO signs a version once, so a publish that failed after signing needs a manifest version bump.
+  - Secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` (addons.mozilla.org, Developer Hub, Manage API Keys) to sign the Firefox build as an unlisted add-on. The signed `.xpi` and `firefox/updates.json` are published beside the Chrome archive, and Firefox updates itself from that file. Without them the release is Chrome-only. AMO signs a version once; a publish that failed after signing is finished by the next run, which takes the file AMO already signed when it holds exactly the files of this build, and otherwise fails until the manifest version is bumped.
 - Disable Vercel's automatic Git deploy integration if you want GitHub Actions to be the only deployment trigger.
 - Command execution policy (including avoiding `npm run` for project workflows) is canonical in `docs/QUALITY.md`.
 - MCP setup instructions are in `mcp/README.md`.
