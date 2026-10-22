@@ -89,7 +89,12 @@ export async function updateSession(request: NextRequest) {
 
   // Public routes that don't require auth
   const publicRoutes = ["/login", "/auth/callback", "/auth/dev-login", "/access-denied"];
-  const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
+  // The extension asks which release is out from its background, with no session of the
+  // person's: the answer is the bucket's own public latest.json, and a redirect to /login in its
+  // place broke every self-update check.
+  const publicExactPaths = ["/api/extension-release/latest"];
+  const isPublicRoute =
+    publicRoutes.some((route) => pathname.startsWith(route)) || publicExactPaths.includes(pathname);
 
   // If accessing a protected route
   if (!isPublicRoute) {
