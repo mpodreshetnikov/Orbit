@@ -67,9 +67,17 @@ name: Курс — действия
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
     timeout: 15000
-- tapOn: "В архиве"
+# The archive filter is the last chip, past the right edge of the row.
+- scrollUntilVisible:
+    element: "В архиве"
+    direction: RIGHT
+- tapOn:
+    text: "В архиве"
+    index: 0
 - extendedWaitUntil:
-    visible: "Magnesium.*"
+    notVisible: "Vitamin D3.*"
+    timeout: 10000
+- assertVisible: "Magnesium.*"
     timeout: 10000
 - takeScreenshot: course-07-archived
 - tapOn: "Настройки"
