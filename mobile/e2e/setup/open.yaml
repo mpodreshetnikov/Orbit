@@ -4,15 +4,23 @@ appId: host.exp.Exponent
 name: Open the client
 ---
 - openLink: exp://127.0.0.1:8081
-# iOS asks before a link leaves for another app.
-- tapOn:
-    text: "Open"
-    optional: true
-# Expo Go lays a tour of its developer menu over the app on its first launch, and nothing under
-# it is visible to Maestro until it is closed: wait for whichever comes first.
-- extendedWaitUntil:
-    visible: "Сегодня|Continue"
-    timeout: 600000
+# iOS asks before a link leaves for another app, and the prompt can arrive after a tap meant for
+# it has already looked and found nothing: keep answering it until the app shows. Expo Go lays a
+# tour of its developer menu over the app on its first launch, and nothing under it is visible to
+# Maestro until it is closed, so either one ends the wait. Twenty rounds of 30 s cover a cold bundle.
+- repeat:
+    times: 20
+    while:
+      notVisible: "Сегодня|Continue"
+    commands:
+      - tapOn:
+          text: "Open"
+          optional: true
+      - extendedWaitUntil:
+          visible: "Сегодня|Continue"
+          timeout: 30000
+          optional: true
+- assertVisible: "Сегодня|Continue"
 - tapOn:
     text: "Continue"
     optional: true
