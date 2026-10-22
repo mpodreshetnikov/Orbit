@@ -1,0 +1,78 @@
+import type { ImportParseResult, MoneyImportBatch, MoneyImportBatchRow } from "@orbit-types/import";
+import { buildDedupeHashPayload } from "@orbit-types/money-import-dedupe";
+import { readReportRows, REPORT_ROW_SELECT } from "@orbit-types/money-import-report-rows";
+import { parseTBankCsv } from "@orbit-types/money-import-tbank-csv";
+import * as Crypto from "expo-crypto";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
+import { supabase } from "@/lib/supabase";
+
+export interface StatementFile {
+  name: string;
+  uri: string;
+}
+
+/** The statement the person picks from Files, or null when they close the picker. */
+export async function pickStatement(): Promise<StatementFile | null> {
+  const result = await DocumentPicker.getDocumentAsync({
+    type: [
+      "text/csv",
+      "text/comma-separated-values",
+      "text/plain",
+      "public.comma-separated-values-text",
+    ],
+    copyToCacheDirectory: true,
+  });
+  const asset = result.canceled ? undefined : result.assets[0];
+  return asset ? { name: asset.name, uri: asset.uri } : null;
+}
+
+/**
+ * Read a T-Bank statement into rows. The dedupe hash is the web's SHA-256 of the same payload,
+ * built by `expo-crypto` because the phone has no `crypto.subtle`: an operation imported from
+ * either is then known to the other.
+ */
+export async function readStatement(uri: string): Promise<ImportParseResult> {
+  const text = await new File(uri).text();
+  return parseTBankCsv(text, (...parts) =>
+    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, buildDedupeHashPayload(...parts)),
+  );
+}
+
+/** Call an action of the `money-import` Edge Function, with its own error message when it fails. */
+export async function moneyImportAction<T>(action: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke("money-import", { body: action });
+  if (error) {
+    const context = (error as { context?: { json?: () => Promise<{ error?: unknown }> } }).context;
+    const body = await context?.json?.().catch(() => null);
+    throw new Error(typeof body?.error === "string" ? body.error : error.message);
+  }
+  return data as T;
+}
+
+/** The person's imports, newest first. */
+export async function fetchImportBatches(personId: string): Promise<MoneyImportBatch[]> {
+  const { data, error } = await supabase
+    .from("money_import_batches")
+    .select("*")
+    .eq("payer_person_id", personId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as MoneyImportBatch[];
+}
+
+/** A batch and its rows as the report reads them: the rows' payloads cut to what it shows. */
+export async function fetchImportBatch(
+  id: string,
+): Promise<{ batch: MoneyImportBatch; rows: MoneyImportBatchRow[] } | null> {
+  const batch = await supabase.from("money_import_batches").select("*").eq("id", id).maybeSingle();
+  if (batch.error) throw new Error(batch.error.message);
+  if (!batch.data) return null;
+  const rows = await supabase
+    .from("money_import_batch_rows")
+    .select(REPORT_ROW_SELECT)
+    .eq("batch_id", id)
+    .order("source_row_index", { ascending: true });
+  if (rows.error) throw new Error(rows.error.message);
+  return { batch: batch.data as MoneyImportBatch, rows: readReportRows(rows.data) };
+}

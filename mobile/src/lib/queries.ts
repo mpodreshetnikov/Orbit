@@ -80,6 +80,7 @@ import {
 } from "@/features/money/transactions";
 import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
 import { saveCategory, type CategoryColumns } from "@/features/money/categories";
+import { fetchImportBatch, fetchImportBatches, moneyImportAction } from "@/features/money/import";
 import {
   fetchBudgetReport,
   fetchSelfAliases,
@@ -800,6 +801,35 @@ export function useSaveSelfAlias() {
     onSettled: () => {
       void client.invalidateQueries({ queryKey: ["money-transfer-self-aliases"] });
       void client.invalidateQueries({ queryKey: ["money-budget-report"] });
+    },
+  });
+}
+
+export function useImportBatches(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["money-import-batches", personId],
+    queryFn: () => fetchImportBatches(personId!),
+    enabled: !!personId,
+  });
+}
+
+export function useImportBatch(id: string) {
+  return useQuery({ queryKey: ["money-import-batch", id], queryFn: () => fetchImportBatch(id) });
+}
+
+/** Apply a batch's rows to the transactions, or mark it as not applied. */
+export function useReviewImportBatch() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, apply }: { id: string; apply: boolean }) =>
+      moneyImportAction({ action: apply ? "apply_batch" : "discard_batch", batch_id: id }),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["money-import-batch"] });
+      void client.invalidateQueries({ queryKey: ["money-import-batches"] });
+      void client.invalidateQueries({ queryKey: ["money-feed"] });
+      void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
     },
   });
 }
