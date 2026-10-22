@@ -14,6 +14,7 @@ import { createAttentionStore } from "./core/attention-store.js";
 import { createAttentionRefresher, type RefreshOptions } from "./core/attention-refresh.js";
 import { runScheduledImport, tryCompleteSessionAsFailed } from "./core/import-runner.js";
 import { activeImportRuns } from "./core/active-runs.js";
+import { applyUpdateWhenIdle } from "./core/update-deferral.js";
 import { keepWorkerAliveDuringRuns } from "./core/keepalive.js";
 import { createSessionJanitor } from "./core/session-janitor.js";
 import { needsRearmAtStart, sweepAlarmSchedule } from "./core/auto-import-alarm.js";
@@ -341,6 +342,14 @@ void sessionJanitor.reconcile("boot");
 // The bank's rate limit is paid in timers, and timers alone let Chrome end the worker after
 // thirty seconds. While a run is registered, a cheap API call every twenty keeps it here.
 keepWorkerAliveDuringRuns(activeImportRuns, { ping: () => chrome.runtime.getPlatformInfo() });
+// An update the browser has downloaded waits for running imports instead of restarting under them.
+chrome.runtime.onUpdateAvailable.addListener((details) => {
+  telemetry.info("extension_update_available", {
+    version: details.version,
+    active_runs: activeImportRuns.size(),
+  });
+  applyUpdateWhenIdle(activeImportRuns, () => chrome.runtime.reload());
+});
 
 const AUTO_IMPORT_ALARM = "money-import-auto";
 /**
