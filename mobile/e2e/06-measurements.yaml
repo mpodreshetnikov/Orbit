@@ -43,6 +43,10 @@ name: Измерения
 - extendedWaitUntil:
     visible: "Последняя запись.*"
     timeout: 10000
+# A fresh simulator shows the slide-to-type tip over its first keyboard.
+- tapOn:
+    text: "Continue"
+    optional: true
 - inputText: "76,9"
 - hideKeyboard
 - takeScreenshot: measurements-06-new
