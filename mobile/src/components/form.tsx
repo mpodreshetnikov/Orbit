@@ -18,15 +18,17 @@ export function Section({ title, children }: { title: string; children: ReactNod
   );
 }
 
-/** A label over its control, with an error under it. */
+/** A label over its control, with an error or a hint under it. */
 export function Field({
   label,
   error,
+  hint,
   flex,
   children,
 }: {
   label: string;
   error?: string;
+  hint?: string;
   /** Share a row with the fields beside it. */
   flex?: boolean;
   children: ReactNode;
@@ -40,6 +42,10 @@ export function Field({
       {error ? (
         <Text size="xs" tone="destructive">
           {error}
+        </Text>
+      ) : hint ? (
+        <Text size="xs" tone="mutedForeground">
+          {hint}
         </Text>
       ) : null}
     </View>
@@ -115,14 +121,17 @@ export function Choice<T>({
   value,
   options,
   onPick,
+  placeholder,
 }: {
   label: string;
   value: T;
   options: [T, string][];
   onPick: (value: T) => void;
+  /** Shown while `value` is none of the options. */
+  placeholder?: string;
 }) {
   const palette = usePalette();
-  const shown = options.find(([option]) => option === value)?.[1] ?? String(value);
+  const shown = options.find(([option]) => option === value)?.[1] ?? placeholder ?? String(value);
   const open = () => {
     const labels = [...options.map(([, one]) => one), t("common.cancel")];
     ActionSheetIOS.showActionSheetWithOptions(
@@ -150,7 +159,9 @@ export function Choice<T>({
         opacity: pressed ? 0.6 : 1,
       })}
     >
-      <Text>{shown}</Text>
+      <Text tone={shown === placeholder ? "mutedForeground" : "foreground"} style={{ flex: 1 }}>
+        {shown}
+      </Text>
       <Icon icon={ChevronsUpDown} size={14} />
     </Pressable>
   );

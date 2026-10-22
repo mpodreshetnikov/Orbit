@@ -1,10 +1,10 @@
 import type { MeasurementHistoryPoint } from "@orbit-types/measurement";
-import { Stack, useLocalSearchParams } from "expo-router";
-import { MoreHorizontal, TrendingDown, TrendingUp } from "lucide-react-native";
+import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
+import { MoreHorizontal, Plus, TrendingDown, TrendingUp } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { LineChart } from "@/components/charts";
-import { Badge, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import {
   categoryLabel,
   formatDay,
@@ -13,7 +13,12 @@ import {
   trendPercent,
 } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import { useDeleteMeasurement, useMeasurements, usePerson } from "@/lib/queries";
+import {
+  useHiddenMeasurements,
+  useMeasurements,
+  usePerson,
+  useSaveMeasurement,
+} from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
 /** How long the system sheet takes to slide away before an alert may be shown. */
@@ -21,21 +26,37 @@ const SHEET_DISMISS_MS = 400;
 
 /**
  * One measurement's history — the web measurement page: the four summary cards, the chart and the
- * history, each entry deletable from its menu.
+ * history, each entry editable or deletable from its menu. "+" in the bar records a new value of this
+ * type.
  */
 export default function MeasurementScreen() {
+  const router = useRouter();
   const palette = usePalette();
   const { code } = useLocalSearchParams<{ code: string }>();
   const person = usePerson();
   const measurements = useMeasurements(person.data?.id);
-  const remove = useDeleteMeasurement();
+  const hidden = useHiddenMeasurements(person.data?.id);
+  const save = useSaveMeasurement();
   const measurement = measurements.data?.find((one) => one.code === code);
+
+  const add = () =>
+    router.push(`/health/measurements/form?code=${encodeURIComponent(code)}` as Href);
 
   const header = (
     <Stack.Screen
       options={{
         title: measurement?.name_ru ?? code,
         headerLargeTitle: false,
+        headerRight: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("measurements.addMeasurement")}
+            hitSlop={space.sm}
+            onPress={add}
+          >
+            <Icon icon={Plus} size={24} tone="foreground" />
+          </Pressable>
+        ),
       }}
     />
   );
@@ -59,27 +80,33 @@ export default function MeasurementScreen() {
   const trend = trendPercent(measurement.history);
   const newestFirst = [...measurement.history].reverse();
 
-  const confirmRemove = (point: MeasurementHistoryPoint) =>
+  const remove = (point: MeasurementHistoryPoint) =>
     Alert.alert(t("measurements.deleteTitle"), t("measurements.deleteMessage"), [
       { text: t("common.cancel"), style: "cancel" },
       {
         text: t("common.delete"),
         style: "destructive",
-        onPress: () => remove.mutate(point.id),
+        onPress: () => save.mutate({ id: point.id, remove: true }),
       },
     ]);
 
   const more = (point: MeasurementHistoryPoint) => {
-    const labels = [t("common.delete"), t("common.cancel")];
+    const labels = [t("common.edit"), t("common.delete"), t("common.cancel")];
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: `${formatValue(point.value, 2)} ${unit} · ${formatMoment(point.measured_at)}`,
         options: labels,
-        destructiveButtonIndex: 0,
-        cancelButtonIndex: 1,
+        destructiveButtonIndex: 1,
+        cancelButtonIndex: 2,
       },
       (index) => {
-        if (index === 0) setTimeout(() => confirmRemove(point), SHEET_DISMISS_MS);
+        if (index === 0) {
+          router.push(
+            `/health/measurements/form?code=${encodeURIComponent(code)}&entry=${point.id}` as Href,
+          );
+        } else if (index === 1) {
+          setTimeout(() => remove(point), SHEET_DISMISS_MS);
+        }
       },
     );
   };
@@ -100,6 +127,9 @@ export default function MeasurementScreen() {
       >
         <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
           <Badge label={code} />
+          {hidden.codes.has(code) ? (
+            <Badge label={t("measurements.hiddenBadge")} surface={palette.secondary} />
+          ) : null}
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
           <Stat title={t("measurements.latestValue")}>
@@ -193,6 +223,7 @@ export default function MeasurementScreen() {
             </Pressable>
           ))}
         </Card>
+        <Button variant="outline" label={t("measurements.addMeasurement")} onPress={add} />
       </ScrollView>
     </>
   );

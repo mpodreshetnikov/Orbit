@@ -1,6 +1,6 @@
-# Measurements: the health tab's menu, the list by category, a value's chart and history, and an
-# entry's delete asked and cancelled. The seed carries a year of weights, so the chart has a line
-# to draw.
+# Measurements: the health tab's menu, the list by category, a value's chart and history, an
+# entry's delete asked and cancelled, a new value recorded from the type's page, and a type hidden
+# from the list. The seed carries a year of weights, so the chart has a line to draw.
 appId: host.exp.Exponent
 name: Измерения
 ---
@@ -37,3 +37,39 @@ name: Измерения
 - takeScreenshot: measurements-05-delete
 - tapOn: "Отмена"
 - assertVisible: ".*80.80.*"
+- tapOn:
+    text: "Добавить измерение"
+    index: 0
+- extendedWaitUntil:
+    visible: "Последняя запись.*"
+    timeout: 10000
+- inputText: "76,9"
+- hideKeyboard
+- takeScreenshot: measurements-06-new
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: ".*76.90.*"
+    timeout: 20000
+- takeScreenshot: measurements-07-saved
+# Back is the edge swipe: Maestro's own `back` is Android's.
+- swipe:
+    start: 1%, 50%
+    end: 80%, 50%
+- extendedWaitUntil:
+    visible: "ОСНОВНЫЕ"
+    timeout: 10000
+- tapOn: "Выбрать измерения"
+- extendedWaitUntil:
+    visible: "Снимите галочку.*"
+    timeout: 10000
+# Tapping the row flips its switch.
+- tapOn: "Рост"
+- takeScreenshot: measurements-08-visibility
+# Back is the edge swipe: Maestro's own `back` is Android's.
+- swipe:
+    start: 1%, 50%
+    end: 80%, 50%
+- extendedWaitUntil:
+    visible: "Скрыто: 1"
+    timeout: 10000
+- takeScreenshot: measurements-09-hidden

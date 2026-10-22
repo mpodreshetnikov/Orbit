@@ -1,5 +1,6 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
+import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
 import type {
   AddOneTimeToExistingPayload,
   CreateMedRegimenInput,
@@ -27,7 +28,16 @@ import {
   unarchiveRegimen,
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
-import { deleteMeasurement, fetchMeasurements } from "@/features/measurements/query";
+import {
+  createMeasurement,
+  deleteMeasurement,
+  fetchHiddenCodes,
+  fetchMeasurementCatalog,
+  fetchMeasurements,
+  saveHiddenCodes,
+  updateMeasurement,
+  type MeasurementEntry,
+} from "@/features/measurements/query";
 import { saveEditedCourse, saveNewCourse } from "@/features/medications/save";
 import { useSession } from "@/lib/session";
 
@@ -255,22 +265,72 @@ export function useSaveCourse() {
 }
 
 export function useMeasurements(personId: string | undefined) {
-  const { session } = useSession();
-  const userId = session?.user.id;
   return useQuery({
     queryKey: ["measurements", personId],
-    queryFn: () => fetchMeasurements(personId as string, userId as string),
-    enabled: Boolean(personId && userId),
+    queryFn: () => fetchMeasurements(personId as string),
+    enabled: Boolean(personId),
   });
 }
 
-/** Delete one measurement; the person's list is refetched after. */
-export function useDeleteMeasurement() {
+export function useMeasurementCatalog() {
+  return useQuery({ queryKey: ["measurement-catalog"], queryFn: fetchMeasurementCatalog });
+}
+
+export type MeasurementSave =
+  | { personId: string; catalogId: string; entry: MeasurementEntry }
+  | { id: string; entry: MeasurementEntry }
+  | { id: string; remove: true };
+
+/** Record, correct or delete one measurement; the person's list is refetched after. */
+export function useSaveMeasurement() {
   const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id as string;
   return useMutation({
-    mutationFn: deleteMeasurement,
+    mutationFn: async (save: MeasurementSave) => {
+      if ("remove" in save) return deleteMeasurement(save.id);
+      if ("personId" in save) {
+        return createMeasurement(userId, save.personId, save.catalogId, save.entry);
+      }
+      return updateMeasurement(save.id, save.entry);
+    },
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => void client.invalidateQueries({ queryKey: ["measurements"] }),
   });
+}
+
+/**
+ * The types hidden from one person's list, and a toggle — the web app's `useHiddenMeasurements`.
+ *
+ * The preference is one jsonb blob read-modify-written whole, so each toggle builds on the cache the
+ * previous toggle already changed rather than on the server's last answer, and the writes queue in
+ * one scope so they reach the server in the order they were made. A failed write refetches.
+ */
+export function useHiddenMeasurements(personId: string | undefined) {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id;
+  const key = ["hidden-measurements", userId];
+  const hidden = useQuery({
+    queryKey: key,
+    queryFn: () => fetchHiddenCodes(userId as string),
+    enabled: Boolean(userId),
+  });
+  const save = useMutation({
+    mutationFn: (next: HiddenMeasurementCodes) => saveHiddenCodes(userId as string, next),
+    scope: { id: "hidden-measurements" },
+    onError: () => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      void client.invalidateQueries({ queryKey: key });
+    },
+  });
+  const codes = new Set(personId ? (hidden.data?.[personId] ?? []) : []);
+  const toggle = (code: string) => {
+    if (!personId) return;
+    const next = toggleHiddenCode(client.getQueryData(key) ?? {}, personId, code);
+    client.setQueryData(key, next);
+    save.mutate(next);
+  };
+  return { codes, toggle };
 }

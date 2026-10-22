@@ -2,14 +2,14 @@ import type { MeasurementSummary } from "@orbit-types/measurement";
 import { searchMeasurementSummaries } from "@orbit-types/measurement-summary";
 import { getMeasurementTrend } from "@orbit-types/measurement-trend";
 import { Stack, useRouter, type Href } from "expo-router";
-import { Minus, TrendingDown, TrendingUp } from "lucide-react-native";
+import { Minus, Plus, SlidersHorizontal, TrendingDown, TrendingUp } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, RefreshControl, SectionList, View } from "react-native";
 import { Sparkline } from "@/components/charts";
 import { Badge, Button, Icon, Placeholder, Text } from "@/components/ui";
 import { byCategory, categoryLabel, formatDay, formatValue } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import { useMeasurements, usePerson } from "@/lib/queries";
+import { useHiddenMeasurements, useMeasurements, usePerson } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
 /** The latest change as the web card marks it: up in orange, down in blue, flat in grey. */
@@ -23,24 +23,46 @@ export function TrendMark({ history }: { history: { value: number }[] }) {
 
 /**
  * The person's measurements — the web measurements page's cards, grouped by category as it groups
- * them, with its search in the navigation bar. The web page's table and body-map views are left to
- * the web: on a phone the cards already show every value, and the table is the same history a card
- * opens.
+ * them, with its search in the navigation bar and its "choose measurements" behind the sliders in
+ * the bar. The web page's table and body-map views are left to the web: on a phone the cards already
+ * show every value, and the table is the same history a card opens.
  */
 export default function MeasurementsScreen() {
   const palette = usePalette();
   const router = useRouter();
   const person = usePerson();
   const measurements = useMeasurements(person.data?.id);
+  const hidden = useHiddenMeasurements(person.data?.id);
   const [query, setQuery] = useState("");
 
   const all = measurements.data ?? [];
-  const shown = searchMeasurementSummaries(all, query);
+  const shown = searchMeasurementSummaries(all, query).filter((one) => !hidden.codes.has(one.code));
+  const hiddenCount = all.filter((one) => hidden.codes.has(one.code)).length;
 
   const header = (
     <Stack.Screen
       options={{
         title: t("measurements.title"),
+        headerRight: () => (
+          <View style={{ flexDirection: "row", gap: space.lg }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("measurements.manageVisibility")}
+              hitSlop={space.sm}
+              onPress={() => router.push("/health/measurements/visibility" as Href)}
+            >
+              <Icon icon={SlidersHorizontal} size={22} tone="foreground" />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("measurements.addMeasurement")}
+              hitSlop={space.sm}
+              onPress={() => router.push("/health/measurements/form" as Href)}
+            >
+              <Icon icon={Plus} size={24} tone="foreground" />
+            </Pressable>
+          </View>
+        ),
         headerSearchBarOptions: {
           placeholder: t("measurements.searchPlaceholder"),
           hideWhenScrolling: false,
@@ -101,8 +123,23 @@ export default function MeasurementsScreen() {
               </Text>
             </View>
           ) : (
-            <Placeholder message={t("measurements.noSearchResults")} />
+            <Placeholder
+              message={t(query ? "measurements.noSearchResults" : "measurements.allHidden")}
+            />
           )
+        }
+        ListFooterComponent={
+          hiddenCount > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push("/health/measurements/visibility" as Href)}
+              style={{ paddingTop: space.lg, alignItems: "center" }}
+            >
+              <Text size="sm" tone="mutedForeground">
+                {t("measurements.hiddenSummary", { count: hiddenCount })}
+              </Text>
+            </Pressable>
+          ) : null
         }
         refreshControl={
           <RefreshControl
