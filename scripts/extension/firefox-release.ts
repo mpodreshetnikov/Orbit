@@ -140,13 +140,17 @@ export function createAmoJwt(
  * Downloads the add-on AMO already signed for `version` into `destinationPath`, and says whether
  * there was one. Signing and publishing are separate steps, so a publish can fail after AMO has
  * signed -- a Storage that refused the upload, a server not yet migrated -- and the next run, which
- * cannot sign that version again, takes the signed file from AMO instead of needing a version bump.
- * The manifest version is bumped whenever the packaged code changes, so the file AMO holds for a
- * version is the build of that version.
+ * cannot sign that version again, takes the signed file from AMO instead.
+ *
+ * Only a file that is this build is taken: it must match the hash AMO gives for it, and apart from
+ * the signature in `META-INF/` it must hold exactly the files of `sourceDir`, byte for byte. A file
+ * built from other code or for another server, or signed by someone else holding the AMO key,
+ * fails the release, and a new manifest version is what releases that build.
  */
 export async function downloadSignedFirefoxVersion(input: {
   geckoId: string;
   version: string;
+  sourceDir: string;
   destinationPath: string;
   env: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
@@ -160,7 +164,9 @@ export async function downloadSignedFirefoxVersion(input: {
   if (!response.ok) {
     throw new Error(`AMO answered ${response.status} for ${input.version} of ${input.geckoId}.`);
   }
-  const body = (await response.json()) as { file?: { url?: unknown; status?: unknown } };
+  const body = (await response.json()) as {
+    file?: { url?: unknown; status?: unknown; hash?: unknown };
+  };
   const fileUrl = body.file?.url;
   if (typeof fileUrl !== "string" || body.file?.status !== "public") {
     throw new Error(
@@ -171,9 +177,76 @@ export async function downloadSignedFirefoxVersion(input: {
   if (!file.ok) {
     throw new Error(`AMO answered ${file.status} for the signed file of ${input.version}.`);
   }
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const digest = `sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`;
+  if (body.file?.hash !== digest) {
+    throw new Error(
+      `The signed file AMO sent for ${input.version} does not match its hash (${String(body.file?.hash)}).`,
+    );
+  }
+
   await fs.mkdir(path.dirname(input.destinationPath), { recursive: true });
-  await fs.writeFile(input.destinationPath, Buffer.from(await file.arrayBuffer()));
+  const workDir = await fs.mkdtemp(path.join(path.dirname(input.destinationPath), ".amo-signed-"));
+  try {
+    const xpiPath = path.join(workDir, "signed.xpi");
+    await fs.writeFile(xpiPath, bytes);
+    const unpacked = path.join(workDir, "unpacked");
+    await runCommand("unzip", ["-q", xpiPath, "-d", unpacked]);
+    const difference = await firstDifference(input.sourceDir, unpacked);
+    if (difference) {
+      throw new Error(
+        `AMO's signed ${input.version} is not this build (${difference}). Release it under a new manifest version.`,
+      );
+    }
+    await fs.rename(xpiPath, input.destinationPath);
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
   return true;
+}
+
+/** web-ext leaves dotfiles out of what it submits, and AMO adds its signature under META-INF/. */
+function isSubmitted(relativePath: string): boolean {
+  return !relativePath.split("/").some((part) => part.startsWith("."));
+}
+
+async function listFiles(rootDir: string): Promise<string[]> {
+  const entries = await fs.readdir(rootDir, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) =>
+      path.relative(rootDir, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"),
+    )
+    .sort();
+}
+
+/** The first file that differs between the build and the unpacked signed add-on, if any. */
+async function firstDifference(sourceDir: string, unpackedDir: string): Promise<string | null> {
+  const built = (await listFiles(sourceDir)).filter(isSubmitted);
+  const signed = (await listFiles(unpackedDir)).filter((file) => !file.startsWith("META-INF/"));
+  const missing = built.find((file) => !signed.includes(file));
+  if (missing) return `${missing} is not in it`;
+  const extra = signed.find((file) => !built.includes(file));
+  if (extra) return `${extra} is not in the build`;
+  for (const file of built) {
+    const [a, b] = await Promise.all([
+      fs.readFile(path.join(sourceDir, file)),
+      fs.readFile(path.join(unpackedDir, file)),
+    ]);
+    if (!a.equals(b)) return `${file} differs`;
+  }
+  return null;
+}
+
+function runCommand(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit" });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited with code ${code ?? "null"}`));
+    });
+  });
 }
 
 export async function sha256OfFile(filePath: string): Promise<string> {

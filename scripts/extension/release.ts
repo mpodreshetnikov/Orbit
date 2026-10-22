@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import {
   buildFirefoxUpdatesManifest,
+  FIREFOX_DIST_DIR,
   FIREFOX_UPDATES_PATH,
   FIREFOX_XPI_CONTENT_TYPE,
   type FirefoxReleaseMetadata,
@@ -82,9 +83,6 @@ const EXTENSION_NON_PACKAGED_PATTERNS = [
   // the version policy would require a version bump to land the change, which
   // is circular. The rest of scripts/extension/ stays governed.
   /^scripts\/extension\/release\.ts$/,
-  // Its Firefox half, for the same reason: it lints, signs or fetches the signed file, and
-  // publishes; what the add-on contains is decided by the build before it runs.
-  /^scripts\/extension\/firefox-release\.ts$/,
 ] as const;
 
 export interface ExtensionReleaseMetadata {
@@ -956,6 +954,7 @@ async function prepareFirefoxRelease(input: {
   const alreadySigned = await downloadSignedFirefoxVersion({
     geckoId,
     version: input.version,
+    sourceDir: path.join(input.rootDir, FIREFOX_DIST_DIR),
     destinationPath: xpiPath,
     env: process.env,
   });

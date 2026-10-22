@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -62,30 +63,54 @@ describe("firefox release", () => {
   });
 
   describe("a version AMO already signed", () => {
-    async function destination() {
+    /** A build, its signed add-on as AMO would serve it, and where the release puts the file. */
+    async function fixture(changeSigned?: (unpacked: string) => Promise<void>) {
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), "firefox-release-test-"));
-      return path.join(dir, "releases", "0.1.26", "orbit-extension-0.1.26.xpi");
-    }
+      const sourceDir = path.join(dir, "dist-firefox");
+      await fs.mkdir(path.join(sourceDir, "src"), { recursive: true });
+      await fs.writeFile(path.join(sourceDir, "manifest.json"), '{"version":"0.1.26"}');
+      await fs.writeFile(path.join(sourceDir, "src", "env.js"), "export const ORIGIN = 'a';");
 
-    it("is downloaded with the token instead of signed again", async () => {
-      const destinationPath = await destination();
+      const unpacked = path.join(dir, "signed");
+      await fs.cp(sourceDir, unpacked, { recursive: true });
+      await fs.mkdir(path.join(unpacked, "META-INF"));
+      await fs.writeFile(path.join(unpacked, "META-INF", "mozilla.rsa"), "signature");
+      await changeSigned?.(unpacked);
+      const xpi = path.join(dir, "signed.xpi");
+      execFileSync("zip", ["-rq", xpi, "."], { cwd: unpacked });
+      const bytes = await fs.readFile(xpi);
+
       const fetchImpl = vi.fn(async (url: string | URL | Request) =>
         String(url).endsWith("/versions/v0.1.26/")
-          ? Response.json({ file: { url: "https://amo.example/f.xpi", status: "public" } })
-          : new Response("signed bytes"),
+          ? Response.json({
+              file: {
+                url: "https://amo.example/f.xpi",
+                status: "public",
+                hash: `sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`,
+              },
+            })
+          : new Response(bytes),
       ) as unknown as typeof fetch;
-
-      await expect(
-        downloadSignedFirefoxVersion({
+      return {
+        bytes,
+        fetchImpl,
+        input: {
           geckoId: "orbit@privateorbit.space",
           version: "0.1.26",
-          destinationPath,
+          sourceDir,
+          destinationPath: path.join(dir, "out", "orbit-extension-0.1.26.xpi"),
           env: AMO_ENV,
           fetchImpl,
-        }),
-      ).resolves.toBe(true);
+        },
+      };
+    }
 
-      expect(await fs.readFile(destinationPath, "utf8")).toBe("signed bytes");
+    it("is downloaded with the token instead of signed again when it is this build", async () => {
+      const { bytes, fetchImpl, input } = await fixture();
+
+      await expect(downloadSignedFirefoxVersion(input)).resolves.toBe(true);
+
+      expect((await fs.readFile(input.destinationPath)).equals(bytes)).toBe(true);
       const calls = vi.mocked(fetchImpl).mock.calls;
       expect(String(calls[0]![0])).toBe(
         "https://addons.mozilla.org/api/v5/addons/addon/orbit%40privateorbit.space/versions/v0.1.26/",
@@ -97,35 +122,47 @@ describe("firefox release", () => {
     });
 
     it("is absent when AMO does not know it, so the build is signed", async () => {
+      const { input } = await fixture();
       const fetchImpl = vi.fn(
         async () => new Response("", { status: 404 }),
       ) as unknown as typeof fetch;
-      await expect(
-        downloadSignedFirefoxVersion({
-          geckoId: "orbit@privateorbit.space",
-          version: "0.1.27",
-          destinationPath: await destination(),
-          env: AMO_ENV,
-          fetchImpl,
-        }),
-      ).resolves.toBe(false);
+      await expect(downloadSignedFirefoxVersion({ ...input, fetchImpl })).resolves.toBe(false);
+    });
+
+    it("fails the release when it is another build, and keeps nothing", async () => {
+      for (const change of [
+        (unpacked: string) => fs.writeFile(path.join(unpacked, "src", "env.js"), "other server"),
+        (unpacked: string) => fs.writeFile(path.join(unpacked, "extra.js"), "planted"),
+        (unpacked: string) => fs.rm(path.join(unpacked, "src", "env.js")),
+      ]) {
+        const { input } = await fixture(change);
+        await expect(downloadSignedFirefoxVersion(input)).rejects.toThrow(/not this build/);
+        await expect(fs.access(input.destinationPath)).rejects.toThrow();
+      }
+    });
+
+    it("fails the release on a file that does not match AMO's hash", async () => {
+      const { input } = await fixture();
+      const fetchImpl = vi.fn(async (url: string | URL | Request) =>
+        String(url).endsWith("/versions/v0.1.26/")
+          ? Response.json({
+              file: { url: "https://amo.example/f.xpi", status: "public", hash: "sha256:00" },
+            })
+          : new Response("truncated"),
+      ) as unknown as typeof fetch;
+      await expect(downloadSignedFirefoxVersion({ ...input, fetchImpl })).rejects.toThrow(
+        /does not match its hash/,
+      );
     });
 
     it("fails the release while AMO has not signed it, or refuses the token", async () => {
+      const { input } = await fixture();
       for (const answer of [
         Response.json({ file: { url: "https://amo.example/f.xpi", status: "unreviewed" } }),
         new Response("", { status: 401 }),
       ]) {
         const fetchImpl = vi.fn(async () => answer) as unknown as typeof fetch;
-        await expect(
-          downloadSignedFirefoxVersion({
-            geckoId: "orbit@privateorbit.space",
-            version: "0.1.26",
-            destinationPath: await destination(),
-            env: AMO_ENV,
-            fetchImpl,
-          }),
-        ).rejects.toThrow();
+        await expect(downloadSignedFirefoxVersion({ ...input, fetchImpl })).rejects.toThrow();
       }
     });
   });
