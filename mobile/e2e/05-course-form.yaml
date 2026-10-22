@@ -1,5 +1,4 @@
-# The course form: a regular course added from the list's plus, edited from its menu, then a one-off
-# intake taken into a course picked by its name. It changes the data, so it runs last.
+# A course added from the list's plus, edited from its menu, then a one-off taken into a picked course.
 appId: host.exp.Exponent
 name: Курс — форма
 ---
@@ -64,7 +63,6 @@ name: Курс — форма
     visible: "Когда принять"
     timeout: 10000
 - inputText: "Vit"
-# The person's courses that match the name are offered under it; the intake goes into the one picked.
 - tapOn:
     text: "Vitamin D3"
     index: 1

@@ -80,6 +80,8 @@ name: Курс — действия
     timeout: 10000
 - assertVisible: "Magnesium.*"
 - takeScreenshot: course-07-archived
+- swipe: { from: { text: "Приостановлено" }, direction: RIGHT } # Flows after this one want "Все".
+- tapOn: "Все"
 # Back on the list, iOS 26 can leave its search open over the title and the gear: close it.
 - tapOn:
     text: "Close"
