@@ -242,10 +242,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends "postgresql-client-${major}"
           echo "/usr/lib/postgresql/${major}/bin" >> "$GITHUB_PATH"
+      # `supabase gen types` starts postgres-meta with a one-off `docker run`. From public ECR that
+      # pull hits the anonymous data limit (`toomanyrequests: Data limit exceeded`, Orbit#164 and
+      # #166) and nothing earlier in the run has it yet; Docker Hub carries the same image, and the
+      # CLI pulls from it when this names it. Scoped to this step: the stack's own images keep
+      # their ECR names, so the cached archive still matches what `supabase start` asks for.
       - name: Verify generated DB artifacts
         if: steps.impact.outputs.dbImpact == 'true'
         env:
           SUPABASE_ALREADY_RUNNING: "1"
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: docker.io
         run: node scripts/just/db-artifacts.cjs --verify
       - name: Build and DB checks
         if: steps.impact.outputs.dbImpact == 'true'
