@@ -16,6 +16,10 @@ name: Open the client
       - tapOn:
           text: "Open"
           optional: true
+      # A cold bundle on a slow runner can outlast Expo Go's own request: ask for it again.
+      - tapOn:
+          text: "Try again"
+          optional: true
       - extendedWaitUntil:
           visible: "Сегодня|Continue"
           timeout: 30000
