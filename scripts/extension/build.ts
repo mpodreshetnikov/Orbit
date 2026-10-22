@@ -68,6 +68,10 @@ async function copyStaticToDist(): Promise<void> {
   await fs.cp(path.join(extensionDir, "manifest.json"), path.join(distDir, "manifest.json"));
   await fs.cp(path.join(extensionDir, "popup.html"), path.join(distDir, "popup.html"));
   await fs.cp(path.join(extensionDir, "icons"), path.join(distDir, "icons"), { recursive: true });
+  // Shipped inside the release so the person installs the updater from the folder it updates.
+  await fs.cp(path.join(extensionDir, "updater"), path.join(distDir, "updater"), {
+    recursive: true,
+  });
   const swPath = path.join(extensionDir, "sw.js");
   if (await fileExists(swPath)) {
     await fs.cp(swPath, path.join(distDir, "sw.js"));

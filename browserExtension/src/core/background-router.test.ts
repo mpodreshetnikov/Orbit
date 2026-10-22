@@ -4,7 +4,7 @@ import { createImportDebugStore } from "./import-debug.js";
 import { routeBackgroundMessage } from "./background-router.js";
 import type { StoredImportGrant } from "./grant-store.js";
 import { createInitialAutoRunState } from "./auto-run-policy.js";
-import { activeImportRuns } from "./active-runs.js";
+import { activeImportRuns, UPDATE_IN_PROGRESS_ERROR } from "./active-runs.js";
 import { liveRuns } from "./run-board.js";
 
 describe("background-router", () => {
@@ -867,6 +867,26 @@ describe("background-router", () => {
       edge_transport: "network",
     });
     expect(deps.sessionStore.setSession).toHaveBeenCalledWith(null);
+  });
+
+  it("refuses a run while an update holds the registry, and says why", async () => {
+    const deps = createDeps();
+    deps.sessionStore.getSession.mockResolvedValue({
+      source: "tbank_web",
+      session_id: "session-1",
+      batch_id: "batch-1",
+      function_url: "https://example.com/fn",
+      session_token: "token",
+    });
+    const release = activeImportRuns.holdForUpdate();
+    try {
+      await expect(routeBackgroundMessage({ type: "MONEY_IMPORT_RUN" }, deps)).rejects.toThrow(
+        UPDATE_IN_PROGRESS_ERROR,
+      );
+    } finally {
+      release?.();
+    }
+    expect(activeImportRuns.has("session-1")).toBe(false);
   });
 
   it("rejects duplicate import runs while a session run is already in flight", async () => {
