@@ -32,7 +32,8 @@ name: Курс — действия
 - takeScreenshot: course-03-menu
 - tapOn: "Пополнить"
 - extendedWaitUntil:
-    visible: "Плюс = пополнить.*"
+    # The prompt's message is one text: the course, then the help on a line of its own.
+    visible: "(?s).*Плюс = пополнить.*"
     timeout: 10000
 - eraseText: 5
 - inputText: "10"
