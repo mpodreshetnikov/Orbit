@@ -1,6 +1,7 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
+import type { checkupColumns } from "@orbit-types/checkup-form";
 import type { UpdateConditionInput } from "@orbit-types/condition";
 import type { FindingSummary } from "@orbit-types/finding";
 import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
@@ -44,6 +45,7 @@ import {
   fetchCheckups,
   fetchCompletions,
   planCheckup,
+  saveCheckup,
   saveCompletion,
   setCheckupStatus,
   type Completion,
@@ -488,8 +490,8 @@ export function useCheckups(personId: string | undefined) {
 }
 
 /**
- * Everything done to a checkup: mark it done, plan it, change its status or delete it, correct or
- * delete a completion. The checkups and their completions are refetched after.
+ * Everything done to a checkup: create or edit it, mark it done, plan it, change its status or
+ * delete it, correct or delete a completion. The checkups and their completions are refetched after.
  */
 export function useCheckupAction() {
   const client = useQueryClient();
@@ -499,8 +501,10 @@ export function useCheckupAction() {
         | { item: CheckupItem; completion: Completion }
         | { item: CheckupItem; plannedOn: string | null }
         | { item: CheckupItem; status: CheckupItemStatus | null }
-        | { completionId: string; completion: Completion | null },
+        | { completionId: string; completion: Completion | null }
+        | { personId: string; id?: string; columns: ReturnType<typeof checkupColumns> },
     ) => {
+      if ("columns" in input) return saveCheckup(input.personId, input.id, input.columns);
       if ("completionId" in input) return saveCompletion(input.completionId, input.completion);
       if ("completion" in input) return completeCheckup(input.item, input.completion);
       if ("plannedOn" in input) return planCheckup(input.item.id, input.plannedOn);

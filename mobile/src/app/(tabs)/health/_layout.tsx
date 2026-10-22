@@ -12,6 +12,7 @@ export default function HealthStack() {
       <Stack.Screen name="conditions/history" options={{ presentation: "modal" }} />
       <Stack.Screen name="checkups/complete" options={{ presentation: "modal" }} />
       <Stack.Screen name="checkups/plan" options={{ presentation: "modal" }} />
+      <Stack.Screen name="checkups/form" options={{ presentation: "modal" }} />
     </Stack>
   );
 }

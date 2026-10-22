@@ -13,6 +13,7 @@ import {
   CalendarPlus,
   CheckCircle2,
   Clock,
+  Plus,
   type LucideIcon,
 } from "lucide-react-native";
 import { useState } from "react";
@@ -94,6 +95,16 @@ export default function CheckupsScreen() {
     <Stack.Screen
       options={{
         title: t("checkups.navTitle"),
+        headerRight: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("checkups.add")}
+            hitSlop={space.sm}
+            onPress={() => router.push("/health/checkups/form" as Href)}
+          >
+            <Icon icon={Plus} size={22} tone="foreground" />
+          </Pressable>
+        ),
         headerSearchBarOptions: {
           placeholder: t("common.search"),
           hideWhenScrolling: false,
