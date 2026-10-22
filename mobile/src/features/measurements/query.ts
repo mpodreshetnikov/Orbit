@@ -87,3 +87,21 @@ export async function saveHiddenCodes(userId: string, hidden: HiddenMeasurementC
       ),
   );
 }
+
+/** A catalogue entry's own columns, as the web catalogue dialog saves them. */
+export type CatalogColumns = Pick<
+  MeasurementCatalog,
+  "code" | "name_ru" | "name_en" | "unit_ru" | "unit_en" | "category" | "sort_order"
+>;
+
+export async function createCatalogEntry(columns: CatalogColumns) {
+  check(await supabase.from("measurement_catalog").insert(columns));
+}
+
+export async function updateCatalogEntry(id: string, columns: CatalogColumns) {
+  check(await supabase.from("measurement_catalog").update(columns).eq("id", id));
+}
+
+export async function deleteCatalogEntry(id: string) {
+  check(await supabase.from("measurement_catalog").delete().eq("id", id));
+}

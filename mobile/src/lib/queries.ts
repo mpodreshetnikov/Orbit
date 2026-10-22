@@ -29,13 +29,17 @@ import {
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
 import {
+  createCatalogEntry,
   createMeasurement,
+  deleteCatalogEntry,
   deleteMeasurement,
   fetchHiddenCodes,
   fetchMeasurementCatalog,
   fetchMeasurements,
   saveHiddenCodes,
+  updateCatalogEntry,
   updateMeasurement,
+  type CatalogColumns,
   type MeasurementEntry,
 } from "@/features/measurements/query";
 import { saveEditedCourse, saveNewCourse } from "@/features/medications/save";
@@ -274,6 +278,29 @@ export function useMeasurements(personId: string | undefined) {
 
 export function useMeasurementCatalog() {
   return useQuery({ queryKey: ["measurement-catalog"], queryFn: fetchMeasurementCatalog });
+}
+
+export type CatalogSave = { columns: CatalogColumns; id?: string } | { id: string; remove: true };
+
+/**
+ * Add, change or delete a catalogue entry. A person's measurements carry the entry's names, so they
+ * are refetched with the catalogue.
+ */
+export function useSaveCatalogEntry() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (save: CatalogSave) => {
+      if ("remove" in save) return deleteCatalogEntry(save.id);
+      if (save.id) return updateCatalogEntry(save.id, save.columns);
+      return createCatalogEntry(save.columns);
+    },
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["measurement-catalog"] });
+      void client.invalidateQueries({ queryKey: ["measurements"] });
+    },
+  });
 }
 
 export type MeasurementSave =

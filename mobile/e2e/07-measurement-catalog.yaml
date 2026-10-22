@@ -1,0 +1,58 @@
+# The measurement catalogue: reached from the health menu, a type added with its category picked
+# from the sheet, then edited from its menu, and its delete asked and cancelled.
+appId: host.exp.Exponent
+name: Каталог измерений
+---
+- openLink: exp://127.0.0.1:8081/--/health
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Управление типами измерений тела и единицами"
+    timeout: 60000
+- tapOn: "Каталог измерений"
+- extendedWaitUntil:
+    visible: "ОСНОВНЫЕ"
+    timeout: 20000
+- takeScreenshot: catalog-01-list
+- tapOn: "Добавить тип измерения"
+- extendedWaitUntil:
+    visible: "Добавить новый тип измерения в каталог"
+    timeout: 10000
+- tapOn: "Код"
+- inputText: "wrist_left"
+- tapOn: "Название (RU)"
+- inputText: "Левое запястье"
+- tapOn: "Название (EN)"
+- inputText: "Left wrist"
+- tapOn: "Единица (RU)"
+- inputText: "см"
+- hideKeyboard
+- tapOn: "Категория: Тело"
+- tapOn: "Конечности"
+- takeScreenshot: catalog-02-new
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "wrist_left · Left wrist"
+    timeout: 20000
+- takeScreenshot: catalog-03-added
+- tapOn: "Левое запястье wrist_left"
+- tapOn: "Редактировать"
+- extendedWaitUntil:
+    visible: "Изменить определение типа измерения"
+    timeout: 10000
+- tapOn: "Единица (EN)"
+- inputText: "cm"
+- hideKeyboard
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "wrist_left · Left wrist"
+    timeout: 20000
+- tapOn: "Левое запястье wrist_left"
+- tapOn: "Удалить"
+- extendedWaitUntil:
+    visible: "Удалить тип измерения"
+    timeout: 10000
+- takeScreenshot: catalog-04-delete
+- tapOn: "Отмена"
+- assertVisible: "wrist_left · Left wrist"
