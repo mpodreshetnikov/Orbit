@@ -961,6 +961,8 @@
     }
   },
   "common": {
+    "expand": "Expand",
+    "collapse": "Collapse",
     "required": "Required",
     "actions": "Actions",
     "loading": "Loading...",

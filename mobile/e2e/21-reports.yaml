@@ -1,0 +1,21 @@
+# The budget report, reached from the money tab, and a category's target.
+appId: host.exp.Exponent
+name: Отчеты
+---
+- openLink: exp://127.0.0.1:8081/--/money
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil:
+    visible: "Совпадений"
+    timeout: 60000
+- tapOn: "Отчеты"
+- extendedWaitUntil:
+    visible: "(Фактические доходы|Не удалось загрузить.*)" # The rates sync needs the edge function.
+    timeout: 30000
+- takeScreenshot: reports-01-month
+- runFlow:
+    when: { visible: "Изменить цель: Food" }
+    commands:
+      - tapOn: "Изменить цель: Food"
+      - extendedWaitUntil: { visible: "Сумма цели.*", timeout: 10000 }
+      - takeScreenshot: reports-02-target
+      - tapOn: "Отмена"
