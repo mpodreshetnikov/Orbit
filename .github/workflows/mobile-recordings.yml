@@ -101,6 +101,11 @@ jobs:
                select 1 from public.med_dose_events e
                 where e.regimen_id = r.id
                   and date_trunc('minute', e.scheduled_at) = date_trunc('minute', s.at));
+          -- Magnesium keeps stock and is running low, so a course shows its stock, the low-stock
+          -- reminder and the refill.
+          update public.med_regimens
+             set inventory = '{"enabled": true, "current_amount": 3, "refill_threshold_amount": 5, "unit": "pill", "auto_decrement_on_taken": true}'::jsonb
+           where id = '30000001-0000-4000-8000-000000000004';
           -- Yesterday, every daily slot taken on time: a course always has a history to open.
           insert into public.med_dose_events
             (person_id, regimen_id, scheduled_at, actual_at, taken_at, planned_intake, status)

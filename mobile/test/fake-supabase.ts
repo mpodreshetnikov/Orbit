@@ -11,6 +11,10 @@ import type { Session } from "@supabase/supabase-js";
  * already in place. The three dose RPCs change the seeded dose as the database functions do, so a
  * refetch after a tap sees the new state; any other RPC is answered by `rpcHandlers`. Every call is
  * recorded in `calls`.
+ *
+ * Writes work the same way: `insert`, `update`, `upsert` and `delete` change the seeded rows, after
+ * the filters chained to them, and a `select()` after one returns what was written. A new row gets an
+ * `id` when it has none.
  */
 
 type Row = Record<string, unknown>;
@@ -77,12 +81,39 @@ function compare(a: unknown, b: unknown): number {
   return String(a) < String(b) ? -1 : 1;
 }
 
+type Write =
+  | { kind: "insert"; rows: Row[] }
+  | { kind: "update"; values: Row }
+  | { kind: "upsert"; rows: Row[]; key: string }
+  | { kind: "delete" };
+
+let nextId = 1;
+
 class Query {
   private filters: Filter[] = [];
   private orders: { column: string; ascending: boolean }[] = [];
-  private single = false;
+  private one = false;
+  private write: Write | null = null;
 
   constructor(private readonly table: string) {}
+
+  insert(values: Row | Row[]) {
+    this.write = { kind: "insert", rows: Array.isArray(values) ? values : [values] };
+    return this;
+  }
+  update(values: Row) {
+    this.write = { kind: "update", values };
+    return this;
+  }
+  upsert(values: Row | Row[], options: { onConflict?: string } = {}) {
+    const rows = Array.isArray(values) ? values : [values];
+    this.write = { kind: "upsert", rows, key: options.onConflict ?? "id" };
+    return this;
+  }
+  delete() {
+    this.write = { kind: "delete" };
+    return this;
+  }
 
   select() {
     return this;
@@ -112,13 +143,46 @@ class Query {
     return this;
   }
   maybeSingle() {
-    this.single = true;
+    this.one = true;
     return this;
+  }
+  single() {
+    return this.maybeSingle();
+  }
+
+  /** Apply the pending write and return the rows it touched. */
+  private apply(write: Write): Row[] {
+    const table = (db.tables[this.table] ??= []);
+    if (write.kind === "insert") {
+      const rows = write.rows.map((row) => ({ id: `new-${nextId++}`, ...structuredClone(row) }));
+      table.push(...rows);
+      return rows;
+    }
+    if (write.kind === "upsert") {
+      return write.rows.map((row) => {
+        const existing = table.find((one) => one[write.key] === row[write.key]);
+        if (existing) return Object.assign(existing, structuredClone(row));
+        const created = { id: `new-${nextId++}`, ...structuredClone(row) };
+        table.push(created);
+        return created;
+      });
+    }
+    const matched = table.filter((row) => this.filters.every((f) => f(row)));
+    if (write.kind === "update") {
+      for (const row of matched) Object.assign(row, structuredClone(write.values));
+    } else {
+      db.tables[this.table] = table.filter((row) => !matched.includes(row));
+    }
+    return matched;
   }
 
   private run(): Result {
     if (db.failing.has(this.table)) {
       return { data: null, error: { message: `${this.table} is unavailable` } };
+    }
+    if (this.write) {
+      const written = structuredClone(this.apply(this.write));
+      return { data: this.one ? (written[0] ?? null) : written, error: null };
     }
     const rows = (db.tables[this.table] ?? []).filter((row) => this.filters.every((f) => f(row)));
     const sorted = [...rows].sort((a, b) => {
@@ -129,7 +193,7 @@ class Query {
       return 0;
     });
     const copy = structuredClone(sorted);
-    return { data: this.single ? (copy[0] ?? null) : copy, error: null };
+    return { data: this.one ? (copy[0] ?? null) : copy, error: null };
   }
 
   /** Awaiting the builder runs the query, as awaiting Supabase's own builder does. */

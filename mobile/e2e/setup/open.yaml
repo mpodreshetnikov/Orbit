@@ -16,6 +16,10 @@ name: Open the client
       - tapOn:
           text: "Open"
           optional: true
+      # A cold bundle on a slow runner can outlast Expo Go's own request: ask for it again.
+      - tapOn:
+          text: "Try again"
+          optional: true
       - extendedWaitUntil:
           visible: "Сегодня|Continue"
           timeout: 30000
@@ -31,3 +35,11 @@ name: Open the client
 - extendedWaitUntil:
     visible: "Сегодня"
     timeout: 60000
+# Expo Go floats its tools button over the top right corner, exactly where the navigation bar keeps
+# its own buttons ("Действия: …", the gear), and hides them from Maestro too. Drag it down beside
+# the tab bar, out of their way, for every flow after this one.
+- swipe:
+    start: 89%, 9%
+    end: 89%, 88%
+    duration: 2000
+- waitForAnimationToEnd
