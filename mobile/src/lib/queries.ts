@@ -1,5 +1,6 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
+import type { CheckupItem } from "@orbit-types/checkup";
 import type { UpdateConditionInput } from "@orbit-types/condition";
 import type { FindingSummary } from "@orbit-types/finding";
 import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
@@ -38,6 +39,12 @@ import {
   updateCondition,
 } from "@/features/conditions/query";
 import { addConditionHistory, type HistoryEntry } from "@/features/conditions/history";
+import {
+  completeCheckup,
+  fetchCheckups,
+  planCheckup,
+  type Completion,
+} from "@/features/checkups/query";
 import { fetchObservations } from "@/features/observations/query";
 import { fetchActiveRecords, fetchFindings, markFindingResolved } from "@/features/findings/query";
 import {
@@ -465,6 +472,34 @@ export function useAddConditionHistory() {
     onSettled: (_data, _error, entry) => {
       void client.invalidateQueries({ queryKey: ["conditions"] });
       void client.invalidateQueries({ queryKey: ["condition", entry.conditionId] });
+    },
+  });
+}
+
+export function useCheckups(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["checkups", personId],
+    queryFn: () => fetchCheckups(personId as string),
+    enabled: Boolean(personId),
+  });
+}
+
+/** Mark a checkup done, or plan it for a day; the checkups are refetched after. */
+export function useCheckupAction() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input:
+        | { item: CheckupItem; completion: Completion }
+        | { item: CheckupItem; plannedOn: string | null },
+    ) =>
+      "completion" in input
+        ? completeCheckup(input.item, input.completion)
+        : planCheckup(input.item.id, input.plannedOn),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["checkups"] });
+      void client.invalidateQueries({ queryKey: ["checkup"] });
     },
   });
 }

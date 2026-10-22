@@ -1,6 +1,7 @@
 import { Stack, useRouter, type Href } from "expo-router";
 import {
   BookOpen,
+  CalendarCheck,
   ChevronRight,
   FlaskConical,
   HeartPulse,
@@ -20,6 +21,12 @@ const SECTIONS: { title: string; description?: string; icon: LucideIcon; href: s
     description: "conditions.description",
     icon: HeartPulse,
     href: "/health/conditions",
+  },
+  {
+    title: "checkups.navTitle",
+    description: "checkups.description",
+    icon: CalendarCheck,
+    href: "/health/checkups",
   },
   {
     title: "observationHistory.navTitle",

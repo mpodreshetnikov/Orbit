@@ -28,6 +28,7 @@ import { CheckupCard, MarkCompleteDialog, PlanDialog } from "@/components/checku
 import { useCheckupItems, useMedicalRecords } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
 import { cn } from "@/lib/utils";
+import { groupCheckups, searchCheckups } from "@/types/checkup-summary";
 import type { CheckupItem, CheckupCategory } from "@/types";
 
 type StatusTab = "all" | "overdue" | "upcoming" | "inactive";
@@ -123,48 +124,15 @@ export default function CheckupsPage() {
       };
     }
 
-    const today = new Date().toISOString().slice(0, 10);
-    const weekFromToday = new Date();
-    weekFromToday.setDate(weekFromToday.getDate() + 7);
-    const weekFromTodayStr = weekFromToday.toISOString().slice(0, 10);
-
     // Category filter
     let filtered = items;
     if (categoryFilter !== "all") {
       filtered = filtered.filter((i) => i.category === categoryFilter);
     }
-
-    // Search filter
-    if (debouncedSearch.trim()) {
-      const q = debouncedSearch.toLowerCase();
-      filtered = filtered.filter((i) => i.title.toLowerCase().includes(q));
-    }
+    filtered = searchCheckups(filtered, debouncedSearch);
 
     // Groups for "All" tab: overdue, upcoming (within 7 days), later (due after 7 days), inactive
-    const overdue = filtered.filter(
-      (i) =>
-        i.status === "active" &&
-        ((i.next_due_at && i.next_due_at < today) || (i.planned_on && i.planned_on < today)),
-    );
-    const overdueIds = new Set(overdue.map((i) => i.id));
-    const upcoming = filtered.filter(
-      (i) =>
-        !overdueIds.has(i.id) &&
-        i.status === "active" &&
-        i.next_due_at &&
-        i.next_due_at >= today &&
-        i.next_due_at <= weekFromTodayStr,
-    );
-    const later = filtered.filter(
-      (i) =>
-        !overdueIds.has(i.id) &&
-        i.status === "active" &&
-        i.next_due_at &&
-        i.next_due_at > weekFromTodayStr,
-    );
-    const rest = filtered.filter(
-      (i) => i.status !== "active" || (!i.next_due_at && !(i.planned_on && i.planned_on < today)),
-    );
+    const { overdue, upcoming, later, rest } = groupCheckups(filtered, new Date());
 
     // Apply status tab filter (single list when a tab is selected)
     let result = filtered;

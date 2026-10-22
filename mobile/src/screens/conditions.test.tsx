@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { ActionSheetIOS, Alert, Linking, type AlertButton } from "react-native";
 import ConditionFormScreen, { icdNameFor } from "@/screens/condition-form-screen";
-import ConditionHistoryScreen, { dayOf } from "@/screens/condition-history-screen";
+import { dayOf } from "@/features/measurements/format";
+import ConditionHistoryScreen from "@/screens/condition-history-screen";
 import ConditionScreen from "@/screens/condition-screen";
 import ConditionsScreen from "@/screens/conditions-screen";
 import HealthScreen from "@/screens/health-screen";

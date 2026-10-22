@@ -7,16 +7,10 @@ import { Alert, ScrollView } from "react-native";
 import { Choice, Field, Input, Section } from "@/components/form";
 import { Button, Placeholder } from "@/components/ui";
 import type { ConditionDetail } from "@/features/conditions/query";
-import { formatDay } from "@/features/measurements/format";
+import { dayOf, formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
 import { useActiveRecords, useAddConditionHistory, useCondition } from "@/lib/queries";
 import { space } from "@/theme";
-
-/** The local day of `date` as a record stores it: `YYYY-MM-DD`. */
-export function dayOf(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
 
 /**
  * The web "Добавить в историю" dialog: a status as of a day, with a note, linked to one of the
