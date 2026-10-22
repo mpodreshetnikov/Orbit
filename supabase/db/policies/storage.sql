@@ -20,7 +20,8 @@ VALUES (
   'extension-releases',
   true,
   52428800,
-  ARRAY['application/zip', 'application/json']
+  -- application/x-xpinstall: the signed Firefox add-on (20261021140000_extension_release_bucket_xpi.sql).
+  ARRAY['application/zip', 'application/json', 'application/x-xpinstall']
 )
 ON CONFLICT (id) DO UPDATE
 SET
