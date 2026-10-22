@@ -147,6 +147,31 @@ describe("updateSession", () => {
     expect(mockRefs.redirect).not.toHaveBeenCalled();
   });
 
+  it("lets the extension read the latest release without a session", async () => {
+    const { request } = createRequest("/api/extension-release/latest");
+    createSupabase({
+      user: null,
+    });
+
+    const { updateSession } = await import("./supabase-middleware");
+    const response = await updateSession(request);
+
+    expect(response).toEqual(expect.objectContaining({ kind: "next" }));
+    expect(mockRefs.redirect).not.toHaveBeenCalled();
+  });
+
+  it("still gates the rest of the extension release routes", async () => {
+    const { request } = createRequest("/api/extension-release/latest/download");
+    createSupabase({
+      user: null,
+    });
+
+    const { updateSession } = await import("./supabase-middleware");
+    await updateSession(request);
+
+    expect(mockRefs.redirect).toHaveBeenCalledTimes(1);
+  });
+
   it("redirects unauthenticated user from protected route to login", async () => {
     const { request } = createRequest("/health/records");
     createSupabase({
