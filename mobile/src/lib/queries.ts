@@ -9,6 +9,7 @@ import * as Haptics from "expo-haptics";
 import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
 import type { checkupColumns } from "@orbit-types/checkup-form";
 import type { UpdateConditionInput } from "@orbit-types/condition";
+import type { RoutingChoice } from "@orbit-types/notification-routing";
 import type { FindingSummary } from "@orbit-types/finding";
 import type {
   CreateMoneyLineItemInput,
@@ -82,6 +83,16 @@ import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/featur
 import { saveCategory, type CategoryColumns } from "@/features/money/categories";
 import { fetchImportBatch, fetchImportBatches, moneyImportAction } from "@/features/money/import";
 import {
+  fetchCheckupReminders,
+  fetchHousehold,
+  fetchRouting,
+  readChosenPerson,
+  saveCheckupReminders,
+  saveRouting,
+  writeChosenPerson,
+  type CheckupReminders,
+} from "@/features/settings";
+import {
   fetchBudgetReport,
   fetchSelfAliases,
   saveBudgetTarget,
@@ -128,7 +139,7 @@ export function usePerson() {
   const userId = session?.user.id;
   return useQuery({
     queryKey: ["person", userId],
-    queryFn: () => resolveOwnPerson(userId),
+    queryFn: async () => resolveOwnPerson(userId, await readChosenPerson(userId!)),
     enabled: Boolean(userId),
     staleTime: Infinity,
   });
@@ -831,5 +842,52 @@ export function useReviewImportBatch() {
       void client.invalidateQueries({ queryKey: ["money-feed"] });
       void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
     },
+  });
+}
+
+/** Switch the phone to another person of the household; every screen follows. */
+export function useChoosePerson() {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useMutation({
+    mutationFn: (personId: string) => writeChosenPerson(userId!, personId),
+    onSuccess: () => void Haptics.selectionAsync(),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["person", userId] }),
+  });
+}
+
+export function useHousehold() {
+  return useQuery({ queryKey: ["household"], queryFn: fetchHousehold });
+}
+
+export function useNotificationSettings() {
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useQuery({
+    queryKey: ["notification-settings", userId],
+    queryFn: async () => ({
+      reminders: await fetchCheckupReminders(userId!),
+      routing: await fetchRouting(userId!),
+    }),
+    enabled: Boolean(userId),
+  });
+}
+
+export type NotificationSave = { reminders: CheckupReminders } | { routing: RoutingChoice };
+
+/** Save the checkup reminder's time, or whose reminders reach the account. */
+export function useSaveNotificationSettings() {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useMutation({
+    mutationFn: (save: NotificationSave) =>
+      "reminders" in save
+        ? saveCheckupReminders(userId!, save.reminders)
+        : saveRouting(userId!, save.routing),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["notification-settings"] }),
   });
 }

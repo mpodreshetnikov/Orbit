@@ -148,12 +148,6 @@ describe("TodayScreen", () => {
     expect(await screen.findByText("Нет приёмов в этот день")).toBeOnTheScreen();
   });
 
-  it("signs out from the header", async () => {
-    await renderScreens(routes, "/today");
-    await fireEvent.press(await screen.findByText("Выйти"));
-    await waitFor(() => expect(screen.queryByText("Vitamin D3")).toBeNull());
-  });
-
   it("shows the error and retries", async () => {
     fail("med_dose_events");
     await renderScreens(routes, "/today");

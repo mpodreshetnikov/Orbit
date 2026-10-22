@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useIntlLocale } from "@/lib/date-locale";
+import { normalizeReminderTime, routingEnabled, routingUpsert } from "@/types/notification-routing";
 import {
   useUserPreferences,
   useUpdateUserPreferences,
@@ -271,11 +272,8 @@ export default function SettingsPage() {
   }, [preferences?.checkup_notification_timezone, notificationTimezone]);
 
   const handleSaveCheckupReminders = async () => {
-    const timeValue = notificationTime.trim() || "09:00";
-    const [h, m] = timeValue.split(":").map(Number);
-    const normalized = `${String(h ?? 9).padStart(2, "0")}:${String(m ?? 0).padStart(2, "0")}`;
     await updatePreferences.mutateAsync({
-      checkup_notification_time: normalized,
+      checkup_notification_time: normalizeReminderTime(notificationTime),
       checkup_notification_timezone: notificationTimezone.trim() || null,
     });
   };
@@ -320,9 +318,7 @@ export default function SettingsPage() {
   };
 
   const isPersonEnabled = (personId: string, personOwnerId: string | null | undefined) => {
-    const row = routingByPersonId.get(personId);
-    if (row) return row.enabled;
-    return currentUserId != null && personOwnerId === currentUserId;
+    return routingEnabled(routingByPersonId.get(personId), personOwnerId, currentUserId);
   };
 
   const handleToggleRouting = async (
@@ -331,23 +327,17 @@ export default function SettingsPage() {
   ) => {
     const enabled = !isPersonEnabled(personId, personOwnerId);
     const isOwnPerson = currentUserId != null && personOwnerId === currentUserId;
-    const customPrefix = prefixByPerson[personId] ?? "";
-    await updateRouting.mutateAsync({
-      person_id: personId,
-      enabled,
-      custom_prefix: isOwnPerson ? null : customPrefix.trim() ? customPrefix.trim() : null,
-    });
+    await updateRouting.mutateAsync(
+      routingUpsert(personId, enabled, prefixByPerson[personId] ?? "", isOwnPerson),
+    );
   };
 
   const handlePrefixSave = async (personId: string, personOwnerId: string | null | undefined) => {
     const enabled = isPersonEnabled(personId, personOwnerId);
     const isOwnPerson = currentUserId != null && personOwnerId === currentUserId;
-    const customPrefix = prefixByPerson[personId] ?? "";
-    await updateRouting.mutateAsync({
-      person_id: personId,
-      enabled,
-      custom_prefix: isOwnPerson ? null : customPrefix.trim() ? customPrefix.trim() : null,
-    });
+    await updateRouting.mutateAsync(
+      routingUpsert(personId, enabled, prefixByPerson[personId] ?? "", isOwnPerson),
+    );
   };
 
   return (

@@ -179,7 +179,11 @@ class Query {
     }
     if (write.kind === "upsert") {
       return write.rows.map((row) => {
-        const existing = table.find((one) => one[write.key] === row[write.key]);
+        // `onConflict` may name several columns, as "recipient_user_id,person_id" does.
+        const columns = write.key.split(",").map((column) => column.trim());
+        const existing = table.find((one) =>
+          columns.every((column) => one[column] === row[column]),
+        );
         if (existing) return Object.assign(existing, structuredClone(row));
         const created = { id: `new-${nextId++}`, ...structuredClone(row) };
         table.push(created);
