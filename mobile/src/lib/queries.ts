@@ -1,9 +1,16 @@
-import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  QueryClient,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
 import type { checkupColumns } from "@orbit-types/checkup-form";
 import type { UpdateConditionInput } from "@orbit-types/condition";
 import type { FindingSummary } from "@orbit-types/finding";
+import type { MoneyTransactionFeedFilters } from "@orbit-types/money";
 import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
 import type {
   AddOneTimeToExistingPayload,
@@ -51,6 +58,12 @@ import {
   type Completion,
 } from "@/features/checkups/query";
 import { fetchObservations } from "@/features/observations/query";
+import {
+  fetchMoneyAccounts,
+  fetchMoneyCategories,
+  fetchMoneyFeedPage,
+  fetchMoneyFeedSummary,
+} from "@/features/money/query";
 import {
   fetchClinicalCatalog,
   saveClinicalEntry,
@@ -548,4 +561,38 @@ export function useCheckupAction() {
 
 export function useCompletions(itemId: string) {
   return useQuery({ queryKey: ["completions", itemId], queryFn: () => fetchCompletions(itemId) });
+}
+
+/** The person's transactions, a page at a time, under the web feed's filters. */
+export function useMoneyFeed(personId: string | undefined, filters: MoneyTransactionFeedFilters) {
+  return useInfiniteQuery({
+    queryKey: ["money-feed", personId, filters],
+    queryFn: ({ pageParam }) => fetchMoneyFeedPage(personId!, filters, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (page) => page.nextOffset,
+    enabled: !!personId,
+  });
+}
+
+export function useMoneyFeedSummary(
+  personId: string | undefined,
+  filters: MoneyTransactionFeedFilters,
+) {
+  return useQuery({
+    queryKey: ["money-feed-summary", personId, filters],
+    queryFn: () => fetchMoneyFeedSummary(personId!, filters),
+    enabled: !!personId,
+  });
+}
+
+export function useMoneyAccounts(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["money-accounts", personId],
+    queryFn: () => fetchMoneyAccounts(personId!),
+    enabled: !!personId,
+  });
+}
+
+export function useMoneyCategories() {
+  return useQuery({ queryKey: ["money-categories"], queryFn: fetchMoneyCategories });
 }

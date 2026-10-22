@@ -69,7 +69,8 @@ describe("the app", () => {
     setSession(fakeSession(USER_ID));
     await renderApp("/");
     expect((await screen.findAllByText("Vitamin D3")).length).toBeGreaterThan(0);
-    expect(calls.rpc).toEqual([]);
+    // Every tab is mounted: only the money tab's feed is asked of a function.
+    expect(calls.rpc.filter((call) => !call.name.startsWith("money_"))).toEqual([]);
   });
 
   it("says why the sign-in could not start", async () => {
