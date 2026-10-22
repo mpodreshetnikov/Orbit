@@ -78,6 +78,7 @@ import {
   fetchTransaction,
   updateTransaction,
 } from "@/features/money/transactions";
+import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
 import {
   fetchClinicalCatalog,
   saveClinicalEntry,
@@ -662,6 +663,41 @@ export function useSaveTransaction() {
       void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
       void client.invalidateQueries({ queryKey: ["money-merchant-names"] });
       if (id) void client.invalidateQueries({ queryKey: ["money-transaction", id] });
+    },
+  });
+}
+
+export function useMoneyCards(accountIds: string[]) {
+  const ids = [...accountIds].sort();
+  return useQuery({
+    queryKey: ["money-cards", ids],
+    queryFn: () => fetchCards(ids),
+    enabled: ids.length > 0,
+  });
+}
+
+export type AccountSave =
+  | { kind: "account"; personId: string; id?: string; columns: AccountColumns | null }
+  | {
+      kind: "card";
+      accountId: string;
+      id?: string;
+      columns: { last4: string; card_label: string | null } | null;
+    };
+
+/** Add, change or delete (`columns: null`) an account or one of its cards. */
+export function useSaveAccount() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (save: AccountSave) =>
+      save.kind === "account"
+        ? saveAccount(save.personId, save.id, save.columns)
+        : saveCard(save.accountId, save.id, save.columns),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["money-accounts"] });
+      void client.invalidateQueries({ queryKey: ["money-cards"] });
     },
   });
 }
