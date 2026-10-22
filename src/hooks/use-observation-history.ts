@@ -3,6 +3,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
 import type { ObservationSummary, ObservationHistoryPoint, ObservationStatus } from "@/types";
+import {
+  OBSERVATION_LIST_SELECT,
+  searchObservationSummaries,
+  summarizeObservations,
+  type ObservationListRow,
+} from "@/types/observation-summary";
 
 // ============================================================================
 // FETCH ALL OBSERVATIONS FOR A PERSON (aggregated by obs_code/obs_name)
@@ -13,187 +19,24 @@ async function fetchPersonObservationHistory(
 ): Promise<ObservationSummary[]> {
   const supabase = createClient();
 
-  // First, get all observations for active records of this person
-  // Join with medical_records to get record_date and filter by person_id
-  const query = supabase
+  // Applied observations of the person's active records, with the record's date.
+  const { data, error } = await supabase
     .from("record_observations")
-    .select(
-      `
-      id,
-      record_id,
-      obs_code,
-      obs_name,
-      catalog_id,
-      value_numeric,
-      value_text,
-      value_canonical,
-      unit,
-      unit_canonical,
-      ref_range_low,
-      ref_range_high,
-      ref_range_low_canonical,
-      ref_range_high_canonical,
-      status,
-      created_at,
-      medical_records!inner(
-        person_id,
-        record_date,
-        status
-      ),
-      observation_catalog(
-        name_ru,
-        name_en,
-        canonical_unit,
-        synonyms_ru,
-        synonyms_en,
-        default_ref_low,
-        default_ref_high
-      )
-    `,
-    )
+    .select(OBSERVATION_LIST_SELECT)
     .eq("medical_records.person_id", personId)
     .eq("medical_records.status", "active")
-    .eq("is_applied", true) // Only show applied observations in history
+    .eq("is_applied", true)
     .order("created_at", { ascending: false });
-
-  const { data, error } = await query;
 
   if (error) {
     throw new Error(error.message);
   }
 
-  if (!data || data.length === 0) {
-    return [];
-  }
-
-  // Transform the data and group by obs_code or obs_name
-  const observationMap = new Map<string, ObservationSummary>();
-
-  for (const row of data as unknown[]) {
-    const r = row as {
-      id: string;
-      record_id: string;
-      obs_code: string | null;
-      obs_name: string;
-      catalog_id: string | null;
-      value_numeric: number | null;
-      value_text: string | null;
-      value_canonical: number | null;
-      unit: string | null;
-      unit_canonical: string | null;
-      ref_range_low: number | null;
-      ref_range_high: number | null;
-      ref_range_low_canonical: number | null;
-      ref_range_high_canonical: number | null;
-      status: string | null;
-      created_at: string;
-      medical_records: {
-        person_id: string;
-        record_date: string | null;
-        status: string;
-      };
-      observation_catalog: {
-        name_ru: string | null;
-        name_en: string | null;
-        canonical_unit: string | null;
-        synonyms_ru: string[] | null;
-        synonyms_en: string[] | null;
-        default_ref_low: number | null;
-        default_ref_high: number | null;
-      } | null;
-    };
-
-    // Use obs_code as key if available, otherwise use normalized obs_name
-    const key = r.obs_code || r.obs_name.toLowerCase().trim();
-
-    const historyPoint: ObservationHistoryPoint = {
-      id: r.id,
-      record_id: r.record_id,
-      record_date: r.medical_records.record_date,
-      value_numeric: r.value_numeric,
-      value_text: r.value_text,
-      value_canonical: r.value_canonical,
-      unit: r.unit,
-      unit_canonical: r.unit_canonical,
-      ref_range_low: r.ref_range_low,
-      ref_range_high: r.ref_range_high,
-      ref_range_low_canonical: r.ref_range_low_canonical,
-      ref_range_high_canonical: r.ref_range_high_canonical,
-      status: r.status as ObservationStatus | null,
-      created_at: r.created_at,
-    };
-
-    if (observationMap.has(key)) {
-      const existing = observationMap.get(key)!;
-      existing.history.push(historyPoint);
-      existing.measurement_count++;
-    } else {
-      observationMap.set(key, {
-        obs_code: r.obs_code || key,
-        obs_name: r.obs_name,
-        catalog_id: r.catalog_id,
-        catalog_name_ru: r.observation_catalog?.name_ru || null,
-        catalog_name_en: r.observation_catalog?.name_en || null,
-        canonical_unit: r.observation_catalog?.canonical_unit || r.unit_canonical,
-        latest_value: r.value_canonical ?? r.value_numeric,
-        latest_value_text: r.value_text,
-        latest_unit: r.unit_canonical || r.unit,
-        latest_status: r.status as ObservationStatus | null,
-        latest_date: r.medical_records.record_date,
-        latest_ref_low: r.ref_range_low,
-        latest_ref_high: r.ref_range_high,
-        latest_ref_low_canonical: r.ref_range_low_canonical,
-        latest_ref_high_canonical: r.ref_range_high_canonical,
-        default_ref_low: r.observation_catalog?.default_ref_low ?? null,
-        default_ref_high: r.observation_catalog?.default_ref_high ?? null,
-        measurement_count: 1,
-        history: [historyPoint],
-      });
-    }
-  }
-
-  // Convert map to array and sort history by date (oldest first for charts)
-  let summaries = Array.from(observationMap.values()).map((summary) => ({
-    ...summary,
-    history: summary.history.sort((a, b) => {
-      const dateA = a.record_date || a.created_at;
-      const dateB = b.record_date || b.created_at;
-      return new Date(dateA).getTime() - new Date(dateB).getTime();
-    }),
-  }));
-
-  // Apply search filter if provided
-  if (search && search.trim()) {
-    const searchLower = search.toLowerCase().trim();
-    summaries = summaries.filter((s) => {
-      // Search in obs_name
-      if (s.obs_name.toLowerCase().includes(searchLower)) return true;
-      // Search in obs_code
-      if (s.obs_code.toLowerCase().includes(searchLower)) return true;
-      // Search in catalog names
-      if (s.catalog_name_ru?.toLowerCase().includes(searchLower)) return true;
-      if (s.catalog_name_en?.toLowerCase().includes(searchLower)) return true;
-      return false;
-    });
-  }
-
-  // Sort: bad observations first, then by last observation date (newest first), then by name
-  summaries.sort((a, b) => {
-    const aIsBad = a.latest_status && a.latest_status !== "normal" && a.latest_status !== "unknown";
-    const bIsBad = b.latest_status && b.latest_status !== "normal" && b.latest_status !== "unknown";
-
-    if (aIsBad && !bIsBad) return -1;
-    if (!aIsBad && bIsBad) return 1;
-
-    const dateA = a.latest_date ? new Date(a.latest_date).getTime() : 0;
-    const dateB = b.latest_date ? new Date(b.latest_date).getTime() : 0;
-    const byDate = dateB - dateA;
-    if (byDate !== 0) return byDate;
-
-    return a.obs_name.localeCompare(b.obs_name);
-  });
-
-  return summaries;
+  // Grouped by code, out-of-range ones first, then newest.
+  return searchObservationSummaries(
+    summarizeObservations((data ?? []) as unknown as ObservationListRow[]),
+    search,
+  );
 }
 
 export function usePersonObservationHistory(personId: string | null, search?: string) {
