@@ -49,6 +49,13 @@ describe("describeUpdateStatus", () => {
     );
   });
 
+  it("says how to fetch now when the browser installs the update", () => {
+    expect(
+      describeUpdateStatus({ ...base, phase: "browser_will_install", latest_version: "0.1.26" })
+        .text,
+    ).toContain("about:addons");
+  });
+
   it("shows the error and the state of an up-to-date install", () => {
     expect(describeUpdateStatus({ ...base, phase: "error", error: "boom" }).text).toContain("boom");
     expect(describeUpdateStatus({ ...base, phase: "up_to_date" }).text).toContain("Up to date");

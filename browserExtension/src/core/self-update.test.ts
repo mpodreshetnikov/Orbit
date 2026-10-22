@@ -298,3 +298,93 @@ describe("createSelfUpdater", () => {
     expect(fetchLatest).toHaveBeenCalledOnce();
   });
 });
+
+describe("createSelfUpdater, where the browser installs updates", () => {
+  function browserSetup(overrides: Partial<SelfUpdaterDeps> & { busy?: boolean[] } = {}) {
+    let pending: string | null = null;
+    const pendingStore = {
+      get: async () => pending,
+      set: async (version: string | null) => {
+        pending = version;
+      },
+    };
+    const env = setup({ browserManaged: true, pendingStore, ...overrides });
+    return { ...env, pending: () => pending };
+  }
+
+  it("reloads into the update the browser downloaded once nothing imports", async () => {
+    const { updater, reload, sendNative } = browserSetup();
+    await updater.onBrowserUpdateAvailable("0.1.24");
+    expect(reload).toHaveBeenCalledOnce();
+    expect(sendNative).not.toHaveBeenCalled();
+  });
+
+  it("holds the reload during an import, and reloads when it ends", async () => {
+    const { updater, reload, registry } = browserSetup();
+    registry.begin("run-1");
+    await updater.onBrowserUpdateAvailable("0.1.24");
+    expect(updater.status().phase).toBe("reload_pending");
+    expect(reload).not.toHaveBeenCalled();
+    registry.end("run-1");
+    await updater.onImportsSettled();
+    expect(reload).toHaveBeenCalledOnce();
+    expect(registry.isHeldForUpdate()).toBe(true);
+  });
+
+  it("finds a held-back update again in a worker that started after the event", async () => {
+    const first = browserSetup({ busy: [true] });
+    await first.updater.onBrowserUpdateAvailable("0.1.24");
+    expect(first.reload).not.toHaveBeenCalled();
+
+    // The event page was ended while it waited; a new one only has the stored version.
+    const stored = first.pending();
+    const { updater, reload } = setup({
+      browserManaged: true,
+      pendingStore: { get: async () => stored, set: async () => undefined },
+    });
+    await updater.onImportsSettled();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("looks for a held-back update when the worker wakes, without asking the server", async () => {
+    const fetchLatest = vi.fn(async () => RELEASE);
+    const { updater, reload } = setup({
+      browserManaged: true,
+      fetchLatest,
+      pendingStore: { get: async () => "0.1.24", set: async () => undefined },
+    });
+    await updater.check("wake");
+    expect(reload).toHaveBeenCalledOnce();
+
+    const idle = setup({ browserManaged: true, fetchLatest, pendingStore: undefined });
+    expect((await idle.updater.check("wake")).phase).toBe("idle");
+    expect(fetchLatest).not.toHaveBeenCalled();
+  });
+
+  it("reports a newer release the browser has not fetched yet, and installs nothing", async () => {
+    const { updater, reload, sendNative } = browserSetup({
+      // The endpoint names the Chrome build's id; nothing here is installed from it.
+      fetchLatest: async () => ({ ...RELEASE, extension_id: "chrome-id" }),
+    });
+    expect((await updater.check("manual")).phase).toBe("browser_will_install");
+    expect(reload).not.toHaveBeenCalled();
+    expect(sendNative).not.toHaveBeenCalled();
+  });
+
+  it("forgets a held-back version once it is the one running", async () => {
+    let pending: string | null = "0.1.24";
+    const { updater, reload } = setup({
+      browserManaged: true,
+      currentVersion: () => "0.1.24",
+      pendingStore: {
+        get: async () => pending,
+        set: async (version) => {
+          pending = version;
+        },
+      },
+    });
+    expect((await updater.check("startup")).phase).toBe("up_to_date");
+    expect(pending).toBeNull();
+    expect(reload).not.toHaveBeenCalled();
+  });
+});

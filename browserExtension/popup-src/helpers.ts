@@ -60,6 +60,13 @@ export function describeUpdateStatus(status: UpdateStatus): UpdateStatusView {
         text: `${current}\n${latest} is ready and installs as soon as the import in progress ends.`,
         busy: true,
       };
+    case "browser_will_install":
+      return {
+        ...check,
+        text:
+          `${current}\nAvailable: ${latest}. The browser installs it by itself within a day. ` +
+          "To get it now, open about:addons, then the gear menu, then Check for Updates.",
+      };
     case "host_missing":
       return {
         ...check,

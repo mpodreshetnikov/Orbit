@@ -15,6 +15,10 @@
  * begin meanwhile is refused rather than started on files that are changing. A stored session
  * (a run about to start) also defers both. An update found during an import waits, and goes
  * ahead when the import ends.
+ *
+ * A browser that updates the extension itself -- Firefox, from `update_url` -- holds a
+ * downloaded version back while `runtime.onUpdateAvailable` has a listener, and installs it on
+ * `runtime.reload()`. That reload goes through the same hold, so it waits for imports too.
  */
 
 export const SELF_UPDATE_ALARM = "orbit-self-update";
@@ -42,6 +46,8 @@ export type SelfUpdatePhase =
   | "applying"
   /** Files are replaced; the reload waits for the import that started meanwhile. */
   | "reload_pending"
+  /** The browser installs a newer release itself and has not downloaded it yet. */
+  | "browser_will_install"
   | "host_missing"
   | "error";
 
@@ -63,6 +69,20 @@ export interface NativeHostReply {
 
 export interface SelfUpdaterDeps {
   supported: boolean;
+  /**
+   * The browser installs updates (Firefox from `update_url`): nothing is staged or applied here,
+   * only the reload that installs what the browser downloaded. It has no API to look now --
+   * Firefox does not implement `runtime.requestUpdateCheck` -- so a check only reports.
+   */
+  browserManaged?: boolean;
+  /**
+   * The version the browser is holding back. Kept outside the worker: the event comes once, and
+   * an event page can be ended while the reload waits for an import.
+   */
+  pendingStore?: {
+    get(): Promise<string | null>;
+    set(version: string | null): Promise<void>;
+  };
   /** This extension's id: a release built with another key would install as another extension. */
   extensionId: string;
   currentVersion: () => string;
@@ -86,9 +106,11 @@ export interface SelfUpdater {
    * Looks for a newer release and installs it when nothing is importing. The alarm and the
    * popup's button both land here; the button only differs in being now.
    */
-  check(origin: "alarm" | "startup" | "manual" | "settled"): Promise<SelfUpdateStatus>;
+  check(origin: "alarm" | "startup" | "manual" | "settled" | "wake"): Promise<SelfUpdateStatus>;
   /** Called when an import ends; finishes an update that waited for it. */
   onImportsSettled(): Promise<void>;
+  /** `runtime.onUpdateAvailable`: the browser downloaded `version` and waits for a reload. */
+  onBrowserUpdateAvailable(version: string): Promise<void>;
 }
 
 /** Orders versions the way Chrome does: up to four dot-separated integers. Null if invalid. */
@@ -148,6 +170,8 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
   let inFlight: Promise<SelfUpdateStatus> | null = null;
   /** An import ended while a pass was already running, after it may have decided to wait. */
   let settledDuringPass = false;
+  /** The browser announced an update while a pass was running. */
+  let browserUpdateDuringPass = false;
 
   const set = (patch: Partial<SelfUpdateStatus>) => {
     state = { ...state, ...patch };
@@ -233,9 +257,35 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     });
   };
 
+  /** A check where the browser installs: reload for what it holds back, or say what is out. */
+  const runBrowserManaged = async (origin: string) => {
+    const current = state.current_version;
+    const pending = (await deps.pendingStore?.get()) ?? null;
+    if (pending && (compareExtensionVersions(pending, current) ?? 0) > 0) {
+      set({ latest_version: pending, phase: "reload_pending" });
+      await reloadWhenIdle();
+      return;
+    }
+    if (pending) await deps.pendingStore?.set(null);
+    // Only a check someone or something scheduled asks the server; a worker waking or an import
+    // ending only looks for a held-back update, and they happen all the time.
+    if (origin === "settled" || origin === "wake") {
+      set({ phase: "idle" });
+      return;
+    }
+    const latest = await deps.fetchLatest();
+    set({ checked_at: new Date(now()).toISOString(), latest_version: latest?.version ?? null });
+    const order = latest ? compareExtensionVersions(latest.version, current) : null;
+    set({ phase: order !== null && order > 0 ? "browser_will_install" : "up_to_date" });
+  };
+
   const run = async (origin: string): Promise<SelfUpdateStatus> => {
     try {
       set({ phase: "checking", error: null });
+      if (deps.browserManaged) {
+        await runBrowserManaged(origin);
+        return { ...state };
+      }
       const latest = await deps.fetchLatest();
       set({ checked_at: new Date(now()).toISOString() });
       if (!latest) {
@@ -305,6 +355,12 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     if (inFlight) return inFlight;
     inFlight = pass(origin).finally(() => {
       inFlight = null;
+      if (browserUpdateDuringPass) {
+        browserUpdateDuringPass = false;
+        settledDuringPass = false;
+        void drive("browser");
+        return;
+      }
       if (settledDuringPass) {
         settledDuringPass = false;
         if (state.phase === "waiting_for_import" || state.phase === "reload_pending") {
@@ -337,6 +393,16 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
       ) {
         await drive("settled");
       }
+    },
+    async onBrowserUpdateAvailable(version) {
+      await deps.pendingStore?.set(version);
+      deps.onInfo?.("extension_self_update_found", { origin: "browser", to: version });
+      if (inFlight) {
+        browserUpdateDuringPass = true;
+        return;
+      }
+      set({ latest_version: version, phase: "reload_pending", error: null });
+      await drive("browser");
     },
   };
 }

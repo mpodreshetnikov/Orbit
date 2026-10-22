@@ -106,6 +106,11 @@ The person runs the installer once from the unpacked folder.
 - A failed `apply` puts the previous files back from a copy the host takes first. If even that
   fails, the hold stays until a later `apply` succeeds, so no run starts on a half-replaced folder.
 - The installed host is a copy outside the folder; each `apply` refreshes it from the release.
+- A browser that installs updates itself (Firefox, signed, from `update_url`) holds a downloaded
+  version back while `runtime.onUpdateAvailable` has a listener, and installs it on
+  `runtime.reload()`. The extension listens, stores the version (the event comes once and an event
+  page can be ended meanwhile), and reloads under the same hold. Firefox has no
+  `runtime.requestUpdateCheck`, so "update now" there is about:addons, then Check for Updates.
 - One unpacked folder per machine. Every browser and profile reaches the same host with the same
   extension id, so the host cannot tell installations apart; installing from a second folder
   replaces the first, and the installers say so. A release whose `extension_id` is not the running

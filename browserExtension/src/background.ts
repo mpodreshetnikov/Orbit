@@ -352,10 +352,13 @@ void sessionJanitor.reconcile("boot");
 keepWorkerAliveDuringRuns(activeImportRuns, { ping: () => chrome.runtime.getPlatformInfo() });
 
 /**
- * Only a production build loaded unpacked keeps itself up to date: a development build is
- * built from the working tree and must not be overwritten by a release, and an installed
- * package is updated by the browser. See `core/self-update.ts`.
+ * Only a production build updates itself: a development build is built from the working tree
+ * and must not be overwritten by a release. Loaded unpacked it goes through the native host; an
+ * installed package (Firefox, signed) is updated by the browser, and only its reload is ours.
+ * See `core/self-update.ts`.
  */
+let selfUpdateUsesHost = false;
+const SELF_UPDATE_PENDING_KEY = "orbit-self-update-pending";
 const selfUpdater: Promise<SelfUpdater> = (async () => {
   let installType: string | null = null;
   try {
@@ -364,13 +367,27 @@ const selfUpdater: Promise<SelfUpdater> = (async () => {
     installType = null;
   }
   const appOrigin = Array.isArray(APP_ORIGINS) ? APP_ORIGINS[0] : undefined;
-  const supported =
-    BUILD_MODE === "production" &&
+  const release = BUILD_MODE === "production" && Boolean(appOrigin);
+  const browserManaged = release && installType === "normal";
+  selfUpdateUsesHost =
+    release &&
     installType === "development" &&
-    typeof chrome.runtime.sendNativeMessage === "function" &&
-    Boolean(appOrigin);
+    typeof chrome.runtime.sendNativeMessage === "function";
   return createSelfUpdater({
-    supported,
+    supported: selfUpdateUsesHost || browserManaged,
+    browserManaged,
+    pendingStore: {
+      get: async () => {
+        const stored = (await chrome.storage.local.get(SELF_UPDATE_PENDING_KEY))[
+          SELF_UPDATE_PENDING_KEY
+        ];
+        return typeof stored === "string" ? stored : null;
+      },
+      set: async (version) => {
+        if (version) await chrome.storage.local.set({ [SELF_UPDATE_PENDING_KEY]: version });
+        else await chrome.storage.local.remove(SELF_UPDATE_PENDING_KEY);
+      },
+    },
     extensionId: chrome.runtime.id,
     currentVersion: () => chrome.runtime.getManifest().version,
     fetchLatest: async () => {
@@ -391,8 +408,21 @@ const selfUpdater: Promise<SelfUpdater> = (async () => {
   });
 })();
 
-void selfUpdater.then(async (updater) => {
-  if (updater.status().phase === "unsupported" || !chrome.alarms?.create) return;
+// A browser that installs updates itself holds a downloaded one back only while this listens,
+// and the reload that installs it then waits for imports like any other.
+chrome.runtime.onUpdateAvailable?.addListener((details) => {
+  void selfUpdater.then((updater) => updater.onBrowserUpdateAvailable(details.version));
+});
+
+// An event page is ended while idle, so a reload that waited for an import may wake in a new
+// one: it finds the held-back version in storage. Nothing is fetched for this.
+void selfUpdater.then((updater) => {
+  if (updater.status().phase !== "unsupported" && !selfUpdateUsesHost) void updater.check("wake");
+});
+
+// The browser looks for its own updates; the alarm is for the host only.
+void selfUpdater.then(async () => {
+  if (!selfUpdateUsesHost || !chrome.alarms?.create) return;
   const existing = await chrome.alarms.get(SELF_UPDATE_ALARM).catch(() => null);
   if (existing) return;
   await chrome.alarms.create(SELF_UPDATE_ALARM, {
