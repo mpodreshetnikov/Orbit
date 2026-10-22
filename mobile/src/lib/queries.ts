@@ -80,7 +80,13 @@ import {
 } from "@/features/money/transactions";
 import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
 import { saveCategory, type CategoryColumns } from "@/features/money/categories";
-import { fetchBudgetReport, saveBudgetTarget, type TargetKey } from "@/features/money/reports";
+import {
+  fetchBudgetReport,
+  fetchSelfAliases,
+  saveBudgetTarget,
+  saveSelfAlias,
+  type TargetKey,
+} from "@/features/money/reports";
 import { deleteRule, fetchRules, reorderRules, saveRule } from "@/features/money/rules";
 import {
   fetchClinicalCatalog,
@@ -773,5 +779,27 @@ export function useSaveBudgetTarget() {
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => void client.invalidateQueries({ queryKey: ["money-budget-report"] }),
+  });
+}
+
+export function useSelfAliases(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["money-transfer-self-aliases", personId],
+    queryFn: () => fetchSelfAliases(personId!),
+    enabled: !!personId,
+  });
+}
+
+/** Add or delete a self-transfer alias; the report changes with it. */
+export function useSaveSelfAlias() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: saveSelfAlias,
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["money-transfer-self-aliases"] });
+      void client.invalidateQueries({ queryKey: ["money-budget-report"] });
+    },
   });
 }

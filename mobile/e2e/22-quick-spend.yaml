@@ -1,0 +1,16 @@
+# A spend from the first screen: one tap opens the form with the amount ready for typing.
+appId: host.exp.Exponent
+name: Быстрая трата
+---
+- openLink: exp://127.0.0.1:8081/--/today
+- tapOn: { text: "Open", optional: true }
+- extendedWaitUntil:
+    visible: "Добавить транзакцию"
+    timeout: 60000
+- tapOn: "Добавить транзакцию"
+- extendedWaitUntil:
+    visible: "Сумма"
+    timeout: 10000
+- inputText: "-350"
+- takeScreenshot: quick-spend-01-form
+- tapOn: "Отмена"

@@ -76,3 +76,30 @@ export async function saveBudgetTarget(
     ),
   );
 }
+
+export interface SelfAlias {
+  id: string;
+  alias: string;
+  normalized_alias: string | null;
+}
+
+/** The names a person's own transfers go by, so the report leaves them out. */
+export async function fetchSelfAliases(personId: string): Promise<SelfAlias[]> {
+  const rows = check(
+    await supabase
+      .from("money_transfer_self_aliases")
+      .select("id, alias, normalized_alias")
+      .eq("person_id", personId)
+      .order("created_at", { ascending: false }),
+  );
+  return (rows ?? []) as SelfAlias[];
+}
+
+/** Add an alias (its normalised form is the database's to fill), or delete one by `id`. */
+export async function saveSelfAlias(
+  change: { personId: string; alias: string } | { id: string },
+): Promise<void> {
+  const table = supabase.from("money_transfer_self_aliases");
+  if ("id" in change) check(await table.delete().eq("id", change.id));
+  else check(await table.insert({ person_id: change.personId, alias: change.alias } as never));
+}

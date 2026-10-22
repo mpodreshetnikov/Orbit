@@ -9,7 +9,7 @@ import {
   targetForMode,
 } from "@orbit-types/money-reports";
 import { Stack, useRouter, type Href } from "expo-router";
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react-native";
+import { ChevronDown, ChevronLeft, ChevronRight, UserRoundCheck } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { LineChart } from "@/components/charts";
@@ -73,7 +73,21 @@ export default function MoneyReportsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: t("money.reports") }} />
+      <Stack.Screen
+        options={{
+          title: t("money.reports"),
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("money.reportSelfAliases")}
+              hitSlop={space.sm}
+              onPress={() => router.push("/money/reports/aliases" as Href)}
+            >
+              <Icon icon={UserRoundCheck} size={22} tone="foreground" />
+            </Pressable>
+          ),
+        }}
+      />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xl * 2 }}

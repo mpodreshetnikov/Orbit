@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clock,
   MoreHorizontal,
+  Wallet,
   X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -129,6 +130,16 @@ export default function TodayScreen() {
     <Stack.Screen
       options={{
         title: isToday ? t("medications.dateToday") : dateLabel,
+        headerLeft: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("money.addTransaction")}
+            hitSlop={space.sm}
+            onPress={() => router.push("/today/spend" as Href)}
+          >
+            <Icon icon={Wallet} size={22} tone="foreground" />
+          </Pressable>
+        ),
         headerRight: () => (
           <Pressable accessibilityRole="button" onPress={() => void signOut()} hitSlop={space.sm}>
             <Text size="base" tone="mutedForeground">
