@@ -58,7 +58,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .cache/docker/supabase-images
-          key: ${{ runner.os }}-supabase-docker-${{ hashFiles('supabase/config.toml') }}
+          key: ${{ runner.os }}-supabase-docker-v2-${{ hashFiles('supabase/config.toml') }}
       - name: Load cached Supabase Docker images
         run: |
           shopt -s nullglob
