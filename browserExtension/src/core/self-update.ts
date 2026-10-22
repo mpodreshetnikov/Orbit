@@ -275,7 +275,11 @@ export function createSelfUpdater(deps: SelfUpdaterDeps): SelfUpdater {
     }
     const latest = await deps.fetchLatest();
     set({ checked_at: new Date(now()).toISOString(), latest_version: latest?.version ?? null });
-    const order = latest ? compareExtensionVersions(latest.version, current) : null;
+    if (!latest) {
+      set({ phase: "error", error: "No published release was found." });
+      return;
+    }
+    const order = compareExtensionVersions(latest.version, current);
     set({ phase: order !== null && order > 0 ? "browser_will_install" : "up_to_date" });
   };
 

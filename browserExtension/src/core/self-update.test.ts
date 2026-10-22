@@ -371,6 +371,11 @@ describe("createSelfUpdater, where the browser installs updates", () => {
     expect(sendNative).not.toHaveBeenCalled();
   });
 
+  it("does not call a failed check up to date", async () => {
+    const { updater } = browserSetup({ fetchLatest: async () => null });
+    expect((await updater.check("manual")).phase).toBe("error");
+  });
+
   it("forgets a held-back version once it is the one running", async () => {
     let pending: string | null = "0.1.24";
     const { updater, reload } = setup({
