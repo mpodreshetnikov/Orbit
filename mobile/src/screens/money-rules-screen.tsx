@@ -1,12 +1,18 @@
 import type { MoneyCategoryRule } from "@orbit-types/money";
 import { movedRuleIds, ruleCategoryLabel, ruleSummary } from "@orbit-types/money-rules";
-import { Stack } from "expo-router";
-import { Ellipsis } from "lucide-react-native";
+import { Stack, useRouter, type Href } from "expo-router";
+import { Ellipsis, Plus } from "lucide-react-native";
 import { useRef } from "react";
 import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
-import { useChangeRules, useMoneyCategories, useMoneyRules, usePerson } from "@/lib/queries";
+import {
+  useChangeRules,
+  useMoneyCategories,
+  useMoneyRules,
+  usePerson,
+  type RuleChange,
+} from "@/lib/queries";
 import { space, usePalette } from "@/theme";
 
 /** How long the system sheet takes to slide away before an alert may be shown. */
@@ -14,11 +20,12 @@ const SHEET_DISMISS_MS = 400;
 
 /**
  * "Правила" — the web rules page: the person's category rules in the order the pipeline runs
- * them, each with its kind, whether it is on, and its filters in a line. A rule's menu moves it up
- * or down the order, or deletes it once asked.
+ * them, each with its kind, whether it is on, and its filters in a line. "+" adds a rule; a rule's
+ * menu edits it, moves it up or down the order, or deletes it once asked.
  */
 export default function MoneyRulesScreen() {
   const palette = usePalette();
+  const router = useRouter();
   const person = usePerson();
   const rules = useMoneyRules(person.data?.id);
   const categories = useMoneyCategories();
@@ -26,10 +33,11 @@ export default function MoneyRulesScreen() {
   const names = new Map((categories.data ?? []).map((one) => [one.id, ruleCategoryLabel(one)]));
   const all = rules.data ?? [];
 
+  const open = (query = "") => router.push(`/money/rules/form${query}` as Href);
   // A reorder parks rules at negative positions on the way, so a second change started before the
   // first one and its refresh land would collide with it: one change at a time, as on the web.
   const changing = useRef(false);
-  const run = (what: { delete: string } | { order: string[] }) => {
+  const run = (what: RuleChange) => {
     if (changing.current) return;
     changing.current = true;
     change.mutate(what, {
@@ -43,6 +51,7 @@ export default function MoneyRulesScreen() {
     const up = movedRuleIds(all, rule.id, "up");
     const down = movedRuleIds(all, rule.id, "down");
     const choices: [string, () => void][] = [
+      [t("common.edit"), () => open(`?id=${rule.id}`)],
       ...(up ? [[t("money.ruleMoveUp"), () => run({ order: up })] as [string, () => void]] : []),
       ...(down
         ? [[t("money.ruleMoveDown"), () => run({ order: down })] as [string, () => void]]
@@ -76,7 +85,23 @@ export default function MoneyRulesScreen() {
     );
   };
 
-  const header = <Stack.Screen options={{ title: t("money.rules") }} />;
+  const header = (
+    <Stack.Screen
+      options={{
+        title: t("money.rules"),
+        headerRight: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("money.addRule")}
+            hitSlop={space.sm}
+            onPress={() => open()}
+          >
+            <Icon icon={Plus} size={24} tone="foreground" />
+          </Pressable>
+        ),
+      }}
+    />
+  );
   if (!all.length) {
     // A failed person read leaves the rules query disabled, which stays pending forever.
     const failed = person.error ?? rules.error;
@@ -88,13 +113,15 @@ export default function MoneyRulesScreen() {
           busy={busy}
           message={busy ? undefined : (failed?.message ?? t("money.noRulesHint"))}
           action={
-            failed ? (
+            busy ? undefined : failed ? (
               <Button
                 variant="outline"
                 label={t("common.retry")}
                 onPress={() => void (person.error ? person.refetch() : rules.refetch())}
               />
-            ) : undefined
+            ) : (
+              <Button label={t("money.addRule")} onPress={() => open()} />
+            )
           }
         />
       </>

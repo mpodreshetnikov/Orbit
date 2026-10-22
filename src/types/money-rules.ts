@@ -1,8 +1,13 @@
 import type {
+  CreateMoneyCategoryRuleInput,
   MoneyCategory,
   MoneyCategoryRule,
   MoneyCategoryRuleFilter,
   MoneyCategoryRuleFilterOperator,
+  MoneyCategoryRuleKind,
+  MoneyCategoryRuleMatchMode,
+  MoneyCategoryRuleScopeFilter,
+  UpdateMoneyCategoryRuleInput,
 } from "./money";
 
 /** The category rules as the web pages and the phone read and describe them. */
@@ -197,4 +202,206 @@ export function movedRuleIds(
   const ids = rules.map((rule) => rule.id);
   ids.splice(to, 0, ...ids.splice(from, 1));
   return ids;
+}
+
+/** The rule editor's form, as typed: what the web editor and the phone's both hold. */
+
+export interface RuleFilterDraft {
+  id: string;
+  field: string;
+  operator: MoneyCategoryRuleFilterOperator;
+  value: string;
+  values: string;
+  min: string;
+  max: string;
+}
+
+export interface RuleForm {
+  id: string | null;
+  name: string;
+  description: string;
+  enabled: boolean;
+  ruleKind: MoneyCategoryRuleKind;
+  targetCategoryId: string;
+  matchMode: MoneyCategoryRuleMatchMode;
+  scopeFilter: MoneyCategoryRuleScopeFilter;
+  stopProcessing: boolean;
+  prompt: string;
+  fallbackSystemKey: string;
+  filters: RuleFilterDraft[];
+}
+
+function normalizeDraftOperator(
+  operator: MoneyCategoryRuleFilterOperator | undefined,
+): MoneyCategoryRuleFilterOperator {
+  if (operator === "in_set") return "equals_any_in_set";
+  return operator ?? "contains";
+}
+
+function buildDraftId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function ruleFilterDraft(seed: Partial<RuleFilterDraft> = {}): RuleFilterDraft {
+  return {
+    id: seed.id ?? buildDraftId(),
+    field: seed.field ?? "merchant_name",
+    operator: normalizeDraftOperator(seed.operator),
+    value: seed.value ?? "",
+    values: seed.values ?? "",
+    min: seed.min ?? "",
+    max: seed.max ?? "",
+  };
+}
+
+export function ruleFilterDrafts(filters: MoneyCategoryRuleFilter[]): RuleFilterDraft[] {
+  return filters.map((filter) =>
+    ruleFilterDraft({
+      field: filter.field,
+      operator: filter.operator,
+      value: filter.value == null ? "" : String(filter.value),
+      values: Array.isArray(filter.values) ? filter.values.join(", ") : "",
+      min: filter.min == null ? "" : String(filter.min),
+      max: filter.max == null ? "" : String(filter.max),
+    }),
+  );
+}
+
+export function ruleFiltersOf(filters: RuleFilterDraft[]): MoneyCategoryRuleFilter[] {
+  return filters.reduce<MoneyCategoryRuleFilter[]>((accumulator, filter) => {
+    const normalizedField = filter.field.trim();
+    if (!normalizedField) return accumulator;
+
+    const normalized: MoneyCategoryRuleFilter = {
+      field: normalizedField,
+      operator: filter.operator,
+    };
+
+    if (filter.operator === "contains_any_in_set" || filter.operator === "equals_any_in_set") {
+      const values = filter.values
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length > 0) normalized.values = values;
+    } else if (filter.operator === "range") {
+      normalized.min = filter.min.trim() ? Number(filter.min) : null;
+      normalized.max = filter.max.trim() ? Number(filter.max) : null;
+    } else if (filter.operator !== "is_empty" && filter.operator !== "is_not_empty") {
+      normalized.value = filter.value.trim();
+    }
+
+    accumulator.push(normalized);
+    return accumulator;
+  }, []);
+}
+
+export function emptyRuleForm(): RuleForm {
+  return {
+    id: null,
+    name: "",
+    description: "",
+    enabled: true,
+    ruleKind: "direct",
+    targetCategoryId: "",
+    matchMode: "all",
+    scopeFilter: "all_line_items",
+    stopProcessing: false,
+    prompt: "",
+    fallbackSystemKey: "uncategorized",
+    filters: [],
+  };
+}
+
+export function ruleFormOf(rule: MoneyCategoryRule): RuleForm {
+  return {
+    id: rule.id,
+    name: rule.name,
+    description: rule.description ?? "",
+    enabled: rule.enabled,
+    ruleKind: rule.rule_kind,
+    targetCategoryId: rule.target_category_id ?? "",
+    matchMode: rule.match_mode,
+    scopeFilter: rule.scope_filter,
+    stopProcessing: rule.stop_processing,
+    prompt: typeof rule.config.prompt === "string" ? rule.config.prompt : "",
+    fallbackSystemKey:
+      typeof rule.config.target_system_key === "string"
+        ? rule.config.target_system_key
+        : "uncategorized",
+    filters: ruleFilterDrafts(rule.filters),
+  };
+}
+
+export function rulePayload(
+  selectedPersonId: string,
+  form: RuleForm,
+  rules: MoneyCategoryRule[],
+): CreateMoneyCategoryRuleInput | UpdateMoneyCategoryRuleInput {
+  const config: Record<string, unknown> = {};
+
+  if (form.ruleKind === "llm_categorization" && form.prompt.trim()) {
+    config.prompt = form.prompt.trim();
+  }
+
+  if (form.ruleKind === "fallback_uncategorized") {
+    config.target_system_key = form.fallbackSystemKey.trim() || "uncategorized";
+  }
+
+  const sharedFields = {
+    name: form.name.trim(),
+    description: form.description.trim() || null,
+    enabled: form.enabled,
+    rule_kind: form.ruleKind,
+    target_category_id: form.ruleKind === "direct" ? form.targetCategoryId || null : null,
+    match_mode: form.matchMode,
+    scope_filter: form.scopeFilter,
+    filters: ruleFiltersOf(form.filters),
+    config,
+    stop_processing: form.stopProcessing,
+  };
+
+  if (form.id) {
+    return sharedFields;
+  }
+
+  return {
+    person_id: selectedPersonId,
+    sort_order: rules.length + 1,
+    ...sharedFields,
+  };
+}
+
+export function ruleNumberInput(value: string): string {
+  let normalized = value.replace(/[^\d.-]/g, "");
+  normalized = normalized.replace(/(?!^)-/g, "");
+
+  const dotIndex = normalized.indexOf(".");
+  if (dotIndex !== -1) {
+    normalized =
+      normalized.slice(0, dotIndex + 1) + normalized.slice(dotIndex + 1).replace(/[.]/g, "");
+  }
+
+  return normalized;
+}
+
+export function isSmartRuleKind(kind: MoneyCategoryRuleKind) {
+  return kind !== "direct" && kind !== "fallback_uncategorized";
+}
+
+/** Why the rule cannot be saved as it is: no name, a direct rule with no category, or a broken regex. */
+export function ruleFormProblem(form: RuleForm): "name" | "target" | "regex" | null {
+  if (!form.name.trim()) return "name";
+  if (form.ruleKind === "direct" && !form.targetCategoryId) return "target";
+  for (const filter of form.filters) {
+    if (filter.operator !== "regex" || !filter.value.trim()) continue;
+    try {
+      void new RegExp(filter.value);
+    } catch {
+      return "regex";
+    }
+  }
+  return null;
 }

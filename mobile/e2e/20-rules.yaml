@@ -18,3 +18,11 @@ name: Правила
     timeout: 10000
 - takeScreenshot: rules-02-menu
 - tapOn: "Отмена"
+- tapOn: "Добавить правило"
+- extendedWaitUntil:
+    visible: "Название правила"
+    timeout: 10000
+- inputText: "Такси"
+- tapOn: "Добавить фильтр"
+- takeScreenshot: rules-03-form
+- tapOn: "Отмена"

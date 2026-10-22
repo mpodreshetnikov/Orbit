@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { MoneyCategory, MoneyCategoryRule } from "./money";
 import {
+  emptyRuleForm,
+  isSmartRuleKind,
   movedRuleIds,
-  ruleCategoryLabel,
   rowToMoneyCategoryRule,
+  ruleCategoryLabel,
+  ruleFilterDraft,
+  ruleFormOf,
+  ruleFormProblem,
+  ruleNumberInput,
+  rulePayload,
   ruleSummary,
 } from "./money-rules";
 
@@ -85,5 +92,120 @@ describe("movedRuleIds", () => {
     expect(movedRuleIds(rules, "a", "up")).toBeNull();
     expect(movedRuleIds(rules, "c", "down")).toBeNull();
     expect(movedRuleIds(rules, "x", "down")).toBeNull();
+  });
+});
+
+describe("the rule form", () => {
+  const saved = rule({
+    id: "r1",
+    person_id: "p",
+    name: "Кофе",
+    description: null,
+    enabled: true,
+    rule_kind: "direct",
+    target_category_id: "cat",
+    scope_filter: "all_line_items",
+    stop_processing: false,
+    config: {},
+    filters: [
+      { field: "merchant_name", operator: "in_set", values: ["a", "b"] },
+      { field: "line_item_amount", operator: "range", min: 1, max: null },
+      { field: "mcc", operator: "equals", value: 5411 },
+    ],
+  });
+
+  it("reads a rule back, with old set operators renamed", () => {
+    const form = ruleFormOf(saved);
+    expect(form).toMatchObject({ id: "r1", name: "Кофе", targetCategoryId: "cat", prompt: "" });
+    expect(form.fallbackSystemKey).toBe("uncategorized");
+    expect(form.filters.map(({ id: _id, ...rest }) => rest)).toEqual([
+      {
+        field: "merchant_name",
+        operator: "equals_any_in_set",
+        value: "",
+        values: "a, b",
+        min: "",
+        max: "",
+      },
+      { field: "line_item_amount", operator: "range", value: "", values: "", min: "1", max: "" },
+      { field: "mcc", operator: "equals", value: "5411", values: "", min: "", max: "" },
+    ]);
+    expect(
+      ruleFormOf({ ...saved, config: { prompt: "Еда?", target_system_key: "other" } }),
+    ).toMatchObject({ prompt: "Еда?", fallbackSystemKey: "other" });
+  });
+
+  it("writes a new rule at the end of the order, with only what its kind uses", () => {
+    const form = {
+      ...emptyRuleForm(),
+      name: " Кофе ",
+      description: " ",
+      ruleKind: "llm_categorization" as const,
+      targetCategoryId: "cat",
+      prompt: " Еда? ",
+      filters: [
+        ruleFilterDraft({ field: " ", value: "x" }),
+        ruleFilterDraft({ operator: "contains_any_in_set", values: "a, ,b" }),
+        ruleFilterDraft({ operator: "contains_any_in_set", values: " " }),
+        ruleFilterDraft({ field: "line_item_amount", operator: "range", min: "1", max: "" }),
+        ruleFilterDraft({ operator: "is_empty", value: "x" }),
+        ruleFilterDraft({ value: " Coffee " }),
+      ],
+    };
+    expect(rulePayload("p", form, [saved])).toEqual({
+      person_id: "p",
+      sort_order: 2,
+      name: "Кофе",
+      description: null,
+      enabled: true,
+      rule_kind: "llm_categorization",
+      target_category_id: null,
+      match_mode: "all",
+      scope_filter: "all_line_items",
+      filters: [
+        { field: "merchant_name", operator: "contains_any_in_set", values: ["a", "b"] },
+        { field: "merchant_name", operator: "contains_any_in_set" },
+        { field: "line_item_amount", operator: "range", min: 1, max: null },
+        { field: "merchant_name", operator: "is_empty" },
+        { field: "merchant_name", operator: "contains", value: "Coffee" },
+      ],
+      config: { prompt: "Еда?" },
+      stop_processing: false,
+    });
+    expect(
+      rulePayload(
+        "p",
+        { ...form, id: "r1", ruleKind: "fallback_uncategorized", fallbackSystemKey: " " },
+        [],
+      ),
+    ).not.toHaveProperty("person_id");
+    expect(
+      rulePayload("p", { ...form, ruleKind: "fallback_uncategorized", fallbackSystemKey: " " }, [])
+        .config,
+    ).toEqual({ target_system_key: "uncategorized" });
+    expect(
+      rulePayload("p", { ...form, ruleKind: "direct", targetCategoryId: "cat" }, [])
+        .target_category_id,
+    ).toBe("cat");
+  });
+
+  it("names what stops a save", () => {
+    const form = { ...emptyRuleForm(), name: "Кофе", targetCategoryId: "cat" };
+    expect(ruleFormProblem(form)).toBeNull();
+    expect(ruleFormProblem({ ...form, name: " " })).toBe("name");
+    expect(ruleFormProblem({ ...form, targetCategoryId: "" })).toBe("target");
+    expect(
+      ruleFormProblem({ ...form, filters: [ruleFilterDraft({ operator: "regex", value: "(" })] }),
+    ).toBe("regex");
+    expect(
+      ruleFormProblem({ ...form, filters: [ruleFilterDraft({ operator: "regex", value: "a+" })] }),
+    ).toBeNull();
+  });
+
+  it("keeps a number field to one sign and one point, and tells smart kinds apart", () => {
+    expect(ruleNumberInput("1-2.3.4 ₽")).toBe("12.34");
+    expect(ruleNumberInput("-5")).toBe("-5");
+    expect(isSmartRuleKind("mcc_map")).toBe(true);
+    expect(isSmartRuleKind("direct")).toBe(false);
   });
 });

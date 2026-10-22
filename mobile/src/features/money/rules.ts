@@ -1,4 +1,8 @@
-import type { MoneyCategoryRule } from "@orbit-types/money";
+import type {
+  CreateMoneyCategoryRuleInput,
+  MoneyCategoryRule,
+  UpdateMoneyCategoryRuleInput,
+} from "@orbit-types/money";
 import { rowToMoneyCategoryRule } from "@orbit-types/money-rules";
 import { supabase } from "@/lib/supabase";
 
@@ -44,4 +48,16 @@ export async function reorderRules(ids: string[]): Promise<void> {
         .eq("id", id),
     );
   }
+}
+
+/** Add a rule (a payload with its person and place), or change one by `id`. */
+export async function saveRule(
+  id: string | null,
+  payload: CreateMoneyCategoryRuleInput | UpdateMoneyCategoryRuleInput,
+): Promise<void> {
+  // The generated types want the filters and config as `Json`; the rule's own types are narrower.
+  const row = payload as never;
+  const table = supabase.from("money_category_rules");
+  if (id) check(await table.update(row).eq("id", id));
+  else check(await table.insert(row));
 }
