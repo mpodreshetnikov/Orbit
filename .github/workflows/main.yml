@@ -196,7 +196,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .cache/docker/supabase-images
-          key: ${{ runner.os }}-supabase-docker-${{ hashFiles('supabase/config.toml') }}
+          key: ${{ runner.os }}-supabase-docker-v2-${{ hashFiles('supabase/config.toml') }}
+          # v1 lacks postgres-meta (T-261022-338) but still spares every other pull until a run on
+          # main saves v2. A fallback hit is not a cache-hit, so that run still captures and saves.
+          restore-keys: |
+            ${{ runner.os }}-supabase-docker-${{ hashFiles('supabase/config.toml') }}
       - name: Load cached Supabase Docker image
         if: steps.impact.outputs.dbImpact == 'true'
         shell: bash
@@ -215,12 +219,6 @@ jobs:
           HEALTH_STRUCTURE_PARSER_MODE: e2e_stub
           OPENROUTER_API_KEY: e2e-local-disabled
         run: just supabase-local-start
-      - name: Capture Supabase Docker images
-        if: steps.impact.outputs.dbImpact == 'true'
-        shell: bash
-        run: |
-          mkdir -p .cache/docker
-          docker ps --format '{{.Image}}' | sort -u > .cache/docker/supabase-images.txt
       # The runner ships pg_dump 16, which fails twice over: it refuses the 17 server that
       # supabase/config.toml pins, and it does not know --no-policies, which the snapshot is
       # defined with and which arrived in pg_dump 18. Without a client clearing both bars the
@@ -244,10 +242,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends "postgresql-client-${major}"
           echo "/usr/lib/postgresql/${major}/bin" >> "$GITHUB_PATH"
+      # `supabase gen types` starts postgres-meta with a one-off `docker run`. From public ECR that
+      # pull hits the anonymous data limit (`toomanyrequests: Data limit exceeded`, Orbit#164 and
+      # #166) and nothing earlier in the run has it yet; Docker Hub carries the same image, and the
+      # CLI pulls from it when this names it. Scoped to this step: the stack's own images keep
+      # their ECR names, so the cached archive still matches what `supabase start` asks for.
       - name: Verify generated DB artifacts
         if: steps.impact.outputs.dbImpact == 'true'
         env:
           SUPABASE_ALREADY_RUNNING: "1"
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: docker.io
         run: node scripts/just/db-artifacts.cjs --verify
       - name: Build and DB checks
         if: steps.impact.outputs.dbImpact == 'true'
@@ -263,6 +267,20 @@ jobs:
       - name: End-to-end tests
         if: steps.impact.outputs.webImpact == 'true' || steps.impact.outputs.dbImpact == 'true' || steps.impact.outputs.functionsImpact == 'true'
         run: just test-e2e
+      # Read from the images on disk, not from `docker ps`, and only once every step that pulls one
+      # has run. `docker ps` after `supabase start` sees only the containers the stack leaves
+      # running, so a one-off container -- postgres-meta, which `supabase gen types` starts inside
+      # `db-artifacts --verify` -- was never cached and came from public ECR on every run, until
+      # its rate limit failed the job (`toomanyrequests: Data limit exceeded`, T-261022-338).
+      - name: Capture Supabase Docker images
+        if: steps.impact.outputs.dbImpact == 'true' && steps.supabase-image-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p .cache/docker
+          docker images --format '{{.Repository}}:{{.Tag}}' \
+            | grep -E '(^|/)supabase/' | grep -v ':<none>$' | sort -u \
+            > .cache/docker/supabase-images.txt || true
+          cat .cache/docker/supabase-images.txt
       - name: Bundle Supabase Docker images
         if: steps.impact.outputs.dbImpact == 'true' && steps.supabase-image-cache.outputs.cache-hit != 'true'
         id: supabase-image-bundle
