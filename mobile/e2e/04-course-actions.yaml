@@ -68,9 +68,10 @@ name: Курс — действия
     visible: "Vitamin D3.*"
     timeout: 15000
 # The archive filter is the last chip, past the right edge of the row.
-- scrollUntilVisible:
-    element: "В архиве"
-    direction: RIGHT
+- swipe:
+    from:
+      text: "Приостановлено"
+    direction: LEFT
 - tapOn:
     text: "В архиве"
     index: 0
