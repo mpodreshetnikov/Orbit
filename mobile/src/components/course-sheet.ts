@@ -4,8 +4,9 @@ import type { SheetChoice } from "@/components/dose-sheet";
 import { t } from "@/lib/i18n";
 import type { CourseChange } from "@/lib/queries";
 
-/** What the sheet hands back: a change to the course, or an amount to add to its stock. */
+/** What the sheet hands back: the form, a change to the course, or an amount to add to its stock. */
 export type CourseSheetActions = {
+  edit: () => void;
   change: (change: CourseChange) => void;
   refill: (amount: number) => void;
 };
@@ -52,11 +53,12 @@ function askRefill(course: MedRegimen, refill: (amount: number) => void) {
 }
 
 /**
- * The web course page's toolbar in one system sheet: refill when the course keeps stock, archive or
- * bring back from the archive, and delete, each confirmed with the web page's own question.
+ * The web course page's toolbar in one system sheet: edit, refill when the course keeps stock,
+ * archive or bring back from the archive, and delete, each change confirmed with the web page's own
+ * question.
  */
 export function showCourseSheet(course: MedRegimen, actions: CourseSheetActions) {
-  const choices: SheetChoice[] = [];
+  const choices: SheetChoice[] = [{ label: t("common.edit"), run: actions.edit }];
   if (course.inventory?.enabled) {
     choices.push({
       label: t("medications.refillButton"),

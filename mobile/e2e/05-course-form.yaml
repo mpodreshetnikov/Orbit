@@ -1,0 +1,73 @@
+# The course form: a regular course added from the list's plus, edited from its menu, then a one-off
+# intake taken into a course picked by its name. It changes the data, so it runs last.
+appId: host.exp.Exponent
+name: Курс — форма
+---
+- openLink: exp://127.0.0.1:8081/--/medications
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 60000
+- tapOn: "Добавить лекарство"
+- tapOn: "Регулярно"
+- extendedWaitUntil:
+    visible: "Основные данные"
+    timeout: 10000
+- inputText: "Омега-3"
+- hideKeyboard
+- takeScreenshot: form-01-new
+- scrollUntilVisible:
+    element: "Приёмов в день.*"
+- tapOn: "2"
+- takeScreenshot: form-02-schedule
+- scrollUntilVisible:
+    element: "Учитывать запас"
+- tapOn: "Учитывать запас"
+- tapOn: "Сейчас"
+- inputText: "60"
+- hideKeyboard
+- takeScreenshot: form-03-stock
+- tapOn: "Сохранить"
+# Saved, the form slides away and the new course opens with the stock it was given.
+- extendedWaitUntil:
+    visible: "Сейчас: 60.*"
+    timeout: 20000
+- takeScreenshot: form-04-saved
+- tapOn: "Действия: Омега-3"
+- tapOn: "Редактировать"
+- extendedWaitUntil:
+    visible: "Основные данные"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "Частота: Ежедневно"
+- tapOn: "Частота: Ежедневно"
+- tapOn: "Конкретные дни недели"
+- takeScreenshot: form-05-edit-weekly
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: ".*Пн.*"
+    timeout: 20000
+- takeScreenshot: form-06-edited
+- openLink: exp://127.0.0.1:8081/--/medications
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 15000
+- tapOn: "Добавить лекарство"
+- tapOn: "Разово"
+- extendedWaitUntil:
+    visible: "Когда принять"
+    timeout: 10000
+- inputText: "Vit"
+# The person's courses that match the name are offered under it; the intake goes into the one picked.
+- tapOn:
+    text: "Vitamin D3"
+    index: 1
+- hideKeyboard
+- takeScreenshot: form-07-one-off
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "История приёмов.*"
+    timeout: 20000
+- takeScreenshot: form-08-one-off-saved
