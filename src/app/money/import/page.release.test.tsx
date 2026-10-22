@@ -156,6 +156,7 @@ describe("MoneyImportPage release UX", () => {
       expect(screen.getByText("money.importExtensionInstallProdStep1")).toBeInTheDocument();
       expect(screen.getByText("money.importExtensionInstallProdStep2")).toBeInTheDocument();
       expect(screen.getByText("money.importExtensionInstallProdStep3")).toBeInTheDocument();
+      expect(screen.getByText("money.importExtensionInstallProdStep4")).toBeInTheDocument();
     } finally {
       postMessageSpy.mockRestore();
     }

@@ -7,7 +7,7 @@ import { Label } from "@shared/ui/label";
 import { Input } from "@shared/ui/input";
 import { Textarea } from "@shared/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
-import { formatSession, toIsoFromInput } from "./helpers";
+import { describeUpdateStatus, formatSession, toIsoFromInput, type UpdateStatus } from "./helpers";
 
 function sendMessage(message: Record<string, unknown>): Promise<unknown> {
   return new Promise((resolve) => {
@@ -38,6 +38,52 @@ interface DebugRunSummary {
   };
   events?: Array<Record<string, unknown>>;
   event_count?: number;
+}
+
+function UpdateCard() {
+  const [status, setStatus] = React.useState<UpdateStatus | null>(null);
+  const [checking, setChecking] = React.useState(false);
+
+  React.useEffect(() => {
+    void sendMessage({ type: "EXTENSION_UPDATE_STATUS" }).then((response) => {
+      const next = (response as { status?: UpdateStatus } | null)?.status;
+      if (next) setStatus(next);
+    });
+  }, []);
+
+  const onCheck = async () => {
+    setChecking(true);
+    try {
+      const response = (await sendMessage({ type: "EXTENSION_UPDATE_CHECK" })) as {
+        status?: UpdateStatus;
+      } | null;
+      if (response?.status) setStatus(response.status);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  if (!status || status.phase === "unsupported") return null;
+  const view = describeUpdateStatus(status);
+
+  return (
+    <Card>
+      <CardHeader className="p-4 pb-2">
+        <CardTitle className="text-sm">Updates</CardTitle>
+      </CardHeader>
+      <CardContent className="p-4 pt-0 space-y-2">
+        <p className="text-xs text-muted-foreground whitespace-pre-wrap">{view.text}</p>
+        <Button
+          variant={view.updateAvailable ? "default" : "secondary"}
+          onClick={onCheck}
+          disabled={checking || view.busy}
+          className="w-full"
+        >
+          {checking ? "Checking..." : view.buttonLabel}
+        </Button>
+      </CardContent>
+    </Card>
+  );
 }
 
 function App() {
@@ -278,6 +324,8 @@ function App() {
   return (
     <div className="min-w-[340px] p-3 space-y-3">
       <h1 className="text-base font-semibold leading-tight">Money Import</h1>
+
+      <UpdateCard />
 
       <Card>
         <CardHeader className="p-4 pb-2">

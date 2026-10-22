@@ -552,6 +552,7 @@
     "importExtensionInstallFirefoxStep2": "Нажмите «Добавить» в окне установки и подтвердите доступ к сайтам банков и Orbit.",
     "importExtensionFirefoxUnavailable": "Сборка для Firefox ещё не опубликована. Пока импорт работает через Chrome.",
     "importExtensionUpdateAvailableFirefox": "Доступна новая версия. Firefox установит её сам при следующей проверке обновлений, или скачайте её сейчас.",
+    "importExtensionInstallProdStep4": "Один раз, по желанию: чтобы расширение обновлялось само, запустите в этой папке updater/install.sh (macOS) или updater/install-windows.cmd (Windows). Дальше обновления ставятся сами и никогда во время импорта.",
     "importExtensionRetryCheck": "Проверить снова",
     "importExtensionReloadHint": "После установки расширения перезагрузите эту страницу и нажмите «Проверить снова».",
     "importExtensionVersionCurrent": "Установленная версия расширения",

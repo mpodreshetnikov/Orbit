@@ -552,6 +552,7 @@
     "importExtensionInstallFirefoxStep2": "Click Add in the install prompt and confirm access to the bank sites and Orbit.",
     "importExtensionFirefoxUnavailable": "The Firefox build has not been published yet. Until then, import through Chrome.",
     "importExtensionUpdateAvailableFirefox": "A newer version is available. Firefox installs it on its next update check, or download it now.",
+    "importExtensionInstallProdStep4": "Optional, once: to update automatically, run updater/install.sh (macOS) or double-click updater/install-windows.cmd (Windows) in that folder. Updates then install on their own, never during an import.",
     "importExtensionRetryCheck": "Retry check",
     "importExtensionReloadHint": "After installing the extension, reload this page, then click Retry check.",
     "importExtensionVersionCurrent": "Installed extension version",

@@ -8,24 +8,37 @@
  * the worker may idle) get one answer.
  */
 export interface ActiveRunRegistry {
-  /** Takes the session for a run; false when a run already holds it. */
+  /** Takes the session for a run; false when a run already holds it, or an update does. */
   begin(sessionId: string): boolean;
   end(sessionId: string): void;
   has(sessionId: string): boolean;
   size(): number;
   /** Called with the new count after every change; returns the unsubscribe. */
   onChange(listener: (size: number) => void): () => void;
+  /**
+   * Keeps every run out while an update replaces the extension's files: null when a run is in
+   * flight (or another hold is), otherwise the release. Checked and taken in one synchronous
+   * step, so no run can begin between "nothing is running" and the files changing; see
+   * `core/self-update.ts`.
+   */
+  holdForUpdate(): (() => void) | null;
+  isHeldForUpdate(): boolean;
 }
+
+/** What a run that tried to begin during an update is told. */
+export const UPDATE_IN_PROGRESS_ERROR =
+  "The extension is installing an update; start the import again in a moment.";
 
 export function createActiveRunRegistry(): ActiveRunRegistry {
   const running = new Set<string>();
   const listeners = new Set<(size: number) => void>();
+  let held = false;
   const notify = () => {
     for (const listener of listeners) listener(running.size);
   };
   return {
     begin(sessionId) {
-      if (running.has(sessionId)) return false;
+      if (held || running.has(sessionId)) return false;
       running.add(sessionId);
       notify();
       return true;
@@ -36,6 +49,17 @@ export function createActiveRunRegistry(): ActiveRunRegistry {
     },
     has: (sessionId) => running.has(sessionId),
     size: () => running.size,
+    holdForUpdate() {
+      if (held || running.size > 0) return null;
+      held = true;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        held = false;
+      };
+    },
+    isHeldForUpdate: () => held,
     onChange(listener) {
       listeners.add(listener);
       return () => {
