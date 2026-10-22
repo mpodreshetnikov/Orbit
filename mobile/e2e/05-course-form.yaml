@@ -59,9 +59,7 @@ name: Курс — форма
     visible: "Когда принять"
     timeout: 10000
 - inputText: "Vit"
-- tapOn:
-    text: "Vitamin D3"
-    index: 1
+- tapOn: "Vitamin D3" # The suggestion; the list under the sheet is out of reach.
 - hideKeyboard
 - takeScreenshot: form-07-one-off
 - tapOn: "Сохранить"

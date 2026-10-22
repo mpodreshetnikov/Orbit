@@ -13,16 +13,11 @@ name: Курс — действия
 - extendedWaitUntil:
     visible: "Magnesium.*"
     timeout: 60000
-- tapOn: { text: "Close", optional: true } # A search 02 left open would swallow the next tap.
-- waitForAnimationToEnd # Closing it moves the list under the finger.
-# The list can still be settling under its search bar when it first shows: tap again until the
-# course opens.
-- tapOn:
-    text: "Magnesium, .*"
-    retryTapIfNoChange: true
-- extendedWaitUntil:
-    visible: "Если вы уже ждёте доставку.*"
-    timeout: 60000
+- retry: # A search left open, or a list still settling, can swallow a tap: tap until it opens.
+    maxRetries: 3
+    commands:
+      - tapOn: "Magnesium, .*"
+      - extendedWaitUntil: { visible: "Если вы уже ждёте доставку.*", timeout: 15000 }
 - takeScreenshot: course-01-low-stock
 - tapOn: "Отложить напоминание"
 - extendedWaitUntil:
