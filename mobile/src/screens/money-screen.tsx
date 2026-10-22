@@ -80,7 +80,7 @@ export function byDay(items: MoneyTransactionFeedItem[]) {
 /**
  * "Деньги" — the web transactions page: every transaction of the person, newest first and by day,
  * searched from the bar and narrowed to money in or out, with how many match and their sums. More
- * load as the list nears its end. "+" adds one.
+ * load as the list nears its end. A row opens its transaction; "+" adds one.
  */
 export default function MoneyScreen() {
   const palette = usePalette();
@@ -280,17 +280,19 @@ export default function MoneyScreen() {
             .filter(Boolean)
             .join(" / ");
           return (
-            <View
+            <Pressable
+              accessibilityRole="button"
               accessibilityLabel={item.merchant_name || t("money.transactionFallback")}
-              style={{
+              onPress={() => router.push(`/money/${item.id}` as Href)}
+              style={({ pressed }) => ({
                 flexDirection: "row",
                 gap: space.md,
                 padding: space.md,
                 borderRadius: radius.lg,
                 borderWidth: 1,
                 borderColor: palette.border,
-                backgroundColor: palette.card,
-              }}
+                backgroundColor: pressed ? palette.mutedHalf : palette.card,
+              })}
             >
               <View
                 style={{
@@ -333,7 +335,7 @@ export default function MoneyScreen() {
                   {account || "-"}
                 </Text>
               </View>
-            </View>
+            </Pressable>
           );
         }}
       />

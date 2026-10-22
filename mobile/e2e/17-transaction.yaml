@@ -1,4 +1,4 @@
-# A spend added from the money tab's plus, then in the feed.
+# A spend added from the money tab's plus, opened from the feed, then deleted from its sheet.
 appId: host.exp.Exponent
 name: Транзакция
 ---
@@ -23,3 +23,16 @@ name: Транзакция
     visible: "Пекарня у дома"
     timeout: 20000
 - takeScreenshot: transaction-02-feed
+- tapOn: "Пекарня у дома"
+- extendedWaitUntil:
+    visible: "Строки"
+    timeout: 10000
+- takeScreenshot: transaction-03-page
+- tapOn: "Действия: Пекарня у дома"
+- tapOn: "Удалить транзакцию"
+- tapOn:
+    text: "Удалить транзакцию"
+    index: 1
+- extendedWaitUntil:
+    notVisible: "Пекарня у дома"
+    timeout: 20000
