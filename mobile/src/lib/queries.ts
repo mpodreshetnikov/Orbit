@@ -255,10 +255,12 @@ export function useSaveCourse() {
 }
 
 export function useMeasurements(personId: string | undefined) {
+  const { session } = useSession();
+  const userId = session?.user.id;
   return useQuery({
     queryKey: ["measurements", personId],
-    queryFn: () => fetchMeasurements(personId as string),
-    enabled: Boolean(personId),
+    queryFn: () => fetchMeasurements(personId as string, userId as string),
+    enabled: Boolean(personId && userId),
   });
 }
 

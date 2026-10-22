@@ -44,7 +44,7 @@ export default function MeasurementScreen() {
     return (
       <>
         {header}
-        {measurements.isPending || person.isPending ? (
+        {(measurements.isPending || person.isPending) && !person.error ? (
           <Placeholder busy />
         ) : (
           <Placeholder

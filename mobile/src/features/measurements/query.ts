@@ -4,6 +4,10 @@ import {
   summarizeMeasurements,
   type MeasurementListRow,
 } from "@orbit-types/measurement-summary";
+import {
+  hiddenCodesForPerson,
+  normalizeHiddenMeasurementCodes,
+} from "@orbit-types/measurement-visibility";
 import { supabase } from "@/lib/supabase";
 
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {
@@ -11,8 +15,14 @@ function check<T>({ data, error }: { data: T; error: { message: string } | null 
   return data;
 }
 
-/** A person's measurements, one summary per type — the web app's `fetchPersonMeasurements`. */
-export async function fetchMeasurements(personId: string): Promise<MeasurementSummary[]> {
+/**
+ * A person's measurements, one summary per type — the web app's `fetchPersonMeasurements` — less
+ * the types the account hid for them on the web's list.
+ */
+export async function fetchMeasurements(
+  personId: string,
+  userId: string,
+): Promise<MeasurementSummary[]> {
   const rows = check(
     await supabase
       .from("measurements")
@@ -20,7 +30,20 @@ export async function fetchMeasurements(personId: string): Promise<MeasurementSu
       .eq("person_id", personId)
       .order("measured_at", { ascending: false }),
   );
-  return summarizeMeasurements((rows ?? []) as unknown as MeasurementListRow[]);
+  const preferences = check(
+    await supabase
+      .from("user_preferences")
+      .select("hidden_measurement_codes")
+      .eq("auth_user_id", userId)
+      .maybeSingle(),
+  ) as { hidden_measurement_codes?: unknown } | null;
+  const hidden = hiddenCodesForPerson(
+    normalizeHiddenMeasurementCodes(preferences?.hidden_measurement_codes),
+    personId,
+  );
+  return summarizeMeasurements((rows ?? []) as unknown as MeasurementListRow[]).filter(
+    (summary) => !hidden.has(summary.code),
+  );
 }
 
 export async function deleteMeasurement(id: string) {

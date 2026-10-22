@@ -113,6 +113,18 @@ describe("the measurements list", () => {
     expect(screen.queryByText("Рост")).toBeNull();
   });
 
+  it("leaves out the types hidden for the person on the web's list", async () => {
+    db.tables.user_preferences = [
+      {
+        auth_user_id: USER_ID,
+        hidden_measurement_codes: { [PERSON.id]: [WAIST.code], someone: [WEIGHT.code] },
+      },
+    ];
+    await renderScreens(routes, "/health/measurements");
+    expect(await screen.findByText("Вес")).toBeOnTheScreen();
+    expect(screen.queryByText(WAIST.name_ru)).toBeNull();
+  });
+
   it("says so when the person has nothing recorded", async () => {
     db.tables.measurements = [];
     await renderScreens(routes, "/health/measurements");
@@ -164,6 +176,12 @@ describe("a measurement's page", () => {
     });
     expect(screen.getByText("90.2")).toBeOnTheScreen();
     expect(screen.getByText("05.10.2026")).toBeOnTheScreen();
+  });
+
+  it("says when the person cannot be read rather than waiting", async () => {
+    fail("persons");
+    await renderScreens(routes, "/health/measurements/weight");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
   });
 
   it("says there is nothing for an unknown type", async () => {
