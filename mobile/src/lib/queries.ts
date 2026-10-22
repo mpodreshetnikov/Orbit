@@ -27,6 +27,7 @@ import {
   unarchiveRegimen,
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
+import { deleteMeasurement, fetchMeasurements } from "@/features/measurements/query";
 import { saveEditedCourse, saveNewCourse } from "@/features/medications/save";
 import { useSession } from "@/lib/session";
 
@@ -250,5 +251,26 @@ export function useSaveCourse() {
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => refreshCourses(client),
+  });
+}
+
+export function useMeasurements(personId: string | undefined) {
+  const { session } = useSession();
+  const userId = session?.user.id;
+  return useQuery({
+    queryKey: ["measurements", personId],
+    queryFn: () => fetchMeasurements(personId as string, userId as string),
+    enabled: Boolean(personId && userId),
+  });
+}
+
+/** Delete one measurement; the person's list is refetched after. */
+export function useDeleteMeasurement() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: deleteMeasurement,
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["measurements"] }),
   });
 }

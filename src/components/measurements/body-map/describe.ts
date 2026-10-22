@@ -1,4 +1,4 @@
-import type { MeasurementTrend } from "@/lib/measurement-trend";
+import type { MeasurementTrend } from "@/types/measurement-trend";
 
 export interface DescribeMeasurementInput {
   name: string;

@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import { normalizeHiddenMeasurementCodes } from "@/lib/measurement-visibility";
+import { normalizeHiddenMeasurementCodes } from "@/types/measurement-visibility";
 import type { UserPreferences, UpdateUserPreferencesInput } from "@/types";
 
 export const USER_PREFERENCES_QUERY_KEY = "user-preferences";

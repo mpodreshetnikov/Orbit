@@ -1,0 +1,233 @@
+import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
+import { ActionSheetIOS, Alert } from "react-native";
+import { chartDomain, plot } from "@/components/charts";
+import { byCategory, formatMoment, trendPercent } from "@/features/measurements/format";
+import HealthScreen from "@/screens/health-screen";
+import MeasurementScreen from "@/screens/measurement-screen";
+import MeasurementsScreen from "@/screens/measurements-screen";
+import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
+import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
+import { renderScreens } from "../../test/render";
+
+jest.mock("@/lib/supabase", () => jest.requireActual("../../test/fake-supabase"));
+
+const routes = {
+  "health/index": HealthScreen,
+  "health/measurements/index": MeasurementsScreen,
+  "health/measurements/[code]": MeasurementScreen,
+};
+
+const catalogEntry = (
+  id: string,
+  code: string,
+  name: string,
+  unit: string,
+  category: string,
+  sort = 0,
+) => ({
+  id,
+  code,
+  name_ru: name,
+  name_en: code,
+  unit_ru: unit,
+  unit_en: unit,
+  category,
+  sort_order: sort,
+});
+
+const WEIGHT = catalogEntry("cat-weight", "weight", "Вес", "кг", "basic", 1);
+const WAIST = catalogEntry("cat-waist", "waist", "Талия", "см", "body", 1);
+const HEIGHT = catalogEntry("cat-height", "height", "Рост", "см", "basic", 2);
+const BMI = catalogEntry("cat-bmi", "bmi", "ИМТ", "", "vital", 1);
+
+function entry(id: string, catalog: typeof WEIGHT, value: number, day: number, notes?: string) {
+  return {
+    id,
+    person_id: PERSON.id,
+    catalog_id: catalog.id,
+    value,
+    measured_at: new Date(2026, 9, day, 8, 30).toISOString(),
+    notes: notes ?? null,
+    created_by_user_id: USER_ID,
+    created_at: new Date(2026, 9, day, 8, 30).toISOString(),
+    // The fake does not resolve joins; the list's joined catalogue is seeded in place.
+    measurement_catalog: catalog,
+  };
+}
+
+function seedMeasurements() {
+  seed({
+    ...household(),
+    measurement_catalog: [WEIGHT, WAIST, HEIGHT, BMI],
+    measurements: [
+      entry("w1", WEIGHT, 82, 1),
+      entry("w2", WEIGHT, 80.5, 15, "после отпуска"),
+      entry("t0", WAIST, 88, 5),
+      entry("t1", WAIST, 90, 10),
+      entry("b1", BMI, 24.5, 12),
+    ],
+  });
+}
+
+/** Answer the next action sheet with the option labelled so; keep what it offered. */
+function chooseInSheet(label: string) {
+  const offered: string[][] = [];
+  jest.spyOn(ActionSheetIOS, "showActionSheetWithOptions").mockImplementationOnce((options, cb) => {
+    offered.push(options.options);
+    cb(options.options.indexOf(label));
+  });
+  return offered;
+}
+
+beforeEach(() => {
+  jest.useFakeTimers({ now: NOW, advanceTimers: true });
+  seedMeasurements();
+  setSession(fakeSession(USER_ID));
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  jest.useRealTimers();
+});
+
+describe("the health tab", () => {
+  it("opens the measurements from its menu", async () => {
+    await renderScreens(routes, "/health");
+    await fireEvent.press(await screen.findByLabelText("Измерения"));
+    expect(await screen.findByText("Вес")).toBeOnTheScreen();
+  });
+});
+
+describe("the measurements list", () => {
+  it("groups the person's measurements by category with the latest value", async () => {
+    await renderScreens(routes, "/health/measurements");
+
+    expect(await screen.findByText("ОСНОВНЫЕ")).toBeOnTheScreen();
+    expect(screen.getByText("ТЕЛО")).toBeOnTheScreen();
+    expect(screen.getByText("СОСТАВ ТЕЛА")).toBeOnTheScreen();
+    expect(screen.getByText("80.5")).toBeOnTheScreen();
+    expect(screen.getByText("15.10.2026")).toBeOnTheScreen();
+    expect(screen.getAllByText("2 измерений")).toHaveLength(2);
+    // A type with no entries is not on the list.
+    expect(screen.queryByText("Рост")).toBeNull();
+  });
+
+  it("leaves out the types hidden for the person on the web's list", async () => {
+    db.tables.user_preferences = [
+      {
+        auth_user_id: USER_ID,
+        hidden_measurement_codes: { [PERSON.id]: [WAIST.code], someone: [WEIGHT.code] },
+      },
+    ];
+    await renderScreens(routes, "/health/measurements");
+    expect(await screen.findByText("Вес")).toBeOnTheScreen();
+    expect(screen.queryByText(WAIST.name_ru)).toBeNull();
+  });
+
+  it("says so when the person has nothing recorded", async () => {
+    db.tables.measurements = [];
+    await renderScreens(routes, "/health/measurements");
+    expect(await screen.findByText("Измерений пока нет")).toBeOnTheScreen();
+  });
+
+  it("offers a retry when the person cannot be read", async () => {
+    fail("persons");
+    await renderScreens(routes, "/health/measurements");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+  });
+
+  it("offers a retry when the measurements cannot be read", async () => {
+    fail("measurements");
+    await renderScreens(routes, "/health/measurements");
+    expect(await screen.findByText("measurements is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Вес")).toBeOnTheScreen();
+  });
+});
+
+describe("a measurement's page", () => {
+  it("shows the summary, the trend and the history newest first", async () => {
+    await renderScreens(routes, "/health/measurements/weight");
+
+    expect(await screen.findByText("Последнее значение")).toBeOnTheScreen();
+    expect(screen.getByText("-1.8%")).toBeOnTheScreen();
+    expect(screen.getByText("Основные")).toBeOnTheScreen();
+    const rows = screen.getAllByLabelText(/^\d\d\.10\.2026, 08:30/);
+    expect(rows.map((row) => row.props.accessibilityLabel)).toEqual([
+      "15.10.2026, 08:30 80.50",
+      "01.10.2026, 08:30 82",
+    ]);
+    expect(within(rows[0]).getByText("после отпуска")).toBeOnTheScreen();
+  });
+
+  it("marks a single value as having no trend", async () => {
+    await renderScreens(routes, "/health/measurements/bmi");
+    expect(await screen.findByText("—")).toBeOnTheScreen();
+    expect(screen.getByLabelText("12.10.2026, 08:30 24.50")).toBeOnTheScreen();
+  });
+
+  it("marks a rise and draws the chart once it has a width", async () => {
+    await renderScreens(routes, "/health/measurements/waist");
+    expect(await screen.findByText("+2.3%")).toBeOnTheScreen();
+    await fireEvent(screen.getByTestId("chart"), "layout", {
+      nativeEvent: { layout: { width: 300, height: 200 } },
+    });
+    expect(screen.getByText("90.2")).toBeOnTheScreen();
+    expect(screen.getByText("05.10.2026")).toBeOnTheScreen();
+  });
+
+  it("says when the person cannot be read rather than waiting", async () => {
+    fail("persons");
+    await renderScreens(routes, "/health/measurements/weight");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+  });
+
+  it("says there is nothing for an unknown type", async () => {
+    await renderScreens(routes, "/health/measurements/unknown");
+    expect(await screen.findByText("Измерений пока нет")).toBeOnTheScreen();
+  });
+
+  it("deletes an entry after asking", async () => {
+    await renderScreens(routes, "/health/measurements/weight");
+    const alert = jest.spyOn(Alert, "alert");
+    chooseInSheet("Удалить");
+    await fireEvent.press(await screen.findByLabelText("15.10.2026, 08:30 80.50"));
+
+    await waitFor(() => expect(alert).toHaveBeenCalled());
+    const [title, , buttons] = alert.mock.calls[0];
+    expect(title).toBe("Удалить измерение");
+    buttons?.find((button) => button.style === "destructive")?.onPress?.();
+
+    await waitFor(() =>
+      expect(db.tables.measurements.map((row) => row.id)).toEqual(["w1", "t0", "t1", "b1"]),
+    );
+    expect(await screen.findByText("82")).toBeOnTheScreen();
+  });
+});
+
+describe("the measurement helpers", () => {
+  it("places values in the box, lowest at the bottom", () => {
+    expect(plot([1, 3], 100, 50, 0)).toEqual([
+      { x: 0, y: 50 },
+      { x: 100, y: 0 },
+    ]);
+    expect(plot([5], 100, 50, 10)).toEqual([{ x: 50, y: 40 }]);
+  });
+
+  it("pads the chart's range and keeps it above zero", () => {
+    expect(chartDomain([80, 90])).toEqual([79, 91]);
+    expect(chartDomain([0.5])).toEqual([0, 1.5]);
+  });
+
+  it("measures the trend in percent", () => {
+    expect(trendPercent([{ value: 100 }, { value: 110 }])).toEqual({ trend: "up", percent: 10 });
+    expect(trendPercent([{ value: 100 }])).toBeNull();
+  });
+
+  it("formats a moment and drops empty categories", () => {
+    expect(formatMoment(new Date(2026, 0, 2, 3, 4).toISOString())).toBe("02.01.2026, 03:04");
+    expect(byCategory([{ category: "vital" as const }]).map((s) => s.category)).toEqual(["vital"]);
+  });
+});

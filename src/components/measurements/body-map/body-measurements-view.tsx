@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { usePersons } from "@/hooks";
-import { getMeasurementTrend, type MeasurementTrend } from "@/lib/measurement-trend";
+import { getMeasurementTrend, type MeasurementTrend } from "@/types/measurement-trend";
 import { cn } from "@/lib/utils";
 import type { MeasurementSummary } from "@/types";
 import { AddMeasurementDialog } from "../add-measurement-dialog";

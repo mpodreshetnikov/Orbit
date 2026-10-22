@@ -124,13 +124,25 @@ jobs:
         run: |
           curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared
-          nohup ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:54321 > cloudflared.log 2>&1 &
-          for _ in $(seq 1 60); do
-            url="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | head -1 || true)"
+          # trycloudflare.com sometimes times out handing out a tunnel; ask again rather than fail.
+          # Its API host shows up in the log's error line, so it is never taken for the tunnel.
+          url=""
+          for attempt in 1 2 3 4; do
+            nohup ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:54321 > cloudflared.log 2>&1 &
+            pid=$!
+            for _ in $(seq 1 60); do
+              url="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | grep -v '^https://api\.' | head -1 || true)"
+              [[ -n "$url" ]] && break
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 2
+            done
             [[ -n "$url" ]] && break
-            sleep 2
+            cat cloudflared.log
+            kill "$pid" 2>/dev/null || true
+            echo "::warning::No tunnel on attempt $attempt"
+            sleep $((attempt * 15))
           done
-          [[ -n "$url" ]] || { cat cloudflared.log; echo "::error::No tunnel address"; exit 1; }
+          [[ -n "$url" ]] || { echo "::error::No tunnel address"; exit 1; }
           # A quick tunnel answers before its DNS has spread; wait until it serves the API.
           healthy=""
           for _ in $(seq 1 60); do
