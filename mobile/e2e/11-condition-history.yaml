@@ -1,0 +1,53 @@
+# A condition's history by hand: the seeded allergic rhinitis marked resolved today with a note,
+# written into a manual entry, and the list moving it to «Вылеченные».
+appId: host.exp.Exponent
+name: История диагноза
+---
+- openLink: exp://127.0.0.1:8081/--/health
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Диагнозы"
+    timeout: 60000
+- tapOn: "Диагнозы"
+- extendedWaitUntil:
+    visible: "Allergic rhinitis"
+    timeout: 20000
+- tapOn:
+    text: "Allergic rhinitis"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Добавить в историю"
+    timeout: 20000
+- scrollUntilVisible:
+    element: "Добавить в историю"
+- tapOn: "Добавить в историю"
+- extendedWaitUntil:
+    visible: "Статус в этой записи: Активный"
+    timeout: 10000
+- tapOn: "Статус в этой записи: Активный"
+- tapOn: "Вылечен"
+- tapOn:
+    id: "history-note"
+# A fresh simulator shows the slide-to-type tip over its first keyboard.
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    id: "history-note"
+- inputText: "Весной без симптомов"
+- hideKeyboard
+- takeScreenshot: history-01-form
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "Ручная запись \\(Allergic rhinitis\\)"
+    timeout: 20000
+- takeScreenshot: history-02-added
+- swipe:
+    start: 1%, 50%
+    end: 80%, 50%
+- extendedWaitUntil:
+    visible: "Вылеченные.*"
+    timeout: 20000
+- takeScreenshot: history-03-list

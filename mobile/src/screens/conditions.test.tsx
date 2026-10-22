@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { ActionSheetIOS, Alert, Linking, type AlertButton } from "react-native";
 import ConditionFormScreen, { icdNameFor } from "@/screens/condition-form-screen";
+import ConditionHistoryScreen, { dayOf } from "@/screens/condition-history-screen";
 import ConditionScreen from "@/screens/condition-screen";
 import ConditionsScreen from "@/screens/conditions-screen";
 import HealthScreen from "@/screens/health-screen";
@@ -25,6 +26,7 @@ const routes = {
   "health/conditions/index": ConditionsScreen,
   "health/conditions/[id]": ConditionScreen,
   "health/conditions/edit": ConditionFormScreen,
+  "health/conditions/history": ConditionHistoryScreen,
 };
 
 function condition(id: string, name: string, extra = {}) {
@@ -64,6 +66,10 @@ function mention(id: string, date: string | null, title: string, extra = {}) {
     medical_records: { title, record_date: date, record_type: "lab" },
     ...extra,
   };
+}
+
+function record(id: string, title: string, date: string | null) {
+  return { id, person_id: PERSON.id, title, record_date: date, status: "active" };
 }
 
 /** The list function, answered from the seeded rows as the database answers it. */
@@ -113,6 +119,13 @@ beforeEach(() => {
         is_user_verified: false,
       }),
     ],
+    medical_records: [
+      record("rec-m1", "Общий анализ крови", "2025-03-01"),
+      record("rec-m2", "Ферритин", "2026-02-10"),
+      record("rec-m3", "", null),
+      record("rec-old", "Старый осмотр", "2024-01-01"),
+      record("rec-undated", "Без даты", null),
+    ],
   });
   serveConditions();
   setSession(fakeSession(USER_ID));
@@ -138,6 +151,13 @@ function pickFromSheet(index: number) {
       callback(index);
     });
   return offered;
+}
+
+/** Answer the next sheet with the option labelled so. */
+function pickOption(label: string) {
+  jest
+    .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
+    .mockImplementationOnce((options, callback) => callback(options.options.indexOf(label)));
 }
 
 describe("the conditions", () => {
@@ -340,5 +360,93 @@ describe("icdNameFor", () => {
   it("keeps the saved name for the saved code until the lookup answers", () => {
     expect(icdNameFor("D50.9", undefined, saved)).toBe("Iron deficiency anaemia");
     expect(icdNameFor("D50", undefined, saved)).toBeNull();
+  });
+});
+
+describe("adding to a condition's history", () => {
+  async function openForm(id: string) {
+    await renderScreens(routes, `/health/conditions/${id}`);
+    await fireEvent.press(await screen.findByText("Добавить в историю"));
+    await screen.findByLabelText(/^Статус в этой записи/);
+  }
+
+  it("writes a manual entry of the day, and the newest word sets the status", async () => {
+    await openForm("anemia");
+    pickOption("Вылечен");
+    await fireEvent.press(screen.getByLabelText("Статус в этой записи: Активный"));
+    await fireEvent(screen.getByTestId("history-date"), "change", {
+      nativeEvent: { timestamp: new Date(2026, 9, 20, 7, 0).getTime() },
+    });
+    await fireEvent.changeText(screen.getByLabelText("Заметка"), " Ферритин в норме ");
+    await fireEvent.press(screen.getByText("Сохранить"));
+
+    await waitFor(() => expect(db.tables.conditions[0].current_status).toBe("resolved"));
+    expect(db.tables.medical_records.at(-1)).toMatchObject({
+      person_id: PERSON.id,
+      title: "Ручная запись (Анемия)",
+      record_date: "2026-10-20",
+      record_type: "other",
+      status: "active",
+      notes: "Ферритин в норме",
+      created_by_user_id: USER_ID,
+    });
+    expect(db.tables.condition_records.at(-1)).toMatchObject({
+      condition_id: "anemia",
+      record_id: db.tables.medical_records.at(-1)?.id,
+      status_in_record: "resolved",
+      source_anchor: "Ферритин в норме",
+      is_user_verified: true,
+      review_decision: "confirmed",
+    });
+    expect(await screen.findByText("История упоминаний")).toBeOnTheScreen();
+  });
+
+  it("links to an older record without changing the status", async () => {
+    await openForm("anemia");
+    pickOption("Старый осмотр · 01.01.2024");
+    await fireEvent.press(
+      screen.getByLabelText("Привязать к медицинской записи: Нет (только ручная запись)"),
+    );
+    await fireEvent.press(screen.getByText("Сохранить"));
+
+    await waitFor(() =>
+      expect(db.tables.condition_records.at(-1)).toMatchObject({
+        record_id: "rec-old",
+        status_in_record: "active",
+        source_anchor: null,
+      }),
+    );
+    expect(db.tables.medical_records).toHaveLength(5);
+    expect(db.tables.conditions[0].current_status).toBe("active");
+  });
+
+  it("leaves the status alone for an undated record", async () => {
+    await openForm("pox");
+    pickOption("Без даты");
+    await fireEvent.press(
+      screen.getByLabelText("Привязать к медицинской записи: Нет (только ручная запись)"),
+    );
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() => expect(db.tables.condition_records.at(-1)?.record_id).toBe("rec-undated"));
+    expect(db.tables.conditions[2].current_status).toBe("history");
+  });
+
+  it("says when saving fails", async () => {
+    await openForm("pox");
+    fail("condition_records");
+    const alert = jest.spyOn(Alert, "alert");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "condition_records is unavailable"),
+    );
+  });
+
+  it("says when the condition is not there", async () => {
+    await renderScreens(routes, "/health/conditions/history?id=gone");
+    expect(await screen.findByText("Диагноз не найден")).toBeOnTheScreen();
+  });
+
+  it("dates an entry by the phone's own day", () => {
+    expect(dayOf(new Date(2026, 0, 5, 23, 30))).toBe("2026-01-05");
   });
 });

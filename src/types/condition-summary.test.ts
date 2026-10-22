@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ConditionWithHistory } from "./condition";
-import { conditionSections, conditionTimeline, searchConditions } from "./condition-summary";
+import {
+  conditionSections,
+  conditionTimeline,
+  mentionDecidesStatus,
+  searchConditions,
+} from "./condition-summary";
 
 const condition = (overrides: Partial<ConditionWithHistory>): ConditionWithHistory => ({
   id: "c",
@@ -80,5 +85,14 @@ describe("conditionTimeline", () => {
       first_mentioned_date: null,
       last_mentioned_date: null,
     });
+  });
+});
+
+describe("mentionDecidesStatus", () => {
+  it("lets a dated mention decide when it is the newest word", () => {
+    expect(mentionDecidesStatus("2026-02-01", null)).toBe(true);
+    expect(mentionDecidesStatus("2026-02-01", "2026-02-01")).toBe(true);
+    expect(mentionDecidesStatus("2026-01-01", "2026-02-01")).toBe(false);
+    expect(mentionDecidesStatus(null, null)).toBe(false);
   });
 });
