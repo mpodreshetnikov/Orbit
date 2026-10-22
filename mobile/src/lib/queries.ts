@@ -1,5 +1,11 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
+import type {
+  AddOneTimeToExistingPayload,
+  CreateMedRegimenInput,
+  MedRegimen,
+} from "@orbit-types/regimen";
+import type { CourseColumns } from "@orbit-types/regimen-form";
 import { withStatus } from "@/features/doses/dashboard";
 import type { DayDose, DoseStatus } from "@/features/doses/model";
 import {
@@ -21,6 +27,7 @@ import {
   unarchiveRegimen,
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
+import { saveEditedCourse, saveNewCourse } from "@/features/medications/save";
 import { useSession } from "@/lib/session";
 
 /**
@@ -222,5 +229,26 @@ export function useSaveOverdueInterval() {
     mutationFn: (minutes: number) => saveOverdueInterval(userId as string, minutes),
     onSuccess: (value) => client.setQueryData(["overdue-interval", userId], value),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+  });
+}
+
+export type CourseSave =
+  | { personId: string; submission: CreateMedRegimenInput | AddOneTimeToExistingPayload }
+  | { course: MedRegimen; columns: CourseColumns };
+
+/** Create or edit a course from its form; resolves to the course to show afterwards. */
+export function useSaveCourse() {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const userId = session?.user.id as string;
+  return useMutation({
+    mutationFn: async (save: CourseSave) => {
+      if ("submission" in save) return saveNewCourse(userId, save.personId, save.submission);
+      await saveEditedCourse(userId, save.course, save.columns);
+      return save.course.id;
+    },
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => refreshCourses(client),
   });
 }

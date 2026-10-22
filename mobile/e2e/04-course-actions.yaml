@@ -13,14 +13,11 @@ name: Курс — действия
 - extendedWaitUntil:
     visible: "Magnesium.*"
     timeout: 60000
-# The list can still be settling under its search bar when it first shows: tap again until the
-# course opens.
-- tapOn:
-    text: "Magnesium, .*"
-    retryTapIfNoChange: true
-- extendedWaitUntil:
-    visible: "Если вы уже ждёте доставку.*"
-    timeout: 60000
+- retry: # A search left open, or a list still settling, can swallow a tap: tap until it opens.
+    maxRetries: 3
+    commands:
+      - tapOn: "Magnesium, .*"
+      - extendedWaitUntil: { visible: "Если вы уже ждёте доставку.*", timeout: 15000 }
 - takeScreenshot: course-01-low-stock
 - tapOn: "Отложить напоминание"
 - extendedWaitUntil:
@@ -80,6 +77,8 @@ name: Курс — действия
     timeout: 10000
 - assertVisible: "Magnesium.*"
 - takeScreenshot: course-07-archived
+- swipe: { from: { text: "Приостановлено" }, direction: RIGHT } # Flows after this one want "Все".
+- tapOn: "Все"
 # Back on the list, iOS 26 can leave its search open over the title and the gear: close it.
 - tapOn:
     text: "Close"
