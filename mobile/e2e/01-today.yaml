@@ -3,10 +3,20 @@
 appId: host.exp.Exponent
 name: Сегодня
 ---
-- openLink: exp://127.0.0.1:8081
+# The app comes back where the last flow left it, so the link names the screen: a tap on the tab
+# right after the link can land before the client has settled and be lost.
+- openLink: exp://127.0.0.1:8081/--/today
 - tapOn:
     text: "Open"
     optional: true
+- extendedWaitUntil:
+    visible: "Сегодня"
+    timeout: 60000
+- runFlow:
+    when:
+      notVisible: "Vitamin D3.*"
+    commands:
+      - tapOn: "Сегодня"
 # A dose row reads as one element, "Vitamin D3, Просрочено · …": Maestro matches the whole text.
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
