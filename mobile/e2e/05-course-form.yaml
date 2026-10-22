@@ -7,7 +7,11 @@ name: Курс — форма
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
     timeout: 60000
-- tapOn: "Добавить лекарство"
+- retry: # A list still settling can swallow the plus: tap until its sheet opens.
+    maxRetries: 3
+    commands:
+      - tapOn: "Добавить лекарство"
+      - extendedWaitUntil: { visible: "Регулярно", timeout: 5000 }
 - tapOn: "Регулярно"
 - extendedWaitUntil:
     visible: "Основные данные"

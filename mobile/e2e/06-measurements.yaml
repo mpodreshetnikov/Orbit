@@ -9,7 +9,7 @@ name: Измерения
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Отслеживание параметров тела"
+    visible: "Измерения" # The card reads as its title; the description is not its own element.
     timeout: 60000
 - takeScreenshot: measurements-01-health
 - tapOn: "Измерения"
