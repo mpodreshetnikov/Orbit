@@ -26,6 +26,7 @@ coverage
 # production
 /build
 browserExtension/dist
+browserExtension/dist-firefox
 
 # misc
 .DS_Store

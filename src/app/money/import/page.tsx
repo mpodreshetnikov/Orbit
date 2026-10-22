@@ -17,8 +17,11 @@ import {
   type ExtensionAutoStatus,
 } from "@/components/money";
 import {
+  detectExtensionBrowser,
+  extensionReleaseForBrowser,
   isExtensionOutdated,
   normalizeExtensionRelease,
+  type ExtensionBrowser,
   type ExtensionRelease,
 } from "@/lib/import/extension-release";
 import {
@@ -425,6 +428,15 @@ export default function MoneyImportPage() {
   const [installedExtensionVersion, setInstalledExtensionVersion] = useState<string | null>(null);
   const [latestExtensionRelease, setLatestExtensionRelease] = useState<ExtensionRelease | null>(
     null,
+  );
+  // Read after mount: the server render has no browser, and guessing one there would mismatch.
+  const [extensionBrowser, setExtensionBrowser] = useState<ExtensionBrowser>("chrome");
+  useEffect(() => {
+    setExtensionBrowser(detectExtensionBrowser(navigator.userAgent));
+  }, []);
+  const browserExtensionRelease = useMemo(
+    () => extensionReleaseForBrowser(latestExtensionRelease, extensionBrowser),
+    [extensionBrowser, latestExtensionRelease],
   );
   const [isStartingExtension, setIsStartingExtension] = useState(false);
   const [extensionImportContext, setExtensionImportContext] =
@@ -1003,8 +1015,11 @@ export default function MoneyImportPage() {
     }
   }, [customRangeFrom, customRangeTo, extensionImportContext, extensionRangeChoice, t]);
 
-  const extensionDownloadUrl = useMemo(() => {
-    if (latestExtensionRelease?.downloadUrl) return latestExtensionRelease.downloadUrl;
+  const extensionDownloadUrl = useMemo((): string | null => {
+    if (browserExtensionRelease) return browserExtensionRelease.downloadUrl;
+    // The connector's links below are the Chrome archive and its guide; Firefox has nothing to
+    // fall back to until a signed add-on is published.
+    if (extensionBrowser === "firefox") return null;
     if (selectedConnector?.kind === "extension") {
       return (
         selectedConnector.release?.latestDownloadUrl ??
@@ -1014,11 +1029,11 @@ export default function MoneyImportPage() {
       );
     }
     return "#";
-  }, [latestExtensionRelease?.downloadUrl, selectedConnector]);
+  }, [browserExtensionRelease, extensionBrowser, selectedConnector]);
 
   const extensionUpdateAvailable = useMemo(
-    () => isExtensionOutdated(installedExtensionVersion, latestExtensionRelease?.version ?? null),
-    [installedExtensionVersion, latestExtensionRelease?.version],
+    () => isExtensionOutdated(installedExtensionVersion, browserExtensionRelease?.version ?? null),
+    [installedExtensionVersion, browserExtensionRelease?.version],
   );
 
   const sendGrantToExtension = useCallback(
@@ -1149,6 +1164,8 @@ export default function MoneyImportPage() {
       payload: MoneyImportSessionCreateResult,
       defaultExtensionAccountId: string | null,
     ): boolean => {
+      // Firefox gives every install its own moz-extension:// host, which no page can know.
+      if (extensionBrowser === "firefox") return false;
       const resolvedExtensionId =
         installedExtensionId ?? latestExtensionRelease?.extensionId ?? EXTENSION_ID;
       if (!resolvedExtensionId) return false;
@@ -1177,7 +1194,7 @@ export default function MoneyImportPage() {
       window.open(launchUrl, "_blank", "noopener,noreferrer");
       return true;
     },
-    [installedExtensionId, latestExtensionRelease?.extensionId, locale],
+    [extensionBrowser, installedExtensionId, latestExtensionRelease?.extensionId, locale],
   );
 
   const handleStartExtensionImport = useCallback(async () => {
@@ -1626,22 +1643,24 @@ export default function MoneyImportPage() {
                     </Select>
                   </div>
                 )}
-                {(installedExtensionVersion || latestExtensionRelease?.version) && (
+                {(installedExtensionVersion || browserExtensionRelease?.version) && (
                   <div className="space-y-2 rounded-md border p-4">
                     {installedExtensionVersion && (
                       <p className="text-sm text-muted-foreground">
                         {`${t("money.importExtensionVersionCurrent")}: ${installedExtensionVersion}`}
                       </p>
                     )}
-                    {latestExtensionRelease?.version && (
+                    {browserExtensionRelease?.version && (
                       <p className="text-sm text-muted-foreground">
-                        {`${t("money.importExtensionVersionLatest")}: ${latestExtensionRelease.version}`}
+                        {`${t("money.importExtensionVersionLatest")}: ${browserExtensionRelease.version}`}
                       </p>
                     )}
-                    {extensionUpdateAvailable && (
+                    {extensionUpdateAvailable && extensionDownloadUrl && (
                       <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
                         <p className="text-sm font-medium">
-                          {t("money.importExtensionUpdateAvailable")}
+                          {extensionBrowser === "firefox"
+                            ? t("money.importExtensionUpdateAvailableFirefox")
+                            : t("money.importExtensionUpdateAvailable")}
                         </p>
                         <Button variant="outline" size="sm" asChild>
                           <a href={extensionDownloadUrl}>
@@ -1831,21 +1850,35 @@ export default function MoneyImportPage() {
             {extensionActive === false && (
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  {shouldUsePublishedExtensionFlow
-                    ? t("money.importExtensionInstallProd")
-                    : t("money.importExtensionInstallDev")}
+                  {!shouldUsePublishedExtensionFlow
+                    ? t("money.importExtensionInstallDev")
+                    : extensionBrowser === "firefox"
+                      ? t("money.importExtensionInstallFirefox")
+                      : t("money.importExtensionInstallProd")}
                 </p>
-                {shouldUsePublishedExtensionFlow && (
+                {shouldUsePublishedExtensionFlow && !extensionDownloadUrl && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("money.importExtensionFirefoxUnavailable")}
+                  </p>
+                )}
+                {shouldUsePublishedExtensionFlow && extensionDownloadUrl && (
                   <>
                     <Button variant="outline" size="sm" asChild>
                       <a href={extensionDownloadUrl}>{t("money.importExtensionDownloadLatest")}</a>
                     </Button>
-                    <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
-                      <li>{t("money.importExtensionInstallProdStep1")}</li>
-                      <li>{t("money.importExtensionInstallProdStep2")}</li>
-                      <li>{t("money.importExtensionInstallProdStep3")}</li>
-                      <li>{t("money.importExtensionInstallProdStep4")}</li>
-                    </ol>
+                    {extensionBrowser === "firefox" ? (
+                      <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
+                        <li>{t("money.importExtensionInstallFirefoxStep1")}</li>
+                        <li>{t("money.importExtensionInstallFirefoxStep2")}</li>
+                      </ol>
+                    ) : (
+                      <ol className="list-decimal list-inside space-y-1.5 text-sm text-muted-foreground">
+                        <li>{t("money.importExtensionInstallProdStep1")}</li>
+                        <li>{t("money.importExtensionInstallProdStep2")}</li>
+                        <li>{t("money.importExtensionInstallProdStep3")}</li>
+                        <li>{t("money.importExtensionInstallProdStep4")}</li>
+                      </ol>
+                    )}
                   </>
                 )}
                 <p className="text-sm text-muted-foreground">
