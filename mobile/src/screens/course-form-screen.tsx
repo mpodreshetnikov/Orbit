@@ -457,6 +457,7 @@ function CourseFormBody({ initial, kind }: { initial: MedRegimen | null; kind: M
         <Text style={{ flex: 1 }}>{t("medications.inventoryEnabled")}</Text>
         <Switch
           accessibilityLabel={t("medications.inventoryEnabled")}
+          testID="inventory-enabled"
           value={form.inventory.enabled}
           trackColor={{ true: palette.primary }}
           onValueChange={(enabled) => set({ inventory: { ...form.inventory, enabled } })}

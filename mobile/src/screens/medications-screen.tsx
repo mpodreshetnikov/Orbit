@@ -35,8 +35,7 @@ import { radius, space, usePalette } from "@/theme";
  * The search is the system's own, in the navigation bar under the large title; the filter is a row
  * of chips rather than the web's select, because a phone shows five short words at once. Each card is
  * the web `RegimenCard` and opens the course. The gear in the bar is the web page's settings dialog:
- * how often an overdue dose is reminded about again, asked for in the system's own prompt; the plus
- * beside it adds a course, regular or a one-off intake.
+ * how often an overdue dose is reminded about again, in the system's prompt; the plus adds a course.
  */
 export default function MedicationsScreen() {
   const palette = usePalette();
