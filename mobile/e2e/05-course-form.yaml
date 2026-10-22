@@ -3,9 +3,7 @@ appId: host.exp.Exponent
 name: Курс — форма
 ---
 - openLink: exp://127.0.0.1:8081/--/medications
-- tapOn:
-    text: "Open"
-    optional: true
+- tapOn: { text: "Open", optional: true }
 - extendedWaitUntil:
     visible: "Vitamin D3.*"
     timeout: 60000
@@ -28,7 +26,7 @@ name: Курс — форма
     element: "Учитывать запас"
 - tapOn:
     id: "inventory-enabled"
-- tapOn: "Сейчас"
+- tapOn: { id: "stock-current" } # The label does not focus its field.
 - inputText: "60"
 - hideKeyboard
 - takeScreenshot: form-03-stock

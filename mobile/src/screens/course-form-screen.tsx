@@ -469,6 +469,7 @@ function CourseFormBody({ initial, kind }: { initial: MedRegimen | null; kind: M
             <Field key={key} label={t(STOCK_LABELS[key])} flex>
               <Input
                 accessibilityLabel={t(STOCK_LABELS[key])}
+                testID={`stock-${key}`}
                 keyboardType="decimal-pad"
                 value={form.inventory[key]}
                 onChangeText={(typed) => set({ inventory: { ...form.inventory, [key]: typed } })}
