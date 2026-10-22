@@ -948,6 +948,8 @@ async function prepareFirefoxRelease(input: {
     return undefined;
   }
 
+  await assertStorageTakesXpi(input.supabaseUrl);
+
   const objectPath = getFirefoxReleaseObjectPath(input.version);
   const xpiPath = path.join(input.artifactDir, ...objectPath.split("/"));
   const geckoId = process.env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID;
@@ -978,6 +980,29 @@ async function prepareFirefoxRelease(input: {
     "utf8",
   );
   return firefox;
+}
+
+/**
+ * Refuses before signing when the server's bucket would refuse the signed file. AMO signs a version
+ * once, so a refusal after signing used up 0.1.26 and 0.1.27 on a server whose deploy had not yet
+ * applied `20261021140000_extension_release_bucket_xpi.sql`; failing here leaves the version free
+ * for the run after the server has it. Skipped without the service_role key, which a local build
+ * has no need for.
+ */
+async function assertStorageTakesXpi(supabaseUrl: string): Promise<void> {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceRoleKey) return;
+  const supabase = await createSupabaseAdminClient({ supabaseUrl, serviceRoleKey });
+  const { data, error } = await supabase.storage.getBucket(EXTENSION_RELEASE_BUCKET);
+  if (error) {
+    throw new Error(`Cannot read the ${EXTENSION_RELEASE_BUCKET} bucket: ${error.message}`);
+  }
+  const allowed = data.allowed_mime_types;
+  if (allowed && allowed.length > 0 && !allowed.includes(FIREFOX_XPI_CONTENT_TYPE)) {
+    throw new Error(
+      `The server's ${EXTENSION_RELEASE_BUCKET} bucket does not take ${FIREFOX_XPI_CONTENT_TYPE} yet, so the Firefox build is not signed: the server has not applied its migrations. The next run after it deploys publishes this version.`,
+    );
+  }
 }
 
 async function createSupabaseAdminClient(input: { supabaseUrl: string; serviceRoleKey: string }) {

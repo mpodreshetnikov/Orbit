@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import process from "node:process";
 
 /**
@@ -143,7 +144,8 @@ export function createAmoJwt(
  * cannot sign that version again, takes the signed file from AMO instead.
  *
  * Only a file that is this build is taken: it must match the hash AMO gives for it, and apart from
- * the signature in `META-INF/` it must hold exactly the files of `sourceDir`, byte for byte. A file
+ * the signature in `META-INF/` and the build stamp it must hold exactly the files of `sourceDir`,
+ * byte for byte, and the manifest's keys and values. A file
  * built from other code or for another server, or signed by someone else holding the AMO key,
  * fails the release, and a new manifest version is what releases that build.
  */
@@ -205,9 +207,30 @@ export async function downloadSignedFirefoxVersion(input: {
   return true;
 }
 
+/**
+ * The build's own stamp, a new time on every build, which only the development reload watcher reads.
+ * Equal code from two builds differs here and nowhere else.
+ */
+const BUILD_STAMP_FILE = "reload-trigger.json";
+
 /** web-ext leaves dotfiles out of what it submits, and AMO adds its signature under META-INF/. */
 function isSubmitted(relativePath: string): boolean {
   return !relativePath.split("/").some((part) => part.startsWith("."));
+}
+
+/** The manifest as JSON, not as text: the same keys and values, however they were written out. */
+function manifestDifference(built: Buffer, signed: Buffer): string | null {
+  let ours: Record<string, unknown>;
+  let theirs: Record<string, unknown>;
+  try {
+    ours = JSON.parse(built.toString("utf8")) as Record<string, unknown>;
+    theirs = JSON.parse(signed.toString("utf8")) as Record<string, unknown>;
+  } catch {
+    return "manifest.json is not JSON";
+  }
+  const keys = [...new Set([...Object.keys(ours), ...Object.keys(theirs)])].sort();
+  const differing = keys.filter((key) => !isDeepStrictEqual(ours[key], theirs[key]));
+  return differing.length === 0 ? null : `manifest.json differs in ${differing.join(", ")}`;
 }
 
 async function listFiles(rootDir: string): Promise<string[]> {
@@ -222,8 +245,12 @@ async function listFiles(rootDir: string): Promise<string[]> {
 
 /** The first file that differs between the build and the unpacked signed add-on, if any. */
 async function firstDifference(sourceDir: string, unpackedDir: string): Promise<string | null> {
-  const built = (await listFiles(sourceDir)).filter(isSubmitted);
-  const signed = (await listFiles(unpackedDir)).filter((file) => !file.startsWith("META-INF/"));
+  const built = (await listFiles(sourceDir)).filter(
+    (file) => isSubmitted(file) && file !== BUILD_STAMP_FILE,
+  );
+  const signed = (await listFiles(unpackedDir)).filter(
+    (file) => !file.startsWith("META-INF/") && file !== BUILD_STAMP_FILE,
+  );
   const missing = built.find((file) => !signed.includes(file));
   if (missing) return `${missing} is not in it`;
   const extra = signed.find((file) => !built.includes(file));
@@ -233,7 +260,12 @@ async function firstDifference(sourceDir: string, unpackedDir: string): Promise<
       fs.readFile(path.join(sourceDir, file)),
       fs.readFile(path.join(unpackedDir, file)),
     ]);
-    if (!a.equals(b)) return `${file} differs`;
+    if (file === "manifest.json") {
+      const difference = manifestDifference(a, b);
+      if (difference) return difference;
+    } else if (!a.equals(b)) {
+      return `${file} differs`;
+    }
   }
   return null;
 }
