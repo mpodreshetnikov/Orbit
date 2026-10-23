@@ -40,6 +40,7 @@ import {
 } from "@/hooks";
 import type { MoneyAccount, MoneyAccountKind, MoneyCurrency, MoneyCard } from "@/types";
 import { MONEY_ACCOUNT_KINDS, MONEY_CURRENCIES, MONEY_ACCOUNT_SOURCES } from "@/types";
+import { accountColumns, cardLast4 as cardLast4Of, cardsByAccount } from "@/types/money-accounts";
 
 export default function MoneyAccountsPage() {
   const t = useTranslations();
@@ -49,15 +50,7 @@ export default function MoneyAccountsPage() {
   const { data: accounts, isLoading } = useMoneyAccounts(selectedPersonId);
   const accountIds = useMemo(() => accounts?.map((a) => a.id) ?? [], [accounts]);
   const { data: allCards } = useMoneyCardsByAccountIds(accountIds);
-  const cardsByAccount = useMemo(() => {
-    const map: Record<string, MoneyCard[]> = {};
-    if (!allCards) return map;
-    allCards.forEach((c) => {
-      if (!map[c.account_id]) map[c.account_id] = [];
-      map[c.account_id].push(c);
-    });
-    return map;
-  }, [allCards]);
+  const cardsOfAccount = useMemo(() => cardsByAccount(allCards ?? []), [allCards]);
 
   const createMutation = useCreateMoneyAccount();
   const updateMutation = useUpdateMoneyAccount();
@@ -118,32 +111,13 @@ export default function MoneyAccountsPage() {
 
   const handleSave = async () => {
     if (!selectedPersonId) return;
-    if (!label.trim()) return;
-
+    const columns = accountColumns({ label, accountKind, currency, source, externalId, isActive });
+    if (!columns) return;
     if (editing) {
-      await updateMutation.mutateAsync({
-        id: editing.id,
-        updates: {
-          account_label: label.trim(),
-          account_kind: accountKind,
-          currency,
-          source: source.trim() || "manual",
-          external_account_id: externalId.trim() || null,
-          is_active: isActive,
-        },
-      });
+      await updateMutation.mutateAsync({ id: editing.id, updates: columns });
     } else {
-      await createMutation.mutateAsync({
-        owner_person_id: selectedPersonId,
-        account_label: label.trim(),
-        account_kind: accountKind,
-        currency,
-        source: source.trim() || "manual",
-        external_account_id: externalId.trim() || null,
-        is_active: isActive,
-      });
+      await createMutation.mutateAsync({ owner_person_id: selectedPersonId, ...columns });
     }
-
     setDialogOpen(false);
   };
 
@@ -164,7 +138,7 @@ export default function MoneyAccountsPage() {
   };
 
   const handleSaveCard = async () => {
-    const last4 = cardLast4.replace(/\D/g, "").slice(-4);
+    const last4 = cardLast4Of(cardLast4);
     if (!last4 || !cardAccountId) return;
     if (cardEditing) {
       await updateCardMutation.mutateAsync({
@@ -257,9 +231,9 @@ export default function MoneyAccountsPage() {
                       {t("money.addCard")}
                     </Button>
                   </div>
-                  {cardsByAccount[account.id]?.length ? (
+                  {cardsOfAccount[account.id]?.length ? (
                     <ul className="space-y-1">
-                      {cardsByAccount[account.id].map((c) => (
+                      {cardsOfAccount[account.id].map((c) => (
                         <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
                           <span>
                             *{c.last4}

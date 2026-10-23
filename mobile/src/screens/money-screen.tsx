@@ -54,6 +54,9 @@ export function useDebounced<T>(value: T, ms: number): T {
   return settled;
 }
 
+/** The web money menu's other pages, a row above the feed. */
+const SECTIONS: [string, string][] = [["money.accounts", "/money/accounts"]];
+
 const signLabel = (sign: MoneyAmountSignFilter) =>
   t(`money.amountSign${sign.charAt(0).toUpperCase()}${sign.slice(1)}`);
 
@@ -166,6 +169,17 @@ export default function MoneyScreen() {
 
   const top = (
     <View style={{ gap: space.md, marginBottom: space.sm }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+        {SECTIONS.map(([label, href]) => (
+          <Button
+            key={href}
+            compact
+            variant="secondary"
+            label={t(label)}
+            onPress={() => router.push(href as Href)}
+          />
+        ))}
+      </View>
       <View style={{ flexDirection: "row", gap: space.sm }}>
         {SIGNS.map((sign) => (
           <Chip
