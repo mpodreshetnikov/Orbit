@@ -16,5 +16,5 @@ export async function fetchObservations(personId: string): Promise<ObservationSu
     .eq("is_applied", true)
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
-  return summarizeObservations((data ?? []) as unknown as ObservationListRow[]);
+  return summarizeObservations(data as unknown as ObservationListRow[]);
 }

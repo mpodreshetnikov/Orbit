@@ -1,17 +1,29 @@
 import { Stack, useRouter, type Href } from "expo-router";
-import { BookOpen, ChevronRight, FlaskConical, Ruler, type LucideIcon } from "lucide-react-native";
+import {
+  BookOpen,
+  ChevronRight,
+  FlaskConical,
+  Search,
+  Ruler,
+  type LucideIcon,
+} from "lucide-react-native";
 import { Pressable, ScrollView, View } from "react-native";
 import { Card, Icon, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
 import { space, usePalette } from "@/theme";
 
 /** The web app's health sections, each a row into its own screen. */
-const SECTIONS: { title: string; description: string; icon: LucideIcon; href: string }[] = [
+const SECTIONS: { title: string; description?: string; icon: LucideIcon; href: string }[] = [
   {
     title: "observationHistory.navTitle",
     description: "observationHistory.description",
     icon: FlaskConical,
     href: "/health/observations",
+  },
+  {
+    title: "findings.navTitle",
+    icon: Search,
+    href: "/health/findings",
   },
   {
     title: "measurements.title",
@@ -59,9 +71,11 @@ export default function HealthScreen() {
               <Icon icon={section.icon} size={20} tone="foreground" />
               <View style={{ flex: 1, gap: 2 }}>
                 <Text weight="medium">{t(section.title)}</Text>
-                <Text size="xs" tone="mutedForeground">
-                  {t(section.description)}
-                </Text>
+                {section.description ? (
+                  <Text size="xs" tone="mutedForeground">
+                    {t(section.description)}
+                  </Text>
+                ) : null}
               </View>
               <Icon icon={ChevronRight} />
             </Pressable>
