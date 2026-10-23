@@ -18,41 +18,61 @@ import { space } from "@/theme";
 
 /**
  * The checkup a sheet is about, by `?id=`, from the list already loaded; the sheet itself once it
- * is there.
+ * is there. Marking done and planning take an active checkup only; a past completion can be
+ * corrected whatever the checkup's status.
  */
 function WithCheckup({
   title,
+  activeOnly = true,
   children,
 }: {
   title: string;
+  activeOnly?: boolean;
   children: (item: CheckupItem) => ReactNode;
 }) {
   const { id } = useLocalSearchParams<{ id: string }>();
   const person = usePerson();
   const checkups = useCheckups(person.data?.id);
-  const item = checkups.data?.find((one) => one.id === id && one.status === "active");
+  const item = checkups.data?.find(
+    (one) => one.id === id && (!activeOnly || one.status === "active"),
+  );
   if (item) return children(item);
-  const failed = person.error ?? checkups.error;
-  const busy = !failed && (person.isPending || (checkups.isPending && checkups.isFetching));
   return (
     <>
       <Stack.Screen options={{ title, headerLargeTitle: false }} />
-      {failed ? (
-        <Placeholder
-          message={failed.message}
-          action={
-            <Button
-              variant="outline"
-              label={t("common.retry")}
-              onPress={() => void (person.error ? person.refetch() : checkups.refetch())}
-            />
-          }
-        />
-      ) : (
-        <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
-      )}
+      <CheckupMissing person={person} checkups={checkups} />
     </>
   );
+}
+
+/**
+ * Why a checkup is not on screen: still loading, a read that failed (with a retry), or not there.
+ * A disabled checkups query, waiting for a person that failed, does not count as loading.
+ */
+export function CheckupMissing({
+  person,
+  checkups,
+}: {
+  person: ReturnType<typeof usePerson>;
+  checkups: ReturnType<typeof useCheckups>;
+}) {
+  const failed = person.error ?? checkups.error;
+  if (failed) {
+    return (
+      <Placeholder
+        message={failed.message}
+        action={
+          <Button
+            variant="outline"
+            label={t("common.retry")}
+            onPress={() => void (person.error ? person.refetch() : checkups.refetch())}
+          />
+        }
+      />
+    );
+  }
+  const busy = person.isPending || (checkups.isPending && checkups.isFetching);
+  return <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />;
 }
 
 /** The sheet's bar: cancel on the left, save on the right. */
@@ -89,7 +109,7 @@ function SheetHeader({
 export default function CompleteCheckupScreen() {
   const { completion } = useLocalSearchParams<{ completion?: string }>();
   return (
-    <WithCheckup title={t("checkups.markComplete")}>
+    <WithCheckup title={t("checkups.markComplete")} activeOnly={!completion}>
       {(item) => <CompleteForm item={item} completionId={completion} />}
     </WithCheckup>
   );

@@ -198,6 +198,24 @@ describe("a checkup", () => {
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
   });
 
+  it("offers a retry when it cannot be read", async () => {
+    fail("checkup_items");
+    await renderScreens(routes, "/health/checkups/blood");
+    expect(await screen.findByText("checkup_items is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Каждые 3 месяца")).toBeOnTheScreen();
+  });
+
+  it("offers a retry when its completions cannot be read", async () => {
+    fail("checkup_completions");
+    await renderScreens(routes, "/health/checkups/blood");
+    expect(await screen.findByText("checkup_completions is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Норма")).toBeOnTheScreen();
+  });
+
   it("goes to a linked condition, whose page lists it back", async () => {
     await renderScreens(routes, "/health/checkups/blood");
     await fireEvent.press(await screen.findByText("Анемия"));
@@ -231,6 +249,12 @@ describe("a completion", () => {
     answerAlert("Удалить");
     await fireEvent.press(await screen.findByText("Удалить"));
     await waitFor(() => expect(db.tables.checkup_completions.map((row) => row.id)).toEqual(["c1"]));
+  });
+
+  it("is corrected on a checkup no longer active", async () => {
+    db.tables.checkup_items[0].status = "completed";
+    await renderScreens(routes, "/health/checkups/complete?id=blood&completion=c1");
+    expect((await screen.findByLabelText("Заметка")).props.value).toBe("Норма");
   });
 
   it("says when it is not there", async () => {

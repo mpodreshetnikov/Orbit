@@ -13,13 +13,16 @@ import {
 } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Badge, Button, Card, Icon, Text } from "@/components/ui";
 import { categoryLabel } from "@/features/checkups/query";
 import { formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
 import { useCheckupAction, useCheckups, useCompletions, usePerson } from "@/lib/queries";
+import { CheckupMissing } from "@/screens/checkup-sheets";
 import { CheckupStatusBadge, DateLine } from "@/screens/checkups-screen";
 import { radius, space, usePalette } from "@/theme";
+
+const SHEET_DISMISS_MS = 400;
 
 /** "Каждый год", "Каждые 3 месяца", "Разовая: 01.11.2026". */
 export function scheduleSummary(schedule: CheckupSchedule): string {
@@ -82,7 +85,8 @@ export default function CheckupScreen() {
       (index) => {
         const change = changes[index];
         if (change) action.mutate({ item: current, status: change[0] }, { onError });
-        else if (index === changes.length) remove(current);
+        // An alert raised while the sheet is still closing is dropped by iOS.
+        else if (index === changes.length) setTimeout(() => remove(current), SHEET_DISMISS_MS);
       },
     );
   };
@@ -121,11 +125,10 @@ export default function CheckupScreen() {
     />
   );
   if (!item) {
-    const busy = person.isPending || checkups.isPending;
     return (
       <>
         {header}
-        <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+        <CheckupMissing person={person} checkups={checkups} />
       </>
     );
   }
@@ -250,6 +253,19 @@ export default function CheckupScreen() {
               ) : null}
             </Pressable>
           ))}
+          {completions.error ? (
+            <View style={{ gap: space.sm, alignItems: "flex-start" }}>
+              <Text size="sm" tone="mutedForeground">
+                {completions.error.message}
+              </Text>
+              <Button
+                compact
+                variant="outline"
+                label={t("common.retry")}
+                onPress={() => void completions.refetch()}
+              />
+            </View>
+          ) : null}
           {completions.data?.length === 0 ? (
             <Text size="sm" tone="mutedForeground">
               {t("checkups.noCompletions")}

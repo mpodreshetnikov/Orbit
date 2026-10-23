@@ -1554,7 +1554,7 @@
     "validationScheduleRequired": "Schedule is required",
     "validationDueDateRequired": "Due date is required for one-off checkups",
     "deleteCheckup": "Delete checkup",
-    "deleteCheckupConfirm": "Remove this checkup? Completions will remain in history.",
+    "deleteCheckupConfirm": "Remove this checkup? Its completion history is deleted with it.",
     "deleteCompletionConfirm": "Remove this completion from history?",
     "reminderDaysBefore": "Remind me (days before due)",
     "reminderDaysBeforeHint": "Notify this many days before the due date (e.g. 7, 3, 1)",
