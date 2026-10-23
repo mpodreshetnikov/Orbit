@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { byDay, dayHeading } from "@/screens/money-screen";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react-native";
+import { byDay, dayHeading, SEARCH_DEBOUNCE_MS, useDebounced } from "@/screens/money-screen";
 import MoneyScreen from "@/screens/money-screen";
 import {
   calls,
@@ -161,6 +161,63 @@ describe("the money tab", () => {
     db.failing.clear();
     await fireEvent.press(screen.getByText("Повторить"));
     expect(await screen.findByText("Ручная транзакция")).toBeOnTheScreen();
+  });
+});
+
+describe("the money tab, beyond the first page", () => {
+  it("keeps the loaded page when the next one fails, and tries it again", async () => {
+    feed = Array.from({ length: 55 }, (_, index) => transaction(`p${index}`, 21, -index - 1));
+    await renderScreens(routes, "/money");
+    await screen.findByText("Покупка p0");
+    fail("money_list_transactions_feed");
+    await fireEvent(screen.getByTestId("money-feed"), "endReached");
+    expect(
+      await screen.findByText("Не удалось загрузить операции: money_list_transactions_feed failed"),
+    ).toBeOnTheScreen();
+    expect(screen.getByText("Покупка p0")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    await waitFor(() =>
+      expect(
+        calls.rpc.filter((call) => call.name === "money_list_transactions_feed").at(-1)?.args,
+      ).toMatchObject({ p_offset: 50 }),
+    );
+  });
+
+  it("offers a retry when the person cannot be read", async () => {
+    fail("persons");
+    await renderScreens(routes, "/money");
+    expect(
+      await screen.findByText("Не удалось загрузить операции: persons is unavailable"),
+    ).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Пятёрочка")).toBeOnTheScreen();
+  });
+
+  it("shows no sums across currencies", async () => {
+    feed = [...FEED, transaction("usd", 19, -10, { currency: "USD" })];
+    await renderScreens(routes, "/money");
+    expect(
+      await screen.findByText("Суммы не показаны: в операциях больше одной валюты"),
+    ).toBeOnTheScreen();
+    expect(screen.getAllByText(/^50\s000,00\s₽$/)).toHaveLength(1);
+  });
+});
+
+describe("useDebounced", () => {
+  it("passes a value on once it settles", async () => {
+    const { result, rerender } = await renderHook(
+      ({ value }: { value: string }) => useDebounced(value, SEARCH_DEBOUNCE_MS),
+      { initialProps: { value: "" } },
+    );
+    await rerender({ value: "ко" });
+    await rerender({ value: "кофе" });
+    expect(result.current).toBe("");
+    await act(async () => {
+      jest.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    });
+    expect(result.current).toBe("кофе");
   });
 });
 

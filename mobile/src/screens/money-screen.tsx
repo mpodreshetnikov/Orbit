@@ -14,7 +14,7 @@ import {
   Scale,
   type LucideIcon,
 } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { RefreshControl, SectionList, View } from "react-native";
 import { Chip } from "@/components/form";
 import { Button, Card, Icon, Placeholder, Text } from "@/components/ui";
@@ -39,6 +39,19 @@ const TYPE_LOOK: Record<MoneyTransactionType, [LucideIcon, keyof Palette]> = {
 };
 
 const SIGNS: MoneyAmountSignFilter[] = ["all", "expense", "income"];
+
+/** How long typing pauses before the search goes out, as on the web page. */
+export const SEARCH_DEBOUNCE_MS = 250;
+
+/** `value`, once it has stayed the same for `ms`. */
+export function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
 
 const signLabel = (sign: MoneyAmountSignFilter) =>
   t(`money.amountSign${sign.charAt(0).toUpperCase()}${sign.slice(1)}`);
@@ -72,7 +85,8 @@ export default function MoneyScreen() {
   const palette = usePalette();
   const person = usePerson();
   const personId = person.data?.id;
-  const [query, setQuery] = useState("");
+  const [typed, setQuery] = useState("");
+  const query = useDebounced(typed, SEARCH_DEBOUNCE_MS);
   const [amountSign, setAmountSign] = useState<MoneyAmountSignFilter>("all");
   const filters = useMemo(() => ({ query, amountSign }), [query, amountSign]);
   const feed = useMoneyFeed(personId, filters);
@@ -84,6 +98,13 @@ export default function MoneyScreen() {
   const accountLabel = new Map(accounts.data?.map((one) => [one.id, one.account_label]));
   const categoryName = new Map(categories.data?.map((one) => [one.id, one.name_ru]));
   const currency = items[0]?.currency ?? accounts.data?.[0]?.currency ?? "RUB";
+  // The sums come back as one number whatever the currency: across currencies it means nothing,
+  // so only the count is shown then.
+  const mixedCurrencies =
+    new Set([
+      ...items.map((one) => one.currency),
+      ...(accounts.data ?? []).map((one) => one.currency),
+    ]).size > 1;
 
   const header = (
     <Stack.Screen
@@ -99,17 +120,20 @@ export default function MoneyScreen() {
     />
   );
 
-  if (feed.error) {
+  // A failed person read leaves the feed waiting on nobody; a feed that fails before any page
+  // arrives has nothing to show. A later page or a refresh that fails keeps what is loaded.
+  const failed = person.error ?? (items.length === 0 ? feed.error : null);
+  if (failed) {
     return (
       <>
         {header}
         <Placeholder
-          message={`${t("money.feedLoadFailed")}: ${feed.error.message}`}
+          message={`${t("money.feedLoadFailed")}: ${failed.message}`}
           action={
             <Button
               variant="outline"
               label={t("common.retry")}
-              onPress={() => void feed.refetch()}
+              onPress={() => void (person.error ? person.refetch() : feed.refetch())}
             />
           }
         />
@@ -148,15 +172,23 @@ export default function MoneyScreen() {
         ) : (
           <>
             {total(t("money.summaryMatches"), String(summary.data?.totalCount ?? 0), "foreground")}
-            {total(
-              t("money.summaryPositive"),
-              formatMoney(summary.data?.totalPositiveAmount ?? 0, currency, "ru-RU"),
-              "success",
-            )}
-            {total(
-              t("money.summaryNegative"),
-              formatMoney(summary.data?.totalNegativeAmount ?? 0, currency, "ru-RU"),
-              "destructive",
+            {mixedCurrencies ? (
+              <Text size="xs" tone="mutedForeground" style={{ flex: 2 }}>
+                {t("money.summaryMixedCurrencies")}
+              </Text>
+            ) : (
+              <>
+                {total(
+                  t("money.summaryPositive"),
+                  formatMoney(summary.data?.totalPositiveAmount ?? 0, currency, "ru-RU"),
+                  "success",
+                )}
+                {total(
+                  t("money.summaryNegative"),
+                  formatMoney(summary.data?.totalNegativeAmount ?? 0, currency, "ru-RU"),
+                  "destructive",
+                )}
+              </>
             )}
           </>
         )}
@@ -209,7 +241,25 @@ export default function MoneyScreen() {
             </View>
           )
         }
-        ListFooterComponent={feed.isFetchingNextPage ? <Placeholder busy /> : null}
+        ListFooterComponent={
+          feed.isFetchingNextPage ? (
+            <Placeholder busy />
+          ) : feed.error ? (
+            <View style={{ paddingVertical: space.md, gap: space.sm, alignItems: "center" }}>
+              <Text size="sm" tone="mutedForeground" style={{ textAlign: "center" }}>
+                {`${t("money.feedLoadFailed")}: ${feed.error.message}`}
+              </Text>
+              <Button
+                compact
+                variant="outline"
+                label={t("common.retry")}
+                onPress={() =>
+                  void (feed.isFetchNextPageError ? feed.fetchNextPage() : feed.refetch())
+                }
+              />
+            </View>
+          ) : null
+        }
         renderItem={({ item }) => {
           const [icon, tone] = TYPE_LOOK[item.transaction_type] ?? TYPE_LOOK.expense;
           const comment = preferredComment(item.comment, item.source_comment);

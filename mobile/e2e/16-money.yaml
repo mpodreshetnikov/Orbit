@@ -6,8 +6,9 @@ name: Деньги
 - tapOn:
     text: "Open"
     optional: true
+# The sums' heading shows before the feed arrives: wait for a seeded transaction instead.
 - extendedWaitUntil:
-    visible: "Совпадений"
+    visible: "Employer LLC"
     timeout: 60000
 - takeScreenshot: money-01-feed
 - tapOn: "Доходы"

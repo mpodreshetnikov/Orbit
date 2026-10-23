@@ -255,6 +255,7 @@
     "requestTimedOut": "No answer in {seconds} s. Check the connection and try again.",
     "feedMoreFailed": "Could not load more",
     "summaryUnavailable": "Totals did not arrive",
+    "summaryMixedCurrencies": "Totals hidden: the transactions use more than one currency",
     "accountsTitle": "Accounts",
     "addAccount": "Add account",
     "editAccount": "Edit account",
