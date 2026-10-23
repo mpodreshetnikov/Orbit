@@ -46,6 +46,7 @@ const listeners = new Set<(event: string, session: Session | null) => void>();
 export function seed(tables: Record<string, Row[]>) {
   db.tables = structuredClone(tables);
   db.failing.clear();
+  failingOnce.clear();
   calls.rpc = [];
   for (const name of Object.keys(rpcHandlers)) {
     delete rpcHandlers[name];
@@ -56,6 +57,13 @@ export function seed(tables: Record<string, Row[]>) {
 export function fail(name: string) {
   db.failing.add(name);
 }
+
+/** Fail the next request to `name` only, so what follows it (a refetch after an error) succeeds. */
+export function failOnce(name: string) {
+  failingOnce.add(name);
+}
+
+const failingOnce = new Set<string>();
 
 export function setSession(next: Session | null) {
   session = next;
@@ -177,7 +185,7 @@ class Query {
   }
 
   private run(): Result {
-    if (db.failing.has(this.table)) {
+    if (failingOnce.delete(this.table) || db.failing.has(this.table)) {
       return { data: null, error: { message: `${this.table} is unavailable` } };
     }
     if (this.write) {
