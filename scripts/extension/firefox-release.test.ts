@@ -70,6 +70,7 @@ describe("firefox release", () => {
       await fs.mkdir(path.join(sourceDir, "src"), { recursive: true });
       await fs.writeFile(path.join(sourceDir, "manifest.json"), '{"version":"0.1.26"}');
       await fs.writeFile(path.join(sourceDir, "src", "env.js"), "export const ORIGIN = 'a';");
+      await fs.writeFile(path.join(sourceDir, "reload-trigger.json"), '{"buildId":"11:20"}');
 
       const unpacked = path.join(dir, "signed");
       await fs.cp(sourceDir, unpacked, { recursive: true });
@@ -119,6 +120,26 @@ describe("firefox release", () => {
       for (const [, init] of calls) {
         expect((init?.headers as Record<string, string>).Authorization).toMatch(/^JWT /);
       }
+    });
+
+    it("is this build when only the build stamp and the manifest's layout differ", async () => {
+      const { input } = await fixture(async (unpacked) => {
+        await fs.writeFile(path.join(unpacked, "reload-trigger.json"), '{"buildId":"11:26"}');
+        await fs.writeFile(path.join(unpacked, "manifest.json"), '{\n  "version": "0.1.26"\n}\n');
+      });
+      await expect(downloadSignedFirefoxVersion(input)).resolves.toBe(true);
+    });
+
+    it("names the manifest keys that differ", async () => {
+      const { input } = await fixture((unpacked) =>
+        fs.writeFile(
+          path.join(unpacked, "manifest.json"),
+          '{"version":"0.1.26","permissions":["tabs"]}',
+        ),
+      );
+      await expect(downloadSignedFirefoxVersion(input)).rejects.toThrow(
+        /manifest\.json differs in permissions/,
+      );
     });
 
     it("is absent when AMO does not know it, so the build is signed", async () => {

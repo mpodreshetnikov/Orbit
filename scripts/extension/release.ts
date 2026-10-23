@@ -31,7 +31,7 @@ const EXTENSION_RELEASE_LATEST_PATH = "latest.json";
 const EXTENSION_RELEASE_MANIFEST_PATH = "browserExtension/manifest.json";
 /**
  * The bucket's `allowed_mime_types` is an exact-match list of
- * `["application/zip", "application/json"]`, and Storage compares the whole
+ * `["application/zip", "application/json", "application/x-xpinstall"]`, and Storage compares the whole
  * header including its parameters. Sending `application/json; charset=utf-8`
  * is therefore rejected -- which is what left 0.1.3 published as a zip with no
  * latest.json pointing at it. The parameter carried nothing anyway: JSON is
@@ -948,6 +948,8 @@ async function prepareFirefoxRelease(input: {
     return undefined;
   }
 
+  await assertStorageTakesXpi(input.supabaseUrl);
+
   const objectPath = getFirefoxReleaseObjectPath(input.version);
   const xpiPath = path.join(input.artifactDir, ...objectPath.split("/"));
   const geckoId = process.env.EXTENSION_GECKO_ID?.trim() || DEFAULT_GECKO_ID;
@@ -978,6 +980,30 @@ async function prepareFirefoxRelease(input: {
     "utf8",
   );
   return firefox;
+}
+
+/**
+ * Refuses before signing when the server's bucket would refuse the signed file. AMO signs a version
+ * once, so a refusal after signing used up 0.1.26 and 0.1.27: every deploy re-ran
+ * `supabase/db/policies/storage.sql`, whose bucket list did not have the type yet, and took back
+ * what `20261021140000_extension_release_bucket_xpi.sql` had added. Failing here leaves the version
+ * free for the run after the server takes it. Skipped without the service_role key, which a local
+ * build has no need for.
+ */
+async function assertStorageTakesXpi(supabaseUrl: string): Promise<void> {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceRoleKey) return;
+  const supabase = await createSupabaseAdminClient({ supabaseUrl, serviceRoleKey });
+  const { data, error } = await supabase.storage.getBucket(EXTENSION_RELEASE_BUCKET);
+  if (error) {
+    throw new Error(`Cannot read the ${EXTENSION_RELEASE_BUCKET} bucket: ${error.message}`);
+  }
+  const allowed = data.allowed_mime_types;
+  if (allowed && allowed.length > 0 && !allowed.includes(FIREFOX_XPI_CONTENT_TYPE)) {
+    throw new Error(
+      `The server's ${EXTENSION_RELEASE_BUCKET} bucket does not take ${FIREFOX_XPI_CONTENT_TYPE} yet, so the Firefox build is not signed (supabase/db/policies/storage.sql sets the list on every deploy). The next run after the server takes it publishes this version.`,
+    );
+  }
 }
 
 async function createSupabaseAdminClient(input: { supabaseUrl: string; serviceRoleKey: string }) {

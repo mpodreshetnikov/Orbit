@@ -117,7 +117,7 @@ allowed_mime_types = ["image/png", "image/jpeg", "image/webp", "image/heic", "ap
 [storage.buckets.extension-releases]
 public = true
 file_size_limit = "50MiB"
-allowed_mime_types = ["application/zip", "application/json"]
+allowed_mime_types = ["application/zip", "application/json", "application/x-xpinstall"]
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
