@@ -4,7 +4,7 @@ import { ActionSheetIOS, Alert } from "react-native";
 import CatalogEntryFormScreen, { catalogColumns } from "@/screens/catalog-entry-form-screen";
 import HealthScreen from "@/screens/health-screen";
 import MeasurementCatalogScreen from "@/screens/measurement-catalog-screen";
-import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
+import { db, fail, failOnce, fakeSession, seed, setSession } from "../../test/fake-supabase";
 import { household, NOW, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
@@ -139,6 +139,30 @@ describe("the measurement catalogue", () => {
   it("says when the type to edit is gone", async () => {
     await renderScreens(routes, "/health/catalogs/measurements/form?id=gone");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
+  });
+
+  it("keeps an entry's code, which hidden types and links are keyed by", async () => {
+    await renderScreens(routes, "/health/catalogs/measurements/form?id=cat-weight");
+    expect((await screen.findByLabelText("Код")).props.editable).toBe(false);
+  });
+
+  it("says when the catalogue cannot be read for an edit, and retries", async () => {
+    failOnce("measurement_catalog");
+    await renderScreens(routes, "/health/catalogs/measurements/form?id=cat-weight");
+    expect(await screen.findByText("measurement_catalog is unavailable")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect((await screen.findByLabelText("Название (EN)")).props.value).toBe("Weight");
+  });
+
+  it("does not report a save when the entry was deleted elsewhere", async () => {
+    await renderScreens(routes, "/health/catalogs/measurements/form?id=cat-weight");
+    const alert = jest.spyOn(Alert, "alert");
+    await screen.findByLabelText("Код");
+    db.tables.measurement_catalog = [];
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "Ничего не найдено"),
+    );
   });
 
   it("deletes a type after asking, and shows the refusal when it cannot", async () => {

@@ -9,6 +9,7 @@ import {
   normalizeHiddenMeasurementCodes,
   type HiddenMeasurementCodes,
 } from "@orbit-types/measurement-visibility";
+import { t } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 
 /** One value to write: a new entry, or the changed columns of an existing one. */
@@ -98,8 +99,17 @@ export async function createCatalogEntry(columns: CatalogColumns) {
   check(await supabase.from("measurement_catalog").insert(columns));
 }
 
+/** Throws when no row matched, as the web update does: an entry deleted elsewhere is not saved. */
 export async function updateCatalogEntry(id: string, columns: CatalogColumns) {
-  check(await supabase.from("measurement_catalog").update(columns).eq("id", id));
+  const row = check(
+    await supabase
+      .from("measurement_catalog")
+      .update(columns)
+      .eq("id", id)
+      .select("id")
+      .maybeSingle(),
+  );
+  if (!row) throw new Error(t("common.noResults"));
 }
 
 export async function deleteCatalogEntry(id: string) {

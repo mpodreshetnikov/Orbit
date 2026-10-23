@@ -55,7 +55,16 @@ export default function CatalogEntryFormScreen() {
       <Stack.Screen options={{ title: t("catalogs.editMeasurement"), headerLargeTitle: false }} />
       <Placeholder
         busy={catalog.isPending}
-        message={catalog.isPending ? undefined : t("common.noResults")}
+        message={catalog.isPending ? undefined : (catalog.error?.message ?? t("common.noResults"))}
+        action={
+          catalog.error ? (
+            <Button
+              variant="outline"
+              label={t("common.retry")}
+              onPress={() => void catalog.refetch()}
+            />
+          ) : undefined
+        }
       />
     </>
   );
@@ -122,6 +131,8 @@ function CatalogEntryForm({ id, initial }: { id?: string; initial: CatalogColumn
               <Input
                 accessibilityLabel={t(label)}
                 value={form[key]}
+                // Hidden types and links are keyed by the code, so an entry keeps its own (as on the web).
+                editable={!(id && key === "code")}
                 autoCapitalize={key === "code" ? "none" : "sentences"}
                 onChangeText={(text) => setForm((current) => ({ ...current, [key]: text }))}
               />
