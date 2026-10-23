@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { View } from "react-native";
-import Svg, { Circle, Line, Polyline } from "react-native-svg";
+import Svg, { Circle, Line, Polyline, Rect } from "react-native-svg";
 import { Text } from "@/components/ui";
-import { space, usePalette } from "@/theme";
+import { space, usePalette, type Palette } from "@/theme";
 
 /** Where each value sits in a `width` × `height` box, inset by `inset`, lowest value at the bottom. */
 export function plot(
@@ -29,13 +29,20 @@ export function chartDomain(values: number[]): [number, number] {
   const low = Math.min(...values);
   const high = Math.max(...values);
   const padding = (high - low) * 0.1 || 1;
-  return [Math.max(0, low - padding), high + padding];
+  // Body measurements stop at zero; a lab value or range that is already negative does not.
+  return [low >= 0 ? Math.max(0, low - padding) : low - padding, high + padding];
 }
 
 const points = (at: { x: number; y: number }[]) => at.map(({ x, y }) => `${x},${y}`).join(" ");
 
 /** The list card's sparkline: the history as one line, nothing under two points. */
-export function Sparkline({ values }: { values: number[] }) {
+export function Sparkline({
+  values,
+  tone = "primary",
+}: {
+  values: number[];
+  tone?: keyof Palette;
+}) {
   const palette = usePalette();
   const width = 64;
   const height = 32;
@@ -46,7 +53,7 @@ export function Sparkline({ values }: { values: number[] }) {
           <Polyline
             points={points(plot(values, width, height, 2))}
             fill="none"
-            stroke={palette.primary}
+            stroke={palette[tone]}
             strokeWidth={1.5}
             strokeLinejoin="round"
           />
@@ -58,22 +65,26 @@ export function Sparkline({ values }: { values: number[] }) {
 
 /**
  * The detail page's chart: the line with its points, the y range written at the top and bottom
- * edges, and the first and last dates under it, laid out to whatever width it is given.
+ * edges, and the first and last dates under it, laid out to whatever width it is given. A `band`,
+ * a reference range, is shaded behind the line and kept inside the range.
  */
 export function LineChart({
   values,
   labels,
   format,
+  band,
 }: {
   values: number[];
   labels: [string, string];
   format: (value: number) => string;
+  band?: [number, number];
 }) {
   const palette = usePalette();
   const [width, setWidth] = useState(0);
   const height = 200;
-  const domain = chartDomain(values);
+  const domain = chartDomain([...values, ...(band ?? [])]);
   const at = width ? plot(values, width, height, 8, domain) : [];
+  const shade = band && width ? plot(band, width, height, 8, domain) : null;
   return (
     <View style={{ gap: space.xs }}>
       <View
@@ -83,6 +94,16 @@ export function LineChart({
       >
         {width ? (
           <Svg width={width} height={height}>
+            {shade ? (
+              <Rect
+                x={0}
+                width={width}
+                y={shade[1].y}
+                height={shade[0].y - shade[1].y}
+                fill={palette.success}
+                opacity={0.12}
+              />
+            ) : null}
             {[8, height / 2, height - 8].map((y) => (
               <Line
                 key={y}

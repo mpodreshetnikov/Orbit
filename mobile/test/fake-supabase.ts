@@ -126,8 +126,11 @@ class Query {
   select() {
     return this;
   }
+  /** A dotted column filters on an embedded row, as `.eq("medical_records.status", …)` does. */
   eq(column: string, value: unknown) {
-    this.filters.push((row) => row[column] === value);
+    this.filters.push(
+      (row) => column.split(".").reduce<unknown>((at, key) => (at as Row)?.[key], row) === value,
+    );
     return this;
   }
   is(column: string, value: unknown) {

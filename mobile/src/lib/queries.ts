@@ -28,6 +28,7 @@ import {
   unarchiveRegimen,
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
+import { fetchObservations } from "@/features/observations/query";
 import {
   createCatalogEntry,
   createMeasurement,
@@ -369,4 +370,12 @@ export function useHiddenMeasurements(personId: string | undefined) {
     pending: hidden.isPending,
     error: hidden.error,
   };
+}
+
+export function useObservations(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["observations", personId],
+    queryFn: () => fetchObservations(personId as string),
+    enabled: Boolean(personId),
+  });
 }
