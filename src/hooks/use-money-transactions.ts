@@ -13,18 +13,21 @@ import type {
   MoneyTransactionDetail,
   MoneyTransactionEditAudit,
   MoneyTransactionFeedFilters,
-  MoneyTransactionFeedItem,
   MoneyTransactionFeedPage,
   MoneyTransactionFeedSummary,
   UpdateMoneyTransactionInput,
 } from "@/types";
 import type { Database, Json } from "@/types/database";
+import {
+  feedSummaryOf,
+  MONEY_FEED_PAGE_SIZE,
+  moneyFeedArgs,
+  normalizeFeedItem,
+} from "@/types/money-feed";
 
 type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
 type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Insert"];
 type MoneyLineItemUpdate = Database["public"]["Tables"]["money_line_items"]["Update"];
-
-const MONEY_TRANSACTION_FEED_PAGE_SIZE = 50;
 
 /**
  * One retry, not react-query's three: each attempt has the request budget, and three retries
@@ -49,34 +52,6 @@ function mapDetailRow(row: Record<string, unknown>): MoneyTransactionDetail {
   return {
     ...(tx as unknown as MoneyTransaction),
     line_items: lineItemsRaw,
-  };
-}
-
-function normalizeFeedItem(item: Record<string, unknown>): MoneyTransactionFeedItem {
-  const rawLineItems = Array.isArray(item.line_items)
-    ? (item.line_items as Array<Record<string, unknown>>)
-    : [];
-  const lineItemTitles = Array.isArray(item.line_item_titles)
-    ? (item.line_item_titles as string[])
-    : rawLineItems
-        .map((lineItem) => (typeof lineItem.title === "string" ? lineItem.title : null))
-        .filter((title): title is string => Boolean(title));
-  const moneyCards =
-    item.money_cards !== undefined
-      ? ((item.money_cards as MoneyTransactionCard | null) ?? null)
-      : item.card_last4 || item.card_label || item.card_id
-        ? {
-            id: String(item.card_id ?? ""),
-            last4: typeof item.card_last4 === "string" ? item.card_last4 : "",
-            card_label: typeof item.card_label === "string" ? item.card_label : null,
-          }
-        : undefined;
-
-  return {
-    ...(item as unknown as MoneyTransactionFeedItem),
-    ...(moneyCards !== undefined ? { money_cards: moneyCards } : {}),
-    line_item_titles: lineItemTitles,
-    category_ids: Array.isArray(item.category_ids) ? (item.category_ids as string[]) : [],
   };
 }
 
@@ -177,18 +152,9 @@ async function fetchMoneyTransactionFeedPage({
   };
   const { data, error } = await supabase
     .rpc("money_list_transactions_feed", {
-      p_payer_person_id: payerPersonId,
-      p_search: filters.query?.trim() || null,
-      p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
-      p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
-      p_statuses: filters.statuses?.length ? filters.statuses : null,
-      p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
-      p_transfer_filter: filters.transferFilter ?? "all",
-      p_amount_sign: filters.amountSign ?? "all",
-      p_from: filters.from ?? null,
-      p_to: filters.to ?? null,
+      ...moneyFeedArgs(payerPersonId, filters),
       p_offset: pageParam,
-      p_limit: MONEY_TRANSACTION_FEED_PAGE_SIZE,
+      p_limit: MONEY_FEED_PAGE_SIZE,
     })
     .abortSignal(timeoutSignal(REQUEST_TIMEOUT_MS, signal));
 
@@ -200,7 +166,7 @@ async function fetchMoneyTransactionFeedPage({
 
   return {
     items,
-    nextOffset: items.length === MONEY_TRANSACTION_FEED_PAGE_SIZE ? pageParam + items.length : null,
+    nextOffset: items.length === MONEY_FEED_PAGE_SIZE ? pageParam + items.length : null,
   };
 }
 
@@ -220,29 +186,12 @@ async function fetchMoneyTransactionFeedSummary(
     };
   };
   const { data, error } = await supabase
-    .rpc("money_transaction_feed_summary", {
-      p_payer_person_id: payerPersonId,
-      p_search: filters.query?.trim() || null,
-      p_account_ids: filters.accountIds?.length ? filters.accountIds : null,
-      p_transaction_types: filters.transactionTypes?.length ? filters.transactionTypes : null,
-      p_statuses: filters.statuses?.length ? filters.statuses : null,
-      p_category_ids: filters.categoryIds?.length ? filters.categoryIds : null,
-      p_transfer_filter: filters.transferFilter ?? "all",
-      p_amount_sign: filters.amountSign ?? "all",
-      p_from: filters.from ?? null,
-      p_to: filters.to ?? null,
-    })
+    .rpc("money_transaction_feed_summary", moneyFeedArgs(payerPersonId, filters))
     .abortSignal(timeoutSignal(REQUEST_TIMEOUT_MS, signal));
 
   if (error) throw new Error(error.message);
 
-  const row = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
-
-  return {
-    totalCount: Number(row?.total_count ?? 0),
-    totalPositiveAmount: Number(row?.total_positive_amount ?? 0),
-    totalNegativeAmount: Number(row?.total_negative_amount ?? 0),
-  };
+  return feedSummaryOf(data);
 }
 
 export function useInfiniteMoneyTransactionFeed(

@@ -1,5 +1,6 @@
 "use client";
 
+import { preferredComment } from "@/types/money-feed";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -158,16 +159,6 @@ function dateInputValue(value: string | null) {
 function dateInputToIso(value: string, boundary: "start" | "end") {
   if (!value) return null;
   return boundary === "start" ? `${value}T00:00:00.000Z` : `${value}T23:59:59.999Z`;
-}
-
-function getPreferredTransactionComment(
-  comment: string | null | undefined,
-  sourceComment: string | null | undefined,
-) {
-  const canonical = comment?.trim();
-  if (canonical) return canonical;
-  const source = sourceComment?.trim();
-  return source || null;
 }
 
 function buildDraftFromSearchParams(searchParams: URLSearchParams): FilterDraft {
@@ -1093,10 +1084,7 @@ export default function MoneyTransactionsPage() {
                   );
                 }
 
-                const preferredComment = getPreferredTransactionComment(
-                  row.comment,
-                  row.sourceComment,
-                );
+                const shownComment = preferredComment(row.comment, row.sourceComment);
 
                 return (
                   <div key={row.key} ref={(node) => trackRowHeight(row.key, node)}>
@@ -1136,9 +1124,9 @@ export default function MoneyTransactionsPage() {
                               </p>
                             </div>
 
-                            {preferredComment ? (
+                            {shownComment ? (
                               <p className="line-clamp-1 text-xs leading-4 text-slate-600 sm:text-sm">
-                                {preferredComment}
+                                {shownComment}
                               </p>
                             ) : null}
 

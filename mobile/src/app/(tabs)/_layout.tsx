@@ -36,6 +36,13 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Label>{t("nav.health")}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: "heart", selected: "heart.fill" }} md="favorite" />
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="money">
+        <NativeTabs.Trigger.Label>{t("money.title")}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "creditcard", selected: "creditcard.fill" }}
+          md="payments"
+        />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

@@ -1,0 +1,18 @@
+# The money tab: the seeded transactions by day with their sums, then only the money that came in.
+appId: host.exp.Exponent
+name: Деньги
+---
+- openLink: exp://127.0.0.1:8081/--/money
+- tapOn:
+    text: "Open"
+    optional: true
+# The sums' heading shows before the feed arrives: wait for a seeded transaction instead.
+- extendedWaitUntil:
+    visible: "Employer LLC"
+    timeout: 60000
+- takeScreenshot: money-01-feed
+- tapOn: "Доходы"
+- extendedWaitUntil:
+    visible: "Employer LLC"
+    timeout: 20000
+- takeScreenshot: money-02-income
