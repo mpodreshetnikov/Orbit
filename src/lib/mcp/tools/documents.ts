@@ -58,10 +58,20 @@ const observationSchema = z.object({
 });
 
 const findingFields = {
-  finding_type_text: z.string().describe("What was seen, as written."),
-  finding_code: nullableString.describe("A finding_type catalogue code if you know it, else null."),
-  body_site_text: nullableString,
-  site_code: nullableString.describe("A body_site catalogue code if you know it, else null."),
+  finding_type_text: z
+    .string()
+    .describe(
+      "What was seen, as written. The server codes the finding from this label, so it must match a finding_type catalogue name or synonym.",
+    ),
+  finding_code: nullableString.describe(
+    "Ignored: the server takes the code from finding_type_text. Kept for compatibility.",
+  ),
+  body_site_text: nullableString.describe(
+    "Where, as written. The server codes the site from this label, so it must match a body_site catalogue name or synonym.",
+  ),
+  site_code: nullableString.describe(
+    "Ignored: the server takes the code from body_site_text. Kept for compatibility.",
+  ),
 };
 
 const findingSchema = z.object({
@@ -122,6 +132,11 @@ async function lookupIcd(auth: McpAuthExtra, code: string): Promise<IcdLookupRes
   }
 }
 
+/** The record's page in the app, where the owner reviews it and approves or deletes it. */
+function reviewUrl(auth: McpAuthExtra, recordId: string): string | null {
+  return auth.appOrigin ? `${auth.appOrigin}/health/records/${recordId}` : null;
+}
+
 export function registerDocumentTools(server: McpToolServer): void {
   server.registerTool(
     "create_medical_record",
@@ -172,7 +187,12 @@ export function registerDocumentTools(server: McpToolServer): void {
           formatUploads(uploads),
           `Then call ingest_medical_document with record_id ${recordId}.`,
         ].join("\n"),
-        { record_id: recordId, person_id: person.id, uploads },
+        {
+          record_id: recordId,
+          person_id: person.id,
+          uploads,
+          review_url: reviewUrl(auth, recordId),
+        },
       );
     }, WRITE_SCOPE),
   );
@@ -215,7 +235,8 @@ export function registerDocumentTools(server: McpToolServer): void {
       title: "Ingest medical document",
       description: [
         "Submit what you read from a record's uploaded pages. The server runs its own checks on it, the same ones the app's pipeline runs: every entity's source_anchor must appear verbatim in source_text; lab names are matched to the observation catalogue and values converted to canonical units; a condition closure is accepted only when this document's own in-range measurement supports it, and is left pending confirmation; a finding closure is accepted only when an asserted absence in this document covers it.",
-        "Leave codes null rather than guessing; print names and units as written. Put a finding the document says is NOT there (e.g. 'конкременты не выявлены') in extraction.asserted_absences, never in findings.",
+        "Print names and units as written. Put a finding the document says is NOT there (e.g. 'конкременты не выявлены') in extraction.asserted_absences, never in findings.",
+        "Before submitting findings or absences, look up each finding type and body site with search_catalog_entries (catalogs finding_type and body_site). The server codes them from their labels, and a label no entry carries stays uncoded: it cannot be tracked over time, and uncoded findings at different sites merge into one history. When an entry is missing, add it first with upsert_catalog_entry, putting the document's wording in its Russian synonyms; when one exists under another wording, add that wording as a synonym. One finding per site.",
         "The record moves to review, not to the chart. The reply lists what was stored, what was refused and why, observations the catalogue did not recognise (dropped at approval unless added with upsert_catalog_entry and the document re-ingested), and closures awaiting confirmation. Re-submitting replaces the previous submission for this record.",
       ].join(" "),
       inputSchema: z.object({
@@ -332,6 +353,7 @@ export function registerDocumentTools(server: McpToolServer): void {
         getRecordExtractionIssues(supabase, record.id),
       ]);
       const unmatched = observations.filter((row) => row.is_applied !== true);
+      const uncoded = findings.filter((row) => !row.finding_code || !row.site_code);
       const pending = conditions.filter((row) => row.awaiting_confirmation === true);
 
       const lines = [
@@ -343,6 +365,15 @@ export function registerDocumentTools(server: McpToolServer): void {
           `Not recognised by the observation catalogue (dropped at approval unless added with upsert_catalog_entry and re-ingested):`,
           ...unmatched.map((row) =>
             `- ${String(row.obs_name)} ${String(row.value_text ?? "")} ${String(row.unit ?? "")}`.trimEnd(),
+          ),
+        );
+      }
+      if (uncoded.length > 0) {
+        lines.push(
+          `Findings the catalogues did not recognise (add the finding type or body site with upsert_catalog_entry, with this wording as a synonym, and re-ingest; uncoded, they cannot be tracked over time):`,
+          ...uncoded.map(
+            (row) =>
+              `- ${String(row.finding_type_text)}${row.finding_code ? "" : " (no finding type)"}${row.body_site_text ? ` at ${String(row.body_site_text)}` : ""}${row.site_code ? "" : " (no body site)"}`,
           ),
         );
       }
@@ -368,8 +399,11 @@ export function registerDocumentTools(server: McpToolServer): void {
           ),
         );
       }
+      const review = reviewUrl(auth, record.id);
       lines.push(
-        `Next: activate_medical_record approves it, or leave it for the owner to review in the app.`,
+        review
+          ? `Next: give the owner this link to review the draft in the app, where they can approve it or delete it: ${review}. Or call activate_medical_record once they agree with it here.`
+          : `Next: activate_medical_record approves it, or leave it for the owner to review in the app.`,
       );
 
       return ok(lines.join("\n"), {
@@ -380,6 +414,7 @@ export function registerDocumentTools(server: McpToolServer): void {
         extraction_issues: issues,
         rejected: result.rejected ?? [],
         dropped_condition_resolutions: result.dropped_condition_resolutions ?? [],
+        review_url: review,
       });
     }, WRITE_SCOPE),
   );

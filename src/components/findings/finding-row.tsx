@@ -42,6 +42,8 @@ interface FindingRowProps {
 // Severity badge component
 function SeverityBadge({ severity }: { severity: FindingSeverity }) {
   const t = useTranslations();
+  // An unstated severity is the default, not a finding about the patient: nothing to show.
+  if (!severity || severity === "unknown") return null;
 
   const config: Record<FindingSeverity, { color: string; label: string }> = {
     mild: {
@@ -169,10 +171,12 @@ export function FindingRow({
 }: FindingRowProps) {
   const t = useTranslations();
 
-  // History page: /health/findings/[findingId]?site=...
+  // History page: /health/findings/[findingId]?site=... -- the site's text when it has no code, as
+  // in FindingCard, or the history merges every site the uncoded finding was seen at.
+  const siteKey = finding.site_code ?? finding.body_site_text;
   const viewHref =
     `/health/findings/${encodeURIComponent(finding.finding_code ?? finding.finding_type_text)}` +
-    (finding.site_code ? `?site=${encodeURIComponent(finding.site_code)}` : "");
+    (siteKey ? `?site=${encodeURIComponent(siteKey)}` : "");
 
   // Get display names
   const findingName = finding.catalog_finding_name_ru || finding.finding_type_text;
