@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MoneyLineItem } from "./money";
 import {
+  parseAmount,
   lineItemChanges,
   lineItemDraft,
   lineItemDrafts,
@@ -186,5 +187,20 @@ describe("merchantNames", () => {
         { merchant_name: "Б" },
       ]),
     ).toEqual(["А", "Б"]);
+  });
+});
+
+describe("parseAmount", () => {
+  it("reads a decimal comma or point, signs and grouped digits", () => {
+    expect(parseAmount("-420,50")).toBe(-420.5);
+    expect(parseAmount("1 234.5")).toBe(1234.5);
+    expect(parseAmount("+7")).toBe(7);
+    expect(parseAmount(".5")).toBe(0.5);
+  });
+
+  it("refuses text that is not a whole number, instead of cutting it short", () => {
+    expect(parseAmount("")).toBeNaN();
+    expect(parseAmount("12abc")).toBeNaN();
+    expect(parseAmount("1,2,3")).toBeNaN();
   });
 });

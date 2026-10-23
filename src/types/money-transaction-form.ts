@@ -116,8 +116,17 @@ export function withMerchantCategory(
   }));
 }
 
+/**
+ * A typed amount as a number: a decimal comma reads as a point, spaces between digit groups are
+ * dropped, and anything else in the text makes it NaN rather than cutting the number short.
+ */
+export function parseAmount(text: string): number {
+  const normalized = text.replace(/\s/g, "").replace(",", ".");
+  return /^[-+]?(\d+\.?\d*|\.\d+)$/.test(normalized) ? Number(normalized) : NaN;
+}
+
 const numberOr = <T>(text: string, fallback: T): number | T => {
-  const value = parseFloat(text);
+  const value = parseAmount(text);
   return Number.isFinite(value) ? value : fallback;
 };
 
@@ -139,7 +148,7 @@ export function transactionFormProblem(form: {
 }): string | null {
   if (!form.accountId) return "money.validationAccountRequired";
   if (!form.postedAt) return "money.validationPostedAtRequired";
-  if (!Number.isFinite(parseFloat(form.amount))) return "money.validationAmountRequired";
+  if (!Number.isFinite(parseAmount(form.amount))) return "money.validationAmountRequired";
   return null;
 }
 

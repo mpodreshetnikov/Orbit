@@ -20,6 +20,7 @@ import {
   lineItemsMismatch,
   lineItemsTotal,
   manualCategoryChange,
+  parseAmount,
   transactionFormProblem,
   withMerchantCategory,
   type LineItemDraft,
@@ -27,7 +28,7 @@ import {
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Plus, Trash2 } from "lucide-react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, View } from "react-native";
 import { Chip, Choice, Field, Input, Section } from "@/components/form";
 import { Button, Card, Icon, Placeholder, Text } from "@/components/ui";
@@ -79,11 +80,29 @@ export default function TransactionFormScreen() {
       />
     );
   }
-  const busy = person.isPending || accounts.isPending || (!!id && transaction.isPending);
+  const failed = person.error ?? accounts.error ?? (id ? transaction.error : null);
+  // A query waiting on a person that failed is disabled, not loading.
+  const busy =
+    !failed &&
+    (person.isPending ||
+      (accounts.isPending && accounts.isFetching) ||
+      (!!id && transaction.isPending && transaction.isFetching));
+  const retry = () => {
+    if (person.error) void person.refetch();
+    else if (accounts.error) void accounts.refetch();
+    else void transaction.refetch();
+  };
   return (
     <>
       <Stack.Screen options={{ title: t("money.editTransaction"), headerLargeTitle: false }} />
-      <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      {failed ? (
+        <Placeholder
+          message={failed.message}
+          action={<Button variant="outline" label={t("common.retry")} onPress={retry} />}
+        />
+      ) : (
+        <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      )}
     </>
   );
 }
@@ -139,6 +158,13 @@ function TransactionForm({
     setMerchant(name);
     setItems((current) => withMerchantCategory(current, merchantCategories.data?.[name.trim()]));
   };
+  // A merchant left before its usual categories arrived gets them when they do.
+  useEffect(() => {
+    const category = merchantCategories.data?.[merchant.trim()];
+    if (category) setItems((current) => withMerchantCategory(current, category));
+    // Only the arrival of the mapping: typing is handled when the field is left.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [merchantCategories.data]);
   const typed = merchant.trim().toLowerCase();
   const suggestions = typed
     ? (merchants.data ?? [])
@@ -153,7 +179,7 @@ function TransactionForm({
     const values = {
       account_id: accountId,
       posted_at: postedAt.toISOString(),
-      amount: parseFloat(amount),
+      amount: parseAmount(amount),
       currency,
       transaction_type: type,
       status,
@@ -226,8 +252,9 @@ function TransactionForm({
                 `${one.account_label} (${one.currency})${one.is_active ? "" : ` — ${t("money.accountInactive")}`}`,
               ])}
               onPick={(next) => {
-                // The first account picked brings its currency, as on the web.
-                if (next !== accountId && !initial) {
+                // The account picked brings its currency, editing too: a transaction keeps its
+                // account's currency unless changed after.
+                if (next !== accountId) {
                   setCurrency(accounts.find((one) => one.id === next)?.currency ?? currency);
                 }
                 setAccountId(next);

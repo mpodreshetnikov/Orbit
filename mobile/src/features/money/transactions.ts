@@ -54,11 +54,14 @@ export async function createTransaction(
       .select("id"),
   ) as { id: string }[];
   const items = lineItemsOrWhole(lineItems, transaction.merchant_name, transaction.amount);
-  check(
-    await supabase
-      .from("money_line_items")
-      .insert(asRow(items.map((item) => lineItemRow(item, row.id)))),
-  );
+  const { error } = await supabase
+    .from("money_line_items")
+    .insert(asRow(items.map((item) => lineItemRow(item, row.id))));
+  if (error) {
+    // Take the transaction back, so the retry the error invites does not save it twice.
+    await supabase.from("money_transactions").delete().eq("id", row.id);
+    throw new Error(error.message);
+  }
   return row.id;
 }
 

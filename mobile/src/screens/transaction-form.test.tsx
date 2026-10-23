@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { router } from "expo-router";
 import { ActionSheetIOS, Alert } from "react-native";
 import MoneyScreen from "@/screens/money-screen";
 import TransactionFormScreen, { categoryOptions } from "@/screens/transaction-form-screen";
@@ -232,6 +233,88 @@ describe("the transaction form", () => {
   it("says when the transaction to edit is not there", async () => {
     await renderScreens(routes, "/money/form?id=gone");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
+  });
+
+  it("reads a decimal comma as a point, in the amount and the line items", async () => {
+    await renderScreens(routes, "/money");
+    await fireEvent.press(await screen.findByLabelText("Добавить транзакцию"));
+    await fireEvent.changeText(await screen.findByLabelText("Сумма"), "-420,50");
+    await fireEvent.changeText(screen.getByLabelText("Сумма 1"), "-420,50");
+    expect(screen.queryByText("Сумма строк отличается от суммы транзакции.")).toBeNull();
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() => expect(db.tables.money_transactions).toHaveLength(2));
+    expect(db.tables.money_transactions[1].amount).toBe(-420.5);
+    expect(db.tables.money_line_items[2].amount).toBe(-420.5);
+  });
+
+  it("takes the transaction back when its line items cannot be saved", async () => {
+    await renderScreens(routes, "/money/form");
+    await fireEvent.changeText(await screen.findByLabelText("Сумма"), "-1");
+    fail("money_line_items");
+    const alert = jest.spyOn(Alert, "alert");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "money_line_items is unavailable"),
+    );
+    expect(db.tables.money_transactions.map((row) => row.id)).toEqual(["tx-1"]);
+  });
+
+  it("moves an edited transaction to the currency of the account picked", async () => {
+    await renderScreens(routes, "/money");
+    await screen.findByLabelText("Добавить транзакцию");
+    await act(() => router.push("/money/form?id=tx-1"));
+    pickOption("Доллары (USD) — Неактивен");
+    await fireEvent.press(await screen.findByLabelText("Счет: Тинькофф (RUB)"));
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(db.tables.money_transactions[0]).toMatchObject({
+        account_id: "acc-usd",
+        currency: "USD",
+      }),
+    );
+  });
+
+  it("gives a merchant left early its usual category once that arrives", async () => {
+    rpcHandlers.get_money_merchant_default_categories = () => [];
+    const { client } = await renderScreens(routes, "/money");
+    await fireEvent.press(await screen.findByLabelText("Добавить транзакцию"));
+    await fireEvent.changeText(await screen.findByLabelText("Сумма"), "-1");
+    const merchant = screen.getByLabelText("Мерчант");
+    await fireEvent.changeText(merchant, "Пятёрочка");
+    await fireEvent(merchant, "endEditing");
+    expect(screen.getByLabelText("Категория: Без категории")).toBeOnTheScreen();
+    rpcHandlers.get_money_merchant_default_categories = () => [
+      { merchant_name: "Пятёрочка", category_id: "cat-bakery" },
+    ];
+    await act(() => client.invalidateQueries());
+    expect(await screen.findByLabelText("Категория: Выпечка")).toBeOnTheScreen();
+  });
+
+  it("offers a retry when the person cannot be read", async () => {
+    fail("persons");
+    await renderScreens(routes, "/money/form");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByLabelText("Сумма")).toBeOnTheScreen();
+  });
+
+  it("offers a retry when the accounts cannot be read", async () => {
+    fail("money_accounts");
+    await renderScreens(routes, "/money/form?id=tx-1");
+    expect(await screen.findByText("money_accounts is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect((await screen.findByLabelText("Сумма")).props.value).toBe("-350");
+  });
+
+  it("offers a retry when the transaction cannot be read", async () => {
+    fail("money_transactions");
+    await renderScreens(routes, "/money/form?id=tx-1");
+    expect(await screen.findByText("money_transactions is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect((await screen.findByLabelText("Сумма")).props.value).toBe("-350");
   });
 });
 
