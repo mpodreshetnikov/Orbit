@@ -24,13 +24,27 @@ function WithCheckup({
   const { id } = useLocalSearchParams<{ id: string }>();
   const person = usePerson();
   const checkups = useCheckups(person.data?.id);
-  const item = checkups.data?.find((one) => one.id === id);
+  const item = checkups.data?.find((one) => one.id === id && one.status === "active");
   if (item) return children(item);
-  const busy = person.isPending || checkups.isPending;
+  const failed = person.error ?? checkups.error;
+  const busy = !failed && (person.isPending || (checkups.isPending && checkups.isFetching));
   return (
     <>
       <Stack.Screen options={{ title, headerLargeTitle: false }} />
-      <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      {failed ? (
+        <Placeholder
+          message={failed.message}
+          action={
+            <Button
+              variant="outline"
+              label={t("common.retry")}
+              onPress={() => void (person.error ? person.refetch() : checkups.refetch())}
+            />
+          }
+        />
+      ) : (
+        <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      )}
     </>
   );
 }

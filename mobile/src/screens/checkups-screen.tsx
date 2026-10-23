@@ -259,7 +259,14 @@ function CheckupCard({
         <DateLine icon={CalendarPlus} label={t("checkups.plannedOn")} day={item.planned_on} />
       ) : null}
       {item.status === "active" ? (
-        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.sm }}>
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+            gap: space.sm,
+          }}
+        >
           <Button
             compact
             variant="outline"

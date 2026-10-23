@@ -51,9 +51,10 @@ export function rowToCheckupCompletion(row: Record<string, unknown>): CheckupCom
   };
 }
 
-/** `YYYY-MM-DD` of an instant, as the checkup pages compare due dates: in UTC. */
+/** `YYYY-MM-DD` of an instant, as the checkup pages compare due dates: the local calendar day. */
 export function isoDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /**

@@ -78,6 +78,11 @@ describe("rowToCheckupItem", () => {
 describe("checkupLateness", () => {
   const today = isoDay(NOW);
 
+  it("takes today as the local calendar day, not the UTC one", () => {
+    expect(isoDay(new Date(2026, 9, 22, 23, 30))).toBe("2026-10-22");
+    expect(isoDay(new Date(2026, 0, 3, 0, 15))).toBe("2026-01-03");
+  });
+
   it("is late by due date, or by plan while the due date is ahead", () => {
     expect(checkupLateness(item("a", { next_due_at: "2026-10-01" }), today)).toEqual({
       byDue: true,

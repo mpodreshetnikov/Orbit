@@ -191,6 +191,73 @@ describe("marking a checkup done", () => {
     );
     expect(db.tables.checkup_items[2].planned_on).toBeNull();
   });
+
+  it("puts the plan back when the completion cannot be saved, so a retry records it once", async () => {
+    await renderScreens(routes, "/health/checkups");
+    await fireEvent.press((await screen.findAllByText("Отметить выполненным"))[0]);
+    await screen.findByText("Дата выполнения");
+    fail("checkup_completions");
+    const alert = jest.spyOn(Alert, "alert");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() => expect(alert).toHaveBeenCalled());
+    expect(db.tables.checkup_items[0].planned_on).toBe("2026-10-15");
+    expect(db.tables.checkup_completions).toEqual([]);
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() => expect(db.tables.checkup_completions).toHaveLength(1));
+    expect(db.tables.checkup_items[0].planned_on).toBeNull();
+  });
+});
+
+describe("a checkup no longer active", () => {
+  it("cannot be done or planned from a link", async () => {
+    await renderScreens(routes, "/health/checkups/complete?id=flu");
+    expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
+  });
+
+  it("is refused when it stopped being active while the sheet was open", async () => {
+    await renderScreens(routes, "/health/checkups/complete?id=eye");
+    await screen.findByText("Дата выполнения");
+    db.tables.checkup_items[2].status = "paused";
+    const alert = jest.spyOn(Alert, "alert");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "Ничего не найдено"),
+    );
+    expect(db.tables.checkup_completions).toEqual([]);
+  });
+
+  it("is not planned when it stopped being active", async () => {
+    await renderScreens(routes, "/health/checkups/plan?id=teeth");
+    await screen.findByText(/^Отметить, что вы планируете/);
+    db.tables.checkup_items[3].status = "paused";
+    const alert = jest.spyOn(Alert, "alert");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "Ничего не найдено"),
+    );
+    expect(db.tables.checkup_items[3].planned_on).toBeNull();
+  });
+});
+
+describe("a checkup sheet opened directly", () => {
+  it("offers a retry when the person cannot be read", async () => {
+    fail("persons");
+    await renderScreens(routes, "/health/checkups/complete?id=eye");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Дата выполнения")).toBeOnTheScreen();
+  });
+
+  it("offers a retry when the checkups cannot be read", async () => {
+    fail("checkup_items");
+    await renderScreens(routes, "/health/checkups/plan?id=eye");
+    expect(await screen.findByText("checkup_items is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText(/^Отметить, что вы планируете/)).toBeOnTheScreen();
+  });
 });
 
 describe("planning a checkup", () => {
