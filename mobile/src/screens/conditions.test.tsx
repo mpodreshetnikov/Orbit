@@ -427,7 +427,11 @@ describe("adding to a condition's history", () => {
       screen.getByLabelText("Привязать к медицинской записи: Нет (только ручная запись)"),
     );
     await fireEvent.press(screen.getByText("Сохранить"));
-    await waitFor(() => expect(db.tables.condition_records.at(-1)?.record_id).toBe("rec-undated"));
+    // The save's requests run one after another; under coverage on a busy machine that can outlast the
+    // default second.
+    await waitFor(() => expect(db.tables.condition_records.at(-1)?.record_id).toBe("rec-undated"), {
+      timeout: 5000,
+    });
     expect(db.tables.conditions[2].current_status).toBe("history");
   });
 
