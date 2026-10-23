@@ -944,6 +944,25 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 END $$;
 
+-- A pending statement import for Max: the import history and a batch report waiting for review.
+DO $$
+DECLARE
+  v_max_person_id uuid;
+BEGIN
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+  IF v_max_person_id IS NULL THEN RETURN; END IF;
+
+  INSERT INTO public.money_import_batches (id, source, payer_person_id, import_type, file_path, status, parsed_transactions_count) VALUES
+    ('46000001-0000-4000-8000-000000000001', 'tbank', v_max_person_id, 'file', 'operations.csv', 'pending', 2)
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.money_import_batch_rows (id, batch_id, row_kind, source_row_index, status, message, payload) VALUES
+    ('46000002-0000-4000-8000-000000000001', '46000001-0000-4000-8000-000000000001', 'transaction', 0, 'inserted', NULL,
+      '{"posted_at": "2026-10-01T12:30:00Z", "amount": -320, "currency": "RUB", "merchant_name": "Coffee Lab"}'::jsonb),
+    ('46000002-0000-4000-8000-000000000002', '46000001-0000-4000-8000-000000000001', 'transaction', 1, 'skipped', 'Already imported',
+      '{"posted_at": "2026-10-02T09:00:00Z", "amount": -1890, "currency": "RUB", "merchant_name": "Perekrestok"}'::jsonb)
+  ON CONFLICT (id) DO NOTHING;
+END $$;
+
 -- ============================================================================
 -- NOTES
 -- ============================================================================
