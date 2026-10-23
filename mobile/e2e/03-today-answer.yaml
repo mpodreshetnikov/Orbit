@@ -1,0 +1,43 @@
+# Answering doses on "Сегодня": take one, skip another, then undo the take from its menu.
+# It changes the data, so it runs after the read-only flows (they run in file-name order).
+appId: host.exp.Exponent
+name: Сегодня — ответы
+---
+# The app comes back where the last flow left it, so the link names the screen: a tap on the tab
+# right after the link can land before the client has settled and be lost.
+- openLink: exp://127.0.0.1:8081/--/today
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Сегодня"
+    timeout: 60000
+- runFlow:
+    when:
+      notVisible: "Omega-3.*"
+    commands:
+      - tapOn: "Сегодня"
+- extendedWaitUntil:
+    visible: "Omega-3.*"
+    timeout: 60000
+- takeScreenshot: answer-01-open
+# Each row's buttons sit to the right of its name; Maestro takes the nearest match.
+- tapOn:
+    text: "Принято"
+    rightOf: "Omega-3.*"
+- takeScreenshot: answer-02-taken
+- tapOn:
+    text: "Пропущено"
+    rightOf: "Vitamin D3.*"
+- takeScreenshot: answer-03-skipped
+# An answered dose stays in place for a few seconds, then folds into the done section.
+- extendedWaitUntil:
+    visible: "Выполнено сегодня.*"
+    timeout: 20000
+- tapOn: "Выполнено сегодня.*"
+- takeScreenshot: answer-04-done
+# A settled row's long press opens the same menu as its "…" button, on that dose for certain.
+- longPressOn: "Omega-3.*"
+- takeScreenshot: answer-05-menu
+- tapOn: "Отменить приём"
+- takeScreenshot: answer-06-undone

@@ -1,0 +1,45 @@
+# Opens the client once before anything is recorded: the first load builds the bundle and walks
+# past iOS's link prompt and Expo Go's first-launch tour, which no recording needs to show.
+appId: host.exp.Exponent
+name: Open the client
+---
+- openLink: exp://127.0.0.1:8081
+# iOS asks before a link leaves for another app, and the prompt can arrive after a tap meant for
+# it has already looked and found nothing: keep answering it until the app shows. Expo Go lays a
+# tour of its developer menu over the app on its first launch, and nothing under it is visible to
+# Maestro until it is closed, so either one ends the wait. Twenty rounds of 30 s cover a cold bundle.
+- repeat:
+    times: 20
+    while:
+      notVisible: "Сегодня|Continue"
+    commands:
+      - tapOn:
+          text: "Open"
+          optional: true
+      # A cold bundle on a slow runner can outlast Expo Go's own request: ask for it again.
+      - tapOn:
+          text: "Try again"
+          optional: true
+      - extendedWaitUntil:
+          visible: "Сегодня|Continue"
+          timeout: 30000
+          optional: true
+- assertVisible: "Сегодня|Continue"
+- tapOn:
+    text: "Continue"
+    optional: true
+# "Continue" opens the developer menu itself; close it too.
+- tapOn:
+    text: "Close"
+    optional: true
+- extendedWaitUntil:
+    visible: "Сегодня"
+    timeout: 60000
+# Expo Go floats its tools button over the top right corner, exactly where the navigation bar keeps
+# its own buttons ("Действия: …", the gear), and hides them from Maestro too. Drag it down beside
+# the tab bar, out of their way, for every flow after this one.
+- swipe:
+    start: 89%, 9%
+    end: 89%, 88%
+    duration: 2000
+- waitForAnimationToEnd

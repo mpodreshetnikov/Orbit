@@ -34,11 +34,14 @@ function classifyChangedFiles(changedFiles) {
   // generator is what writes `schema.snapshot.sql` and `database.types.ts` and what the DB lane
   // runs to verify them. A change to either can only be exercised by running that lane, and
   // leaving them out meant the pull request that repaired the verification could not demonstrate
-  // it -- the lane it fixed was skipped on the change that fixed it.
+  // it -- the lane it fixed was skipped on the change that fixed it. The workflow that defines the
+  // lane is in for the same reason: a change to its steps or its image cache (T-261022-338) is
+  // otherwise merged without the lane having run once.
   const dbImpact = normalizedChangedFiles.some(
     (filePath) =>
       /^supabase\/(db|migrations|tests)\//.test(filePath) ||
       filePath === "supabase/config.toml" ||
+      filePath === ".github/workflows/main.yml" ||
       /^scripts\/just\/db-artifacts(\.|$)/.test(filePath),
   );
   const webImpact = normalizedChangedFiles.some(
@@ -53,6 +56,17 @@ function classifyChangedFiles(changedFiles) {
   );
   const functionsImpact = normalizedChangedFiles.some((filePath) =>
     filePath.startsWith("supabase/functions/"),
+  );
+  // The mobile client of `T-261018-l19`. It has its own dependency tree and its own typecheck, so
+  // its lane installs separately from the web app's and is worth skipping on a change that cannot
+  // reach it.
+  //
+  // The generated database types belong here as well as in `dbImpact`: `mobile/tsconfig.json` maps
+  // `@db` straight onto that file, and the root typecheck excludes `mobile`. Without this a renamed
+  // column or enum value would regenerate the types, pass every lane that runs, and leave the client
+  // uncompiled against the schema it reads.
+  const mobileImpact = normalizedChangedFiles.some(
+    (filePath) => filePath.startsWith("mobile/") || filePath === "supabase/db/database.types.ts",
   );
   // The extraction corpus and the harness that scores it. Neither matched any flag above:
   // `test/fixtures/` is not a source prefix and `isDocFile` does not claim it either, so a change
@@ -72,6 +86,7 @@ function classifyChangedFiles(changedFiles) {
     extensionImpact,
     functionsImpact,
     fixturesImpact,
+    mobileImpact,
     docsOnly,
   };
 }
@@ -188,6 +203,7 @@ function boolLines(impact) {
     `extensionImpact=${impact.extensionImpact}`,
     `functionsImpact=${impact.functionsImpact}`,
     `fixturesImpact=${impact.fixturesImpact}`,
+    `mobileImpact=${impact.mobileImpact}`,
     `docsOnly=${impact.docsOnly}`,
   ].join("\n");
 }

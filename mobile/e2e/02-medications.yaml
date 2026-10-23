@@ -1,0 +1,46 @@
+# "Лекарства": the course list, search, a status filter, a course and its history.
+appId: host.exp.Exponent
+name: Лекарства
+---
+- openLink: exp://127.0.0.1:8081
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Лекарства"
+    timeout: 60000
+- tapOn: "Лекарства"
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 30000
+- takeScreenshot: meds-01-list
+# The native search bar hides under the large title until the list is pulled down.
+- swipe:
+    direction: DOWN
+- tapOn: "Поиск"
+- inputText: "Mag"
+- takeScreenshot: meds-02-search
+# The round close button beside the field empties the query and closes the keyboard: the next
+# steps and flows need the whole list, and hiding the keyboard by a gesture can land a tap on a
+# course behind it. It has no text to find it by, so it is tapped where it sits.
+- tapOn:
+    point: "90%,10%"
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 10000
+- tapOn: "Приостановлено"
+- takeScreenshot: meds-03-filter
+- tapOn: "Все"
+- tapOn: "Vitamin D3.*"
+- extendedWaitUntil:
+    visible: "Ежедневно в 08:00.*"
+    timeout: 20000
+- takeScreenshot: meds-04-course
+# The counted row is the link; the bare "История приёмов" is the section heading above it.
+- scrollUntilVisible:
+    element: "История приёмов · .*"
+- tapOn: "История приёмов · .*"
+- extendedWaitUntil:
+    notVisible: "Ежедневно в 08:00.*"
+    timeout: 20000
+- takeScreenshot: meds-05-history

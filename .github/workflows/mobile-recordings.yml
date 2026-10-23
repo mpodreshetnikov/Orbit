@@ -1,0 +1,314 @@
+# Records the iOS client running in an iPhone simulator: screenshots and a video per flow.
+#
+# This is how an agent proves a change to `mobile/` before merge (T-261021-kr8): dispatch it on the
+# branch, download the `recordings` artifact, hand the pictures over. A cloud session runs on Linux
+# and cannot run a simulator itself; a GitHub macOS runner can, and the repository is public, so it
+# costs nothing.
+#
+# Nothing here touches a real instance. The `backend` job starts a local Supabase from this
+# repository's migrations and `supabase/seed.sql`, gives the seed user a password, and exposes the
+# stack through a Cloudflare quick tunnel (no account needed). macOS runners have no Docker, which
+# is why the database lives in a Linux job at all. The two jobs run side by side: `backend` uploads
+# the tunnel's address as the `backend` artifact, `simulator` waits for it, records, and uploads
+# `recordings`, which is `backend`'s signal to stop.
+
+name: Mobile recordings
+
+on:
+  # Every pull request that touches the client gets its recordings without anyone asking.
+  pull_request:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile-recordings.yml"
+  workflow_dispatch:
+    inputs:
+      flows:
+        description: "Maestro flow files under mobile/e2e to run (space-separated); empty runs all"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mobile-recordings-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The seed's own user (`supabase/seed.sql`), given a password only inside this throwaway stack.
+  TEST_EMAIL: dev@example.com
+  TEST_PASSWORD: orbit-recordings-local-only
+
+jobs:
+  backend:
+    name: Local Supabase behind a tunnel
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: taiki-e/install-action@just
+      - name: Install dependencies
+        run: npm ci
+      - name: Restore Supabase Docker image cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/docker/supabase-images
+          key: ${{ runner.os }}-supabase-docker-v2-${{ hashFiles('supabase/config.toml') }}
+          # v1 lacks postgres-meta (T-261022-338) but still spares every other pull until a run on
+          # main saves v2. A fallback hit is not a cache-hit, so that run still captures and saves.
+          restore-keys: |
+            ${{ runner.os }}-supabase-docker-${{ hashFiles('supabase/config.toml') }}
+      - name: Load cached Supabase Docker images
+        run: |
+          shopt -s nullglob
+          for archive in .cache/docker/supabase-images/*.tar.gz; do gzip -dc "$archive" | docker load; done
+      - name: Start Supabase
+        env:
+          HEALTH_STRUCTURE_PARSER_MODE: e2e_stub
+          OPENROUTER_API_KEY: e2e-local-disabled
+        run: just supabase-local-start
+      # Migrations alone leave the functions at their first definition; the live ones come from
+      # supabase/db, as every other lane applies them. Without this, mark_dose_taken has no
+      # p_taken_at and every tap on "Принято" fails and puts the dose back.
+      - name: Apply the idempotent SQL objects
+        run: just supabase-local-deploy-sql
+      - name: Give the seed user a password and today's doses
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 <<SQL
+          update auth.users
+             set encrypted_password = crypt('$TEST_PASSWORD', gen_salt('bf'))
+           where email = '$TEST_EMAIL';
+          select public.generate_med_dose_events_for_horizon(
+            (select id from auth.users where email = '$TEST_EMAIL'), 'UTC', 7);
+          -- The generator only creates slots still ahead of now(), so a run after 08:00 UTC would
+          -- find no morning doses. Put today's earlier slots back, as the overdue doses they would
+          -- be had the cron run at midnight: the recordings then show the same day whatever the hour.
+          insert into public.med_dose_events
+            (person_id, regimen_id, scheduled_at, actual_at, planned_intake, status)
+          select r.person_id, r.id, s.at, s.at, r.dose_definition, 'scheduled'
+            from public.med_regimens r
+            cross join lateral jsonb_array_elements_text(r.schedule->'times') as t(slot)
+            cross join lateral (select (current_date || ' ' || t.slot)::timestamp at time zone 'UTC' as at) s
+           where r.status = 'active'
+             and r.schedule->>'mode' = 'daily_times'
+             and s.at < now()
+             and not exists (
+               select 1 from public.med_dose_events e
+                where e.regimen_id = r.id
+                  and date_trunc('minute', e.scheduled_at) = date_trunc('minute', s.at));
+          -- Magnesium keeps stock and is running low, so a course shows its stock, the low-stock
+          -- reminder and the refill.
+          update public.med_regimens
+             set inventory = '{"enabled": true, "current_amount": 3, "refill_threshold_amount": 5, "unit": "pill", "auto_decrement_on_taken": true}'::jsonb
+           where id = '30000001-0000-4000-8000-000000000004';
+          -- Yesterday, every daily slot taken on time: a course always has a history to open.
+          insert into public.med_dose_events
+            (person_id, regimen_id, scheduled_at, actual_at, taken_at, planned_intake, status)
+          select r.person_id, r.id, s.at, s.at, s.at, r.dose_definition, 'taken'
+            from public.med_regimens r
+            cross join lateral jsonb_array_elements_text(r.schedule->'times') as t(slot)
+            cross join lateral (select ((current_date - 1) || ' ' || t.slot)::timestamp at time zone 'UTC' as at) s
+           where r.status = 'active'
+             and r.schedule->>'mode' = 'daily_times'
+             and not exists (
+               select 1 from public.med_dose_events e
+                where e.regimen_id = r.id
+                  and date_trunc('minute', e.scheduled_at) = date_trunc('minute', s.at));
+          SQL
+      - name: Open the tunnel
+        run: |
+          curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+          # trycloudflare.com sometimes times out handing out a tunnel; ask again rather than fail.
+          # Its API host shows up in the log's error line, so it is never taken for the tunnel.
+          url=""
+          for attempt in 1 2 3 4; do
+            nohup ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:54321 > cloudflared.log 2>&1 &
+            pid=$!
+            for _ in $(seq 1 60); do
+              url="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | grep -v '^https://api\.' | head -1 || true)"
+              [[ -n "$url" ]] && break
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 2
+            done
+            [[ -n "$url" ]] && break
+            cat cloudflared.log
+            kill "$pid" 2>/dev/null || true
+            echo "::warning::No tunnel on attempt $attempt"
+            sleep $((attempt * 15))
+          done
+          [[ -n "$url" ]] || { echo "::error::No tunnel address"; exit 1; }
+          # A quick tunnel answers before its DNS has spread; wait until it serves the API.
+          healthy=""
+          for _ in $(seq 1 60); do
+            curl -fsS -o /dev/null "$url/auth/v1/health" && { healthy=1; break; }
+            sleep 2
+          done
+          [[ -n "$healthy" ]] || { cat cloudflared.log; echo "::error::The tunnel never served the API"; exit 1; }
+          anon="$(npx supabase status -o env | sed -n 's/^ANON_KEY="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p')"
+          [[ -n "$anon" ]] || { echo "::error::No anon key from supabase status"; exit 1; }
+          mkdir -p backend
+          printf 'EXPO_PUBLIC_SUPABASE_URL=%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$url" "$anon" > backend/env
+          echo "Backend at $url"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend
+          path: backend/env
+          retention-days: 1
+      - name: Serve until the recordings are in
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 270); do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                 --jq '.artifacts[].name' | grep -qx recordings; then
+              echo "Recordings uploaded; stopping."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::Stopped waiting for the simulator job after 45 minutes."
+
+  simulator:
+    name: iPhone simulator
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install mobile dependencies
+        run: npm --prefix mobile ci
+      - name: Install Maestro
+        run: |
+          curl -fsSL https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Boot an iPhone and install Expo Go
+        run: |
+          udid="$(xcrun simctl list devices available -j \
+            | jq -r '[.devices[][] | select(.name | test("^iPhone [0-9]+$"))] | last | .udid')"
+          [[ -n "$udid" && "$udid" != null ]] || { xcrun simctl list devices available; exit 1; }
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          sdk="$(node -p "require('./mobile/node_modules/expo/package.json').version.split('.')[0]").0.0"
+          client="$(curl -fsSL https://api.expo.dev/v2/versions/latest | jq -r --arg sdk "$sdk" '.data.sdkVersions[$sdk].iosClientUrl')"
+          [[ "$client" == https://* ]] || { echo "::error::No Expo Go simulator build for SDK $sdk"; exit 1; }
+          mkdir -p expo-go && curl -fsSL "$client" | tar -xz -C expo-go
+          xcrun simctl install "$udid" expo-go
+      - name: Wait for the backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 90); do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                 --jq '.artifacts[].name' | grep -qx backend; then
+              gh run download "$GITHUB_RUN_ID" -n backend -D backend
+              cat backend/env >> "$GITHUB_ENV"
+              # The simulator shares this Mac's network. A quick tunnel can answer the Linux job
+              # and still fail TLS here for a while, which reaches the app as a failed sign-in, so
+              # wait until it serves this machine too.
+              url="$(sed -n 's/^EXPO_PUBLIC_SUPABASE_URL=//p' backend/env)"
+              for _ in $(seq 1 60); do
+                curl -fsS -o /dev/null "$url/auth/v1/health" && exit 0
+                sleep 5
+              done
+              echo "::error::The tunnel at $url never answered from the Mac."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::The backend job never published its address."
+          exit 1
+      - name: Start Metro
+        working-directory: mobile
+        env:
+          CI: 1
+          EXPO_PUBLIC_TEST_SIGNIN_EMAIL: ${{ env.TEST_EMAIL }}
+          EXPO_PUBLIC_TEST_SIGNIN_PASSWORD: ${{ env.TEST_PASSWORD }}
+        run: |
+          # Not `--localhost`: that binds Metro to `localhost`, which Node resolves to ::1 here, and
+          # Expo Go dials 127.0.0.1 and is refused. Ask on 127.0.0.1 so that mismatch fails here.
+          nohup npx expo start --lan --port 8081 > ../metro.log 2>&1 &
+          up=""
+          for _ in $(seq 1 90); do
+            curl -fsS http://127.0.0.1:8081/status 2>/dev/null | grep -q running && { up=1; break; }
+            sleep 2
+          done
+          [[ -n "$up" ]] || { cat ../metro.log; echo "::error::Metro is not answering on 127.0.0.1:8081"; exit 1; }
+          # Build the bundle before the app asks, so the flow does not spend its wait on a four-minute
+          # spinner. The URL is the one the manifest hands Expo Go: any other query is another bundle.
+          bundle="$(curl -fsS -H 'expo-platform: ios' -H 'accept: application/expo+json,application/json' \
+            http://127.0.0.1:8081 | jq -r '.launchAsset.url // empty' | sed 's#//[^/]*/#//127.0.0.1:8081/#')"
+          if [[ -n "$bundle" ]]; then
+            echo "Pre-bundling $bundle"
+            curl -fsS -o /dev/null --max-time 900 "$bundle" \
+              || echo "::warning::Pre-bundling failed; Expo Go will build it on open."
+          else
+            echo "::warning::No launchAsset in the manifest; Expo Go will build the bundle on open."
+          fi
+      - name: Run the flows
+        run: |
+          mkdir -p recordings
+          # Load the app and get past the first-launch screens before any camera rolls.
+          ( cd recordings && maestro test ../mobile/e2e/setup/open.yaml ) || exit 1
+          flows="${{ inputs.flows }}"
+          if [[ -z "$flows" ]]; then flows="$(cd mobile/e2e && ls *.yaml)"; fi
+          # `maestro test` spends half a minute starting up before its first step, with the camera
+          # already rolling, so each video is cut to the flow's own steps afterwards: Maestro logs
+          # when each one ran, and the recording started at a known moment.
+          command -v ffmpeg >/dev/null || brew install --quiet ffmpeg || echo "::warning::No ffmpeg; the videos stay uncut."
+          status=0
+          for flow in $flows; do
+            name="${flow%.yaml}"
+            xcrun simctl io "$SIM_UDID" recordVideo --codec=h264 --force "recordings/$name.mp4" &
+            video=$!
+            started="$(python3 -c 'import time; print(time.time())')"
+            sleep 1
+            ( cd recordings && maestro test --format junit --output "$name.xml" "../mobile/e2e/$flow" ) || status=1
+            kill -INT "$video"; wait "$video" || true
+            steps="$(ls -td ~/.maestro/tests/*/ | head -1)"
+            # From a second before the first step that is not set-up to a second and a half after the last.
+            span="$(python3 - "$steps" "$started" <<'PY' || true
+          import glob, json, sys
+          runs = glob.glob(sys.argv[1] + "*/commands.json")
+          timed = [c["metadata"] for c in json.load(open(runs[0])) if c.get("metadata", {}).get("timestamp")]
+          steps = [m for m in timed if m.get("status") not in ("SKIPPED",)][2:]
+          first = steps[0]["timestamp"] / 1000
+          last = max((m["timestamp"] + (m.get("duration") or 0)) / 1000 for m in steps)
+          start = float(sys.argv[2])
+          print(f"{max(0, first - start - 1):.2f} {last - start + 1.5:.2f}")
+          PY
+            )"
+            if [[ -n "$span" ]] && command -v ffmpeg >/dev/null; then
+              read -r from to <<<"$span"
+              ffmpeg -v error -y -i "recordings/$name.mp4" -ss "$from" -to "$to" -c:v libx264 -preset veryfast -an "recordings/$name.cut.mp4" \
+                && mv "recordings/$name.cut.mp4" "recordings/$name.mp4" \
+                || echo "::warning::Could not cut $name.mp4; it stays as recorded."
+            fi
+          done
+          exit $status
+      - name: Last screen on failure
+        if: failure()
+        run: xcrun simctl io "$SIM_UDID" screenshot recordings/zz-failure.png || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recordings
+          path: |
+            recordings/
+            metro.log
+            ~/.maestro/tests/
+          retention-days: 14

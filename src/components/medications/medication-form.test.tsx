@@ -460,10 +460,9 @@ describe("MedicationForm", () => {
   });
 
   it("keeps a recorded strength when an unrelated field is edited", async () => {
-    // The form has no field for a strength, and it rebuilt `dose_definition`
-    // from its own inputs, so opening a course and changing a reminder time
-    // emptied the ingredients recorded over the connector. That is real data
-    // loss on rows nobody meant to touch.
+    // The form once rebuilt `dose_definition` from its own inputs, so opening a
+    // course and changing a reminder time emptied the ingredients recorded over
+    // the connector. That is real data loss on rows nobody meant to touch.
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
 
@@ -540,6 +539,101 @@ describe("MedicationForm", () => {
             active: [],
             unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
           },
+        }),
+      );
+    });
+  });
+
+  it("shows a recorded strength and saves the one typed over it", async () => {
+    // Before this field existed only an MCP client could record milligrams, so
+    // a course entered in the app could never answer "how many mg do I take".
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          custom_name: "Золофт",
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            unit_strength: [{ name: "Сертралин", amount: 50, unit: "milligram" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00"], amounts: [1] } as MedSchedule,
+        } as unknown as MedRegimen)}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    const strength = screen.getByLabelText(/medications\.dosePerUnit/);
+    expect(strength).toHaveValue("50");
+    expect(screen.getByLabelText(/medications\.activeIngredient/)).toHaveValue("Сертралин");
+
+    fireEvent.change(strength, { target: { value: "100" } });
+    fireEvent.blur(strength);
+
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            active: [],
+            unit_strength: [{ name: "Сертралин", amount: 100, unit: "milligram" }],
+          },
+        }),
+      );
+    });
+  });
+
+  it("opens a course whose stored strength unit is blank", () => {
+    // Radix throws on a select item whose value is empty, so offering the
+    // stored blank unit would take the whole form down.
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          dose_definition: {
+            intake: { amount: 1, unit: "pill" },
+            unit_strength: [{ name: "X", amount: 10, unit: "" }],
+          },
+          schedule: { mode: "daily_times", times: ["09:00"], amounts: [1] } as MedSchedule,
+        } as unknown as MedRegimen)}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText(/medications\.dosePerUnit/)).toHaveValue("10");
+  });
+
+  it("records no strength when the field is left empty", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <MedicationForm
+        mode="edit"
+        personId="person-1"
+        initial={makeRegimen({
+          dose_definition: { intake: { amount: 1, unit: "pill" }, active: [] },
+          schedule: { mode: "daily_times", times: ["09:00"], amounts: [1] } as MedSchedule,
+        } as unknown as MedRegimen)}
+        onSubmit={onSubmit as (data: CreateMedRegimenInput | UpdateMedRegimenInput) => void}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/medications\.activeIngredient/), {
+      target: { value: "Сертралин" },
+    });
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dose_definition: { intake: { amount: 1, unit: "pill" }, active: [] },
         }),
       );
     });

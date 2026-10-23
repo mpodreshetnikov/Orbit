@@ -1,4 +1,4 @@
-import type { HiddenMeasurementCodes } from "@/lib/measurement-visibility";
+import type { HiddenMeasurementCodes } from "@/types/measurement-visibility";
 
 // ============================================================================
 // User preferences (notification time, timezone)

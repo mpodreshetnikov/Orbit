@@ -1,5 +1,6 @@
 import { registerCatalogTools } from "./catalogs";
 import { registerCheckupTools } from "./checkups";
+import { registerDocumentTools } from "./documents";
 import { registerMeasurementTools } from "./measurements";
 import { registerMedicationTools } from "./medications";
 import { registerPersonTools } from "./persons";
@@ -11,6 +12,7 @@ export function registerHealthTools(server: McpToolServer): void {
   registerPersonTools(server);
   registerMeasurementTools(server);
   registerRecordTools(server);
+  registerDocumentTools(server);
   registerCheckupTools(server);
   registerCatalogTools(server);
   registerMedicationTools(server);

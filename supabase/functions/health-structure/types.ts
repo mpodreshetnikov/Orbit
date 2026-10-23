@@ -201,4 +201,9 @@ export interface StructuredParseOutcome {
   stagesRun: string[];
   /** Value-level corrections made along the way. Empty when nothing had to be corrected. */
   issues?: ExtractionIssue[];
+  /**
+   * Entities and proposals refused before anything was written, with the reason. Returned to an
+   * MCP caller so it can see in the same turn what the server would not accept.
+   */
+  rejected?: Array<{ entityKind: string; reason: string }>;
 }

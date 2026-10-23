@@ -276,11 +276,24 @@ export async function runReconcileStage(
     ctx,
   );
 
+  const normalized = normalizeReconciliation(result.parsed, patient);
+  return { ...normalized, usage: result.usage, finishReason: result.finishReason };
+}
+
+/**
+ * The deterministic half of the reconcile stage: whoever proposed the closures — the model in
+ * `runReconcileStage`, or an MCP client — every id is checked against the patient state the
+ * proposer was given, and anything else is refused with its reason.
+ */
+export function normalizeReconciliation(
+  parsed: Record<string, unknown>,
+  patient: PatientStateContext,
+): Pick<StageResult<ReconcileResult>, "value" | "rejected"> {
   const rejected: StageResult<ReconcileResult>["rejected"] = [];
   const knownConditionIds = new Set(patient.existingConditions.map((item) => item.id));
   const knownCheckupIds = new Set(patient.checkupItems.map((item) => item.id));
 
-  const findingsToResolve = asArray(result.parsed.findings_to_resolve).map((item) => {
+  const findingsToResolve = asArray(parsed.findings_to_resolve).map((item) => {
     const obj = asObject(item);
     return {
       finding_code: asNullableString(obj.finding_code),
@@ -296,7 +309,7 @@ export async function runReconcileStage(
   // Ids are checked against what we supplied rather than trusted. A model-invented id would
   // otherwise silently address a row belonging to someone else, or nothing at all.
   const conditionsToResolve = [];
-  for (const item of asArray(result.parsed.conditions_to_resolve)) {
+  for (const item of asArray(parsed.conditions_to_resolve)) {
     const obj = asObject(item);
     const conditionId = asString(obj.condition_id, "");
     if (!knownConditionIds.has(conditionId)) {
@@ -313,7 +326,7 @@ export async function runReconcileStage(
   }
 
   const checkupsToComplete = [];
-  for (const item of asArray(result.parsed.checkups_to_complete)) {
+  for (const item of asArray(parsed.checkups_to_complete)) {
     const obj = asObject(item);
     const checkupItemId = asString(obj.checkup_item_id, "");
     if (!knownCheckupIds.has(checkupItemId)) {
@@ -333,8 +346,6 @@ export async function runReconcileStage(
       conditions_to_resolve: conditionsToResolve,
       checkups_to_complete: checkupsToComplete,
     },
-    usage: result.usage,
-    finishReason: result.finishReason,
     rejected,
   };
 }

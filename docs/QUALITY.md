@@ -260,6 +260,27 @@ The count is not the metric. `T-0006` merged as seven (#28, #30, #33, #34, #35, 
 - The **task id leads the pull request title** — `T-0006: take OCR off the request path` — so every pull request says which task it belongs to.
 - The task's `## Progress` line for that milestone **carries the pull request link**, so the task is the one place the whole set is visible. The registry is where a task's pull requests are grouped; GitHub has nowhere to put that.
 
+## User-Interface Changes Ship On Every Platform
+
+Orbit has two user interfaces: the web app (`src/`) and the native iOS client (`mobile/`). Set by
+the owner on 2026-10-21:
+
+1. **A user-interface feature is built for every platform at once**, unless the person asking names
+   one. A plan for such a feature has a milestone per platform; a platform left out is a recorded
+   decision with that person's reason, never an omission.
+2. **`mobile/src` is covered at 90% of lines and of branches.** The threshold is
+   `jest.coverageThreshold` in `mobile/package.json`; `mobile-check`, which CI runs on any change
+   under `mobile/`, fails below it. Screens are tested rendered, through Expo Router, against the
+   in-memory Supabase in `mobile/test/`.
+3. **The agent proves the change itself, with pictures, before merge.** Web: the
+   `change-review-screenshots` skill. iOS: the `Mobile recordings` workflow
+   (`.github/workflows/mobile-recordings.yml`) runs on every pull request that touches `mobile/`,
+   drives the client on an iPhone simulator against a throwaway local Supabase, and leaves a PNG per
+   `takeScreenshot` and an MP4 per Maestro flow (`mobile/e2e/*.yaml`) in its `recordings`
+   artifact. A change to a flow updates or adds its flow file; the agent downloads the artifact,
+   looks at every picture, and hands them to the owner with the pull request. A red recordings run
+   is a red check. How to run and read it: `mobile/AGENTS.md`.
+
 ## Change-Type Check Matrix
 
 For most code changes, **`ci`** satisfies static/build and test requirements; add the extra checks below when applicable.
@@ -268,6 +289,7 @@ For most code changes, **`ci`** satisfies static/build and test requirements; ad
 | -------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | Docs only                              | `lint` (if touched TS/JS snippets only), docs links check             | none                                                                                                              | list of changed docs and cross-links validated |
 | UI/routes/components                   | `dev` + `ci`                                                          | run `test-e2e` when route participates in user processing flows; manual happy-path walkthrough on affected routes | command outcomes + screenshots/recording       |
+| iOS client (`mobile/`)                 | `mobile-check` (90% coverage gate)                                    | `Mobile recordings` workflow green on the head; a Maestro flow for each changed flow                              | simulator screenshots + MP4 per flow           |
 | Hooks/client orchestration             | `dev` + `ci`                                                          | run `test-e2e` when hook affects end-to-end user flows; walkthrough for stale cache/mutation behavior             | command outcomes + brief behavior notes        |
 | Edge/API workflow                      | `dev` + `ci`                                                          | verify auth behavior and error path handling; run `test-e2e` for user-triggered workflows                         | command outcomes + endpoint behavior notes     |
 | DB schema/policy/function/trigger/cron | `dev` + `ci` + `db-lint`, `db-test`, `db-run` or `db-reset` as needed | verify migration + `supabase/db` parity                                                                           | command outcomes + SQL diff rationale          |

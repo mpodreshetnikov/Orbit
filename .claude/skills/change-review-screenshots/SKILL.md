@@ -14,6 +14,7 @@ Use this skill at the end of any task whose change set touches a visible surface
 | Changed paths                                                       | Surface to capture                                  |
 | ------------------------------------------------------------------- | --------------------------------------------------- |
 | `src/app/**`, `src/components/**`, `src/**/*.tsx`, `tailwind.config.ts` | Web UI route(s) affected                         |
+| `mobile/**`                                                           | iOS client: simulator recordings (below)            |
 | `browserExtension/**`                                                 | Extension popup / injected UI / import flow         |
 | `observability/**` dashboards                                         | Grafana dashboard panels                            |
 | `scripts/**` producing `report.md` / CSV / diagnostics artifacts      | Rendered report output                              |
@@ -39,6 +40,16 @@ Silence is never acceptable. Either images or an explicit reason.
 6. **Add a mobile viewport shot** (`390x844`) whenever layout, responsive rules, or mobile-specific input behavior changed.
 7. **Verify every image.** Open each captured file and confirm it actually shows the change (right route, rendered content, no blank page, no auth wall, no dev overlay). A screenshot that does not show the change is worse than none — recapture it.
 8. **Deliver** per [references/delivery-and-naming.md](references/delivery-and-naming.md): attach the images in the final response, one caption per image, plus paths.
+
+## The iOS Client
+
+`mobile/` is not shot with Playwright: a picture of its web build is not what ships. The
+`Mobile recordings` workflow records it on an iPhone simulator on every pull request touching
+`mobile/`. Add or update the Maestro flow in `mobile/e2e/` for every flow the change touches, push,
+download the `recordings` artifact once the run is green, check each PNG and MP4 the way step 7
+says, and deliver them like any other screenshot. How: `mobile/AGENTS.md`, "Proving a change before
+merge". A UI feature normally changes both `src/` and `mobile/` (`docs/QUALITY.md`, "User-Interface
+Changes Ship On Every Platform"); deliver both sets.
 
 ## Storage
 

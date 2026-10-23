@@ -8,11 +8,18 @@
 const path = require("path");
 const { spawnSync } = require("child_process");
 
+const { check: checkAgentEnv } = require("./agent-env-check.cjs");
 const { locateRegistry } = require("./task-claim-hook.cjs");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 function main(argv) {
+  // No claim, and so no work, in a session this repository's hooks do not reach.
+  const env = checkAgentEnv();
+  if (!env.ok) {
+    console.error(env.message);
+    return 1;
+  }
   const registryRoot = locateRegistry(REPO_ROOT);
   if (!registryRoot) {
     console.error(

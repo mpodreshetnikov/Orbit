@@ -78,6 +78,7 @@ BEGIN;
 \i functions/create_medication_refill_digests.sql
 \i functions/get_medication_refill_snooze.sql
 \i functions/set_medication_refill_snooze.sql
+\i functions/med_regimen_search_text.sql
 
 -- Medication action functions
 \i functions/mark_dose_taken.sql

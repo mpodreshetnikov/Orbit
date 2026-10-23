@@ -36,17 +36,46 @@ import { getUnitIcon, getUnitLabel } from "./medication-units";
 import type {
   MedRegimen,
   MedSchedule,
-  MedScheduleDailyTimes,
   MedScheduleDaysOfWeek,
-  MedScheduleIntervalDays,
   MedDuration,
   CreateMedRegimenInput,
   UpdateMedRegimenInput,
-  PlannedIntake,
-  RegimenInventory,
   AddOneTimeToExistingPayload,
 } from "@/types/regimen";
-import { toPositiveAmount, withCarriedStrength } from "@/types/regimen";
+import { firstUnitStrength, toPositiveAmount } from "@/types/regimen";
+import {
+  courseToAddTo,
+  getInitialDuration,
+  getInitialIntakeAdvice,
+  getInitialSchedule,
+  getInitialStartDate,
+  getReminderSlotsForIntakesPerDay,
+  hasPerSlotAmounts,
+  oneTimeCourseColumns,
+  oneTimeSubmission,
+  regularCourseColumns,
+  reminderSlots as slotsOf,
+  reminderTimesProblem,
+  scheduleForMode,
+  toDatetimeLocalString,
+  withDayToggled,
+  withIntervalEvery,
+  withSlotAdded,
+  withSlotChanged,
+  withSlotRemoved,
+  type CourseFormValues,
+} from "@/types/regimen-form";
+
+// The form's pure parts live in `@/types/regimen-form`, shared with the iOS client; these are
+// re-exported because they were first exported from here.
+export {
+  getInitialDuration,
+  getInitialSchedule,
+  getInitialStartDate,
+  getReminderSlotsForIntakesPerDay,
+  mapLegacyIntakeAdvice,
+  toDatetimeLocalString,
+} from "@/types/regimen-form";
 
 interface MedicationFormPropsBase {
   mode: "create" | "edit";
@@ -69,165 +98,28 @@ interface MedicationFormPropsEdit extends MedicationFormPropsBase {
 
 type MedicationFormProps = MedicationFormPropsCreate | MedicationFormPropsEdit;
 
-const DEFAULT_SCHEDULE: MedSchedule = {
-  mode: "daily_times",
-  times: ["09:00"],
-  amounts: [1],
-};
-
-const DEFAULT_DURATION: MedDuration = { type: "endless" };
-
 /** Index of the schedule step in the mobile wizard, where the slots are edited. */
 const SCHEDULE_WIZARD_STEP = 1;
 
-/** Schedules whose `times` carry a matching per-slot `amounts` array. */
-type MedSchedulePerSlot = MedScheduleDailyTimes | MedScheduleIntervalDays | MedScheduleDaysOfWeek;
+/** Units a per-unit strength is commonly written in. */
+const STRENGTH_UNITS = ["milligram", "microgram", "gram", "iu", "ml"] as const;
 
-/**
- * True for the schedule modes that `generate_med_dose_events_for_person_ids.sql`
- * doses slot by slot, reading `amounts[i]` beside `times[i]` and falling back to
- * the course's base amount when a slot has none.
- */
-function hasPerSlotAmounts(s: MedSchedule): s is MedSchedulePerSlot {
-  return s.mode === "daily_times" || s.mode === "interval_days" || s.mode === "days_of_week";
+/** The strength units to offer, keeping a stored unit outside the list selectable. */
+function strengthUnitOptions(current: string): string[] {
+  // A blank stored unit is never offered: Radix reserves the empty value for
+  // clearing a select and throws on an item that carries it.
+  return !current.trim() || (STRENGTH_UNITS as readonly string[]).includes(current)
+    ? [...STRENGTH_UNITS]
+    : [...STRENGTH_UNITS, current];
 }
 
-/**
- * `amounts` aligned one-to-one with `times`: overrides that exist are kept, and a
- * slot without one takes the base dose the generator would fall back to for it.
- */
-function alignAmounts(times: string[], amounts: number[] | undefined, base: number): number[] {
-  return times.map((_, i) => toPositiveAmount(amounts?.[i], base));
-}
-
-/**
- * A time no slot uses yet. The generator inserts one event per regimen and minute,
- * so two slots at the same time would show two doses in the form and produce one.
- */
-function nextUnusedTime(times: string[]): string {
-  const used = new Set(times);
-  const preset = PRESET_INTAKE_TIMES.find((time) => !used.has(time));
-  if (preset) return preset;
-  for (let minutes = 0; minutes < 24 * 60; minutes += 30) {
-    const candidate = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-    if (!used.has(candidate)) return candidate;
+function strengthUnitLabel(unit: string, t: ReturnType<typeof useTranslations>): string {
+  if (unit === "microgram") return t("medications.unitMicrogram");
+  if ((MEDICATION_UNITS as string[]).includes(unit)) {
+    return t(medicationUnitKey(unit as MedicationUnit), { count: 1 });
   }
-  return "08:00";
+  return unit;
 }
-
-// Preset intake times: morning (9AM), midday (12), late afternoon (3PM), evening (8PM), night (11PM), plus extras for 6–10
-const PRESET_INTAKE_TIMES: string[] = [
-  "09:00", // morning
-  "12:00", // midday
-  "15:00", // late afternoon
-  "20:00", // evening
-  "23:00", // night
-  "07:00", // early morning
-  "10:00", // mid morning
-  "14:00", // afternoon
-  "18:00", // late evening
-  "21:00", // before bed
-];
-
-/** Order for 1–5 intakes: 1=morning, 2=morning+evening, 3=morning+late afternoon+evening, 4=+midday, 5=+night */
-const INTAKES_1_TO_5_TIMES: string[] = ["09:00", "20:00", "15:00", "12:00", "23:00"];
-
-/** Format a Date as YYYY-MM-DDTHH:mm for datetime-local input */
-export function toDatetimeLocalString(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-export function getReminderSlotsForIntakesPerDay(n: number): { time: string; amount: number }[] {
-  if (n < 1 || n > 10) return [{ time: "09:00", amount: 1 }];
-  if (n <= 5) {
-    const times = INTAKES_1_TO_5_TIMES.slice(0, n).sort();
-    return times.map((time) => ({ time, amount: 1 }));
-  }
-  const ordered = [...PRESET_INTAKE_TIMES].sort();
-  return ordered.slice(0, n).map((time) => ({ time, amount: 1 }));
-}
-
-export function getInitialSchedule(
-  initial: MedRegimen | null | undefined,
-  defaultKind: MedicationKind | undefined,
-): MedSchedule {
-  if (!initial?.schedule) {
-    return defaultKind === "one_time" ? { mode: "one_off", due_at: "" } : DEFAULT_SCHEDULE;
-  }
-  const s = initial.schedule;
-  if (s.mode === "one_off") return { ...s };
-  if (s.mode === "daily_times")
-    return { mode: "daily_times", times: s.times ?? ["09:00"], amounts: s.amounts ?? [1] };
-  if (s.mode === "interval_hours")
-    return {
-      mode: "interval_hours",
-      interval: { every: s.interval?.every ?? 1 },
-      amount: toPositiveAmount((s as { amount?: number }).amount),
-    };
-  if (s.mode === "interval_days") {
-    const sd = s as {
-      interval?: { every?: number };
-      time_of_day?: string;
-      times?: string[];
-      amounts?: number[];
-    };
-    const times = sd.times?.length ? sd.times : [sd.time_of_day ?? "09:00"];
-    const amounts = sd.amounts?.length ? sd.amounts : times.map(() => 1);
-    return { mode: "interval_days", interval: { every: sd.interval?.every ?? 1 }, times, amounts };
-  }
-  if (s.mode === "days_of_week") {
-    const sw = s as { days_of_week?: number[]; times?: string[]; amounts?: number[] };
-    return {
-      mode: "days_of_week",
-      days_of_week: sw.days_of_week ?? [1, 2, 3, 4, 5],
-      times: sw.times ?? ["09:00"],
-      // Carried verbatim: the generator doses these per slot, so rewriting or
-      // dropping them here silently replaces the course's weekly overrides.
-      ...(sw.amounts?.length ? { amounts: [...sw.amounts] } : {}),
-    };
-  }
-  return DEFAULT_SCHEDULE;
-}
-
-export function getInitialDuration(initial: MedRegimen | null | undefined): MedDuration {
-  if (!initial?.duration) return DEFAULT_DURATION;
-  const d = initial.duration;
-  const start = (d as { start_date?: string }).start_date;
-  if (d.type === "until_date")
-    return { type: "until_date", end_date: d.end_date ?? "", start_date: start };
-  if (d.type === "for_days") return { type: "for_days", days: d.days ?? 1, start_date: start };
-  return { type: "endless", start_date: start };
-}
-
-export function getInitialStartDate(initial: MedRegimen | null | undefined): string {
-  const start = initial?.duration && (initial.duration as { start_date?: string }).start_date;
-  if (start) return start;
-  return new Date().toISOString().slice(0, 10);
-}
-
-export const mapLegacyIntakeAdvice = (v: string | null | undefined): string => {
-  if (!v) return "";
-  const legacyToNew: Record<string, string> = {
-    before_breakfast: "before_meal",
-    before_lunch: "before_meal",
-    before_dinner: "before_meal",
-    before_bed: "before_bed",
-    with_breakfast: "with_meal",
-    with_lunch: "with_meal",
-    with_dinner: "with_meal",
-    after_breakfast: "after_meal",
-    after_lunch: "after_meal",
-    after_dinner: "after_meal",
-  };
-  return (
-    legacyToNew[v] ??
-    (["before_meal", "with_meal", "after_meal", "before_bed", "morning_fasting", "custom"].includes(
-      v,
-    )
-      ? v
-      : "")
-  );
-};
 
 export function MedicationForm({
   mode,
@@ -246,12 +138,17 @@ export function MedicationForm({
     return defaultKind ?? "regular";
   });
   const [unit, setUnit] = useState<MedicationUnit>(() => initial?.intake_unit ?? "pill");
-  const [dosePerUnit, setDosePerUnit] = useState(() => "");
-  const [intakeAdvice, setIntakeAdvice] = useState(
-    () =>
-      mapLegacyIntakeAdvice(initial?.intake_advice_type ?? null) ||
-      (initial?.intake_advice_type === "none" ? "" : (initial?.intake_advice_type ?? "")),
+  // What one unit of the dosage form contains (`ADR-260907-cvj`): 100 mg in one
+  // tablet, not what the whole intake delivers, so it survives a titration.
+  const initialStrength = firstUnitStrength(initial?.dose_definition);
+  const [strengthName, setStrengthName] = useState(() => initialStrength?.name ?? "");
+  const [strengthAmount, setStrengthAmount] = useState<number | null>(
+    () => initialStrength?.amount ?? null,
   );
+  const [strengthUnit, setStrengthUnit] = useState(
+    () => initialStrength?.unit.trim() || "milligram",
+  );
+  const [intakeAdvice, setIntakeAdvice] = useState(() => getInitialIntakeAdvice(initial));
   const [intakeAdviceCustom, setIntakeAdviceCustom] = useState(
     () => initial?.intake_advice_text ?? "",
   );
@@ -312,48 +209,29 @@ export function MedicationForm({
     setWizardStep((s) => Math.min(s, totalWizardSteps - 1));
   }, [kind, totalWizardSteps]);
 
-  /**
-   * What is wrong with the slot times, if anything. A blank slot is cast to a
-   * timestamp by the generator and fails the whole regimen, and two slots at one
-   * time show a dose it never produces — it inserts one event per regimen and
-   * scheduled minute.
-   */
+  /** What is wrong with the slot times, if anything (`reminderTimesProblem`). */
   const reminderTimesError = (): string => {
-    if (!hasPerSlotAmounts(schedule)) return "";
-    const times = schedule.times ?? [];
-    if (times.some((time) => !/^\d{1,2}:\d{2}(:\d{2})?$/.test(time.trim()))) {
-      return t("medications.reminderTimeRequired");
-    }
-    if (new Set(times).size !== times.length) return t("medications.duplicateReminderTimes");
-    return "";
+    const problem = reminderTimesProblem(schedule);
+    return problem ? t(problem) : "";
   };
 
-  /**
-   * The form has no field for a strength yet, so an edit must not be the thing
-   * that destroys one recorded elsewhere -- over the connector, or by hand. It
-   * rebuilt `dose_definition` from its own inputs alone, which silently emptied
-   * the ingredients of every course anyone opened and saved, even when the save
-   * changed only a reminder time.
-   *
-   * What carries over and what does not is `withCarriedStrength`, shared with
-   * the MCP update path so the rule is stated once: a strength belongs to the
-   * unit it was recorded for, and the legacy total additionally to the amount.
-   */
-  const buildDoseDefinition = (amount: number): PlannedIntake =>
-    withCarriedStrength(initial?.dose_definition, { amount, unit });
-
-  const buildInventory = (): RegimenInventory | null =>
-    inventoryEnabled
-      ? {
-          enabled: true,
-          current_amount: Number(inventoryCurrent) || 0,
-          refill_threshold_amount: inventoryRefillThreshold
-            ? Number(inventoryRefillThreshold)
-            : undefined,
-          unit,
-          auto_decrement_on_taken: true,
-        }
-      : null;
+  /** Everything the form holds, for the shared builders of what a save writes. */
+  const formValues = (): CourseFormValues => ({
+    name,
+    unit,
+    strength: { name: strengthName, amount: strengthAmount, unit: strengthUnit },
+    intakeAdvice,
+    intakeAdviceCustom,
+    schedule,
+    duration,
+    startDate,
+    inventory: {
+      enabled: inventoryEnabled,
+      current: inventoryCurrent,
+      refillThreshold: inventoryRefillThreshold,
+    },
+    notes,
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -364,12 +242,6 @@ export function MedicationForm({
       setBasicErrorType("name");
       return;
     }
-    const advice = intakeAdvice?.trim() || null;
-    const intake_advice_type =
-      !advice || advice === "__none__" ? "none" : advice === "custom" ? "custom" : advice;
-    const intake_advice_text =
-      intake_advice_type === "custom" ? intakeAdviceCustom.trim() || null : null;
-
     if (kind === "one_time") {
       const scheduledAtISO = scheduledAt ? new Date(scheduledAt).toISOString() : "";
       if (!scheduledAtISO && mode === "create") {
@@ -377,51 +249,19 @@ export function MedicationForm({
         return;
       }
       if (mode === "create") {
-        const trimmedName = name.trim();
-        const nameLower = trimmedName.toLowerCase();
-        let addToRegimenId: string | null = selectedRegimenId;
-        if (!addToRegimenId && regimensList?.length) {
-          const matched = regimensList.find(
-            (r) => r.custom_name.trim().toLowerCase() === nameLower,
-          );
-          if (matched) addToRegimenId = matched.id;
-        }
-        if (addToRegimenId) {
-          (onSubmit as (d: CreateMedRegimenInput | AddOneTimeToExistingPayload) => void)({
-            addToRegimenId,
-            scheduled_at: scheduledAtISO,
-            amount: toPositiveAmount(oneTimeAmount),
-            unit,
-            notes: notes.trim() || null,
-          } as AddOneTimeToExistingPayload);
-          return;
-        }
-        const payload: CreateMedRegimenInput = {
-          person_id: personId,
-          custom_name: trimmedName,
-          intake_unit: unit,
-          dose_definition: buildDoseDefinition(toPositiveAmount(oneTimeAmount)),
-          intake_advice_type: "none",
-          intake_advice_text: null,
-          schedule: { mode: "one_off", due_at: scheduledAtISO },
-          duration: { type: "endless" },
-          inventory: null,
-          notes: notes.trim() || null,
-        };
-        (onSubmit as (d: CreateMedRegimenInput) => void)(payload);
+        (onSubmit as (d: CreateMedRegimenInput | AddOneTimeToExistingPayload) => void)(
+          oneTimeSubmission(
+            formValues(),
+            personId,
+            oneTimeAmount,
+            scheduledAtISO,
+            courseToAddTo(name, selectedRegimenId, regimensList),
+          ),
+        );
       } else {
-        const payload = {
-          custom_name: name.trim(),
-          intake_unit: unit,
-          dose_definition: buildDoseDefinition(toPositiveAmount(oneTimeAmount)),
-          intake_advice_type: "none" as const,
-          intake_advice_text: null as string | null,
-          schedule: { mode: "one_off" as const, due_at: scheduledAtISO },
-          duration: { type: "endless" as const },
-          inventory: null,
-          notes: notes.trim() || null,
-        };
-        (onSubmit as (d: UpdateMedRegimenInput) => void)(payload as UpdateMedRegimenInput);
+        (onSubmit as (d: UpdateMedRegimenInput) => void)(
+          oneTimeCourseColumns(formValues(), initial, oneTimeAmount, scheduledAtISO),
+        );
       }
       return;
     }
@@ -440,103 +280,31 @@ export function MedicationForm({
       return;
     }
 
-    const scheduleAmounts = (schedule as { amounts?: number[] }).amounts;
-    // Only take the base dose from the slots when they all carry one. A partial
-    // array leaves the uncovered slots on the course's base dose, so overwriting
-    // it with the first override would quietly re-dose them.
-    const slotsCoverBaseDose =
-      hasPerSlotAmounts(schedule) &&
-      !!scheduleAmounts?.length &&
-      scheduleAmounts.length >= (schedule.times ?? []).length;
-    const amount =
-      schedule.mode === "interval_hours"
-        ? toPositiveAmount((schedule as { amount?: number }).amount)
-        : slotsCoverBaseDose
-          ? toPositiveAmount(scheduleAmounts![0])
-          : baseIntakeAmount;
-
-    const durationToSubmit: MedDuration =
-      duration.type === "for_days"
-        ? { type: "for_days", days: duration.days ?? 1, start_date: startDate }
-        : duration.type === "until_date"
-          ? { type: "until_date", end_date: duration.end_date ?? "", start_date: startDate }
-          : { type: "endless", start_date: startDate };
-
+    const columns = regularCourseColumns(formValues(), initial);
     if (mode === "create") {
       (onSubmit as (d: CreateMedRegimenInput) => void)({
         person_id: personId,
-        custom_name: name.trim(),
         status: "active",
-        intake_unit: unit,
-        dose_definition: buildDoseDefinition(amount),
-        intake_advice_type,
-        intake_advice_text,
-        schedule,
-        duration: durationToSubmit,
-        inventory: buildInventory(),
-        notes: notes.trim() || null,
+        ...columns,
       });
     } else {
-      (onSubmit as (d: UpdateMedRegimenInput) => void)({
-        custom_name: name.trim(),
-        intake_unit: unit,
-        dose_definition: buildDoseDefinition(amount),
-        intake_advice_type,
-        intake_advice_text,
-        schedule,
-        duration: durationToSubmit,
-        inventory: buildInventory(),
-        notes: notes.trim() || null,
-      });
+      (onSubmit as (d: UpdateMedRegimenInput) => void)(columns);
     }
   };
 
   const updateReminderTime = (index: number, field: "time" | "amount", value: string | number) => {
     setSlotsError("");
-    setSchedule((prev) => {
-      if (!hasPerSlotAmounts(prev)) return prev;
-      const times = [...(prev.times ?? [])];
-      if (field === "time") {
-        times[index] = value as string;
-        // Leave `amounts` untouched: a course that dosed its base amount on every
-        // slot keeps doing so instead of gaining overrides nobody asked for.
-        return { ...prev, times };
-      }
-      // Editing one amount materializes the whole array, aligned with `times`, so
-      // the generator pairs each slot with the amount shown beside it.
-      const amounts = alignAmounts(times, prev.amounts, baseIntakeAmount);
-      amounts[index] = toPositiveAmount(value);
-      return { ...prev, times, amounts };
-    });
+    setSchedule((prev) => withSlotChanged(prev, index, field, value, baseIntakeAmount));
   };
 
   const addReminderTime = () => {
     setSlotsError("");
-    setSchedule((prev) => {
-      if (!hasPerSlotAmounts(prev)) return prev;
-      const prevTimes = prev.times ?? [];
-      const times = [...prevTimes, nextUnusedTime(prevTimes)];
-      if (!prev.amounts?.length) return { ...prev, times };
-      // Align the existing slots first: appending to a partial array would shift
-      // every uncovered slot onto the amount beside it.
-      const amounts = [
-        ...alignAmounts(prevTimes, prev.amounts, baseIntakeAmount),
-        toPositiveAmount(prev.amounts[0], baseIntakeAmount),
-      ];
-      return { ...prev, times, amounts };
-    });
+    setSchedule((prev) => withSlotAdded(prev, baseIntakeAmount));
   };
 
   const removeReminderTime = (index: number) => {
     setSlotsError("");
-    setSchedule((prev) => {
-      if (!hasPerSlotAmounts(prev)) return prev;
-      const filtered = (prev.times ?? []).filter((_, i) => i !== index);
-      const times = filtered.length ? filtered : ["09:00"];
-      if (!prev.amounts?.length) return { ...prev, times };
-      const amounts = prev.amounts.filter((_, i) => i !== index);
-      return { ...prev, times, amounts: amounts.length ? amounts : [baseIntakeAmount] };
-    });
+    setSchedule((prev) => withSlotRemoved(prev, index, baseIntakeAmount));
   };
 
   const setScheduleMode = (next: MedSchedule) => {
@@ -544,24 +312,12 @@ export function MedicationForm({
   };
 
   const toggleDayOfWeek = (d: number) => {
-    setSchedule((prev) => {
-      if (prev.mode !== "days_of_week") return prev;
-      const days = (prev.days_of_week ?? []).includes(d)
-        ? (prev.days_of_week ?? []).filter((x) => x !== d)
-        : [...(prev.days_of_week ?? []), d].sort((a, b) => a - b);
-      return { ...prev, days_of_week: days };
-    });
+    setSchedule((prev) => withDayToggled(prev, d));
   };
 
   const DAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-  const reminderSlots = hasPerSlotAmounts(schedule)
-    ? ((schedule as { times?: string[]; amounts?: number[] }).times ?? []).map((time, i) => ({
-        time,
-        // No per-slot amount means the generator doses the base amount here, so show that.
-        amount: (schedule as { amounts?: number[] }).amounts?.[i] ?? baseIntakeAmount,
-      }))
-    : [];
+  const reminderSlots = slotsOf(schedule, baseIntakeAmount);
 
   const currentStep = Math.min(wizardStep, totalWizardSteps - 1);
 
@@ -767,14 +523,42 @@ export function MedicationForm({
                 {t("medications.dosePerUnit")}{" "}
                 <span className="text-muted-foreground font-normal">{t("common.optional")}</span>
               </Label>
+              <div className="flex items-center gap-2">
+                <NumberInput
+                  id="dosePerUnit"
+                  value={strengthAmount}
+                  onValueChange={setStrengthAmount}
+                  placeholder={t("medications.dosePerUnitPlaceholder")}
+                  className="w-24"
+                />
+                <Select value={strengthUnit} onValueChange={setStrengthUnit}>
+                  <SelectTrigger className="w-24" aria-label={t("medications.strengthUnit")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {strengthUnitOptions(strengthUnit).map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {strengthUnitLabel(u, t)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="activeIngredient">
+                {t("medications.activeIngredient")}{" "}
+                <span className="text-muted-foreground font-normal">{t("common.optional")}</span>
+              </Label>
               <Input
-                id="dosePerUnit"
-                value={dosePerUnit}
-                onChange={(e) => setDosePerUnit(e.target.value)}
-                placeholder={t("medications.dosePerUnitPlaceholder")}
+                id="activeIngredient"
+                value={strengthName}
+                onChange={(e) => setStrengthName(e.target.value)}
+                placeholder={t("medications.activeIngredientPlaceholder")}
               />
             </div>
           </div>
+          <p className="text-muted-foreground text-xs -mt-2">{t("medications.dosePerUnitHint")}</p>
           {kind === "one_time" && (
             <>
               <div className="space-y-2">
@@ -830,49 +614,15 @@ export function MedicationForm({
               <Label>{t("medications.frequency")}</Label>
               <Select
                 value={schedule.mode}
-                onValueChange={(v) => {
-                  if (v === "daily_times")
-                    setScheduleMode({ mode: "daily_times", times: ["09:00"], amounts: [1] });
-                  else if (v === "interval_hours")
-                    setScheduleMode({
-                      mode: "interval_hours",
-                      interval: {
-                        every:
-                          schedule.mode === "interval_hours"
-                            ? ((schedule as { interval?: { every?: number } }).interval?.every ?? 1)
-                            : 1,
-                      },
-                      amount:
-                        schedule.mode === "interval_hours"
-                          ? toPositiveAmount((schedule as { amount?: number }).amount)
-                          : 1,
-                    });
-                  else if (v === "interval_days") {
-                    const prev =
-                      schedule.mode === "interval_days"
-                        ? (schedule as {
-                            times?: string[];
-                            amounts?: number[];
-                            interval?: { every?: number };
-                          })
-                        : null;
-                    setScheduleMode({
-                      mode: "interval_days",
-                      interval: { every: prev?.interval?.every ?? 1 },
-                      times: prev?.times?.length ? prev.times : ["09:00"],
-                      amounts: prev?.amounts?.length ? prev.amounts : [1],
-                    });
-                  } else if (v === "days_of_week") {
-                    const prev =
-                      schedule.mode === "days_of_week" ? schedule : lastWeeklySchedule.current;
-                    setScheduleMode({
-                      mode: "days_of_week",
-                      days_of_week: prev?.days_of_week ?? [1, 2, 3, 4, 5],
-                      times: prev?.times?.length ? prev.times : ["09:00"],
-                      ...(prev?.amounts?.length ? { amounts: prev.amounts } : {}),
-                    });
-                  }
-                }}
+                onValueChange={(v) =>
+                  setScheduleMode(
+                    scheduleForMode(
+                      v as Parameters<typeof scheduleForMode>[0],
+                      schedule,
+                      lastWeeklySchedule.current,
+                    ),
+                  )
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -899,20 +649,7 @@ export function MedicationForm({
                       value={(schedule as { interval?: { every?: number } }).interval?.every ?? 1}
                       onValueChange={(n) => {
                         if (n === null) return;
-                        const every = toPositiveAmount(n);
-                        if (schedule.mode === "interval_hours")
-                          setSchedule({
-                            ...schedule,
-                            interval: { every },
-                            amount: (schedule as { amount?: number }).amount ?? 1,
-                          });
-                        else
-                          setSchedule({
-                            ...schedule,
-                            interval: { every },
-                            times: (schedule as { times?: string[] }).times ?? ["09:00"],
-                            amounts: (schedule as { amounts?: number[] }).amounts ?? [1],
-                          });
+                        setSchedule(withIntervalEvery(schedule, toPositiveAmount(n)));
                       }}
                       className="w-24"
                     />

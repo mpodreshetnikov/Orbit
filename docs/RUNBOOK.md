@@ -19,9 +19,10 @@ Notes:
 - Configure GitHub Actions Supabase values:
   - Secrets: `SUPABASE_ACCESS_TOKEN`, `SUPABASEDBPASS`
   - Variables: `SUPABASE_PROJECT_REF`
-- Configure GitHub Actions extension release values:
-  - Secret: `SUPABASE_PRODUCTION_SERVICE_ROLE_KEY`
-  - Variables: `SUPABASE_PROJECT_REF` and either `NEXT_PUBLIC_APP_ORIGIN` or `NEXT_PUBLIC_APP_ORIGINS`
+- Configure GitHub Actions extension release values (the release goes to your server, `docs/SELF_HOSTING.md`):
+  - Secret: `SERVICE_ROLE_KEY` when the server has one of its own (moved from hosted Supabase); otherwise the job derives the server's key from `ORBIT_MASTER_KEY`, as `deploy/orbit` did
+  - Variable: `ORBIT_DOMAIN` (and `ORBIT_HTTP_ONLY` for a test server); the build's app origin and Storage URL are both the server's URL
+  - Secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` (addons.mozilla.org, Developer Hub, Manage API Keys) to sign the Firefox build as an unlisted add-on. The signed `.xpi` and `firefox/updates.json` are published beside the Chrome archive, and Firefox updates itself from that file. Without them the release is Chrome-only. AMO signs a version once; a publish that failed after signing is finished by the next run, which takes the file AMO already signed when it holds exactly the files of this build, and otherwise fails until the manifest version is bumped.
 - Disable Vercel's automatic Git deploy integration if you want GitHub Actions to be the only deployment trigger.
 - Command execution policy (including avoiding `npm run` for project workflows) is canonical in `docs/QUALITY.md`.
 - MCP setup instructions are in `mcp/README.md`.
@@ -37,7 +38,7 @@ Notes:
 - CI flow:
   - `quality-gates` fails if packaged extension files change without a manifest version bump.
   - `extension-release-bundle` runs when the manifest version changes and uploads the versioned ZIP + `latest.json` as a workflow artifact.
-  - `publish-extension-release` runs only on `main` and uploads the prepared bundle to Supabase Storage.
+  - `publish-extension-release` runs only on `main`, after `deploy-self-hosted`. It publishes when the server's `latest.json` is missing or older than the manifest, builds the bundle for the server's URL and uploads it to the server's Storage. An extension only works on the origins it was built for, so a build for another domain is invisible to the app.
 - Local/manual operator flow:
   - run `extension-release-build`
   - inspect `.artifacts/extension-release/`

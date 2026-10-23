@@ -2,46 +2,24 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import { sortByMeasurementOrder } from "@/lib/measurement-order";
+import {
+  MEASUREMENT_LIST_SELECT,
+  normalizeMeasurementCategory,
+  searchMeasurementSummaries,
+  summarizeMeasurements,
+  type MeasurementListRow,
+} from "@/types/measurement-summary";
 import type {
   Measurement,
   MeasurementSummary,
   MeasurementHistoryPoint,
   CreateMeasurementInput,
   UpdateMeasurementInput,
-  MeasurementCategory,
 } from "@/types";
 
 // ============================================================================
 // FETCH ALL MEASUREMENTS FOR A PERSON (aggregated by measurement type)
 // ============================================================================
-interface RawMeasurementRow {
-  id: string;
-  person_id: string;
-  catalog_id: string;
-  value: number;
-  measured_at: string;
-  notes: string | null;
-  created_by_user_id: string;
-  created_at: string;
-  measurement_catalog: {
-    code: string;
-    name_ru: string;
-    name_en: string;
-    unit_ru: string;
-    unit_en: string;
-    category: string;
-    sort_order: number;
-  };
-}
-
-function normalizeMeasurementCategory(value: string): MeasurementCategory {
-  if (value === "basic" || value === "body" || value === "limbs" || value === "vital") {
-    return value;
-  }
-  return "basic";
-}
-
 async function fetchPersonMeasurements(
   personId: string,
   search?: string,
@@ -50,27 +28,7 @@ async function fetchPersonMeasurements(
 
   const { data, error } = await supabase
     .from("measurements")
-    .select(
-      `
-      id,
-      person_id,
-      catalog_id,
-      value,
-      measured_at,
-      notes,
-      created_by_user_id,
-      created_at,
-      measurement_catalog (
-        code,
-        name_ru,
-        name_en,
-        unit_ru,
-        unit_en,
-        category,
-        sort_order
-      )
-    `,
-    )
+    .select(MEASUREMENT_LIST_SELECT)
     .eq("person_id", personId)
     .order("measured_at", { ascending: false });
 
@@ -78,69 +36,12 @@ async function fetchPersonMeasurements(
     throw new Error(error.message);
   }
 
-  if (!data || data.length === 0) {
-    return [];
-  }
-
-  // Group by catalog_id
-  const measurementMap = new Map<string, MeasurementSummary>();
-
-  for (const row of data as unknown as RawMeasurementRow[]) {
-    const catalog = row.measurement_catalog;
-    if (!catalog) continue;
-
-    const historyPoint: MeasurementHistoryPoint = {
-      id: row.id,
-      value: row.value,
-      measured_at: row.measured_at,
-      notes: row.notes,
-      created_at: row.created_at,
-    };
-
-    if (measurementMap.has(catalog.code)) {
-      const existing = measurementMap.get(catalog.code)!;
-      existing.history.push(historyPoint);
-      existing.measurement_count++;
-    } else {
-      measurementMap.set(catalog.code, {
-        code: catalog.code,
-        catalog_id: row.catalog_id,
-        name_ru: catalog.name_ru,
-        name_en: catalog.name_en,
-        unit_ru: catalog.unit_ru,
-        unit_en: catalog.unit_en,
-        category: normalizeMeasurementCategory(catalog.category),
-        sort_order: catalog.sort_order,
-        latest_value: row.value,
-        latest_date: row.measured_at,
-        measurement_count: 1,
-        history: [historyPoint],
-      });
-    }
-  }
-
-  // Convert map to array and sort history by date (oldest first for charts)
-  let summaries = Array.from(measurementMap.values()).map((summary) => ({
-    ...summary,
-    history: summary.history.sort(
-      (a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime(),
-    ),
-  }));
-
-  // Apply search filter if provided
-  if (search && search.trim()) {
-    const searchLower = search.toLowerCase().trim();
-    summaries = summaries.filter((s) => {
-      if (s.code.toLowerCase().includes(searchLower)) return true;
-      if (s.name_ru.toLowerCase().includes(searchLower)) return true;
-      if (s.name_en.toLowerCase().includes(searchLower)) return true;
-      return false;
-    });
-  }
-
-  // Sort by category, then by the catalog's sort_order so left/right pairs of
+  // Sorted by category, then by the catalog's sort_order so left/right pairs of
   // the same body part stay next to each other.
-  return sortByMeasurementOrder(summaries);
+  return searchMeasurementSummaries(
+    summarizeMeasurements((data ?? []) as unknown as MeasurementListRow[]),
+    search,
+  );
 }
 
 export function usePersonMeasurements(personId: string | null, search?: string) {

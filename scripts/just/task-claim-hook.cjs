@@ -30,6 +30,13 @@
  * command that failed (`PostToolUseFailure`): a failed command has often written before it failed.
  * A shell command that changed nothing stays silent.
  *
+ * A session that did not load this repository's `.claude/settings.json` -- a cloud session holding
+ * several repositories starts above the clones -- reaches these hooks through
+ * `project-hooks-bridge.cjs` (T-260902-jxe). The check also runs as a git `pre-commit` hook (`--git`,
+ * from `.githooks/pre-commit`), for whatever commits here without Claude Code's hooks. The verdict
+ * is the same; it judges the staged paths outside `docs/tasks/`, goes to stderr, where the command's
+ * output carries it back, is not throttled, and never refuses the commit.
+ *
  * Reported once per verdict per REPORT_INTERVAL_MS, tracked in .git/task-claim-hook-state, so a
  * fresh session hears it on its first code edit and then is left alone until the situation changes.
  * The three files under `.git/` are located through `git rev-parse --git-path`, so a linked
@@ -348,6 +355,13 @@ function changedPathsOutsideRegistry(repoRoot = REPO_ROOT, snapshot = null) {
   return [...changed];
 }
 
+/** Before a commit: the staged paths outside the registry. */
+function stagedPathsOutsideRegistry(repoRoot = REPO_ROOT) {
+  const result = git(repoRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames"]);
+  if (result.status !== 0) return [];
+  return result.stdout.split("\0").filter((file) => file && !isRegistryPath(file, repoRoot));
+}
+
 function readInput() {
   try {
     const raw = fs.readFileSync(0, "utf8");
@@ -357,7 +371,34 @@ function readInput() {
   }
 }
 
+function describePaths(paths) {
+  return paths.length === 1 ? paths[0] : `${paths[0]} and ${paths.length - 1} more`;
+}
+
+function verdictNow() {
+  const registryRoot = locateRegistry();
+  if (registryRoot) refreshRegistry(registryRoot);
+  return evaluate({
+    marker: readMarker(),
+    registryRoot,
+    statusOf: (id) => taskStatusOnMain(registryRoot, id),
+  });
+}
+
+/** The pre-commit end: no hook input on stdin, nothing throttled, never a refusal. */
+function mainGit() {
+  const staged = stagedPathsOutsideRegistry(REPO_ROOT);
+  if (staged.length === 0) return;
+  const result = verdictNow();
+  if (result.verdict === "claimed") return;
+  process.stderr.write(`task-claim (pre-commit): ${message(result, describePaths(staged))}\n`);
+}
+
 function main() {
+  if (process.argv.includes("--git")) {
+    mainGit();
+    return;
+  }
   const input = readInput();
   const snapshotPath = preSnapshotPath(input.tool_use_id ?? input.session_id ?? "");
   if (process.argv.includes("--pre")) {
@@ -369,7 +410,7 @@ function main() {
   if (input.tool_name && SHELL_TOOLS.has(input.tool_name)) {
     const changed = changedPathsOutsideRegistry(REPO_ROOT, readPreSnapshot(snapshotPath));
     if (changed.length === 0) return;
-    filePath = changed.length === 1 ? changed[0] : `${changed[0]} and ${changed.length - 1} more`;
+    filePath = describePaths(changed);
   } else {
     if (input.tool_name && !EDIT_TOOLS.has(input.tool_name)) return;
     filePath = input.tool_input?.file_path ?? input.tool_input?.notebook_path ?? "";
@@ -377,14 +418,7 @@ function main() {
     filePath = filePath ? path.relative(REPO_ROOT, path.resolve(REPO_ROOT, filePath)) : "";
   }
 
-  const registryRoot = locateRegistry();
-  if (registryRoot) refreshRegistry(registryRoot);
-
-  const result = evaluate({
-    marker: readMarker(),
-    registryRoot,
-    statusOf: (id) => taskStatusOnMain(registryRoot, id),
-  });
+  const result = verdictNow();
   if (result.verdict === "claimed") return;
 
   const key = [result.verdict, result.id ?? "", result.status ?? ""].join(":");
@@ -426,5 +460,6 @@ module.exports = {
   message,
   readMarker,
   shouldReport,
+  stagedPathsOutsideRegistry,
   taskStatusOnMain,
 };

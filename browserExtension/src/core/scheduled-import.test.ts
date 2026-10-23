@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runScheduledImport } from "./import-runner.js";
-import { activeImportRuns } from "./active-runs.js";
+import { activeImportRuns, UPDATE_IN_PROGRESS_ERROR } from "./active-runs.js";
 import { liveRuns } from "./run-board.js";
 import { RUN_STARTED_AT_KEY } from "./session-janitor.js";
 import { createBackfillStore } from "./backfill-store.js";
@@ -404,6 +404,36 @@ describe("runScheduledImport", () => {
     expect(harness.getSession()).toBeNull();
     expect(activeImportRuns.has("session-1")).toBe(false);
     expect(activeImportRuns.has("session-2")).toBe(false);
+  });
+
+  it("gives the window back when an update holds the registry", async () => {
+    const harness = createHarness();
+    const release = activeImportRuns.holdForUpdate();
+    try {
+      await expect(runScheduledImport(INPUT, harness.deps)).rejects.toThrow(
+        UPDATE_IN_PROGRESS_ERROR,
+      );
+    } finally {
+      release?.();
+    }
+    expect(harness.createdWindows).toEqual([]);
+    expect(harness.connector.parse).not.toHaveBeenCalled();
+    expect(harness.getSession()).toBeNull();
+  });
+
+  it("keeps an update out while the window's session is being created", async () => {
+    const harness = createHarness();
+    let heldDuringCreate: (() => void) | null | undefined;
+    const create = harness.callEdge.getMockImplementation()!;
+    harness.callEdge.mockImplementation(async (url: string, token: string, payload) => {
+      if (payload.action === "create_session" && heldDuringCreate === undefined) {
+        heldDuringCreate = activeImportRuns.holdForUpdate();
+      }
+      return create(url, token, payload);
+    });
+    await runScheduledImport(INPUT, harness.deps);
+    expect(heldDuringCreate).toBeNull();
+    expect(activeImportRuns.size()).toBe(0);
   });
 
   it("puts each window on the run board while it runs, and takes it off after", async () => {

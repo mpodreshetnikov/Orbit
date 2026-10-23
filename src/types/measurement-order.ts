@@ -1,4 +1,4 @@
-import { MEASUREMENT_CATEGORIES, type MeasurementCategory } from "@/types";
+import { MEASUREMENT_CATEGORIES, type MeasurementCategory } from "./measurement";
 
 /**
  * Shared ordering rules for measurement types.

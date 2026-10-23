@@ -1,0 +1,42 @@
+{
+  // Self-contained on purpose: no `extends`.
+  //
+  // Expo documents `"extends": "expo/tsconfig.base"`, and both forms of it cost this repository a
+  // red pipeline. The bare specifier resolves through the package's exports map, which tsc handles
+  // and Vite's tsconfig reader does not. Writing the path out fixed that but moved the problem: Vite
+  // looks up the nearest tsconfig for every file it transforms, so `mobile`'s unit tests then needed
+  // `mobile/node_modules` to exist — and `test-unit-coverage` runs every vitest project from a job
+  // that installs only the web app's dependencies. Three test files failed there while passing
+  // locally.
+  //
+  // So the options Expo's base sets are written here instead, copied from
+  // expo/tsconfig.base.json at SDK 58 and unchanged at SDK 57. The cost is that an Expo change to
+  // them has to be copied again; `expo-doctor` is what notices. The gain is that this file resolves
+  // with nothing installed, which is the condition half the lanes run in.
+  "compilerOptions": {
+    "allowJs": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "ESNext"],
+    "module": "preserve",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "target": "ESNext",
+    "strict": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@db": ["../supabase/db/database.types"],
+      // The web app's pure modules this client shares rather than copies: the regimen and
+      // medication types with their helpers, and the message catalogue. metro.config.js watches
+      // exactly these two folders, so nothing else outside this project can be bundled by accident.
+      "@orbit-types/*": ["../src/types/*"],
+      "@orbit-messages/*": ["../src/messages/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "exclude": ["node_modules", "babel.config.js", "metro.config.js", "ios", "android"]
+}

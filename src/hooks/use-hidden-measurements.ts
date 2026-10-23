@@ -8,7 +8,7 @@ import {
   normalizeHiddenMeasurementCodes,
   toggleHiddenCode,
   type HiddenMeasurementCodes,
-} from "@/lib/measurement-visibility";
+} from "@/types/measurement-visibility";
 import { useUserPreferences, USER_PREFERENCES_QUERY_KEY } from "./use-user-preferences";
 
 async function persistHiddenMeasurementCodes(
