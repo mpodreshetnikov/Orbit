@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(23);
+SELECT plan(25);
 
 SELECT ok(
   to_regprocedure(
@@ -680,6 +680,63 @@ SELECT is(
   ),
   2::bigint,
   'no-op updates do not create extra audit rows'
+);
+
+-- 2026-10-18: the owner filtered the feed by "Uncategorized" and saw nothing, while the budget
+-- report counted those line items. A line item with no category is the canonical uncategorized
+-- category's, in the feed as in the report.
+SELECT is(
+  (
+    SELECT count(*)
+    FROM public.money_list_transactions_feed(
+      '73000000-0000-0000-0000-000000000010'::uuid,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      ARRAY[(
+        SELECT category.id
+        FROM public.money_categories AS category
+        WHERE category.category_kind = 'canonical'
+          AND category.system_key = 'uncategorized'
+        LIMIT 1
+      )]::uuid[],
+      'all',
+      'all',
+      NULL,
+      NULL,
+      0,
+      10
+    )
+  ),
+  2::bigint,
+  'feed filter by the uncategorized category finds line items with no category'
+);
+
+SELECT is(
+  (
+    SELECT total_count
+    FROM public.money_transaction_feed_summary(
+      '73000000-0000-0000-0000-000000000010'::uuid,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      ARRAY[(
+        SELECT category.id
+        FROM public.money_categories AS category
+        WHERE category.category_kind = 'canonical'
+          AND category.system_key = 'uncategorized'
+        LIMIT 1
+      )]::uuid[],
+      'all',
+      'all',
+      NULL,
+      NULL
+    )
+  ),
+  2::bigint,
+  'summary counts line items with no category under the uncategorized category'
 );
 
 SELECT * FROM finish();

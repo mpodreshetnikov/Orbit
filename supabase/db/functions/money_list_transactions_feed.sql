@@ -79,7 +79,15 @@ DECLARE
   v_search text := NULLIF(btrim(p_search), '');
   v_offset integer := GREATEST(COALESCE(p_offset, 0), 0);
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 50), 1), 200);
+  v_uncategorized_category_id uuid;
 BEGIN
+  SELECT category.id
+  INTO v_uncategorized_category_id
+  FROM public.money_categories AS category
+  WHERE category.category_kind = 'canonical'
+    AND category.system_key = 'uncategorized'
+  LIMIT 1;
+
   IF p_payer_person_id IS NULL THEN
     RAISE EXCEPTION 'p_payer_person_id is required';
   END IF;
@@ -127,11 +135,22 @@ BEGIN
       AND (
         p_category_ids IS NULL
         OR cardinality(p_category_ids) = 0
+        -- A line item without a category belongs to the canonical uncategorized category, as the
+        -- budget report counts it; a transaction with no line items at all is uncategorized too.
         OR EXISTS (
           SELECT 1
           FROM public.money_line_items AS li_category
           WHERE li_category.transaction_id = t.id
-            AND li_category.category_id = ANY (p_category_ids)
+            AND COALESCE(li_category.category_id, v_uncategorized_category_id)
+              = ANY (p_category_ids)
+        )
+        OR (
+          v_uncategorized_category_id = ANY (p_category_ids)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM public.money_line_items AS li_any
+            WHERE li_any.transaction_id = t.id
+          )
         )
       )
       AND (
