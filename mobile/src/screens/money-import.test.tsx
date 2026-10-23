@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { router } from "expo-router";
 import { ActionSheetIOS, Alert } from "react-native";
+import { fetchImportBatch, REPORT_PAGE } from "@/features/money/import";
 import ImportBatchScreen from "@/screens/import-batch-screen";
 import ImportHistoryScreen from "@/screens/import-history-screen";
 import MoneyImportScreen from "@/screens/money-import-screen";
@@ -235,6 +237,44 @@ describe("a statement import", () => {
 });
 
 describe("the import history", () => {
+  it("lists a new preview at once, before it is applied", async () => {
+    seed({
+      ...db.tables,
+      money_import_batches: [batch("b-old", "completed", "2026-10-01T10:00:00Z")],
+    });
+    rpcHandlers["money-import"] = () => {
+      db.tables.money_import_batches!.push(batch("b-new", "pending", "2026-10-20T10:00:00Z"));
+      return { batch_id: "b-new" };
+    };
+    const { client } = await renderScreens(routes, "/money/import");
+    // The app keeps a read fresh for 30 seconds; the history must not wait that out.
+    client.setDefaultOptions({ queries: { retry: false, gcTime: Infinity, staleTime: 30_000 } });
+    await fireEvent.press(await screen.findByText("История импортов"));
+    expect(await screen.findAllByText(/^\d{2}\.10\.2026/)).toHaveLength(1);
+    await act(() => router.push("/money/import"));
+    await fireEvent.press(await screen.findByText("Загрузить файл"));
+    await fireEvent.press(await screen.findByText("Создать счёт T-Bank"));
+    await screen.findByLabelText("Счёт по умолчанию для неизвестных карт: T-Bank");
+    await fireEvent.press(screen.getByText("Подтвердить импорт"));
+    await screen.findByText("Применить пакет");
+    await act(() => router.push("/money/import/history"));
+    await waitFor(() => expect(screen.getAllByText(/^\d{2}\.10\.2026/)).toHaveLength(2));
+  });
+
+  it("reads every page of a large report, in order", async () => {
+    db.tables.money_import_batch_rows = Array.from({ length: REPORT_PAGE + 2 }, (_, index) => ({
+      id: `r-${String(index).padStart(4, "0")}`,
+      batch_id: "b-new",
+      row_kind: "transaction",
+      source_row_index: REPORT_PAGE + 1 - index,
+      status: "inserted",
+      message: null,
+    }));
+    const report = await fetchImportBatch("b-new");
+    expect(report!.rows).toHaveLength(REPORT_PAGE + 2);
+    expect(report!.rows.map((row) => row.source_row_index).slice(0, 3)).toEqual([0, 1, 2]);
+  });
+
   it("lists the imports newest first, and a pending one is applied from its report", async () => {
     await renderScreens(routes, "/money/import");
     await fireEvent.press(await screen.findByText("История импортов"));

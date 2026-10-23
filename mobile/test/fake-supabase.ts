@@ -86,6 +86,8 @@ function compare(a: unknown, b: unknown): number {
   if (a === b) return 0;
   if (a == null) return -1;
   if (b == null) return 1;
+  // Numbers order as numbers, as Postgres orders them; the rest as text.
+  if (typeof a === "number" && typeof b === "number") return a < b ? -1 : 1;
   return String(a) < String(b) ? -1 : 1;
 }
 
@@ -101,6 +103,7 @@ class Query {
   private filters: Filter[] = [];
   private orders: { column: string; ascending: boolean }[] = [];
   private one = false;
+  private window: [number, number] | null = null;
   private write: Write | null = null;
 
   constructor(private readonly table: string) {}
@@ -153,6 +156,11 @@ class Query {
     this.orders.push({ column, ascending: options.ascending ?? true });
     return this;
   }
+  /** Rows `from` to `to`, both inclusive, as PostgREST pages them. */
+  range(from: number, to: number) {
+    this.window = [from, to];
+    return this;
+  }
   maybeSingle() {
     this.one = true;
     return this;
@@ -203,7 +211,9 @@ class Query {
       }
       return 0;
     });
-    const copy = structuredClone(sorted);
+    const copy = structuredClone(
+      this.window ? sorted.slice(this.window[0], this.window[1] + 1) : sorted,
+    );
     return { data: this.one ? (copy[0] ?? null) : copy, error: null };
   }
 

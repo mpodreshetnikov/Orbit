@@ -6,6 +6,7 @@ import {
   importBatchRows,
 } from "@orbit-types/money-import-rows";
 import { TBANK_CSV_SOURCE_ID } from "@orbit-types/money-import-tbank-csv";
+import { useQueryClient } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { FileSpreadsheet, History } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -32,6 +33,7 @@ const PREVIEW_ROWS = 20;
  */
 export default function MoneyImportScreen() {
   const router = useRouter();
+  const client = useQueryClient();
   const params = useLocalSearchParams<{ file?: string; name?: string }>();
   const person = usePerson();
   const personId = person.data?.id;
@@ -83,6 +85,8 @@ export default function MoneyImportScreen() {
         file_path: file?.name ?? null,
         rows: batch,
       });
+      // The preview is a pending batch: history lists it before it is applied or discarded.
+      void client.invalidateQueries({ queryKey: ["money-import-batches"] });
       router.replace(`/money/import/${result.batch_id}` as Href);
     } catch (error) {
       Alert.alert(t("common.error"), (error as Error).message);
