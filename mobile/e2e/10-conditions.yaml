@@ -1,0 +1,47 @@
+# Conditions: the health menu's «Диагнозы» by status with the status guide opened, the seeded
+# hypertension with its mentions, and a note added to it from the edit form.
+appId: host.exp.Exponent
+name: Диагнозы
+---
+- openLink: exp://127.0.0.1:8081/--/health
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Диагнозы"
+    timeout: 60000
+- tapOn: "Диагнозы"
+- extendedWaitUntil:
+    visible: "Активные диагнозы.*"
+    timeout: 20000
+- tapOn: "Справка по статусам"
+- takeScreenshot: conditions-01-list
+- tapOn: "Справка по статусам"
+- tapOn:
+    text: "Essential hypertension"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "История упоминаний"
+    timeout: 20000
+- takeScreenshot: conditions-02-hypertension
+- tapOn: "Действия: Essential hypertension"
+- tapOn: "Редактировать"
+- extendedWaitUntil:
+    visible: "Редактирование данных диагноза"
+    timeout: 10000
+- tapOn:
+    id: "condition-notes"
+# A fresh simulator shows the slide-to-type tip over its first keyboard.
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    id: "condition-notes"
+- inputText: " Дома 125/80."
+- hideKeyboard
+- takeScreenshot: conditions-03-edit
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: ".*Дома 125/80\\..*"
+    timeout: 20000
+- takeScreenshot: conditions-04-saved

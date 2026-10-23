@@ -6,7 +6,7 @@ import {
   isConfirmedByRecordApproval,
   isUnverifiedClosure,
   type ClosureCandidate,
-} from "./unverified-closure";
+} from "./condition-closure";
 import { CONDITION_STATUSES } from "@/types/condition";
 
 function mention(

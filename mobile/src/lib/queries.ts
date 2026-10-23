@@ -1,5 +1,6 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
+import type { UpdateConditionInput } from "@orbit-types/condition";
 import type { FindingSummary } from "@orbit-types/finding";
 import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
 import type {
@@ -29,6 +30,13 @@ import {
   unarchiveRegimen,
 } from "@/features/medications/actions";
 import { fetchRegimen, fetchRegimens } from "@/features/medications/query";
+import {
+  deleteCondition,
+  fetchCondition,
+  fetchConditions,
+  lookupIcdCode,
+  updateCondition,
+} from "@/features/conditions/query";
 import { fetchObservations } from "@/features/observations/query";
 import { fetchActiveRecords, fetchFindings, markFindingResolved } from "@/features/findings/query";
 import {
@@ -407,5 +415,41 @@ export function useMarkFindingResolved() {
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => void client.invalidateQueries({ queryKey: ["findings"] }),
+  });
+}
+
+export function useConditions(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["conditions", personId],
+    queryFn: () => fetchConditions(personId as string),
+    enabled: Boolean(personId),
+  });
+}
+
+export function useCondition(id: string) {
+  return useQuery({ queryKey: ["condition", id], queryFn: () => fetchCondition(id) });
+}
+
+/** An ICD-10 code's official names, once two characters are typed; codes never change. */
+export function useIcdLookup(code: string) {
+  return useQuery({
+    queryKey: ["icd-lookup", code],
+    queryFn: () => lookupIcdCode(code),
+    enabled: code.length >= 2,
+    staleTime: Infinity,
+  });
+}
+
+/** Edit a condition, or delete it with `remove`; the list and the condition are refetched. */
+export function useSaveCondition() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string } & ({ values: UpdateConditionInput } | { remove: true })) =>
+      "values" in input ? updateCondition(input.id, input.values) : deleteCondition(input.id),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onSettled: (_data, _error, input) => {
+      void client.invalidateQueries({ queryKey: ["conditions"] });
+      void client.invalidateQueries({ queryKey: ["condition", input.id] });
+    },
   });
 }
