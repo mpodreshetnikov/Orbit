@@ -960,6 +960,7 @@
     }
   },
   "common": {
+    "required": "Required",
     "actions": "Actions",
     "loading": "Loading...",
     "error": "Something went wrong",
