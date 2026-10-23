@@ -80,6 +80,7 @@ import {
 } from "@/features/money/transactions";
 import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
 import { saveCategory, type CategoryColumns } from "@/features/money/categories";
+import { fetchBudgetReport, saveBudgetTarget, type TargetKey } from "@/features/money/reports";
 import { deleteRule, fetchRules, reorderRules, saveRule } from "@/features/money/rules";
 import {
   fetchClinicalCatalog,
@@ -664,6 +665,7 @@ export function useSaveTransaction() {
       void client.invalidateQueries({ queryKey: ["money-feed"] });
       void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
       void client.invalidateQueries({ queryKey: ["money-merchant-names"] });
+      void client.invalidateQueries({ queryKey: ["money-budget-report"] });
       if (id) void client.invalidateQueries({ queryKey: ["money-transaction", id] });
     },
   });
@@ -743,5 +745,33 @@ export function useChangeRules() {
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     // Returned, so the change stays pending until the list it reordered has been read again.
     onSettled: () => client.invalidateQueries({ queryKey: ["money-category-rules"] }),
+  });
+}
+
+export function useBudgetReport(
+  personId: string | undefined,
+  monthStart: string,
+  currency: string,
+) {
+  return useQuery({
+    queryKey: ["money-budget-report", personId, monthStart, currency],
+    queryFn: () => fetchBudgetReport(personId!, monthStart, currency),
+    enabled: !!personId,
+  });
+}
+
+/** Set (`amount`) or remove (`amount: null`) a category's target for a month. */
+export function useSaveBudgetTarget() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      amount,
+      currency,
+      ...key
+    }: TargetKey & { amount: number | null; currency: string }) =>
+      saveBudgetTarget(key, amount, currency),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["money-budget-report"] }),
   });
 }

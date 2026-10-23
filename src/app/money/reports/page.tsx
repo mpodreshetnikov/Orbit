@@ -47,6 +47,16 @@ import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
 import type { MoneyBudgetCategoryNode, MoneyBudgetChartMode } from "@/types";
+import {
+  actualForMode,
+  currentReportMonth,
+  reportMonthLabel,
+  shiftReportMonth,
+  signedTarget,
+  targetDraftOf,
+  targetForMode,
+  type TargetDraft,
+} from "@/types/money-reports";
 import { MONEY_CURRENCIES } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,13 +90,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 const DEFAULT_REPORT_CURRENCY = "RUB";
 const COLORS = ["#2563eb", "#d97706", "#059669", "#dc2626", "#7c3aed", "#0f766e", "#64748b"];
 
-type TargetEditorState = { categoryId: string; direction: "income" | "expense"; amount: string };
+type TargetEditorState = TargetDraft & { categoryId: string };
 type Translate = (key: string) => string;
-
-function currentMonthParam() {
-  const now = new Date();
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-}
 
 function isMonthParam(value: string | null): value is string {
   return Boolean(value && /^\d{4}-\d{2}$/.test(value));
@@ -94,30 +99,6 @@ function isMonthParam(value: string | null): value is string {
 
 function monthStart(value: string) {
   return `${value}-01`;
-}
-
-function shiftMonth(value: string, delta: number) {
-  const [year, month] = value.split("-").map(Number);
-  const shifted = new Date(Date.UTC(year, month - 1 + delta, 1));
-  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthLabel(value: string, locale: string) {
-  const [year, month] = value.split("-").map(Number);
-  return new Intl.DateTimeFormat(locale, {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, 1)));
-}
-
-function targetEditorFromNode(node: MoneyBudgetCategoryNode): TargetEditorState {
-  const targetAmount = node.target?.target_amount ?? node.target_amount;
-  return {
-    categoryId: node.id,
-    direction: targetAmount < 0 ? "expense" : "income",
-    amount: targetAmount === 0 ? "" : String(Math.abs(targetAmount)),
-  };
 }
 
 function formatTooltipMoney(
@@ -153,18 +134,6 @@ function categoryPath(nodes: MoneyBudgetCategoryNode[], categoryId: string): str
     if (child) return [node.id, ...child];
   }
   return null;
-}
-
-function actualForMode(node: MoneyBudgetCategoryNode, mode: MoneyBudgetChartMode) {
-  if (mode === "income") return node.actual_income;
-  if (mode === "expenses") return Math.abs(node.actual_expenses);
-  return Math.abs(node.actual_net);
-}
-
-function targetForMode(node: MoneyBudgetCategoryNode, mode: MoneyBudgetChartMode) {
-  if (mode === "income") return node.target_amount > 0 ? node.target_amount : 0;
-  if (mode === "expenses") return node.target_amount < 0 ? Math.abs(node.target_amount) : 0;
-  return Math.abs(node.target_amount);
 }
 
 function BudgetTargetEditor({
@@ -286,7 +255,7 @@ export default function MoneyReportsPage() {
   const paramsString = searchParams?.toString() ?? "";
   const rawMonth = searchParams?.get("month") ?? null;
   const rawCurrency = (searchParams?.get("currency") ?? "").toUpperCase();
-  const reportMonth = isMonthParam(rawMonth) ? rawMonth : currentMonthParam();
+  const reportMonth = isMonthParam(rawMonth) ? rawMonth : currentReportMonth();
   const reportCurrency = MONEY_CURRENCIES.includes(rawCurrency as (typeof MONEY_CURRENCIES)[number])
     ? rawCurrency
     : DEFAULT_REPORT_CURRENCY;
@@ -377,7 +346,7 @@ export default function MoneyReportsPage() {
   }
 
   function openEditor(node: MoneyBudgetCategoryNode) {
-    setEditorState(targetEditorFromNode(node));
+    setEditorState({ categoryId: node.id, ...targetDraftOf(node) });
     if (isMobile) setMobileEditorOpen(true);
     else setDesktopEditorId(node.id);
   }
@@ -412,8 +381,8 @@ export default function MoneyReportsPage() {
 
   async function saveTarget() {
     if (!selectedPersonId || !editorState) return;
-    const amount = Number(editorState.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const targetAmount = signedTarget(editorState);
+    if (targetAmount === null) {
       toast.error(t("money.reportTargetValidation"));
       return;
     }
@@ -422,7 +391,7 @@ export default function MoneyReportsPage() {
         personId: selectedPersonId,
         categoryId: editorState.categoryId,
         monthStart: monthStart(reportMonth),
-        targetAmount: editorState.direction === "expense" ? -amount : amount,
+        targetAmount,
         currency: reportCurrency,
       });
       toast.success(t("money.reportTargetSaved"));
@@ -767,14 +736,14 @@ export default function MoneyReportsPage() {
                 size="icon"
                 className="rounded-full text-white hover:bg-white/10 hover:text-white"
                 onClick={() =>
-                  updateParams((params) => params.set("month", shiftMonth(reportMonth, -1)))
+                  updateParams((params) => params.set("month", shiftReportMonth(reportMonth, -1)))
                 }
                 aria-label={t("money.reportPreviousMonth")}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
               <div className="min-w-[11rem] text-center text-sm font-medium">
-                {monthLabel(reportMonth, intlLocale)}
+                {reportMonthLabel(reportMonth, intlLocale)}
               </div>
               <Button
                 type="button"
@@ -782,7 +751,7 @@ export default function MoneyReportsPage() {
                 size="icon"
                 className="rounded-full text-white hover:bg-white/10 hover:text-white"
                 onClick={() =>
-                  updateParams((params) => params.set("month", shiftMonth(reportMonth, 1)))
+                  updateParams((params) => params.set("month", shiftReportMonth(reportMonth, 1)))
                 }
                 aria-label={t("money.reportNextMonth")}
               >

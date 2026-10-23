@@ -59,6 +59,7 @@ const SECTIONS: [string, string][] = [
   ["money.accounts", "/money/accounts"],
   ["money.categories", "/money/categories"],
   ["money.rules", "/money/rules"],
+  ["money.reports", "/money/reports"],
 ];
 
 const signLabel = (sign: MoneyAmountSignFilter) =>

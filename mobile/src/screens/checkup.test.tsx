@@ -237,7 +237,10 @@ describe("a completion", () => {
     await fireEvent.press(await screen.findByText("Норма"));
     const note = await screen.findByLabelText("Заметка");
     expect(note.props.value).toBe("Норма");
-    expect(screen.getByLabelText("Прикрепить запись: Анализы · 01.09.2026")).toBeOnTheScreen();
+    // The attached record is named once the records list arrives, which can come after the form.
+    expect(
+      await screen.findByLabelText("Прикрепить запись: Анализы · 01.09.2026"),
+    ).toBeOnTheScreen();
     await fireEvent.changeText(note, "Ферритин 40");
     await fireEvent.press(screen.getByText("Сохранить"));
     await waitFor(() =>
