@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
 import SettingsScreen from "@/screens/settings-screen";
 import TodayScreen from "@/screens/today-screen";
@@ -155,6 +155,37 @@ describe("the settings", () => {
     );
     await renderScreens(routes, "/today/settings");
     expect(await screen.findByText("user_preferences is unavailable")).toBeOnTheScreen();
+  });
+
+  it("follows a fresher read in a field not yet typed in", async () => {
+    const { client } = await renderScreens(routes, "/today/settings");
+    expect(await screen.findByDisplayValue("08:30")).toBeOnTheScreen();
+    await fireEvent.changeText(screen.getByDisplayValue("Europe/Moscow"), "Asia/Tbilisi");
+    db.tables.user_preferences = [
+      {
+        auth_user_id: USER_ID,
+        checkup_notification_time: "21:00:00",
+        checkup_notification_timezone: "Europe/Berlin",
+      },
+    ];
+    await act(() => client.invalidateQueries());
+    expect(await screen.findByDisplayValue("21:00")).toBeOnTheScreen();
+    expect(screen.getByDisplayValue("Asia/Tbilisi")).toBeOnTheScreen();
+  });
+
+  it("keeps sign-out when the settings cannot load", async () => {
+    fail("notification_routing");
+    await renderScreens(routes, "/today/settings");
+    expect(await screen.findByText("notification_routing is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("ВЫБРАТЬ ПЕРСОНУ")).toBeOnTheScreen();
+    fail("notification_routing");
+    await renderScreens(routes, "/today/settings");
+    await fireEvent.press(await screen.findByText("Выйти"));
+    await waitFor(() =>
+      expect(screen.queryByText("notification_routing is unavailable")).toBeNull(),
+    );
   });
 
   it("signs out", async () => {

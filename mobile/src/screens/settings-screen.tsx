@@ -6,7 +6,7 @@ import {
 } from "@orbit-types/notification-routing";
 import { Stack } from "expo-router";
 import { Check } from "lucide-react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, Switch, View } from "react-native";
 import { Field, Input, Section } from "@/components/form";
 import { Button, Icon, Placeholder, Text } from "@/components/ui";
@@ -44,6 +44,23 @@ export default function SettingsScreen() {
         <Placeholder
           busy={busy}
           message={busy ? undefined : (household.error ?? settings.error)?.message}
+          // Settings is the only way out of the account: a failed read must not hide it.
+          action={
+            busy ? undefined : (
+              <View style={{ gap: space.sm }}>
+                <Button
+                  variant="outline"
+                  label={t("common.retry")}
+                  onPress={() => void (household.error ? household.refetch() : settings.refetch())}
+                />
+                <Button
+                  variant="outline"
+                  label={t("auth.signOut")}
+                  onPress={() => void signOut()}
+                />
+              </View>
+            )
+          }
         />
       </>
     );
@@ -103,14 +120,31 @@ export default function SettingsScreen() {
 /** When the daily checkup reminder comes, in which time zone. */
 function Reminders({ initial }: { initial: CheckupReminders }) {
   const save = useSaveNotificationSettings();
+  const kept = initial.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [time, setTime] = useState(initial.time);
-  const [timezone, setTimezone] = useState(
-    () => initial.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-  );
+  const [timezone, setTimezone] = useState(kept);
+  // A field follows a fresher read until it is typed in, so a save never sends a stale other half.
+  const [edited, setEdited] = useState({ time: false, timezone: false });
+  useEffect(() => {
+    if (!edited.time) setTime(initial.time);
+    // Only a fresher read: typing is what marks a field edited.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial.time]);
+  useEffect(() => {
+    if (!edited.timezone) setTimezone(kept);
+    // Only a fresher read: typing is what marks a field edited.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kept]);
   const submit = () =>
     save.mutate(
       { reminders: { time: normalizeReminderTime(time), timezone: timezone.trim() || null } },
-      { onSuccess: () => setTime(normalizeReminderTime(time)), onError: fail },
+      {
+        onSuccess: () => {
+          setTime(normalizeReminderTime(time));
+          setEdited({ time: false, timezone: false });
+        },
+        onError: fail,
+      },
     );
   return (
     <Section title={t("settings.pwa.checkupReminders")}>
@@ -123,7 +157,10 @@ function Reminders({ initial }: { initial: CheckupReminders }) {
           keyboardType="numbers-and-punctuation"
           placeholder="09:00"
           value={time}
-          onChangeText={setTime}
+          onChangeText={(value) => {
+            setEdited((was) => ({ ...was, time: true }));
+            setTime(value);
+          }}
         />
       </Field>
       <Field
@@ -136,7 +173,10 @@ function Reminders({ initial }: { initial: CheckupReminders }) {
           autoCorrect={false}
           placeholder="UTC"
           value={timezone}
-          onChangeText={setTimezone}
+          onChangeText={(value) => {
+            setEdited((was) => ({ ...was, timezone: true }));
+            setTimezone(value);
+          }}
         />
       </Field>
       <Button
