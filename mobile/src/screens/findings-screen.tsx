@@ -88,10 +88,17 @@ export default function FindingsScreen() {
             <Placeholder busy />
           ) : (
             <View style={{ paddingVertical: space.xl, gap: space.xs, alignItems: "center" }}>
-              <Text weight="medium">{t("findings.noFindings")}</Text>
-              <Text size="sm" tone="mutedForeground" style={{ textAlign: "center" }}>
-                {t("findings.noFindingsDescription")}
-              </Text>
+              {findings.data?.length ? (
+                // A search that matches nothing is not an empty history.
+                <Text weight="medium">{t("common.noResults")}</Text>
+              ) : (
+                <>
+                  <Text weight="medium">{t("findings.noFindings")}</Text>
+                  <Text size="sm" tone="mutedForeground" style={{ textAlign: "center" }}>
+                    {t("findings.noFindingsDescription")}
+                  </Text>
+                </>
+              )}
             </View>
           )
         }

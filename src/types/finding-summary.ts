@@ -26,6 +26,7 @@ export interface FindingListRow {
   description: string | null;
   histology: string | null;
   source_anchor: string;
+  finding_date: string | null;
   created_at: string;
   medical_records: { person_id: string; record_date: string | null; status: string };
   finding_type_catalog: { name_ru: string | null; name_en: string | null } | null;
@@ -39,7 +40,7 @@ export interface FindingListRow {
 export const FINDING_LIST_SELECT =
   "id, record_id, finding_type_id, finding_code, finding_type_text, body_site_id, site_code, " +
   "body_site_text, size_mm, count, resolution_status, severity, laterality, morphology, " +
-  "description, histology, source_anchor, created_at, " +
+  "description, histology, source_anchor, finding_date, created_at, " +
   "medical_records!inner(person_id, record_date, status), " +
   "finding_type_catalog(name_ru, name_en), body_site_catalog(name_ru, name_en)";
 
@@ -50,8 +51,12 @@ const SEVERITY_ORDER: Record<FindingSeverity, number> = {
   mild: 3,
 };
 
-const pointTime = (point: FindingHistoryPoint) =>
-  new Date(point.record_date || point.created_at).getTime();
+/** The day a finding was seen: its own date, else its record's, else when it was saved. */
+export function findingPointDate(point: FindingHistoryPoint): string {
+  return point.finding_date || point.record_date || point.created_at;
+}
+
+const pointTime = (point: FindingHistoryPoint) => new Date(findingPointDate(point)).getTime();
 
 /**
  * A finding is identified by what it is and where: the catalogue codes, or the text written for
@@ -81,6 +86,7 @@ export function summarizeFindings(rows: FindingListRow[]): FindingSummary[] {
       id: r.id,
       record_id: r.record_id,
       record_date: r.medical_records.record_date,
+      finding_date: r.finding_date,
       size_mm: r.size_mm,
       count: r.count,
       resolution_status: r.resolution_status,
@@ -116,7 +122,7 @@ export function summarizeFindings(rows: FindingListRow[]): FindingSummary[] {
       latest_count: history.find((h) => h.count !== null)?.count ?? null,
       latest_severity: latest.severity,
       latest_laterality: latest.laterality,
-      latest_date: latest.record_date,
+      latest_date: latest.finding_date || latest.record_date,
       is_resolved: latest.resolution_status === "resolved",
       occurrence_count: history.length,
       history,

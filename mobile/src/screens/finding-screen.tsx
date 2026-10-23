@@ -1,4 +1,4 @@
-import { findingKey } from "@orbit-types/finding-summary";
+import { findingKey, findingPointDate } from "@orbit-types/finding-summary";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Calendar, MapPin } from "lucide-react-native";
 import type { ReactNode } from "react";
@@ -36,10 +36,21 @@ export default function FindingScreen() {
     return (
       <>
         {header}
-        {findings.isPending || person.isPending ? (
+        {person.isPending || (findings.isPending && !person.error) ? (
           <Placeholder busy />
         ) : (
-          <Placeholder message={findings.error?.message ?? t("findings.notFound")} />
+          <Placeholder
+            message={(person.error ?? findings.error)?.message ?? t("findings.notFound")}
+            action={
+              person.error || findings.error ? (
+                <Button
+                  variant="outline"
+                  label={t("common.retry")}
+                  onPress={() => void (person.error ? person.refetch() : findings.refetch())}
+                />
+              ) : undefined
+            }
+          />
         )}
       </>
     );
@@ -102,11 +113,23 @@ export default function FindingScreen() {
               <Text tone="mutedForeground">{site}</Text>
             </View>
           ) : null}
-          {finding.is_resolved ? null : (
+          {finding.is_resolved ? null : records.error ? (
+            // Without the records there is nothing to attach the resolution to: say so, and retry.
+            <View style={{ gap: space.xs }}>
+              <Text size="sm" tone="destructive">
+                {records.error.message}
+              </Text>
+              <Button
+                variant="outline"
+                label={t("common.retry")}
+                onPress={() => void records.refetch()}
+              />
+            </View>
+          ) : (
             <Button
               variant="outline"
               label={t("findings.markAsResolved")}
-              busy={resolve.isPending}
+              busy={resolve.isPending || records.isPending}
               onPress={markResolved}
             />
           )}
@@ -139,7 +162,7 @@ export default function FindingScreen() {
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.xs }}>
                 <Icon icon={Calendar} size={14} />
                 <Text size="sm" tone="mutedForeground">
-                  {formatDay(point.record_date || point.created_at)}
+                  {formatDay(findingPointDate(point))}
                 </Text>
               </View>
               <View

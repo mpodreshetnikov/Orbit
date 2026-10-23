@@ -185,6 +185,8 @@ export interface FindingHistoryPoint {
   id: string;
   record_id: string;
   record_date: string | null;
+  /** When the finding itself was seen, if the source dates it apart from its record. */
+  finding_date?: string | null;
   size_mm: number | null;
   count: number | null;
   /** 'resolved' marks a row that closes an earlier finding rather than measuring one. */

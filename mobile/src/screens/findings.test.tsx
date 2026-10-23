@@ -4,7 +4,7 @@ import { ActionSheetIOS, Alert } from "react-native";
 import FindingScreen from "@/screens/finding-screen";
 import FindingsScreen from "@/screens/findings-screen";
 import HealthScreen from "@/screens/health-screen";
-import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
+import { db, fail, failOnce, fakeSession, seed, setSession } from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
@@ -184,6 +184,30 @@ describe("a finding's history", () => {
     expect(screen.getAllByText("Устранена")).toHaveLength(2);
     expect(screen.getAllByText("Не указан").length).toBeGreaterThan(0);
     expect(screen.queryByText("Отметить как устранённую")).toBeNull();
+  });
+
+  it("dates a sighting by the finding's own date when it has one", async () => {
+    db.tables.record_findings[0].finding_date = "2024-11-05";
+    await renderScreens(routes, "/health/findings/cyst%3A%3Akidney_left");
+    expect(await screen.findByText("05.11.2024")).toBeOnTheScreen();
+    expect(screen.queryByText("10.01.2025")).toBeNull();
+  });
+
+  it("says when the person cannot be read on a finding's own page, and retries", async () => {
+    failOnce("persons");
+    await renderScreens(routes, "/health/findings/cyst%3A%3Akidney_left");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Последний размер")).toBeOnTheScreen();
+  });
+
+  it("offers no resolving while the records cannot be read, and retries them", async () => {
+    failOnce("medical_records");
+    await renderScreens(routes, "/health/findings/cyst%3A%3Akidney_left");
+    expect(await screen.findByText("medical_records is unavailable")).toBeOnTheScreen();
+    expect(screen.queryByText("Отметить как устранённую")).toBeNull();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Отметить как устранённую")).toBeOnTheScreen();
   });
 
   it("says when the finding is not there", async () => {

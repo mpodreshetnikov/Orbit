@@ -16,7 +16,7 @@ name: Находки
     timeout: 20000
 - takeScreenshot: findings-01-list
 - tapOn:
-    text: "cyst"
+    text: ".*cyst.*" # The card reads as one element, its texts joined.
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Последний размер"

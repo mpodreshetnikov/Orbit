@@ -27,6 +27,7 @@ function row(id: string, date: string, extra: Partial<FindingListRow> = {}): Fin
     description: null,
     histology: null,
     source_anchor: "",
+    finding_date: null,
     created_at: `${date}T00:00:00Z`,
     medical_records: { person_id: "p", record_date: date, status: "active" },
     finding_type_catalog: null,
@@ -44,6 +45,15 @@ describe("summarizeFindings", () => {
     expect(cyst.history.map((point) => point.id)).toEqual(["b", "a"]);
     expect([cyst.latest_size_mm, cyst.latest_count, cyst.occurrence_count]).toEqual([10, 1, 2]);
     expect(cyst.is_resolved).toBe(false);
+  });
+
+  it("orders and dates sightings by the finding's own date before its record's", () => {
+    const [cyst] = summarizeFindings([
+      row("a", "2026-01-01", { finding_date: "2024-06-01" }),
+      row("b", "2025-01-01"),
+    ]);
+    expect(cyst.history.map((point) => point.id)).toEqual(["b", "a"]);
+    expect(cyst.latest_date).toBe("2025-01-01");
   });
 
   it("is resolved when its latest row says so, and orders the severe first", () => {
