@@ -1,24 +1,20 @@
-# Conditions: the health menu's «Диагнозы» by status with the status guide opened, the seeded
+# Conditions: «Диагнозы» opened by its link, by status with the status guide opened, the seeded
 # hypertension with its mentions, and a note added to it from the edit form.
 appId: host.exp.Exponent
 name: Диагнозы
 ---
-- openLink: exp://127.0.0.1:8081/--/health
+- openLink: exp://127.0.0.1:8081/--/health/conditions
 - tapOn:
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Диагнозы"
-    timeout: 60000
-- tapOn: "Диагнозы"
-- extendedWaitUntil:
     visible: "Активные диагнозы.*"
-    timeout: 20000
+    timeout: 60000
 - tapOn: "Справка по статусам"
 - takeScreenshot: conditions-01-list
 - tapOn: "Справка по статусам"
 - tapOn:
-    text: "Essential hypertension"
+    text: "Essential hypertension.*"
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "История упоминаний"

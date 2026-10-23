@@ -7,17 +7,17 @@ name: Справочники находок
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Типы находок"
+    visible: "Добавить тип находки"
     timeout: 60000
 - scrollUntilVisible:
-    element: "polyp · .*"
+    element: ".* polyp"
 - takeScreenshot: catalogs-01-finding-types
 - openLink: exp://127.0.0.1:8081/--/health/catalogs/body-sites
 - extendedWaitUntil:
-    visible: "Локализации"
+    visible: "Добавить локализацию"
     timeout: 20000
 - scrollUntilVisible:
-    element: "kidney_left · .*"
+    element: ".* kidney_left"
 - takeScreenshot: catalogs-02-body-sites
 - tapOn: "Добавить локализацию"
 - extendedWaitUntil:

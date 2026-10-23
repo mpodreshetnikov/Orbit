@@ -1,16 +1,14 @@
-# A spend from the first screen: one tap opens the form with the amount ready for typing.
+# A spend from the first screen, as today's wallet button opens it: the form with the amount ready
+# for typing. Opened by its link: the money tab's plus reads «Добавить транзакцию» too, and a link
+# leaves no doubt which one was meant.
 appId: host.exp.Exponent
 name: Быстрая трата
 ---
-- openLink: exp://127.0.0.1:8081/--/today
+- openLink: exp://127.0.0.1:8081/--/today/spend
 - tapOn: { text: "Open", optional: true }
 - extendedWaitUntil:
-    visible: "Добавить транзакцию"
-    timeout: 60000
-- tapOn: "Добавить транзакцию"
-- extendedWaitUntil:
     visible: "Сумма"
-    timeout: 10000
+    timeout: 60000
 - inputText: "-350"
 - takeScreenshot: quick-spend-01-form
 - tapOn: "Отмена"

@@ -3,19 +3,15 @@
 appId: host.exp.Exponent
 name: История диагноза
 ---
-- openLink: exp://127.0.0.1:8081/--/health
+- openLink: exp://127.0.0.1:8081/--/health/conditions
 - tapOn:
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Диагнозы"
+    visible: "Allergic rhinitis.*"
     timeout: 60000
-- tapOn: "Диагнозы"
-- extendedWaitUntil:
-    visible: "Allergic rhinitis"
-    timeout: 20000
 - tapOn:
-    text: "Allergic rhinitis"
+    text: "Allergic rhinitis.*"
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Добавить в историю"
@@ -41,7 +37,7 @@ name: История диагноза
 - takeScreenshot: history-01-form
 - tapOn: "Сохранить"
 - extendedWaitUntil:
-    visible: "Ручная запись \\(Allergic rhinitis\\)"
+    visible: ".*Ручная запись \\(Allergic rhinitis\\).*"
     timeout: 20000
 - takeScreenshot: history-02-added
 - swipe:

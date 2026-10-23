@@ -1,14 +1,11 @@
-# The settings, from today's header: whose record the phone shows, and the notification choices.
+# The settings, as today's header opens them: whose record the phone shows, and the notification
+# choices.
 appId: host.exp.Exponent
 name: Настройки
 ---
-- openLink: exp://127.0.0.1:8081/--/today
+- openLink: exp://127.0.0.1:8081/--/today/settings
 - tapOn: { text: "Open", optional: true }
-- extendedWaitUntil:
-    visible: "Настройки"
-    timeout: 60000
-- tapOn: "Настройки"
-- extendedWaitUntil: { visible: "ВЫБРАТЬ ПЕРСОНУ", timeout: 15000 }
+- extendedWaitUntil: { visible: "ВЫБРАТЬ ПЕРСОНУ", timeout: 60000 }
 - takeScreenshot: settings-01-person
 - scrollUntilVisible: { element: "КОГО УВЕДОМЛЯТЬ", direction: DOWN }
 - takeScreenshot: settings-02-reminders

@@ -7,9 +7,12 @@ name: Новый чек-ап
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Annual blood work"
+    visible: ".*Annual blood work.*"
     timeout: 60000
-- tapOn: "Добавить чек-ап"
+- waitForAnimationToEnd
+- tapOn:
+    text: "Добавить чек-ап"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Расписание"
     timeout: 20000
@@ -22,7 +25,11 @@ name: Новый чек-ап
 - tapOn: "Зима (1 декабря)"
 - takeScreenshot: checkup-form-01-filled
 - tapOn: "Сохранить"
+# The title field holds the same words: wait for the form to close first.
 - extendedWaitUntil:
-    visible: "Осмотр окулиста"
+    notVisible: "Частота: .*"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: ".*Осмотр окулиста.*"
     timeout: 20000
 - takeScreenshot: checkup-form-02-saved

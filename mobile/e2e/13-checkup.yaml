@@ -8,10 +8,11 @@ name: Чек-ап
     text: "Open"
     optional: true
 - extendedWaitUntil:
-    visible: "Annual blood work"
+    visible: ".*Annual blood work.*"
     timeout: 60000
+- waitForAnimationToEnd
 - tapOn:
-    text: "Annual blood work"
+    text: ".*Annual blood work.*"
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Расписание"
@@ -24,9 +25,9 @@ name: Чек-ап
 - takeScreenshot: checkup-03-sheet
 - tapOn: "Отмена"
 - scrollUntilVisible:
-    element: "Essential hypertension"
+    element: ".*Essential hypertension.*"
     direction: UP
-- tapOn: "Essential hypertension"
+- tapOn: ".*Essential hypertension.*"
 - scrollUntilVisible:
     element: "Чек-апы по этому диагнозу"
 - takeScreenshot: checkup-04-condition

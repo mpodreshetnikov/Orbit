@@ -244,36 +244,47 @@ function CheckupCard({
 }) {
   const palette = usePalette();
   const late = checkupLateness(item, isoDay(new Date()));
+  // The buttons sit beside the link, not in it: iOS reads a pressable as one element and would hide
+  // them from VoiceOver.
   return (
-    <Pressable
-      accessibilityRole="link"
-      onPress={onPress}
-      style={({ pressed }) => ({
-        gap: space.sm,
-        padding: space.md,
+    <View
+      style={{
         borderRadius: radius.lg,
         borderWidth: 1,
         borderColor: late.byDue || late.byPlan ? palette.warning : palette.border,
-        backgroundColor: pressed ? palette.mutedHalf : palette.card,
-      })}
+        backgroundColor: palette.card,
+        overflow: "hidden",
+      }}
     >
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm }}>
-        <Text size="xs" tone="mutedForeground">
-          {categoryLabel(item.category)}
+      <Pressable
+        accessibilityRole="link"
+        onPress={onPress}
+        style={({ pressed }) => ({
+          gap: space.sm,
+          padding: space.md,
+          backgroundColor: pressed ? palette.mutedHalf : "transparent",
+        })}
+      >
+        <View
+          style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm }}
+        >
+          <Text size="xs" tone="mutedForeground">
+            {categoryLabel(item.category)}
+          </Text>
+          <CheckupStatusBadge status={item.status} />
+          {late.byDue ? <Badge label={t("checkups.overdue")} textTone="warningText" /> : null}
+          {late.byPlan ? <Badge label={t("checkups.plannedOverdue")} textTone="primary" /> : null}
+        </View>
+        <Text weight="medium" numberOfLines={1}>
+          {item.title}
         </Text>
-        <CheckupStatusBadge status={item.status} />
-        {late.byDue ? <Badge label={t("checkups.overdue")} textTone="warningText" /> : null}
-        {late.byPlan ? <Badge label={t("checkups.plannedOverdue")} textTone="primary" /> : null}
-      </View>
-      <Text weight="medium" numberOfLines={1}>
-        {item.title}
-      </Text>
-      {item.next_due_at ? (
-        <DateLine icon={Calendar} label={t("checkups.nextDue")} day={item.next_due_at} />
-      ) : null}
-      {item.planned_on ? (
-        <DateLine icon={CalendarPlus} label={t("checkups.plannedOn")} day={item.planned_on} />
-      ) : null}
+        {item.next_due_at ? (
+          <DateLine icon={Calendar} label={t("checkups.nextDue")} day={item.next_due_at} />
+        ) : null}
+        {item.planned_on ? (
+          <DateLine icon={CalendarPlus} label={t("checkups.plannedOn")} day={item.planned_on} />
+        ) : null}
+      </Pressable>
       {item.status === "active" ? (
         <View
           style={{
@@ -281,6 +292,8 @@ function CheckupCard({
             flexWrap: "wrap",
             justifyContent: "flex-end",
             gap: space.sm,
+            paddingHorizontal: space.md,
+            paddingBottom: space.md,
           }}
         >
           <Button
@@ -301,7 +314,7 @@ function CheckupCard({
           ) : null}
         </View>
       ) : null}
-    </Pressable>
+    </View>
   );
 }
 
