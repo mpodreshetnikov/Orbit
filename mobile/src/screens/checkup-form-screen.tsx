@@ -19,12 +19,13 @@ import { X } from "lucide-react-native";
 import { useState } from "react";
 import { Alert, Pressable, ScrollView, View } from "react-native";
 import { Chip, Choice, Field, Input, NumberInput, Section } from "@/components/form";
-import { Button, Icon, Placeholder, Text } from "@/components/ui";
+import { Button, Icon, Text } from "@/components/ui";
 import { categoryLabel } from "@/features/checkups/query";
 import { dayOf } from "@/features/measurements/format";
 import { noonOf } from "@/features/medications/form";
 import { t } from "@/lib/i18n";
 import { useCheckupAction, useCheckups, useConditions, usePerson } from "@/lib/queries";
+import { CheckupMissing } from "@/screens/checkup-sheets";
 import { space } from "@/theme";
 
 const FREQUENCY_LABEL: Record<FrequencyPreset, string> = {
@@ -59,11 +60,10 @@ export default function CheckupFormScreen() {
   const checkups = useCheckups(person.data?.id);
   const item = id ? checkups.data?.find((one) => one.id === id) : undefined;
   if (person.data && (!id || item)) return <CheckupForm personId={person.data.id} item={item} />;
-  const busy = person.isPending || checkups.isPending;
   return (
     <>
       <Stack.Screen options={{ title: t("checkups.edit"), headerLargeTitle: false }} />
-      <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      <CheckupMissing person={person} checkups={checkups} />
     </>
   );
 }

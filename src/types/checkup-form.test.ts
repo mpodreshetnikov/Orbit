@@ -98,7 +98,10 @@ describe("the interval", () => {
     expect(anchorDateFor("next_period", "", NOW)).toBe("");
     expect(anchorDateFor("custom", "2027-02-02", NOW)).toBe("2027-02-02");
     expect(anchorDateFor("first_of_year", "", NOW)).toBe("2027-01-01");
-    expect(anchorDateFor("first_of_month", "", NOW)).toMatch(/^2026-1[01]-(01|30|31)$/);
+    expect(anchorDateFor("first_of_month", "", NOW)).toBe("2026-11-01");
+    // The end of a long month does not overflow past the next one, and December rolls the year.
+    expect(anchorDateFor("first_of_month", "", new Date(2027, 0, 31, 23, 30))).toBe("2027-02-01");
+    expect(anchorDateFor("first_of_month", "", new Date(2026, 11, 15))).toBe("2027-01-01");
     expect(anchorDateFor("winter", "", NOW)).toBe("2026-12-01");
     expect(anchorDateFor("spring", "", NOW)).toBe("2027-03-01");
   });

@@ -185,4 +185,13 @@ describe("editing a checkup", () => {
     await renderScreens(routes, "/health/checkups/form?id=gone");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
   });
+
+  it("offers a retry when the person cannot be read", async () => {
+    fail("persons");
+    await renderScreens(routes, "/health/checkups/form?id=eyes");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect((await screen.findByLabelText("Название")).props.value).toBe("Окулист");
+  });
 });

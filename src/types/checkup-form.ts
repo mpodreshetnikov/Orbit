@@ -80,10 +80,10 @@ export function anchorDateFor(preset: AnchorPreset, custom: string, now: Date): 
   if (preset === "custom") return custom;
   if (preset === "first_of_year") return `${now.getFullYear() + 1}-01-01`;
   if (preset === "first_of_month") {
-    const d = new Date(now);
-    d.setMonth(d.getMonth() + 1);
-    d.setDate(1);
-    return d.toISOString().slice(0, 10);
+    // Built from the parts, in local time: moving the month of a 31st overflows, and UTC can be a
+    // day off.
+    const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-01`;
   }
   if (preset === "next_period") return "";
   // A season's next start: this year's, unless it has passed.
