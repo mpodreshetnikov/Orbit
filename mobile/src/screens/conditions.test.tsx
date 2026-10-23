@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { ActionSheetIOS, Alert, Linking, type AlertButton } from "react-native";
 import ConditionFormScreen, { icdNameFor } from "@/screens/condition-form-screen";
 import { dayOf } from "@/features/measurements/format";
@@ -452,10 +452,15 @@ describe("adding to a condition's history", () => {
     let offered: (string | undefined)[] = [];
     jest
       .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
-      .mockImplementationOnce((options) => (offered = options.options));
-    await fireEvent.press(
-      screen.getByLabelText("Привязать к медицинской записи: Нет (только ручная запись)"),
+      .mockImplementation((options) => (offered = options.options));
+    // The records load after the form: ask again until they are offered.
+    const picker = screen.getByLabelText(
+      "Привязать к медицинской записи: Нет (только ручная запись)",
     );
+    for (let tries = 0; tries < 20 && offered.length <= 2; tries += 1) {
+      if (tries > 0) await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      await fireEvent.press(picker);
+    }
     expect(offered).toContain("Старый осмотр · 01.01.2024");
     expect(offered).not.toContain("Общий анализ крови · 01.03.2025");
   });

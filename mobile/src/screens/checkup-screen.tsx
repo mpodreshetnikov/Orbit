@@ -55,8 +55,8 @@ const STATUS_CHANGES: Record<CheckupItemStatus, [CheckupItemStatus, string][]> =
 /**
  * One checkup — the web checkup page: what it is and whether it is late, marked done or planned
  * from here, its schedule, reminders, reason, linked conditions and notes, and every completion,
- * each opened to correct or delete. Pausing, resuming, archiving and deleting are in the bar's
- * sheet.
+ * each opened to correct or delete. Editing, pausing, resuming, archiving and deleting are in the
+ * bar's sheet.
  */
 export default function CheckupScreen() {
   const palette = usePalette();
@@ -69,9 +69,11 @@ export default function CheckupScreen() {
   const item = checkups.data?.find((one) => one.id === id);
 
   const onError = (error: Error) => Alert.alert(t("common.error"), error.message);
+  const open = (path: string) => router.push(`/health/checkups/${path}` as Href);
   const actions = (current: CheckupItem) => {
     const changes = STATUS_CHANGES[current.status];
     const labels = [
+      t("common.edit"),
       ...changes.map(([, label]) => t(label)),
       t("checkups.deleteCheckup"),
       t("common.cancel"),
@@ -80,13 +82,16 @@ export default function CheckupScreen() {
       {
         options: labels,
         cancelButtonIndex: labels.length - 1,
-        destructiveButtonIndex: changes.length,
+        destructiveButtonIndex: changes.length + 1,
       },
       (index) => {
-        const change = changes[index];
-        if (change) action.mutate({ item: current, status: change[0] }, { onError });
+        const change = changes[index - 1];
+        if (index === 0) open(`form?id=${current.id}`);
+        else if (change) action.mutate({ item: current, status: change[0] }, { onError });
         // An alert raised while the sheet is still closing is dropped by iOS.
-        else if (index === changes.length) setTimeout(() => remove(current), SHEET_DISMISS_MS);
+        else if (index === changes.length + 1) {
+          setTimeout(() => remove(current), SHEET_DISMISS_MS);
+        }
       },
     );
   };
@@ -135,7 +140,6 @@ export default function CheckupScreen() {
 
   const late = checkupLateness(item, isoDay(new Date()));
   const reminders = reminderDays(item.reminder_days_before);
-  const open = (path: string) => router.push(`/health/checkups/${path}` as Href);
 
   return (
     <>

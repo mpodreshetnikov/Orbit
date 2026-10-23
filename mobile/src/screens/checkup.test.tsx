@@ -150,7 +150,13 @@ describe("a checkup", () => {
 
     const offered = pickOption("Возобновить");
     await fireEvent.press(screen.getByLabelText("Действия: Флюорография"));
-    expect(offered[0]).toEqual(["Возобновить", "В архив", "Удалить чек-ап", "Отмена"]);
+    expect(offered[0]).toEqual([
+      "Редактировать",
+      "Возобновить",
+      "В архив",
+      "Удалить чек-ап",
+      "Отмена",
+    ]);
     await waitFor(() => expect(db.tables.checkup_items[1].status).toBe("active"));
     expect(await screen.findByText("Отметить выполненным")).toBeOnTheScreen();
   });
