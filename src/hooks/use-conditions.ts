@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase";
-import { conditionTimeline } from "@/types/condition-summary";
+import { conditionTimeline, mentionDecidesStatus } from "@/types/condition-summary";
 import { AUTHORITATIVE_STATUS_FILTER } from "@/types/condition-closure";
 import {
   proposedClosureStillHolds,
@@ -831,8 +831,7 @@ export function useLinkConditionToRecord() {
 
       // Only update condition current_status when this record is the most recent by date.
       // If this record has no date, or its date is before the latest mention, leave condition status unchanged.
-      const shouldUpdateStatus =
-        thisRecordDate != null && (!mostRecentDate || thisRecordDate >= mostRecentDate);
+      const shouldUpdateStatus = mentionDecidesStatus(thisRecordDate, mostRecentDate);
 
       // Build update object for condition
       const conditionUpdates: Record<string, string | null> = {};

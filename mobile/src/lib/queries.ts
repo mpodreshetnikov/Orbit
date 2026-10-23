@@ -37,6 +37,7 @@ import {
   lookupIcdCode,
   updateCondition,
 } from "@/features/conditions/query";
+import { addConditionHistory, type HistoryEntry } from "@/features/conditions/history";
 import { fetchObservations } from "@/features/observations/query";
 import { fetchActiveRecords, fetchFindings, markFindingResolved } from "@/features/findings/query";
 import {
@@ -450,6 +451,20 @@ export function useSaveCondition() {
     onSettled: (_data, _error, input) => {
       void client.invalidateQueries({ queryKey: ["conditions"] });
       void client.invalidateQueries({ queryKey: ["condition", input.id] });
+    },
+  });
+}
+
+/** Add a mention to a condition's history by hand; the condition and the list are refetched. */
+export function useAddConditionHistory() {
+  const client = useQueryClient();
+  const { session } = useSession();
+  return useMutation({
+    mutationFn: (entry: HistoryEntry) => addConditionHistory(session?.user.id as string, entry),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onSettled: (_data, _error, entry) => {
+      void client.invalidateQueries({ queryKey: ["conditions"] });
+      void client.invalidateQueries({ queryKey: ["condition", entry.conditionId] });
     },
   });
 }

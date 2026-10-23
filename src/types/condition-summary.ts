@@ -68,3 +68,14 @@ export function conditionTimeline<T extends ConditionMentionDates>(mentions: T[]
     last_mentioned_date: dates[dates.length - 1] || null,
   };
 }
+
+/**
+ * Whether a mention a person adds sets the condition's current status: only when its record is
+ * dated and is no older than the newest mention allowed to decide the status.
+ */
+export function mentionDecidesStatus(
+  recordDate: string | null,
+  newestDate: string | null,
+): boolean {
+  return recordDate != null && (!newestDate || recordDate >= newestDate);
+}
