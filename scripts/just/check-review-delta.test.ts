@@ -178,7 +178,8 @@ describe("argument handling", () => {
     expect(result.stderr).toContain("Cannot resolve --since ref");
   });
 
-  it("takes the ref from the environment, and reports against it", () => {
+  // A child node plus git calls; slow on a runner shared with the database lane.
+  it("takes the ref from the environment, and reports against it", { timeout: 30_000 }, () => {
     const result = runScript([], { REVIEW_DELTA_SINCE: "origin/main" });
 
     expect(result.status).toBe(0);
