@@ -1,6 +1,6 @@
 import type { GrantRow } from "./oauth-store";
 import { findGrantByAccessToken, isGrantUserAllowed, touchGrant } from "./oauth-store";
-import { getResourceIdentifier } from "./config";
+import { getPublicOrigin, getResourceIdentifier } from "./config";
 
 /**
  * Resolves an inbound bearer token to the grant behind it.
@@ -22,6 +22,8 @@ export interface McpAuthExtra extends Record<string, unknown> {
   grantId: string;
   authUserId: string;
   userEmail: string;
+  /** The app's public origin, for links a tool hands back to the owner (the record's review screen). */
+  appOrigin?: string;
 }
 
 export interface McpAuthInfo {
@@ -73,6 +75,7 @@ export async function verifyMcpBearerToken(
       grantId: grant.id,
       authUserId: grant.auth_user_id,
       userEmail: grant.user_email,
+      appOrigin: getPublicOrigin(request),
     },
   };
 }

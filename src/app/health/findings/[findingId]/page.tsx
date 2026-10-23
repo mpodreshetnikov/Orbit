@@ -51,6 +51,8 @@ interface FindingDetailPageProps {
 // Severity badge
 function SeverityBadge({ severity }: { severity: FindingSeverity }) {
   const t = useTranslations();
+  // An unstated severity is the default, not a finding about the patient: nothing to show.
+  if (!severity || severity === "unknown") return null;
 
   const config: Record<FindingSeverity, { color: string }> = {
     mild: { color: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20" },

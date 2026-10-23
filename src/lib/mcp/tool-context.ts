@@ -37,7 +37,8 @@ export function getAuthFromContext(ctx: ToolContext): McpAuthExtra {
     throw new Error("Tool call is missing authentication context.");
   }
 
-  return { grantId, authUserId, userEmail };
+  const appOrigin = typeof extra?.appOrigin === "string" ? extra.appOrigin : undefined;
+  return { grantId, authUserId, userEmail, ...(appOrigin ? { appOrigin } : {}) };
 }
 
 export function getScopesFromContext(ctx: ToolContext): string[] {
