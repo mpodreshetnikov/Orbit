@@ -3,7 +3,7 @@ import {
   materializeConditionProposals,
   ProposalMaterializationError,
 } from "./materialize-proposals";
-import { AUTHORITATIVE_STATUS_FILTER } from "./unverified-closure";
+import { AUTHORITATIVE_STATUS_FILTER } from "@/types/condition-closure";
 import type { ConditionRecordWithDetails } from "@/types";
 
 type Row = Record<string, unknown> | null;

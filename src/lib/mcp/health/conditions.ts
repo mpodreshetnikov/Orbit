@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import { isAwaitingClosureReview, isUnverifiedClosure } from "@/lib/conditions/unverified-closure";
+import { isAwaitingClosureReview, isUnverifiedClosure } from "@/types/condition-closure";
 
 /**
  * Conditions -- the app's word for diagnoses.

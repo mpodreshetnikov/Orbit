@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { ConditionCard } from "@/components/conditions/condition-card";
 import { usePersonConditionsWithHistory } from "@/hooks";
 import { useUIStore } from "@/stores/ui-store";
+import { conditionSections, searchConditions } from "@/types/condition-summary";
 import type { ConditionWithHistory, ConditionStatus } from "@/types";
 
 function StatusIcon({ status }: { status: ConditionStatus }) {
@@ -49,43 +50,16 @@ function ConditionsContent() {
 
   const { data: conditions, isLoading } = usePersonConditionsWithHistory(selectedPersonId);
 
-  // Filter conditions by search
-  const filteredConditions = useMemo(() => {
-    if (!conditions) return [];
-    if (!search.trim()) return conditions;
+  const filteredConditions = useMemo(
+    () => searchConditions(conditions ?? [], search),
+    [conditions, search],
+  );
 
-    const searchLower = search.toLowerCase();
-    return conditions.filter(
-      (c) =>
-        c.name.toLowerCase().includes(searchLower) ||
-        c.icd_name_en?.toLowerCase().includes(searchLower) ||
-        c.code?.toLowerCase().includes(searchLower),
-    );
-  }, [conditions, search]);
-
-  // Split conditions by status and sort each group by last mention date (most recent first; nulls last)
-  const { activeConditions, suspectedConditions, resolvedConditions, historyConditions } =
-    useMemo(() => {
-      const sortByLastMention = (a: ConditionWithHistory, b: ConditionWithHistory) => {
-        const aTime = a.last_mentioned_date ? new Date(a.last_mentioned_date).getTime() : 0;
-        const bTime = b.last_mentioned_date ? new Date(b.last_mentioned_date).getTime() : 0;
-        return bTime - aTime;
-      };
-      return {
-        activeConditions: filteredConditions
-          .filter((c) => c.current_status === "active")
-          .sort(sortByLastMention),
-        suspectedConditions: filteredConditions
-          .filter((c) => c.current_status === "suspected")
-          .sort(sortByLastMention),
-        resolvedConditions: filteredConditions
-          .filter((c) => c.current_status === "resolved")
-          .sort(sortByLastMention),
-        historyConditions: filteredConditions
-          .filter((c) => c.current_status === "history")
-          .sort(sortByLastMention),
-      };
-    }, [filteredConditions]);
+  // Split conditions by status, each group by last mention date (most recent first; nulls last)
+  const [activeConditions, suspectedConditions, resolvedConditions, historyConditions] = useMemo(
+    () => conditionSections(filteredConditions).map((section) => section.items),
+    [filteredConditions],
+  );
 
   if (!selectedPersonId) {
     return (

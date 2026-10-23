@@ -3,6 +3,7 @@ import {
   BookOpen,
   ChevronRight,
   FlaskConical,
+  HeartPulse,
   Search,
   Ruler,
   type LucideIcon,
@@ -14,6 +15,12 @@ import { space, usePalette } from "@/theme";
 
 /** The web app's health sections, each a row into its own screen. */
 const SECTIONS: { title: string; description?: string; icon: LucideIcon; href: string }[] = [
+  {
+    title: "conditions.title",
+    description: "conditions.description",
+    icon: HeartPulse,
+    href: "/health/conditions",
+  },
   {
     title: "observationHistory.navTitle",
     description: "observationHistory.description",

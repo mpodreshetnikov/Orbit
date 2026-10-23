@@ -11,7 +11,7 @@ import {
   proposedClosureStillHolds,
   type PersistedObservation,
 } from "@/lib/conditions/resolution-proposal";
-import { isConfirmedByRecordApproval } from "@/lib/conditions/unverified-closure";
+import { isConfirmedByRecordApproval } from "@/types/condition-closure";
 import {
   Save,
   FileCheck,

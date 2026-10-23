@@ -1,5 +1,5 @@
 import type { RecordObservation } from "@/types/medical-record";
-import { CLOSING_STATUSES } from "./unverified-closure";
+import { CLOSING_STATUSES } from "@/types/condition-closure";
 
 /**
  * What each analyte entry requires, mirroring `RESOLVING_ANALYTES` in

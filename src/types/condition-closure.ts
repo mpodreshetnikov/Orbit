@@ -44,7 +44,7 @@ export interface ClosureCandidate {
  * The exact negation of `AUTHORITATIVE_STATUS_FILTER` above, which is an `or=` of three ways a row
  * can be authoritative: a row is suppressed when none of them holds. The two must stay each other's
  * mirror -- a reader that decides differently from the recompute will describe a row the chart is
- * not applying as one it is, or the reverse -- so `unverified-closure.test.ts` derives one from the
+ * not applying as one it is, or the reverse -- so `condition-closure.test.ts` derives one from the
  * other rather than restating it.
  *
  * The filter exists so a suppressed row cannot *set* a status. This exists so it cannot *say* it

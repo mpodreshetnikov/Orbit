@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { AUTHORITATIVE_STATUS_FILTER } from "./unverified-closure";
+import { AUTHORITATIVE_STATUS_FILTER } from "@/types/condition-closure";
 import type { ConditionRecordWithDetails, IcdLookupResult } from "@/types";
 
 /**
