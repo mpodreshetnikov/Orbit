@@ -19,3 +19,6 @@ name: Отчеты
       - extendedWaitUntil: { visible: "Сумма цели.*", timeout: 10000 }
       - takeScreenshot: reports-02-target
       - tapOn: "Отмена"
+- tapOn: "Псевдонимы для переводов себе"
+- extendedWaitUntil: { visible: "Добавить", timeout: 10000 }
+- takeScreenshot: reports-03-aliases
