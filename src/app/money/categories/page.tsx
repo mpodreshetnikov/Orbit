@@ -28,6 +28,16 @@ import {
 } from "@/components/ui/select";
 import { TreeView, type TreeDataItem, type TreeRenderItemParams } from "@/components/tree-view";
 import {
+  canonicalCategoryOptions,
+  categoryColumns,
+  categoryFormOf,
+  categoryHasChildren,
+  childCategoryForm,
+  EMPTY_CATEGORY_FORM,
+  parentCategoryOptions,
+  type CategoryForm,
+} from "@/types/money-categories";
+import {
   buildMoneyCategoryTree,
   useCreateMoneyCategory,
   useDeleteMoneyCategory,
@@ -51,18 +61,13 @@ export default function MoneyCategoriesPage() {
   const [editing, setEditing] = useState<MoneyCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MoneyCategory | null>(null);
 
-  const [nameEn, setNameEn] = useState("");
-  const [nameRu, setNameRu] = useState("");
-  const [slug, setSlug] = useState("");
-  const [canonicalCategoryId, setCanonicalCategoryId] = useState<string | null>(null);
-  const [parentId, setParentId] = useState<string | null>(null);
+  const [form, setForm] = useState<CategoryForm>(EMPTY_CATEGORY_FORM);
+  const set = (changes: Partial<CategoryForm>) =>
+    setForm((current) => ({ ...current, ...changes }));
 
   const tree = useMemo(() => buildMoneyCategoryTree(categories || []), [categories]);
   const canonicalCategories = useMemo(
-    () =>
-      (categories || [])
-        .filter((category) => category.category_kind === "canonical")
-        .sort((a, b) => a.sort_order - b.sort_order || a.name_en.localeCompare(b.name_en)),
+    () => canonicalCategoryOptions(categories || []),
     [categories],
   );
 
@@ -85,11 +90,7 @@ export default function MoneyCategoriesPage() {
 
   const openNew = useCallback(() => {
     setEditing(null);
-    setNameEn("");
-    setNameRu("");
-    setSlug("");
-    setCanonicalCategoryId(null);
-    setParentId(null);
+    setForm(EMPTY_CATEGORY_FORM);
     setDialogOpen(true);
   }, []);
 
@@ -104,30 +105,19 @@ export default function MoneyCategoriesPage() {
       return;
     }
     setEditing(category);
-    setNameEn(category.name_en);
-    setNameRu(category.name_ru);
-    setSlug(category.slug);
-    setCanonicalCategoryId(category.canonical_category_id);
-    setParentId(category.parent_id);
+    setForm(categoryFormOf(category));
     setDialogOpen(true);
   }, []);
 
   const openNewWithParent = useCallback(
     (parentCategory: MoneyCategory) => {
-      if (parentCategory.category_kind === "custom" && parentCategory.depth >= 4) {
+      const child = childCategoryForm(parentCategory);
+      if (!child) {
         toast.error(t("money.categoryDepthLimit"));
         return;
       }
       setEditing(null);
-      setNameEn("");
-      setNameRu("");
-      setSlug("");
-      setCanonicalCategoryId(
-        parentCategory.category_kind === "canonical"
-          ? parentCategory.id
-          : parentCategory.canonical_category_id,
-      );
-      setParentId(parentCategory.category_kind === "canonical" ? null : parentCategory.id);
+      setForm(child);
       setDialogOpen(true);
     },
     [t],
@@ -138,7 +128,7 @@ export default function MoneyCategoriesPage() {
       const category = categoryById.get(params.item.id);
       if (!category) return <span className="text-sm truncate">{params.item.name}</span>;
       const isCanonical = category.category_kind === "canonical";
-      const canAddChild = isCanonical || category.depth < 4;
+      const canAddChild = childCategoryForm(category) !== null;
       return (
         <div className="flex flex-1 items-center min-w-0 w-full relative pr-[7.5rem]">
           <div className="min-w-0 flex-1">
@@ -231,55 +221,26 @@ export default function MoneyCategoriesPage() {
   );
 
   const handleSave = async () => {
-    if (!nameEn.trim() || !nameRu.trim() || !slug.trim() || !canonicalCategoryId) {
-      toast.error(t("money.validationCategoryRequired"));
+    const saved = categoryColumns(categories || [], form);
+    if ("problem" in saved) {
+      toast.error(
+        t(
+          saved.problem === "depth"
+            ? "money.categoryDepthLimit"
+            : "money.validationCategoryRequired",
+        ),
+      );
       return;
     }
-
-    const canonical = (categories || []).find(
-      (category) => category.id === canonicalCategoryId && category.category_kind === "canonical",
-    );
-    if (!canonical) {
-      toast.error(t("money.validationCategoryRequired"));
-      return;
-    }
-
-    const parent =
-      (categories || []).find(
-        (category) =>
-          category.id === parentId &&
-          category.category_kind === "custom" &&
-          category.canonical_category_id === canonical.id,
-      ) || null;
-    const depth = parent ? parent.depth + 1 : 1;
-
-    if (depth > 4) {
-      toast.error(t("money.categoryDepthLimit"));
-      return;
-    }
+    const { columns } = saved;
 
     if (editing) {
       await updateMutation.mutateAsync({
         id: editing.id,
-        updates: {
-          parent_id: parent?.id ?? null,
-          canonical_category_id: canonical.id,
-          depth,
-          name_en: nameEn.trim(),
-          name_ru: nameRu.trim(),
-          slug: slug.trim(),
-        },
+        updates: columns,
       });
     } else {
-      await createMutation.mutateAsync({
-        parent_id: parent?.id ?? null,
-        canonical_category_id: canonical.id,
-        category_kind: "custom",
-        depth,
-        name_en: nameEn.trim(),
-        name_ru: nameRu.trim(),
-        slug: slug.trim(),
-      });
+      await createMutation.mutateAsync({ ...columns, category_kind: "custom" });
     }
 
     setDialogOpen(false);
@@ -287,8 +248,7 @@ export default function MoneyCategoriesPage() {
 
   const handleDelete = async () => {
     if (!deleteTarget || deleteTarget.category_kind === "canonical") return;
-    const hasChildren = (categories || []).some((cat) => cat.parent_id === deleteTarget.id);
-    if (hasChildren) {
+    if (categoryHasChildren(categories || [], deleteTarget.id)) {
       toast.error(t("money.cannotDeleteCategory"));
       setDeleteTarget(null);
       return;
@@ -298,17 +258,8 @@ export default function MoneyCategoriesPage() {
   };
 
   const parentOptions = useMemo(
-    () =>
-      (categories || [])
-        .filter(
-          (category) =>
-            category.category_kind === "custom" &&
-            category.depth < 4 &&
-            category.id !== editing?.id &&
-            category.canonical_category_id === canonicalCategoryId,
-        )
-        .sort((a, b) => a.depth - b.depth || a.name_en.localeCompare(b.name_en)),
-    [categories, canonicalCategoryId, editing?.id],
+    () => parentCategoryOptions(categories || [], form.canonicalId, editing?.id),
+    [categories, form.canonicalId, editing?.id],
   );
 
   return (
@@ -349,25 +300,23 @@ export default function MoneyCategoriesPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.categoryNameEn")}</label>
-              <Input value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
+              <Input value={form.nameEn} onChange={(e) => set({ nameEn: e.target.value })} />
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.categoryNameRu")}</label>
-              <Input value={nameRu} onChange={(e) => setNameRu(e.target.value)} />
+              <Input value={form.nameRu} onChange={(e) => set({ nameRu: e.target.value })} />
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.categorySlug")}</label>
-              <Input value={slug} onChange={(e) => setSlug(e.target.value)} />
+              <Input value={form.slug} onChange={(e) => set({ slug: e.target.value })} />
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.categoryCanonicalBranch")}</label>
               <Select
-                value={canonicalCategoryId ?? "none"}
-                onValueChange={(value) => {
-                  const nextCanonicalId = value === "none" ? null : value;
-                  setCanonicalCategoryId(nextCanonicalId);
-                  setParentId(null);
-                }}
+                value={form.canonicalId ?? "none"}
+                onValueChange={(value) =>
+                  set({ canonicalId: value === "none" ? null : value, parentId: null })
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t("money.categorySelectCanonical")} />
@@ -385,8 +334,8 @@ export default function MoneyCategoriesPage() {
             <div className="space-y-1">
               <label className="text-sm font-medium">{t("money.categoryParent")}</label>
               <Select
-                value={parentId ?? "none"}
-                onValueChange={(value) => setParentId(value === "none" ? null : value)}
+                value={form.parentId ?? "none"}
+                onValueChange={(value) => set({ parentId: value === "none" ? null : value })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t("money.categoryParent")} />

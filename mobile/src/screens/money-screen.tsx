@@ -55,7 +55,10 @@ export function useDebounced<T>(value: T, ms: number): T {
 }
 
 /** The web money menu's other pages, a row above the feed. */
-const SECTIONS: [string, string][] = [["money.accounts", "/money/accounts"]];
+const SECTIONS: [string, string][] = [
+  ["money.accounts", "/money/accounts"],
+  ["money.categories", "/money/categories"],
+];
 
 const signLabel = (sign: MoneyAmountSignFilter) =>
   t(`money.amountSign${sign.charAt(0).toUpperCase()}${sign.slice(1)}`);

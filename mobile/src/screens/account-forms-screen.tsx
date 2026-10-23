@@ -24,7 +24,7 @@ import { space } from "@/theme";
 const capitalized = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 /** A sheet with Cancel and Save in its bar, as the web dialogs have them under. */
-function Sheet({
+export function Sheet({
   title,
   busy,
   onSave,
