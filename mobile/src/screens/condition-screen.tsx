@@ -12,7 +12,7 @@ import {
 import type { ReactNode } from "react";
 import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { CONDITION_TONE, ConditionStatusBadge } from "@/components/condition-status";
-import { Badge, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import type { ConditionMention } from "@/features/conditions/query";
 import { formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
@@ -190,6 +190,12 @@ export default function ConditionScreen() {
               {t("conditions.noHistory")}
             </Text>
           )}
+          <Button
+            variant="outline"
+            icon={History}
+            label={t("conditions.addToHistory")}
+            onPress={() => router.push(`/health/conditions/history?id=${id}` as Href)}
+          />
         </Card>
       </ScrollView>
     </>
