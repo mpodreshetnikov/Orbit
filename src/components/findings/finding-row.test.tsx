@@ -106,7 +106,7 @@ describe("FindingRow", () => {
 
     expect(screen.getByText("findings.comparison.sizeChange")).toBeInTheDocument();
     expect(screen.queryByText("findings.lateralityOptions.left")).toBeNull();
-    expect(screen.getByText("findings.severityOptions.unknown")).toBeInTheDocument();
+    expect(screen.queryByText("findings.severityOptions.unknown")).toBeNull();
     expect(screen.queryByText("x1")).toBeNull();
   });
 
@@ -128,5 +128,27 @@ describe("FindingRow", () => {
     expect(screen.getByText("findings.comparison.new")).toBeInTheDocument();
     const historyLink = screen.getByRole("link");
     expect(historyLink.getAttribute("href")).toBe("/health/findings/free%20text%20finding");
+  });
+
+  it("keeps an uncoded site in the history link and hides an unstated severity", () => {
+    render(
+      <FindingRow
+        finding={makeFinding({
+          finding_code: null,
+          finding_type_text: "Высыпания",
+          site_code: null,
+          catalog_finding_name_ru: null,
+          catalog_site_name_ru: null,
+          body_site_text: "спина",
+          severity: "unknown",
+        })}
+        comparison={makeComparison({ isNew: true })}
+      />,
+    );
+
+    expect(screen.getByRole("link").getAttribute("href")).toBe(
+      `/health/findings/${encodeURIComponent("Высыпания")}?site=${encodeURIComponent("спина")}`,
+    );
+    expect(screen.queryByText("findings.severityOptions.unknown")).not.toBeInTheDocument();
   });
 });

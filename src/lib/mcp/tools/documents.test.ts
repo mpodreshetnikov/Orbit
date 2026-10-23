@@ -263,6 +263,33 @@ describe("ingest_medical_document", () => {
     expect(unlinked.structuredContent?.review_url).toBeNull();
   });
 
+  it("names the findings the catalogues did not code", async () => {
+    userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
+      status: 200,
+      payload: { success: true },
+    });
+    records.getRecordFindings.mockResolvedValue([
+      {
+        finding_type_text: "Конкременты",
+        finding_code: "CALCULUS",
+        body_site_text: "почка",
+        site_code: "kidney",
+      },
+      {
+        finding_type_text: "Высыпания",
+        finding_code: null,
+        body_site_text: "спина",
+        site_code: null,
+      },
+    ]);
+    const text = (await (await handlers()).get("ingest_medical_document")!(SUBMISSION, ctx))
+      .content[0].text;
+
+    expect(text).toContain("Findings the catalogues did not recognise");
+    expect(text).toContain("- Высыпания (no finding type) at спина (no body site)");
+    expect(text).not.toContain("- Конкременты");
+  });
+
   it("relays the server's refusal", async () => {
     userClient.invokeEdgeFunctionAsUser.mockResolvedValue({
       status: 409,
