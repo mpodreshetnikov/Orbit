@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { FindingTypeEditDialog } from "./finding-type-edit-dialog";
 import { useFindingTypeCatalog, useDeleteFindingType } from "@/hooks";
+import { matchesCatalogEntry } from "@/types/clinical-catalog";
 import type { FindingTypeCatalog } from "@/types";
 
 export function FindingTypeCatalogList() {
@@ -50,17 +51,9 @@ export function FindingTypeCatalogList() {
   const deleteMutation = useDeleteFindingType();
 
   // Filter by search
-  const filteredItems = findingTypes?.filter((item) => {
-    if (!debouncedSearch.trim()) return true;
-    const search = debouncedSearch.toLowerCase();
-    return (
-      item.finding_code.toLowerCase().includes(search) ||
-      item.name_ru.toLowerCase().includes(search) ||
-      item.name_en.toLowerCase().includes(search) ||
-      item.synonyms_ru?.some((s) => s.toLowerCase().includes(search)) ||
-      item.synonyms_en?.some((s) => s.toLowerCase().includes(search))
-    );
-  });
+  const filteredItems = findingTypes?.filter((item) =>
+    matchesCatalogEntry(item.finding_code, item, debouncedSearch),
+  );
 
   // Handlers
   const handleAdd = () => {

@@ -51,6 +51,12 @@ import {
   type Completion,
 } from "@/features/checkups/query";
 import { fetchObservations } from "@/features/observations/query";
+import {
+  fetchClinicalCatalog,
+  saveClinicalEntry,
+  type ClinicalCatalogKind,
+  type ClinicalColumns,
+} from "@/features/catalogs/query";
 import { fetchActiveRecords, fetchFindings, markFindingResolved } from "@/features/findings/query";
 import {
   createCatalogEntry,
@@ -302,6 +308,28 @@ export function useMeasurements(personId: string | undefined) {
 
 export function useMeasurementCatalog() {
   return useQuery({ queryKey: ["measurement-catalog"], queryFn: fetchMeasurementCatalog });
+}
+
+export function useClinicalCatalog(kind: ClinicalCatalogKind) {
+  return useQuery({
+    queryKey: ["clinical-catalog", kind],
+    queryFn: () => fetchClinicalCatalog(kind),
+  });
+}
+
+/** Add, change or delete (`columns: null`) a finding type or body site; findings carry their names. */
+export function useSaveClinicalEntry(kind: ClinicalCatalogKind) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, columns }: { id?: string; columns: ClinicalColumns | null }) =>
+      saveClinicalEntry(kind, id, columns),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ["clinical-catalog", kind] });
+      void client.invalidateQueries({ queryKey: ["findings"] });
+    },
+  });
 }
 
 export type CatalogSave = { columns: CatalogColumns; id?: string } | { id: string; remove: true };

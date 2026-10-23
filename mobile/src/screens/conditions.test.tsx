@@ -369,6 +369,25 @@ describe("adding to a condition's history", () => {
     await renderScreens(routes, `/health/conditions/${id}`);
     await fireEvent.press(await screen.findByText("Добавить в историю"));
     await screen.findByLabelText(/^Статус в этой записи/);
+    await recordsOffered();
+  }
+
+  /**
+   * The records load after the form; on a loaded runner a pick made before they arrive finds only
+   * "none". Open the picker until it offers them, then leave the sheet to each test.
+   */
+  async function recordsOffered() {
+    let offered: (string | undefined)[] = [];
+    const sheet = jest
+      .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
+      .mockImplementation((options) => (offered = options.options));
+    const picker = screen.getByLabelText(/^Привязать к медицинской записи/);
+    for (let tries = 0; tries < 40 && offered.length <= 2; tries += 1) {
+      if (tries > 0) await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      await fireEvent.press(picker);
+    }
+    sheet.mockRestore();
+    return offered;
   }
 
   it("writes a manual entry of the day, and the newest word sets the status", async () => {
@@ -449,18 +468,7 @@ describe("adding to a condition's history", () => {
 
   it("offers only the records that do not mention the condition yet", async () => {
     await openForm("anemia");
-    let offered: (string | undefined)[] = [];
-    jest
-      .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
-      .mockImplementation((options) => (offered = options.options));
-    // The records load after the form: ask again until they are offered.
-    const picker = screen.getByLabelText(
-      "Привязать к медицинской записи: Нет (только ручная запись)",
-    );
-    for (let tries = 0; tries < 20 && offered.length <= 2; tries += 1) {
-      if (tries > 0) await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
-      await fireEvent.press(picker);
-    }
+    const offered = await recordsOffered();
     expect(offered).toContain("Старый осмотр · 01.01.2024");
     expect(offered).not.toContain("Общий анализ крови · 01.03.2025");
   });

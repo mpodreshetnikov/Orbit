@@ -1103,6 +1103,7 @@
     "unitEn": "Unit (EN)",
     "canonicalUnit": "Canonical Unit",
     "unit": "Unit",
+    "synonyms": "Synonyms",
     "synonymsRu": "Synonyms (RU)",
     "synonymsEn": "Synonyms (EN)",
     "addSynonym": "Add synonym...",

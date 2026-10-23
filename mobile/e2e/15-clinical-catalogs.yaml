@@ -1,0 +1,29 @@
+# The finding-type and body-site catalogues, and a body site's form with a parent found by name.
+appId: host.exp.Exponent
+name: Справочники находок
+---
+- openLink: exp://127.0.0.1:8081/--/health/catalogs/finding-types
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Типы находок"
+    timeout: 60000
+- scrollUntilVisible:
+    element: "polyp · .*"
+- takeScreenshot: catalogs-01-finding-types
+- openLink: exp://127.0.0.1:8081/--/health/catalogs/body-sites
+- extendedWaitUntil:
+    visible: "Локализации"
+    timeout: 20000
+- scrollUntilVisible:
+    element: "kidney_left · .*"
+- takeScreenshot: catalogs-02-body-sites
+- tapOn: "Добавить локализацию"
+- extendedWaitUntil:
+    visible: "Родительская локализация"
+    timeout: 10000
+- tapOn: "Выберите родительскую локализацию..."
+- inputText: "почк"
+- takeScreenshot: catalogs-03-parent-search
+- tapOn: "Отмена"
