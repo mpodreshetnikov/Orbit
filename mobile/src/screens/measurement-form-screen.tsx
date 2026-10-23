@@ -1,6 +1,6 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScrollView } from "react-native";
 import { Choice, Field, Input, NumberInput, Section } from "@/components/form";
 import { Button, Placeholder, Text } from "@/components/ui";
@@ -41,9 +41,12 @@ export default function MeasurementFormScreen() {
   const [notes, setNotes] = useState("");
   const [missing, setMissing] = useState(false);
 
-  // Fill from the entry being edited, or the type the page was opened for, once they have loaded.
+  // Fill from the entry being edited, or the type the page was opened for, once they have loaded:
+  // once per entry, so a refetch landing mid-edit does not put back what the person changed.
+  const filledFor = useRef<string | null>(null);
   useEffect(() => {
-    if (editing) {
+    if (editing && filledFor.current !== editing.id) {
+      filledFor.current = editing.id;
       setValue(editing.value);
       setMeasuredAt(new Date(editing.measured_at));
       setNotes(editing.notes ?? "");
@@ -102,10 +105,30 @@ export default function MeasurementFormScreen() {
     return (
       <>
         {header}
-        {catalog.isPending || measurements.isPending ? (
+        {(catalog.isPending || measurements.isPending) && !person.error ? (
           <Placeholder busy />
         ) : (
-          <Placeholder message={catalog.error?.message ?? t("measurements.noData")} />
+          <Placeholder
+            message={
+              (person.error ?? catalog.error ?? measurements.error)?.message ??
+              t("measurements.noData")
+            }
+            action={
+              person.error || catalog.error || measurements.error ? (
+                <Button
+                  variant="outline"
+                  label={t("common.retry")}
+                  onPress={() =>
+                    void (person.error
+                      ? person.refetch()
+                      : catalog.error
+                        ? catalog.refetch()
+                        : measurements.refetch())
+                  }
+                />
+              ) : undefined
+            }
+          />
         )}
       </>
     );

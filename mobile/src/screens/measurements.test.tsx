@@ -8,7 +8,7 @@ import MeasurementFormScreen from "@/screens/measurement-form-screen";
 import MeasurementScreen from "@/screens/measurement-screen";
 import MeasurementVisibilityScreen from "@/screens/measurement-visibility-screen";
 import MeasurementsScreen from "@/screens/measurements-screen";
-import { db, fail, fakeSession, seed, setSession } from "../../test/fake-supabase";
+import { db, fail, failOnce, fakeSession, seed, setSession } from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
@@ -296,6 +296,32 @@ describe("recording a measurement", () => {
     await waitFor(() => expect(screen.queryByLabelText("Значение")).toBeNull());
   });
 
+  it("keeps what the person typed when the entry refetches mid-edit", async () => {
+    const { client } = await renderScreens(
+      routes,
+      "/health/measurements/form?code=weight&entry=w1",
+    );
+    const value = await screen.findByLabelText("Значение");
+    await fireEvent.changeText(value, "79");
+    db.tables.measurements = db.tables.measurements.map((row) =>
+      row.id === "w1" ? { ...row, notes: "сервер" } : row,
+    );
+    await client.invalidateQueries({ queryKey: ["measurements"] });
+    await waitFor(() =>
+      expect(JSON.stringify(client.getQueryData(["measurements", PERSON.id]))).toContain("сервер"),
+    );
+    expect(screen.getByLabelText("Значение").props.value).toBe("79");
+  });
+
+  it("says when the measurements cannot be read, and retries", async () => {
+    fail("measurements");
+    await renderScreens(routes, "/health/measurements/form?code=weight&entry=w1");
+    expect(await screen.findByText("measurements is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect((await screen.findByLabelText("Значение")).props.value).toBe("82");
+  });
+
   it("says when the entry to correct is gone", async () => {
     await renderScreens(routes, "/health/measurements/form?code=weight&entry=gone");
     expect(await screen.findByText("Измерений пока нет")).toBeOnTheScreen();
@@ -339,12 +365,18 @@ describe("choosing measurements", () => {
     );
   });
 
+  it("offers no switch until the stored choices have loaded", async () => {
+    fail("user_preferences");
+    await renderScreens(routes, "/health/measurements/visibility");
+    expect(await screen.findByText("user_preferences is unavailable")).toBeOnTheScreen();
+    expect(screen.queryByLabelText("Вес")).toBeNull();
+  });
+
   it("puts the switch back when the preference cannot be saved", async () => {
     await renderScreens(routes, "/health/measurements/visibility");
     const weight = await screen.findByLabelText("Вес");
-    fail("user_preferences");
+    failOnce("user_preferences");
     await fireEvent(weight, "valueChange", false);
-    db.failing.clear();
     await waitFor(() => expect(screen.getByLabelText("Вес").props.value).toBe(true));
   });
 });

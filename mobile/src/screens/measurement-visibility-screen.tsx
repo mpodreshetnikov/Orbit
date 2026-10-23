@@ -20,8 +20,11 @@ export default function MeasurementVisibilityScreen() {
       <Stack.Screen
         options={{ title: t("measurements.visibilityTitle"), headerLargeTitle: false }}
       />
-      {!measurements.data ? (
-        <Placeholder busy={measurements.isPending} message={measurements.error?.message} />
+      {!measurements.data || !hidden.ready ? (
+        <Placeholder
+          busy={measurements.isPending || hidden.pending}
+          message={(measurements.error ?? hidden.error)?.message}
+        />
       ) : (
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"

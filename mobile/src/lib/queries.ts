@@ -326,11 +326,20 @@ export function useHiddenMeasurements(personId: string | undefined) {
     },
   });
   const codes = new Set(personId ? (hidden.data?.[personId] ?? []) : []);
+  // The column is written whole, so a toggle waits for the stored choices: one built on nothing
+  // would wipe the types hidden for every other person.
   const toggle = (code: string) => {
-    if (!personId) return;
-    const next = toggleHiddenCode(client.getQueryData(key) ?? {}, personId, code);
+    const current = client.getQueryData<HiddenMeasurementCodes>(key);
+    if (!personId || !current) return;
+    const next = toggleHiddenCode(current, personId, code);
     client.setQueryData(key, next);
     save.mutate(next);
   };
-  return { codes, toggle };
+  return {
+    codes,
+    toggle,
+    ready: hidden.data !== undefined,
+    pending: hidden.isPending,
+    error: hidden.error,
+  };
 }

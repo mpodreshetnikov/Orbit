@@ -47,8 +47,7 @@ name: Измерения
 - tapOn:
     text: "Continue"
     optional: true
-- inputText: "76,9"
-- hideKeyboard
+- inputText: "76,9" # A decimal pad has no key to hide it by; Save is in the bar above it.
 - takeScreenshot: measurements-06-new
 - tapOn: "Сохранить"
 - extendedWaitUntil:
