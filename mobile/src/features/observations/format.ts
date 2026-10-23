@@ -16,16 +16,22 @@ export function shownValue(value: number | null, text: string | null, digits = 1
   return value !== null ? formatValue(value, digits) : text || "—";
 }
 
+/** A bound as written, without the float tail a unit conversion leaves ("3.885", not "3.8850000000000002"). */
+const bound = (value: number) => String(Number(value.toFixed(3)));
+
 /** "3.5–5.5", or a dash when either end is missing. */
 export function rangeText(low: number | null, high: number | null): string {
-  return low !== null && high !== null ? `${low}–${high}` : "—";
+  return low !== null && high !== null ? `${bound(low)}–${bound(high)}` : "—";
 }
 
-/** The range a summary is judged against: the latest result's own, else the catalogue's. */
+/**
+ * The range a summary is judged against, in the unit of its latest value: the latest result's own
+ * (converted when the value was), else the catalogue's.
+ */
 export function summaryRange(summary: ObservationSummary): [number | null, number | null] {
   return [
-    summary.latest_ref_low ?? summary.default_ref_low,
-    summary.latest_ref_high ?? summary.default_ref_high,
+    summary.latest_ref_low_canonical ?? summary.latest_ref_low ?? summary.default_ref_low,
+    summary.latest_ref_high_canonical ?? summary.latest_ref_high ?? summary.default_ref_high,
   ];
 }
 
@@ -37,7 +43,15 @@ export function statusTone(status: ObservationStatus): keyof Palette {
   return "destructive";
 }
 
+/** The results a chart can draw, oldest first, each with its date: a text-only result has no point. */
+export function chartPoints(history: ObservationHistoryPoint[]): { value: number; date: string }[] {
+  return history.flatMap((point) => {
+    const value = pointValue(point);
+    return value === null ? [] : [{ value, date: point.record_date || point.created_at }];
+  });
+}
+
 /** The values a chart can draw, oldest first. */
 export function chartValues(history: ObservationHistoryPoint[]): number[] {
-  return history.map(pointValue).filter((value): value is number => value !== null);
+  return chartPoints(history).map((point) => point.value);
 }

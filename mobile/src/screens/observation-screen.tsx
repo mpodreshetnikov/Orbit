@@ -8,7 +8,7 @@ import { ObservationStatusBadge } from "@/components/observation-status";
 import { Card, Icon, Placeholder, Text } from "@/components/ui";
 import { formatDay, formatValue, trendPercent } from "@/features/measurements/format";
 import {
-  chartValues,
+  chartPoints,
   pointValue,
   rangeText,
   shownValue,
@@ -51,10 +51,10 @@ export default function ObservationScreen() {
 
   const unit = observation.latest_unit || observation.canonical_unit || "";
   const [low, high] = summaryRange(observation);
-  const values = chartValues(observation.history);
-  const trend = trendPercent(values.map((value) => ({ value })));
+  const charted = chartPoints(observation.history);
+  const values = charted.map((point) => point.value);
+  const trend = trendPercent(charted);
   const newestFirst = [...observation.history].reverse();
-  const dated = observation.history.map((point) => point.record_date || point.created_at);
 
   return (
     <>
@@ -130,7 +130,7 @@ export default function ObservationScreen() {
             <Text weight="semibold">{t("observationHistory.chartTitle")}</Text>
             <LineChart
               values={values}
-              labels={[formatDay(dated[0]), formatDay(dated[dated.length - 1])]}
+              labels={[formatDay(charted[0].date), formatDay(charted[charted.length - 1].date)]}
               format={(value) => formatValue(value)}
               band={low !== null && high !== null ? [low, high] : undefined}
             />

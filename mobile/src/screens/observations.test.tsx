@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { fireEvent, screen, within } from "@testing-library/react-native";
-import { rangeText, shownValue, statusTone } from "@/features/observations/format";
+import { chartDomain } from "@/components/charts";
+import { formatDay } from "@/features/measurements/format";
+import {
+  chartPoints,
+  rangeText,
+  shownValue,
+  statusTone,
+  summaryRange,
+} from "@/features/observations/format";
 import HealthScreen from "@/screens/health-screen";
 import ObservationScreen from "@/screens/observation-screen";
 import ObservationsScreen from "@/screens/observations-screen";
@@ -155,10 +163,65 @@ describe("the observation helpers", () => {
   it("formats values, ranges and status colours", () => {
     expect(shownValue(null, null)).toBe("—");
     expect(rangeText(1, null)).toBe("—");
+    expect(rangeText(3.8850000000000002, 5)).toBe("3.885–5");
     expect([statusTone("normal"), statusTone("high"), statusTone("critical_low")]).toEqual([
       "success",
       "rising",
       "destructive",
     ]);
+  });
+});
+
+describe("the observation chart and range", () => {
+  const point = (id: string, date: string, value: number | null, text: string | null = null) => ({
+    id,
+    record_id: "r",
+    record_date: date,
+    value_numeric: value,
+    value_text: text,
+    value_canonical: null,
+    unit: "u",
+    unit_canonical: null,
+    ref_range_low: null,
+    ref_range_high: null,
+    ref_range_low_canonical: null,
+    ref_range_high_canonical: null,
+    status: null,
+    created_at: date,
+  });
+
+  it("keeps each charted value with its own date, leaving text-only results out", () => {
+    expect(
+      chartPoints([
+        point("a", "2026-01-01", 1),
+        point("b", "2026-02-01", 2),
+        point("c", "2026-03-01", null, "neg"),
+      ]),
+    ).toEqual([
+      { value: 1, date: "2026-01-01" },
+      { value: 2, date: "2026-02-01" },
+    ]);
+  });
+
+  it("judges a converted value against its converted range", () => {
+    expect(
+      summaryRange({
+        latest_ref_low: 200,
+        latest_ref_high: 900,
+        latest_ref_low_canonical: 148,
+        latest_ref_high_canonical: 664,
+        default_ref_low: 100,
+        default_ref_high: 500,
+      } as Parameters<typeof summaryRange>[0]),
+    ).toEqual([148, 664]);
+  });
+
+  it("lets a negative range go below zero", () => {
+    expect(chartDomain([-2, -1])).toEqual([-2.1, -0.9]);
+    expect(chartDomain([-1, 2])[0]).toBeLessThan(-1);
+  });
+
+  it("shows a date-only value as that day", () => {
+    expect(formatDay("2026-09-01")).toBe("01.09.2026");
   });
 });

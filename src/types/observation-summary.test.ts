@@ -48,6 +48,18 @@ describe("summarizeObservations", () => {
     expect(urine.obs_code).toBe("urine colour");
   });
 
+  it("takes the latest result by its record's date, not by upload", () => {
+    const [glucose] = summarizeObservations([
+      row("old", "glucose", "Glucose", "2025-01-01", { value_numeric: 4, status: "low" }),
+      row("new", "glucose", "Glucose", "2026-03-01", { value_numeric: 6 }),
+    ]);
+    expect([glucose.latest_value, glucose.latest_status, glucose.latest_date]).toEqual([
+      6,
+      "normal",
+      "2026-03-01",
+    ]);
+  });
+
   it("puts out-of-range values first, then the newest, then by name", () => {
     const codes = summarizeObservations([
       row("1", "b", "B", "2026-01-01"),

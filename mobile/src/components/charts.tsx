@@ -29,7 +29,8 @@ export function chartDomain(values: number[]): [number, number] {
   const low = Math.min(...values);
   const high = Math.max(...values);
   const padding = (high - low) * 0.1 || 1;
-  return [Math.max(0, low - padding), high + padding];
+  // Body measurements stop at zero; a lab value or range that is already negative does not.
+  return [low >= 0 ? Math.max(0, low - padding) : low - padding, high + padding];
 }
 
 const points = (at: { x: number; y: number }[]) => at.map(({ x, y }) => `${x},${y}`).join(" ");

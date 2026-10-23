@@ -50,6 +50,22 @@ export function isAbnormal(status: ObservationStatus | null): boolean {
 }
 
 const pointDate = (point: ObservationHistoryPoint) => point.record_date || point.created_at;
+const pointTime = (point: ObservationHistoryPoint) => new Date(pointDate(point)).getTime();
+
+/** A summary's `latest_*` fields, taken from one result. */
+function latestOf(point: ObservationHistoryPoint) {
+  return {
+    latest_value: point.value_canonical ?? point.value_numeric,
+    latest_value_text: point.value_text,
+    latest_unit: point.unit_canonical || point.unit,
+    latest_status: point.status,
+    latest_date: point.record_date,
+    latest_ref_low: point.ref_range_low,
+    latest_ref_high: point.ref_range_high,
+    latest_ref_low_canonical: point.ref_range_low_canonical,
+    latest_ref_high_canonical: point.ref_range_high_canonical,
+  };
+}
 
 /**
  * Groups observations, newest first as the history query returns them, into one summary per code
@@ -80,6 +96,9 @@ export function summarizeObservations(rows: ObservationListRow[]): ObservationSu
 
     const existing = byKey.get(key);
     if (existing) {
+      // An older record uploaded later comes first by upload time: the latest is by its own date.
+      const latest = existing.history.reduce((a, b) => (pointTime(b) > pointTime(a) ? b : a));
+      if (pointTime(point) > pointTime(latest)) Object.assign(existing, latestOf(point));
       existing.history.push(point);
       existing.measurement_count++;
       continue;
@@ -91,15 +110,7 @@ export function summarizeObservations(rows: ObservationListRow[]): ObservationSu
       catalog_name_ru: r.observation_catalog?.name_ru || null,
       catalog_name_en: r.observation_catalog?.name_en || null,
       canonical_unit: r.observation_catalog?.canonical_unit || r.unit_canonical,
-      latest_value: r.value_canonical ?? r.value_numeric,
-      latest_value_text: r.value_text,
-      latest_unit: r.unit_canonical || r.unit,
-      latest_status: r.status as ObservationStatus | null,
-      latest_date: r.medical_records.record_date,
-      latest_ref_low: r.ref_range_low,
-      latest_ref_high: r.ref_range_high,
-      latest_ref_low_canonical: r.ref_range_low_canonical,
-      latest_ref_high_canonical: r.ref_range_high_canonical,
+      ...latestOf(point),
       default_ref_low: r.observation_catalog?.default_ref_low ?? null,
       default_ref_high: r.observation_catalog?.default_ref_high ?? null,
       measurement_count: 1,
