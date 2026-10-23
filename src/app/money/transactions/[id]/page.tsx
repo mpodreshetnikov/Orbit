@@ -37,6 +37,7 @@ import {
 } from "@/hooks";
 import { formatMoney } from "@/lib/money";
 import { useUIStore } from "@/stores/ui-store";
+import { merchantNames } from "@/types/money-transaction-form";
 
 export default function MoneyTransactionDetailPage({
   params,
@@ -67,17 +68,7 @@ export default function MoneyTransactionDetailPage({
   const applyMutation = useApplyMoneyCategoryRulePipeline();
   const replayTransactionMutation = useReplayMoneyCategoryRulePipelineForTransaction();
 
-  const existingMerchantNames = useMemo(
-    () =>
-      [
-        ...new Set(
-          (transactions ?? [])
-            .map((tx) => tx.merchant_name)
-            .filter((name): name is string => Boolean(name?.trim())),
-        ),
-      ].sort(),
-    [transactions],
-  );
+  const existingMerchantNames = useMemo(() => merchantNames(transactions ?? []), [transactions]);
 
   const categoryNameById = useMemo(
     () =>

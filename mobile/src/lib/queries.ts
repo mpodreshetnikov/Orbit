@@ -10,7 +10,12 @@ import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
 import type { checkupColumns } from "@orbit-types/checkup-form";
 import type { UpdateConditionInput } from "@orbit-types/condition";
 import type { FindingSummary } from "@orbit-types/finding";
-import type { MoneyTransactionFeedFilters } from "@orbit-types/money";
+import type {
+  CreateMoneyLineItemInput,
+  CreateMoneyTransactionInput,
+  MoneyTransactionFeedFilters,
+  UpdateMoneyTransactionInput,
+} from "@orbit-types/money";
 import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
 import type {
   AddOneTimeToExistingPayload,
@@ -64,6 +69,15 @@ import {
   fetchMoneyFeedPage,
   fetchMoneyFeedSummary,
 } from "@/features/money/query";
+import {
+  createTransaction,
+  deleteTransaction,
+  fetchMerchantCategories,
+  fetchMerchantNames,
+  fetchPersons,
+  fetchTransaction,
+  updateTransaction,
+} from "@/features/money/transactions";
 import {
   fetchClinicalCatalog,
   saveClinicalEntry,
@@ -595,4 +609,59 @@ export function useMoneyAccounts(personId: string | undefined) {
 
 export function useMoneyCategories() {
   return useQuery({ queryKey: ["money-categories"], queryFn: fetchMoneyCategories });
+}
+
+export function useTransaction(id: string) {
+  return useQuery({ queryKey: ["money-transaction", id], queryFn: () => fetchTransaction(id) });
+}
+
+export function useMerchantCategories(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["money-merchant-categories", personId],
+    queryFn: () => fetchMerchantCategories(personId!),
+    enabled: !!personId,
+  });
+}
+
+export function useMerchantNames(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["money-merchant-names", personId],
+    queryFn: () => fetchMerchantNames(personId!),
+    enabled: !!personId,
+  });
+}
+
+export function usePersons() {
+  return useQuery({ queryKey: ["persons"], queryFn: fetchPersons });
+}
+
+export type TransactionSave =
+  | { transaction: CreateMoneyTransactionInput; lineItems: CreateMoneyLineItemInput[] }
+  | { id: string; updates: UpdateMoneyTransactionInput; lineItems: CreateMoneyLineItemInput[] }
+  | { id: string; remove: true };
+
+/** Add, change or delete a transaction; the feed and its sums follow. Resolves to its id. */
+export function useSaveTransaction() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (save: TransactionSave): Promise<string> => {
+      if ("remove" in save) {
+        await deleteTransaction(save.id);
+        return save.id;
+      }
+      if ("updates" in save) {
+        await updateTransaction(save.id, save.updates, save.lineItems);
+        return save.id;
+      }
+      return createTransaction(save.transaction, save.lineItems);
+    },
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    onSettled: (id) => {
+      void client.invalidateQueries({ queryKey: ["money-feed"] });
+      void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
+      void client.invalidateQueries({ queryKey: ["money-merchant-names"] });
+      if (id) void client.invalidateQueries({ queryKey: ["money-transaction", id] });
+    },
+  });
 }

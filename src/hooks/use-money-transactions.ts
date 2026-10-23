@@ -17,13 +17,19 @@ import type {
   MoneyTransactionFeedSummary,
   UpdateMoneyTransactionInput,
 } from "@/types";
-import type { Database, Json } from "@/types/database";
+import type { Database } from "@/types/database";
 import {
   feedSummaryOf,
   MONEY_FEED_PAGE_SIZE,
   moneyFeedArgs,
   normalizeFeedItem,
 } from "@/types/money-feed";
+import {
+  lineItemChanges,
+  lineItemRow,
+  lineItemsOrWhole,
+  transactionInsertRow,
+} from "@/types/money-transaction-form";
 
 type MoneyTransactionInsert = Database["public"]["Tables"]["money_transactions"]["Insert"];
 type MoneyLineItemInsert = Database["public"]["Tables"]["money_line_items"]["Insert"];
@@ -37,12 +43,6 @@ const FEED_RETRIES = 1;
 
 export interface MoneyTransactionsFilters {
   accountId?: string | null;
-}
-
-function toJsonOrNull(value: Record<string, unknown> | null | undefined): Json | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  return value as unknown as Json;
 }
 
 function mapDetailRow(row: Record<string, unknown>): MoneyTransactionDetail {
@@ -262,41 +262,6 @@ export function useMoneyTransactionEditAudits(transactionId: string | null) {
   });
 }
 
-function ensureLineItems(
-  lineItems: CreateMoneyLineItemInput[],
-  fallback: CreateMoneyLineItemInput,
-): CreateMoneyLineItemInput[] {
-  if (!lineItems || lineItems.length === 0) {
-    return [fallback];
-  }
-  return lineItems;
-}
-
-function toLineItemMutationPayload(
-  item: CreateMoneyLineItemInput,
-  transactionId: string,
-): MoneyLineItemInsert & MoneyLineItemUpdate {
-  return {
-    transaction_id: transactionId,
-    title: item.title,
-    amount: item.amount,
-    quantity: item.quantity ?? null,
-    unit: item.unit ?? null,
-    line_status: item.line_status ?? "final",
-    related_line_item_id: item.related_line_item_id ?? null,
-    category_id: item.category_id ?? null,
-    beneficiary_person_id: item.beneficiary_person_id ?? null,
-    assignment_method: item.assignment_method ?? "manual",
-    assignment_rule_id: item.assignment_rule_id ?? null,
-    assignment_confidence: item.assignment_confidence ?? null,
-    category_locked_by_user: item.category_locked_by_user ?? false,
-    raw_payload: toJsonOrNull(item.raw_payload) ?? null,
-    last_category_rule_id: item.last_category_rule_id ?? null,
-    last_category_rule_run_id: item.last_category_rule_run_id ?? null,
-    category_assigned_at: item.category_assigned_at ?? null,
-  };
-}
-
 async function createMoneyTransactionWithLines({
   transaction,
   lineItems,
@@ -305,31 +270,7 @@ async function createMoneyTransactionWithLines({
   lineItems: CreateMoneyLineItemInput[];
 }): Promise<MoneyTransactionDetail> {
   const supabase = createClient();
-  const txPayload: MoneyTransactionInsert = {
-    payer_person_id: transaction.payer_person_id,
-    account_id: transaction.account_id,
-    brand_id: transaction.brand_id ?? null,
-    source: transaction.source ?? "manual",
-    external_id: transaction.external_id ?? null,
-    posted_at: transaction.posted_at,
-    amount: transaction.amount,
-    currency: transaction.currency,
-    transaction_type: transaction.transaction_type,
-    status: transaction.status ?? "posted",
-    merchant_name: transaction.merchant_name ?? null,
-    mcc: transaction.mcc ?? null,
-    comment: transaction.comment ?? null,
-    source_comment: transaction.source_comment ?? null,
-    cashback_amount: transaction.cashback_amount ?? null,
-    cashback_currency: transaction.cashback_currency ?? null,
-    operation_icon_url: transaction.operation_icon_url ?? null,
-    source_category_id: transaction.source_category_id ?? null,
-    source_category_name: transaction.source_category_name ?? null,
-    is_transfer: transaction.is_transfer ?? false,
-    transfer_group_id: transaction.transfer_group_id ?? null,
-    raw_payload: toJsonOrNull(transaction.raw_payload) ?? null,
-    dedupe_hash: transaction.dedupe_hash ?? null,
-  } as MoneyTransactionInsert;
+  const txPayload = transactionInsertRow(transaction) as MoneyTransactionInsert;
 
   const { data: tx, error } = await supabase
     .from("money_transactions")
@@ -339,15 +280,8 @@ async function createMoneyTransactionWithLines({
 
   if (error) throw new Error(error.message);
 
-  const fallbackItem: CreateMoneyLineItemInput = {
-    title: transaction.merchant_name?.trim() || "Manual item",
-    amount: transaction.amount,
-    line_status: "final",
-    assignment_method: "manual",
-  };
-
-  const items: MoneyLineItemInsert[] = ensureLineItems(lineItems, fallbackItem).map((item) =>
-    toLineItemMutationPayload(item, tx.id),
+  const items = lineItemsOrWhole(lineItems, transaction.merchant_name, transaction.amount).map(
+    (item) => lineItemRow(item, tx.id) as MoneyLineItemInsert,
   );
 
   const { data: lines, error: lineError } = await supabase
@@ -398,14 +332,7 @@ async function updateMoneyTransactionWithLines({
 
   if (error) throw new Error(error.message);
 
-  const fallbackItem: CreateMoneyLineItemInput = {
-    title: updates.merchant_name?.trim() || "Manual item",
-    amount: updates.amount ?? 0,
-    line_status: "final",
-    assignment_method: "manual",
-  };
-
-  const items = ensureLineItems(lineItems, fallbackItem);
+  const items = lineItemsOrWhole(lineItems, updates.merchant_name, updates.amount ?? 0);
   const { data: currentLineRows, error: currentLineError } = await supabase
     .from("money_line_items")
     .select("id")
@@ -413,11 +340,14 @@ async function updateMoneyTransactionWithLines({
 
   if (currentLineError) throw new Error(currentLineError.message);
 
-  const currentLineIds = new Set((currentLineRows ?? []).map((row) => row.id));
-  const submittedExistingIds = new Set(
-    items.map((item) => item.id).filter((value): value is string => Boolean(value)),
+  const {
+    removed: removedLineIds,
+    changed,
+    added: newItems,
+  } = lineItemChanges(
+    (currentLineRows ?? []).map((row) => row.id),
+    items,
   );
-  const removedLineIds = [...currentLineIds].filter((lineId) => !submittedExistingIds.has(lineId));
 
   if (removedLineIds.length > 0) {
     const { error: deleteError } = await supabase
@@ -429,29 +359,24 @@ async function updateMoneyTransactionWithLines({
   }
 
   const updatedLineMap = new Map<string, MoneyLineItem>();
-  const newItems = items.filter((item) => !item.id || !currentLineIds.has(item.id));
 
-  for (const item of items) {
-    if (!item.id || !currentLineIds.has(item.id)) {
-      continue;
-    }
-
+  for (const item of changed) {
     const { data: updatedLine, error: updateLineError } = await supabase
       .from("money_line_items")
-      .update(toLineItemMutationPayload(item, id))
-      .eq("id", item.id)
+      .update(lineItemRow(item, id) as MoneyLineItemUpdate)
+      .eq("id", item.id!)
       .select()
       .single();
 
     if (updateLineError) throw new Error(updateLineError.message);
-    updatedLineMap.set(item.id, updatedLine as MoneyLineItem);
+    updatedLineMap.set(item.id!, updatedLine as MoneyLineItem);
   }
 
   let insertedLines: MoneyLineItem[] = [];
   if (newItems.length > 0) {
     const { data: insertedLineRows, error: lineError } = await supabase
       .from("money_line_items")
-      .insert(newItems.map((item) => toLineItemMutationPayload(item, id)))
+      .insert(newItems.map((item) => lineItemRow(item, id) as MoneyLineItemInsert))
       .select();
 
     if (lineError) throw new Error(lineError.message);

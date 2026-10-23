@@ -4,18 +4,19 @@ import type {
   MoneyTransactionType,
 } from "@orbit-types/money";
 import { formatMoney, preferredComment } from "@orbit-types/money-feed";
-import { Stack } from "expo-router";
+import { Stack, useRouter, type Href } from "expo-router";
 import {
   ArrowDownLeft,
   ArrowRightLeft,
   ArrowUpRight,
+  Plus,
   ReceiptText,
   RotateCcw,
   Scale,
   type LucideIcon,
 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
-import { RefreshControl, SectionList, View } from "react-native";
+import { Pressable, RefreshControl, SectionList, View } from "react-native";
 import { Chip } from "@/components/form";
 import { Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
@@ -79,10 +80,11 @@ export function byDay(items: MoneyTransactionFeedItem[]) {
 /**
  * "Деньги" — the web transactions page: every transaction of the person, newest first and by day,
  * searched from the bar and narrowed to money in or out, with how many match and their sums. More
- * load as the list nears its end.
+ * load as the list nears its end. "+" adds one.
  */
 export default function MoneyScreen() {
   const palette = usePalette();
+  const router = useRouter();
   const person = usePerson();
   const personId = person.data?.id;
   const [typed, setQuery] = useState("");
@@ -110,6 +112,16 @@ export default function MoneyScreen() {
     <Stack.Screen
       options={{
         title: t("money.title"),
+        headerRight: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("money.addTransaction")}
+            hitSlop={space.sm}
+            onPress={() => router.push("/money/form" as Href)}
+          >
+            <Icon icon={Plus} size={24} tone="foreground" />
+          </Pressable>
+        ),
         headerSearchBarOptions: {
           placeholder: t("money.searchTransactions"),
           hideWhenScrolling: false,

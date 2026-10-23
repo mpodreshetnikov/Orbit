@@ -1,0 +1,25 @@
+# A spend added from the money tab's plus, then in the feed.
+appId: host.exp.Exponent
+name: Транзакция
+---
+- openLink: exp://127.0.0.1:8081/--/money
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Совпадений"
+    timeout: 60000
+- tapOn: "Добавить транзакцию"
+- extendedWaitUntil:
+    visible: "Строки"
+    timeout: 10000
+- inputText: "-420"
+- tapOn: "Мерчант"
+- inputText: "Пекарня у дома"
+- hideKeyboard
+- takeScreenshot: transaction-01-form
+- tapOn: "Сохранить"
+- extendedWaitUntil:
+    visible: "Пекарня у дома"
+    timeout: 20000
+- takeScreenshot: transaction-02-feed
