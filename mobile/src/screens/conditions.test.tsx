@@ -9,6 +9,7 @@ import {
   calls,
   db,
   fail,
+  failOnce,
   fakeSession,
   rpcHandlers,
   seed,
@@ -313,6 +314,14 @@ describe("editing a condition", () => {
     await waitFor(() =>
       expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "conditions is unavailable"),
     );
+  });
+
+  it("says when the condition cannot be read for editing, and retries", async () => {
+    failOnce("conditions");
+    await renderScreens(routes, "/health/conditions/edit?id=pox");
+    expect(await screen.findByText("conditions is unavailable")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByDisplayValue("Ветрянка")).toBeOnTheScreen();
   });
 
   it("says when the condition is not there", async () => {

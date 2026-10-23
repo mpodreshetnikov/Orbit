@@ -33,7 +33,20 @@ export default function ConditionFormScreen() {
       <Stack.Screen options={{ title: t("conditions.edit"), headerLargeTitle: false }} />
       <Placeholder
         busy={condition.isPending}
-        message={condition.isPending ? undefined : t("conditions.conditionNotFound")}
+        message={
+          condition.isPending
+            ? undefined
+            : (condition.error?.message ?? t("conditions.conditionNotFound"))
+        }
+        action={
+          condition.error ? (
+            <Button
+              variant="outline"
+              label={t("common.retry")}
+              onPress={() => void condition.refetch()}
+            />
+          ) : undefined
+        }
       />
     </>
   );
@@ -78,7 +91,8 @@ function ConditionForm({ initial }: { initial: Condition }) {
               compact
               variant="ghost"
               label={t("common.save")}
-              busy={save.isPending}
+              // The official name comes from the lookup: wait for it rather than save without it.
+              busy={save.isPending || lookup.isFetching}
               disabled={!name.trim()}
               onPress={submit}
             />

@@ -19,6 +19,8 @@ import { t } from "@/lib/i18n";
 import { useCondition, useSaveCondition } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
+const SHEET_DISMISS_MS = 400;
+
 /**
  * One condition — the web condition page: its status and ICD code, its dates and how often it was
  * mentioned, its notes, and every mention newest first with the record it is in and the source's own
@@ -66,7 +68,8 @@ export default function ConditionScreen() {
       },
       (index) => {
         if (index === 0) router.push(`/health/conditions/edit?id=${id}` as Href);
-        else if (deletable && index === 1) remove();
+        // An alert raised while the sheet is still closing is dropped by iOS.
+        else if (deletable && index === 1) setTimeout(remove, SHEET_DISMISS_MS);
       },
     );
   };

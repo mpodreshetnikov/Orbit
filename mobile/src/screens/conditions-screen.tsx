@@ -122,10 +122,17 @@ export default function ConditionsScreen() {
             <Placeholder busy />
           ) : (
             <View style={{ paddingVertical: space.xl, gap: space.xs, alignItems: "center" }}>
-              <Text weight="medium">{t("conditions.noConditions")}</Text>
-              <Text size="sm" tone="mutedForeground" style={{ textAlign: "center" }}>
-                {t("conditions.noConditionsHint")}
-              </Text>
+              {conditions.data?.length ? (
+                // A search that matches nothing is not an empty chart.
+                <Text weight="medium">{t("common.noResults")}</Text>
+              ) : (
+                <>
+                  <Text weight="medium">{t("conditions.noConditions")}</Text>
+                  <Text size="sm" tone="mutedForeground" style={{ textAlign: "center" }}>
+                    {t("conditions.noConditionsHint")}
+                  </Text>
+                </>
+              )}
             </View>
           )
         }
