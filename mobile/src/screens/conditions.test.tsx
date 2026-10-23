@@ -435,7 +435,7 @@ describe("adding to a condition's history", () => {
     expect(db.tables.conditions[2].current_status).toBe("history");
   });
 
-  it("says when saving fails", async () => {
+  it("says when saving fails, and takes back the manual record it wrote", async () => {
     await openForm("pox");
     fail("condition_records");
     const alert = jest.spyOn(Alert, "alert");
@@ -443,6 +443,28 @@ describe("adding to a condition's history", () => {
     await waitFor(() =>
       expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "condition_records is unavailable"),
     );
+    expect(db.tables.medical_records).toHaveLength(5);
+  });
+
+  it("offers only the records that do not mention the condition yet", async () => {
+    await openForm("anemia");
+    let offered: (string | undefined)[] = [];
+    jest
+      .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
+      .mockImplementationOnce((options) => (offered = options.options));
+    await fireEvent.press(
+      screen.getByLabelText("Привязать к медицинской записи: Нет (только ручная запись)"),
+    );
+    expect(offered).toContain("Старый осмотр · 01.01.2024");
+    expect(offered).not.toContain("Общий анализ крови · 01.03.2025");
+  });
+
+  it("says when the condition cannot be read, and retries", async () => {
+    failOnce("conditions");
+    await renderScreens(routes, "/health/conditions/history?id=anemia");
+    expect(await screen.findByText("conditions is unavailable")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByLabelText(/^Статус в этой записи/)).toBeOnTheScreen();
   });
 
   it("says when the condition is not there", async () => {

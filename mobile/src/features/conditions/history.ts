@@ -30,6 +30,7 @@ function check<T>({ data, error }: { data: T; error: { message: string } | null 
  */
 export async function addConditionHistory(userId: string, entry: HistoryEntry): Promise<void> {
   const note = entry.note.trim() || null;
+  const manual = !entry.record;
   const record =
     entry.record ??
     (check(
@@ -47,17 +48,20 @@ export async function addConditionHistory(userId: string, entry: HistoryEntry): 
         .select("id, title, record_date")
         .single(),
     ) as RecordChoice);
-  check(
-    await supabase.from("condition_records").insert({
-      condition_id: entry.conditionId,
-      record_id: record.id,
-      status_in_record: entry.status,
-      source_anchor: note,
-      is_llm_extracted: false,
-      is_user_verified: true,
-      review_decision: "confirmed",
-    }),
-  );
+  const linked = await supabase.from("condition_records").insert({
+    condition_id: entry.conditionId,
+    record_id: record.id,
+    status_in_record: entry.status,
+    source_anchor: note,
+    is_llm_extracted: false,
+    is_user_verified: true,
+    review_decision: "confirmed",
+  });
+  if (linked.error) {
+    // The manual record exists only for this mention: take it back, so a retry leaves no orphan.
+    if (manual) await supabase.from("medical_records").delete().eq("id", record.id);
+    throw new Error(linked.error.message);
+  }
 
   const mentions = check(
     await supabase

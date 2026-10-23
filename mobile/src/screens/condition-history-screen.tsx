@@ -1,4 +1,4 @@
-import type { Condition, ConditionStatus } from "@orbit-types/condition";
+import type { ConditionStatus } from "@orbit-types/condition";
 import { CONDITION_SECTION_ORDER } from "@orbit-types/condition-summary";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Alert, ScrollView } from "react-native";
 import { Choice, Field, Input, Section } from "@/components/form";
 import { Button, Placeholder } from "@/components/ui";
+import type { ConditionDetail } from "@/features/conditions/query";
 import { formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
 import { useActiveRecords, useAddConditionHistory, useCondition } from "@/lib/queries";
@@ -30,15 +31,31 @@ export default function ConditionHistoryScreen() {
       <Stack.Screen options={{ title: t("conditions.addToHistory"), headerLargeTitle: false }} />
       <Placeholder
         busy={condition.isPending}
-        message={condition.isPending ? undefined : t("conditions.conditionNotFound")}
+        message={
+          condition.isPending
+            ? undefined
+            : (condition.error?.message ?? t("conditions.conditionNotFound"))
+        }
+        action={
+          condition.error ? (
+            <Button
+              variant="outline"
+              label={t("common.retry")}
+              onPress={() => void condition.refetch()}
+            />
+          ) : undefined
+        }
       />
     </>
   );
 }
 
-function HistoryForm({ condition }: { condition: Condition }) {
+function HistoryForm({ condition }: { condition: ConditionDetail }) {
   const router = useRouter();
   const records = useActiveRecords(condition.person_id);
+  // A record mentions a condition once: the ones that already do are not offered again.
+  const linked = new Set(condition.history.map((mention) => mention.record_id));
+  const choices = (records.data ?? []).filter((one) => !linked.has(one.id));
   const add = useAddConditionHistory();
   const [status, setStatus] = useState<ConditionStatus>("active");
   const [date, setDate] = useState(() => new Date());
@@ -54,7 +71,7 @@ function HistoryForm({ condition }: { condition: Condition }) {
         status,
         date: dayOf(date),
         note,
-        record: records.data?.find((one) => one.id === recordId) ?? null,
+        record: choices.find((one) => one.id === recordId) ?? null,
       },
       {
         onSuccess: () => router.back(),
@@ -123,7 +140,7 @@ function HistoryForm({ condition }: { condition: Condition }) {
               value={recordId}
               options={[
                 ["none", t("conditions.noLinkToRecord")],
-                ...(records.data ?? []).map((one): [string, string] => [
+                ...choices.map((one): [string, string] => [
                   one.id,
                   one.record_date ? `${one.title} · ${formatDay(one.record_date)}` : one.title,
                 ]),
