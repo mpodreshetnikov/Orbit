@@ -148,6 +148,22 @@ describe("a transaction", () => {
     await waitFor(() => expect(db.tables.money_transactions).toHaveLength(0));
   });
 
+  it("shows the bank's note when it has no comment of its own", async () => {
+    db.tables.money_transactions[0] = {
+      ...db.tables.money_transactions[0],
+      comment: null,
+      source_comment: "Оплата картой",
+    };
+    await renderScreens(routes, "/money/tx-1");
+    expect(await screen.findByText("Оплата картой")).toBeOnTheScreen();
+  });
+
+  it("is named in the feed by merchant, amount and account", async () => {
+    rpcHandlers.money_list_transactions_feed = () => [TX];
+    await renderScreens(routes, "/money");
+    expect(await screen.findByLabelText(/^Пятёрочка, -350,00\s₽, Тинькофф/)).toBeOnTheScreen();
+  });
+
   it("says when it is not there", async () => {
     await renderScreens(routes, "/money/gone");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();

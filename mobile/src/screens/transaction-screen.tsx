@@ -1,4 +1,4 @@
-import { formatMoney } from "@orbit-types/money-feed";
+import { formatMoney, preferredComment } from "@orbit-types/money-feed";
 import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { Ellipsis } from "lucide-react-native";
 import type { ReactNode } from "react";
@@ -101,6 +101,8 @@ export default function TransactionScreen() {
   }
 
   const account = accounts.data?.find((one) => one.id === item.account_id)?.account_label ?? "—";
+  // An imported transaction keeps the bank's note in source_comment, as the feed shows it.
+  const comment = preferredComment(item.comment, item.source_comment);
   const categoryName = (categoryId: string | null) =>
     categoryId
       ? (categories.data?.find((one) => one.id === categoryId)?.name_ru ?? categoryId)
@@ -147,7 +149,7 @@ export default function TransactionScreen() {
               {`*${item.money_cards.last4}${item.money_cards.card_label ? ` (${item.money_cards.card_label})` : ""}`}
             </Labelled>
           ) : null}
-          {item.comment ? <Labelled label={t("money.comment")}>{item.comment}</Labelled> : null}
+          {comment ? <Labelled label={t("money.comment")}>{comment}</Labelled> : null}
         </Card>
 
         <Card style={{ padding: space.lg, gap: space.md }}>

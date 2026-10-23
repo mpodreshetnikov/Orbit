@@ -282,7 +282,15 @@ export default function MoneyScreen() {
           return (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={item.merchant_name || t("money.transactionFallback")}
+              // The row's own label would hide everything but the merchant from VoiceOver: say the
+              // amount and account too, so repeat merchants tell apart.
+              accessibilityLabel={[
+                item.merchant_name || t("money.transactionFallback"),
+                formatMoney(item.amount, item.currency, "ru-RU"),
+                account,
+              ]
+                .filter(Boolean)
+                .join(", ")}
               onPress={() => router.push(`/money/${item.id}` as Href)}
               style={({ pressed }) => ({
                 flexDirection: "row",
