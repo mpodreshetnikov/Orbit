@@ -1,0 +1,24 @@
+# Findings: the health menu's «Находки», the seeded kidney cyst as a card, and its history with
+# the source's words.
+appId: host.exp.Exponent
+name: Находки
+---
+- openLink: exp://127.0.0.1:8081/--/health
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Находки"
+    timeout: 60000
+- tapOn: "Находки"
+- extendedWaitUntil:
+    visible: "Активные находки.*"
+    timeout: 20000
+- takeScreenshot: findings-01-list
+- tapOn:
+    text: ".*cyst.*" # The card reads as one element, its texts joined.
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Последний размер"
+    timeout: 20000
+- takeScreenshot: findings-02-cyst

@@ -43,6 +43,7 @@ import { useSingleFindingHistory, useMarkFindingResolved } from "@/hooks";
 import { useMedicalRecords } from "@/hooks/use-medical-records";
 import { useUIStore } from "@/stores/ui-store";
 import type { FindingSeverity, FindingHistoryPoint } from "@/types";
+import { findingPointDate } from "@/types/finding-summary";
 
 interface FindingDetailPageProps {
   params: Promise<{ findingId: string }>;
@@ -346,9 +347,7 @@ function FindingDetailContent({ findingId }: { findingId: string }) {
                 {/* Date */}
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 sm:w-32 text-xs sm:text-sm text-muted-foreground">
                   <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                  {point.record_date
-                    ? format(new Date(point.record_date), "dd.MM.yyyy", { locale: dateLocale })
-                    : format(new Date(point.created_at), "dd.MM.yyyy", { locale: dateLocale })}
+                  {format(new Date(findingPointDate(point)), "dd.MM.yyyy", { locale: dateLocale })}
                 </div>
 
                 {/* Details */}
