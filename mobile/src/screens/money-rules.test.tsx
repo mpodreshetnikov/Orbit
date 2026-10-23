@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { ActionSheetIOS, Alert, type AlertButton } from "react-native";
+import MoneyRuleFormScreen from "@/screens/money-rule-form-screen";
 import MoneyRulesScreen from "@/screens/money-rules-screen";
 import MoneyScreen from "@/screens/money-screen";
 import {
@@ -17,7 +18,11 @@ import { renderScreens } from "../../test/render";
 
 jest.mock("@/lib/supabase", () => jest.requireActual("../../test/fake-supabase"));
 
-const routes = { "money/index": MoneyScreen, "money/rules/index": MoneyRulesScreen };
+const routes = {
+  "money/index": MoneyScreen,
+  "money/rules/index": MoneyRulesScreen,
+  "money/rules/form": MoneyRuleFormScreen,
+};
 
 const rule = (id: string, sort_order: number, changes: Record<string, unknown> = {}) => ({
   id,
@@ -42,7 +47,22 @@ beforeEach(() => {
   seed({
     ...household(),
     money_categories: [
-      { id: "cafe", name_en: "Cafe", name_ru: "Кафе", system_key: null, category_kind: "custom" },
+      {
+        id: "other",
+        name_en: "Other",
+        name_ru: "Прочее",
+        system_key: "uncategorized",
+        category_kind: "canonical",
+        depth: 0,
+      },
+      {
+        id: "cafe",
+        name_en: "Cafe",
+        name_ru: "Кафе",
+        system_key: null,
+        category_kind: "custom",
+        depth: 1,
+      },
     ],
     money_category_rules: [
       rule("Кофе", 1, {
@@ -172,5 +192,151 @@ describe("the rules", () => {
     expect(
       await screen.findByText("Создайте первое правило для выбранной персоны."),
     ).toBeOnTheScreen();
+  });
+});
+
+describe("the rule form", () => {
+  async function openNew() {
+    await renderScreens(routes, "/money/rules");
+    await fireEvent.press(await screen.findByLabelText("Добавить правило"));
+    await screen.findByLabelText("Название правила");
+  }
+
+  it("saves a new direct rule with its filters, last in the order", async () => {
+    await openNew();
+    await fireEvent.changeText(screen.getByLabelText("Название правила"), " Такси ");
+    await fireEvent.changeText(screen.getByLabelText("Описание"), "Поездки");
+    pickOption("  Кафе");
+    await fireEvent.press(screen.getByLabelText("Целевая категория: Выберите категорию"));
+    pickOption("Любой фильтр");
+    await fireEvent.press(screen.getByLabelText("Режим совпадения: Все фильтры"));
+    pickOption("Только без категории");
+    await fireEvent.press(screen.getByLabelText("Ограничение области: Все строки"));
+    expect(screen.getByText(/^Фильтры не добавлены/)).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByText("Добавить фильтр"));
+    pickOption("Содержит любое из набора");
+    await fireEvent.press(screen.getByLabelText("Оператор 1: Содержит"));
+    await fireEvent.changeText(screen.getByLabelText("Значения 1"), "Yandex, Uber");
+
+    await fireEvent.press(screen.getByText("Добавить фильтр"));
+    pickOption("Сумма строки");
+    await fireEvent.press(screen.getByLabelText("Поле 2: Мерчант"));
+    pickOption("Диапазон");
+    await fireEvent.press(screen.getByLabelText("Оператор 2: Содержит"));
+    expect(screen.getByText(/^Минимум и максимум включаются/)).toBeOnTheScreen();
+    await fireEvent.changeText(screen.getByLabelText("Минимум 2"), "1,5x");
+    await fireEvent.changeText(screen.getByLabelText("Максимум 2"), "-100");
+
+    await fireEvent.press(screen.getByText("Добавить фильтр"));
+    pickOption("Пусто");
+    await fireEvent.press(screen.getByLabelText("Оператор 3: Содержит"));
+    await fireEvent.press(screen.getByText("Добавить фильтр"));
+    await fireEvent.press(screen.getByLabelText("Удалить фильтр 4"));
+
+    await fireEvent(
+      screen.getByLabelText("Остановить пайплайн после изменения категории"),
+      "valueChange",
+      true,
+    );
+    await fireEvent(screen.getByLabelText("Включено"), "valueChange", false);
+    await fireEvent.press(screen.getByText("Сохранить"));
+
+    await waitFor(() => expect(db.tables.money_category_rules).toHaveLength(4));
+    expect(db.tables.money_category_rules[3]).toMatchObject({
+      person_id: PERSON.id,
+      sort_order: 3,
+      name: "Такси",
+      description: "Поездки",
+      enabled: false,
+      rule_kind: "direct",
+      target_category_id: "cafe",
+      match_mode: "any",
+      scope_filter: "uncategorized_only",
+      stop_processing: true,
+      filters: [
+        { field: "merchant_name", operator: "contains_any_in_set", values: ["Yandex", "Uber"] },
+        { field: "line_item_amount", operator: "range", min: 15, max: -100 },
+        { field: "merchant_name", operator: "is_empty" },
+      ],
+    });
+    expect(await screen.findByText("Такси")).toBeOnTheScreen();
+  });
+
+  it("names what stops a save", async () => {
+    await openNew();
+    await fireEvent.press(screen.getByText("Сохранить"));
+    expect(screen.getByText("Название правила обязательно.")).toBeOnTheScreen();
+    await fireEvent.changeText(screen.getByLabelText("Название правила"), "Такси");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    expect(screen.getByText("Для прямого правила нужна целевая категория.")).toBeOnTheScreen();
+    pickOption("MCC-маппинг");
+    await fireEvent.press(screen.getByLabelText("Тип правила: Прямое правило"));
+    await fireEvent.press(screen.getByText("Добавить фильтр"));
+    pickOption("Регулярное выражение");
+    await fireEvent.press(screen.getByLabelText("Оператор 1: Содержит"));
+    await fireEvent.changeText(screen.getByLabelText("Значение 1"), "(");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    expect(screen.getByText("Регулярное выражение указано некорректно.")).toBeOnTheScreen();
+    expect(db.tables.money_category_rules).toHaveLength(3);
+  });
+
+  it("edits a rule from its menu: a smart one's prompt, a fallback's category", async () => {
+    await renderScreens(routes, "/money/rules");
+    pickOption("Редактировать");
+    await fireEvent.press(await screen.findByLabelText("Действия: Кофе"));
+    const name = await screen.findByLabelText("Название правила");
+    expect(name.props.value).toBe("Кофе");
+    expect(screen.getByLabelText("Значение 1").props.value).toBe("coffee");
+    pickOption("LLM-категоризация");
+    await fireEvent.press(screen.getByLabelText("Тип правила: Прямое правило"));
+    await fireEvent.changeText(screen.getByLabelText("Промпт для LLM"), "Кофе?");
+    pickOption("Fallback без категории");
+    await fireEvent.press(screen.getByLabelText("Тип правила: LLM-категоризация"));
+    pickOption("Other / Прочее (uncategorized)");
+    await fireEvent.press(
+      screen.getByLabelText("Каноническая fallback-категория: Other / Прочее (uncategorized)"),
+    );
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(db.tables.money_category_rules[0]).toMatchObject({
+        rule_kind: "fallback_uncategorized",
+        target_category_id: null,
+        config: { target_system_key: "uncategorized" },
+      }),
+    );
+  });
+
+  it("says when saving fails, and when the rule is not there", async () => {
+    await renderScreens(routes, "/money/rules");
+    pickOption("Редактировать");
+    await fireEvent.press(await screen.findByLabelText("Действия: MCC"));
+    await screen.findByLabelText("Название правила");
+    fail("money_category_rules");
+    const alert = jest.spyOn(Alert, "alert");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith(
+        "Что-то пошло не так",
+        "money_category_rules is unavailable",
+      ),
+    );
+  });
+
+  it.each(["persons", "money_categories"])(
+    "says when %s cannot be read, and opens once tried again",
+    async (table) => {
+      fail(table);
+      await renderScreens(routes, "/money/rules/form");
+      expect(await screen.findByText(`${table} is unavailable`)).toBeOnTheScreen();
+      db.failing.clear();
+      await fireEvent.press(screen.getByText("Повторить"));
+      expect(await screen.findByLabelText("Название правила")).toBeOnTheScreen();
+    },
+  );
+
+  it("says when the rule to edit is not there", async () => {
+    await renderScreens(routes, "/money/rules/form?id=gone");
+    expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
   });
 });
