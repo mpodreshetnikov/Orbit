@@ -122,6 +122,11 @@ async function lookupIcd(auth: McpAuthExtra, code: string): Promise<IcdLookupRes
   }
 }
 
+/** The record's page in the app, where the owner reviews it and approves or deletes it. */
+function reviewUrl(auth: McpAuthExtra, recordId: string): string | null {
+  return auth.appOrigin ? `${auth.appOrigin}/health/records/${recordId}` : null;
+}
+
 export function registerDocumentTools(server: McpToolServer): void {
   server.registerTool(
     "create_medical_record",
@@ -172,7 +177,12 @@ export function registerDocumentTools(server: McpToolServer): void {
           formatUploads(uploads),
           `Then call ingest_medical_document with record_id ${recordId}.`,
         ].join("\n"),
-        { record_id: recordId, person_id: person.id, uploads },
+        {
+          record_id: recordId,
+          person_id: person.id,
+          uploads,
+          review_url: reviewUrl(auth, recordId),
+        },
       );
     }, WRITE_SCOPE),
   );
@@ -368,8 +378,11 @@ export function registerDocumentTools(server: McpToolServer): void {
           ),
         );
       }
+      const review = reviewUrl(auth, record.id);
       lines.push(
-        `Next: activate_medical_record approves it, or leave it for the owner to review in the app.`,
+        review
+          ? `Next: give the owner this link to review the draft in the app, where they can approve it or delete it: ${review}. Or call activate_medical_record once they agree with it here.`
+          : `Next: activate_medical_record approves it, or leave it for the owner to review in the app.`,
       );
 
       return ok(lines.join("\n"), {
@@ -380,6 +393,7 @@ export function registerDocumentTools(server: McpToolServer): void {
         extraction_issues: issues,
         rejected: result.rejected ?? [],
         dropped_condition_resolutions: result.dropped_condition_resolutions ?? [],
+        review_url: review,
       });
     }, WRITE_SCOPE),
   );
