@@ -10,64 +10,12 @@ import type {
   CreateCheckupCompletionInput,
   UpdateCheckupCompletionInput,
   CheckupItemsFilters,
-  CheckupSchedule,
-  CheckupWhyLink,
 } from "@/types";
+import { rowToCheckupCompletion, rowToCheckupItem } from "@/types/checkup-summary";
 import type { Database, Json } from "@/types/database";
 
 type CheckupItemInsert = Database["public"]["Tables"]["checkup_items"]["Insert"];
 type CheckupItemUpdate = Database["public"]["Tables"]["checkup_items"]["Update"];
-
-// Normalize a single why_link from DB (may have missing label or different shape)
-function normalizeWhyLink(link: unknown): CheckupWhyLink | null {
-  if (!link || typeof link !== "object") return null;
-  const o = link as Record<string, unknown>;
-  const type = o.type as string | undefined;
-  const id = typeof o.id === "string" ? o.id : undefined;
-  if (type !== "condition" || !id) return null;
-  const label = typeof o.label === "string" ? o.label : id;
-  return { type: "condition", id, label };
-}
-
-// Normalize DB jsonb schedule/why_links to typed shape
-function rowToCheckupItem(row: Record<string, unknown>): CheckupItem {
-  const schedule = row.schedule as CheckupSchedule;
-  const rawWhyLinks = row.why_links;
-  const whyLinks: CheckupWhyLink[] = Array.isArray(rawWhyLinks)
-    ? rawWhyLinks.map(normalizeWhyLink).filter((l): l is CheckupWhyLink => l != null)
-    : [];
-  const rawReminder = row.reminder_days_before;
-  const reminderDaysBefore: number[] = Array.isArray(rawReminder)
-    ? rawReminder.filter((x): x is number => typeof x === "number")
-    : [7];
-  return {
-    id: row.id as string,
-    person_id: row.person_id as string,
-    title: row.title as string,
-    category: row.category as CheckupItem["category"],
-    schedule,
-    next_due_at: (row.next_due_at as string | null) ?? null,
-    status: row.status as CheckupItem["status"],
-    reminder_days_before: reminderDaysBefore,
-    planned_on: (row.planned_on as string | null) ?? null,
-    why_text: (row.why_text as string | null) ?? null,
-    why_links: whyLinks,
-    notes: (row.notes as string | null) ?? null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
-}
-
-function rowToCheckupCompletion(row: Record<string, unknown>): CheckupCompletion {
-  return {
-    id: row.id as string,
-    checkup_item_id: row.checkup_item_id as string,
-    done_at: row.done_at as string,
-    note: (row.note as string | null) ?? null,
-    evidence_record_id: (row.evidence_record_id as string | null) ?? null,
-    created_at: row.created_at as string,
-  };
-}
 
 // ============================================================================
 // CHECKUP ITEMS

@@ -17,6 +17,11 @@ export function formatDay(iso: string): string {
   return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
 }
 
+/** The local day of `date` as a row stores it: `YYYY-MM-DD`. */
+export function dayOf(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 /** `dd.MM.yyyy, HH:mm`, a history entry's moment. */
 export function formatMoment(iso: string): string {
   const date = new Date(iso);
