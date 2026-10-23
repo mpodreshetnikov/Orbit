@@ -1,5 +1,10 @@
-import type { CheckupCategory, CheckupItem } from "@orbit-types/checkup";
-import { rowToCheckupItem } from "@orbit-types/checkup-summary";
+import type {
+  CheckupCategory,
+  CheckupCompletion,
+  CheckupItem,
+  CheckupItemStatus,
+} from "@orbit-types/checkup";
+import { rowToCheckupCompletion, rowToCheckupItem } from "@orbit-types/checkup-summary";
 import { t } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 
@@ -78,4 +83,46 @@ export async function planCheckup(id: string, plannedOn: string | null): Promise
 
 async function setPlannedOn(id: string, plannedOn: string | null): Promise<void> {
   check(await supabase.from("checkup_items").update({ planned_on: plannedOn }).eq("id", id));
+}
+
+/** A checkup's completions, newest first. */
+export async function fetchCompletions(itemId: string): Promise<CheckupCompletion[]> {
+  const rows = check(
+    await supabase
+      .from("checkup_completions")
+      .select("*")
+      .eq("checkup_item_id", itemId)
+      .order("done_at", { ascending: false }),
+  ) as Record<string, unknown>[];
+  return rows.map(rowToCheckupCompletion);
+}
+
+/** Correct a completion, or delete it with `null`. */
+export async function saveCompletion(id: string, completion: Completion | null): Promise<void> {
+  if (!completion) {
+    check(await supabase.from("checkup_completions").delete().eq("id", id));
+    return;
+  }
+  check(
+    await supabase
+      .from("checkup_completions")
+      .update({
+        done_at: completion.done_at,
+        note: completion.note.trim() || null,
+        evidence_record_id: completion.evidence_record_id,
+      })
+      .eq("id", id),
+  );
+}
+
+/** Pause, resume or archive a checkup, or delete it with `null`; its completions stay. */
+export async function setCheckupStatus(
+  id: string,
+  status: CheckupItemStatus | null,
+): Promise<void> {
+  check(
+    status
+      ? await supabase.from("checkup_items").update({ status }).eq("id", id)
+      : await supabase.from("checkup_items").delete().eq("id", id),
+  );
 }

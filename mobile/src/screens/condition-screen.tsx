@@ -3,6 +3,8 @@ import { Stack, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
   AlertTriangle,
   Calendar,
+  CalendarCheck,
+  ChevronRight,
   CheckCircle2,
   Ellipsis,
   FileText,
@@ -16,7 +18,7 @@ import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import type { ConditionMention } from "@/features/conditions/query";
 import { formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import { useCondition, useSaveCondition } from "@/lib/queries";
+import { useCheckups, useCondition, useSaveCondition } from "@/lib/queries";
 import { radius, space, usePalette } from "@/theme";
 
 const SHEET_DISMISS_MS = 400;
@@ -33,6 +35,10 @@ export default function ConditionScreen() {
   const condition = useCondition(id);
   const save = useSaveCondition();
   const data = condition.data;
+  const checkups = useCheckups(data?.person_id);
+  const linked = (checkups.data ?? []).filter((item) =>
+    item.why_links.some((link) => link.id === id),
+  );
 
   const remove = () =>
     Alert.alert(t("conditions.deleteCondition"), t("conditions.deleteConditionConfirm"), [
@@ -196,6 +202,34 @@ export default function ConditionScreen() {
             label={t("conditions.addToHistory")}
             onPress={() => router.push(`/health/conditions/history?id=${id}` as Href)}
           />
+        </Card>
+
+        <Card style={{ padding: space.lg, gap: space.md }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+            <Icon icon={CalendarCheck} />
+            <Text weight="semibold">{t("conditions.linkedCheckups")}</Text>
+          </View>
+          {linked.map((item) => (
+            <Pressable
+              key={item.id}
+              accessibilityRole="link"
+              onPress={() => router.push(`/health/checkups/${item.id}` as Href)}
+              style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}
+            >
+              <Text weight="medium" style={{ flex: 1 }}>
+                {item.title}
+              </Text>
+              <Text size="xs" tone="mutedForeground">
+                {item.next_due_at ? formatDay(item.next_due_at) : "—"}
+              </Text>
+              <Icon icon={ChevronRight} size={14} />
+            </Pressable>
+          ))}
+          {linked.length === 0 ? (
+            <Text size="sm" tone="mutedForeground">
+              {t("conditions.linkedCheckupsEmpty")}
+            </Text>
+          ) : null}
         </Card>
       </ScrollView>
     </>

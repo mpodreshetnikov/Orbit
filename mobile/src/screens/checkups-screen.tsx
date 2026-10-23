@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react-native";
 import { useState } from "react";
-import { RefreshControl, ScrollView, SectionList, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, SectionList, View } from "react-native";
 import { Chip, Choice } from "@/components/form";
 import { Badge, Button, Icon, Placeholder, Text } from "@/components/ui";
 import { categoryLabel } from "@/features/checkups/query";
@@ -209,6 +209,7 @@ export default function CheckupsScreen() {
         renderItem={({ item }) => (
           <CheckupCard
             item={item}
+            onPress={() => router.push(`/health/checkups/${item.id}` as Href)}
             onComplete={() => router.push(`/health/checkups/complete?id=${item.id}` as Href)}
             onPlan={() => router.push(`/health/checkups/plan?id=${item.id}` as Href)}
           />
@@ -221,25 +222,29 @@ export default function CheckupsScreen() {
 /** The web `CheckupCard`. */
 function CheckupCard({
   item,
+  onPress,
   onComplete,
   onPlan,
 }: {
   item: CheckupItem;
+  onPress: () => void;
   onComplete: () => void;
   onPlan: () => void;
 }) {
   const palette = usePalette();
   const late = checkupLateness(item, isoDay(new Date()));
   return (
-    <View
-      style={{
+    <Pressable
+      accessibilityRole="link"
+      onPress={onPress}
+      style={({ pressed }) => ({
         gap: space.sm,
         padding: space.md,
         borderRadius: radius.lg,
         borderWidth: 1,
         borderColor: late.byDue || late.byPlan ? palette.warning : palette.border,
-        backgroundColor: palette.card,
-      }}
+        backgroundColor: pressed ? palette.mutedHalf : palette.card,
+      })}
     >
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm }}>
         <Text size="xs" tone="mutedForeground">
@@ -285,7 +290,7 @@ function CheckupCard({
           ) : null}
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 

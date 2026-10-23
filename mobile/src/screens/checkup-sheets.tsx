@@ -1,4 +1,4 @@
-import type { CheckupItem } from "@orbit-types/checkup";
+import type { CheckupCompletion, CheckupItem } from "@orbit-types/checkup";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useState, type ReactNode } from "react";
@@ -7,46 +7,72 @@ import { Choice, Field, Input, Section } from "@/components/form";
 import { Button, Placeholder, Text } from "@/components/ui";
 import { dayOf, formatDay } from "@/features/measurements/format";
 import { t } from "@/lib/i18n";
-import { useActiveRecords, useCheckupAction, useCheckups, usePerson } from "@/lib/queries";
+import {
+  useActiveRecords,
+  useCheckupAction,
+  useCheckups,
+  useCompletions,
+  usePerson,
+} from "@/lib/queries";
 import { space } from "@/theme";
 
 /**
  * The checkup a sheet is about, by `?id=`, from the list already loaded; the sheet itself once it
- * is there.
+ * is there. Marking done and planning take an active checkup only; a past completion can be
+ * corrected whatever the checkup's status.
  */
 function WithCheckup({
   title,
+  activeOnly = true,
   children,
 }: {
   title: string;
+  activeOnly?: boolean;
   children: (item: CheckupItem) => ReactNode;
 }) {
   const { id } = useLocalSearchParams<{ id: string }>();
   const person = usePerson();
   const checkups = useCheckups(person.data?.id);
-  const item = checkups.data?.find((one) => one.id === id && one.status === "active");
+  const item = checkups.data?.find(
+    (one) => one.id === id && (!activeOnly || one.status === "active"),
+  );
   if (item) return children(item);
-  const failed = person.error ?? checkups.error;
-  const busy = !failed && (person.isPending || (checkups.isPending && checkups.isFetching));
   return (
     <>
       <Stack.Screen options={{ title, headerLargeTitle: false }} />
-      {failed ? (
-        <Placeholder
-          message={failed.message}
-          action={
-            <Button
-              variant="outline"
-              label={t("common.retry")}
-              onPress={() => void (person.error ? person.refetch() : checkups.refetch())}
-            />
-          }
-        />
-      ) : (
-        <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
-      )}
+      <CheckupMissing person={person} checkups={checkups} />
     </>
   );
+}
+
+/**
+ * Why a checkup is not on screen: still loading, a read that failed (with a retry), or not there.
+ * A disabled checkups query, waiting for a person that failed, does not count as loading.
+ */
+export function CheckupMissing({
+  person,
+  checkups,
+}: {
+  person: ReturnType<typeof usePerson>;
+  checkups: ReturnType<typeof useCheckups>;
+}) {
+  const failed = person.error ?? checkups.error;
+  if (failed) {
+    return (
+      <Placeholder
+        message={failed.message}
+        action={
+          <Button
+            variant="outline"
+            label={t("common.retry")}
+            onPress={() => void (person.error ? person.refetch() : checkups.refetch())}
+          />
+        }
+      />
+    );
+  }
+  const busy = person.isPending || (checkups.isPending && checkups.isFetching);
+  return <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />;
 }
 
 /** The sheet's bar: cancel on the left, save on the right. */
@@ -76,42 +102,67 @@ function SheetHeader({
   );
 }
 
-/** The web "Отметить выполненным" dialog: the day it was done, a note, a record as evidence. */
+/**
+ * The web "Отметить выполненным" dialog: the day it was done, a note, a record as evidence. With
+ * `?completion=` it is the web edit-completion dialog instead, which can also delete it.
+ */
 export default function CompleteCheckupScreen() {
+  const { completion } = useLocalSearchParams<{ completion?: string }>();
   return (
-    <WithCheckup title={t("checkups.markComplete")}>
-      {(item) => <CompleteForm item={item} />}
+    <WithCheckup title={t("checkups.markComplete")} activeOnly={!completion}>
+      {(item) => <CompleteForm item={item} completionId={completion} />}
     </WithCheckup>
   );
 }
 
-function CompleteForm({ item }: { item: CheckupItem }) {
+function CompleteForm({ item, completionId }: { item: CheckupItem; completionId?: string }) {
+  const completions = useCompletions(item.id);
+  const editing = completions.data?.find((one) => one.id === completionId);
+  if (!completionId) return <CompletionForm item={item} />;
+  if (editing) return <CompletionForm item={item} editing={editing} />;
+  return (
+    <Placeholder
+      busy={completions.isPending}
+      message={completions.isPending ? undefined : t("common.noResults")}
+    />
+  );
+}
+
+function CompletionForm({ item, editing }: { item: CheckupItem; editing?: CheckupCompletion }) {
   const router = useRouter();
   const records = useActiveRecords(item.person_id);
   const action = useCheckupAction();
-  const [doneAt, setDoneAt] = useState(() => new Date());
-  const [note, setNote] = useState("");
-  const [recordId, setRecordId] = useState("none");
+  const [doneAt, setDoneAt] = useState(() =>
+    editing ? new Date(`${editing.done_at}T12:00:00`) : new Date(),
+  );
+  const [note, setNote] = useState(editing?.note ?? "");
+  const [recordId, setRecordId] = useState(editing?.evidence_record_id ?? "none");
+  const done = {
+    onSuccess: () => router.back(),
+    onError: (error: Error) => Alert.alert(t("common.error"), error.message),
+  };
 
+  const completion = {
+    done_at: dayOf(doneAt),
+    note,
+    evidence_record_id: recordId === "none" ? null : recordId,
+  };
   const save = () =>
-    action.mutate(
+    action.mutate(editing ? { completionId: editing.id, completion } : { item, completion }, done);
+  const remove = (id: string) =>
+    Alert.alert(t("common.delete"), t("checkups.deleteCompletionConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        item,
-        completion: {
-          done_at: dayOf(doneAt),
-          note,
-          evidence_record_id: recordId === "none" ? null : recordId,
-        },
+        text: t("common.delete"),
+        style: "destructive",
+        onPress: () => action.mutate({ completionId: id, completion: null }, done),
       },
-      {
-        onSuccess: () => router.back(),
-        onError: (error) => Alert.alert(t("common.error"), error.message),
-      },
-    );
+    ]);
+  const title = editing ? t("common.edit") : t("checkups.markComplete");
 
   return (
     <>
-      <SheetHeader title={t("checkups.markComplete")} busy={action.isPending} onSave={save} />
+      <SheetHeader title={title} busy={action.isPending} onSave={save} />
       <ScrollView
         keyboardDismissMode="on-drag"
         contentContainerStyle={{ padding: space.lg, gap: space.lg }}
@@ -154,6 +205,9 @@ function CompleteForm({ item }: { item: CheckupItem }) {
             />
           </Field>
         </Section>
+        {editing ? (
+          <Button variant="outline" label={t("common.delete")} onPress={() => remove(editing.id)} />
+        ) : null}
       </ScrollView>
     </>
   );

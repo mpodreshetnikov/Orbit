@@ -1,6 +1,6 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
-import type { CheckupItem } from "@orbit-types/checkup";
+import type { CheckupItem, CheckupItemStatus } from "@orbit-types/checkup";
 import type { UpdateConditionInput } from "@orbit-types/condition";
 import type { FindingSummary } from "@orbit-types/finding";
 import { toggleHiddenCode, type HiddenMeasurementCodes } from "@orbit-types/measurement-visibility";
@@ -42,7 +42,10 @@ import { addConditionHistory, type HistoryEntry } from "@/features/conditions/hi
 import {
   completeCheckup,
   fetchCheckups,
+  fetchCompletions,
   planCheckup,
+  saveCompletion,
+  setCheckupStatus,
   type Completion,
 } from "@/features/checkups/query";
 import { fetchObservations } from "@/features/observations/query";
@@ -484,22 +487,33 @@ export function useCheckups(personId: string | undefined) {
   });
 }
 
-/** Mark a checkup done, or plan it for a day; the checkups are refetched after. */
+/**
+ * Everything done to a checkup: mark it done, plan it, change its status or delete it, correct or
+ * delete a completion. The checkups and their completions are refetched after.
+ */
 export function useCheckupAction() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (
       input:
         | { item: CheckupItem; completion: Completion }
-        | { item: CheckupItem; plannedOn: string | null },
-    ) =>
-      "completion" in input
-        ? completeCheckup(input.item, input.completion)
-        : planCheckup(input.item.id, input.plannedOn),
+        | { item: CheckupItem; plannedOn: string | null }
+        | { item: CheckupItem; status: CheckupItemStatus | null }
+        | { completionId: string; completion: Completion | null },
+    ) => {
+      if ("completionId" in input) return saveCompletion(input.completionId, input.completion);
+      if ("completion" in input) return completeCheckup(input.item, input.completion);
+      if ("plannedOn" in input) return planCheckup(input.item.id, input.plannedOn);
+      return setCheckupStatus(input.item.id, input.status);
+    },
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onSettled: () => {
       void client.invalidateQueries({ queryKey: ["checkups"] });
-      void client.invalidateQueries({ queryKey: ["checkup"] });
+      void client.invalidateQueries({ queryKey: ["completions"] });
     },
   });
+}
+
+export function useCompletions(itemId: string) {
+  return useQuery({ queryKey: ["completions", itemId], queryFn: () => fetchCompletions(itemId) });
 }
