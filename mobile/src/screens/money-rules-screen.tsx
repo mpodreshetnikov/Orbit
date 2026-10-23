@@ -2,8 +2,9 @@ import type { MoneyCategoryRule } from "@orbit-types/money";
 import { movedRuleIds, ruleCategoryLabel, ruleSummary } from "@orbit-types/money-rules";
 import { Stack } from "expo-router";
 import { Ellipsis } from "lucide-react-native";
+import { useRef } from "react";
 import { ActionSheetIOS, Alert, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { Badge, Card, Icon, Placeholder, Text } from "@/components/ui";
+import { Badge, Button, Card, Icon, Placeholder, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
 import { useChangeRules, useMoneyCategories, useMoneyRules, usePerson } from "@/lib/queries";
 import { space, usePalette } from "@/theme";
@@ -25,8 +26,19 @@ export default function MoneyRulesScreen() {
   const names = new Map((categories.data ?? []).map((one) => [one.id, ruleCategoryLabel(one)]));
   const all = rules.data ?? [];
 
-  const run = (what: { delete: string } | { order: string[] }) =>
-    change.mutate(what, { onError: (error) => Alert.alert(t("common.error"), error.message) });
+  // A reorder parks rules at negative positions on the way, so a second change started before the
+  // first one and its refresh land would collide with it: one change at a time, as on the web.
+  const changing = useRef(false);
+  const run = (what: { delete: string } | { order: string[] }) => {
+    if (changing.current) return;
+    changing.current = true;
+    change.mutate(what, {
+      onError: (error) => Alert.alert(t("common.error"), error.message),
+      onSettled: () => {
+        changing.current = false;
+      },
+    });
+  };
   const actions = (rule: MoneyCategoryRule) => {
     const up = movedRuleIds(all, rule.id, "up");
     const down = movedRuleIds(all, rule.id, "down");
@@ -66,13 +78,24 @@ export default function MoneyRulesScreen() {
 
   const header = <Stack.Screen options={{ title: t("money.rules") }} />;
   if (!all.length) {
-    const busy = person.isPending || rules.isPending;
+    // A failed person read leaves the rules query disabled, which stays pending forever.
+    const failed = person.error ?? rules.error;
+    const busy = !failed && (person.isPending || (rules.isPending && rules.isFetching));
     return (
       <>
         {header}
         <Placeholder
           busy={busy}
-          message={busy ? undefined : (rules.error?.message ?? t("money.noRulesHint"))}
+          message={busy ? undefined : (failed?.message ?? t("money.noRulesHint"))}
+          action={
+            failed ? (
+              <Button
+                variant="outline"
+                label={t("common.retry")}
+                onPress={() => void (person.error ? person.refetch() : rules.refetch())}
+              />
+            ) : undefined
+          }
         />
       </>
     );
@@ -106,6 +129,7 @@ export default function MoneyRulesScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`${t("common.actions")}: ${rule.name}`}
                 hitSlop={space.sm}
+                disabled={change.isPending}
                 onPress={() => actions(rule)}
               >
                 <Icon icon={Ellipsis} size={20} />

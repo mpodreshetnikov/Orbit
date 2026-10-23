@@ -3,7 +3,15 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { ActionSheetIOS, Alert, type AlertButton } from "react-native";
 import MoneyRulesScreen from "@/screens/money-rules-screen";
 import MoneyScreen from "@/screens/money-screen";
-import { db, fail, fakeSession, rpcHandlers, seed, setSession } from "../../test/fake-supabase";
+import {
+  db,
+  fail,
+  fakeSession,
+  rpcHandlers,
+  seed,
+  setSession,
+  supabase,
+} from "../../test/fake-supabase";
 import { household, NOW, PERSON, USER_ID } from "../../test/fixtures";
 import { renderScreens } from "../../test/render";
 
@@ -93,6 +101,42 @@ describe("the rules", () => {
     pickOption("Поднять выше");
     await fireEvent.press(screen.getByLabelText("Действия: Кофе"));
     await waitFor(() => expect(order()).toMatchObject({ Кофе: 1, MCC: 2 }));
+  });
+
+  it("change one at a time: a move picked while another is saving is dropped", async () => {
+    await renderScreens(routes, "/money/rules");
+    const from = supabase.from.bind(supabase);
+    let updates = 0;
+    jest.spyOn(supabase, "from").mockImplementation(((name: string) => {
+      const builder = from(name);
+      const update = builder.update.bind(builder);
+      builder.update = ((...args: Parameters<typeof update>) => {
+        updates += 1;
+        return update(...args);
+      }) as typeof builder.update;
+      return builder;
+    }) as typeof supabase.from);
+    jest
+      .spyOn(ActionSheetIOS, "showActionSheetWithOptions")
+      .mockImplementationOnce((options, pick) => {
+        const down = options.options.indexOf("Опустить ниже");
+        pick(down);
+        pick(down);
+      });
+    await fireEvent.press(await screen.findByLabelText("Действия: Кофе"));
+    await waitFor(() => expect(order()).toMatchObject({ Кофе: 2, MCC: 1 }));
+    await waitFor(() => expect(screen.getByLabelText("Действия: Кофе")).toBeEnabled());
+    // Two rules, each parked and then placed: four writes for the one move that ran.
+    expect(updates).toBe(4);
+  });
+
+  it("say when the person cannot be read, and try again", async () => {
+    fail("persons");
+    await renderScreens(routes, "/money/rules");
+    expect(await screen.findByText("persons is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByText("Кофе")).toBeOnTheScreen();
   });
 
   it("are deleted once asked, and say when that fails", async () => {

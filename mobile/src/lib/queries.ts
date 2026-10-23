@@ -732,6 +732,7 @@ export function useChangeRules() {
       "delete" in change ? deleteRule(change.delete) : reorderRules(change.order),
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-    onSettled: () => void client.invalidateQueries({ queryKey: ["money-category-rules"] }),
+    // Returned, so the change stays pending until the list it reordered has been read again.
+    onSettled: () => client.invalidateQueries({ queryKey: ["money-category-rules"] }),
   });
 }
