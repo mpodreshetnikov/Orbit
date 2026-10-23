@@ -65,8 +65,10 @@ name: Измерения
 - extendedWaitUntil:
     visible: "Снимите галочку.*"
     timeout: 10000
-# Tapping the row flips its switch.
-- tapOn: "Рост"
+# Tapping the row flips its switch. The row reads as one element, its texts joined.
+- tapOn:
+    text: "Рост.*"
+    index: 0
 - takeScreenshot: measurements-08-visibility
 # Back is the edge swipe: Maestro's own `back` is Android's.
 - swipe:

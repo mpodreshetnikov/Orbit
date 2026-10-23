@@ -20,9 +20,14 @@ name: Лекарства
 - tapOn: "Поиск"
 - inputText: "Mag"
 - takeScreenshot: meds-02-search
-# Cancel empties the query and closes the keyboard: the next steps and flows need the whole
-# list, and hiding the keyboard by a gesture can land a tap on a course behind it.
-- tapOn: "(Cancel|Отменить|Отмена)"
+# The round close button beside the field empties the query and closes the keyboard: the next
+# steps and flows need the whole list, and hiding the keyboard by a gesture can land a tap on a
+# course behind it. It has no text to find it by, so it is tapped where it sits.
+- tapOn:
+    point: "90%,10%"
+- extendedWaitUntil:
+    visible: "Vitamin D3.*"
+    timeout: 10000
 - tapOn: "Приостановлено"
 - takeScreenshot: meds-03-filter
 - tapOn: "Все"
