@@ -133,7 +133,8 @@ describe("the app", () => {
   it("signs out back to the sign-in screen", async () => {
     setSession(fakeSession(USER_ID));
     await renderApp("/today");
-    await fireEvent.press((await screen.findAllByText("Выйти"))[0]);
+    await fireEvent.press((await screen.findAllByLabelText("Настройки"))[0]!);
+    await fireEvent.press(await screen.findByText("Выйти"));
     expect(await screen.findByText("Войти через Google")).toBeOnTheScreen();
   });
 });

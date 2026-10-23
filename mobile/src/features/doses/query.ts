@@ -11,11 +11,13 @@ export type OrbitPerson = { id: string; name: string };
  * the person the account belongs to when one is linked, otherwise the first human. The ordering is
  * the web app's — `kind` ascending puts humans before pets, because 'h' sorts before 'p'.
  *
- * A household with several people needs a switcher rather than a guess, and that is a later
- * milestone; until it exists this returns one person and the screen names them, so a wrong guess is
- * visible rather than silent.
+ * `chosenId` is the person the settings switched this phone to; it wins while it is still in the
+ * household, and a person no longer there falls back to the account's own.
  */
-export async function resolveOwnPerson(authUserId: string | undefined): Promise<OrbitPerson> {
+export async function resolveOwnPerson(
+  authUserId: string | undefined,
+  chosenId: string | null = null,
+): Promise<OrbitPerson> {
   const { data, error } = await supabase
     .from("persons")
     .select("id, name, kind, auth_user_id")
@@ -31,7 +33,7 @@ export async function resolveOwnPerson(authUserId: string | undefined): Promise<
   }
 
   const own = authUserId ? persons.find((person) => person.auth_user_id === authUserId) : undefined;
-  const chosen = own ?? persons[0];
+  const chosen = persons.find((person) => person.id === chosenId) ?? own ?? persons[0];
   return { id: chosen.id, name: chosen.name };
 }
 
