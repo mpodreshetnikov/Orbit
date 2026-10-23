@@ -56,11 +56,26 @@ export default function MoneyRuleFormScreen() {
       />
     );
   }
-  const busy = person.isPending || rules.isPending || categories.isPending;
+  // A failed person read leaves the rules query disabled, which stays pending forever.
+  const failed = [person, rules, categories].find((query) => query.error);
+  const busy =
+    !failed && (person.isPending || (rules.isPending && rules.isFetching) || categories.isPending);
   return (
     <>
       <Stack.Screen options={{ title: t("money.editRule"), headerLargeTitle: false }} />
-      <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      <Placeholder
+        busy={busy}
+        message={busy ? undefined : (failed?.error?.message ?? t("common.noResults"))}
+        action={
+          failed ? (
+            <Button
+              variant="outline"
+              label={t("common.retry")}
+              onPress={() => void failed.refetch()}
+            />
+          ) : undefined
+        }
+      />
     </>
   );
 }

@@ -323,6 +323,18 @@ describe("the rule form", () => {
     );
   });
 
+  it.each(["persons", "money_categories"])(
+    "says when %s cannot be read, and opens once tried again",
+    async (table) => {
+      fail(table);
+      await renderScreens(routes, "/money/rules/form");
+      expect(await screen.findByText(`${table} is unavailable`)).toBeOnTheScreen();
+      db.failing.clear();
+      await fireEvent.press(screen.getByText("Повторить"));
+      expect(await screen.findByLabelText("Название правила")).toBeOnTheScreen();
+    },
+  );
+
   it("says when the rule to edit is not there", async () => {
     await renderScreens(routes, "/money/rules/form?id=gone");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
