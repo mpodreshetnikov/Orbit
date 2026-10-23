@@ -928,6 +928,22 @@ BEGIN
   END IF;
 END $$;
 
+-- Money category rules for Max: a direct rule and an MCC map, for the rules list.
+DO $$
+DECLARE
+  v_max_person_id uuid;
+BEGIN
+  SELECT id INTO v_max_person_id FROM public.persons WHERE name = 'Max' LIMIT 1;
+  IF v_max_person_id IS NULL THEN RETURN; END IF;
+
+  INSERT INTO public.money_category_rules (id, person_id, name, description, sort_order, rule_kind, target_category_id, match_mode, filters) VALUES
+    ('45000001-0000-4000-8000-000000000001', v_max_person_id, 'Streaming', 'Subscriptions to video and music', 1, 'direct',
+      (SELECT id FROM public.money_categories WHERE system_key = 'entertainment'), 'any',
+      '[{"field": "merchant_name", "operator": "contains_any_in_set", "values": ["Netflix", "Spotify"]}]'::jsonb),
+    ('45000001-0000-4000-8000-000000000002', v_max_person_id, 'MCC codes', NULL, 2, 'mcc_map', NULL, 'all', '[]'::jsonb)
+  ON CONFLICT (id) DO NOTHING;
+END $$;
+
 -- ============================================================================
 -- NOTES
 -- ============================================================================

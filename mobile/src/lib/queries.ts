@@ -80,6 +80,7 @@ import {
 } from "@/features/money/transactions";
 import { fetchCards, saveAccount, saveCard, type AccountColumns } from "@/features/money/accounts";
 import { saveCategory, type CategoryColumns } from "@/features/money/categories";
+import { deleteRule, fetchRules, reorderRules } from "@/features/money/rules";
 import {
   fetchClinicalCatalog,
   saveClinicalEntry,
@@ -712,5 +713,26 @@ export function useSaveCategory() {
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
     onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
     onSettled: () => void client.invalidateQueries({ queryKey: ["money-categories"] }),
+  });
+}
+
+export function useMoneyRules(personId: string | undefined) {
+  return useQuery({
+    queryKey: ["money-category-rules", personId],
+    queryFn: () => fetchRules(personId!),
+    enabled: !!personId,
+  });
+}
+
+/** Delete a rule, or put the rules in a new order. */
+export function useChangeRules() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (change: { delete: string } | { order: string[] }) =>
+      "delete" in change ? deleteRule(change.delete) : reorderRules(change.order),
+    onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+    onError: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+    // Returned, so the change stays pending until the list it reordered has been read again.
+    onSettled: () => client.invalidateQueries({ queryKey: ["money-category-rules"] }),
   });
 }
