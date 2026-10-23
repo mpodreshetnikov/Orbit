@@ -20,9 +20,9 @@ name: Лекарства
 - tapOn: "Поиск"
 - inputText: "Mag"
 - takeScreenshot: meds-02-search
-# Empty the query again: the app keeps it, and the next steps and flows need the whole list.
-- eraseText: 20
-- hideKeyboard
+# Cancel empties the query and closes the keyboard: the next steps and flows need the whole
+# list, and hiding the keyboard by a gesture can land a tap on a course behind it.
+- tapOn: "(Cancel|Отменить|Отмена)"
 - tapOn: "Приостановлено"
 - takeScreenshot: meds-03-filter
 - tapOn: "Все"
