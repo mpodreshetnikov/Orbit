@@ -74,7 +74,8 @@ name: Измерения
 - swipe:
     start: 1%, 50%
     end: 80%, 50%
-- extendedWaitUntil:
-    visible: "Скрыто: 1"
-    timeout: 10000
+# The count of hidden types sits under the list.
+- scrollUntilVisible:
+    element: "Скрыто: 1"
+    timeout: 20000
 - takeScreenshot: measurements-09-hidden
