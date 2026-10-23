@@ -182,6 +182,30 @@ describe("the finding types", () => {
     await renderScreens(routes, "/health/catalogs/finding-types/form?id=gone");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
   });
+
+  it("keep a code once it exists, and say when the entry went while it was edited", async () => {
+    await renderScreens(routes, "/health/catalogs/finding-types");
+    chooseInSheet("Редактировать");
+    await fireEvent.press(await screen.findByLabelText("Киста cyst"));
+    expect((await screen.findByLabelText("Код")).props.editable).toBe(false);
+    db.tables.finding_type_catalog = db.tables.finding_type_catalog.filter(
+      (row) => row.id !== "ft-cyst",
+    );
+    const alert = jest.spyOn(Alert, "alert");
+    await fireEvent.press(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith("Что-то пошло не так", "Ничего не найдено"),
+    );
+  });
+
+  it("offer a retry when the form cannot read them", async () => {
+    fail("finding_type_catalog");
+    await renderScreens(routes, "/health/catalogs/finding-types/form");
+    expect(await screen.findByText("finding_type_catalog is unavailable")).toBeOnTheScreen();
+    db.failing.clear();
+    await fireEvent.press(screen.getByText("Повторить"));
+    expect(await screen.findByLabelText("Код")).toBeOnTheScreen();
+  });
 });
 
 describe("the body sites", () => {
@@ -201,6 +225,7 @@ describe("the body sites", () => {
     expect(screen.getByText("Нет родителя (верхний уровень)")).toBeOnTheScreen();
     await fireEvent.press(screen.getByText("Сохранить"));
     await waitFor(() => expect(db.tables.body_site_catalog[1].parent_site_code).toBeNull());
+    expect(db.tables.body_site_catalog[1].site_code).toBe("kidney");
   });
 
   it("gain one under a parent found by name", async () => {

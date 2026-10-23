@@ -42,9 +42,14 @@ export function parentCandidates(
   if (!site) return all;
   return all.filter((candidate) => {
     if (candidate.id === site.id) return false;
+    // A chain that repeats is already a loop in the data (nothing in the database forbids one):
+    // stop there, and offer nothing on it.
+    const seen = new Set<string>();
     let current = candidate;
     while (current.parent_site_code) {
       if (current.parent_site_code === site.site_code) return false;
+      if (seen.has(current.site_code)) return false;
+      seen.add(current.site_code);
       const parent = all.find((one) => one.site_code === current.parent_site_code);
       if (!parent) break;
       current = parent;

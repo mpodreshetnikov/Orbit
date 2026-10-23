@@ -60,7 +60,20 @@ export default function ClinicalCatalogFormScreen({ kind }: { kind: ClinicalCata
   return (
     <>
       <Stack.Screen options={{ title: t(CLINICAL_CATALOG[kind].edit), headerLargeTitle: false }} />
-      <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      {catalog.error ? (
+        <Placeholder
+          message={catalog.error.message}
+          action={
+            <Button
+              variant="outline"
+              label={t("common.retry")}
+              onPress={() => void catalog.refetch()}
+            />
+          }
+        />
+      ) : (
+        <Placeholder busy={busy} message={busy ? undefined : t("common.noResults")} />
+      )}
     </>
   );
 }
@@ -104,6 +117,8 @@ function ClinicalForm({
         placeholder={placeholder[key]}
         value={form[key]}
         autoCapitalize={key === "code" ? "none" : "sentences"}
+        // A code is fixed once the entry exists (see saveClinicalEntry).
+        editable={!(entry && key === "code")}
         onChangeText={(value) => set({ [key]: value })}
       />
     </Field>

@@ -1,4 +1,5 @@
 import type { BodySiteCatalog, FindingTypeCatalog } from "@orbit-types/finding";
+import { t } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 
 /** The two catalogues findings are described with: what a finding is, and where it is. */
@@ -61,13 +62,20 @@ export async function saveClinicalEntry(
     return;
   }
   const { code, parent_code, ...rest } = columns;
+  // A code is fixed once the entry exists: findings keep their own copy of a finding code, and a
+  // site's children point at its code with no cascade, so renaming either would split or break
+  // them.
+  let updated: unknown;
   if (kind === "finding-types") {
     const table = supabase.from(TABLE[kind]);
-    const row = { ...rest, finding_code: code };
-    check(id ? await table.update(row).eq("id", id) : await table.insert(row));
-    return;
+    if (!id) return void check(await table.insert({ ...rest, finding_code: code }));
+    updated = check(await table.update(rest).eq("id", id).select("id").maybeSingle());
+  } else {
+    const table = supabase.from(TABLE[kind]);
+    const row = { ...rest, parent_site_code: parent_code };
+    if (!id) return void check(await table.insert({ ...row, site_code: code }));
+    updated = check(await table.update(row).eq("id", id).select("id").maybeSingle());
   }
-  const table = supabase.from(TABLE[kind]);
-  const row = { ...rest, site_code: code, parent_site_code: parent_code };
-  check(id ? await table.update(row).eq("id", id) : await table.insert(row));
+  // Gone while the form was open: the update touched nothing.
+  if (!updated) throw new Error(t("common.noResults"));
 }

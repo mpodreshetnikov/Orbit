@@ -51,4 +51,9 @@ describe("parentCandidates", () => {
   it("leaves out the site itself and everything under it", () => {
     expect(parentCandidates(all, all[1]).map((one) => one.id)).toEqual(["abdomen", "orphan"]);
   });
+
+  it("stops on a loop already in the data, and offers nothing on it", () => {
+    const looped = [...all, site("a", "b"), site("b", "a")];
+    expect(parentCandidates(looped, all[1]).map((one) => one.id)).toEqual(["abdomen", "orphan"]);
+  });
 });
