@@ -665,6 +665,7 @@ export function useSaveTransaction() {
       void client.invalidateQueries({ queryKey: ["money-feed"] });
       void client.invalidateQueries({ queryKey: ["money-feed-summary"] });
       void client.invalidateQueries({ queryKey: ["money-merchant-names"] });
+      void client.invalidateQueries({ queryKey: ["money-budget-report"] });
       if (id) void client.invalidateQueries({ queryKey: ["money-transaction", id] });
     },
   });

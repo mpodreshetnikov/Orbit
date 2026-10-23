@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
+import { useSaveTransaction } from "@/lib/queries";
 import BudgetTargetScreen from "@/screens/budget-target-screen";
 import MoneyReportsScreen from "@/screens/money-reports-screen";
 import MoneyScreen from "@/screens/money-screen";
@@ -134,6 +136,9 @@ describe("the budget report", () => {
     await renderScreens(routes, "/money/reports");
     expect(await screen.findByText("Не хватает курсов валют")).toBeOnTheScreen();
     expect(screen.getByText("Нет курса USD")).toBeOnTheScreen();
+    // The figures it could not compute are not shown as zeroes.
+    expect(screen.queryByText("Фактические доходы")).toBeNull();
+    expect(screen.queryByText("Категории")).toBeNull();
     fail("money_get_budget_report");
     await fireEvent.press(screen.getByLabelText("Следующий месяц"));
     expect(
@@ -203,5 +208,23 @@ describe("a category's target", () => {
   it("says when the category is not in the report", async () => {
     await renderScreens(routes, "/money/reports/target?category=gone&month=2026-10&currency=RUB");
     expect(await screen.findByText("Ничего не найдено")).toBeOnTheScreen();
+  });
+});
+
+describe("the report", () => {
+  it("is read again once a transaction changes", async () => {
+    const { client } = await renderScreens(routes, "/money/reports");
+    expect(await screen.findByText("Фактические доходы")).toBeOnTheScreen();
+    const reads = () => calls.rpc.filter((one) => one.name === "money_get_budget_report").length;
+    const before = reads();
+    const { result } = await renderHook(() => useSaveTransaction(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    await act(async () => {
+      await result.current.mutateAsync({ id: "gone", remove: true }).catch(() => undefined);
+    });
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 });

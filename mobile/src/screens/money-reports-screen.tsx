@@ -145,97 +145,106 @@ export default function MoneyReportsScreen() {
                 </Text>
               </Card>
             )}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-              {(
-                [
-                  ["money.reportActualIncome", data.summary.actual_income],
-                  ["money.reportActualExpenses", data.summary.actual_expenses],
-                  ["money.reportNet", data.summary.actual_net],
-                  ["money.reportTargetIncome", data.summary.target_income],
-                  ["money.reportTargetExpenses", data.summary.target_expenses],
-                  ["money.reportTargetNet", data.summary.target_net],
-                  ["money.reportVarianceNet", data.summary.variance_net],
-                ] as const
-              ).map(([label, value]) => (
-                <Card
-                  key={label}
-                  style={{ padding: space.md, gap: 2, flexBasis: "47%", flexGrow: 1 }}
-                >
-                  <Text size="xs" tone="mutedForeground">
-                    {t(label)}
-                  </Text>
-                  <Text weight="semibold">{money(value)}</Text>
-                </Card>
-              ))}
-            </View>
-
-            {trend.length > 1 ? (
-              <Section title={t("money.reportTrendTitle")}>
-                <LineChart
-                  values={trend.map((point) => Math.abs(point.expenses))}
-                  labels={[trend[0]!.date, trend.at(-1)!.date]}
-                  format={money}
-                />
-              </Section>
-            ) : null}
-
-            <Section title={t("money.reportRootComparisonTitle")}>
-              <View style={{ flexDirection: "row", gap: space.sm }}>
-                {MODES.map((one) => (
-                  <Chip
-                    key={one}
-                    label={modeLabel(one)}
-                    selected={mode === one}
-                    onPress={() => setMode(one)}
-                  />
-                ))}
-              </View>
-              {roots.length ? (
-                roots.map(({ node, actual, target }) => (
-                  <View key={node.id} style={{ gap: 4 }}>
-                    <View style={{ flexDirection: "row", gap: space.sm }}>
-                      <Text size="sm" style={{ flex: 1 }}>
-                        {node.name_en}
-                      </Text>
-                      <Text size="sm" tone="mutedForeground">
-                        {target ? `${money(actual)} / ${money(target)}` : money(actual)}
-                      </Text>
-                    </View>
-                    <View
-                      style={{ height: 8, borderRadius: radius.sm, backgroundColor: palette.muted }}
+            {/* Without the rates it needs the report has no figures: its nulls are not zeroes. */}
+            {data.fx_status.is_blocking ? null : (
+              <>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+                  {(
+                    [
+                      ["money.reportActualIncome", data.summary.actual_income],
+                      ["money.reportActualExpenses", data.summary.actual_expenses],
+                      ["money.reportNet", data.summary.actual_net],
+                      ["money.reportTargetIncome", data.summary.target_income],
+                      ["money.reportTargetExpenses", data.summary.target_expenses],
+                      ["money.reportTargetNet", data.summary.target_net],
+                      ["money.reportVarianceNet", data.summary.variance_net],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <Card
+                      key={label}
+                      style={{ padding: space.md, gap: 2, flexBasis: "47%", flexGrow: 1 }}
                     >
-                      <View
-                        style={{
-                          width: `${(actual / widest) * 100}%`,
-                          height: 8,
-                          borderRadius: radius.sm,
-                          backgroundColor:
-                            target && actual > target ? palette.destructive : palette.primary,
-                        }}
+                      <Text size="xs" tone="mutedForeground">
+                        {t(label)}
+                      </Text>
+                      <Text weight="semibold">{money(value)}</Text>
+                    </Card>
+                  ))}
+                </View>
+
+                {trend.length > 1 ? (
+                  <Section title={t("money.reportTrendTitle")}>
+                    <LineChart
+                      values={trend.map((point) => Math.abs(point.expenses))}
+                      labels={[trend[0]!.date, trend.at(-1)!.date]}
+                      format={money}
+                    />
+                  </Section>
+                ) : null}
+
+                <Section title={t("money.reportRootComparisonTitle")}>
+                  <View style={{ flexDirection: "row", gap: space.sm }}>
+                    {MODES.map((one) => (
+                      <Chip
+                        key={one}
+                        label={modeLabel(one)}
+                        selected={mode === one}
+                        onPress={() => setMode(one)}
                       />
-                      {target ? (
+                    ))}
+                  </View>
+                  {roots.length ? (
+                    roots.map(({ node, actual, target }) => (
+                      <View key={node.id} style={{ gap: 4 }}>
+                        <View style={{ flexDirection: "row", gap: space.sm }}>
+                          <Text size="sm" style={{ flex: 1 }}>
+                            {node.name_en}
+                          </Text>
+                          <Text size="sm" tone="mutedForeground">
+                            {target ? `${money(actual)} / ${money(target)}` : money(actual)}
+                          </Text>
+                        </View>
                         <View
                           style={{
-                            position: "absolute",
-                            left: `${(target / widest) * 100}%`,
-                            top: -2,
-                            width: 2,
-                            height: 12,
-                            backgroundColor: palette.warning,
+                            height: 8,
+                            borderRadius: radius.sm,
+                            backgroundColor: palette.muted,
                           }}
-                        />
-                      ) : null}
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <Text size="sm" tone="mutedForeground">
-                  {t("money.reportChartEmpty")}
-                </Text>
-              )}
-            </Section>
+                        >
+                          <View
+                            style={{
+                              width: `${(actual / widest) * 100}%`,
+                              height: 8,
+                              borderRadius: radius.sm,
+                              backgroundColor:
+                                target && actual > target ? palette.destructive : palette.primary,
+                            }}
+                          />
+                          {target ? (
+                            <View
+                              style={{
+                                position: "absolute",
+                                left: `${(target / widest) * 100}%`,
+                                top: -2,
+                                width: 2,
+                                height: 12,
+                                backgroundColor: palette.warning,
+                              }}
+                            />
+                          ) : null}
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    <Text size="sm" tone="mutedForeground">
+                      {t("money.reportChartEmpty")}
+                    </Text>
+                  )}
+                </Section>
 
-            <Section title={t("money.reportCategoriesTitle")}>{rows(data.categories)}</Section>
+                <Section title={t("money.reportCategoriesTitle")}>{rows(data.categories)}</Section>
+              </>
+            )}
           </>
         )}
       </ScrollView>
