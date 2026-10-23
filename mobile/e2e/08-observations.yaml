@@ -1,0 +1,24 @@
+# Lab values: the health menu's «Анализы», the seeded blood test's values, and one value's history
+# with its reference range.
+appId: host.exp.Exponent
+name: Анализы
+---
+- openLink: exp://127.0.0.1:8081/--/health
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "История всех результатов анализов и измерений"
+    timeout: 60000
+- tapOn: "Анализы"
+- extendedWaitUntil:
+    visible: "Гемоглобин|Hemoglobin"
+    timeout: 20000
+- takeScreenshot: observations-01-list
+- tapOn:
+    text: "Гемоглобин|Hemoglobin"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Референсный интервал"
+    timeout: 20000
+- takeScreenshot: observations-02-hemoglobin
