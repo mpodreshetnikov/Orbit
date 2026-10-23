@@ -1,5 +1,5 @@
 import { Stack, useRouter, type Href } from "expo-router";
-import { ChevronRight, Ruler, type LucideIcon } from "lucide-react-native";
+import { BookOpen, ChevronRight, Ruler, type LucideIcon } from "lucide-react-native";
 import { Pressable, ScrollView, View } from "react-native";
 import { Card, Icon, Text } from "@/components/ui";
 import { t } from "@/lib/i18n";
@@ -12,6 +12,12 @@ const SECTIONS: { title: string; description: string; icon: LucideIcon; href: st
     description: "measurements.description",
     icon: Ruler,
     href: "/health/measurements",
+  },
+  {
+    title: "catalogs.measurements",
+    description: "catalogs.measurementsDescription",
+    icon: BookOpen,
+    href: "/health/catalogs/measurements",
   },
 ];
 
