@@ -44,7 +44,7 @@ jobs:
   backend:
     name: Local Supabase behind a tunnel
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -178,7 +178,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for _ in $(seq 1 270); do
+          for _ in $(seq 1 630); do
             if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
                  --jq '.artifacts[].name' | grep -qx recordings; then
               echo "Recordings uploaded; stopping."
@@ -186,12 +186,13 @@ jobs:
             fi
             sleep 10
           done
-          echo "::warning::Stopped waiting for the simulator job after 45 minutes."
+          echo "::warning::Stopped waiting for the simulator job after 105 minutes."
 
   simulator:
     name: iPhone simulator
     runs-on: macos-latest
-    timeout-minutes: 60
+    # All 24 flows take about 50 minutes on a hosted Mac, and each starts with a relaunch.
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -294,12 +295,15 @@ jobs:
             ( cd recordings && maestro test --format junit --output "$name.xml" "../mobile/e2e/$flow" ) || status=1
             kill -INT "$video"; wait "$video" || true
             steps="$(ls -td ~/.maestro/tests/*/ | head -1)"
-            # From a second before the first step that is not set-up to a second and a half after the last.
+            # From a second before the flow's own link (its relaunch in setup/fresh.yaml is not worth
+            # showing) to a second and a half after the last step.
             span="$(python3 - "$steps" "$started" <<'PY' || true
           import glob, json, sys
           runs = glob.glob(sys.argv[1] + "*/commands.json")
-          timed = [c["metadata"] for c in json.load(open(runs[0])) if c.get("metadata", {}).get("timestamp")]
-          steps = [m for m in timed if m.get("status") not in ("SKIPPED",)][2:]
+          timed = [c for c in json.load(open(runs[0])) if c.get("metadata", {}).get("timestamp")]
+          timed = [c for c in timed if c["metadata"].get("status") not in ("SKIPPED",)]
+          own = [i for i, c in enumerate(timed) if "/--/" in c["command"].get("openLinkCommand", {}).get("link", "")]
+          steps = [c["metadata"] for c in timed[own[0] if own else 2:]]
           first = steps[0]["timestamp"] / 1000
           last = max((m["timestamp"] + (m.get("duration") or 0)) / 1000 for m in steps)
           start = float(sys.argv[2])

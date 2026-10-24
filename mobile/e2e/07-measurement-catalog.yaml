@@ -1,16 +1,17 @@
-# The measurement catalogue: reached from the health menu, a type added with its category picked
+# The measurement catalogue, opened by its link: a type added with its category picked
 # from the sheet, then edited from its menu, and its delete asked and cancelled.
 appId: host.exp.Exponent
 name: Каталог измерений
 ---
-- openLink: exp://127.0.0.1:8081/--/health
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/health/catalogs/measurements
 - tapOn:
     text: "Open"
     optional: true
+# A link opened over another screen can leave it on view for a moment: wait for this one's own button.
 - extendedWaitUntil:
-    visible: "Управление типами измерений тела и единицами"
+    visible: "Добавить тип измерения"
     timeout: 60000
-- tapOn: "Каталог измерений"
 - extendedWaitUntil:
     visible: "ОСНОВНЫЕ"
     timeout: 20000
@@ -19,18 +20,24 @@ name: Каталог измерений
 - extendedWaitUntil:
     visible: "Добавить новый тип измерения в каталог"
     timeout: 10000
-- tapOn: "Код"
+# Each field's caption reads as its label too: tap the fields by id.
+- tapOn:
+    id: "catalog-code"
 # A fresh simulator shows the slide-to-type tip over its first keyboard.
 - tapOn:
     text: "Continue"
     optional: true
-- tapOn: "Код"
+- tapOn:
+    id: "catalog-code"
 - inputText: "wrist_left"
-- tapOn: "Название (RU)"
+- tapOn:
+    id: "catalog-name_ru"
 - inputText: "Левое запястье"
-- tapOn: "Название (EN)"
+- tapOn:
+    id: "catalog-name_en"
 - inputText: "Left wrist"
-- tapOn: "Единица (RU)"
+- tapOn:
+    id: "catalog-unit_ru"
 - inputText: "см"
 - hideKeyboard
 - tapOn: "Категория: Тело"
@@ -38,7 +45,7 @@ name: Каталог измерений
 - takeScreenshot: catalog-02-new
 - tapOn: "Сохранить"
 - extendedWaitUntil:
-    visible: "wrist_left · Left wrist"
+    visible: "Левое запястье wrist_left"
     timeout: 20000
 - takeScreenshot: catalog-03-added
 - tapOn: "Левое запястье wrist_left"
@@ -46,12 +53,13 @@ name: Каталог измерений
 - extendedWaitUntil:
     visible: "Изменить определение типа измерения"
     timeout: 10000
-- tapOn: "Единица (EN)"
+- tapOn:
+    id: "catalog-unit_en"
 - inputText: "cm"
 - hideKeyboard
 - tapOn: "Сохранить"
 - extendedWaitUntil:
-    visible: "wrist_left · Left wrist"
+    visible: "Левое запястье wrist_left"
     timeout: 20000
 - tapOn: "Левое запястье wrist_left"
 - tapOn: "Удалить"
@@ -60,4 +68,4 @@ name: Каталог измерений
     timeout: 10000
 - takeScreenshot: catalog-04-delete
 - tapOn: "Отмена"
-- assertVisible: "wrist_left · Left wrist"
+- assertVisible: "Левое запястье wrist_left"

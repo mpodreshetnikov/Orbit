@@ -263,6 +263,7 @@ function TransactionForm({
           </Field>
           <Field label={t("money.merchant")}>
             <Input
+              testID="transaction-merchant"
               accessibilityLabel={t("money.merchant")}
               placeholder={t("money.merchantPlaceholder")}
               value={merchant}

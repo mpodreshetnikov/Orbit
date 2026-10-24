@@ -1,16 +1,13 @@
-# The category rules, reached from the money tab, and a rule's menu.
+# The category rules, opened by its link, and a rule's menu.
 appId: host.exp.Exponent
 name: Правила
 ---
-- openLink: exp://127.0.0.1:8081/--/money
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/money/rules
 - tapOn: { text: "Open", optional: true }
 - extendedWaitUntil:
-    visible: "Совпадений"
-    timeout: 60000
-- tapOn: "Правила"
-- extendedWaitUntil:
     visible: "Streaming"
-    timeout: 20000
+    timeout: 60000
 - takeScreenshot: rules-01-list
 - tapOn: "Действия: Streaming"
 - extendedWaitUntil:
@@ -23,6 +20,8 @@ name: Правила
     visible: "Название правила"
     timeout: 10000
 - inputText: "Такси"
+- hideKeyboard
+- scrollUntilVisible: { element: "Добавить фильтр", direction: DOWN }
 - tapOn: "Добавить фильтр"
 - takeScreenshot: rules-03-form
 - tapOn: "Отмена"

@@ -2,17 +2,24 @@
 appId: host.exp.Exponent
 name: Деньги
 ---
+- runFlow: setup/fresh.yaml
 - openLink: exp://127.0.0.1:8081/--/money
 - tapOn:
     text: "Open"
     optional: true
-# The sums' heading shows before the feed arrives: wait for a seeded transaction instead.
 - extendedWaitUntil:
-    visible: "Employer LLC"
+    visible: "Совпадений"
     timeout: 60000
-- takeScreenshot: money-01-feed
-- tapOn: "Доходы"
+# The sums' heading shows before the feed arrives: wait for a seeded transaction too. A row reads as
+# one element, the merchant first.
 - extendedWaitUntil:
-    visible: "Employer LLC"
+    visible: "Steam.*"
+    timeout: 30000
+- takeScreenshot: money-01-feed
+- tapOn:
+    text: "Доходы"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Employer LLC.*"
     timeout: 20000
 - takeScreenshot: money-02-income

@@ -1,10 +1,11 @@
 # The "Сегодня" tab: opens signed in as the seed user and shows the day's doses.
-# `setup/open.yaml` has already loaded the client, so this starts on a warm app.
+# `setup/open.yaml` has already loaded the client; `setup/fresh.yaml` relaunches it on «Сегодня».
 appId: host.exp.Exponent
 name: Сегодня
 ---
-# The app comes back where the last flow left it, so the link names the screen: a tap on the tab
-# right after the link can land before the client has settled and be lost.
+- runFlow: setup/fresh.yaml
+# The link names the screen, as every flow's does: a tap on the tab right after a launch can land
+# before the client has settled and be lost.
 - openLink: exp://127.0.0.1:8081/--/today
 - tapOn:
     text: "Open"

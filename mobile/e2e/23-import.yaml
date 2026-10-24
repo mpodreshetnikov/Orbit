@@ -1,23 +1,21 @@
-# A statement import from the money tab: the file picker, the history and a batch waiting for review.
+# A statement import opened by its link: the file picker, the history and a batch waiting for review.
 appId: host.exp.Exponent
 name: Импорт
 ---
-- openLink: exp://127.0.0.1:8081/--/money
+- runFlow: setup/fresh.yaml
+- openLink: exp://127.0.0.1:8081/--/money/import
 - tapOn: { text: "Open", optional: true }
 - extendedWaitUntil:
-    visible: "Совпадений"
+    visible: "Загрузить файл"
     timeout: 60000
-- scrollUntilVisible: { element: "Импорт", direction: DOWN }
-- tapOn: "Импорт"
-- extendedWaitUntil: { visible: "Загрузить файл", timeout: 10000 }
 - takeScreenshot: import-01-start
 - tapOn: "Загрузить файл"
 - extendedWaitUntil: { visible: "(Cancel|Отменить|Отмена)", timeout: 15000 }
 - takeScreenshot: import-02-picker
 - tapOn: "(Cancel|Отменить|Отмена)"
 - tapOn: "История импортов"
-- extendedWaitUntil: { visible: "tbank · Файл.*", timeout: 10000 }
+- extendedWaitUntil: { visible: ".*tbank · Файл.*", timeout: 10000 }
 - takeScreenshot: import-03-history
-- tapOn: "tbank · Файл.*"
+- tapOn: ".*tbank · Файл.*"
 - extendedWaitUntil: { visible: "Применить пакет", timeout: 10000 }
 - takeScreenshot: import-04-report
