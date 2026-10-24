@@ -1,0 +1,21 @@
+# Starts every flow from a fresh launch on «Сегодня». A flow that fails can leave a form open, and a
+# link opened after it lands inside that form's sheet: every later flow then sees the wrong screen.
+# Relaunching costs a few seconds of the cached bundle and makes each flow stand on its own.
+appId: host.exp.Exponent
+---
+- stopApp
+- openLink: exp://127.0.0.1:8081
+- tapOn:
+    text: "Open"
+    optional: true
+- extendedWaitUntil:
+    visible: "Сегодня"
+    timeout: 120000
+# Expo Go may put its tools button back over the top right corner on launch, where it hides the
+# navigation bar's own buttons: drag it down beside the tab bar again (see open.yaml). Where it is
+# already down there, the drag only pulls at today's header.
+- swipe:
+    start: 89%, 9%
+    end: 89%, 88%
+    duration: 2000
+- waitForAnimationToEnd

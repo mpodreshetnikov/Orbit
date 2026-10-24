@@ -2,6 +2,7 @@
 appId: host.exp.Exponent
 name: Новый чек-ап
 ---
+- runFlow: setup/fresh.yaml
 - openLink: exp://127.0.0.1:8081/--/health/checkups
 - tapOn:
     text: "Open"
@@ -19,6 +20,8 @@ name: Новый чек-ап
 - tapOn:
     id: "checkup-title"
 - inputText: "Осмотр окулиста"
+# The first tap past an open keyboard only closes it.
+- hideKeyboard
 - tapOn: "Частота: Каждые 6 мес."
 - tapOn: "Каждый год"
 - tapOn: "Первый срок: От сегодня"

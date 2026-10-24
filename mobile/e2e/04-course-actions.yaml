@@ -4,6 +4,7 @@
 appId: host.exp.Exponent
 name: Курс — действия
 ---
+- runFlow: setup/fresh.yaml
 # Opened from the list rather than by its own link: a link straight to a course leaves the list's
 # search bar in the navigation bar on iOS 26, over the course's title and its menu button.
 - openLink: exp://127.0.0.1:8081/--/medications

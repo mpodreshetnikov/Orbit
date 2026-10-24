@@ -3,6 +3,7 @@
 appId: host.exp.Exponent
 name: История диагноза
 ---
+- runFlow: setup/fresh.yaml
 - openLink: exp://127.0.0.1:8081/--/health/conditions
 - tapOn:
     text: "Open"
@@ -10,6 +11,10 @@ name: История диагноза
 - extendedWaitUntil:
     visible: "Allergic rhinitis.*"
     timeout: 60000
+# iOS keeps the search field over the bottom of the list: bring the row to the middle before a tap.
+- scrollUntilVisible:
+    element: "Allergic rhinitis.*"
+    centerElement: true
 - tapOn:
     text: "Allergic rhinitis.*"
     retryTapIfNoChange: true

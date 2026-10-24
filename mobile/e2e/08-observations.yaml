@@ -3,6 +3,7 @@
 appId: host.exp.Exponent
 name: Анализы
 ---
+- runFlow: setup/fresh.yaml
 - openLink: exp://127.0.0.1:8081/--/health/observations
 - tapOn:
     text: "Open"
@@ -12,6 +13,10 @@ name: Анализы
     visible: "(Гемоглобин|Hemoglobin).*"
     timeout: 60000
 - takeScreenshot: observations-01-list
+# iOS keeps the search field over the bottom of the list: bring the row to the middle before a tap.
+- scrollUntilVisible:
+    element: "(Гемоглобин|Hemoglobin).*"
+    centerElement: true
 - tapOn:
     text: "(Гемоглобин|Hemoglobin).*"
     retryTapIfNoChange: true

@@ -4,6 +4,7 @@
 appId: host.exp.Exponent
 name: Быстрая трата
 ---
+- runFlow: setup/fresh.yaml
 - openLink: exp://127.0.0.1:8081/--/today/spend
 - tapOn: { text: "Open", optional: true }
 - extendedWaitUntil:

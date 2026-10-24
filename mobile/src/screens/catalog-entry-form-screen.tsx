@@ -129,6 +129,7 @@ function CatalogEntryForm({ id, initial }: { id?: string; initial: CatalogColumn
               }
             >
               <Input
+                testID={`catalog-${key}`}
                 accessibilityLabel={t(label)}
                 value={form[key]}
                 // Hidden types and links are keyed by the code, so an entry keeps its own (as on the web).
