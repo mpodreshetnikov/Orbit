@@ -139,7 +139,7 @@ export default function MeasurementsScreen() {
                 {t("measurements.hiddenSummary", { count: hiddenCount })}
               </Text>
             </Pressable>
-          ) : null
+          ) : undefined
         }
         refreshControl={
           <RefreshControl

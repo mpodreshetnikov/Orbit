@@ -105,7 +105,12 @@ function CheckupForm({ personId, item }: { personId: string; item?: CheckupItem 
           title: t(item ? "checkups.edit" : "checkups.add"),
           headerLargeTitle: false,
           headerLeft: () => (
-            <Button compact variant="ghost" label={t("common.cancel")} onPress={router.back} />
+            <Button
+              compact
+              variant="ghost"
+              label={t("common.cancel")}
+              onPress={() => router.back()}
+            />
           ),
           headerRight: () => (
             <Button

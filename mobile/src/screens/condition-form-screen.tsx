@@ -84,7 +84,12 @@ function ConditionForm({ initial }: { initial: Condition }) {
           title: t("conditions.edit"),
           headerLargeTitle: false,
           headerLeft: () => (
-            <Button compact variant="ghost" label={t("common.cancel")} onPress={router.back} />
+            <Button
+              compact
+              variant="ghost"
+              label={t("common.cancel")}
+              onPress={() => router.back()}
+            />
           ),
           headerRight: () => (
             <Button

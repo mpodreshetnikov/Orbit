@@ -131,7 +131,12 @@ function ClinicalForm({
           title: t(entry ? CLINICAL_CATALOG[kind].edit : CLINICAL_CATALOG[kind].add),
           headerLargeTitle: false,
           headerLeft: () => (
-            <Button compact variant="ghost" label={t("common.cancel")} onPress={router.back} />
+            <Button
+              compact
+              variant="ghost"
+              label={t("common.cancel")}
+              onPress={() => router.back()}
+            />
           ),
           headerRight: () => (
             <Button

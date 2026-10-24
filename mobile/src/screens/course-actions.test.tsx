@@ -42,7 +42,7 @@ function chooseInSheet(label: string) {
 function answerAlert(label: string) {
   const titles: string[] = [];
   jest.spyOn(Alert, "alert").mockImplementationOnce((title, _message, buttons) => {
-    titles.push(title);
+    titles.push(title ?? "");
     (buttons as AlertButton[]).find((button) => button.text === label)?.onPress?.();
   });
   return titles;

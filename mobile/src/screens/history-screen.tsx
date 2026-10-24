@@ -91,7 +91,7 @@ export default function HistoryScreen() {
             <Text size="sm" tone="mutedForeground" style={{ paddingTop: space.md }}>
               {regimen.data.custom_name}
             </Text>
-          ) : null
+          ) : undefined
         }
         ListEmptyComponent={
           history.isPending ? (
