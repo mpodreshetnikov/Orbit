@@ -205,7 +205,12 @@ function TransactionForm({
           title: t(initial ? "money.editTransaction" : "money.addTransaction"),
           headerLargeTitle: false,
           headerLeft: () => (
-            <Button compact variant="ghost" label={t("common.cancel")} onPress={router.back} />
+            <Button
+              compact
+              variant="ghost"
+              label={t("common.cancel")}
+              onPress={() => router.back()}
+            />
           ),
           headerRight: () => (
             <Button
