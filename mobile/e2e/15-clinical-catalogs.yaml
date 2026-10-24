@@ -33,6 +33,8 @@ name: Справочники находок
     visible: "Левая почка kidney_left"
     timeout: 10000
 - takeScreenshot: catalogs-02-body-sites
+# A search in progress hides the navigation bar on iOS 26: close it to reach the add button.
+- tapOn: "Close"
 - tapOn: "Добавить локализацию"
 - extendedWaitUntil:
     visible: "Родительская локализация"
