@@ -32,6 +32,26 @@ name: Open the client
 - tapOn:
     text: "Close"
     optional: true
+# A quick tunnel can still fail TLS from the simulator for a while after it answers the Mac, and the
+# app's sign-in then stops on «Добро пожаловать» with the error. A relaunch signs in again.
+- repeat:
+    times: 6
+    while:
+      notVisible: "Сегодня"
+    commands:
+      - extendedWaitUntil:
+          visible: "Сегодня"
+          timeout: 30000
+          optional: true
+      - runFlow:
+          when:
+            notVisible: "Сегодня"
+          commands:
+            - stopApp
+            - openLink: exp://127.0.0.1:8081
+            - tapOn:
+                text: "Open"
+                optional: true
 - extendedWaitUntil:
     visible: "Сегодня"
     timeout: 60000
