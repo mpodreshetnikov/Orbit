@@ -161,8 +161,7 @@ describe("MoneyTransactionsPage", () => {
     hookMocks.useMoneyTransactionFeedSummary.mockReturnValue({
       data: {
         totalCount: 2,
-        totalPositiveAmount: 800,
-        totalNegativeAmount: -1200,
+        byCurrency: [{ currency: "RUB", count: 2, positiveAmount: 800, negativeAmount: -1200 }],
       },
       isLoading: false,
     });
@@ -200,6 +199,32 @@ describe("MoneyTransactionsPage", () => {
 
     render(<MoneyTransactionsPage />);
     expect(screen.getByText("person.selectPrompt")).toBeInTheDocument();
+  });
+
+  it("sums each currency on its own line instead of adding them together", () => {
+    currentSearchParams = new URLSearchParams("accounts=acc-1");
+    hookMocks.useMoneyTransactionFeedSummary.mockReturnValue({
+      data: {
+        totalCount: 3,
+        byCurrency: [
+          { currency: "RUB", count: 2, positiveAmount: 800, negativeAmount: -1200 },
+          { currency: "USD", count: 1, positiveAmount: 0, negativeAmount: -12.5 },
+        ],
+      },
+      isLoading: false,
+    });
+
+    render(<MoneyTransactionsPage />);
+
+    const summary = screen.getByTestId("transaction-search-summary");
+    const expenses = Array.from(summary.querySelectorAll("p.text-rose-700"), (one) =>
+      one.textContent?.replace(/\s/g, " "),
+    );
+    expect(expenses).toHaveLength(2);
+    expect(expenses[0]).toMatch(/1.200/);
+    expect(expenses[1]).toMatch(/12[.,]50/);
+    expect(expenses[1]).toMatch(/\$|USD/);
+    expect(summary).toHaveTextContent("3");
   });
 
   it("hydrates URL-synced filters into the hidden filter panel", async () => {

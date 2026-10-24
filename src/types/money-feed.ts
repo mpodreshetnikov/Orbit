@@ -76,13 +76,18 @@ export function normalizeFeedItem(item: Record<string, unknown>): MoneyTransacti
   };
 }
 
-/** The summary row `money_transaction_feed_summary` returns, as numbers. */
+/** The rows `money_transaction_feed_summary` returns, one per currency, as numbers. */
 export function feedSummaryOf(data: unknown): MoneyTransactionFeedSummary {
-  const row = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
+  const rows = Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
+  const byCurrency = rows.map((row) => ({
+    currency: String(row.currency ?? ""),
+    count: Number(row.total_count ?? 0),
+    positiveAmount: Number(row.total_positive_amount ?? 0),
+    negativeAmount: Number(row.total_negative_amount ?? 0),
+  }));
   return {
-    totalCount: Number(row?.total_count ?? 0),
-    totalPositiveAmount: Number(row?.total_positive_amount ?? 0),
-    totalNegativeAmount: Number(row?.total_negative_amount ?? 0),
+    totalCount: byCurrency.reduce((sum, one) => sum + one.count, 0),
+    byCurrency,
   };
 }
 

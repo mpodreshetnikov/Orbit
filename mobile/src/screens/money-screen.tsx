@@ -109,13 +109,10 @@ export default function MoneyScreen() {
   const accountLabel = new Map(accounts.data?.map((one) => [one.id, one.account_label]));
   const categoryName = new Map(categories.data?.map((one) => [one.id, one.name_ru]));
   const currency = items[0]?.currency ?? accounts.data?.[0]?.currency ?? "RUB";
-  // The sums come back as one number whatever the currency: across currencies it means nothing,
-  // so only the count is shown then.
-  const mixedCurrencies =
-    new Set([
-      ...items.map((one) => one.currency),
-      ...(accounts.data ?? []).map((one) => one.currency),
-    ]).size > 1;
+  // Each currency is summed on its own: one line per currency, or a zero in the feed's currency.
+  const byCurrency = summary.data?.byCurrency.length
+    ? summary.data.byCurrency
+    : [{ currency, count: 0, positiveAmount: 0, negativeAmount: 0 }];
 
   const header = (
     <Stack.Screen
@@ -162,14 +159,16 @@ export default function MoneyScreen() {
     );
   }
 
-  const total = (label: string, value: string, tone: keyof Palette) => (
+  const total = (label: string, values: string[], tone: keyof Palette) => (
     <View style={{ flex: 1, gap: 2 }}>
       <Text size="xs" tone="mutedForeground">
         {label}
       </Text>
-      <Text weight="semibold" tone={tone}>
-        {value}
-      </Text>
+      {values.map((value) => (
+        <Text key={value} weight="semibold" tone={tone}>
+          {value}
+        </Text>
+      ))}
     </View>
   );
 
@@ -203,24 +202,20 @@ export default function MoneyScreen() {
           </Text>
         ) : (
           <>
-            {total(t("money.summaryMatches"), String(summary.data?.totalCount ?? 0), "foreground")}
-            {mixedCurrencies ? (
-              <Text size="xs" tone="mutedForeground" style={{ flex: 2 }}>
-                {t("money.summaryMixedCurrencies")}
-              </Text>
-            ) : (
-              <>
-                {total(
-                  t("money.summaryPositive"),
-                  formatMoney(summary.data?.totalPositiveAmount ?? 0, currency, "ru-RU"),
-                  "success",
-                )}
-                {total(
-                  t("money.summaryNegative"),
-                  formatMoney(summary.data?.totalNegativeAmount ?? 0, currency, "ru-RU"),
-                  "destructive",
-                )}
-              </>
+            {total(
+              t("money.summaryMatches"),
+              [String(summary.data?.totalCount ?? 0)],
+              "foreground",
+            )}
+            {total(
+              t("money.summaryPositive"),
+              byCurrency.map((one) => formatMoney(one.positiveAmount, one.currency, "ru-RU")),
+              "success",
+            )}
+            {total(
+              t("money.summaryNegative"),
+              byCurrency.map((one) => formatMoney(one.negativeAmount, one.currency, "ru-RU")),
+              "destructive",
             )}
           </>
         )}

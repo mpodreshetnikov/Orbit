@@ -260,13 +260,10 @@ export function lineItemsOrWhole(
   ];
 }
 
-/** How an edit reaches the saved line items: which go, which change, which are new. */
-export function lineItemChanges(currentIds: string[], items: CreateMoneyLineItemInput[]) {
-  const current = new Set(currentIds);
-  const kept = new Set(items.map((item) => item.id).filter(Boolean));
-  return {
-    removed: currentIds.filter((id) => !kept.has(id)),
-    changed: items.filter((item) => item.id && current.has(item.id)),
-    added: items.filter((item) => !item.id || !current.has(item.id)),
-  };
+/**
+ * The line items `money_update_transaction_with_lines` brings a transaction to: a saved one keeps
+ * its id and is changed, one without an id is added, and a saved one left out is removed.
+ */
+export function lineItemUpdateRows(items: CreateMoneyLineItemInput[], transactionId: string) {
+  return items.map((item) => ({ ...lineItemRow(item, transactionId), id: item.id ?? null }));
 }

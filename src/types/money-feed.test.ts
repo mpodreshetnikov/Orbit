@@ -51,19 +51,29 @@ describe("normalizeFeedItem", () => {
 });
 
 describe("feedSummaryOf", () => {
-  it("reads the first row as numbers, or zeros", () => {
+  it("reads each currency's row as numbers and counts them all", () => {
     expect(
-      feedSummaryOf([{ total_count: "2", total_positive_amount: 5, total_negative_amount: -1 }]),
+      feedSummaryOf([
+        { currency: "RUB", total_count: "2", total_positive_amount: 5, total_negative_amount: -1 },
+        {
+          currency: "USD",
+          total_count: 1,
+          total_positive_amount: "0",
+          total_negative_amount: "-12.5",
+        },
+      ]),
     ).toEqual({
-      totalCount: 2,
-      totalPositiveAmount: 5,
-      totalNegativeAmount: -1,
+      totalCount: 3,
+      byCurrency: [
+        { currency: "RUB", count: 2, positiveAmount: 5, negativeAmount: -1 },
+        { currency: "USD", count: 1, positiveAmount: 0, negativeAmount: -12.5 },
+      ],
     });
-    expect(feedSummaryOf(null)).toEqual({
-      totalCount: 0,
-      totalPositiveAmount: 0,
-      totalNegativeAmount: 0,
-    });
+  });
+
+  it("reads nothing as no currencies", () => {
+    expect(feedSummaryOf(null)).toEqual({ totalCount: 0, byCurrency: [] });
+    expect(feedSummaryOf([])).toEqual({ totalCount: 0, byCurrency: [] });
   });
 });
 

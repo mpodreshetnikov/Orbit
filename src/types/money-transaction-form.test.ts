@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { MoneyLineItem } from "./money";
 import {
   parseAmount,
-  lineItemChanges,
   lineItemDraft,
   lineItemDrafts,
   lineItemInputs,
@@ -10,6 +9,7 @@ import {
   lineItemsMismatch,
   lineItemsOrWhole,
   lineItemsTotal,
+  lineItemUpdateRows,
   manualCategoryChange,
   merchantNames,
   transactionFormProblem,
@@ -161,18 +161,18 @@ describe("the rows written", () => {
     expect(lineItemsOrWhole(items, "x", 1)).toBe(items);
   });
 
-  it("tell removed, changed and added line items apart", () => {
-    const changes = lineItemChanges(
-      ["a", "b"],
+  it("send saved line items with their id and new ones without", () => {
+    const rows = lineItemUpdateRows(
       [
         { id: "a", title: "A", amount: 1 },
-        { id: "z", title: "Z", amount: 1 },
-        { title: "N", amount: 1 },
+        { title: "N", amount: 2 },
       ],
+      "tx-1",
     );
-    expect(changes.removed).toEqual(["b"]);
-    expect(changes.changed.map((item) => item.id)).toEqual(["a"]);
-    expect(changes.added.map((item) => item.title)).toEqual(["Z", "N"]);
+    expect(rows.map((row) => [row.id, row.title, row.transaction_id])).toEqual([
+      ["a", "A", "tx-1"],
+      [null, "N", "tx-1"],
+    ]);
   });
 });
 

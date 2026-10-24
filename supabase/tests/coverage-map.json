@@ -103,7 +103,11 @@
       "supabase/tests/functions/money_budget_reporting_test.sql"
     ],
     "supabase/db/functions/money_transaction_feed_summary.sql": [
-      "supabase/tests/functions/money_transactions_feed_and_audit_test.sql"
+      "supabase/tests/functions/money_transactions_feed_and_audit_test.sql",
+      "supabase/tests/functions/money_update_transaction_with_lines_test.sql"
+    ],
+    "supabase/db/functions/money_update_transaction_with_lines.sql": [
+      "supabase/tests/functions/money_update_transaction_with_lines_test.sql"
     ],
     "supabase/db/functions/money_preview_category_rule_pipeline.sql": [
       "supabase/tests/functions/money_category_rule_pipeline_test.sql"
