@@ -10,18 +10,28 @@ name: Справочники находок
 - extendedWaitUntil:
     visible: "Добавить тип находки"
     timeout: 60000
-# iOS keeps the search field over the bottom of the list: bring the row to the middle.
-- scrollUntilVisible:
-    element: ".* polyp"
-    centerElement: true
+# The list runs under iOS's search field and tab bar, and a scroll stops short of the lower rows: find
+# the row by the search instead.
+- tapOn: "Поиск..."
+- inputText: "полип"
+- extendedWaitUntil:
+    visible: "Полип polyp"
+    timeout: 10000
 - takeScreenshot: catalogs-01-finding-types
+# Afresh, so the search field above is not the one tapped next.
+- runFlow: setup/fresh.yaml
 - openLink: exp://127.0.0.1:8081/--/health/catalogs/body-sites
+- tapOn:
+    text: "Open"
+    optional: true
 - extendedWaitUntil:
     visible: "Добавить локализацию"
-    timeout: 20000
-- scrollUntilVisible:
-    element: ".* kidney_left"
-    centerElement: true
+    timeout: 60000
+- tapOn: "Поиск..."
+- inputText: "почка"
+- extendedWaitUntil:
+    visible: "Левая почка kidney_left"
+    timeout: 10000
 - takeScreenshot: catalogs-02-body-sites
 - tapOn: "Добавить локализацию"
 - extendedWaitUntil:
