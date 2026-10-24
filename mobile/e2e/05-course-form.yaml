@@ -65,7 +65,11 @@ name: Курс — форма
     timeout: 10000
 - inputText: "Vit"
 - tapOn: "Vitamin D3" # The suggestion; the list under the sheet is out of reach.
-- hideKeyboard
+# Picking the suggestion closes the keyboard. A hideKeyboard here would tap the sheet instead and
+# could open the time picker: "Сохранить" in the bar is reachable as it is.
+- tapOn:
+    text: "dismiss popup"
+    optional: true
 - takeScreenshot: form-07-one-off
 - tapOn: "Сохранить"
 - extendedWaitUntil:
