@@ -370,6 +370,10 @@ export default function MoneyTransactionsPage() {
 
   const summaryCurrency =
     transactions[0]?.currency ?? accountCurrencyById.get(appliedFilters.accounts[0] ?? "") ?? "USD";
+  // Each currency is summed on its own: one line per currency, or a zero in the feed's currency.
+  const summaryByCurrency = feedSummaryQuery.data?.byCurrency.length
+    ? feedSummaryQuery.data.byCurrency
+    : [{ currency: summaryCurrency, count: 0, positiveAmount: 0, negativeAmount: 0 }];
   const activeFilterCount = countActiveFilters(appliedFilters);
   const hasStructuredFilters = activeFilterCount > 0;
   const isSummaryCollapsed = scrollTop > SUMMARY_COLLAPSE_SCROLL_TOP;
@@ -958,7 +962,7 @@ export default function MoneyTransactionsPage() {
               className={`overflow-hidden transition-all duration-200 ease-out ${
                 isSummaryCollapsed
                   ? "max-h-0 -translate-y-2 opacity-0 pointer-events-none"
-                  : "max-h-48 translate-y-0 opacity-100"
+                  : "max-h-96 translate-y-0 opacity-100"
               }`}
             >
               {feedSummaryQuery.isError ? (
@@ -997,25 +1001,21 @@ export default function MoneyTransactionsPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       {t("money.summaryPositive")}
                     </p>
-                    <p className="text-lg font-semibold text-emerald-700">
-                      {formatMoney(
-                        feedSummaryQuery.data?.totalPositiveAmount ?? 0,
-                        summaryCurrency,
-                        intlLocale,
-                      )}
-                    </p>
+                    {summaryByCurrency.map((one) => (
+                      <p key={one.currency} className="text-lg font-semibold text-emerald-700">
+                        {formatMoney(one.positiveAmount, one.currency, intlLocale)}
+                      </p>
+                    ))}
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       {t("money.summaryNegative")}
                     </p>
-                    <p className="text-lg font-semibold text-rose-700">
-                      {formatMoney(
-                        feedSummaryQuery.data?.totalNegativeAmount ?? 0,
-                        summaryCurrency,
-                        intlLocale,
-                      )}
-                    </p>
+                    {summaryByCurrency.map((one) => (
+                      <p key={one.currency} className="text-lg font-semibold text-rose-700">
+                        {formatMoney(one.negativeAmount, one.currency, intlLocale)}
+                      </p>
+                    ))}
                   </div>
                 </div>
               )}

@@ -3157,10 +3157,15 @@ export type Database = {
           p_transfer_filter?: string
         }
         Returns: {
+          currency: string
           total_count: number
           total_negative_amount: number
           total_positive_amount: number
         }[]
+      }
+      money_update_transaction_with_lines: {
+        Args: { p_line_items: Json; p_transaction_id: string; p_updates: Json }
+        Returns: Json
       }
       money_upsert_transactions_batch: {
         Args: { p_batch_id: string; p_payer_person_id: string; p_rows: Json }

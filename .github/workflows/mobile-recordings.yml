@@ -133,6 +133,20 @@ jobs:
                select 1 from public.med_dose_events e
                 where e.regimen_id = r.id
                   and date_trunc('minute', e.scheduled_at) = date_trunc('minute', s.at));
+          -- A dollar account with one old spend, so the money tab's sums show a line per currency
+          -- (T-261024-0t0). Dated well before the seed's months: the feed and reports stay as they were.
+          insert into public.money_accounts
+            (id, owner_person_id, source, account_kind, account_label, currency)
+          select 'd0110000-0000-4000-8000-000000000001', p.id, 'manual', 'debit', 'Dollars', 'USD'
+            from public.persons p
+           where p.name = 'Max';
+          insert into public.money_transactions
+            (payer_person_id, account_id, posted_at, amount, currency, transaction_type, status,
+             merchant_name)
+          select a.owner_person_id, a.id, '2025-06-01 12:00:00+00', -12.5, 'USD', 'expense',
+                 'posted', 'App Store'
+            from public.money_accounts a
+           where a.id = 'd0110000-0000-4000-8000-000000000001';
           SQL
       - name: Open the tunnel
         run: |

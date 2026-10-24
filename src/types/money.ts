@@ -512,10 +512,18 @@ export interface MoneyTransactionFeedPage {
   nextOffset: number | null;
 }
 
+/** One currency's share of the feed summary: amounts are never added across currencies. */
+export interface MoneyCurrencyTotals {
+  currency: string;
+  count: number;
+  positiveAmount: number;
+  negativeAmount: number;
+}
+
 export interface MoneyTransactionFeedSummary {
   totalCount: number;
-  totalPositiveAmount: number;
-  totalNegativeAmount: number;
+  /** The most frequent currency first; empty when nothing matches. */
+  byCurrency: MoneyCurrencyTotals[];
 }
 
 export interface MoneyTransactionEditAudit {
