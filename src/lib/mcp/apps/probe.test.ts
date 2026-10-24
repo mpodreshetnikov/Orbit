@@ -47,5 +47,6 @@ describe("registerAppProbe", () => {
     expect(result.contents[0].text).toContain("Карточка Orbit работает");
     expect(result.contents[0].text).toContain('name: "list_persons"');
     expect(result.contents[0].text.match(/name: "/g)).toHaveLength(2);
+    expect(result.contents[0].text).toContain("result.isError");
   });
 });

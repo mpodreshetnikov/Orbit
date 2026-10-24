@@ -80,6 +80,12 @@ export const PROBE_HTML = `<!doctype html>
   $("ping").addEventListener("click", function () {
     $("call").textContent = "вызываем…";
     request("tools/call", { name: "list_persons", arguments: {} }).then(function (result) {
+      // A tool that fails answers with a normal result marked isError, not a JSON-RPC error.
+      if (result && result.isError) {
+        var text = result.content && result.content[0] && result.content[0].text;
+        $("call").textContent = "сервер ответил ошибкой: " + (text || "без текста");
+        return;
+      }
       var persons = result && result.structuredContent && result.structuredContent.persons;
       $("call").textContent = Array.isArray(persons) ? "работает, людей: " + persons.length : "работает";
     }, function (error) {
